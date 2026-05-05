@@ -4,6 +4,7 @@ members = [
   "crates/helios-core",
   "crates/helios-arrow",
   "crates/helios-csv",
+  "apps/desktop/src-tauri",
 ]
 
 [workspace.package]

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Helios",
+  "version": "0.0.1",
+  "identifier": "edu.asu.sdm.helios",
+  "build": {
+    "beforeDevCommand": "pnpm vite:dev",
+    "beforeBuildCommand": "pnpm vite:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      { "title": "Helios", "width": 1600, "height": 1000, "resizable": true }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "appimage", "msi"],
+    "icon": ["icons/icon.png"],
+    "resources": {
+      "../../../samples/sdm26-synthetic-lap.csv": "samples/sdm26-synthetic-lap.csv",
+      "../../../docs/channels.yaml": "channels.yaml"
+    }
+  }
+}

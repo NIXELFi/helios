@@ -1,0 +1,20 @@
+[package]
+name = "helios-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "helios_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+helios-core = { path = "../../../crates/helios-core" }
+helios-csv = { path = "../../../crates/helios-csv" }
+helios-arrow = { path = "../../../crates/helios-arrow" }

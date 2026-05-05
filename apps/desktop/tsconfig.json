@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "noEmit": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@helios/store": ["../../packages/store/src"],
+      "@helios/lib": ["../../packages/lib/src"],
+      "@helios/ui": ["../../packages/ui/src"],
+      "@helios/widgets": ["../../packages/widgets/src"]
+    }
+  },
+  "include": ["src"]
+}
