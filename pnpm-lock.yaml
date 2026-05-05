@@ -17,6 +17,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@helios/lib':
+        specifier: workspace:*
+        version: link:../../packages/lib
+      '@helios/store':
+        specifier: workspace:*
+        version: link:../../packages/store
+      '@helios/widgets':
+        specifier: workspace:*
+        version: link:../../packages/widgets
       '@tauri-apps/api':
         specifier: ^2.0.0
         version: 2.11.0
