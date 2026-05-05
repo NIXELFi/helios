@@ -8,14 +8,11 @@ import { Tile } from "./components/Tile";
 export default function App() {
   const [store, setStore] = useState<ChannelStore | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cursorUs, setCursorUs] = useState(0);
   const [emitter] = useState(() => new CursorEmitter());
 
   useEffect(() => {
     loadSampleSession().then(setStore).catch((e) => setError(String(e)));
   }, []);
-
-  useEffect(() => emitter.subscribe(setCursorUs), [emitter]);
 
   if (error) return <div className="p-8 text-[#EF5350]">{error}</div>;
   if (!store) return <div className="p-8 text-[#7B8088]">Loading sample session…</div>;
@@ -27,7 +24,7 @@ export default function App() {
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
         <span className="text-[#FFC627] font-bold">HELIOS</span>
         <span className="ml-3 text-[#7B8088]">sdm26-synthetic-lap.csv</span>
-        <span className="ml-auto font-mono-num">{formatClock(cursorUs)}</span>
+        <span className="ml-auto font-mono-num"><CursorClock emitter={emitter} /></span>
       </header>
 
       <main
@@ -49,4 +46,10 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+function CursorClock({ emitter }: { emitter: CursorEmitter }) {
+  const [t, setT] = useState(emitter.get());
+  useEffect(() => emitter.subscribe(setT), [emitter]);
+  return <>{formatClock(t)}</>;
 }

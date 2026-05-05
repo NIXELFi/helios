@@ -32,7 +32,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       width: containerRef.current.clientWidth || 600,
       height: containerRef.current.clientHeight || 200,
       pxAlign: 0,
-      cursor: { drag: { x: true, y: false }, sync: undefined, points: { show: false } },
+      cursor: { show: false, drag: { x: true, y: false }, sync: undefined, points: { show: false } },
       scales: { x: {}, y: { range: [config.yMin, config.yMax] } },
       axes: [
         { stroke: "#5A5F66", grid: { stroke: "#23252B" } },
@@ -58,9 +58,12 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     const off = cursorEmitter.subscribe((tUs) => {
       const u = plotRef.current; if (!u) return;
       const tS = tUs / 1_000_000;
-      const left = u.valToPos(tS, "x", true);
-      const root = u.root;
-      let line = root.querySelector<HTMLDivElement>(".helios-cursor");
+      // valToPos with canvasPixels=false returns CSS pixels in u.over's coord
+      // space — same as uPlot's own cursor — so attaching the line to u.over
+      // keeps the two perfectly aligned regardless of axis padding.
+      const left = u.valToPos(tS, "x", false);
+      const over = u.over;
+      let line = over.querySelector<HTMLDivElement>(".helios-cursor");
       if (!line) {
         line = document.createElement("div");
         line.className = "helios-cursor";
@@ -70,7 +73,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
         line.style.width = "1px";
         line.style.background = "#FFC627";
         line.style.pointerEvents = "none";
-        root.appendChild(line);
+        over.appendChild(line);
       }
       line.style.left = `${left}px`;
     });
