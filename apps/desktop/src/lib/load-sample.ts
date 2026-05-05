@@ -1,5 +1,6 @@
 import { resolveResource } from "@tauri-apps/api/path";
 import { ChannelStore, loadCsvIntoStore } from "@helios/store";
+import { type LoadedSession, colorForIndex } from "./session";
 
 export interface SampleEntry { id: string; label: string; resource: string; }
 
@@ -9,10 +10,23 @@ export const SAMPLES: SampleEntry[] = [
   { id: "sdm26-synthetic",        label: "SDM26 synthetic lap (demo)",            resource: "samples/sdm26-synthetic-lap.csv" },
 ];
 
-export async function loadSampleSession(resourceRelPath: string = SAMPLES[0]!.resource): Promise<ChannelStore> {
+export async function loadSampleSession(resourceRelPath: string): Promise<ChannelStore> {
   const store = new ChannelStore();
   const csv = await resolveResource(resourceRelPath);
   const yaml = await resolveResource("channels.yaml");
   await loadCsvIntoStore(store, csv, yaml);
   return store;
+}
+
+/** Load every bundled sample into its own LoadedSession. The first sample is
+ *  visible by default; subsequent ones load hidden so the overlay is opt-in. */
+export async function loadAllSessions(): Promise<LoadedSession[]> {
+  const stores = await Promise.all(SAMPLES.map((s) => loadSampleSession(s.resource)));
+  return SAMPLES.map((s, i) => ({
+    id: s.id,
+    label: s.label,
+    store: stores[i]!,
+    color: colorForIndex(i),
+    visible: i === 0,
+  }));
 }

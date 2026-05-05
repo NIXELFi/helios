@@ -1,23 +1,26 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { StripChartConfig } from "./render";
+import { ChannelPicker } from "../lib/channel-picker";
 
-export function StripChartConfigEditor({ config, onChange }: WidgetConfigEditorProps<StripChartConfig>) {
+export function StripChartConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<StripChartConfig>) {
   return (
     <div className="flex flex-col gap-2 p-2 text-xs text-[#D8DCE2]">
       <div>Channels:
         {config.channels.map((c, i) => (
-          <div key={i} className="flex gap-1 mt-1">
-            <input
-              className="bg-[#0E0E10] border border-[#2A2C32] px-1 flex-1"
+          <div key={i} className="flex gap-1 mt-1 items-center">
+            <ChannelPicker
+              className="flex-1"
               value={c.id}
-              onChange={(e) => {
+              onChange={(v) => {
                 const next = [...config.channels];
-                next[i] = { ...c, id: e.target.value };
+                next[i] = { ...c, id: v };
                 onChange({ ...config, channels: next });
               }}
+              channels={availableChannels}
             />
             <input
               type="color"
+              className="w-7 h-6 bg-[#0E0E10] border border-[#2A2C32]"
               value={c.color}
               onChange={(e) => {
                 const next = [...config.channels];
@@ -25,6 +28,11 @@ export function StripChartConfigEditor({ config, onChange }: WidgetConfigEditorP
                 onChange({ ...config, channels: next });
               }}
             />
+            <button
+              aria-label="Remove channel"
+              className="px-1 text-[#7B8088] hover:text-[#EF5350]"
+              onClick={() => onChange({ ...config, channels: config.channels.filter((_, j) => j !== i) })}
+            >×</button>
           </div>
         ))}
         <button

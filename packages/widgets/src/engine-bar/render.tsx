@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface EngineBarConfig {
   rpmChannelId: string;
@@ -30,6 +31,9 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
   }, [slice, config, cursorEmitter]);
 
   useEffect(() => { peakRef.current = rpmRef.current; draw(); }, [config]);
+
+  const onResize = useCallback(() => { draw(); }, []);
+  useResizeObserver(canvasRef, onResize);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;

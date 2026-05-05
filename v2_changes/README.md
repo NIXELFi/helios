@@ -12,6 +12,16 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 04 | Scrubbing the strip chart didn't update other widgets | [04-strip-chart-fractional-microseconds.md](04-strip-chart-fractional-microseconds.md) |
 | 05 | Loading real MoTeC CSV exports (alias map + metadata-block preprocessor) | [05-real-motec-data.md](05-real-motec-data.md) |
 | 06 | In-app sample switcher for bundled CSVs | [06-sample-switcher.md](06-sample-switcher.md) |
+| 07 | Workspace switcher (phase 1 of view editing) | [07-workspace-switcher.md](07-workspace-switcher.md) |
+| 08 | Multi-session overlay (phase A: panel + strip-chart overlay) | [08-multi-session-overlay-phase-a.md](08-multi-session-overlay-phase-a.md) |
+| 09 | Widgets didn't resize when their tile changed size | [09-widget-resize-observer.md](09-widget-resize-observer.md) |
+| 10 | Multi-session overlay phase B (GPS, XY, histogram) | [10-multi-session-overlay-phase-b.md](10-multi-session-overlay-phase-b.md) |
+| 11 | Edit mode + tile config editor (phase 2.1 + 2.2 of view editing) | [11-edit-mode-and-config-editor.md](11-edit-mode-and-config-editor.md) |
+| 12 | Channel pickers + Channels inspector modal | [12-channel-pickers-and-inspector.md](12-channel-pickers-and-inspector.md) |
+| 13 | Layout editor: drag, resize, add, duplicate, delete, auto-arrange | [13-layout-editor.md](13-layout-editor.md) |
+| 14 | Snap-to-grid (replacing destructive auto-arrange) + change widget type | [14-snap-to-grid-and-type-swap.md](14-snap-to-grid-and-type-swap.md) |
+| 15 | Math channels (phase A: engine + storage + apply + UI) | [15-math-channels-phase-a.md](15-math-channels-phase-a.md) |
+| 16 | Math channels phase B: time ops + drag-and-drop palette | [16-math-channels-phase-b.md](16-math-channels-phase-b.md) |
 
 ## New behaviors introduced
 

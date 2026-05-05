@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize, thresholdColor } from "../lib/canvas-helpers";
+import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface BarGaugeConfig {
   channelId: string;
@@ -31,6 +32,9 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
   }, [slice, config, cursorEmitter]);
 
   useEffect(() => { peakRef.current = valueRef.current; draw(); }, [config]);
+
+  const onResize = useCallback(() => { draw(); }, []);
+  useResizeObserver(canvasRef, onResize);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;

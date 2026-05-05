@@ -1,15 +1,12 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { NumericReadoutConfig } from "./render";
+import { ChannelPicker } from "../lib/channel-picker";
 
-export function NumericReadoutConfigEditor({ config, onChange }: WidgetConfigEditorProps<NumericReadoutConfig>) {
+export function NumericReadoutConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<NumericReadoutConfig>) {
   return (
     <div className="flex flex-col gap-2 p-2 text-xs text-[#D8DCE2]">
-      <label>Channel
-        <input
-          className="ml-2 bg-[#0E0E10] border border-[#2A2C32] px-1"
-          value={config.channelId}
-          onChange={(e) => onChange({ ...config, channelId: e.target.value })}
-        />
+      <label className="flex items-center gap-2">Channel
+        <ChannelPicker className="flex-1" value={config.channelId} onChange={(v) => onChange({ ...config, channelId: v })} channels={availableChannels} />
       </label>
       <label>Units
         <input

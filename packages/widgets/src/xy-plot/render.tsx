@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
-import type { WidgetRenderProps } from "../types";
+import { useCallback, useEffect, useRef } from "react";
+import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface XyPlotConfig {
   xChannelId: string;
@@ -8,41 +9,61 @@ export interface XyPlotConfig {
   xMin?: number; xMax?: number;
   yMin?: number; yMax?: number;
   color: string;
-  /** if true, color points by their time index (time-color trail) */
+  /** if true, color points by their time index (time-color trail).
+   *  Single-session only — overlays use session colors. */
   trail: boolean;
 }
 
+interface SessionLayout {
+  session: OverlaySession;
+  xs: Float64Array;
+  ys: Float64Array;
+  n: number;
+}
+
 export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
-  const { config, slice, cursorEmitter } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef<{
-    xs: Float64Array; ys: Float64Array; n: number;
+    sessions: SessionLayout[];
     xmin: number; xmax: number; ymin: number; ymax: number;
     padL: number; padT: number; plotW: number; plotH: number;
   } | null>(null);
 
-  useEffect(() => { draw(); }, [slice, config]);
+  const visible: OverlaySession[] = overlays && overlays.length > 0
+    ? overlays
+    : [{ id: "primary", label: "primary", color: config.color, slice, range: timeRange, isPrimary: true }];
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { draw(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+
+  const onResize = useCallback(() => { draw(); }, []);
+  useResizeObserver(canvasRef, onResize);
 
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     let dragging = false;
     const emitFromEvent = (e: PointerEvent) => {
-      const layout = layoutRef.current; if (!layout || layout.n === 0) return;
+      const layout = layoutRef.current; if (!layout || layout.sessions.length === 0) return;
       const rect = c.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const { xs, ys, n, xmin, xmax, ymin, ymax, padL, padT, plotW, plotH } = layout;
+      const { sessions, xmin, xmax, ymin, ymax, padL, padT, plotW, plotH } = layout;
       const xSpan = Math.max(1e-9, xmax - xmin);
       const ySpan = Math.max(1e-9, ymax - ymin);
-      let best = 0, bestD = Infinity;
-      for (let i = 0; i < n; i++) {
-        const px = padL + ((xs[i]! - xmin) / xSpan) * plotW;
-        const py = padT + plotH - ((ys[i]! - ymin) / ySpan) * plotH;
-        const dx = px - mx, dy = py - my;
-        const d = dx * dx + dy * dy;
-        if (d < bestD) { bestD = d; best = i; }
+      let bestSession: SessionLayout | null = null;
+      let bestIdx = 0, bestD = Infinity;
+      for (const sl of sessions) {
+        for (let i = 0; i < sl.n; i++) {
+          const px = padL + ((sl.xs[i]! - xmin) / xSpan) * plotW;
+          const py = padT + plotH - ((sl.ys[i]! - ymin) / ySpan) * plotH;
+          const dx = px - mx, dy = py - my;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; bestIdx = i; bestSession = sl; }
+        }
       }
-      const tUs = Number(slice.time[best] ?? 0n);
+      if (!bestSession) return;
+      const tUs = Number(bestSession.session.slice.time[bestIdx] ?? 0n);
       cursorEmitter.emit(tUs);
     };
     const onDown = (e: PointerEvent) => {
@@ -66,7 +87,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
       c.removeEventListener("pointerup", onUp);
       c.removeEventListener("pointercancel", onUp);
     };
-  }, [cursorEmitter, slice]);
+  }, [cursorEmitter]);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;
@@ -74,36 +95,51 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     const { w, h } = canvasLogicalSize(c);
     ctx.clearRect(0, 0, w, h);
 
-    const xs = slice.data.get(config.xChannelId);
-    const ys = slice.data.get(config.yChannelId);
-    if (!xs || !ys || xs.length === 0 || ys.length === 0) {
+    // Collect xs/ys for each visible session that has both channels.
+    const sessions: SessionLayout[] = [];
+    for (const session of visible) {
+      const xs = session.slice.data.get(config.xChannelId);
+      const ys = session.slice.data.get(config.yChannelId);
+      if (!xs || !ys || xs.length === 0 || ys.length === 0) continue;
+      const n = Math.min(xs.length, ys.length);
+      sessions.push({ session, xs, ys, n });
+    }
+    if (sessions.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no data", w / 2, h / 2);
+      layoutRef.current = null;
       return;
     }
-    const n = Math.min(xs.length, ys.length);
 
+    // Compute bounds: explicit config wins, otherwise union across sessions.
     let xmin = config.xMin, xmax = config.xMax, ymin = config.yMin, ymax = config.yMax;
     if (xmin === undefined || xmax === undefined || ymin === undefined || ymax === undefined) {
       let xn = Infinity, xx = -Infinity, yn = Infinity, yx = -Infinity;
-      for (let i = 0; i < n; i++) {
-        const xv = xs[i]!, yv = ys[i]!;
-        if (xv < xn) xn = xv; if (xv > xx) xx = xv;
-        if (yv < yn) yn = yv; if (yv > yx) yx = yv;
+      for (const sl of sessions) {
+        for (let i = 0; i < sl.n; i++) {
+          const xv = sl.xs[i]!, yv = sl.ys[i]!;
+          if (xv < xn) xn = xv; if (xv > xx) xx = xv;
+          if (yv < yn) yn = yv; if (yv > yx) yx = yv;
+        }
       }
       xmin = xmin ?? xn; xmax = xmax ?? xx; ymin = ymin ?? yn; ymax = ymax ?? yx;
     }
+
     const padL = 28, padR = 8, padT = 18, padB = 22;
     const plotW = w - padL - padR, plotH = h - padT - padB;
-    const xScale = (v: number) => padL + ((v - xmin!) / Math.max(1e-9, xmax! - xmin!)) * plotW;
-    const yScale = (v: number) => padT + plotH - ((v - ymin!) / Math.max(1e-9, ymax! - ymin!)) * plotH;
+    const xSpan = Math.max(1e-9, xmax! - xmin!);
+    const ySpan = Math.max(1e-9, ymax! - ymin!);
+    const xScale = (v: number) => padL + ((v - xmin!) / xSpan) * plotW;
+    const yScale = (v: number) => padT + plotH - ((v - ymin!) / ySpan) * plotH;
+
     layoutRef.current = {
-      xs, ys, n,
+      sessions,
       xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!,
       padL, padT, plotW, plotH,
     };
 
+    // Frame + zero crosshair (drawn once, behind data).
     ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
     ctx.strokeRect(padL + 0.5, padT + 0.5, plotW, plotH);
     ctx.strokeStyle = "#5A5F66";
@@ -116,15 +152,23 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     }
     ctx.stroke();
 
-    if (config.trail) {
-      for (let i = 0; i < n; i++) {
-        const t = i / Math.max(1, n - 1);
-        ctx.fillStyle = lerpColor("#26A69A", "#FFB800", t);
-        ctx.fillRect(xScale(xs[i]!) - 1, yScale(ys[i]!) - 1, 2, 2);
+    const isMulti = sessions.length > 1;
+
+    // Plot each session's points in its session color. The single-session
+    // "trail" gradient mode is preserved when only one session is visible.
+    for (const sl of sessions) {
+      if (config.trail && !isMulti) {
+        for (let i = 0; i < sl.n; i++) {
+          const t = i / Math.max(1, sl.n - 1);
+          ctx.fillStyle = lerpColor("#26A69A", "#FFB800", t);
+          ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
+        }
+      } else {
+        ctx.fillStyle = sl.session.color;
+        for (let i = 0; i < sl.n; i++) {
+          ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
+        }
       }
-    } else {
-      ctx.fillStyle = config.color;
-      for (let i = 0; i < n; i++) ctx.fillRect(xScale(xs[i]!) - 1, yScale(ys[i]!) - 1, 2, 2);
     }
 
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";

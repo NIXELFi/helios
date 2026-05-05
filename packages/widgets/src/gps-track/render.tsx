@@ -1,22 +1,36 @@
-import { useEffect, useRef } from "react";
-import type { WidgetRenderProps } from "../types";
+import { useCallback, useEffect, useRef } from "react";
+import type { ChannelSlice } from "@helios/store";
+import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface GpsTrackConfig {
   latChannelId: string;
   lonChannelId: string;
-  /** optional: color the track by this channel's value */
+  /** optional: color the track by this channel's value (single-session only) */
   colorByChannelId?: string;
   /** when colorBy is set: gradient stops min..max */
   colorMin?: number;
   colorMax?: number;
 }
 
+interface SessionProjection {
+  session: OverlaySession;
+  xs: Float64Array;
+  ys: Float64Array;
+  n: number;
+}
+
 export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
-  const { config, slice, cursorEmitter } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tRef = useRef<number>(cursorEmitter.get());
-  const projRef = useRef<{ xs: Float64Array; ys: Float64Array; n: number } | null>(null);
+  const projsRef = useRef<SessionProjection[]>([]);
+
+  // Synthesize a single-overlay fallback for callers that haven't passed `overlays`.
+  const visible: OverlaySession[] = overlays && overlays.length > 0
+    ? overlays
+    : [{ id: "primary", label: "primary", color: "#4FC3F7", slice, range: timeRange, isPrimary: true }];
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
@@ -24,28 +38,38 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       draw();
     });
     return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursorEmitter]);
 
-  useEffect(() => { draw(); }, [slice, config]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { draw(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+
+  const onResize = useCallback(() => { draw(); }, []);
+  useResizeObserver(canvasRef, onResize);
 
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     let dragging = false;
     const emitFromEvent = (e: PointerEvent) => {
-      const proj = projRef.current; if (!proj || proj.n === 0) return;
+      const projs = projsRef.current; if (projs.length === 0) return;
       const rect = c.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const w = rect.width, h = rect.height;
       const pad = 16;
-      let best = 0, bestD = Infinity;
-      for (let i = 0; i < proj.n; i++) {
-        const dx = (pad + proj.xs[i]! * (w - pad * 2)) - mx;
-        const dy = (pad + proj.ys[i]! * (h - pad * 2)) - my;
-        const d = dx * dx + dy * dy;
-        if (d < bestD) { bestD = d; best = i; }
+      // Search across every visible session; click jumps to closest sample anywhere.
+      let bestSession: SessionProjection | null = null;
+      let bestIdx = 0, bestD = Infinity;
+      for (const p of projs) {
+        for (let i = 0; i < p.n; i++) {
+          const dx = (pad + p.xs[i]! * (w - pad * 2)) - mx;
+          const dy = (pad + p.ys[i]! * (h - pad * 2)) - my;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; bestIdx = i; bestSession = p; }
+        }
       }
-      const tUs = Number(slice.time[best] ?? 0n);
+      if (!bestSession) return;
+      const tUs = Number(bestSession.session.slice.time[bestIdx] ?? 0n);
       cursorEmitter.emit(tUs);
     };
     const onDown = (e: PointerEvent) => {
@@ -69,26 +93,73 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       c.removeEventListener("pointerup", onUp);
       c.removeEventListener("pointercancel", onUp);
     };
-  }, [cursorEmitter, slice]);
+  }, [cursorEmitter]);
 
-  function projectAll(): { xs: Float64Array; ys: Float64Array; n: number } | null {
-    const lat = slice.data.get(config.latChannelId);
-    const lon = slice.data.get(config.lonChannelId);
-    if (!lat || !lon) return null;
-    const n = Math.min(lat.length, lon.length);
-    if (n === 0) return null;
+  /** Project every visible session into a shared [0,1]² space using the union
+   *  of all sessions' lat/lon bounds. Sessions that lack the channels — or
+   *  whose values are all clamped near (0,0) (no GPS fix; e.g. exports where
+   *  the receiver wasn't locked) — are skipped so they don't pollute the
+   *  shared bbox and collapse a valid track to a single pixel. */
+  function projectAll(): SessionProjection[] {
+    type RawSession = {
+      session: OverlaySession;
+      lat: Float64Array;
+      lon: Float64Array;
+      n: number;
+      minLat: number; maxLat: number; minLon: number; maxLon: number;
+    };
+    const raws: RawSession[] = [];
+    for (const session of visible) {
+      const s: ChannelSlice = session.slice;
+      const lat = s.data.get(config.latChannelId);
+      const lon = s.data.get(config.lonChannelId);
+      if (!lat || !lon) continue;
+      const n = Math.min(lat.length, lon.length);
+      if (n === 0) continue;
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const la = lat[i]!, lo = lon[i]!;
+        if (la < minLat) minLat = la; if (la > maxLat) maxLat = la;
+        if (lo < minLon) minLon = lo; if (lo > maxLon) maxLon = lo;
+      }
+      // Null-island guard: real driving never lands every sample inside the
+      // 1°×1° box around (0,0). MoTeC exports with no GPS fix typically clamp
+      // every row to 0, which would otherwise dominate the union bbox.
+      const nullIsland = Math.abs(minLat) < 1 && Math.abs(maxLat) < 1
+                      && Math.abs(minLon) < 1 && Math.abs(maxLon) < 1;
+      if (nullIsland) continue;
+      raws.push({ session, lat, lon, n, minLat, maxLat, minLon, maxLon });
+    }
+    if (raws.length === 0) return [];
+
+    // Union bbox over the surviving sessions.
     let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-    for (let i = 0; i < n; i++) {
-      const la = lat[i]!, lo = lon[i]!;
-      if (la < minLat) minLat = la; if (la > maxLat) maxLat = la;
-      if (lo < minLon) minLon = lo; if (lo > maxLon) maxLon = lo;
+    for (const r of raws) {
+      if (r.minLat < minLat) minLat = r.minLat;
+      if (r.maxLat > maxLat) maxLat = r.maxLat;
+      if (r.minLon < minLon) minLon = r.minLon;
+      if (r.maxLon > maxLon) maxLon = r.maxLon;
     }
-    const xs = new Float64Array(n), ys = new Float64Array(n);
-    for (let i = 0; i < n; i++) {
-      xs[i] = (lon[i]! - minLon) / Math.max(1e-12, maxLon - minLon);
-      ys[i] = 1 - (lat[i]! - minLat) / Math.max(1e-12, maxLat - minLat);
+    const latSpan = Math.max(1e-12, maxLat - minLat);
+    const lonSpan = Math.max(1e-12, maxLon - minLon);
+    return raws.map(({ session, lat, lon, n }) => {
+      const xs = new Float64Array(n), ys = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        xs[i] = (lon[i]! - minLon) / lonSpan;
+        ys[i] = 1 - (lat[i]! - minLat) / latSpan;
+      }
+      return { session, xs, ys, n };
+    });
+  }
+
+  function findIndexForTime(s: ChannelSlice, tUs: number, n: number): number {
+    const t = BigInt(Math.round(tUs));
+    let lo = 0, hi = s.time.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (s.time[mid]! <= t) lo = mid + 1; else hi = mid;
     }
-    return { xs, ys, n };
+    return Math.max(0, Math.min(n - 1, lo - 1));
   }
 
   function draw() {
@@ -96,59 +167,68 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     const ctx = setupCanvas(c);
     const { w, h } = canvasLogicalSize(c);
     ctx.clearRect(0, 0, w, h);
-    const proj = projectAll();
-    projRef.current = proj;
-    if (!proj) {
+
+    const projs = projectAll();
+    projsRef.current = projs;
+
+    if (projs.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no GPS data", w / 2, h / 2);
       return;
     }
-    const { xs, ys, n } = proj;
-    const pad = 16;
-    const px = (i: number) => pad + xs[i]! * (w - pad * 2);
-    const py = (i: number) => pad + ys[i]! * (h - pad * 2);
 
-    const colorBy = config.colorByChannelId ? slice.data.get(config.colorByChannelId) : undefined;
-    if (colorBy && config.colorMin !== undefined && config.colorMax !== undefined) {
-      const span = config.colorMax - config.colorMin;
-      ctx.lineWidth = 2.5;
-      for (let i = 1; i < n; i++) {
-        const t = Math.max(0, Math.min(1, ((colorBy[i] ?? 0) - config.colorMin) / span));
-        ctx.strokeStyle = lerpColor("#26A69A", "#FFB800", t);
+    const pad = 16;
+    const isMulti = visible.length > 1;
+    const colorByEnabled = !isMulti && config.colorByChannelId
+      && config.colorMin !== undefined && config.colorMax !== undefined;
+
+    for (const p of projs) {
+      const { xs, ys, n } = p;
+      const px = (i: number) => pad + xs[i]! * (w - pad * 2);
+      const py = (i: number) => pad + ys[i]! * (h - pad * 2);
+
+      if (colorByEnabled) {
+        // Single-session "color by channel" gradient mode preserved from v1.
+        const colorBy = p.session.slice.data.get(config.colorByChannelId!);
+        const span = config.colorMax! - config.colorMin!;
+        ctx.lineWidth = 2.5;
+        for (let i = 1; i < n; i++) {
+          const t = Math.max(0, Math.min(1, ((colorBy?.[i] ?? 0) - config.colorMin!) / span));
+          ctx.strokeStyle = lerpColor("#26A69A", "#FFB800", t);
+          ctx.beginPath();
+          ctx.moveTo(px(i - 1), py(i - 1));
+          ctx.lineTo(px(i), py(i));
+          ctx.stroke();
+        }
+      } else {
+        // Multi-session or no colorBy: solid line in the session's color.
+        ctx.strokeStyle = p.session.color;
+        ctx.lineWidth = p.session.isPrimary ? 2.5 : 1.5;
         ctx.beginPath();
-        ctx.moveTo(px(i - 1), py(i - 1));
-        ctx.lineTo(px(i), py(i));
+        ctx.moveTo(px(0), py(0));
+        for (let i = 1; i < n; i++) ctx.lineTo(px(i), py(i));
         ctx.stroke();
       }
-    } else {
-      ctx.strokeStyle = "#4FC3F7"; ctx.lineWidth = 2;
+
+      // Cursor dot for this session at the current time.
+      const idx = findIndexForTime(p.session.slice, tRef.current, n);
+      const cx = px(idx), cy = py(idx);
+      ctx.fillStyle = p.session.color;
       ctx.beginPath();
-      ctx.moveTo(px(0), py(0));
-      for (let i = 1; i < n; i++) ctx.lineTo(px(i), py(i));
+      ctx.arc(cx, cy, p.session.isPrimary ? 5 : 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 
-    // Car dot at cursor
-    const t = BigInt(tRef.current);
-    let lo = 0, hi = slice.time.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (slice.time[mid]! <= t) lo = mid + 1; else hi = mid;
-    }
-    const idx = Math.max(0, Math.min(n - 1, lo - 1));
-    const cx = pad + xs[idx]! * (w - pad * 2);
-    const cy = pad + ys[idx]! * (h - pad * 2);
-    ctx.fillStyle = "#FFC627";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1.5;
-    ctx.stroke();
-
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillText(`GPS · ${n} pts${config.colorByChannelId ? ` · ${config.colorByChannelId}` : ""}`, 6, 6);
+    const totalPts = projs.reduce((s, p) => s + p.n, 0);
+    ctx.fillText(
+      `GPS · ${projs.length} session${projs.length === 1 ? "" : "s"} · ${totalPts} pts`,
+      6, 6,
+    );
   }
 
   return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B] cursor-crosshair" />;
