@@ -28,7 +28,8 @@ if (typeof HTMLCanvasElement !== "undefined") {
       },
     },
   );
-  HTMLCanvasElement.prototype.getContext = () => noopCtx as unknown as CanvasRenderingContext2D;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (HTMLCanvasElement.prototype.getContext as unknown) = () => noopCtx as any;
 }
 
 // Stub Path2D which jsdom does not provide.
