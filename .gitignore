@@ -1,0 +1,32 @@
+# Node
+node_modules/
+.turbo/
+dist/
+*.log
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Tauri
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+
+# Env
+.env
+.env.local
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
