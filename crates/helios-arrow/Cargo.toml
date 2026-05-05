@@ -1,0 +1,11 @@
+[package]
+name = "helios-arrow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }
+helios-core = { path = "../helios-core" }
+thiserror = { workspace = true }
