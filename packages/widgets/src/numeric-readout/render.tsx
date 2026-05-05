@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
+import { sampleAt } from "../lib/sample-at";
 
 export interface NumericReadoutConfig {
   channelId: string;
@@ -36,18 +37,4 @@ export function NumericReadoutRender(props: WidgetRenderProps<NumericReadoutConf
       <div className="text-xs text-[#7B8088] mt-1">{config.units}</div>
     </div>
   );
-}
-
-function sampleAt(slice: { time: BigInt64Array; data: Map<string, Float64Array> }, id: string, tUs: number): number | null {
-  const col = slice.data.get(id);
-  if (!col || slice.time.length === 0) return null;
-  const t = BigInt(tUs);
-  let lo = 0, hi = slice.time.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (slice.time[mid]! <= t) lo = mid + 1;
-    else hi = mid;
-  }
-  const idx = Math.max(0, lo - 1);
-  return col[idx] ?? null;
 }
