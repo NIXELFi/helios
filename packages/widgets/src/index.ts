@@ -10,3 +10,4 @@ export * from "./lap-panel";
 export * from "./alarm-panel";
 export * from "./tire-grid";
 export * from "./histogram";
+export * from "./xy-plot";
