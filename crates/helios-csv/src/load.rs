@@ -158,4 +158,15 @@ mod tests {
         let r = load_csv(&fixture("malformed/missing_header.csv"), &registry()).unwrap();
         assert!(!r.warnings.is_empty());
     }
+
+    #[test]
+    fn sample_session_loads() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../samples/sdm26-synthetic-lap.csv");
+        let r = load_csv(&path, &registry()).unwrap();
+        assert!(r.rate_groups.len() >= 2, "expected at least 100Hz and 10Hz groups");
+        assert!(r.duration_us > 89_000_000 && r.duration_us < 91_000_000);
+        let has_rpm = r.rate_groups.iter().any(|g| g.meta("engine.rpm").is_some());
+        assert!(has_rpm, "engine.rpm missing from sample load");
+    }
 }
