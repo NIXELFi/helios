@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/helios-core",
   "crates/helios-arrow",
+  "crates/helios-csv",
 ]
 
 [workspace.package]
