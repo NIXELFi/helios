@@ -2,9 +2,6 @@
 resolver = "2"
 members = [
   "crates/helios-core",
-  "crates/helios-csv",
-  "crates/helios-arrow",
-  "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
