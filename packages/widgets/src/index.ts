@@ -4,3 +4,4 @@ export * from "./numeric-readout";
 export * from "./strip-chart";
 export * from "./round-gauge";
 export * from "./bar-gauge";
+export * from "./engine-bar";
