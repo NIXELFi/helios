@@ -45,7 +45,7 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
     for (let i = 0; i < data.length; i++) {
       const v = data[i]!;
       const idx = Math.max(0, Math.min(bins - 1, Math.floor(((v - lo) / span) * bins)));
-      counts[idx]++;
+      counts[idx]!++;
     }
     let maxCount = 0;
     for (let i = 0; i < bins; i++) if (counts[i]! > maxCount) maxCount = counts[i]!;
