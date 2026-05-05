@@ -1,4 +1,5 @@
 pub mod delimiter;
+pub mod registry;
 pub mod time_detect;
 
 #[derive(Debug, thiserror::Error)]

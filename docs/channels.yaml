@@ -1,0 +1,121 @@
+# Helios canonical channel registry
+# Each entry maps one channel id to its display metadata.
+# `aliases:` lists CSV header names that should resolve to this channel.
+
+channels:
+  - id: engine.rpm
+    display_name: Engine RPM
+    units: rpm
+    group: Engine
+    color: "#FFB800"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 15000
+    warn: 13500
+    alarm: 14500
+    aliases: [rpm, RPM, engine_rpm, "engine.rpm"]
+
+  - id: engine.tps
+    display_name: Throttle Position
+    units: "%"
+    group: Engine
+    color: "#4FC3F7"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 100
+    aliases: [tps, TPS, throttle, throttle_pct, "engine.tps"]
+
+  - id: engine.water_temp
+    display_name: Water Temp
+    units: "°C"
+    group: Engine
+    color: "#66BB6A"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    min: 0
+    max: 130
+    warn: 105
+    alarm: 115
+    aliases: [water_temp, ECT, "engine.water_temp"]
+
+  - id: engine.oil_temp
+    display_name: Oil Temp
+    units: "°C"
+    group: Engine
+    color: "#FF8A65"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    min: 0
+    max: 150
+    warn: 120
+    alarm: 135
+    aliases: [oil_temp, OilT, "engine.oil_temp"]
+
+  - id: engine.gear
+    display_name: Gear
+    units: ""
+    group: Engine
+    color: "#BA68C8"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 6
+    aliases: [gear, "engine.gear"]
+
+  - id: gps.lat
+    display_name: GPS Latitude
+    units: "°"
+    group: GPS
+    color: "#9CCC65"
+    decimals: 6
+    data_type: f64
+    source: gps_module
+    sample_rate_hz: 10
+    aliases: [lat, latitude, "gps.lat"]
+
+  - id: gps.lon
+    display_name: GPS Longitude
+    units: "°"
+    group: GPS
+    color: "#9CCC65"
+    decimals: 6
+    data_type: f64
+    source: gps_module
+    sample_rate_hz: 10
+    aliases: [lon, lng, longitude, "gps.lon"]
+
+  - id: gps.speed
+    display_name: GPS Speed
+    units: m/s
+    group: GPS
+    color: "#26A69A"
+    decimals: 2
+    data_type: f32
+    source: gps_module
+    sample_rate_hz: 10
+    aliases: [speed, gps_speed, "gps.speed"]
+
+  - id: imu.lat_g
+    display_name: Lateral G
+    units: g
+    group: IMU
+    color: "#EF5350"
+    decimals: 2
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -3
+    max: 3
+    aliases: [lat_g, "imu.lat_g"]
