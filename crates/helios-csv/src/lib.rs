@@ -1,6 +1,10 @@
 pub mod delimiter;
+pub mod load;
 pub mod registry;
 pub mod time_detect;
+
+pub use load::{load_csv, load_csv_bytes, LoadResult};
+pub use registry::ChannelRegistry;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CsvLoadError {
