@@ -7,3 +7,4 @@ export * from "./bar-gauge";
 export * from "./engine-bar";
 export * from "./gps-track";
 export * from "./lap-panel";
+export * from "./alarm-panel";
