@@ -22,6 +22,8 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 14 | Snap-to-grid (replacing destructive auto-arrange) + change widget type | [14-snap-to-grid-and-type-swap.md](14-snap-to-grid-and-type-swap.md) |
 | 15 | Math channels (phase A: engine + storage + apply + UI) | [15-math-channels-phase-a.md](15-math-channels-phase-a.md) |
 | 16 | Math channels phase B: time ops + drag-and-drop palette | [16-math-channels-phase-b.md](16-math-channels-phase-b.md) |
+| 17 | Color edits in the config panel didn't reach the canvas | [17-config-color-not-applied.md](17-config-color-not-applied.md) |
+| 18 | Loading screen + Helios brand wordmark | [18-loading-screen-and-brand.md](18-loading-screen-and-brand.md) |
 
 ## New behaviors introduced
 

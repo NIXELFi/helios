@@ -7,6 +7,10 @@ import { useResizeObserver } from "../lib/use-resize-observer";
 export interface GpsTrackConfig {
   latChannelId: string;
   lonChannelId: string;
+  /** Track line color in single-session mode. Ignored when more than one
+   *  session is visible (each session uses its own palette color) or when
+   *  colorByChannelId is set (gradient takes over). */
+  color?: string;
   /** optional: color the track by this channel's value (single-session only) */
   colorByChannelId?: string;
   /** when colorBy is set: gradient stops min..max */
@@ -26,6 +30,13 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tRef = useRef<number>(cursorEmitter.get());
   const projsRef = useRef<SessionProjection[]>([]);
+  // Indirection ref so long-lived callbacks (cursor subscription, resize
+  // observer) always invoke the LATEST `draw` closure rather than a stale
+  // one captured at subscription time. Without this, edits to `config`
+  // would re-run the dep'd effect to draw with new colors but a subsequent
+  // resize/cursor callback would repaint with the old closure's config.
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // assigned every render so subscribers always invoke the latest closure
 
   // Synthesize a single-overlay fallback for callers that haven't passed `overlays`.
   const visible: OverlaySession[] = overlays && overlays.length > 0
@@ -35,16 +46,15 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
       tRef.current = t;
-      draw();
+      drawRef.current();
     });
     return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursorEmitter]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { draw(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+  useEffect(() => { drawRef.current(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   useEffect(() => {
@@ -202,8 +212,11 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
           ctx.stroke();
         }
       } else {
-        // Multi-session or no colorBy: solid line in the session's color.
-        ctx.strokeStyle = p.session.color;
+        // Solid line. In single-session mode, prefer the user-configured
+        // color so edits in the config panel are visible; fall back to the
+        // session palette color when nothing is configured or when multiple
+        // sessions are overlaid.
+        ctx.strokeStyle = !isMulti && config.color ? config.color : p.session.color;
         ctx.lineWidth = p.session.isPrimary ? 2.5 : 1.5;
         ctx.beginPath();
         ctx.moveTo(px(0), py(0));
@@ -211,10 +224,11 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         ctx.stroke();
       }
 
-      // Cursor dot for this session at the current time.
+      // Cursor dot for this session at the current time. Match the line
+      // color so the dot reads as part of the same trace.
       const idx = findIndexForTime(p.session.slice, tRef.current, n);
       const cx = px(idx), cy = py(idx);
-      ctx.fillStyle = p.session.color;
+      ctx.fillStyle = !isMulti && config.color ? config.color : p.session.color;
       ctx.beginPath();
       ctx.arc(cx, cy, p.session.isPrimary ? 5 : 4, 0, Math.PI * 2);
       ctx.fill();

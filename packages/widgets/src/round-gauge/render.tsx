@@ -20,20 +20,22 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
   const { config, slice, cursorEmitter } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const valueRef = useRef<number | null>(sampleAt(slice, config.channelId, cursorEmitter.get()));
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
       valueRef.current = sampleAt(slice, config.channelId, t);
-      draw();
+      drawRef.current();
     });
     return off;
   }, [slice, config, cursorEmitter]);
 
   useEffect(() => {
-    draw();
+    drawRef.current();
   }, [config]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   function draw() {

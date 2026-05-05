@@ -18,10 +18,30 @@ export async function loadSampleSession(resourceRelPath: string): Promise<Channe
   return store;
 }
 
+export interface LoadProgress {
+  /** Short label of the current step shown to the user. */
+  label: string;
+  /** Number of sessions finished loading so far. */
+  loaded: number;
+  /** Total sessions to load. */
+  total: number;
+}
+
 /** Load every bundled sample into its own LoadedSession. The first sample is
- *  visible by default; subsequent ones load hidden so the overlay is opt-in. */
-export async function loadAllSessions(): Promise<LoadedSession[]> {
-  const stores = await Promise.all(SAMPLES.map((s) => loadSampleSession(s.resource)));
+ *  visible by default; subsequent ones load hidden so the overlay is opt-in.
+ *  When `onProgress` is supplied, fires once before each session and once
+ *  after every session is loaded — useful for driving a loading-screen UI. */
+export async function loadAllSessions(
+  onProgress?: (p: LoadProgress) => void,
+): Promise<LoadedSession[]> {
+  const total = SAMPLES.length;
+  const stores: import("@helios/store").ChannelStore[] = [];
+  for (let i = 0; i < SAMPLES.length; i++) {
+    const s = SAMPLES[i]!;
+    onProgress?.({ label: `Loading ${s.label}`, loaded: i, total });
+    stores.push(await loadSampleSession(s.resource));
+  }
+  onProgress?.({ label: "Sessions ready", loaded: total, total });
   return SAMPLES.map((s, i) => ({
     id: s.id,
     label: s.label,

@@ -5,3 +5,18 @@
 html, body, #root { height: 100%; margin: 0; }
 body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-serif; }
 .font-mono-num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+/* Helios brand wordmark — used in the header logo and the loading splash. */
+.font-helios {
+  font-family: "Orbitron", "Audiowide", system-ui, sans-serif;
+  letter-spacing: 0.18em;
+  font-weight: 900;
+}
+
+/* Indeterminate-style highlight that slides across the filled region of the
+   loading-screen progress bar. */
+@keyframes helios-bar-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.helios-bar-slide { animation: helios-bar-slide 1.4s linear infinite; }

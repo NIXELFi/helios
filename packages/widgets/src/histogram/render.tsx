@@ -14,15 +14,17 @@ export interface HistogramConfig {
 export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
   const { config, slice, cursorEmitter: _c, timeRange, overlays } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
 
   const visible: OverlaySession[] = overlays && overlays.length > 0
     ? overlays
     : [{ id: "primary", label: "primary", color: config.color, slice, range: timeRange, isPrimary: true }];
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { draw(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+  useEffect(() => { drawRef.current(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   function draw() {
@@ -80,9 +82,12 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
     const isMulti = datasets.length > 1;
 
     if (!isMulti) {
-      // Single session: keep the v1 filled-bar look.
+      // Single session: keep the v1 filled-bar look. Use the configured
+      // color (editable in the config panel), not the session palette color
+      // — otherwise edits to `color` in the config editor would have no
+      // visible effect when only one session is visible.
       const counts0 = counts[0]!;
-      ctx.fillStyle = datasets[0]!.session.color;
+      ctx.fillStyle = config.color;
       for (let i = 0; i < bins; i++) {
         const barH = maxCount === 0 ? 0 : (counts0[i]! / maxCount) * plotH;
         ctx.fillRect(padL + i * binW + 0.5, padT + plotH - barH, Math.max(1, binW - 1), barH);

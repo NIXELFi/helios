@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CursorEmitter, formatClock } from "@helios/lib";
-import { loadAllSessions } from "./lib/load-sample";
+import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
 import type { TileSpec, Workspace } from "./workspaces/types";
 import { loadWorkspaces, saveWorkspaces, resetToBuiltins } from "./lib/workspace-storage";
@@ -14,6 +14,7 @@ import { ConfigPanel } from "./components/ConfigPanel";
 import { ChannelsModal } from "./components/ChannelsModal";
 import { AddTileModal } from "./components/AddTileModal";
 import { MathChannelsModal } from "./components/MathChannelsModal";
+import { LoadingScreen } from "./components/LoadingScreen";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
@@ -32,10 +33,21 @@ export default function App() {
   const [mathChannelsOpen, setMathChannelsOpen] = useState(false);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
+  // Progress reported by the loader; drives the splash bar. The "stages" are
+  // (a) per-session load via loadAllSessions's onProgress, and (b) a single
+  // final "Computing math channels" beat we add ourselves.
+  const [loadProgress, setLoadProgress] = useState<LoadProgress>({
+    label: "Starting…", loaded: 0, total: 1,
+  });
 
   useEffect(() => {
-    loadAllSessions()
+    loadAllSessions((p) => setLoadProgress(p))
       .then((loaded) => {
+        setLoadProgress({
+          label: "Computing math channels",
+          loaded: loaded.length,
+          total: loaded.length + 1,
+        });
         const initialMath = loadMathChannels();
         const errors = new Map<string, string>();
         for (const session of loaded) {
@@ -46,12 +58,25 @@ export default function App() {
         setSessions(loaded);
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
         setPrimaryId(firstVisible?.id ?? null);
+        setLoadProgress({
+          label: "Ready",
+          loaded: loaded.length + 1,
+          total: loaded.length + 1,
+        });
       })
       .catch((e) => setError(String(e)));
   }, []);
 
-  if (error) return <div className="p-8 text-[#EF5350]">{error}</div>;
-  if (!sessions || !primaryId) return <div className="p-8 text-[#7B8088]">Loading sessions…</div>;
+  if (error || !sessions || !primaryId) {
+    const denom = Math.max(1, loadProgress.total);
+    return (
+      <LoadingScreen
+        progress={loadProgress.loaded / denom}
+        stage={loadProgress.label}
+        error={error}
+      />
+    );
+  }
 
   const visibleSessions = sessions.filter((s) => s.visible);
   const primary = sessions.find((s) => s.id === primaryId) ?? visibleSessions[0] ?? sessions[0]!;
@@ -72,20 +97,28 @@ export default function App() {
     });
   }
 
-  function commitWorkspaces(next: Workspace[]) {
-    saveWorkspaces(next);
-    setWorkspaces(next);
+  /** Apply a workspaces update via functional setState, then persist. Using
+   *  the functional form here is critical: every workspace mutation reads
+   *  the LATEST committed state instead of whatever was in scope when the
+   *  closure was created, so a stale-closure can't quietly clobber a
+   *  previous edit (the "field reverts instantly after edit" bug). */
+  function commitWorkspaces(updater: (prev: Workspace[]) => Workspace[]) {
+    setWorkspaces((prev) => {
+      const next = updater(prev);
+      saveWorkspaces(next);
+      return next;
+    });
   }
 
   function updateTile(nextTile: TileSpec) {
-    commitWorkspaces(workspaces.map((w) => (w.id !== workspaceId
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
       ? w
       : { ...w, tiles: w.tiles.map((t) => (t.id === nextTile.id ? nextTile : t)) }
     )));
   }
 
   function deleteTile(tileId: string) {
-    commitWorkspaces(workspaces.map((w) => (w.id !== workspaceId
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
       ? w
       : { ...w, tiles: w.tiles.filter((t) => t.id !== tileId) }
     )));
@@ -105,7 +138,7 @@ export default function App() {
       Math.max(2, Math.round(orig.h * GRID_ROWS)),
     );
     const dupe: TileSpec = { ...orig, id: newId, ...slot };
-    commitWorkspaces(workspaces.map((w) => (w.id !== workspaceId
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
       ? w
       : { ...w, tiles: [...w.tiles, dupe] }
     )));
@@ -120,7 +153,7 @@ export default function App() {
       config: entry.config,
       ...slot,
     };
-    commitWorkspaces(workspaces.map((w) => (w.id !== workspaceId
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
       ? w
       : { ...w, tiles: [...w.tiles, tile] }
     )));
@@ -128,7 +161,7 @@ export default function App() {
   }
 
   function handleSnapToGrid() {
-    commitWorkspaces(workspaces.map((w) => (w.id !== workspaceId ? w : snapAllToGrid(w))));
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId ? w : snapAllToGrid(w))));
   }
 
   function handleResetWorkspaces() {
@@ -166,7 +199,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
-        <span className="text-[#FFC627] font-bold">HELIOS</span>
+        <span className="font-helios text-sm text-[#FFC627]">HELIOS</span>
         <span className="ml-3 text-[#7B8088]">{primary.label}</span>
         <span className="ml-2 text-[#7B8088]">·</span>
         <div className="ml-2 flex gap-1">

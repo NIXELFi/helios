@@ -20,20 +20,22 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const valueRef = useRef<number | null>(sampleAt(slice, config.channelId, cursorEmitter.get()));
   const peakRef = useRef<number | null>(valueRef.current);
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
       const v = sampleAt(slice, config.channelId, t);
       valueRef.current = v;
       if (v !== null && (peakRef.current === null || v > peakRef.current)) peakRef.current = v;
-      draw();
+      drawRef.current();
     });
     return off;
   }, [slice, config, cursorEmitter]);
 
-  useEffect(() => { peakRef.current = valueRef.current; draw(); }, [config]);
+  useEffect(() => { peakRef.current = valueRef.current; drawRef.current(); }, [config]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   function draw() {

@@ -18,6 +18,8 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
   const rpmRef = useRef<number | null>(sampleAt(slice, config.rpmChannelId, cursorEmitter.get()));
   const peakRef = useRef<number | null>(rpmRef.current);
   const gearRef = useRef<number | null>(config.gearChannelId ? sampleAt(slice, config.gearChannelId, cursorEmitter.get()) : null);
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
@@ -25,14 +27,14 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
       rpmRef.current = r;
       if (r !== null && (peakRef.current === null || r > peakRef.current)) peakRef.current = r;
       gearRef.current = config.gearChannelId ? sampleAt(slice, config.gearChannelId, t) : null;
-      draw();
+      drawRef.current();
     });
     return off;
   }, [slice, config, cursorEmitter]);
 
-  useEffect(() => { peakRef.current = rpmRef.current; draw(); }, [config]);
+  useEffect(() => { peakRef.current = rpmRef.current; drawRef.current(); }, [config]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   function draw() {

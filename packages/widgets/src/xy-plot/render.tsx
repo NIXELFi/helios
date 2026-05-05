@@ -29,15 +29,17 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     xmin: number; xmax: number; ymin: number; ymax: number;
     padL: number; padT: number; plotW: number; plotH: number;
   } | null>(null);
+  const drawRef = useRef<() => void>(() => {});
+  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
 
   const visible: OverlaySession[] = overlays && overlays.length > 0
     ? overlays
     : [{ id: "primary", label: "primary", color: config.color, slice, range: timeRange, isPrimary: true }];
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { draw(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+  useEffect(() => { drawRef.current(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
 
-  const onResize = useCallback(() => { draw(); }, []);
+  const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
   useEffect(() => {
@@ -154,8 +156,10 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
 
     const isMulti = sessions.length > 1;
 
-    // Plot each session's points in its session color. The single-session
-    // "trail" gradient mode is preserved when only one session is visible.
+    // Color rules:
+    //   single session, trail=true  → time-coloured gradient (v1)
+    //   single session, trail=false → configured color (editable in the panel)
+    //   multi session               → session palette color, one per overlay
     for (const sl of sessions) {
       if (config.trail && !isMulti) {
         for (let i = 0; i < sl.n; i++) {
@@ -164,7 +168,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
           ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
         }
       } else {
-        ctx.fillStyle = sl.session.color;
+        ctx.fillStyle = isMulti ? sl.session.color : config.color;
         for (let i = 0; i < sl.n; i++) {
           ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
         }
