@@ -21,6 +21,8 @@
     "icon": ["icons/icon.png"],
     "resources": {
       "../../../samples/sdm26-synthetic-lap.csv": "samples/sdm26-synthetic-lap.csv",
+      "../../../SDM26-5-3-Best_Accel.csv": "samples/sdm26-best-accel.csv",
+      "../../../driver_tryout_4_16__57_kaden_good_gps.csv": "samples/driver-tryout-good-gps.csv",
       "../../../docs/channels.yaml": "channels.yaml"
     }
   }

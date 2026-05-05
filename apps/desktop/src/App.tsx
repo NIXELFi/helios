@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 import { ChannelStore } from "@helios/store";
 import { CursorEmitter, formatClock } from "@helios/lib";
-import { loadSampleSession } from "./lib/load-sample";
+import { loadSampleSession, SAMPLES } from "./lib/load-sample";
 import { overviewDefault } from "./workspaces/overview-default";
 import { Tile } from "./components/Tile";
 
 export default function App() {
+  const [sampleId, setSampleId] = useState(SAMPLES[0]!.id);
   const [store, setStore] = useState<ChannelStore | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emitter] = useState(() => new CursorEmitter());
 
   useEffect(() => {
-    loadSampleSession().then(setStore).catch((e) => setError(String(e)));
-  }, []);
+    setStore(null);
+    setError(null);
+    const sample = SAMPLES.find((s) => s.id === sampleId) ?? SAMPLES[0]!;
+    loadSampleSession(sample.resource)
+      .then(setStore)
+      .catch((e) => setError(String(e)));
+  }, [sampleId]);
 
   if (error) return <div className="p-8 text-[#EF5350]">{error}</div>;
   if (!store) return <div className="p-8 text-[#7B8088]">Loading sample session…</div>;
@@ -23,19 +29,19 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
         <span className="text-[#FFC627] font-bold">HELIOS</span>
-        <span className="ml-3 text-[#7B8088]">sdm26-synthetic-lap.csv</span>
+        <select
+          value={sampleId}
+          onChange={(e) => setSampleId(e.target.value)}
+          className="ml-3 bg-[#16171B] text-[#D8DCE2] border border-[#2A2C32] rounded-sm px-2 py-0.5 text-xs focus:outline-none focus:border-[#FFC627] cursor-pointer"
+        >
+          {SAMPLES.map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
         <span className="ml-auto font-mono-num"><CursorClock emitter={emitter} /></span>
       </header>
 
-      <main
-        className="flex-1 relative cursor-crosshair"
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const frac = (e.clientX - rect.left) / rect.width;
-          const t = ext.startUs + frac * (ext.endUs - ext.startUs);
-          emitter.emit(t);
-        }}
-      >
+      <main className="flex-1 relative">
         {overviewDefault.map((spec) => (
           <Tile key={spec.id} spec={spec} store={store} cursorEmitter={emitter} />
         ))}

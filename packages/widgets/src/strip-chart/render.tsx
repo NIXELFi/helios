@@ -32,7 +32,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       width: containerRef.current.clientWidth || 600,
       height: containerRef.current.clientHeight || 200,
       pxAlign: 0,
-      cursor: { show: false, drag: { x: true, y: false }, sync: undefined, points: { show: false } },
+      cursor: { show: false, drag: { x: false, y: false }, sync: undefined, points: { show: false } },
       scales: { x: {}, y: { range: [config.yMin, config.yMax] } },
       axes: [
         { stroke: "#5A5F66", grid: { stroke: "#23252B" } },
@@ -44,15 +44,52 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       ],
     };
 
+    let cleanupPointer: (() => void) | undefined;
     try {
       plotRef.current?.destroy();
       plotRef.current = new uPlot(opts, data, containerRef.current);
+      const u = plotRef.current;
+      const over = u.over;
+      over.style.cursor = "crosshair";
+
+      let dragging = false;
+      const emitFromEvent = (e: PointerEvent) => {
+        const rect = over.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const tS = u.posToVal(localX, "x");
+        cursorEmitter.emit(Math.round(tS * 1_000_000));
+      };
+      const onDown = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        dragging = true;
+        over.setPointerCapture(e.pointerId);
+        emitFromEvent(e);
+      };
+      const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
+      const onUp = (e: PointerEvent) => {
+        dragging = false;
+        if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
+      };
+      over.addEventListener("pointerdown", onDown);
+      over.addEventListener("pointermove", onMove);
+      over.addEventListener("pointerup", onUp);
+      over.addEventListener("pointercancel", onUp);
+      cleanupPointer = () => {
+        over.removeEventListener("pointerdown", onDown);
+        over.removeEventListener("pointermove", onMove);
+        over.removeEventListener("pointerup", onUp);
+        over.removeEventListener("pointercancel", onUp);
+      };
     } catch (_e) {
       // jsdom canvas may not support 2d context; ignore in test environments
     }
 
-    return () => { plotRef.current?.destroy(); plotRef.current = null; };
-  }, [slice, config, timeRange]);
+    return () => {
+      cleanupPointer?.();
+      plotRef.current?.destroy();
+      plotRef.current = null;
+    };
+  }, [slice, config, timeRange, cursorEmitter]);
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((tUs) => {

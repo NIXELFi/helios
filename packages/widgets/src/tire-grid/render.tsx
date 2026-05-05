@@ -18,7 +18,14 @@ export interface TireGridConfig {
 export function TireGridRender(props: WidgetRenderProps<TireGridConfig>) {
   const { config, slice, cursorEmitter } = props;
   const [tick, setTick] = useState(0);
-  useEffect(() => cursorEmitter.subscribe(() => setTick((x) => x + 1)), [cursorEmitter]);
+  useEffect(() => {
+    let raf = 0;
+    const off = cursorEmitter.subscribe(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; setTick((x) => x + 1); });
+    });
+    return () => { off(); if (raf) cancelAnimationFrame(raf); };
+  }, [cursorEmitter]);
   const t = cursorEmitter.get();
   const data = (() => {
     const out: Record<Corner, { temp: number | null; pressure: number | null; wear: number | null }> = {} as never;

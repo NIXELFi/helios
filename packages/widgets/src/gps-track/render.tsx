@@ -16,6 +16,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   const { config, slice, cursorEmitter } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tRef = useRef<number>(cursorEmitter.get());
+  const projRef = useRef<{ xs: Float64Array; ys: Float64Array; n: number } | null>(null);
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
@@ -26,6 +27,49 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   }, [cursorEmitter]);
 
   useEffect(() => { draw(); }, [slice, config]);
+
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    let dragging = false;
+    const emitFromEvent = (e: PointerEvent) => {
+      const proj = projRef.current; if (!proj || proj.n === 0) return;
+      const rect = c.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const w = rect.width, h = rect.height;
+      const pad = 16;
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < proj.n; i++) {
+        const dx = (pad + proj.xs[i]! * (w - pad * 2)) - mx;
+        const dy = (pad + proj.ys[i]! * (h - pad * 2)) - my;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      const tUs = Number(slice.time[best] ?? 0n);
+      cursorEmitter.emit(tUs);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      c.setPointerCapture(e.pointerId);
+      emitFromEvent(e);
+    };
+    const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
+    const onUp = (e: PointerEvent) => {
+      dragging = false;
+      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
+    };
+    c.addEventListener("pointerdown", onDown);
+    c.addEventListener("pointermove", onMove);
+    c.addEventListener("pointerup", onUp);
+    c.addEventListener("pointercancel", onUp);
+    return () => {
+      c.removeEventListener("pointerdown", onDown);
+      c.removeEventListener("pointermove", onMove);
+      c.removeEventListener("pointerup", onUp);
+      c.removeEventListener("pointercancel", onUp);
+    };
+  }, [cursorEmitter, slice]);
 
   function projectAll(): { xs: Float64Array; ys: Float64Array; n: number } | null {
     const lat = slice.data.get(config.latChannelId);
@@ -53,6 +97,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     const { w, h } = canvasLogicalSize(c);
     ctx.clearRect(0, 0, w, h);
     const proj = projectAll();
+    projRef.current = proj;
     if (!proj) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -106,7 +151,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     ctx.fillText(`GPS · ${n} pts${config.colorByChannelId ? ` · ${config.colorByChannelId}` : ""}`, 6, 6);
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B] cursor-crosshair" />;
 }
 
 function lerpColor(aHex: string, bHex: string, t: number): string {

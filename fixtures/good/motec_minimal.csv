@@ -1,0 +1,16 @@
+"Format","MoTeC CSV File",,,"Workbook",""
+"Venue","Test",,,"Worksheet",""
+"Vehicle","Test","",,"Vehicle Desc",""
+"Sample Rate","100.000","Hz"
+"Beacon Markers",""
+
+
+"Time","Engine Speed","Throttle Position","Time"
+"s","rpm","%","min"
+
+
+"0.000","1000","5","1"
+"0.010","1010","5","1"
+"0.020","1020","6","1"
+"0.030","1030","6","1"
+"0.040","1040","7","1"

@@ -1,6 +1,7 @@
 use crate::{delimiter::detect_delimiter, registry::ChannelRegistry, time_detect::detect_time_unit, CsvLoadError};
 use helios_core::{ChannelMeta, RateGroup};
-use std::collections::BTreeMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 pub struct LoadResult {
@@ -25,8 +26,9 @@ pub fn load_csv(path: &Path, registry: &ChannelRegistry) -> Result<LoadResult, C
 }
 
 pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadResult, CsvLoadError> {
-    let text = std::str::from_utf8(bytes)
+    let raw = std::str::from_utf8(bytes)
         .map_err(|e| CsvLoadError::Malformed(format!("non-utf8 input: {e}")))?;
+    let text = preprocess_motec_if_needed(raw);
     let first_line = text.lines().next()
         .ok_or_else(|| CsvLoadError::Malformed("empty file".into()))?;
     let delim = detect_delimiter(first_line);
@@ -34,7 +36,7 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delim)
         .has_headers(true)
-        .from_reader(bytes);
+        .from_reader(text.as_bytes());
 
     let headers = rdr.headers()?.clone();
     if headers.is_empty() {
@@ -114,6 +116,86 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     Ok(LoadResult { rate_groups, warnings, duration_us })
 }
 
+/// MoTeC-style CSV files start with ~12 lines of metadata, then a quoted
+/// channel-names row, then a units row, then blanks, then data. The standard
+/// `csv` crate handles quoted values fine, but the metadata block must be
+/// stripped first. Detection is keyed off the literal `"Format","MoTeC` prefix
+/// so non-MoTeC files pass through untouched.
+fn preprocess_motec_if_needed(text: &str) -> Cow<'_, str> {
+    let first = text.lines().next().unwrap_or("");
+    if !(first.starts_with("\"Format\"") && first.contains("MoTeC")) {
+        return Cow::Borrowed(text);
+    }
+    let lines: Vec<&str> = text.lines().collect();
+
+    // Header row = first row whose first cell is exactly "Time". Earlier
+    // metadata rows also start with quoted strings, so we use cell equality.
+    let header_idx = lines.iter().position(|l| {
+        first_csv_cell(l).map(|c| c == "Time").unwrap_or(false)
+    });
+    let Some(hi) = header_idx else { return Cow::Borrowed(text); };
+
+    // Skip past the header itself, the units row, and any blank rows until
+    // we land on a data row (first cell parses as a float).
+    let mut data_start = hi + 1;
+    while data_start < lines.len() {
+        let trimmed = lines[data_start].trim();
+        if trimmed.is_empty() { data_start += 1; continue; }
+        let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
+        if first_cell.parse::<f64>().is_ok() { break; }
+        data_start += 1; // units row, "Beacon Markers", etc.
+    }
+
+    // Rebuild header with deduplicated column names. MoTeC files reuse "Time"
+    // for both relative-seconds and absolute-minute clocks; the second copy
+    // would otherwise collide in the channel id map.
+    let header_unique = dedupe_csv_header(lines[hi]);
+
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&header_unique);
+    out.push('\n');
+    for l in &lines[data_start..] {
+        out.push_str(l);
+        out.push('\n');
+    }
+    Cow::Owned(out)
+}
+
+fn first_csv_cell(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    if let Some(rest) = line.strip_prefix('"') {
+        let end = rest.find('"')?;
+        Some(&rest[..end])
+    } else {
+        Some(line.split(',').next()?.trim())
+    }
+}
+
+fn dedupe_csv_header(line: &str) -> String {
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(line.as_bytes());
+    let mut record = csv::StringRecord::new();
+    if rdr.read_record(&mut record).is_err() {
+        return line.to_string();
+    }
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<String> = Vec::with_capacity(record.len());
+    for cell in record.iter() {
+        let base = cell.to_string();
+        let c = counts.entry(base.clone()).or_insert(0);
+        let name = if *c == 0 { base.clone() } else { format!("{base}_{c}") };
+        *c += 1;
+        out.push(name);
+    }
+    let mut wtr = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    let _ = wtr.write_record(&out);
+    let bytes = wtr.into_inner().unwrap_or_default();
+    String::from_utf8(bytes).unwrap_or_default().trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +239,25 @@ mod tests {
     fn missing_header_row_is_treated_as_data_failure() {
         let r = load_csv(&fixture("malformed/missing_header.csv"), &registry()).unwrap();
         assert!(!r.warnings.is_empty());
+    }
+
+    #[test]
+    fn loads_motec_format_via_aliases() {
+        let r = load_csv(&fixture("good/motec_minimal.csv"), &registry()).unwrap();
+        // Both "Engine Speed" and "Throttle Position" should resolve via aliases.
+        let mut rpm_value: Option<f64> = None;
+        let mut saw_tps = false;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.rpm").is_some() {
+                rpm_value = Some(rg.channel_data("engine.rpm").unwrap().value(0));
+            }
+            if rg.meta("engine.tps").is_some() {
+                saw_tps = true;
+            }
+        }
+        assert_eq!(rpm_value, Some(1000.0), "engine.rpm not loaded");
+        assert!(saw_tps, "engine.tps not loaded");
+        assert_eq!(r.duration_us, 40_000);
     }
 
     #[test]

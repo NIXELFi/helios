@@ -13,10 +13,60 @@ export interface XyPlotConfig {
 }
 
 export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
-  const { config, slice } = props;
+  const { config, slice, cursorEmitter } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const layoutRef = useRef<{
+    xs: Float64Array; ys: Float64Array; n: number;
+    xmin: number; xmax: number; ymin: number; ymax: number;
+    padL: number; padT: number; plotW: number; plotH: number;
+  } | null>(null);
 
   useEffect(() => { draw(); }, [slice, config]);
+
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    let dragging = false;
+    const emitFromEvent = (e: PointerEvent) => {
+      const layout = layoutRef.current; if (!layout || layout.n === 0) return;
+      const rect = c.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { xs, ys, n, xmin, xmax, ymin, ymax, padL, padT, plotW, plotH } = layout;
+      const xSpan = Math.max(1e-9, xmax - xmin);
+      const ySpan = Math.max(1e-9, ymax - ymin);
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < n; i++) {
+        const px = padL + ((xs[i]! - xmin) / xSpan) * plotW;
+        const py = padT + plotH - ((ys[i]! - ymin) / ySpan) * plotH;
+        const dx = px - mx, dy = py - my;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      const tUs = Number(slice.time[best] ?? 0n);
+      cursorEmitter.emit(tUs);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      c.setPointerCapture(e.pointerId);
+      emitFromEvent(e);
+    };
+    const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
+    const onUp = (e: PointerEvent) => {
+      dragging = false;
+      if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
+    };
+    c.addEventListener("pointerdown", onDown);
+    c.addEventListener("pointermove", onMove);
+    c.addEventListener("pointerup", onUp);
+    c.addEventListener("pointercancel", onUp);
+    return () => {
+      c.removeEventListener("pointerdown", onDown);
+      c.removeEventListener("pointermove", onMove);
+      c.removeEventListener("pointerup", onUp);
+      c.removeEventListener("pointercancel", onUp);
+    };
+  }, [cursorEmitter, slice]);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;
@@ -48,6 +98,11 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     const plotW = w - padL - padR, plotH = h - padT - padB;
     const xScale = (v: number) => padL + ((v - xmin!) / Math.max(1e-9, xmax! - xmin!)) * plotW;
     const yScale = (v: number) => padT + plotH - ((v - ymin!) / Math.max(1e-9, ymax! - ymin!)) * plotH;
+    layoutRef.current = {
+      xs, ys, n,
+      xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!,
+      padL, padT, plotW, plotH,
+    };
 
     ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
     ctx.strokeRect(padL + 0.5, padT + 0.5, plotW, plotH);
@@ -86,7 +141,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     ctx.restore();
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B] cursor-crosshair" />;
 }
 
 function lerpColor(aHex: string, bHex: string, t: number): string {

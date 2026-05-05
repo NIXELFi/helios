@@ -16,7 +16,7 @@ channels:
     max: 15000
     warn: 13500
     alarm: 14500
-    aliases: [rpm, RPM, engine_rpm, "engine.rpm"]
+    aliases: [rpm, RPM, engine_rpm, "engine.rpm", "Engine Speed"]
 
   - id: engine.tps
     display_name: Throttle Position
@@ -29,7 +29,7 @@ channels:
     sample_rate_hz: 100
     min: 0
     max: 100
-    aliases: [tps, TPS, throttle, throttle_pct, "engine.tps"]
+    aliases: [tps, TPS, throttle, throttle_pct, "engine.tps", "Throttle Position", "APS Main"]
 
   - id: engine.water_temp
     display_name: Water Temp
@@ -44,7 +44,7 @@ channels:
     max: 130
     warn: 105
     alarm: 115
-    aliases: [water_temp, ECT, "engine.water_temp"]
+    aliases: [water_temp, ECT, "engine.water_temp", "Engine Coolant Temp"]
 
   - id: engine.oil_temp
     display_name: Oil Temp
@@ -59,7 +59,7 @@ channels:
     max: 150
     warn: 120
     alarm: 135
-    aliases: [oil_temp, OilT, "engine.oil_temp"]
+    aliases: [oil_temp, OilT, "engine.oil_temp", "Engine Oil Temp"]
 
   - id: engine.gear
     display_name: Gear
@@ -72,7 +72,7 @@ channels:
     sample_rate_hz: 100
     min: 0
     max: 6
-    aliases: [gear, "engine.gear"]
+    aliases: [gear, "engine.gear", "Gear Position"]
 
   - id: gps.lat
     display_name: GPS Latitude
@@ -83,7 +83,7 @@ channels:
     data_type: f64
     source: gps_module
     sample_rate_hz: 10
-    aliases: [lat, latitude, "gps.lat"]
+    aliases: [lat, latitude, "gps.lat", "GPS Latitude"]
 
   - id: gps.lon
     display_name: GPS Longitude
@@ -94,7 +94,7 @@ channels:
     data_type: f64
     source: gps_module
     sample_rate_hz: 10
-    aliases: [lon, lng, longitude, "gps.lon"]
+    aliases: [lon, lng, longitude, "gps.lon", "GPS Longitude"]
 
   - id: gps.speed
     display_name: GPS Speed
@@ -105,7 +105,7 @@ channels:
     data_type: f32
     source: gps_module
     sample_rate_hz: 10
-    aliases: [speed, gps_speed, "gps.speed"]
+    aliases: [speed, gps_speed, "gps.speed", "GPS Speed"]
 
   - id: imu.lat_g
     display_name: Lateral G
@@ -118,4 +118,4 @@ channels:
     sample_rate_hz: 100
     min: -3
     max: 3
-    aliases: [lat_g, "imu.lat_g"]
+    aliases: [lat_g, "imu.lat_g", "Lat_Accel"]
