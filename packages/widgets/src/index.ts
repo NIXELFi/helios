@@ -5,3 +5,4 @@ export * from "./strip-chart";
 export * from "./round-gauge";
 export * from "./bar-gauge";
 export * from "./engine-bar";
+export * from "./gps-track";
