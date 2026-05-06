@@ -18,6 +18,7 @@ import { ChannelsModal } from "./components/ChannelsModal";
 import { AddTileModal } from "./components/AddTileModal";
 import { MathChannelsModal } from "./components/MathChannelsModal";
 import { LoadingScreen } from "./components/LoadingScreen";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
@@ -38,6 +39,12 @@ export default function App() {
   const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
   const updater = useUpdater();
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    heading: string;
+    body: string;
+    tone?: "default" | "danger";
+    onConfirm: () => void;
+  } | null>(null);
   const [playing, setPlaying] = useState(false);
   // Progress reported by the loader; drives the splash bar. The "stages" are
   // (a) per-session load via loadAllSessions's onProgress, and (b) a single
@@ -178,10 +185,17 @@ export default function App() {
   }
 
   function handleResetWorkspaces() {
-    if (!confirm("Reset all workspaces to their built-in defaults? Unsaved edits will be lost.")) return;
-    const fresh = resetToBuiltins();
-    setWorkspaces(fresh);
-    setSelectedTileId(null);
+    setConfirmState({
+      heading: "Reset all workspaces?",
+      body: "Reset all workspaces to their built-in defaults? Unsaved edits will be lost.",
+      tone: "danger",
+      onConfirm: () => {
+        const fresh = resetToBuiltins();
+        setWorkspaces(fresh);
+        setSelectedTileId(null);
+        setConfirmState(null);
+      },
+    });
   }
 
   /** Replace the math-channel set, persist, and re-apply against every loaded
@@ -380,6 +394,15 @@ export default function App() {
           playbackBlocked={playing}
           onInstall={() => updater.installAndRelaunch()}
           onClose={() => setUpdateModalOpen(false)}
+        />
+      )}
+      {confirmState && (
+        <ConfirmDialog
+          heading={confirmState.heading}
+          body={confirmState.body}
+          tone={confirmState.tone}
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
         />
       )}
     </div>
