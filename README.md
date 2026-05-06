@@ -24,6 +24,10 @@ pnpm dev
 
 The dev command runs Vite + the Tauri shell, opens a window, and seeds three bundled CSVs into the Sessions panel.
 
+## Installing a release build
+
+If you don't need to develop — you just want to use Helios — see [`docs/INSTALL.md`](docs/INSTALL.md). It covers downloading the latest installer for macOS / Windows / Linux and the one-time first-run instructions for our (currently un-OS-signed) installers.
+
 ## Building from source
 
 The Tauri shell is Rust + React, so you need:
