@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import type { DragEvent } from "react";
 import type { Workspace } from "../workspaces/types";
 import { SESSION_PALETTE } from "../lib/session";
 import { TabContextMenu } from "./TabContextMenu";
@@ -71,11 +72,44 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
     setRenamingId(null);
   }
 
+  // Hoisted drag handlers — wired on the tablist <div> rather than each tab.
+  // This keeps dropIndex updating continuously as the cursor crosses gaps and
+  // empty space at the end of the strip, so a user can drop AFTER the last tab
+  // by releasing in tablist whitespace.
+  function onTablistDragOver(e: DragEvent) {
+    if (dragSourceIndex === null) return;
+    e.preventDefault();
+    const rects = tabRefs.current
+      .map((el) => el?.getBoundingClientRect())
+      .filter(Boolean) as DOMRect[];
+    setDropIndex(computeDropIndex(rects.map((r) => ({ left: r.left, right: r.right })), e.clientX));
+  }
+  function onTablistDrop(e: DragEvent) {
+    e.preventDefault();
+    if (dragSourceIndex !== null && dropIndex !== null && dropIndex !== dragSourceIndex && dropIndex !== dragSourceIndex + 1) {
+      // dropIndex is the pre-removal gap index. The reorder splices out the
+      // source first, then inserts at the target — when dropping RIGHTward of
+      // the source we subtract 1 to account for the shift. See computeDropIndex
+      // JSDoc above.
+      const target = dropIndex > dragSourceIndex ? dropIndex - 1 : dropIndex;
+      props.onReorder(dragSourceIndex, target);
+    }
+    setDragSourceIndex(null);
+    setDropIndex(null);
+  }
+
   return (
     <div className="ml-2 flex gap-1 items-center">
-      <div role="tablist" aria-label="Workspaces" className="flex gap-1 items-center">
+      <div
+        role="tablist"
+        aria-label="Workspaces"
+        className="flex gap-1 items-center"
+        onDragOver={onTablistDragOver}
+        onDrop={onTablistDrop}
+      >
         {workspaces.map((w, i) => {
           const active = w.id === activeId;
+          const isDragSource = dragSourceIndex === i;
           return (
             <div key={w.id} className="flex items-center">
               {/* Drop indicator: shown before tab i when dropIndex === i */}
@@ -83,7 +117,6 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                 <span className="w-0.5 h-4 bg-[#FFC627] rounded-full mr-0.5 shrink-0" aria-hidden />
               )}
             <button
-              key={w.id}
               role="tab"
               aria-selected={active}
               onClick={() => onSelect(w.id)}
@@ -94,23 +127,6 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData("text/plain", w.id);
               }}
-              onDragOver={(e) => {
-                if (dragSourceIndex === null) return;
-                e.preventDefault();
-                const rects = tabRefs.current
-                  .map((el) => el?.getBoundingClientRect())
-                  .filter(Boolean) as DOMRect[];
-                setDropIndex(computeDropIndex(rects.map((r) => ({ left: r.left, right: r.right })), e.clientX));
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragSourceIndex !== null && dropIndex !== null && dropIndex !== dragSourceIndex && dropIndex !== dragSourceIndex + 1) {
-                  const target = dropIndex > dragSourceIndex ? dropIndex - 1 : dropIndex;
-                  props.onReorder(dragSourceIndex, target);
-                }
-                setDragSourceIndex(null);
-                setDropIndex(null);
-              }}
               onDragEnd={() => { setDragSourceIndex(null); setDropIndex(null); }}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -118,6 +134,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
               }}
               className={
                 "flex items-center gap-1.5 px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
+                (isDragSource ? "opacity-50 " : "") +
                 (active
                   ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
                   : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
