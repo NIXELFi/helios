@@ -9,6 +9,7 @@ import { getOverlayModule } from "./overlays/registry";
 import "./overlays/scatter";
 import "./overlays/fit";
 import "./overlays/formula";
+import "./overlays/bins";
 
 /* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
 export type { XyPlotConfig } from "./types";
