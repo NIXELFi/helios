@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag (e.g. v2.3.0-rc.1)"
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS gets two matrix entries — one per arch — instead of a single
+          # `universal-apple-darwin` build. tauri-action's docs explicitly note
+          # universal is incompatible with the updater (it only emits a .dmg
+          # for first install and no signed .app.tar.gz for the updater
+          # payload), which leaves macOS missing from latest.json. Building
+          # per-arch produces .app.tar.gz + .sig for each, which tauri-action
+          # aggregates into the latest.json darwin-aarch64 / darwin-x86_64
+          # platform keys.
+          - platform: macos-aarch64
+            runner: macos-14
+            rust-target: aarch64-apple-darwin
+            tauri-args: "--target aarch64-apple-darwin"
+          - platform: macos-x64
+            runner: macos-14
+            rust-target: x86_64-apple-darwin
+            tauri-args: "--target x86_64-apple-darwin"
+          - platform: windows
+            runner: windows-latest
+            rust-target: ""
+            tauri-args: ""
+          - platform: linux
+            runner: ubuntu-22.04
+            rust-target: ""
+            tauri-args: ""
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version tag
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up pnpm
+        # Version intentionally not specified here — the action picks it up
+        # from package.json's "packageManager" field. Setting both is an error
+        # in pnpm/action-setup@v4 (ERR_PNPM_BAD_PM_VERSION).
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri
+            crates/helios-core
+            crates/helios-csv
+            crates/helios-arrow
+
+      - name: Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify versions match the tag
+        env:
+          GITHUB_REF_NAME: ${{ steps.version.outputs.tag }}
+        run: node scripts/check-versions.mjs
+
+      - name: Run Rust tests
+        run: cargo test --workspace
+
+      - name: Run TS tests
+        run: pnpm -r --workspace-concurrency=1 test
+
+      - name: Build + sign + upload
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # GITHUB_TOKEN is required by tauri-action to upload the built
+          # artifacts to the release. Without it, the build succeeds and
+          # signs cleanly but the upload step exits with
+          # "##[error]GITHUB_TOKEN is required".
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: "Helios ${{ steps.version.outputs.tag }}"
+          releaseBody: |
+            See [v2_changes/](https://github.com/NIXELFi/helios/tree/${{ steps.version.outputs.tag }}/v2_changes/) for the running log.
+            First-install instructions: [docs/INSTALL.md](https://github.com/NIXELFi/helios/blob/${{ steps.version.outputs.tag }}/docs/INSTALL.md).
+          releaseDraft: true
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+          projectPath: apps/desktop
+          args: ${{ matrix.tauri-args }}
+          updaterJsonPreferNsis: true
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Promote draft release to published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false

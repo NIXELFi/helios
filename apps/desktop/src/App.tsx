@@ -8,7 +8,10 @@ import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/gri
 import {
   type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
 } from "./lib/math-channels";
+import { useUpdater } from "./lib/use-updater";
 import { Tile } from "./components/Tile";
+import { UpdatesPill } from "./components/UpdatesPill";
+import { UpdateModal } from "./components/UpdateModal";
 import { SessionPanel } from "./components/SessionPanel";
 import { ConfigPanel } from "./components/ConfigPanel";
 import { ChannelsModal } from "./components/ChannelsModal";
@@ -33,6 +36,9 @@ export default function App() {
   const [mathChannelsOpen, setMathChannelsOpen] = useState(false);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
+  const updater = useUpdater();
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [playing, setPlaying] = useState(false);
   // Progress reported by the loader; drives the splash bar. The "stages" are
   // (a) per-session load via loadAllSessions's onProgress, and (b) a single
   // final "Computing math channels" beat we add ourselves.
@@ -66,6 +72,13 @@ export default function App() {
       })
       .catch((e) => setError(String(e)));
   }, []);
+
+  // When the updater transitions into "available" (after the auto-check on
+  // launch), auto-open the modal once. The user can dismiss with "Remind me
+  // later"; we don't auto-reopen on every state change to avoid being annoying.
+  useEffect(() => {
+    if (updater.state.kind === "available") setUpdateModalOpen(true);
+  }, [updater.state.kind]);
 
   if (error || !sessions || !primaryId) {
     const denom = Math.max(1, loadProgress.total);
@@ -280,7 +293,17 @@ export default function App() {
               </button>
             </>
           )}
-          <PlaybackControls emitter={emitter} ext={ext} />
+          <PlaybackControls emitter={emitter} ext={ext} playing={playing} onPlayingChange={setPlaying} />
+          <UpdatesPill
+            state={updater.state}
+            onClick={() => {
+              if (updater.state.kind === "up_to_date" || updater.state.kind === "offline") {
+                updater.recheck();
+              } else if (updater.state.kind === "available" || updater.state.kind === "downloading" || updater.state.kind === "installing") {
+                setUpdateModalOpen(true);
+              }
+            }}
+          />
           <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
         </div>
       </header>
@@ -351,6 +374,14 @@ export default function App() {
           onClose={() => setMathChannelsOpen(false)}
         />
       )}
+      {updateModalOpen && (
+        <UpdateModal
+          state={updater.state}
+          playbackBlocked={playing}
+          onInstall={() => updater.installAndRelaunch()}
+          onClose={() => setUpdateModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -370,12 +401,14 @@ const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
  *  to the session start when the cursor passes the end so a casual press
  *  of play loops the lap rather than dead-stopping. */
 function PlaybackControls({
-  emitter, ext,
+  emitter, ext, playing, onPlayingChange,
 }: {
   emitter: CursorEmitter;
   ext: { startUs: number; endUs: number };
+  playing: boolean;
+  onPlayingChange: (p: boolean) => void;
 }) {
-  const [playing, setPlaying] = useState(false);
+  const setPlaying = onPlayingChange;
   const [speed, setSpeed] = useState<number>(1);
   // Live refs the rAF loop reads so we don't have to re-arm it whenever
   // speed/extents change.
@@ -431,16 +464,16 @@ function PlaybackControls({
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       e.preventDefault();
-      setPlaying((p) => !p);
+      setPlaying(!playing);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [playing]);
 
   return (
     <div className="flex items-center gap-1">
       <button
-        onClick={() => setPlaying((p) => !p)}
+        onClick={() => setPlaying(!playing)}
         className={
           "w-7 h-6 flex items-center justify-center text-xs border rounded-sm cursor-pointer transition-colors " +
           (playing

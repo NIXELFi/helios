@@ -9,6 +9,7 @@
     "core:path:allow-resolve-directory",
     "core:path:allow-resolve",
     "core:path:allow-join",
-    "core:path:allow-normalize"
+    "core:path:allow-normalize",
+    "updater:default"
   ]
 }
