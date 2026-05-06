@@ -1,12 +1,24 @@
 import { useCallback, useEffect, useRef } from "react";
-import uPlot, { type AlignedData, type Options, type Series } from "uplot";
+import uPlot, { type AlignedData, type Axis, type Options, type Scales, type Series } from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
-export interface StripChartChannel { id: string; color: string; }
+export interface StripChartChannel {
+  id: string;
+  color: string;
+  /** Per-channel Y range. When unset, falls back to the chart-level
+   *  yMin/yMax. This is the MoTeC i2 model: each channel can have its
+   *  own scale so a 0–14000 RPM trace and a 0–100 % throttle trace can
+   *  share a chart without one being invisible. */
+  yMin?: number;
+  yMax?: number;
+}
+
 export interface StripChartConfig {
   channels: StripChartChannel[];
+  /** Default Y range applied to channels that don't set their own. Kept
+   *  for backward compatibility with single-scale charts. */
   yMin: number;
   yMax: number;
 }
@@ -14,6 +26,10 @@ export interface StripChartConfig {
 const DASH_PATTERNS: number[][] = [
   [], [6, 3], [2, 3], [10, 3, 2, 3], [4, 2],
 ];
+
+function rangeFor(c: StripChartChannel, fallback: StripChartConfig): [number, number] {
+  return [c.yMin ?? fallback.yMin, c.yMax ?? fallback.yMax];
+}
 
 /** Build a uPlot AlignedData payload covering every visible session.
  *  X = sorted union of all session timestamps (in seconds).
@@ -73,6 +89,27 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     if (!containerRef.current) return;
     const { data, seriesMeta } = buildAlignedData(visible, config.channels);
 
+    // Per-channel scales + alternating-side axes: channel 0 → left, 1 → right,
+    // 2 → left (further out), 3 → right (further out), etc. Each axis takes
+    // the channel's color so the user can read which trace owns which scale.
+    const scales: Scales = { x: {} };
+    const axes: Axis[] = [{ stroke: "#5A5F66", grid: { stroke: "#23252B" } }];
+    for (let ci = 0; ci < config.channels.length; ci++) {
+      const ch = config.channels[ci]!;
+      const scaleId = `s${ci}`;
+      const [lo, hi] = rangeFor(ch, config);
+      scales[scaleId] = { range: [lo, hi] };
+      axes.push({
+        scale: scaleId,
+        side: ci % 2 === 0 ? 3 : 1,  // 3 = left, 1 = right
+        stroke: ch.color,
+        // Only the first channel paints horizontal grid lines so the
+        // background stays clean when channels have very different scales.
+        grid: ci === 0 ? { stroke: "#23252B" } : { show: false, stroke: "" },
+        size: 40,
+      });
+    }
+
     const series: Series[] = [
       {},
       ...seriesMeta.map((meta): Series => {
@@ -84,7 +121,14 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
         const dash = isMulti && config.channels.length > 1
           ? DASH_PATTERNS[meta.channelIndex % DASH_PATTERNS.length]!
           : [];
-        return { stroke, width: 1, dash: dash.length ? dash : undefined };
+        return {
+          stroke,
+          width: 1,
+          dash: dash.length ? dash : undefined,
+          scale: `s${meta.channelIndex}`,
+          // Disable point markers; we draw our own cursor line instead.
+          points: { show: false },
+        };
       }),
     ];
 
@@ -92,12 +136,13 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       width: containerRef.current.clientWidth || 600,
       height: containerRef.current.clientHeight || 200,
       pxAlign: 0,
+      // uPlot's default legend renders an HTML table below the canvas which
+      // gets clipped by neighboring tiles. Disable it; we draw our own
+      // overlay legend in the React tree (see JSX below).
+      legend: { show: false },
       cursor: { show: false, drag: { x: false, y: false }, sync: undefined, points: { show: false } },
-      scales: { x: {}, y: { range: [config.yMin, config.yMax] } },
-      axes: [
-        { stroke: "#5A5F66", grid: { stroke: "#23252B" } },
-        { stroke: "#5A5F66", grid: { stroke: "#23252B" } },
-      ],
+      scales,
+      axes,
       series,
     };
 
@@ -181,5 +226,27 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   }, []);
   useResizeObserver(containerRef, onResize);
 
-  return <div ref={containerRef} className="w-full h-full bg-[#16171B]" />;
+  return (
+    <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
+      {/* In-canvas legend so it doesn't get clipped by the tile below. One
+          row per channel, with a color chip and the channel id. */}
+      {config.channels.length > 0 && (
+        <div className="absolute top-1 left-1 flex flex-col gap-0.5 z-10 pointer-events-none">
+          {config.channels.map((c, i) => {
+            const [lo, hi] = rangeFor(c, config);
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 text-[10px] text-[#D8DCE2] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm"
+              >
+                <span className="inline-block w-2 h-2" style={{ background: c.color }} />
+                <span className="font-mono-num">{c.id || "—"}</span>
+                <span className="text-[#7B8088]">{lo}…{hi}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
