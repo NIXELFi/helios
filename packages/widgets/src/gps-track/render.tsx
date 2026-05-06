@@ -5,8 +5,11 @@ import type { ChannelSlice } from "@helios/store";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
+import { detectTrackLabels, DEFAULT_TURN_OPTIONS, type TrackLabel } from "./turns";
 
 export type BasemapMode = "none" | "dark" | "satellite" | "custom";
+
+export type LabelsMode = "none" | "turns" | "turns_and_straights";
 
 export interface GpsTrackConfig {
   latChannelId: string;
@@ -27,6 +30,11 @@ export interface GpsTrackConfig {
   /** Tile URL template (e.g. https://example.com/{z}/{x}/{y}.png) used when
    *  basemap === 'custom'. Ignored otherwise. */
   customTileUrl?: string;
+  /** Auto-detect turn (and optionally straight) segments from GPS curvature
+   *  and label them T1, T2, … / S1, S2, … on the track. Mirrors MoTeC's
+   *  track-map labeling. Computed from the primary session only — overlaid
+   *  sessions of the same track will sit under the same labels anyway. */
+  labels?: LabelsMode;
 }
 
 interface SessionRaw {
@@ -147,6 +155,10 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
    *  lat/lon values fell outside legal ranges. Surfaced in the canvas
    *  overlay as a diagnostic so the user knows the basemap can't frame. */
   const bboxRejectedRef = useRef<boolean>(false);
+  /** Cached track labels keyed by data — only recomputed when the primary
+   *  session's data or the labels mode changes, not on every cursor frame. */
+  const labelsRef = useRef<TrackLabel[]>([]);
+  const labelsCacheKeyRef = useRef<string>("");
   /** Indirection so long-lived callbacks (cursor sub, resize, map move) always
    *  invoke the LATEST `draw` closure rather than a stale capture. */
   const drawRef = useRef<() => void>(() => {});
@@ -402,6 +414,30 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     normBboxRef.current = bbox;
     bboxRejectedRef.current = bbox !== null && bboxToBounds(bbox) === undefined;
 
+    // Recompute track labels only when the primary session's data, the labels
+    // mode, or the configured channels have changed — not on every cursor
+    // frame. The cache key includes the primary session's id and length plus
+    // the labels mode; that's enough to invalidate when the user switches
+    // sessions or toggles the labels.
+    const labelsMode: LabelsMode = config.labels ?? "none";
+    const primary = raws[0];
+    const cacheKey = primary
+      ? `${primary.session.id}:${primary.n}:${labelsMode}`
+      : `none:${labelsMode}`;
+    if (cacheKey !== labelsCacheKeyRef.current) {
+      labelsCacheKeyRef.current = cacheKey;
+      if (labelsMode === "none" || !primary) {
+        labelsRef.current = [];
+      } else {
+        labelsRef.current = detectTrackLabels(
+          primary.lat,
+          primary.lon,
+          primary.session.slice.time,
+          { ...DEFAULT_TURN_OPTIONS, emitStraights: labelsMode === "turns_and_straights" },
+        );
+      }
+    }
+
     if (raws.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -453,13 +489,41 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       ctx.stroke();
     }
 
+    // Track labels (turns / straights) — drawn AFTER the polylines so they
+    // sit on top of the trace, but BEFORE the status text so the status
+    // text never gets covered.
+    if (labelsRef.current.length > 0) {
+      for (const label of labelsRef.current) {
+        const p = projectPoint(label.lat, label.lon, w, h);
+        const isTurn = label.kind === "turn";
+        const fontPx = isTurn ? 12 : 10;
+        ctx.font = `bold ${fontPx}px Inter, system-ui, sans-serif`;
+        const textW = ctx.measureText(label.text).width;
+        const padX = 4, padY = 2;
+        const boxW = textW + padX * 2, boxH = fontPx + padY * 2;
+        const bx = p.x - boxW / 2, by = p.y - boxH / 2;
+        // Pill background — slightly darker for turns, dimmer for straights.
+        ctx.fillStyle = isTurn ? "rgba(14,14,16,0.85)" : "rgba(14,14,16,0.65)";
+        ctx.fillRect(bx, by, boxW, boxH);
+        ctx.strokeStyle = isTurn ? "#FFC627" : "#5A5F66";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, boxW - 1, boxH - 1);
+        ctx.fillStyle = isTurn ? "#FFC627" : "#D8DCE2";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(label.text, p.x, p.y + 0.5);
+      }
+    }
+
     // Status label
     ctx.fillStyle = useMap ? "#D8DCE2" : "#7B8088";
     ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     const totalPts = raws.reduce((s, p) => s + p.n, 0);
+    const labelHint = labelsRef.current.length > 0
+      ? ` · ${labelsRef.current.filter((l) => l.kind === "turn").length} turns`
+      : "";
     ctx.fillText(
-      `GPS · ${raws.length} session${raws.length === 1 ? "" : "s"} · ${totalPts} pts`,
+      `GPS · ${raws.length} session${raws.length === 1 ? "" : "s"} · ${totalPts} pts${labelHint}`,
       6, 6,
     );
 

@@ -1,5 +1,5 @@
 import type { WidgetConfigEditorProps } from "../types";
-import type { GpsTrackConfig, BasemapMode } from "./render";
+import type { GpsTrackConfig, BasemapMode, LabelsMode } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
 
 const BASEMAP_OPTIONS: Array<{ value: BasemapMode; label: string }> = [
@@ -7,6 +7,12 @@ const BASEMAP_OPTIONS: Array<{ value: BasemapMode; label: string }> = [
   { value: "dark",      label: "Dark roads (CARTO)" },
   { value: "satellite", label: "Satellite (Esri)" },
   { value: "custom",    label: "Custom tile URL" },
+];
+
+const LABELS_OPTIONS: Array<{ value: LabelsMode; label: string }> = [
+  { value: "none",                 label: "None" },
+  { value: "turns",                label: "Turns (T1, T2…)" },
+  { value: "turns_and_straights",  label: "Turns + straights" },
 ];
 
 export function GpsTrackConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<GpsTrackConfig>) {
@@ -60,6 +66,19 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
             />
           </label>
         )}
+      </div>
+      <div className="border-t border-[#2A2C32] mt-2 pt-2 flex flex-col gap-1">
+        <label className="flex justify-between items-center"><span>track labels</span>
+          <select
+            className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+            value={config.labels ?? "none"}
+            onChange={(e) => set("labels", e.target.value as LabelsMode)}
+          >
+            {LABELS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
     </div>
   );
