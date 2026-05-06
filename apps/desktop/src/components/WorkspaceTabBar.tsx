@@ -73,10 +73,15 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
 
   return (
     <div className="ml-2 flex gap-1 items-center">
-      <div role="tablist" className="flex gap-1">
+      <div role="tablist" className="flex gap-1 items-center">
         {workspaces.map((w, i) => {
           const active = w.id === activeId;
           return (
+            <div key={w.id} className="flex items-center">
+              {/* Drop indicator: shown before tab i when dropIndex === i */}
+              {dropIndex === i && dragSourceIndex !== null && dragSourceIndex !== i && dragSourceIndex !== i - 1 && (
+                <span className="w-0.5 h-4 bg-[#FFC627] rounded-full mr-0.5 shrink-0" aria-hidden />
+              )}
             <button
               key={w.id}
               role="tab"
@@ -142,8 +147,13 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                 <span onDoubleClick={(e) => { e.stopPropagation(); startRename(w); }}>{w.label}</span>
               )}
             </button>
+            </div>
           );
         })}
+        {/* Drop indicator after the last tab */}
+        {dropIndex === workspaces.length && dragSourceIndex !== null && dragSourceIndex !== workspaces.length - 1 && (
+          <span className="w-0.5 h-4 bg-[#FFC627] rounded-full ml-0.5 shrink-0" aria-hidden />
+        )}
       </div>
       <button
         onClick={onCreate}
