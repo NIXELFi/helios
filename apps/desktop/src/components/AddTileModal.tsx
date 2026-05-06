@@ -1,7 +1,7 @@
 import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
-  tireGridWidget, histogramWidget, xyPlotWidget,
+  tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
   type Widget,
 } from "@helios/widgets";
 import type { TileSpec, WidgetType } from "../workspaces/types";
@@ -27,6 +27,7 @@ const PALETTE: PaletteEntry[] = [
   { type: "tire_grid",       label: "Tire Grid",       description: "Per-corner temp + pressure",     defaultCells: { w: 8,  h: 6 }, widget: tireGridWidget },
   { type: "lap_panel",       label: "Lap Panel",       description: "List of laps with times",        defaultCells: { w: 6,  h: 5 }, widget: lapPanelWidget },
   { type: "alarm_panel",     label: "Alarm Panel",     description: "List of alarm events",           defaultCells: { w: 6,  h: 5 }, widget: alarmPanelWidget },
+  { type: "steering_wheel",  label: "Steering Wheel",  description: "Animated wheel + degree readout", defaultCells: { w: 4,  h: 5 }, widget: steeringWheelWidget },
 ];
 
 interface Props {

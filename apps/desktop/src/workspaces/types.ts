@@ -1,13 +1,13 @@
 import type {
   StripChartConfig, NumericReadoutConfig, RoundGaugeConfig, BarGaugeConfig,
   EngineBarConfig, GpsTrackConfig, LapPanelConfig, AlarmPanelConfig,
-  TireGridConfig, HistogramConfig, XyPlotConfig,
+  TireGridConfig, HistogramConfig, XyPlotConfig, SteeringWheelConfig,
 } from "@helios/widgets";
 
 export type WidgetType =
   | "strip_chart" | "numeric_readout" | "round_gauge" | "bar_gauge"
   | "engine_bar" | "gps_track" | "lap_panel" | "alarm_panel"
-  | "tire_grid" | "histogram" | "xy_plot";
+  | "tire_grid" | "histogram" | "xy_plot" | "steering_wheel";
 
 export interface TileSpec {
   id: string;
@@ -15,7 +15,7 @@ export interface TileSpec {
   config:
     | StripChartConfig | NumericReadoutConfig | RoundGaugeConfig | BarGaugeConfig
     | EngineBarConfig | GpsTrackConfig | LapPanelConfig | AlarmPanelConfig
-    | TireGridConfig | HistogramConfig | XyPlotConfig;
+    | TireGridConfig | HistogramConfig | XyPlotConfig | SteeringWheelConfig;
   x: number; y: number; w: number; h: number;
 }
 

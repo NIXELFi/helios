@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
-  tireGridWidget, histogramWidget, xyPlotWidget,
+  tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
   type Widget, type OverlaySession,
 } from "@helios/widgets";
 import type { CursorEmitter } from "@helios/lib";
@@ -22,6 +22,7 @@ const widgets: Record<string, Widget<unknown>> = {
   tire_grid:       tireGridWidget       as unknown as Widget<unknown>,
   histogram:       histogramWidget      as unknown as Widget<unknown>,
   xy_plot:         xyPlotWidget         as unknown as Widget<unknown>,
+  steering_wheel:  steeringWheelWidget  as unknown as Widget<unknown>,
 };
 
 interface Props {

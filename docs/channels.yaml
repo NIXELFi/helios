@@ -107,6 +107,19 @@ channels:
     sample_rate_hz: 10
     aliases: [speed, gps_speed, "gps.speed", "GPS Speed"]
 
+  - id: chassis.steering_angle
+    display_name: Steering Angle
+    units: "°"
+    group: Chassis
+    color: "#BA68C8"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: -120
+    max: 120
+    aliases: [steering, Steering, steering_angle, "chassis.steering_angle"]
+
   - id: imu.lat_g
     display_name: Lateral G
     units: g
