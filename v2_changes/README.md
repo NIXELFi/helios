@@ -24,6 +24,12 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 16 | Math channels phase B: time ops + drag-and-drop palette | [16-math-channels-phase-b.md](16-math-channels-phase-b.md) |
 | 17 | Color edits in the config panel didn't reach the canvas | [17-config-color-not-applied.md](17-config-color-not-applied.md) |
 | 18 | Loading screen + Helios brand wordmark | [18-loading-screen-and-brand.md](18-loading-screen-and-brand.md) |
+| 19 | GPS basemap (CARTO dark / Esri satellite / custom) | [19-gps-basemap.md](19-gps-basemap.md) |
+| 20 | MoTeC ADL int32-as-uint32 GPS micro-degrees decode | [20-motec-gps-int32-decode.md](20-motec-gps-int32-decode.md) |
+| 21 | Steering Wheel widget | [21-steering-wheel-widget.md](21-steering-wheel-widget.md) |
+| 22 | Playback controls (▶ / pause / 0.25–8× speed) | [22-playback-controls.md](22-playback-controls.md) |
+| 23 | Per-channel Y axis on the strip chart + clip / legend / color-swatch fixes | [23-strip-chart-per-channel-axis.md](23-strip-chart-per-channel-axis.md) |
+| 24 | Auto-labeled turns and straights on the GPS view | [24-track-labels.md](24-track-labels.md) |
 
 ## New behaviors introduced
 

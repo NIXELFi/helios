@@ -2,14 +2,16 @@
 
 **Sun Devil Motorsports ground-station telemetry suite.** Tauri (Rust + React) desktop app for ingesting CSV telemetry exports, overlaying multiple sessions, scrubbing through laps, defining math channels, and laying out a custom workspace of plots and gauges — MoTeC i2 in spirit, with editing built in.
 
-> **Status:** `v2.1` — see [`v2_changes/`](v2_changes/) for the running log of every issue and fix landed since the v1 baseline.
+> **Status:** `v2.2` — see [`v2_changes/`](v2_changes/) for the running log of every issue and fix landed since the v1 baseline.
 
 ## Highlights
 
 - **Multi-session overlay.** A collapsible left rail lists every loaded CSV; tick more than one to overlay them on every plot. Strip charts, GPS tracks, XY scatters, and histograms all draw a trace per visible session in distinct palette colors. Click any track / chart to scrub the cursor — emits the closest sample's time across sessions.
-- **MoTeC CSV ingest.** Out of the box the loader handles plain time-series CSVs *and* MoTeC i2 exports (the metadata-block-prefixed format with quoted values and a units row). The channel registry in [`docs/channels.yaml`](docs/channels.yaml) maps human-readable MoTeC column names to canonical channel ids via aliases.
-- **Workspace editor.** Drag tiles to move, drag the corner to resize, snap to a 24×16 grid. **+ Add tile** drops any of 11 widget types into the next free slot. Per-tile config editor changes channels, ranges, colors, and even widget type (in-place swap). Workspaces persist to localStorage.
+- **MoTeC CSV ingest.** Out of the box the loader handles plain time-series CSVs *and* MoTeC i2 exports (the metadata-block-prefixed format with quoted values and a units row). The channel registry in [`docs/channels.yaml`](docs/channels.yaml) maps human-readable MoTeC column names to canonical channel ids via aliases. The GPS widget also decodes MoTeC ADL's int32-as-uint32 micro-degree quirk so longitudes like "3175683584" round-trip back to "-111.93°" without a config change.
+- **Workspace editor.** Drag tiles to move, drag the corner to resize, snap to a 24×16 grid. **+ Add tile** drops any of 12 widget types (incl. Steering Wheel) into the next free slot. Per-tile config editor changes channels, ranges, colors, and even widget type (in-place swap). Workspaces persist to localStorage.
 - **Math channels.** Define computed channels by formula — `derivative(engine.rpm)`, `lowpass(imu.lat_g, 5)`, `engine.rpm * 0.1047` — with full operator precedence, ternary, comparison/logical ops, 17 scalar functions, and time-aware ops (`derivative integral shift smooth lowpass`). New channels appear in every channel picker and inspector instantly. Drag-and-drop palette of channels, operators, and functions in the editor.
+- **GPS basemap.** Toggle the GPS widget between dark canvas, CARTO Dark Matter roads, Esri World Imagery satellite, or a custom tile-URL template. Track polyline + cursor dot project through the active basemap so they ride real lat/lon. Auto-detected turn/straight labels (T1, T2…, S1, S2…) overlay the track when enabled — uses `imu.lat_g` when available for noise-resistant detection, GPS curvature otherwise.
+- **Playback.** ▶ / pause + 0.25–8× speed selector in the header drive the cursor at wall-clock rate, so every widget animates together. Spacebar toggles. Click anywhere on a scrubbable plot to re-anchor while playing.
 - **Channel inspector.** Header `Channels` button opens a searchable, grouped table of every channel resolved in the primary session.
 - **Real loading screen.** Branded splash with a real progress bar driven by per-session load events.
 
@@ -52,7 +54,7 @@ crates/              Rust crates
 packages/            TypeScript packages
   lib/                 cursor emitter, time helpers, math-expression engine
   store/               JS-side channel store + slice
-  widgets/             11 widgets (strip chart, GPS, gauges, math-channel-aware)
+  widgets/             12 widgets (strip chart, GPS, gauges, steering wheel, math-channel-aware)
   ui/                  primitives
 docs/                architecture, channel registry, design spec
 samples/             bundled sample sessions
