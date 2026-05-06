@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
@@ -21,6 +21,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
   const layoutRef = useRef<{ groups: SessionGroup[]; layout: PlotLayout } | null>(null);
   const drawRef = useRef<() => void>(() => {});
   const markerDrawRef = useRef<() => void>(() => {});
+  const [domOverlays, setDomOverlays] = useState<Array<{ id: string; element: ReactNode }>>([]);
 
   const visible: OverlaySession[] = visibleOverlays && visibleOverlays.length > 0
     ? visibleOverlays
@@ -171,6 +172,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
       availableChannels: [],
     };
     const priorArtifacts = ctxObj.priorArtifacts as Map<string, unknown>;
+    const nextDomOverlays: Array<{ id: string; element: ReactNode }> = [];
     for (const overlay of config.overlays) {
       const mod = getOverlayModule(overlay.kind);
       if (!mod) { console.warn(`xy-plot: unknown overlay kind '${overlay.kind}'`); continue; }
@@ -178,7 +180,15 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
       const artifacts = mod.compute(groups, overlay.config as never, ctxObj);
       priorArtifacts.set(overlay.id, artifacts);
       mod.draw?.(ctx, layout, artifacts, overlay.config as never);
+      if (mod.Component) {
+        const Comp = mod.Component;
+        nextDomOverlays.push({
+          id: overlay.id,
+          element: <Comp artifacts={artifacts} cfg={overlay.config as never} layout={layout} />,
+        });
+      }
     }
+    setDomOverlays(nextDomOverlays);
 
     // Axis labels
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
@@ -199,6 +209,12 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     <div className="relative w-full h-full bg-[#16171B]">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <canvas ref={markerCanvasRef} className="absolute inset-0 w-full h-full cursor-crosshair" />
+      {/* DOM overlay layer — pointer-events-none so the marker canvas keeps
+          receiving scrub events; individual Components opt back in to
+          pointer events on themselves (e.g. selectable text). */}
+      <div className="absolute inset-0 pointer-events-none">
+        {domOverlays.map((d) => <div key={d.id}>{d.element}</div>)}
+      </div>
     </div>
   );
 }
