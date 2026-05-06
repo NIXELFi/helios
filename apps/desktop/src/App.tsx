@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { CursorEmitter, formatClock } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
@@ -13,6 +14,9 @@ import {
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
 import { useUpdater } from "./lib/use-updater";
+import { useFileOpener } from "./lib/use-file-opener";
+import { formatFileOpenSummary } from "./lib/file-open-summary";
+import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
 import { UpdatesPill } from "./components/UpdatesPill";
 import { UpdateModal } from "./components/UpdateModal";
@@ -43,10 +47,11 @@ export default function App() {
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
   const updater = useUpdater();
+  useFileOpener({ onPending: handleFileOpenPending });
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   type ConfirmRequest = {
     title: string;
-    body: string;
+    body: string | ReactNode;
     confirmLabel: string;
     confirmTone: "default" | "danger";
     cancelLabel?: string;
@@ -256,6 +261,40 @@ export default function App() {
     commitWorkspaces(() => merged);
     setWorkspaceId(merged[firstImportedIndex]!.id);
     setSelectedTileId(null);
+  }
+
+  function handleFileOpenPending(perFile: PerFileResult[]) {
+    const summary = formatFileOpenSummary(perFile);
+    if (summary.isAlert) {
+      setConfirmState({
+        title: summary.title,
+        body: <span style={{ whiteSpace: "pre-line" }}>{summary.body}</span>,
+        confirmLabel: "OK",
+        confirmTone: "default",
+        onConfirm: () => setConfirmState(null),
+      });
+      return;
+    }
+    const validBundles = perFile
+      .filter((r): r is Extract<PerFileResult, { kind: "valid" }> => r.kind === "valid")
+      .flatMap((r) => r.workspaces);
+    setConfirmState({
+      title: summary.title,
+      body: <span style={{ whiteSpace: "pre-line" }}>{summary.body}</span>,
+      confirmLabel: "Import",
+      confirmTone: "default",
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        // Snapshot workspaces.length BEFORE commit (same pattern as
+        // handleImportWorkspaces).
+        const firstImportedIndex = workspaces.length;
+        const merged = mergeImported(workspaces, validBundles);
+        commitWorkspaces(() => merged);
+        setWorkspaceId(merged[firstImportedIndex]!.id);
+        setSelectedTileId(null);
+        setConfirmState(null);
+      },
+    });
   }
 
   function updateTile(nextTile: TileSpec) {
