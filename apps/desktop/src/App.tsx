@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CursorEmitter, formatClock } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
@@ -280,6 +280,7 @@ export default function App() {
               </button>
             </>
           )}
+          <PlaybackControls emitter={emitter} ext={ext} />
           <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
         </div>
       </header>
@@ -358,6 +359,106 @@ function CursorClock({ emitter }: { emitter: CursorEmitter }) {
   const [t, setT] = useState(emitter.get());
   useEffect(() => emitter.subscribe(setT), [emitter]);
   return <>{formatClock(t)}</>;
+}
+
+const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
+
+/** Drives the cursor emitter at wall-clock rate (modulated by `speed`) when
+ *  playing. Uses requestAnimationFrame to advance once per paint, comparing
+ *  emitter.get() against the last value we wrote so a user scrub during
+ *  playback re-anchors the start instead of fighting with playback. Wraps
+ *  to the session start when the cursor passes the end so a casual press
+ *  of play loops the lap rather than dead-stopping. */
+function PlaybackControls({
+  emitter, ext,
+}: {
+  emitter: CursorEmitter;
+  ext: { startUs: number; endUs: number };
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<number>(1);
+  // Live refs the rAF loop reads so we don't have to re-arm it whenever
+  // speed/extents change.
+  const speedRef = useRef(speed); speedRef.current = speed;
+  const extRef = useRef(ext); extRef.current = ext;
+
+  useEffect(() => {
+    if (!playing) return;
+    let rafId: number;
+    let wallStartMs = performance.now();
+    let cursorStartUs = emitter.get();
+    let lastWrittenUs = cursorStartUs;
+    // If the cursor sits at (or past) the end when play is hit, restart from
+    // the beginning so a fresh press always plays the lap rather than no-op.
+    if (cursorStartUs >= extRef.current.endUs - 1000) {
+      cursorStartUs = extRef.current.startUs;
+      emitter.emit(cursorStartUs);
+      lastWrittenUs = cursorStartUs;
+    }
+
+    const tick = () => {
+      // External scrub since our last write? Anchor to the new spot.
+      const currentUs = emitter.get();
+      if (currentUs !== lastWrittenUs) {
+        wallStartMs = performance.now();
+        cursorStartUs = currentUs;
+      }
+      const wallElapsedMs = performance.now() - wallStartMs;
+      let next = cursorStartUs + wallElapsedMs * 1000 * speedRef.current;
+      if (next >= extRef.current.endUs) {
+        next = extRef.current.startUs;
+        wallStartMs = performance.now();
+        cursorStartUs = next;
+      }
+      emitter.emit(next);
+      lastWrittenUs = next;
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [playing, emitter]);
+
+  // Spacebar = play/pause when no input is focused. Common media-player
+  // convention; saves a hand-trip to the mouse during analysis.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.code !== "Space") return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      setPlaying((p) => !p);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setPlaying((p) => !p)}
+        className={
+          "w-7 h-6 flex items-center justify-center text-xs border rounded-sm cursor-pointer transition-colors " +
+          (playing
+            ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]"
+            : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+        }
+        title={playing ? "Pause (Space)" : "Play (Space)"}
+        aria-label={playing ? "Pause" : "Play"}
+      >
+        {playing ? "❚❚" : "▶"}
+      </button>
+      <select
+        value={speed}
+        onChange={(e) => setSpeed(Number(e.target.value))}
+        className="bg-[#16171B] text-[#D8DCE2] border border-[#2A2C32] hover:border-[#FFC627] rounded-sm px-1 h-6 text-xs cursor-pointer"
+        title="Playback speed"
+      >
+        {PLAYBACK_SPEEDS.map((s) => (
+          <option key={s} value={s}>{s}×</option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 /** Faint dotted grid drawn behind tiles in edit mode. The CSS gradient stops
