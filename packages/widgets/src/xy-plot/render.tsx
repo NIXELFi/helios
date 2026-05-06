@@ -10,6 +10,7 @@ import "./overlays/scatter";
 import "./overlays/fit";
 import "./overlays/formula";
 import "./overlays/bins";
+import "./overlays/stats";
 
 /* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
 export type { XyPlotConfig } from "./types";
