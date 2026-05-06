@@ -31,6 +31,7 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 23 | Per-channel Y axis on the strip chart + clip / legend / color-swatch fixes | [23-strip-chart-per-channel-axis.md](23-strip-chart-per-channel-axis.md) |
 | 24 | Auto-labeled turns and straights on the GPS view | [24-track-labels.md](24-track-labels.md) |
 | 25 | User-managed workspaces (CRUD, color, reorder, export/import) | [25-workspace-management.md](25-workspace-management.md) |
+| 26 | Workspace UX polish — tab-strip horizontal scroll + .helios launch handler | [26-workspace-ux-polish.md](26-workspace-ux-polish.md) |
 
 ## New behaviors introduced
 
