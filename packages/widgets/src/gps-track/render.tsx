@@ -40,6 +40,20 @@ interface NormBbox { minLat: number; maxLat: number; minLon: number; maxLon: num
 
 const PAD = 16;
 
+/** Convert a bbox to MapLibre LngLatBoundsLike, but only if the lat/lon
+ *  values are in legal range. Returns undefined for invalid bboxes (caller
+ *  should skip the basemap fit and surface a warning). MapLibre's Map
+ *  constructor throws synchronously when bounds contain a lat outside
+ *  [-90, 90], so this gate has to live before construction. */
+function bboxToBounds(
+  bbox: NormBbox | null,
+): [[number, number], [number, number]] | undefined {
+  if (!bbox) return undefined;
+  if (bbox.minLat < -90 || bbox.maxLat > 90) return undefined;
+  if (bbox.minLon < -180 || bbox.maxLon > 180) return undefined;
+  return [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]];
+}
+
 function buildStyle(mode: BasemapMode, customTileUrl: string | undefined): StyleSpecification {
   if (mode === "dark") {
     return {
@@ -101,6 +115,10 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   const tRef = useRef<number>(cursorEmitter.get());
   const sessionRawsRef = useRef<SessionRaw[]>([]);
   const normBboxRef = useRef<NormBbox | null>(null);
+  /** True when the computed bbox is real (some session had GPS) but its
+   *  lat/lon values fell outside legal ranges. Surfaced in the canvas
+   *  overlay as a diagnostic so the user knows the basemap can't frame. */
+  const bboxRejectedRef = useRef<boolean>(false);
   /** Indirection so long-lived callbacks (cursor sub, resize, map move) always
    *  invoke the LATEST `draw` closure rather than a stale capture. */
   const drawRef = useRef<() => void>(() => {});
@@ -158,16 +176,16 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         drawRef.current();
       });
     } else {
-      try {
-        // Compute initial bounds up-front so the map opens already framed on
-        // the GPS data instead of flashing at zoom 0 / world view. fitBounds
-        // after-the-fact races the container's first layout, which left the
-        // map showing the whole earth on first paint.
-        const { bbox } = buildSessionRaws();
-        const initialBounds: [[number, number], [number, number]] | undefined =
-          bbox ? [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]] : undefined;
+      // Compute initial bounds up-front so the map opens already framed on
+      // the GPS data instead of flashing at zoom 0 / world view. fitBounds
+      // after-the-fact races the container's first layout, which left the
+      // map showing the whole earth on first paint.
+      const { bbox } = buildSessionRaws();
+      const initialBounds = bboxToBounds(bbox);
 
-        const map = new maplibregl.Map({
+      let map: MapLibreMap;
+      try {
+        map = new maplibregl.Map({
           container: div,
           style: buildStyle(basemap, config.customTileUrl),
           attributionControl: { compact: true },
@@ -184,20 +202,26 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
           maxZoom: 18,
           fitBoundsOptions: { padding: 24, animate: false, duration: 0, maxZoom: 18 },
         });
-        mapRef.current = map;
-        map.on("load", () => {
-          map.resize();
-          fitBoundsToData();
-          drawRef.current();
-        });
-        // Repaint our overlay canvas whenever the map view changes.
-        map.on("move", () => drawRef.current());
-        map.on("zoom", () => drawRef.current());
-        map.on("rotate", () => drawRef.current());
-        map.on("pitch", () => drawRef.current());
-      } catch (_e) {
-        // jsdom / non-DOM test environments don't support MapLibre's WebGL; ignore.
+      } catch (e) {
+        // Surface construction failures (e.g. WebGL unavailable). The previous
+        // silent-swallow catch was meant for jsdom but masked real runtime
+        // errors in the running app — the test env now uses a vi.mock so the
+        // catch is no longer load-bearing for tests.
+        console.error("[helios/gps-track] maplibre Map construction failed:", e);
+        return;
       }
+      mapRef.current = map;
+      map.on("error", (ev) => console.error("[helios/gps-track] maplibre error:", ev));
+      map.on("load", () => {
+        map.resize();
+        fitBoundsToData();
+        drawRef.current();
+      });
+      // Repaint our overlay canvas whenever the map view changes.
+      map.on("move", () => drawRef.current());
+      map.on("zoom", () => drawRef.current());
+      map.on("rotate", () => drawRef.current());
+      map.on("pitch", () => drawRef.current());
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useMap, basemap, config.customTileUrl]);
@@ -297,13 +321,11 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   function fitBoundsToData() {
     const map = mapRef.current; if (!map) return;
     const { bbox } = buildSessionRaws();
-    if (!bbox) return;
+    const bounds = bboxToBounds(bbox);
+    if (!bounds) return;
     try {
       map.resize();
-      map.fitBounds(
-        [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]],
-        { padding: 24, duration: 0, animate: false, maxZoom: 18 },
-      );
+      map.fitBounds(bounds, { padding: 24, duration: 0, animate: false, maxZoom: 18 });
     } catch (_e) { /* map may not be ready yet */ }
   }
 
@@ -346,6 +368,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     const { raws, bbox } = buildSessionRaws();
     sessionRawsRef.current = raws;
     normBboxRef.current = bbox;
+    bboxRejectedRef.current = bbox !== null && bboxToBounds(bbox) === undefined;
 
     if (raws.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
@@ -407,6 +430,18 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       `GPS · ${raws.length} session${raws.length === 1 ? "" : "s"} · ${totalPts} pts`,
       6, 6,
     );
+
+    // Diagnostic for the most common basemap-broken case: a session has
+    // lat/lon that look swapped or are outside legal ranges, which makes
+    // MapLibre refuse to frame.
+    if (useMap && bbox && bboxRejectedRef.current) {
+      ctx.fillStyle = "#EF5350";
+      ctx.textBaseline = "top";
+      ctx.fillText(
+        `basemap can't frame: lat ${bbox.minLat.toFixed(2)}…${bbox.maxLat.toFixed(2)}, lon ${bbox.minLon.toFixed(2)}…${bbox.maxLon.toFixed(2)} (out of legal range — try swapping latChannelId / lonChannelId in config)`,
+        6, 22,
+      );
+    }
   }
 
   return (
