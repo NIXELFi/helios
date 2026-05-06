@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { slugifyForFilename, serializeBundle, BUNDLE_KIND, BUNDLE_VERSION } from "../src/lib/workspace-bundle";
+import { slugifyForFilename, serializeBundle, parseBundle, BUNDLE_KIND, BUNDLE_VERSION } from "../src/lib/workspace-bundle";
 import type { Workspace } from "../src/workspaces/types";
 
 const sampleWs: Workspace[] = [
@@ -38,5 +38,56 @@ describe("serializeBundle", () => {
     const before = JSON.parse(JSON.stringify(sampleWs));
     serializeBundle(sampleWs, "x");
     expect(sampleWs).toEqual(before);
+  });
+});
+
+describe("parseBundle", () => {
+  const validBundle = JSON.stringify({
+    kind: BUNDLE_KIND,
+    version: BUNDLE_VERSION,
+    exportedAt: "2026-05-06T00:00:00.000Z",
+    exportedFrom: "Helios 2.3.2",
+    workspaces: [{ id: "a", label: "A", color: "#FFC627", tiles: [] }],
+  });
+
+  it("accepts a well-formed bundle", () => {
+    const r = parseBundle(validBundle);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.bundle.workspaces.length).toBe(1);
+  });
+
+  it("rejects non-JSON", () => {
+    const r = parseBundle("not json {");
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects wrong kind", () => {
+    const r = parseBundle(JSON.stringify({ ...JSON.parse(validBundle), kind: "other" }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/not a Helios workspace file/i);
+  });
+
+  it("rejects wrong version", () => {
+    const r = parseBundle(JSON.stringify({ ...JSON.parse(validBundle), version: 99 }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/version/i);
+  });
+
+  it("rejects missing workspaces array", () => {
+    const r = parseBundle(JSON.stringify({ kind: BUNDLE_KIND, version: 1 }));
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects empty workspaces array", () => {
+    const r = parseBundle(JSON.stringify({ ...JSON.parse(validBundle), workspaces: [] }));
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects workspace missing required fields", () => {
+    const r = parseBundle(JSON.stringify({
+      ...JSON.parse(validBundle),
+      workspaces: [{ id: "a", label: "A" }],  // no color, no tiles
+    }));
+    expect(r.ok).toBe(false);
   });
 });

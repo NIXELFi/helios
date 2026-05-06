@@ -26,3 +26,41 @@ export function serializeBundle(workspaces: Workspace[], appVersion: string): st
   };
   return JSON.stringify(bundle, null, 2);
 }
+
+export type ParseResult =
+  | { ok: true; bundle: WorkspaceBundle }
+  | { ok: false; reason: string };
+
+export function parseBundle(json: string): ParseResult {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return { ok: false, reason: "Not valid JSON." };
+  }
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, reason: "Not a Helios workspace file." };
+  }
+  const obj = raw as Record<string, unknown>;
+  if (obj.kind !== BUNDLE_KIND) {
+    return { ok: false, reason: "Not a Helios workspace file." };
+  }
+  if (obj.version !== BUNDLE_VERSION) {
+    return { ok: false, reason: `Unsupported bundle version: ${String(obj.version)}.` };
+  }
+  if (!Array.isArray(obj.workspaces) || obj.workspaces.length === 0) {
+    return { ok: false, reason: "Bundle contains no workspaces." };
+  }
+  for (const w of obj.workspaces) {
+    if (
+      !w || typeof w !== "object" ||
+      typeof (w as Workspace).id !== "string" ||
+      typeof (w as Workspace).label !== "string" ||
+      typeof (w as Workspace).color !== "string" ||
+      !Array.isArray((w as Workspace).tiles)
+    ) {
+      return { ok: false, reason: "Bundle contains a malformed workspace." };
+    }
+  }
+  return { ok: true, bundle: obj as unknown as WorkspaceBundle };
+}
