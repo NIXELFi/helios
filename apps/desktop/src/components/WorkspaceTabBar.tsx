@@ -99,7 +99,11 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
   }
 
   return (
-    <div className="ml-2 flex gap-1 items-center">
+    // Outer wrapper: takes available header width, clips overflow to its
+    // edge, scrolls horizontally on the wheel. Inner row stays a single
+    // line so tabs never wrap and grow header height.
+    <div className="ml-2 flex-1 min-w-0 overflow-x-auto">
+      <div className="flex gap-1 items-center w-max">
       <div
         role="tablist"
         aria-label="Workspaces"
@@ -133,7 +137,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                 setMenuFor({ workspaceId: w.id, x: e.clientX, y: e.clientY });
               }}
               className={
-                "flex items-center gap-1.5 px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
+                "flex items-center gap-1.5 whitespace-nowrap px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
                 (isDragSource ? "opacity-50 " : "") +
                 (active
                   ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
@@ -193,6 +197,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
       >
         Export all…
       </button>
+      </div>{/* end .w-max inner row */}
 
       {menuFor && (() => {
         const target = workspaces.find((w) => w.id === menuFor.workspaceId);
