@@ -5,11 +5,17 @@ import type { ChannelSlice } from "@helios/store";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
-import { detectTrackLabels, DEFAULT_TURN_OPTIONS, type TrackLabel } from "./turns";
+import { detectTrackLabels, SENSITIVITY_PRESETS, type Sensitivity, type TrackLabel } from "./turns";
 
 export type BasemapMode = "none" | "dark" | "satellite" | "custom";
 
 export type LabelsMode = "none" | "turns" | "turns_and_straights";
+
+/** Channel id we look up automatically as the cornering signal source.
+ *  When the primary session has this channel populated, the turn detector
+ *  uses |lat_g| (chassis-frame, robust against GPS noise) instead of GPS
+ *  path curvature. */
+const LAT_G_CHANNEL_ID = "imu.lat_g";
 
 export interface GpsTrackConfig {
   latChannelId: string;
@@ -33,8 +39,14 @@ export interface GpsTrackConfig {
   /** Auto-detect turn (and optionally straight) segments from GPS curvature
    *  and label them T1, T2, … / S1, S2, … on the track. Mirrors MoTeC's
    *  track-map labeling. Computed from the primary session only — overlaid
-   *  sessions of the same track will sit under the same labels anyway. */
+   *  sessions of the same track will sit under the same labels anyway.
+   *  Detector prefers `imu.lat_g` (chassis-frame cornering force) when it
+   *  exists in the session, falling back to a GPS-curvature signal with a
+   *  lookahead window. */
   labels?: LabelsMode;
+  /** How aggressive the turn detector is. "low" wants a sustained, hard
+   *  corner; "high" picks up subtle bends. Defaults to medium. */
+  labelSensitivity?: Sensitivity;
 }
 
 interface SessionRaw {
@@ -415,25 +427,32 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     bboxRejectedRef.current = bbox !== null && bboxToBounds(bbox) === undefined;
 
     // Recompute track labels only when the primary session's data, the labels
-    // mode, or the configured channels have changed — not on every cursor
-    // frame. The cache key includes the primary session's id and length plus
-    // the labels mode; that's enough to invalidate when the user switches
-    // sessions or toggles the labels.
+    // mode, or the sensitivity have changed — not on every cursor frame.
+    // The cache key encodes everything that affects the result.
     const labelsMode: LabelsMode = config.labels ?? "none";
+    const sensitivity: Sensitivity = config.labelSensitivity ?? "medium";
     const primary = raws[0];
     const cacheKey = primary
-      ? `${primary.session.id}:${primary.n}:${labelsMode}`
-      : `none:${labelsMode}`;
+      ? `${primary.session.id}:${primary.n}:${labelsMode}:${sensitivity}`
+      : `none:${labelsMode}:${sensitivity}`;
     if (cacheKey !== labelsCacheKeyRef.current) {
       labelsCacheKeyRef.current = cacheKey;
       if (labelsMode === "none" || !primary) {
         labelsRef.current = [];
       } else {
+        // Look up the lateral G channel from the primary session if
+        // available — way more reliable than GPS curvature on noisy data.
+        const latG = primary.session.slice.data.get(LAT_G_CHANNEL_ID);
+        const opts = {
+          ...SENSITIVITY_PRESETS[sensitivity],
+          emitStraights: labelsMode === "turns_and_straights",
+        };
         labelsRef.current = detectTrackLabels(
           primary.lat,
           primary.lon,
           primary.session.slice.time,
-          { ...DEFAULT_TURN_OPTIONS, emitStraights: labelsMode === "turns_and_straights" },
+          opts,
+          latG,
         );
       }
     }

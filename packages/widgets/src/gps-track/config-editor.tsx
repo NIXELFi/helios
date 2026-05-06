@@ -1,5 +1,6 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { GpsTrackConfig, BasemapMode, LabelsMode } from "./render";
+import type { Sensitivity } from "./turns";
 import { ChannelPicker } from "../lib/channel-picker";
 
 const BASEMAP_OPTIONS: Array<{ value: BasemapMode; label: string }> = [
@@ -13,6 +14,12 @@ const LABELS_OPTIONS: Array<{ value: LabelsMode; label: string }> = [
   { value: "none",                 label: "None" },
   { value: "turns",                label: "Turns (T1, T2…)" },
   { value: "turns_and_straights",  label: "Turns + straights" },
+];
+
+const SENSITIVITY_OPTIONS: Array<{ value: Sensitivity; label: string }> = [
+  { value: "low",    label: "Low (only obvious corners)" },
+  { value: "medium", label: "Medium (default)" },
+  { value: "high",   label: "High (catches subtle bends)" },
 ];
 
 export function GpsTrackConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<GpsTrackConfig>) {
@@ -79,6 +86,19 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
             ))}
           </select>
         </label>
+        {(config.labels ?? "none") !== "none" && (
+          <label className="flex justify-between items-center"><span>sensitivity</span>
+            <select
+              className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+              value={config.labelSensitivity ?? "medium"}
+              onChange={(e) => set("labelSensitivity", e.target.value as Sensitivity)}
+            >
+              {SENSITIVITY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
     </div>
   );
