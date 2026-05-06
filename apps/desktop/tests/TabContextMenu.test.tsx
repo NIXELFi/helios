@@ -31,10 +31,14 @@ describe("TabContextMenu", () => {
     expect(screen.getByRole("menuitem", { name: /delete/i })).toBeInTheDocument();
   });
 
-  it("disables Delete when canDelete=false", () => {
-    render(<TabContextMenu {...defaultProps({ canDelete: false })} />);
+  it("disables Delete when canDelete=false; click is a no-op", () => {
+    const props = defaultProps({ canDelete: false });
+    render(<TabContextMenu {...props} />);
     const del = screen.getByRole("menuitem", { name: /delete/i });
     expect(del).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(del);
+    expect(props.onDelete).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 
   it("clicking Rename calls onRename + onClose", () => {

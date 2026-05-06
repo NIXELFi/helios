@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface TabContextMenuProps {
   anchor: { x: number; y: number };
@@ -18,10 +18,12 @@ export function TabContextMenu(props: TabContextMenuProps) {
   const [colorOpen, setColorOpen] = useState(false);
   const [colorFlipLeft, setColorFlipLeft] = useState(false);
 
-  // Close on Escape, outside-click, or window resize.
+  // Close on Escape, outside-click, or window resize. Esc gets stopPropagation
+  // so it doesn't ALSO close an ancestor (e.g. an inline-rename input on the
+  // tab itself when this menu opens above it).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
     }
     function onClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
@@ -36,9 +38,11 @@ export function TabContextMenu(props: TabContextMenuProps) {
     };
   }, [onClose]);
 
-  // Position with viewport-overflow handling (flip up/left if too close to edge).
+  // Position with viewport-overflow handling (flip up/left if too close to
+  // edge). useLayoutEffect runs synchronously before paint so the user never
+  // sees a one-frame flash at the un-flipped anchor.
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
