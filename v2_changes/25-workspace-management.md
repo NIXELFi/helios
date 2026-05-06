@@ -27,7 +27,14 @@ Workspaces are now fully user-managed at runtime.
 
 ## Files changed
 
-- `apps/desktop/src/WorkspaceBar.tsx` (new) — tab bar with drag, context menu, inline rename, color picker
-- `apps/desktop/src/ConfirmDialog.tsx` (new) — accessible modal confirm
-- `apps/desktop/src/App.tsx` — wires workspace CRUD, migration, and export/import
-- `apps/desktop/src/WorkspaceBar.css` (new) — tab bar styles and color swatch dot
+- `apps/desktop/src/components/WorkspaceTabBar.tsx` (new) — tab bar with drag-reorder, inline rename, drop indicator
+- `apps/desktop/src/components/TabContextMenu.tsx` (new) — right-click menu with viewport-overflow flip + Color submenu
+- `apps/desktop/src/components/ConfirmDialog.tsx` (new) — reusable confirm + alert modal
+- `apps/desktop/src/lib/workspace-bundle.ts` (new) — pure `serializeBundle` / `parseBundle` / `mergeImported` / `slugifyForFilename`
+- `apps/desktop/src/lib/workspace-dialog.ts` (new) — Tauri save/open file-dialog wrappers
+- `apps/desktop/src/lib/workspace-storage.ts` — v1→v2 migration adding `color` field
+- `apps/desktop/src/workspaces/types.ts`, `apps/desktop/src/workspaces/index.ts` — `+color` field on `Workspace`; built-ins assigned colors
+- `apps/desktop/src/App.tsx` — replaces inline tab map with `<WorkspaceTabBar>`; adds 9 workspace mutation/export/import callbacks; wires `<ConfirmDialog>` for both Reset and Delete-workspace
+- `apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/src-tauri/src/lib.rs`, `apps/desktop/src-tauri/capabilities/default.json` — register `tauri-plugin-dialog` + `tauri-plugin-fs` with minimal text-file capabilities
+- `apps/desktop/vitest.config.ts`, `apps/desktop/tests/setup.ts` (new) — jsdom + RTL test config for the desktop app
+- `apps/desktop/tests/{workspace-storage,workspace-bundle,ConfirmDialog,TabContextMenu,WorkspaceTabBar}.test.{ts,tsx}` (new) — 50 of the 62 new unit tests (the rest are inline/imported helpers)

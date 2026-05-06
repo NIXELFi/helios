@@ -21,7 +21,11 @@ export function ConfirmDialog({
     confirmRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        // stopPropagation so a stacked context (e.g. an open menu underneath
+        // or a future stacked dialog) doesn't ALSO close on the same keypress.
+        // Matches the convention used by TabContextMenu's Esc handler.
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     }
