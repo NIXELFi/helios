@@ -32,9 +32,21 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let helios_paths: Vec<String> = extract_helios_paths(argv.into_iter().skip(1));
             if !helios_paths.is_empty() {
-                let _ = app.emit("helios://open-files", helios_paths);
-            }
-            if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window("main") {
+                    // Common path: window exists, emit directly to it (window-
+                    // scoped, not app.emit which broadcasts to every window).
+                    let _ = window.emit("helios://open-files", &helios_paths);
+                    let _ = window.set_focus();
+                    let _ = window.unminimize();
+                } else if let Some(state) = app.try_state::<PendingOpenFiles>() {
+                    // Edge case: a 2nd launch arrived before this 1st instance
+                    // finished booting. Queue the paths into PendingOpenFiles
+                    // so on_page_load drains them when the window is ready.
+                    state.0.lock().unwrap().extend(helios_paths);
+                }
+            } else if let Some(window) = app.get_webview_window("main") {
+                // No .helios paths in argv — just bring the existing window
+                // forward (the user clicked the app icon while it was running).
                 let _ = window.set_focus();
                 let _ = window.unminimize();
             }

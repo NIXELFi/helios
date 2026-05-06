@@ -285,13 +285,23 @@ export default function App() {
       confirmTone: "default",
       cancelLabel: "Cancel",
       onConfirm: () => {
-        // Snapshot workspaces.length BEFORE commit (same pattern as
-        // handleImportWorkspaces).
-        const firstImportedIndex = workspaces.length;
-        const merged = mergeImported(workspaces, validBundles);
-        commitWorkspaces(() => merged);
-        setWorkspaceId(merged[firstImportedIndex]!.id);
-        setSelectedTileId(null);
+        // Read the LATEST committed workspaces inside the updater rather
+        // than from this closure. The dialog can sit open arbitrarily long
+        // before the user clicks Import, during which other actions (rename,
+        // delete, in-app Import) could mutate the list. Reading from `prev`
+        // guarantees the merge sees current state — same rationale as the
+        // commitWorkspaces docstring at the top of the file.
+        let firstImportedId: string | null = null;
+        commitWorkspaces((prev) => {
+          const firstImportedIndex = prev.length;
+          const merged = mergeImported(prev, validBundles);
+          firstImportedId = merged[firstImportedIndex]!.id;
+          return merged;
+        });
+        if (firstImportedId !== null) {
+          setWorkspaceId(firstImportedId);
+          setSelectedTileId(null);
+        }
         setConfirmState(null);
       },
     });
