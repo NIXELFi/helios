@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { CursorEmitter, formatClock } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
+import { SESSION_PALETTE } from "./lib/session";
 import type { TileSpec, Workspace } from "./workspaces/types";
 import { loadWorkspaces, saveWorkspaces, resetToBuiltins } from "./lib/workspace-storage";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
 import {
   type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
 } from "./lib/math-channels";
+import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
+import { saveJsonFile, openJsonFile } from "./lib/workspace-dialog";
 import { useUpdater } from "./lib/use-updater";
 import { Tile } from "./components/Tile";
 import { UpdatesPill } from "./components/UpdatesPill";
@@ -19,6 +23,7 @@ import { AddTileModal } from "./components/AddTileModal";
 import { MathChannelsModal } from "./components/MathChannelsModal";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { WorkspaceTabBar } from "./components/WorkspaceTabBar";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
@@ -49,6 +54,8 @@ export default function App() {
   };
   const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("dev");
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
   // Progress reported by the loader; drives the splash bar. The "stages" are
   // (a) per-session load via loadAllSessions's onProgress, and (b) a single
   // final "Computing math channels" beat we add ourselves.
@@ -131,6 +138,124 @@ export default function App() {
       saveWorkspaces(next);
       return next;
     });
+  }
+
+  function handleCreateWorkspace() {
+    const usedColors = new Set(workspaces.map((w) => w.color));
+    const nextColor = SESSION_PALETTE.find((c) => !usedColors.has(c)) ?? SESSION_PALETTE[workspaces.length % SESSION_PALETTE.length]!;
+    // Pick the lowest-numbered "Workspace N" that isn't taken.
+    const taken = new Set(workspaces.map((w) => w.label));
+    let n = 1;
+    while (taken.has(`Workspace ${n}`)) n++;
+    const fresh: Workspace = {
+      id: crypto.randomUUID(),
+      label: `Workspace ${n}`,
+      color: nextColor,
+      tiles: [],
+    };
+    commitWorkspaces((prev) => [...prev, fresh]);
+    setWorkspaceId(fresh.id);
+    setSelectedTileId(null);
+  }
+
+  function handleRenameWorkspace(id: string, label: string) {
+    commitWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, label } : w)));
+  }
+
+  function handleRecolorWorkspace(id: string, color: string) {
+    commitWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, color } : w)));
+  }
+
+  function handleDuplicateWorkspace(id: string) {
+    const src = workspaces.find((w) => w.id === id);
+    if (!src) return;
+    const copy: Workspace = {
+      ...JSON.parse(JSON.stringify(src)),
+      id: crypto.randomUUID(),
+      label: `${src.label} copy`,
+    };
+    commitWorkspaces((prev) => {
+      const i = prev.findIndex((w) => w.id === id);
+      const next = [...prev];
+      next.splice(i + 1, 0, copy);
+      return next;
+    });
+    setWorkspaceId(copy.id);
+    setSelectedTileId(null);
+  }
+
+  function handleRequestDeleteWorkspace(id: string) {
+    if (workspaces.length <= 1) return;       // defensive — UI also disables
+    const target = workspaces.find((w) => w.id === id);
+    if (!target) return;
+    setConfirmState({
+      title: `Delete workspace "${target.label}"?`,
+      body: "This cannot be undone. Tiles in this workspace will be lost.",
+      confirmLabel: "Delete",
+      confirmTone: "danger",
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        commitWorkspaces((prev) => prev.filter((w) => w.id !== id));
+        // If we deleted the active workspace, switch to a neighbor.
+        if (workspaceId === id) {
+          const remaining = workspaces.filter((w) => w.id !== id);
+          const idx = workspaces.findIndex((w) => w.id === id);
+          const next = remaining[idx] ?? remaining[idx - 1] ?? remaining[0]!;
+          setWorkspaceId(next.id);
+          setSelectedTileId(null);
+        }
+        setConfirmState(null);
+      },
+    });
+  }
+
+  function handleReorderWorkspaces(fromIndex: number, toIndex: number) {
+    commitWorkspaces((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved!);
+      return next;
+    });
+  }
+
+  async function handleExportWorkspace(id: string) {
+    const w = workspaces.find((x) => x.id === id);
+    if (!w) return;
+    const json = serializeBundle([w], appVersion);
+    await saveJsonFile(`helios-workspace-${slugifyForFilename(w.label)}.json`, json);
+  }
+
+  async function handleExportAllWorkspaces() {
+    const json = serializeBundle(workspaces, appVersion);
+    await saveJsonFile("helios-workspaces.json", json);
+  }
+
+  async function handleImportWorkspaces() {
+    const text = await openJsonFile();
+    if (text === null) return;
+    const result = parseBundle(text);
+    if (!result.ok) {
+      setConfirmState({
+        title: "Could not import",
+        body: result.reason,
+        confirmLabel: "OK",
+        confirmTone: "default",
+        onConfirm: () => setConfirmState(null),
+      });
+      return;
+    }
+    // We snapshot the current `workspaces` length BEFORE calling
+    // commitWorkspaces, then look up the freshly-imported workspace by index in
+    // the merged array. This is correct here because mergeImported preserves
+    // the existing list's order at the front. Do NOT "fix" this to read from
+    // the post-update state — at this call site the closure's `workspaces` is
+    // the right reference for computing the index. The functional setState
+    // pattern still applies (commitWorkspaces takes a (prev) => next updater).
+    const firstImportedIndex = workspaces.length;
+    const merged = mergeImported(workspaces, result.bundle.workspaces);
+    commitWorkspaces(() => merged);
+    setWorkspaceId(merged[firstImportedIndex]!.id);
+    setSelectedTileId(null);
   }
 
   function updateTile(nextTile: TileSpec) {
@@ -234,25 +359,21 @@ export default function App() {
         <span className="font-helios text-sm text-[#FFC627]">HELIOS</span>
         <span className="ml-3 text-[#7B8088]">{primary.label}</span>
         <span className="ml-2 text-[#7B8088]">·</span>
-        <div className="ml-2 flex gap-1">
-          {workspaces.map((w) => {
-            const active = w.id === workspaceId;
-            return (
-              <button
-                key={w.id}
-                onClick={() => { setWorkspaceId(w.id); setSelectedTileId(null); }}
-                className={
-                  "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
-                  (active
-                    ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
-                    : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
-                }
-              >
-                {w.label}
-              </button>
-            );
-          })}
-        </div>
+        <WorkspaceTabBar
+          workspaces={workspaces}
+          activeId={workspaceId}
+          appVersion={appVersion}
+          onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
+          onCreate={handleCreateWorkspace}
+          onRename={handleRenameWorkspace}
+          onRecolor={handleRecolorWorkspace}
+          onDuplicate={handleDuplicateWorkspace}
+          onDelete={handleRequestDeleteWorkspace}
+          onReorder={handleReorderWorkspaces}
+          onExport={handleExportWorkspace}
+          onExportAll={handleExportAllWorkspaces}
+          onImport={handleImportWorkspaces}
+        />
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setChannelsOpen(true)}
