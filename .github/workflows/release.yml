@@ -97,6 +97,11 @@ jobs:
       - name: Build + sign + upload
         uses: tauri-apps/tauri-action@v0
         env:
+          # GITHUB_TOKEN is required by tauri-action to upload the built
+          # artifacts to the release. Without it, the build succeeds and
+          # signs cleanly but the upload step exits with
+          # "##[error]GITHUB_TOKEN is required".
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
