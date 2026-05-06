@@ -130,3 +130,85 @@ export function fitLinear(xs: ArrayLike<number>, ys: ArrayLike<number>): FitResu
     predict: (x: number) => b0 + b1 * x,
   };
 }
+
+/** y = a · e^(b·x). Linearised by taking ln on both sides and fitting
+ *  ln(y) = ln(a) + b·x with linear least squares; samples with y <= 0
+ *  are skipped (no real ln). R² + residualStd are reported on the
+ *  original (non-log) scale. */
+export function fitExponential(xs: ArrayLike<number>, ys: ArrayLike<number>): FitResult {
+  const n = Math.min(xs.length, ys.length);
+  const X: number[] = [], LY: number[] = [], YORIG: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!, y = ys[i]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || y <= 0) continue;
+    X.push(x); LY.push(Math.log(y)); YORIG.push(y);
+  }
+  const valid = X.length;
+  if (valid < 2) return { ...NO_FIT, validSamples: valid };
+  const linFit = fitLinear(X, LY);
+  if (linFit.coefficients.length === 0) return { ...NO_FIT, validSamples: valid };
+  const lnA = linFit.coefficients[0]!;
+  const b = linFit.coefficients[1]!;
+  const a = Math.exp(lnA);
+  const predict = (x: number) => a * Math.exp(b * x);
+  return { coefficients: [a, b], ...rsquaredAndResidual(X, YORIG, predict, valid) };
+}
+
+/** y = a + b·ln(x). Skips x <= 0. */
+export function fitLogarithmic(xs: ArrayLike<number>, ys: ArrayLike<number>): FitResult {
+  const n = Math.min(xs.length, ys.length);
+  const LX: number[] = [], Y: number[] = [], XORIG: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!, y = ys[i]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0) continue;
+    LX.push(Math.log(x)); Y.push(y); XORIG.push(x);
+  }
+  const valid = LX.length;
+  if (valid < 2) return { ...NO_FIT, validSamples: valid };
+  const linFit = fitLinear(LX, Y);
+  if (linFit.coefficients.length === 0) return { ...NO_FIT, validSamples: valid };
+  const a = linFit.coefficients[0]!;
+  const b = linFit.coefficients[1]!;
+  const predict = (x: number) => a + b * Math.log(x);
+  return { coefficients: [a, b], ...rsquaredAndResidual(XORIG, Y, predict, valid) };
+}
+
+/** y = a · x^b. Skips x <= 0 or y <= 0. */
+export function fitPower(xs: ArrayLike<number>, ys: ArrayLike<number>): FitResult {
+  const n = Math.min(xs.length, ys.length);
+  const LX: number[] = [], LY: number[] = [], XORIG: number[] = [], YORIG: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!, y = ys[i]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) continue;
+    LX.push(Math.log(x)); LY.push(Math.log(y)); XORIG.push(x); YORIG.push(y);
+  }
+  const valid = LX.length;
+  if (valid < 2) return { ...NO_FIT, validSamples: valid };
+  const linFit = fitLinear(LX, LY);
+  if (linFit.coefficients.length === 0) return { ...NO_FIT, validSamples: valid };
+  const a = Math.exp(linFit.coefficients[0]!);
+  const b = linFit.coefficients[1]!;
+  const predict = (x: number) => a * Math.pow(x, b);
+  return { coefficients: [a, b], ...rsquaredAndResidual(XORIG, YORIG, predict, valid) };
+}
+
+function rsquaredAndResidual(
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  predict: (x: number) => number,
+  validSamples: number,
+): Pick<FitResult, "rSquared" | "residualStd" | "validSamples" | "predict"> {
+  const n = Math.min(xs.length, ys.length);
+  let sumY = 0;
+  for (let i = 0; i < n; i++) sumY += ys[i]!;
+  const yMean = sumY / Math.max(1, n);
+  let ssRes = 0, ssTot = 0;
+  for (let i = 0; i < n; i++) {
+    const r = ys[i]! - predict(xs[i]!);
+    ssRes += r * r;
+    ssTot += (ys[i]! - yMean) * (ys[i]! - yMean);
+  }
+  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  const residualStd = Math.sqrt(ssRes / Math.max(1, n - 2));
+  return { rSquared, residualStd, validSamples, predict };
+}
