@@ -40,6 +40,34 @@ interface NormBbox { minLat: number; maxLat: number; minLon: number; maxLon: num
 
 const PAD = 16;
 
+/** MoTeC ADL exports GPS as signed int32 micro-degrees, but the CSV writer
+ *  renders them as unsigned, so a real -111.93° longitude comes out as
+ *  "3175683584" (= 4294967296 - 1119283712). Detect any value whose
+ *  magnitude is way past legal degrees and reinterpret it as int32 then
+ *  scale by 1e-7. Values already in legal degree range pass through. */
+const INT32_MAX = 2_147_483_647;
+const UINT32_RANGE = 4_294_967_296;
+function decodeGpsValue(v: number): number {
+  if (!Number.isFinite(v) || Math.abs(v) <= 1000) return v;
+  const signed = v > INT32_MAX ? v - UINT32_RANGE : v;
+  return signed / 1e7;
+}
+
+/** Return a copy of the array with the MoTeC int32-as-uint32 fixup applied
+ *  per element. Allocates only when at least one value triggers the
+ *  threshold, so well-formed feeds (synthetic data, fresh sensors) stay
+ *  zero-copy. */
+function decodeGpsArray(src: Float64Array): Float64Array {
+  let needs = false;
+  for (let i = 0; i < src.length; i++) {
+    if (Math.abs(src[i]!) > 1000) { needs = true; break; }
+  }
+  if (!needs) return src;
+  const out = new Float64Array(src.length);
+  for (let i = 0; i < src.length; i++) out[i] = decodeGpsValue(src[i]!);
+  return out;
+}
+
 /** Convert a bbox to MapLibre LngLatBoundsLike, but only if the lat/lon
  *  values are in legal range. Returns undefined for invalid bboxes (caller
  *  should skip the basemap fit and surface a warning). MapLibre's Map
@@ -290,9 +318,13 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
     for (const session of visible) {
       const s: ChannelSlice = session.slice;
-      const lat = s.data.get(config.latChannelId);
-      const lon = s.data.get(config.lonChannelId);
-      if (!lat || !lon) continue;
+      const rawLat = s.data.get(config.latChannelId);
+      const rawLon = s.data.get(config.lonChannelId);
+      if (!rawLat || !rawLon) continue;
+      // Decode MoTeC's broken int32-as-uint32 GPS encoding before anything
+      // else looks at the values. Pure passthrough for already-clean data.
+      const lat = decodeGpsArray(rawLat);
+      const lon = decodeGpsArray(rawLon);
       const n = Math.min(lat.length, lon.length);
       if (n === 0) continue;
       let mnLa = Infinity, mxLa = -Infinity, mnLo = Infinity, mxLo = -Infinity;
