@@ -73,7 +73,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
 
   return (
     <div className="ml-2 flex gap-1 items-center">
-      <div role="tablist" className="flex gap-1 items-center">
+      <div role="tablist" aria-label="Workspaces" className="flex gap-1 items-center">
         {workspaces.map((w, i) => {
           const active = w.id === activeId;
           return (
