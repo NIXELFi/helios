@@ -22,6 +22,11 @@ Thumbs.db
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/target/
 
+# Helios bundle exports — never commit user-saved workspace bundles
+*.helios
+helios-workspaces.json
+helios-workspace-*.json
+
 # Env
 .env
 .env.local

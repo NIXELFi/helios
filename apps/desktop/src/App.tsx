@@ -11,7 +11,7 @@ import {
   type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
 } from "./lib/math-channels";
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
-import { saveJsonFile, openJsonFile } from "./lib/workspace-dialog";
+import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
 import { useUpdater } from "./lib/use-updater";
 import { Tile } from "./components/Tile";
 import { UpdatesPill } from "./components/UpdatesPill";
@@ -222,16 +222,16 @@ export default function App() {
     const w = workspaces.find((x) => x.id === id);
     if (!w) return;
     const json = serializeBundle([w], appVersion);
-    await saveJsonFile(`helios-workspace-${slugifyForFilename(w.label)}.json`, json);
+    await saveBundleFile(`helios-workspace-${slugifyForFilename(w.label)}.helios`, json);
   }
 
   async function handleExportAllWorkspaces() {
     const json = serializeBundle(workspaces, appVersion);
-    await saveJsonFile("helios-workspaces.json", json);
+    await saveBundleFile("helios-workspaces.helios", json);
   }
 
   async function handleImportWorkspaces() {
-    const text = await openJsonFile();
+    const text = await openBundleFile();
     if (text === null) return;
     const result = parseBundle(text);
     if (!result.ok) {

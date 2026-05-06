@@ -15,7 +15,8 @@
         "title": "Helios",
         "width": 1600,
         "height": 1000,
-        "resizable": true
+        "resizable": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -39,7 +40,16 @@
       "../../../SDM26-5-3-Best_Accel.csv": "samples/sdm26-best-accel.csv",
       "../../../driver_tryout_4_16__57_kaden_good_gps.csv": "samples/driver-tryout-good-gps.csv",
       "../../../docs/channels.yaml": "channels.yaml"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["helios"],
+        "name": "Helios workspace bundle",
+        "description": "Helios workspace bundle (shareable JSON of one or more workspaces)",
+        "role": "Editor",
+        "mimeType": "application/x-helios-bundle"
+      }
+    ]
   },
   "plugins": {
     "updater": {
