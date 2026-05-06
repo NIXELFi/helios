@@ -31,6 +31,24 @@ function rangeFor(c: StripChartChannel, fallback: StripChartConfig): [number, nu
   return [c.yMin ?? fallback.yMin, c.yMax ?? fallback.yMax];
 }
 
+/** Format an elapsed-seconds value as the time labels you'd expect on a
+ *  motorsport chart: short laps stay sub-second precise, multi-minute
+ *  stints fall back to M:SS. uPlot calls this for every tick. */
+function formatElapsed(v: number): string {
+  if (!Number.isFinite(v)) return "";
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  const min = Math.floor(abs / 60);
+  const sec = abs - min * 60;
+  if (min === 0) {
+    // Sub-minute — show seconds with one decimal at the start, plain int
+    // once we're past the first few seconds.
+    if (abs < 10) return `${sign}${sec.toFixed(1)}`;
+    return `${sign}${Math.round(sec)}`;
+  }
+  return `${sign}${min}:${Math.round(sec).toString().padStart(2, "0")}`;
+}
+
 /** Build a uPlot AlignedData payload covering every visible session.
  *  X = sorted union of all session timestamps (in seconds).
  *  Each series is one (session × channel) pair, NaN where the session lacks
@@ -96,8 +114,18 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     // left, the second on the right; channels beyond that share the
     // closest-matching existing axis (no third side, no triple-stacked
     // axes that overflow the tile).
-    const scales: Scales = { x: {} };
-    const axes: Axis[] = [{ stroke: "#5A5F66", grid: { stroke: "#23252B" } }];
+    // X is elapsed time-in-seconds, NOT Unix epoch. Without this uPlot would
+    // format ticks as wall-clock dates (e.g. "12/31/69 5pm" for a value of 0
+    // in the local timezone). time: false flips it to a plain numeric scale,
+    // and the axis values formatter below renders M:SS / SS.s / etc.
+    const scales: Scales = { x: { time: false } };
+    const axes: Axis[] = [{
+      stroke: "#5A5F66",
+      grid: { stroke: "#23252B" },
+      values: (_u, splits) => splits.map(formatElapsed),
+      // Time axis at the bottom needs enough vertical room for the labels.
+      size: 30,
+    }];
     /** scaleId per channel index, threaded into series below */
     const channelScale: string[] = [];
     /** ordered list of unique [lo, hi, scaleId, color, side] */
@@ -124,7 +152,9 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             // Only the left axis paints grid lines so the background
             // stays clean when ranges differ.
             grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
-            size: 40,
+            // 60 px gives 5-digit labels like "15,000" room to breathe;
+            // 40 was clipping the leading comma on RPM-scale charts.
+            size: 60,
           });
         } else {
           // Fall back to the first group's scale.
