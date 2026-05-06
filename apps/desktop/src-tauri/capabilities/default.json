@@ -10,6 +10,7 @@
     "core:path:allow-resolve",
     "core:path:allow-join",
     "core:path:allow-normalize",
-    "updater:default"
+    "updater:default",
+    "dialog:default"
   ]
 }
