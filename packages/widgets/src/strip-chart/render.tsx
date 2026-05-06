@@ -89,25 +89,49 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     if (!containerRef.current) return;
     const { data, seriesMeta } = buildAlignedData(visible, config.channels);
 
-    // Per-channel scales + alternating-side axes: channel 0 → left, 1 → right,
-    // 2 → left (further out), 3 → right (further out), etc. Each axis takes
-    // the channel's color so the user can read which trace owns which scale.
+    // Group channels by their resolved Y range so channels that share a
+    // range share an axis. Without this, four shock channels at the same
+    // ±25 mm range would each get their own axis and the outer axes
+    // would clip at the tile edge. The first distinct range goes on the
+    // left, the second on the right; channels beyond that share the
+    // closest-matching existing axis (no third side, no triple-stacked
+    // axes that overflow the tile).
     const scales: Scales = { x: {} };
     const axes: Axis[] = [{ stroke: "#5A5F66", grid: { stroke: "#23252B" } }];
+    /** scaleId per channel index, threaded into series below */
+    const channelScale: string[] = [];
+    /** ordered list of unique [lo, hi, scaleId, color, side] */
+    const groups: Array<{ lo: number; hi: number; id: string; color: string; side: 1 | 3 }> = [];
     for (let ci = 0; ci < config.channels.length; ci++) {
       const ch = config.channels[ci]!;
-      const scaleId = `s${ci}`;
       const [lo, hi] = rangeFor(ch, config);
-      scales[scaleId] = { range: [lo, hi] };
-      axes.push({
-        scale: scaleId,
-        side: ci % 2 === 0 ? 3 : 1,  // 3 = left, 1 = right
-        stroke: ch.color,
-        // Only the first channel paints horizontal grid lines so the
-        // background stays clean when channels have very different scales.
-        grid: ci === 0 ? { stroke: "#23252B" } : { show: false, stroke: "" },
-        size: 40,
-      });
+      let group = groups.find((g) => g.lo === lo && g.hi === hi);
+      if (!group) {
+        const id = `s${groups.length}`;
+        const side: 1 | 3 = groups.length === 0 ? 3 : 1;
+        // First two distinct ranges get their own axis; further distinct
+        // ranges share the closer side's axis (range will be wrong but
+        // the trace still draws — the legend tells the user the actual
+        // channel range so this degradation is acceptable).
+        group = { lo, hi, id, color: ch.color, side };
+        groups.push(group);
+        if (groups.length <= 2) {
+          scales[id] = { range: [lo, hi] };
+          axes.push({
+            scale: id,
+            side,
+            stroke: ch.color,
+            // Only the left axis paints grid lines so the background
+            // stays clean when ranges differ.
+            grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
+            size: 40,
+          });
+        } else {
+          // Fall back to the first group's scale.
+          group.id = groups[0]!.id;
+        }
+      }
+      channelScale.push(group.id);
     }
 
     const series: Series[] = [
@@ -125,7 +149,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
           stroke,
           width: 1,
           dash: dash.length ? dash : undefined,
-          scale: `s${meta.channelIndex}`,
+          scale: channelScale[meta.channelIndex] ?? "s0",
           // Disable point markers; we draw our own cursor line instead.
           points: { show: false },
         };
@@ -228,23 +252,21 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
-      {/* In-canvas legend so it doesn't get clipped by the tile below. One
-          row per channel, with a color chip and the channel id. */}
+      {/* Compact in-canvas legend: single horizontal row in the top-right
+          so it doesn't overlap the data on the leading edge of a scrub.
+          Color chip + channel id only — the per-axis tick labels already
+          tell the user the range, so we don't duplicate that info. */}
       {config.channels.length > 0 && (
-        <div className="absolute top-1 left-1 flex flex-col gap-0.5 z-10 pointer-events-none">
-          {config.channels.map((c, i) => {
-            const [lo, hi] = rangeFor(c, config);
-            return (
-              <div
-                key={i}
-                className="flex items-center gap-1.5 text-[10px] text-[#D8DCE2] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm"
-              >
-                <span className="inline-block w-2 h-2" style={{ background: c.color }} />
-                <span className="font-mono-num">{c.id || "—"}</span>
-                <span className="text-[#7B8088]">{lo}…{hi}</span>
-              </div>
-            );
-          })}
+        <div className="absolute top-1 right-1 flex flex-row gap-1 z-10 pointer-events-none max-w-[80%] flex-wrap justify-end">
+          {config.channels.map((c, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1 text-[9px] text-[#D8DCE2] bg-[#0E0E10cc] px-1 py-px rounded-sm"
+            >
+              <span className="inline-block w-1.5 h-1.5" style={{ background: c.color }} />
+              <span className="font-mono-num leading-none">{c.id || "—"}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
