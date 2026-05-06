@@ -17,13 +17,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "appimage", "msi"],
+    "targets": ["dmg", "appimage", "nsis", "msi"],
     "icon": ["icons/icon.png"],
     "resources": {
       "../../../samples/sdm26-synthetic-lap.csv": "samples/sdm26-synthetic-lap.csv",
       "../../../SDM26-5-3-Best_Accel.csv": "samples/sdm26-best-accel.csv",
       "../../../driver_tryout_4_16__57_kaden_good_gps.csv": "samples/driver-tryout-good-gps.csv",
       "../../../docs/channels.yaml": "channels.yaml"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/NIXELFi/helios/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3QTdDN0I4MzU1Qzg1OEYKUldTUGhWdzF1TWVudDEzcjJ0V0gzUUtrWkRmUzhVSElmYW1VMWZVK040cno4MUljMy84WlRKamsK"
     }
   }
 }
