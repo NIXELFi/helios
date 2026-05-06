@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
+import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import type { ChannelSlice } from "@helios/store";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
+
+export type BasemapMode = "none" | "dark" | "satellite" | "custom";
 
 export interface GpsTrackConfig {
   latChannelId: string;
@@ -16,33 +20,101 @@ export interface GpsTrackConfig {
   /** when colorBy is set: gradient stops min..max */
   colorMin?: number;
   colorMax?: number;
+  /** Basemap mode: 'none' = dark canvas with normalized projection (the v2.1
+   *  default); 'dark' = CARTO Dark Matter raster tiles; 'satellite' = Esri
+   *  World Imagery; 'custom' = caller-supplied tile URL template. */
+  basemap?: BasemapMode;
+  /** Tile URL template (e.g. https://example.com/{z}/{x}/{y}.png) used when
+   *  basemap === 'custom'. Ignored otherwise. */
+  customTileUrl?: string;
 }
 
-interface SessionProjection {
+interface SessionRaw {
   session: OverlaySession;
-  xs: Float64Array;
-  ys: Float64Array;
+  lat: Float64Array;
+  lon: Float64Array;
   n: number;
+}
+
+interface NormBbox { minLat: number; maxLat: number; minLon: number; maxLon: number }
+
+const PAD = 16;
+
+function buildStyle(mode: BasemapMode, customTileUrl: string | undefined): StyleSpecification {
+  if (mode === "dark") {
+    return {
+      version: 8,
+      sources: {
+        base: {
+          type: "raster",
+          tiles: [
+            "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+          ],
+          tileSize: 256,
+          attribution: "© OpenStreetMap contributors © CARTO",
+        },
+      },
+      layers: [{ id: "base", type: "raster", source: "base" }],
+    };
+  }
+  if (mode === "satellite") {
+    return {
+      version: 8,
+      sources: {
+        base: {
+          type: "raster",
+          tiles: [
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          ],
+          tileSize: 256,
+          attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        },
+      },
+      layers: [{ id: "base", type: "raster", source: "base" }],
+    };
+  }
+  if (mode === "custom" && customTileUrl) {
+    return {
+      version: 8,
+      sources: {
+        base: { type: "raster", tiles: [customTileUrl], tileSize: 256 },
+      },
+      layers: [{ id: "base", type: "raster", source: "base" }],
+    };
+  }
+  // Fallback (shouldn't normally render — mode === 'none' is handled outside).
+  return {
+    version: 8,
+    sources: {},
+    layers: [{ id: "bg", type: "background", paint: { "background-color": "#16171B" } }],
+  };
 }
 
 export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   const { config, slice, cursorEmitter, timeRange, overlays } = props;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapDivRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
   const tRef = useRef<number>(cursorEmitter.get());
-  const projsRef = useRef<SessionProjection[]>([]);
-  // Indirection ref so long-lived callbacks (cursor subscription, resize
-  // observer) always invoke the LATEST `draw` closure rather than a stale
-  // one captured at subscription time. Without this, edits to `config`
-  // would re-run the dep'd effect to draw with new colors but a subsequent
-  // resize/cursor callback would repaint with the old closure's config.
+  const sessionRawsRef = useRef<SessionRaw[]>([]);
+  const normBboxRef = useRef<NormBbox | null>(null);
+  /** Indirection so long-lived callbacks (cursor sub, resize, map move) always
+   *  invoke the LATEST `draw` closure rather than a stale capture. */
   const drawRef = useRef<() => void>(() => {});
-  drawRef.current = draw;  // assigned every render so subscribers always invoke the latest closure
+  drawRef.current = draw;  // assigned every render
 
   // Synthesize a single-overlay fallback for callers that haven't passed `overlays`.
   const visible: OverlaySession[] = overlays && overlays.length > 0
     ? overlays
     : [{ id: "primary", label: "primary", color: "#4FC3F7", slice, range: timeRange, isPrimary: true }];
 
+  const basemap: BasemapMode = config.basemap ?? "none";
+  const useMap = basemap !== "none";
+
+  // Cursor subscription
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
       tRef.current = t;
@@ -51,35 +123,96 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     return off;
   }, [cursorEmitter]);
 
+  // Redraw + (when basemap on) refit when slice/config/overlays change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { drawRef.current(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+  useEffect(() => {
+    fitBoundsToData();
+    drawRef.current();
+  }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
 
-  const onResize = useCallback(() => { drawRef.current(); }, []);
-  useResizeObserver(canvasRef, onResize);
+  // Resize: maplibre needs an explicit `resize()` and so does our canvas.
+  const onResize = useCallback(() => {
+    if (mapRef.current) mapRef.current.resize();
+    drawRef.current();
+  }, []);
+  useResizeObserver(containerRef, onResize);
 
+  // Mount/teardown/style-swap of the MapLibre instance based on basemap mode.
+  useEffect(() => {
+    const div = mapDivRef.current;
+    if (!useMap || !div) {
+      // Going back to 'none' — tear down if it exists.
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      drawRef.current();
+      return;
+    }
+
+    if (mapRef.current) {
+      mapRef.current.setStyle(buildStyle(basemap, config.customTileUrl));
+      mapRef.current.once("styledata", () => {
+        fitBoundsToData();
+        drawRef.current();
+      });
+    } else {
+      try {
+        const map = new maplibregl.Map({
+          container: div,
+          style: buildStyle(basemap, config.customTileUrl),
+          attributionControl: { compact: true },
+          interactive: true,
+          fadeDuration: 0,
+        });
+        mapRef.current = map;
+        map.on("load", () => {
+          fitBoundsToData();
+          drawRef.current();
+        });
+        // Repaint our overlay canvas whenever the map view changes.
+        map.on("move", () => drawRef.current());
+        map.on("zoom", () => drawRef.current());
+        map.on("rotate", () => drawRef.current());
+        map.on("pitch", () => drawRef.current());
+      } catch (_e) {
+        // jsdom / non-DOM test environments don't support MapLibre's WebGL; ignore.
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useMap, basemap, config.customTileUrl]);
+
+  // Final unmount cleanup.
+  useEffect(() => () => {
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+  }, []);
+
+  // Click/drag scrubbing — operates on the canvas overlay, finds nearest sample
+  // across all visible sessions in canvas-pixel space.
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     let dragging = false;
     const emitFromEvent = (e: PointerEvent) => {
-      const projs = projsRef.current; if (projs.length === 0) return;
+      const raws = sessionRawsRef.current; if (raws.length === 0) return;
       const rect = c.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const w = rect.width, h = rect.height;
-      const pad = 16;
-      // Search across every visible session; click jumps to closest sample anywhere.
-      let bestSession: SessionProjection | null = null;
-      let bestIdx = 0, bestD = Infinity;
-      for (const p of projs) {
-        for (let i = 0; i < p.n; i++) {
-          const dx = (pad + p.xs[i]! * (w - pad * 2)) - mx;
-          const dy = (pad + p.ys[i]! * (h - pad * 2)) - my;
+      let best: { session: OverlaySession; idx: number } | null = null;
+      let bestD = Infinity;
+      for (const r of raws) {
+        for (let i = 0; i < r.n; i++) {
+          const pt = projectPoint(r.lat[i]!, r.lon[i]!, w, h);
+          const dx = pt.x - mx, dy = pt.y - my;
           const d = dx * dx + dy * dy;
-          if (d < bestD) { bestD = d; bestIdx = i; bestSession = p; }
+          if (d < bestD) { bestD = d; best = { session: r.session, idx: i }; }
         }
       }
-      if (!bestSession) return;
-      const tUs = Number(bestSession.session.slice.time[bestIdx] ?? 0n);
+      if (!best) return;
+      const tUs = Number(best.session.slice.time[best.idx] ?? 0n);
       cursorEmitter.emit(tUs);
     };
     const onDown = (e: PointerEvent) => {
@@ -105,20 +238,12 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     };
   }, [cursorEmitter]);
 
-  /** Project every visible session into a shared [0,1]² space using the union
-   *  of all sessions' lat/lon bounds. Sessions that lack the channels — or
-   *  whose values are all clamped near (0,0) (no GPS fix; e.g. exports where
-   *  the receiver wasn't locked) — are skipped so they don't pollute the
-   *  shared bbox and collapse a valid track to a single pixel. */
-  function projectAll(): SessionProjection[] {
-    type RawSession = {
-      session: OverlaySession;
-      lat: Float64Array;
-      lon: Float64Array;
-      n: number;
-      minLat: number; maxLat: number; minLon: number; maxLon: number;
-    };
-    const raws: RawSession[] = [];
+  /** Compute the union lat/lon bbox over every visible session that has a
+   *  real GPS track. Sessions whose values cluster around (0,0) (no GPS fix
+   *  in the export) are excluded so they don't poison the bbox. */
+  function buildSessionRaws(): { raws: SessionRaw[]; bbox: NormBbox | null } {
+    const raws: SessionRaw[] = [];
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
     for (const session of visible) {
       const s: ChannelSlice = session.slice;
       const lat = s.data.get(config.latChannelId);
@@ -126,40 +251,56 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       if (!lat || !lon) continue;
       const n = Math.min(lat.length, lon.length);
       if (n === 0) continue;
-      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+      let mnLa = Infinity, mxLa = -Infinity, mnLo = Infinity, mxLo = -Infinity;
       for (let i = 0; i < n; i++) {
         const la = lat[i]!, lo = lon[i]!;
-        if (la < minLat) minLat = la; if (la > maxLat) maxLat = la;
-        if (lo < minLon) minLon = lo; if (lo > maxLon) maxLon = lo;
+        if (la < mnLa) mnLa = la; if (la > mxLa) mxLa = la;
+        if (lo < mnLo) mnLo = lo; if (lo > mxLo) mxLo = lo;
       }
-      // Null-island guard: real driving never lands every sample inside the
-      // 1°×1° box around (0,0). MoTeC exports with no GPS fix typically clamp
-      // every row to 0, which would otherwise dominate the union bbox.
-      const nullIsland = Math.abs(minLat) < 1 && Math.abs(maxLat) < 1
-                      && Math.abs(minLon) < 1 && Math.abs(maxLon) < 1;
+      const nullIsland = Math.abs(mnLa) < 1 && Math.abs(mxLa) < 1
+                      && Math.abs(mnLo) < 1 && Math.abs(mxLo) < 1;
       if (nullIsland) continue;
-      raws.push({ session, lat, lon, n, minLat, maxLat, minLon, maxLon });
+      raws.push({ session, lat, lon, n });
+      if (mnLa < minLat) minLat = mnLa;
+      if (mxLa > maxLat) maxLat = mxLa;
+      if (mnLo < minLon) minLon = mnLo;
+      if (mxLo > maxLon) maxLon = mxLo;
     }
-    if (raws.length === 0) return [];
+    if (raws.length === 0) return { raws: [], bbox: null };
+    return { raws, bbox: { minLat, maxLat, minLon, maxLon } };
+  }
 
-    // Union bbox over the surviving sessions.
-    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-    for (const r of raws) {
-      if (r.minLat < minLat) minLat = r.minLat;
-      if (r.maxLat > maxLat) maxLat = r.maxLat;
-      if (r.minLon < minLon) minLon = r.minLon;
-      if (r.maxLon > maxLon) maxLon = r.maxLon;
+  /** Fit the MapLibre map to the union GPS bbox (if a map is mounted). */
+  function fitBoundsToData() {
+    const map = mapRef.current; if (!map) return;
+    const { bbox } = buildSessionRaws();
+    if (!bbox) return;
+    try {
+      map.fitBounds(
+        [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]],
+        { padding: 24, duration: 0, animate: false },
+      );
+    } catch (_e) { /* map may not be ready yet */ }
+  }
+
+  /** Project a (lat, lon) to canvas-pixel coords. Routes through MapLibre
+   *  when a basemap is active, else through the cached normalized bbox. */
+  function projectPoint(lat: number, lon: number, w: number, h: number): { x: number; y: number } {
+    const map = mapRef.current;
+    if (useMap && map) {
+      try {
+        const p = map.project([lon, lat]);
+        return { x: p.x, y: p.y };
+      } catch { /* fall through to normalized */ }
     }
-    const latSpan = Math.max(1e-12, maxLat - minLat);
-    const lonSpan = Math.max(1e-12, maxLon - minLon);
-    return raws.map(({ session, lat, lon, n }) => {
-      const xs = new Float64Array(n), ys = new Float64Array(n);
-      for (let i = 0; i < n; i++) {
-        xs[i] = (lon[i]! - minLon) / lonSpan;
-        ys[i] = 1 - (lat[i]! - minLat) / latSpan;
-      }
-      return { session, xs, ys, n };
-    });
+    const bbox = normBboxRef.current;
+    if (!bbox) return { x: 0, y: 0 };
+    const xN = (lon - bbox.minLon) / Math.max(1e-12, bbox.maxLon - bbox.minLon);
+    const yN = 1 - (lat - bbox.minLat) / Math.max(1e-12, bbox.maxLat - bbox.minLat);
+    return {
+      x: PAD + xN * (w - PAD * 2),
+      y: PAD + yN * (h - PAD * 2),
+    };
   }
 
   function findIndexForTime(s: ChannelSlice, tUs: number, n: number): number {
@@ -178,74 +319,88 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     const { w, h } = canvasLogicalSize(c);
     ctx.clearRect(0, 0, w, h);
 
-    const projs = projectAll();
-    projsRef.current = projs;
+    const { raws, bbox } = buildSessionRaws();
+    sessionRawsRef.current = raws;
+    normBboxRef.current = bbox;
 
-    if (projs.length === 0) {
+    if (raws.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no GPS data", w / 2, h / 2);
       return;
     }
 
-    const pad = 16;
     const isMulti = visible.length > 1;
     const colorByEnabled = !isMulti && config.colorByChannelId
       && config.colorMin !== undefined && config.colorMax !== undefined;
 
-    for (const p of projs) {
-      const { xs, ys, n } = p;
-      const px = (i: number) => pad + xs[i]! * (w - pad * 2);
-      const py = (i: number) => pad + ys[i]! * (h - pad * 2);
+    for (const r of raws) {
+      const px = (i: number) => projectPoint(r.lat[i]!, r.lon[i]!, w, h);
 
       if (colorByEnabled) {
-        // Single-session "color by channel" gradient mode preserved from v1.
-        const colorBy = p.session.slice.data.get(config.colorByChannelId!);
+        const colorBy = r.session.slice.data.get(config.colorByChannelId!);
         const span = config.colorMax! - config.colorMin!;
         ctx.lineWidth = 2.5;
-        for (let i = 1; i < n; i++) {
+        for (let i = 1; i < r.n; i++) {
           const t = Math.max(0, Math.min(1, ((colorBy?.[i] ?? 0) - config.colorMin!) / span));
           ctx.strokeStyle = lerpColor("#26A69A", "#FFB800", t);
+          const a = px(i - 1), b = px(i);
           ctx.beginPath();
-          ctx.moveTo(px(i - 1), py(i - 1));
-          ctx.lineTo(px(i), py(i));
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
           ctx.stroke();
         }
       } else {
-        // Solid line. In single-session mode, prefer the user-configured
-        // color so edits in the config panel are visible; fall back to the
-        // session palette color when nothing is configured or when multiple
-        // sessions are overlaid.
-        ctx.strokeStyle = !isMulti && config.color ? config.color : p.session.color;
-        ctx.lineWidth = p.session.isPrimary ? 2.5 : 1.5;
+        ctx.strokeStyle = !isMulti && config.color ? config.color : r.session.color;
+        ctx.lineWidth = r.session.isPrimary ? 2.5 : 1.5;
         ctx.beginPath();
-        ctx.moveTo(px(0), py(0));
-        for (let i = 1; i < n; i++) ctx.lineTo(px(i), py(i));
+        const first = px(0);
+        ctx.moveTo(first.x, first.y);
+        for (let i = 1; i < r.n; i++) {
+          const p = px(i);
+          ctx.lineTo(p.x, p.y);
+        }
         ctx.stroke();
       }
 
-      // Cursor dot for this session at the current time. Match the line
-      // color so the dot reads as part of the same trace.
-      const idx = findIndexForTime(p.session.slice, tRef.current, n);
-      const cx = px(idx), cy = py(idx);
-      ctx.fillStyle = !isMulti && config.color ? config.color : p.session.color;
+      // Cursor dot for this session.
+      const idx = findIndexForTime(r.session.slice, tRef.current, r.n);
+      const cur = px(idx);
+      ctx.fillStyle = !isMulti && config.color ? config.color : r.session.color;
       ctx.beginPath();
-      ctx.arc(cx, cy, p.session.isPrimary ? 5 : 4, 0, Math.PI * 2);
+      ctx.arc(cur.x, cur.y, r.session.isPrimary ? 5 : 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
+    // Status label
+    ctx.fillStyle = useMap ? "#D8DCE2" : "#7B8088";
+    ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    const totalPts = projs.reduce((s, p) => s + p.n, 0);
+    const totalPts = raws.reduce((s, p) => s + p.n, 0);
     ctx.fillText(
-      `GPS · ${projs.length} session${projs.length === 1 ? "" : "s"} · ${totalPts} pts`,
+      `GPS · ${raws.length} session${raws.length === 1 ? "" : "s"} · ${totalPts} pts`,
       6, 6,
     );
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B] cursor-crosshair" />;
+  return (
+    <div ref={containerRef} className="relative w-full h-full bg-[#16171B] overflow-hidden">
+      {useMap && (
+        <div ref={mapDivRef} className="absolute inset-0" />
+      )}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full cursor-crosshair pointer-events-auto"
+        style={{ background: useMap ? "transparent" : undefined }}
+      />
+      <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-[#7B8088] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
+        <span>basemap</span>
+        <span className="text-[#FFC627]">{basemap}</span>
+      </div>
+    </div>
+  );
 }
 
 function lerpColor(aHex: string, bHex: string, t: number): string {

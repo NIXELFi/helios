@@ -12,6 +12,7 @@
     "@helios/lib": "workspace:*",
     "@helios/store": "workspace:*",
     "@helios/ui": "workspace:*",
+    "maplibre-gl": "^4.7.0",
     "react": "^18.3.0",
     "uplot": "^1.6.30"
   },

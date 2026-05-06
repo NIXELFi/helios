@@ -1,9 +1,17 @@
 import type { WidgetConfigEditorProps } from "../types";
-import type { GpsTrackConfig } from "./render";
+import type { GpsTrackConfig, BasemapMode } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
+
+const BASEMAP_OPTIONS: Array<{ value: BasemapMode; label: string }> = [
+  { value: "none",      label: "None (dark canvas)" },
+  { value: "dark",      label: "Dark roads (CARTO)" },
+  { value: "satellite", label: "Satellite (Esri)" },
+  { value: "custom",    label: "Custom tile URL" },
+];
 
 export function GpsTrackConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<GpsTrackConfig>) {
   const set = (k: keyof GpsTrackConfig, v: unknown) => onChange({ ...config, [k]: v } as GpsTrackConfig);
+  const basemap = config.basemap ?? "none";
   return (
     <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
       <label className="flex justify-between items-center"><span>latChannelId</span>
@@ -30,6 +38,29 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
             onChange={(e) => set(k, e.target.value === "" ? undefined : Number(e.target.value))} />
         </label>
       ))}
+      <div className="border-t border-[#2A2C32] mt-2 pt-2 flex flex-col gap-1">
+        <label className="flex justify-between items-center"><span>basemap</span>
+          <select
+            className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+            value={basemap}
+            onChange={(e) => set("basemap", e.target.value as BasemapMode)}
+          >
+            {BASEMAP_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        {basemap === "custom" && (
+          <label className="flex justify-between items-center"><span>customTileUrl</span>
+            <input
+              className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 font-mono"
+              placeholder="https://…/{z}/{x}/{y}.png"
+              value={config.customTileUrl ?? ""}
+              onChange={(e) => set("customTileUrl", e.target.value || undefined)}
+            />
+          </label>
+        )}
+      </div>
     </div>
   );
 }

@@ -43,3 +43,26 @@ if (typeof (globalThis as Record<string, unknown>).Path2D === "undefined") {
     addPath() {}
   };
 }
+
+// maplibre-gl bails at module-evaluation time in jsdom because it touches
+// WebGL globals before any user code runs. Stub it with a minimal no-op Map
+// class so the GPS widget tests can import the render module without
+// triggering the WebGL initialization path. Real rendering is only exercised
+// in the running app, not in the test environment.
+import { vi } from "vitest";
+vi.mock("maplibre-gl", () => {
+  class FakeMap {
+    on() { return this; }
+    once() { return this; }
+    off() { return this; }
+    remove() {}
+    resize() {}
+    setStyle() {}
+    fitBounds() {}
+    project(_lnglat: [number, number]) { return { x: 0, y: 0 }; }
+  }
+  return {
+    default: { Map: FakeMap },
+    Map: FakeMap,
+  };
+});
