@@ -24,14 +24,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos
+          # macOS gets two matrix entries — one per arch — instead of a single
+          # `universal-apple-darwin` build. tauri-action's docs explicitly note
+          # universal is incompatible with the updater (it only emits a .dmg
+          # for first install and no signed .app.tar.gz for the updater
+          # payload), which leaves macOS missing from latest.json. Building
+          # per-arch produces .app.tar.gz + .sig for each, which tauri-action
+          # aggregates into the latest.json darwin-aarch64 / darwin-x86_64
+          # platform keys.
+          - platform: macos-aarch64
             runner: macos-14
-            tauri-args: "--target universal-apple-darwin"
+            rust-target: aarch64-apple-darwin
+            tauri-args: "--target aarch64-apple-darwin"
+          - platform: macos-x64
+            runner: macos-14
+            rust-target: x86_64-apple-darwin
+            tauri-args: "--target x86_64-apple-darwin"
           - platform: windows
             runner: windows-latest
+            rust-target: ""
             tauri-args: ""
           - platform: linux
             runner: ubuntu-22.04
+            rust-target: ""
             tauri-args: ""
 
     runs-on: ${{ matrix.runner }}
@@ -63,7 +78,7 @@ jobs:
       - name: Set up Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust-target }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
