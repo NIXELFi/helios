@@ -404,7 +404,12 @@ function PlaybackControls({
         cursorStartUs = currentUs;
       }
       const wallElapsedMs = performance.now() - wallStartMs;
-      let next = cursorStartUs + wallElapsedMs * 1000 * speedRef.current;
+      // Round to integer microseconds. Subscribers that feed cursor time
+      // into BigInt() (sample-at binary search, gps-track index lookup,
+      // etc.) throw on fractional values and silently drop the frame —
+      // see v2_changes/04. Without this round the strip chart cursor
+      // moves but every gauge / GPS / numeric widget stays frozen.
+      let next = Math.round(cursorStartUs + wallElapsedMs * 1000 * speedRef.current);
       if (next >= extRef.current.endUs) {
         next = extRef.current.startUs;
         wallStartMs = performance.now();
