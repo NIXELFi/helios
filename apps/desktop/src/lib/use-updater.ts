@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 
 /** Lifecycle of the update checker, surfaced to the UI as a discriminated
  *  union so the header pill can pattern-match. */
@@ -92,9 +93,21 @@ export function useUpdater(): UpdaterApi {
           setState({ kind: "installing", update: state.update });
         }
       });
-      // Once downloadAndInstall resolves the new bundle is in place; relaunch
-      // exits the process and starts the new version.
-      await relaunch();
+      // Once downloadAndInstall resolves the new bundle is in place. Use
+      // our custom restart command on macOS — it strips quarantine, uses
+      // `open -na` for proper LaunchServices registration, and sleeps
+      // before exiting so the new app actually appears in the foreground.
+      // Tauri's plugin-process `relaunch()` races with macOS LaunchServices
+      // and frequently produces a "ghost launch" where the old window
+      // disappears but the new one never shows.
+      try {
+        await invoke("helios_relaunch");
+      } catch {
+        // Fallback to Tauri's standard relaunch — better than nothing if
+        // our custom command somehow isn't available (older app updating
+        // to a build with the new command, etc.).
+        await relaunch();
+      }
     } catch (e) {
       setState({ kind: "offline", error: String(e) });
     }
