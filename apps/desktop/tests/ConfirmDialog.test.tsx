@@ -1,91 +1,78 @@
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "../src/components/ConfirmDialog";
 
 afterEach(cleanup);
 
-describe("ConfirmDialog", () => {
-  // --- confirm mode ---
-
-  it("renders the heading and body", () => {
-    render(
-      <ConfirmDialog
-        heading="Delete workspace?"
-        body="This cannot be undone."
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Delete workspace?")).toBeTruthy();
-    expect(screen.getByText("This cannot be undone.")).toBeTruthy();
-  });
-
-  it("calls onConfirm when the confirm button is clicked", () => {
+describe("ConfirmDialog (confirm mode)", () => {
+  function setup(overrides = {}) {
     const onConfirm = vi.fn();
+    const onClose = vi.fn();
     render(
       <ConfirmDialog
-        heading="Confirm"
-        body="Are you sure?"
+        title="Delete it?"
+        body="This cannot be undone."
+        confirmLabel="Delete"
+        confirmTone="danger"
+        cancelLabel="Cancel"
         onConfirm={onConfirm}
-        onCancel={vi.fn()}
+        onClose={onClose}
+        {...overrides}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
-    expect(onConfirm).toHaveBeenCalledOnce();
+    return { onConfirm, onClose };
+  }
+
+  it("renders title and body", () => {
+    setup();
+    expect(screen.getByText("Delete it?")).toBeInTheDocument();
+    expect(screen.getByText("This cannot be undone.")).toBeInTheDocument();
   });
 
-  it("calls onCancel when the cancel button is clicked", () => {
-    const onCancel = vi.fn();
-    render(
-      <ConfirmDialog
-        heading="Confirm"
-        body="Are you sure?"
-        onConfirm={vi.fn()}
-        onCancel={onCancel}
-      />,
-    );
+  it("clicking confirm fires onConfirm", () => {
+    const { onConfirm } = setup();
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking cancel fires onClose only", () => {
+    const { onConfirm, onClose } = setup();
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
-    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onCancel when the backdrop is clicked", () => {
-    const onCancel = vi.fn();
-    render(
-      <ConfirmDialog
-        heading="Confirm"
-        body="Are you sure?"
-        onConfirm={vi.fn()}
-        onCancel={onCancel}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("confirm-backdrop"));
-    expect(onCancel).toHaveBeenCalledOnce();
+  it("Escape fires onClose", () => {
+    const { onConfirm, onClose } = setup();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("uses yellow confirm button for default tone", () => {
-    render(
-      <ConfirmDialog
-        heading="Confirm"
-        body="Are you sure?"
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    const btn = screen.getByRole("button", { name: /confirm/i });
-    expect(btn.className).toMatch(/FFC627|yellow/i);
-  });
-
-  it("uses red confirm button for danger tone", () => {
-    render(
-      <ConfirmDialog
-        heading="Confirm"
-        body="Are you sure?"
-        tone="danger"
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    const btn = screen.getByRole("button", { name: /confirm/i });
+  it("danger tone applies a red-styled confirm button", () => {
+    setup();
+    const btn = screen.getByRole("button", { name: /delete/i });
     expect(btn.className).toMatch(/EF5350|red|danger/i);
+  });
+});
+
+describe("ConfirmDialog (alert mode — no cancelLabel)", () => {
+  it("renders only the confirm button", () => {
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <ConfirmDialog
+        title="Could not import"
+        body="Not a Helios workspace file."
+        confirmLabel="OK"
+        confirmTone="default"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^ok$/i }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

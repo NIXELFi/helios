@@ -39,12 +39,15 @@ export default function App() {
   const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
   const updater = useUpdater();
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [confirmState, setConfirmState] = useState<{
-    heading: string;
+  type ConfirmRequest = {
+    title: string;
     body: string;
-    tone?: "default" | "danger";
+    confirmLabel: string;
+    confirmTone: "default" | "danger";
+    cancelLabel?: string;
     onConfirm: () => void;
-  } | null>(null);
+  };
+  const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
   const [playing, setPlaying] = useState(false);
   // Progress reported by the loader; drives the splash bar. The "stages" are
   // (a) per-session load via loadAllSessions's onProgress, and (b) a single
@@ -186,9 +189,11 @@ export default function App() {
 
   function handleResetWorkspaces() {
     setConfirmState({
-      heading: "Reset all workspaces?",
-      body: "Reset all workspaces to their built-in defaults? Unsaved edits will be lost.",
-      tone: "danger",
+      title: "Reset all workspaces?",
+      body: "Every workspace will be replaced by its built-in default. Unsaved edits will be lost.",
+      confirmLabel: "Reset all",
+      confirmTone: "danger",
+      cancelLabel: "Cancel",
       onConfirm: () => {
         const fresh = resetToBuiltins();
         setWorkspaces(fresh);
@@ -398,11 +403,13 @@ export default function App() {
       )}
       {confirmState && (
         <ConfirmDialog
-          heading={confirmState.heading}
+          title={confirmState.title}
           body={confirmState.body}
-          tone={confirmState.tone}
+          confirmLabel={confirmState.confirmLabel}
+          confirmTone={confirmState.confirmTone}
+          cancelLabel={confirmState.cancelLabel}
           onConfirm={confirmState.onConfirm}
-          onCancel={() => setConfirmState(null)}
+          onClose={() => setConfirmState(null)}
         />
       )}
     </div>
