@@ -14,6 +14,7 @@ function fakeSession(): OverlaySession {
         ["rpm",      Float64Array.from([1000, 2000, 3000, 4000, 5000])],
         ["gear",     Float64Array.from([1, 1, 2, 2, 3])],
       ]),
+      range: { startUs: 0, endUs: 4 },
     },
   };
 }
