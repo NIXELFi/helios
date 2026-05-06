@@ -80,10 +80,10 @@ These are deletable like any other workspace. `Reset all` reseeds them.
 
 ### Storage migration
 
-`apps/desktop/src/lib/workspace-storage.ts` bumps to `version: 2`:
+`apps/desktop/src/lib/workspace-storage.ts` bumps the in-blob `version` field to `2`. The `localStorage` **key stays `helios.workspaces.v1`** — only the blob shape changes. (The `v1` in the key is historical; bumping the key to `v2` would orphan the existing user data unless we still read from the old key, so it's simpler to keep the key and discriminate on the in-blob version field.)
 
 - v2 blob → loaded as-is.
-- v1 blob → for each workspace, fill in `color` from `SESSION_PALETTE[i % 8]` indexed by array position; rewrite the blob as v2.
+- v1 blob → for each workspace, fill in `color` from `SESSION_PALETTE[i % 8]` indexed by array position; rewrite the blob (same key) as v2.
 - Missing or corrupt blob → seed from built-ins (current behavior).
 
 ---
@@ -115,7 +115,7 @@ To the right of the tab list, three small buttons styled to match today's `+ Add
 ### `<TabContextMenu>` items
 
 1. **Rename** — same effect as double-click.
-2. **Color ▸** — submenu with the 8 palette swatches; click sets `workspace.color` and persists.
+2. **Color ▸** — submenu with the 8 palette swatches; click sets `workspace.color` and persists. Submenu opens to the right of the parent menu by default; if it would overflow the viewport horizontally, it flips to open on the left. Same vertical-overflow handling for the parent menu (flips above the click point if too close to the bottom).
 3. **Duplicate** — deep-clones the workspace (new uuid, label `<source> copy`, same color, tiles deep-cloned), inserts immediately after the source, switches to the duplicate.
 4. **Export…** — opens Tauri save dialog with default filename `helios-workspace-<slug>.json`; writes a single-workspace bundle.
 5. **Delete** — opens `<ConfirmDialog>`. **Disabled (greyed)** when only one workspace remains.
@@ -134,10 +134,13 @@ interface ConfirmDialogProps {
   body: string | ReactNode;
   confirmLabel: string;
   confirmTone: "default" | "danger";  // danger = red button
+  cancelLabel?: string;               // omit to render as alert (single button)
   onConfirm: () => void;
-  onClose: () => void;
+  onClose: () => void;                // also fired by alert button when cancel is omitted
 }
 ```
+
+When `cancelLabel` is omitted, the dialog renders in **alert mode**: only the confirm button is shown, and clicking it (or pressing Enter / Esc) fires both `onConfirm` and `onClose`. This is the variant used for import-failure errors — one component, two visual modes, no separate `AlertDialog` needed.
 
 Behavior:
 
@@ -233,6 +236,8 @@ Every mutator funnels through the existing `commitWorkspaces(updater)` helper at
 
 A wrapper object with a `workspaces` **array** so the importer doesn't care whether the file was exported from a single tab or from `Export all…`. `version: 1` lets future formats migrate cleanly. `kind` lets the importer reject non-Helios JSON files with a friendly error.
 
+`exportedFrom` is sourced from the running app's version (the same `package.json` version surfaced via Vite's `__APP_VERSION__` define or `@tauri-apps/api`'s `getVersion()`); never hardcoded, so the field stays accurate as the app's version drifts.
+
 ### Pure functions in `workspace-bundle.ts`
 
 ```ts
@@ -247,7 +252,7 @@ These are unit-testable without the UI.
 
 ### Tauri dialog wiring
 
-`apps/desktop/src/src-tauri/capabilities/default.json` adds `dialog:default`. New TS helper in `lib/workspace-bundle.ts` (or a sibling) wraps `@tauri-apps/plugin-dialog`'s `save()` and `open()` with the right filters and default filenames.
+`apps/desktop/src-tauri/capabilities/default.json` adds `dialog:default` to its permissions. (Note path: `src-tauri/`, not `src/src-tauri/`.) New TS helper in `lib/workspace-bundle.ts` (or a sibling) wraps `@tauri-apps/plugin-dialog`'s `save()` and `open()` with the right filters and default filenames.
 
 ### Filename conventions
 
@@ -306,7 +311,7 @@ These are unit-testable without the UI.
 To be logged in `v2_changes/NN-workspace-management.md` per the project's logging convention. Steps:
 
 1. Open app fresh → built-ins show with their assigned colors (yellow Overview, red Engine focus).
-2. Click `+ New workspace` → "Workspace 3" appears, switched-to, empty.
+2. Click `+ New workspace` → "Workspace 1" appears, switched-to, empty (the auto-namer picks the lowest free `Workspace N` — built-in labels don't match that pattern, so N=1 on first click).
 3. Double-click new tab, type "Test", Enter → label persists across reload.
 4. Right-click new tab → Color → green → swatch turns green; reload → still green.
 5. Drag "Test" between Overview and Engine focus → order persists across reload.
