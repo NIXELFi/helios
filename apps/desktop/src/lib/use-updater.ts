@@ -1,0 +1,114 @@
+import { useEffect, useRef, useState } from "react";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+
+/** Lifecycle of the update checker, surfaced to the UI as a discriminated
+ *  union so the header pill can pattern-match. */
+export type UpdaterState =
+  | { kind: "checking" }
+  | { kind: "up_to_date";  current: string }
+  | { kind: "available";   update: UpdaterAvailable }
+  | { kind: "downloading"; update: UpdaterAvailable; downloaded: number; total: number | null }
+  | { kind: "installing";  update: UpdaterAvailable }
+  | { kind: "offline";     error: string };
+
+export interface UpdaterAvailable {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+  date: string | null;
+  /** Tauri's Update handle; not exposed to UI. */
+  _handle: Update;
+}
+
+export interface UpdaterApi {
+  state: UpdaterState;
+  /** Re-run the manifest check; transitions through `checking`. */
+  recheck: () => void;
+  /** Download + install + relaunch. Only valid when state.kind === 'available'. */
+  installAndRelaunch: () => Promise<void>;
+}
+
+export function useUpdater(): UpdaterApi {
+  const [state, setState] = useState<UpdaterState>({ kind: "checking" });
+  // Tracks whether a check is already in flight so manual rechecks during an
+  // initial check don't fire twice. Refs (not state) so toggling doesn't
+  // re-render the consumer.
+  const checkingRef = useRef(false);
+
+  const runCheck = async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    setState({ kind: "checking" });
+    try {
+      const update = await check();
+      if (update) {
+        setState({
+          kind: "available",
+          update: {
+            version: update.version,
+            currentVersion: update.currentVersion,
+            notes: update.body ?? null,
+            date: update.date ?? null,
+            _handle: update,
+          },
+        });
+      } else {
+        // `check()` returns null when the app is already on the latest version.
+        // We still want to surface the current version in the UI.
+        const currentVersion = getCurrentVersionSafe();
+        setState({ kind: "up_to_date", current: currentVersion });
+      }
+    } catch (e) {
+      setState({ kind: "offline", error: String(e) });
+    } finally {
+      checkingRef.current = false;
+    }
+  };
+
+  // Auto-check ~3s after mount so the splash isn't blocked on a network call.
+  useEffect(() => {
+    const handle = setTimeout(runCheck, 3000);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const installAndRelaunch = async () => {
+    if (state.kind !== "available") return;
+    const handle = state.update._handle;
+    let downloaded = 0;
+    let total: number | null = null;
+    setState({ kind: "downloading", update: state.update, downloaded, total });
+    try {
+      await handle.downloadAndInstall((event) => {
+        // Tauri emits "Started" → many "Progress" → "Finished".
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? null;
+          setState({ kind: "downloading", update: state.update, downloaded, total });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setState({ kind: "downloading", update: state.update, downloaded, total });
+        } else if (event.event === "Finished") {
+          setState({ kind: "installing", update: state.update });
+        }
+      });
+      // Once downloadAndInstall resolves the new bundle is in place; relaunch
+      // exits the process and starts the new version.
+      await relaunch();
+    } catch (e) {
+      setState({ kind: "offline", error: String(e) });
+    }
+  };
+
+  return { state, recheck: runCheck, installAndRelaunch };
+}
+
+function getCurrentVersionSafe(): string {
+  try {
+    // Avoid pulling a heavyweight import — fetch the version string from the
+    // Tauri-injected window globals when available, fall back to empty string
+    // so the UI shows a graceful "✓" without a number.
+    const meta = (globalThis as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentVersion?: string } } }).__TAURI_INTERNALS__;
+    return meta?.metadata?.currentVersion ?? "";
+  } catch { return ""; }
+}
