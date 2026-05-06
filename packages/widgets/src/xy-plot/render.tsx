@@ -7,6 +7,7 @@ import { buildSessionGroups } from "./data-pipeline";
 import { getOverlayModule } from "./overlays/registry";
 // Side-effect imports: each overlay self-registers on load.
 import "./overlays/scatter";
+import "./overlays/fit";
 
 /* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
 export type { XyPlotConfig } from "./types";
