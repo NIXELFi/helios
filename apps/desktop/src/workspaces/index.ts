@@ -5,6 +5,6 @@ import { engineFocus } from "./engine-focus";
 export type { TileSpec, WidgetType, Workspace } from "./types";
 
 export const WORKSPACES: Workspace[] = [
-  { id: "overview", label: "Overview", tiles: overviewDefault },
-  { id: "engine-focus", label: "Engine focus", tiles: engineFocus },
+  { id: "overview",     label: "Overview",     color: "#FFC627", tiles: overviewDefault },
+  { id: "engine-focus", label: "Engine focus", color: "#EF5350", tiles: engineFocus },
 ];

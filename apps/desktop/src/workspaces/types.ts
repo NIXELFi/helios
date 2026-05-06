@@ -22,5 +22,6 @@ export interface TileSpec {
 export interface Workspace {
   id: string;
   label: string;
+  color: string;  // hex string from SESSION_PALETTE (lib/session.ts)
   tiles: TileSpec[];
 }
