@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { slugifyForFilename, serializeBundle, parseBundle, BUNDLE_KIND, BUNDLE_VERSION } from "../src/lib/workspace-bundle";
+import { slugifyForFilename, serializeBundle, parseBundle, mergeImported, BUNDLE_KIND, BUNDLE_VERSION } from "../src/lib/workspace-bundle";
 import type { Workspace } from "../src/workspaces/types";
 
 const sampleWs: Workspace[] = [
@@ -89,5 +89,59 @@ describe("parseBundle", () => {
       workspaces: [{ id: "a", label: "A" }],  // no color, no tiles
     }));
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("mergeImported", () => {
+  const existing: Workspace[] = [
+    { id: "x", label: "Overview", color: "#FFC627", tiles: [] },
+  ];
+
+  it("regenerates ids on every imported workspace", () => {
+    const imported: Workspace[] = [
+      { id: "x", label: "Other", color: "#aaa", tiles: [] },
+    ];
+    const out = mergeImported(existing, imported);
+    expect(out.length).toBe(2);
+    expect(out[1]!.id).not.toBe("x");
+    expect(out[0]!.id).toBe("x");  // existing untouched
+  });
+
+  it("appends ' (imported)' on label collision", () => {
+    const imported: Workspace[] = [
+      { id: "y", label: "Overview", color: "#aaa", tiles: [] },
+    ];
+    const out = mergeImported(existing, imported);
+    expect(out[1]!.label).toBe("Overview (imported)");
+  });
+
+  it("chains '(imported 2)', '(imported 3)' on repeated collisions", () => {
+    const e: Workspace[] = [
+      { id: "x", label: "Overview", color: "#fff", tiles: [] },
+      { id: "y", label: "Overview (imported)", color: "#fff", tiles: [] },
+    ];
+    const out = mergeImported(e, [
+      { id: "z", label: "Overview", color: "#aaa", tiles: [] },
+    ]);
+    expect(out[2]!.label).toBe("Overview (imported 2)");
+  });
+
+  it("dedupes labels among multiple imports in one batch", () => {
+    const out = mergeImported(existing, [
+      { id: "a", label: "Overview", color: "#1", tiles: [] },
+      { id: "b", label: "Overview", color: "#2", tiles: [] },
+    ]);
+    expect(out[1]!.label).toBe("Overview (imported)");
+    expect(out[2]!.label).toBe("Overview (imported 2)");
+  });
+
+  it("does not mutate inputs", () => {
+    const e = [{ id: "x", label: "X", color: "#1", tiles: [] }];
+    const i = [{ id: "y", label: "X", color: "#2", tiles: [] }];
+    const eBefore = JSON.parse(JSON.stringify(e));
+    const iBefore = JSON.parse(JSON.stringify(i));
+    mergeImported(e, i);
+    expect(e).toEqual(eBefore);
+    expect(i).toEqual(iBefore);
   });
 });

@@ -64,3 +64,35 @@ export function parseBundle(json: string): ParseResult {
   }
   return { ok: true, bundle: obj as unknown as WorkspaceBundle };
 }
+
+/** Merge imported workspaces onto an existing list. Each imported workspace
+ *  gets a fresh uuid (never preserve source ids — they could collide with
+ *  built-ins or existing user state). Label collisions get suffixed with
+ *  " (imported)", then "(imported 2)", etc., considering both the existing
+ *  list AND any earlier-in-batch import that already grabbed the suffix. */
+export function mergeImported(
+  existing: Workspace[],
+  imported: Workspace[],
+): Workspace[] {
+  const result = [...existing];
+  for (const w of imported) {
+    const newWorkspace: Workspace = {
+      id: crypto.randomUUID(),
+      label: dedupeLabel(w.label, result),
+      color: w.color,
+      tiles: JSON.parse(JSON.stringify(w.tiles)),
+    };
+    result.push(newWorkspace);
+  }
+  return result;
+}
+
+function dedupeLabel(label: string, existing: Workspace[]): string {
+  const taken = new Set(existing.map((w) => w.label));
+  if (!taken.has(label)) return label;
+  let candidate = `${label} (imported)`;
+  if (!taken.has(candidate)) return candidate;
+  let n = 2;
+  while (taken.has((candidate = `${label} (imported ${n})`))) n++;
+  return candidate;
+}
