@@ -91,9 +91,13 @@ export const overviewDefault: TileSpec[] = [
     id: "gg-plot",
     widgetType: "xy_plot",
     config: {
+      version: 2, mode: "simple",
       xChannelId: "imu.lat_g", yChannelId: "engine.tps",
       xMin: -2, xMax: 2, yMin: 0, yMax: 100,
-      color: "#FFC627", trail: true,
+      overlays: [{
+        id: "default-scatter", kind: "scatter",
+        config: { color: "#FFC627", pointSize: 2, alpha: 1, trail: true },
+      }],
     },
     x: 0.30, y: 0.70, w: 0.30, h: 0.30,
   },

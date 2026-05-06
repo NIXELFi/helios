@@ -75,9 +75,13 @@ export const engineFocus: TileSpec[] = [
     id: "rpm-vs-throttle",
     widgetType: "xy_plot",
     config: {
+      version: 2, mode: "simple",
       xChannelId: "engine.rpm", yChannelId: "engine.tps",
       xMin: 0, xMax: 14000, yMin: 0, yMax: 100,
-      color: "#FFC627", trail: true,
+      overlays: [{
+        id: "default-scatter", kind: "scatter",
+        config: { color: "#FFC627", pointSize: 2, alpha: 1, trail: true },
+      }],
     },
     x: 0.60, y: 0.70, w: 0.40, h: 0.30,
   },

@@ -2,77 +2,64 @@ import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
+import type { XyPlotConfig, PlotLayout, OverlayContext, SessionGroup } from "./types";
+import { buildSessionGroups } from "./data-pipeline";
+import { getOverlayModule } from "./overlays/registry";
+// Side-effect imports: each overlay self-registers on load.
+import "./overlays/scatter";
 
-export interface XyPlotConfig {
-  xChannelId: string;
-  yChannelId: string;
-  xMin?: number; xMax?: number;
-  yMin?: number; yMax?: number;
-  color: string;
-  /** if true, color points by their time index (time-color trail).
-   *  Single-session only — overlays use session colors. */
-  trail: boolean;
-}
-
-interface SessionLayout {
-  session: OverlaySession;
-  xs: Float64Array;
-  ys: Float64Array;
-  n: number;
-}
+/* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
+export type { XyPlotConfig } from "./types";
 
 export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays: visibleOverlays, viewState } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const layoutRef = useRef<{
-    sessions: SessionLayout[];
-    xmin: number; xmax: number; ymin: number; ymax: number;
-    padL: number; padT: number; plotW: number; plotH: number;
-  } | null>(null);
+  const markerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const layoutRef = useRef<{ groups: SessionGroup[]; layout: PlotLayout } | null>(null);
   const drawRef = useRef<() => void>(() => {});
-  drawRef.current = draw;  // updated every render so async callbacks see the latest closure
+  const markerDrawRef = useRef<() => void>(() => {});
 
-  const visible: OverlaySession[] = overlays && overlays.length > 0
-    ? overlays
-    : [{ id: "primary", label: "primary", color: config.color, slice, range: timeRange, isPrimary: true }];
+  const visible: OverlaySession[] = visibleOverlays && visibleOverlays.length > 0
+    ? visibleOverlays
+    : [{ id: "primary", label: "primary", color: "#FFC627", slice, range: timeRange, isPrimary: true }];
+
+  drawRef.current = () => draw();
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { drawRef.current(); }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
+  useEffect(() => {
+    drawRef.current();
+    markerDrawRef.current();
+  }, [slice, config, JSON.stringify(visible.map((v) => v.id))]);
 
-  const onResize = useCallback(() => { drawRef.current(); }, []);
+  const onResize = useCallback(() => {
+    drawRef.current();
+    markerDrawRef.current();
+  }, []);
   useResizeObserver(canvasRef, onResize);
 
+  // Pointer scrub on the marker canvas. Closest-point lookup against the
+  // currently rendered groups (cached in layoutRef).
   useEffect(() => {
-    const c = canvasRef.current; if (!c) return;
+    const c = markerCanvasRef.current; if (!c) return;
     let dragging = false;
     const emitFromEvent = (e: PointerEvent) => {
-      const layout = layoutRef.current; if (!layout || layout.sessions.length === 0) return;
+      const layout = layoutRef.current; if (!layout || layout.groups.length === 0) return;
       const rect = c.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const { sessions, xmin, xmax, ymin, ymax, padL, padT, plotW, plotH } = layout;
-      const xSpan = Math.max(1e-9, xmax - xmin);
-      const ySpan = Math.max(1e-9, ymax - ymin);
-      let bestSession: SessionLayout | null = null;
-      let bestIdx = 0, bestD = Infinity;
-      for (const sl of sessions) {
-        for (let i = 0; i < sl.n; i++) {
-          const px = padL + ((sl.xs[i]! - xmin) / xSpan) * plotW;
-          const py = padT + plotH - ((sl.ys[i]! - ymin) / ySpan) * plotH;
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      let bestT = 0, bestD = Infinity;
+      for (const g of layout.groups) {
+        for (let i = 0; i < g.n; i++) {
+          const { px, py } = layout.layout.project(g.xs[i]!, g.ys[i]!);
           const dx = px - mx, dy = py - my;
           const d = dx * dx + dy * dy;
-          if (d < bestD) { bestD = d; bestIdx = i; bestSession = sl; }
+          if (d < bestD) { bestD = d; bestT = g.time[i]!; }
         }
       }
-      if (!bestSession) return;
-      const tUs = Number(bestSession.session.slice.time[bestIdx] ?? 0n);
-      cursorEmitter.emit(tUs);
+      cursorEmitter.emit(Math.round(bestT));
     };
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      dragging = true;
-      c.setPointerCapture(e.pointerId);
-      emitFromEvent(e);
+      dragging = true; c.setPointerCapture(e.pointerId); emitFromEvent(e);
     };
     const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
     const onUp = (e: PointerEvent) => {
@@ -91,22 +78,39 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     };
   }, [cursorEmitter]);
 
+  // Marker layer (cursor ring + crosshair + datum markers).
+  useEffect(() => {
+    const drawMarkers = () => {
+      const layout = layoutRef.current;
+      const c = markerCanvasRef.current; if (!c) return;
+      const ctx = setupCanvas(c);
+      const { w, h } = canvasLogicalSize(c);
+      ctx.clearRect(0, 0, w, h);
+      if (!layout || layout.groups.length === 0) return;
+      drawCursorAndDatums(ctx, layout.layout, layout.groups, cursorEmitter.get(), viewState?.get().datums ?? []);
+    };
+    markerDrawRef.current = drawMarkers;
+    drawMarkers();
+    const offCursor = cursorEmitter.subscribe(drawMarkers);
+    const offView = viewState?.subscribe(drawMarkers);
+    return () => { offCursor(); offView?.(); };
+  }, [cursorEmitter, viewState]);
+
   function draw() {
     const c = canvasRef.current; if (!c) return;
     const ctx = setupCanvas(c);
     const { w, h } = canvasLogicalSize(c);
     ctx.clearRect(0, 0, w, h);
 
-    // Collect xs/ys for each visible session that has both channels.
-    const sessions: SessionLayout[] = [];
-    for (const session of visible) {
-      const xs = session.slice.data.get(config.xChannelId);
-      const ys = session.slice.data.get(config.yChannelId);
-      if (!xs || !ys || xs.length === 0 || ys.length === 0) continue;
-      const n = Math.min(xs.length, ys.length);
-      sessions.push({ session, xs, ys, n });
-    }
-    if (sessions.length === 0) {
+    const groups = buildSessionGroups(visible, {
+      xChannelId: config.xChannelId,
+      yChannelId: config.yChannelId,
+      filter: config.filter,
+      groupByChannelId: config.groupByChannelId,
+      zoomRange: viewState?.get().zoomRange ?? null,
+    });
+
+    if (groups.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no data", w / 2, h / 2);
@@ -114,67 +118,66 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
       return;
     }
 
-    // Compute bounds: explicit config wins, otherwise union across sessions.
     let xmin = config.xMin, xmax = config.xMax, ymin = config.yMin, ymax = config.yMax;
     if (xmin === undefined || xmax === undefined || ymin === undefined || ymax === undefined) {
       let xn = Infinity, xx = -Infinity, yn = Infinity, yx = -Infinity;
-      for (const sl of sessions) {
-        for (let i = 0; i < sl.n; i++) {
-          const xv = sl.xs[i]!, yv = sl.ys[i]!;
+      for (const g of groups) {
+        for (let i = 0; i < g.n; i++) {
+          const xv = g.xs[i]!, yv = g.ys[i]!;
           if (xv < xn) xn = xv; if (xv > xx) xx = xv;
           if (yv < yn) yn = yv; if (yv > yx) yx = yv;
         }
       }
       xmin = xmin ?? xn; xmax = xmax ?? xx; ymin = ymin ?? yn; ymax = ymax ?? yx;
     }
-
     const padL = 28, padR = 8, padT = 18, padB = 22;
     const plotW = w - padL - padR, plotH = h - padT - padB;
     const xSpan = Math.max(1e-9, xmax! - xmin!);
     const ySpan = Math.max(1e-9, ymax! - ymin!);
-    const xScale = (v: number) => padL + ((v - xmin!) / xSpan) * plotW;
-    const yScale = (v: number) => padT + plotH - ((v - ymin!) / ySpan) * plotH;
-
-    layoutRef.current = {
-      sessions,
+    const layout: PlotLayout = {
       xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!,
       padL, padT, plotW, plotH,
+      project(x, y) {
+        return {
+          px: padL + ((x - xmin!) / xSpan) * plotW,
+          py: padT + plotH - ((y - ymin!) / ySpan) * plotH,
+        };
+      },
     };
+    layoutRef.current = { groups, layout };
 
-    // Frame + zero crosshair (drawn once, behind data).
+    // Frame + zero crosshair
     ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
     ctx.strokeRect(padL + 0.5, padT + 0.5, plotW, plotH);
     ctx.strokeStyle = "#5A5F66";
     ctx.beginPath();
     if (xmin! < 0 && xmax! > 0) {
-      const x0 = xScale(0); ctx.moveTo(x0, padT); ctx.lineTo(x0, padT + plotH);
+      const x0 = layout.project(0, 0).px;
+      ctx.moveTo(x0, padT); ctx.lineTo(x0, padT + plotH);
     }
     if (ymin! < 0 && ymax! > 0) {
-      const y0 = yScale(0); ctx.moveTo(padL, y0); ctx.lineTo(padL + plotW, y0);
+      const y0 = layout.project(0, 0).py;
+      ctx.moveTo(padL, y0); ctx.lineTo(padL + plotW, y0);
     }
     ctx.stroke();
 
-    const isMulti = sessions.length > 1;
-
-    // Color rules:
-    //   single session, trail=true  → time-coloured gradient (v1)
-    //   single session, trail=false → configured color (editable in the panel)
-    //   multi session               → session palette color, one per overlay
-    for (const sl of sessions) {
-      if (config.trail && !isMulti) {
-        for (let i = 0; i < sl.n; i++) {
-          const t = i / Math.max(1, sl.n - 1);
-          ctx.fillStyle = lerpColor("#26A69A", "#FFB800", t);
-          ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
-        }
-      } else {
-        ctx.fillStyle = isMulti ? sl.session.color : config.color;
-        for (let i = 0; i < sl.n; i++) {
-          ctx.fillRect(xScale(sl.xs[i]!) - 1, yScale(sl.ys[i]!) - 1, 2, 2);
-        }
-      }
+    // Iterate overlays in array order. Skip unknown kinds with a warn.
+    const ctxObj: OverlayContext = {
+      bounds: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax! },
+      priorArtifacts: new Map(),
+      availableChannels: [],
+    };
+    const priorArtifacts = ctxObj.priorArtifacts as Map<string, unknown>;
+    for (const overlay of config.overlays) {
+      const mod = getOverlayModule(overlay.kind);
+      if (!mod) { console.warn(`xy-plot: unknown overlay kind '${overlay.kind}'`); continue; }
+      if (config.mode === "simple" && !mod.availability.includes("simple")) continue;
+      const artifacts = mod.compute(groups, overlay.config as never, ctxObj);
+      priorArtifacts.set(overlay.id, artifacts);
+      mod.draw?.(ctx, layout, artifacts, overlay.config as never);
     }
 
+    // Axis labels
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(`${config.xChannelId} × ${config.yChannelId}`, 4, 4);
@@ -189,17 +192,78 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     ctx.restore();
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B] cursor-crosshair" />;
+  return (
+    <div className="relative w-full h-full bg-[#16171B]">
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+      <canvas ref={markerCanvasRef} className="absolute inset-0 w-full h-full cursor-crosshair" />
+    </div>
+  );
 }
 
-function lerpColor(aHex: string, bHex: string, t: number): string {
-  const a = hex2(aHex), b = hex2(bHex);
-  const r = Math.round(a.r + (b.r - a.r) * t);
-  const g = Math.round(a.g + (b.g - a.g) * t);
-  const bl = Math.round(a.b + (b.b - a.b) * t);
-  return `rgb(${r},${g},${bl})`;
+/* Cursor + datum markers — extracted out of the main render. */
+function drawCursorAndDatums(
+  ctx: CanvasRenderingContext2D,
+  layout: PlotLayout,
+  groups: SessionGroup[],
+  cursorUs: number,
+  datums: number[],
+): void {
+  const { padL, padT, plotW, plotH, project } = layout;
+  for (const tUs of datums) {
+    for (const g of groups) {
+      const idx = indexAtTime(g.time, tUs);
+      if (idx === null) continue;
+      const x = g.xs[idx], y = g.ys[idx];
+      if (x === undefined || y === undefined || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const { px, py } = project(x, y);
+      ctx.strokeStyle = "rgba(255, 107, 74, 0.35)"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py);
+      ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH);
+      ctx.stroke();
+      ctx.fillStyle = "#FF6B4A"; ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  for (const g of groups) {
+    const xy = interpolatedAt(g.time, g.xs, g.ys, cursorUs);
+    if (!xy) continue;
+    const { px, py } = project(xy.x, xy.y);
+    ctx.strokeStyle = "rgba(232, 234, 238, 0.45)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py);
+    ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH);
+    ctx.stroke();
+    ctx.strokeStyle = "#E8EAEE"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.stroke();
+  }
 }
-function hex2(h: string) {
-  const v = parseInt(h.slice(1), 16);
-  return { r: (v >> 16) & 0xff, g: (v >> 8) & 0xff, b: v & 0xff };
+
+function indexAtTime(time: Float64Array, tUs: number): number | null {
+  if (time.length === 0) return null;
+  let lo = 0, hi = time.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (time[mid]! <= tUs) lo = mid + 1; else hi = mid;
+  }
+  return Math.max(0, lo - 1);
+}
+
+function interpolatedAt(
+  time: Float64Array, xs: Float64Array, ys: Float64Array, tUs: number,
+): { x: number; y: number } | null {
+  if (time.length === 0) return null;
+  const idx = indexAtTime(time, tUs);
+  if (idx === null) return null;
+  const x0 = xs[idx]!, y0 = ys[idx]!;
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) return null;
+  if (idx + 1 >= time.length) return { x: x0, y: y0 };
+  const x1 = xs[idx + 1]!, y1 = ys[idx + 1]!;
+  if (!Number.isFinite(x1) || !Number.isFinite(y1)) return { x: x0, y: y0 };
+  const t0 = time[idx]!, t1 = time[idx + 1]!;
+  const span = t1 - t0;
+  if (span <= 0) return { x: x0, y: y0 };
+  const f = Math.max(0, Math.min(1, (tUs - t0) / span));
+  return { x: x0 + (x1 - x0) * f, y: y0 + (y1 - y0) * f };
 }
