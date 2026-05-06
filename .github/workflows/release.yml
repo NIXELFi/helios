@@ -55,9 +55,10 @@ jobs:
           node-version: "20"
 
       - name: Set up pnpm
+        # Version intentionally not specified here — the action picks it up
+        # from package.json's "packageManager" field. Setting both is an error
+        # in pnpm/action-setup@v4 (ERR_PNPM_BAD_PM_VERSION).
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Set up Rust stable
         uses: dtolnay/rust-toolchain@stable
