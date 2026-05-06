@@ -6,13 +6,20 @@ Helios ships as a native desktop app for macOS and Windows. Auto-updates run ins
 
 1. Download `Helios_<version>_universal.dmg` from the [latest release](https://github.com/NIXELFi/helios/releases/latest).
 2. Open the `.dmg` and drag `Helios.app` into `/Applications`.
-3. **The first time you launch Helios, macOS will say "Helios can't be opened because it is from an unidentified developer."** This is expected — we don't have an Apple Developer ID code-signing cert yet. Do this once:
-   - In Finder, navigate to `/Applications`.
-   - Right-click (or Control-click) `Helios.app` → **Open**.
-   - macOS shows a softer dialog: "macOS cannot verify the developer of 'Helios'. Are you sure you want to open it?" Click **Open**.
-   - macOS remembers this exception forever for this app.
+3. **Double-click `Helios.app`. macOS will block it** with a dialog: *"Apple could not verify 'Helios' is free of malware..."* (older macOS may say "unidentified developer"). This is expected — we don't have an Apple Developer ID code-signing cert yet. Do this once:
+   - Click **Done** in the warning dialog (don't move it to Trash).
+   - Open **System Settings → Privacy & Security**.
+   - Scroll to the bottom — you'll see *"Helios was blocked to protect your Mac."* with an **Open Anyway** button next to it.
+   - Click **Open Anyway**, confirm with Touch ID or your password.
+   - Double-click `Helios.app` again — it now launches and macOS remembers the exception forever for this app.
 
-(Power-user alternative: `xattr -d com.apple.quarantine /Applications/Helios.app` clears the quarantine bit; double-clicking afterwards launches normally.)
+**Power-user one-liner** that skips the System Settings dance entirely:
+```bash
+xattr -d com.apple.quarantine /Applications/Helios.app
+```
+Then double-click — no warning at all. Same effect, faster.
+
+(Older macOS versions used to let you bypass via right-click → Open. Sequoia and later removed that path; the System Settings flow above is the supported one now.)
 
 ## Windows
 
