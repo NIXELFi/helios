@@ -11,6 +11,9 @@
     "core:path:allow-join",
     "core:path:allow-normalize",
     "updater:default",
-    "dialog:default"
+    "dialog:default",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file"
   ]
 }
