@@ -166,7 +166,7 @@ The existing `fs:allow-read-text-file` (added in Phase 1) covers reading the .he
 
 Tauri's event bus is in-process and synchronous-ish: events emitted before any listener attaches can be lost. Two-belts mitigation:
 
-1. **Defer the emit until after the main window finishes loading.** In `lib.rs`'s `setup`, attach an `on_page_load` callback (or use `WindowEvent::Created`) that schedules the emit. By the time the page has loaded, `useFileOpener` is mounted and has called `listen()`.
+1. **Defer the emit until after the main window finishes loading.** In `lib.rs`'s `setup`, attach an **`on_page_load`** callback (NOT `WindowEvent::Created` — that fires before the page loads, so React isn't mounted yet and the emit would still be lost; only `on_page_load` fires after DOMContentLoaded, which is when `useFileOpener` has mounted and called `listen()`).
 2. **Fallback Tauri command `get_pending_open_files()`** returns the contents of a `Mutex<Vec<PathBuf>>` that the Rust handler also writes to. The hook calls this once at mount as a backup path. If the event fires before the listener attaches, the command picks up the buffered paths.
 
 Belt #1 is the primary path; belt #2 is the safety net. Tests will cover belt #2's read-and-clear behavior.
@@ -184,7 +184,7 @@ Belt #1 is the primary path; belt #2 is the safety net. Tests will cover belt #2
 | 1 file, N workspaces (N > 8) | same | `"<l1>", "<l2>", and N more` |
 | K files (K ≥ 2), M workspaces (K ≤ 6) | `Import M workspaces from K files?` | `<filename1> · <filename2> · …` (full list) |
 | K files (K > 6), M workspaces | same | `<f1> · <f2> · and N more` |
-| Some files invalid, but ≥1 valid | append a `(K file(s) skipped — not valid Helios bundles)` line to the body |
+| Some files invalid, but ≥1 valid | (use the matching valid-import title above) | append `(S file(s) skipped — not valid Helios bundles)` to the body, where `S` = invalid count (distinct from `K` = total files in multi-file rows) |
 | ALL files invalid | uses **alert mode** (no Cancel button). Title: `Could not open` | One line per file: `"<filename>": <reason>` |
 
 Confirm button label: `Import`. Cancel: `Cancel`. Tone: `default` (yellow), not `danger` — import is non-destructive.
