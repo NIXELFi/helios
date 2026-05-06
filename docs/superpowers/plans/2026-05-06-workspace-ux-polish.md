@@ -706,15 +706,14 @@ function handleFileOpenPending(perFile: PerFileResult[]) {
 }
 ```
 
-- [ ] **Step 3: Note about ConfirmDialog body line breaks**
+- [ ] **Step 3: Widen `ConfirmRequest.body` to `string | ReactNode` and handle line breaks**
 
-The `body` string returned by `formatFileOpenSummary` may contain `\n` newlines. `<ConfirmDialog>`'s body slot renders `body` inside a `<div className="text-xs text-[#D8DCE2]">`, so newlines are collapsed to a space by default HTML.
+The `body` string returned by `formatFileOpenSummary` may contain `\n` newlines. `<ConfirmDialog>`'s body slot renders `body` inside a `<div>` so HTML collapses newlines to spaces by default. The clean fix:
 
-To preserve them visually, wrap the string in a `<span style={{ whiteSpace: "pre-line" }}>` when passing to `<ConfirmDialog>`. Either:
-- Adjust `<ConfirmDialog>`'s body rendering to use `whitespace-pre-line` always (one-line CSS change in `ConfirmDialog.tsx`), OR
-- In `App.tsx`'s `handleFileOpenPending`, pre-wrap the body in a JSX node: `body: <span style={{ whiteSpace: "pre-line" }}>{summary.body}</span>` (the body prop type is `string | ReactNode`, so this works).
+1. Find the existing `ConfirmRequest` type in `App.tsx` (currently `body: string`). Widen to `body: string | ReactNode`. Add `import type { ReactNode } from "react";` if it's not already there.
+2. In `handleFileOpenPending`, wrap the body in a JSX span: `body: <span style={{ whiteSpace: "pre-line" }}>{summary.body}</span>`. Apply to BOTH the alert and confirm branches.
 
-Pick the second — keeps `ConfirmDialog` general. Apply to BOTH the alert and confirm branches.
+(`<ConfirmDialog>`'s `body` prop type is already `string | ReactNode` from Phase 3 of the prior feature, so no component-level change is needed — only the local `ConfirmRequest` typedef in App.tsx needs widening to match.)
 
 - [ ] **Step 4: Verify tests + typecheck**
 
