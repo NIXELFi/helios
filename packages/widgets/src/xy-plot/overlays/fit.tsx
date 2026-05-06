@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower, linspace, type FitResult } from "@helios/lib";
 import type { OverlayModule, SessionGroup, FitConfig, FitKind, OverlayContext } from "../types";
 import { register } from "./registry";
@@ -96,8 +97,63 @@ export const fitOverlay: OverlayModule<FitConfig, FitArtifact> = {
       label: `${describeFitKind(cfg.kind)}${f.groupKey ? " [" + f.groupKey + "]" : ""}  R²=${f.rSquared.toFixed(3)}`,
     }));
   },
-  Editor: () => null,
+  Editor: ({ config, onChange }) => (
+    <>
+      <Row label="kind">
+        <select value={config.kind.type}
+          onChange={(e) => {
+            const t = e.target.value as FitKind["type"];
+            const k: FitKind = t === "polynomial" ? { type: "polynomial", degree: 2 } : { type: t } as FitKind;
+            onChange({ ...config, kind: k });
+          }}
+          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          <option value="linear">linear</option>
+          <option value="polynomial">polynomial</option>
+          <option value="exponential">exponential</option>
+          <option value="logarithmic">logarithmic</option>
+          <option value="power">power</option>
+        </select>
+      </Row>
+      {config.kind.type === "polynomial" && (
+        <Row label="degree">
+          <input type="number" min={1} max={6} value={config.kind.degree}
+            onChange={(e) => onChange({ ...config, kind: { type: "polynomial", degree: Number(e.target.value) } })}
+            className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+        </Row>
+      )}
+      <Row label="color">
+        <input type="color" value={config.color}
+          onChange={(e) => onChange({ ...config, color: e.target.value })} className="w-24" />
+      </Row>
+      <Row label="line width">
+        <input type="number" min={1} max={5} step={0.5} value={config.lineWidth}
+          onChange={(e) => onChange({ ...config, lineWidth: Number(e.target.value) })}
+          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+      </Row>
+      <Row label="±σ band">
+        <input type="checkbox" checked={config.showBand}
+          onChange={(e) => onChange({ ...config, showBand: e.target.checked })} />
+      </Row>
+      <Row label="extrapolate to bounds">
+        <input type="checkbox" checked={config.extrapolate}
+          onChange={(e) => onChange({ ...config, extrapolate: e.target.checked })} />
+      </Row>
+      <Row label="per group-by group">
+        <input type="checkbox" checked={config.perGroup}
+          onChange={(e) => onChange({ ...config, perGroup: e.target.checked })} />
+      </Row>
+    </>
+  ),
 };
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
+      <span className="text-[#7B8088]">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 register(fitOverlay);
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { OverlayModule, SessionGroup, ScatterConfig } from "../types";
 import { register } from "./registry";
 
@@ -43,8 +44,38 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
     if (artifacts.groups.length <= 1) return [];
     return artifacts.groups.map((g) => ({ color: g.color, label: g.groupKey || "(default)" }));
   },
-  Editor: () => null,
+  Editor: ({ config, onChange }) => (
+    <>
+      <Row label="color">
+        <input type="color" value={config.color}
+          onChange={(e) => onChange({ ...config, color: e.target.value })} className="w-24" />
+      </Row>
+      <Row label="point size">
+        <input type="number" min={1} max={6} step={1} value={config.pointSize}
+          onChange={(e) => onChange({ ...config, pointSize: Number(e.target.value) })}
+          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+      </Row>
+      <Row label="alpha">
+        <input type="number" min={0} max={1} step={0.1} value={config.alpha}
+          onChange={(e) => onChange({ ...config, alpha: Number(e.target.value) })}
+          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+      </Row>
+      <Row label="trail (time-color)">
+        <input type="checkbox" checked={config.trail}
+          onChange={(e) => onChange({ ...config, trail: e.target.checked })} />
+      </Row>
+    </>
+  ),
 };
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
+      <span className="text-[#7B8088]">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 register(scatterOverlay);
 

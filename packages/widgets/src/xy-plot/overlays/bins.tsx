@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { mean, percentile } from "@helios/lib";
 import type { OverlayModule, BinsConfig, SessionGroup } from "../types";
 import { register } from "./registry";
@@ -90,8 +91,42 @@ export const binsOverlay: OverlayModule<BinsConfig, BinsArtifact> = {
   legendEntries(cfg) {
     return [{ color: cfg.color, label: `bins (${cfg.statistic}, ${cfg.binCount})` }];
   },
-  Editor: () => null,
+  Editor: ({ config, onChange }) => (
+    <>
+      <Row label="bins">
+        <input type="number" min={1} max={200} value={config.binCount}
+          onChange={(e) => onChange({ ...config, binCount: Number(e.target.value) })}
+          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+      </Row>
+      <Row label="statistic">
+        <select value={config.statistic}
+          onChange={(e) => onChange({ ...config, statistic: e.target.value as typeof config.statistic })}
+          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          <option value="mean">mean</option>
+          <option value="median">median</option>
+          <option value="p25-p75">p25–p75 band</option>
+        </select>
+      </Row>
+      <Row label="color">
+        <input type="color" value={config.color}
+          onChange={(e) => onChange({ ...config, color: e.target.value })} className="w-24" />
+      </Row>
+      <Row label="show sample count">
+        <input type="checkbox" checked={config.showCount}
+          onChange={(e) => onChange({ ...config, showCount: e.target.checked })} />
+      </Row>
+    </>
+  ),
 };
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
+      <span className="text-[#7B8088]">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 register(binsOverlay);
 

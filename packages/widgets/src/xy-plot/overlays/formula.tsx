@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { parseExpr, evalAst, linspace, type Ast } from "@helios/lib";
 import type { OverlayModule, FormulaConfig } from "../types";
 import { register } from "./registry";
@@ -67,7 +68,38 @@ export const formulaOverlay: OverlayModule<FormulaConfig, FormulaArtifact> = {
   legendEntries(cfg) {
     return [{ color: cfg.color, label: `y = ${cfg.expression}` }];
   },
-  Editor: () => null,
+  Editor: ({ config, onChange }) => (
+    <>
+      <Row label="expression (y = …)">
+        <input type="text" value={config.expression}
+          onChange={(e) => onChange({ ...config, expression: e.target.value })}
+          placeholder="x"
+          className="w-44 bg-[#0E0E10] border border-[#2A2C32] px-1 font-mono text-[11px]" />
+      </Row>
+      <Row label="color">
+        <input type="color" value={config.color}
+          onChange={(e) => onChange({ ...config, color: e.target.value })} className="w-24" />
+      </Row>
+      <Row label="line width">
+        <input type="number" min={1} max={5} step={0.5} value={config.lineWidth}
+          onChange={(e) => onChange({ ...config, lineWidth: Number(e.target.value) })}
+          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+      </Row>
+      <Row label="dashed">
+        <input type="checkbox" checked={config.dashed}
+          onChange={(e) => onChange({ ...config, dashed: e.target.checked })} />
+      </Row>
+    </>
+  ),
 };
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
+      <span className="text-[#7B8088]">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 register(formulaOverlay);

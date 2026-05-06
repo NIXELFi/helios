@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { mean, stddev, correlation } from "@helios/lib";
 import type { OverlayModule, StatsConfig } from "../types";
 import { register } from "./registry";
@@ -75,8 +76,42 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
       </div>
     );
   },
-  Editor: () => null,
+  Editor: ({ config, onChange }) => (
+    <>
+      <Row label="position">
+        <select value={config.position}
+          onChange={(e) => onChange({ ...config, position: e.target.value as typeof config.position })}
+          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          <option value="top-left">top left</option>
+          <option value="top-right">top right</option>
+          <option value="bottom-left">bottom left</option>
+          <option value="bottom-right">bottom right</option>
+        </select>
+      </Row>
+      {(["count", "meanXY", "stdXY", "correlation", "fitRSquared", "fitEquation"] as const).map((k) => (
+        <Row key={k} label={`show ${k}`}>
+          <input type="checkbox" checked={config.show[k]}
+            onChange={(e) => onChange({ ...config, show: { ...config.show, [k]: e.target.checked } })} />
+        </Row>
+      ))}
+      <Row label="fit overlay id">
+        <input type="text" value={config.fitOverlayId ?? ""}
+          onChange={(e) => onChange({ ...config, fitOverlayId: e.target.value || undefined })}
+          placeholder="(none)"
+          className="w-32 bg-[#0E0E10] border border-[#2A2C32] px-1 font-mono text-[11px]" />
+      </Row>
+    </>
+  ),
 };
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
+      <span className="text-[#7B8088]">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 register(statsOverlay);
 
