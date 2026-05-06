@@ -153,20 +153,40 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     if (mapRef.current) {
       mapRef.current.setStyle(buildStyle(basemap, config.customTileUrl));
       mapRef.current.once("styledata", () => {
+        mapRef.current?.resize();
         fitBoundsToData();
         drawRef.current();
       });
     } else {
       try {
+        // Compute initial bounds up-front so the map opens already framed on
+        // the GPS data instead of flashing at zoom 0 / world view. fitBounds
+        // after-the-fact races the container's first layout, which left the
+        // map showing the whole earth on first paint.
+        const { bbox } = buildSessionRaws();
+        const initialBounds: [[number, number], [number, number]] | undefined =
+          bbox ? [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]] : undefined;
+
         const map = new maplibregl.Map({
           container: div,
           style: buildStyle(basemap, config.customTileUrl),
           attributionControl: { compact: true },
-          interactive: true,
+          // Read-only basemap: keeps the canvas overlay's click/drag scrub
+          // semantics intact across all GPS interactions. fitBounds drives
+          // the framing; user does not pan or zoom the basemap directly.
+          interactive: false,
           fadeDuration: 0,
+          bounds: initialBounds,
+          // Tile providers cap out around z18 (CARTO) / z19 (Esri). FSAE
+          // tracks are ~90m across, which would push fitBounds to z21+ —
+          // beyond any tile source's maxzoom, leaving an empty (dark) map.
+          // Cap at z18 so we always have tiles even on the smallest tracks.
+          maxZoom: 18,
+          fitBoundsOptions: { padding: 24, animate: false, duration: 0, maxZoom: 18 },
         });
         mapRef.current = map;
         map.on("load", () => {
+          map.resize();
           fitBoundsToData();
           drawRef.current();
         });
@@ -270,15 +290,19 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     return { raws, bbox: { minLat, maxLat, minLon, maxLon } };
   }
 
-  /** Fit the MapLibre map to the union GPS bbox (if a map is mounted). */
+  /** Fit the MapLibre map to the union GPS bbox (if a map is mounted).
+   *  Calls resize() first so a container that finished laying out *after*
+   *  Map construction (common: map appears via state toggle) gets correct
+   *  viewport dimensions before fitBounds calculates the camera. */
   function fitBoundsToData() {
     const map = mapRef.current; if (!map) return;
     const { bbox } = buildSessionRaws();
     if (!bbox) return;
     try {
+      map.resize();
       map.fitBounds(
         [[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]],
-        { padding: 24, duration: 0, animate: false },
+        { padding: 24, duration: 0, animate: false, maxZoom: 18 },
       );
     } catch (_e) { /* map may not be ready yet */ }
   }
