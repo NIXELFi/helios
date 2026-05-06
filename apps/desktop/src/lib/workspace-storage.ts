@@ -1,6 +1,6 @@
 import type { Workspace } from "../workspaces/types";
 import { WORKSPACES as BUILTIN_WORKSPACES } from "../workspaces";
-import { SESSION_PALETTE } from "./session";
+import { colorForIndex } from "./session";
 
 // localStorage key stays "helios.workspaces.v1" for backward-compat;
 // only the in-blob `version` field changes.
@@ -39,7 +39,7 @@ export function loadWorkspaces(): Workspace[] {
     if (parsed.version === 1) {
       const migrated: Workspace[] = parsed.workspaces.map((w, i) => ({
         ...w,
-        color: SESSION_PALETTE[i % SESSION_PALETTE.length]!,
+        color: colorForIndex(i),
       }));
       saveWorkspaces(migrated);
       return migrated;
@@ -68,5 +68,7 @@ export function resetToBuiltins(): Workspace[] {
 }
 
 function cloneBuiltins(): Workspace[] {
+  // Deep-clone so user edits can't mutate the source-of-truth defaults at
+  // module level.
   return JSON.parse(JSON.stringify(BUILTIN_WORKSPACES)) as Workspace[];
 }
