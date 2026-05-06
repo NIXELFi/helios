@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
-import { WorkspaceTabBar } from "../src/components/WorkspaceTabBar";
+import { WorkspaceTabBar, computeDropIndex } from "../src/components/WorkspaceTabBar";
 import type { Workspace } from "../src/workspaces/types";
 
 afterEach(cleanup);
@@ -63,5 +63,100 @@ describe("WorkspaceTabBar — rendering", () => {
     render(<WorkspaceTabBar {...props} />);
     fireEvent.click(screen.getByRole("button", { name: /export all/i }));
     expect(props.onExportAll).toHaveBeenCalled();
+  });
+});
+
+describe("WorkspaceTabBar — inline rename", () => {
+  it("double-click on the label puts the tab in rename mode", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.doubleClick(screen.getByText("Overview"));
+    expect(screen.getByDisplayValue("Overview")).toBeInTheDocument();
+  });
+
+  it("Enter commits the new label", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.doubleClick(screen.getByText("Overview"));
+    const input = screen.getByDisplayValue("Overview") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Track A" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRename).toHaveBeenCalledWith("a", "Track A");
+  });
+
+  it("Escape cancels", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.doubleClick(screen.getByText("Overview"));
+    const input = screen.getByDisplayValue("Overview") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Track A" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(props.onRename).not.toHaveBeenCalled();
+  });
+
+  it("empty / whitespace-only commit is treated as cancel", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.doubleClick(screen.getByText("Overview"));
+    const input = screen.getByDisplayValue("Overview") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRename).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeDropIndex", () => {
+  // Tabs at: [0..50] [50..100] [100..150]
+  const rects: Array<Pick<DOMRect, "left" | "right">> = [
+    { left: 0, right: 50 },
+    { left: 50, right: 100 },
+    { left: 100, right: 150 },
+  ];
+
+  it("snaps to the gap before the tab whose midpoint mouseX is left of", () => {
+    expect(computeDropIndex(rects, 24)).toBe(0);
+    expect(computeDropIndex(rects, 26)).toBe(1);
+    expect(computeDropIndex(rects, 76)).toBe(2);
+  });
+
+  it("snaps past the last tab when mouseX is past the rightmost midpoint", () => {
+    expect(computeDropIndex(rects, 200)).toBe(3);
+  });
+
+  it("clamps negative inputs to 0", () => {
+    expect(computeDropIndex(rects, -10)).toBe(0);
+  });
+});
+
+describe("WorkspaceTabBar — context menu", () => {
+  it("right-click on a tab opens the TabContextMenu", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /overview/i }));
+    expect(screen.getByRole("menu", { name: /workspace actions/i })).toBeInTheDocument();
+  });
+
+  it("Delete entry is disabled when only one workspace remains", () => {
+    const props = defaultProps({ workspaces: [ws[0]], activeId: "a" });
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /overview/i }));
+    const del = screen.getByRole("menuitem", { name: /^delete$/i });
+    expect(del).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("clicking Duplicate fires onDuplicate with the right id", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /engine focus/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /duplicate/i }));
+    expect(props.onDuplicate).toHaveBeenCalledWith("b");
+  });
+
+  it("clicking Export fires onExport with the right id", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /overview/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /export/i }));
+    expect(props.onExport).toHaveBeenCalledWith("a");
   });
 });
