@@ -145,6 +145,10 @@ export interface OverlayEditorProps<C> {
   config: C;
   onChange: (next: C) => void;
   availableChannels: ChannelMeta[];
+  /** Other overlays in this plot (id + kind only). Lets editors that
+   *  reference another overlay (e.g. stats picking which fit to read R²
+   *  from) populate a dropdown without exposing opaque uuids. */
+  siblings: Array<{ id: string; kind: string }>;
 }
 
 export interface OverlayModule<C, A> {

@@ -167,26 +167,50 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     }
     ctx.stroke();
 
-    // Iterate overlays in array order. Skip unknown kinds with a warn.
+    // Two-pass overlay rendering. Pass 1: compute every overlay's artifact
+    // into a shared map, with that map ALSO exposed to each compute via
+    // OverlayContext.priorArtifacts so dependent overlays (e.g. stats →
+    // fit) can read each other regardless of array order. Pass 2: draw /
+    // emit DOM components with the full map available. Without this,
+    // putting a stats overlay above its fit silently produced "R² = —".
+    const allArtifacts = new Map<string, unknown>();
     const ctxObj: OverlayContext = {
       bounds: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax! },
-      priorArtifacts: new Map(),
+      priorArtifacts: allArtifacts,
       availableChannels: [],
     };
-    const priorArtifacts = ctxObj.priorArtifacts as Map<string, unknown>;
-    const nextDomOverlays: Array<{ id: string; element: ReactNode }> = [];
+
+    type Eligible = { overlay: typeof config.overlays[number]; mod: ReturnType<typeof getOverlayModule> };
+    const eligible: Eligible[] = [];
     for (const overlay of config.overlays) {
       const mod = getOverlayModule(overlay.kind);
       if (!mod) { console.warn(`xy-plot: unknown overlay kind '${overlay.kind}'`); continue; }
       if (config.mode === "simple" && !mod.availability.includes("simple")) continue;
-      const artifacts = mod.compute(groups, overlay.config as never, ctxObj);
-      priorArtifacts.set(overlay.id, artifacts);
-      mod.draw?.(ctx, layout, artifacts, overlay.config as never);
-      if (mod.Component) {
-        const Comp = mod.Component;
+      eligible.push({ overlay, mod });
+    }
+
+    // Pass 1: compute all. Two passes through compute lets every overlay
+    // see every artifact, which matters for stats reading from a fit that
+    // sits later in the array — a common UX mistake otherwise.
+    for (const { overlay, mod } of eligible) {
+      const artifacts = mod!.compute(groups, overlay.config as never, ctxObj);
+      allArtifacts.set(overlay.id, artifacts);
+    }
+    for (const { overlay, mod } of eligible) {
+      const artifacts = mod!.compute(groups, overlay.config as never, ctxObj);
+      allArtifacts.set(overlay.id, artifacts);
+    }
+
+    // Pass 2: draw + collect DOM Components.
+    const nextDomOverlays: Array<{ id: string; element: ReactNode }> = [];
+    for (const { overlay, mod } of eligible) {
+      const artifacts = allArtifacts.get(overlay.id);
+      mod!.draw?.(ctx, layout, artifacts as never, overlay.config as never);
+      if (mod!.Component) {
+        const Comp = mod!.Component;
         nextDomOverlays.push({
           id: overlay.id,
-          element: <Comp artifacts={artifacts} cfg={overlay.config as never} layout={layout} />,
+          element: <Comp artifacts={artifacts as never} cfg={overlay.config as never} layout={layout} />,
         });
       }
     }

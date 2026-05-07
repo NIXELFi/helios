@@ -1,5 +1,6 @@
-import { useState, type FC } from "react";
+import { useMemo, useState, type FC } from "react";
 import type { ChannelMeta } from "@helios/store";
+import { parseExpr } from "@helios/lib";
 import type { WidgetConfigEditorProps } from "../types";
 import type { XyPlotConfig, Overlay } from "./types";
 import { ChannelPicker } from "../lib/channel-picker";
@@ -75,12 +76,7 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
       {config.mode === "advanced" && (
         <>
           <div className="flex flex-col gap-1 border-t border-[#2A2C32] pt-2">
-            <label className="flex justify-between items-center"><span>filter (math-expr)</span>
-              <input type="text" value={config.filter ?? ""}
-                onChange={(e) => set("filter", e.target.value)}
-                placeholder="(none)"
-                className="w-44 bg-[#0E0E10] border border-[#2A2C32] px-1 font-mono text-[11px]" />
-            </label>
+            <FilterInput value={config.filter ?? ""} onChange={(v) => set("filter", v || undefined)} />
             <label className="flex justify-between items-center"><span>group by channel</span>
               <ChannelPicker className="w-40" value={config.groupByChannelId ?? ""}
                 onChange={(v) => set("groupByChannelId", v || undefined)}
@@ -93,6 +89,7 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
             {config.overlays.map((o, idx) => (
               <OverlayRow key={o.id} overlay={o} index={idx} total={config.overlays.length}
                 availableChannels={availableChannels}
+                siblings={config.overlays.filter((s) => s.id !== o.id).map(({ id, kind }) => ({ id, kind }))}
                 onConfigChange={(c) => updateOverlay(o.id, c)}
                 onMove={(dir) => moveOverlay(o.id, dir)}
                 onRemove={() => removeOverlay(o.id)} />
@@ -105,11 +102,12 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
   );
 }
 
-function OverlayRow({ overlay, index, total, availableChannels, onConfigChange, onMove, onRemove }: {
+function OverlayRow({ overlay, index, total, availableChannels, siblings, onConfigChange, onMove, onRemove }: {
   overlay: Overlay;
   index: number;
   total: number;
   availableChannels: ChannelMeta[];
+  siblings: Array<{ id: string; kind: string }>;
   onConfigChange: (cfg: unknown) => void;
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
@@ -123,7 +121,12 @@ function OverlayRow({ overlay, index, total, availableChannels, onConfigChange, 
       </div>
     );
   }
-  const Editor = mod.Editor as FC<{ config: unknown; onChange: (c: unknown) => void; availableChannels: ChannelMeta[] }>;
+  const Editor = mod.Editor as FC<{
+    config: unknown;
+    onChange: (c: unknown) => void;
+    availableChannels: ChannelMeta[];
+    siblings: Array<{ id: string; kind: string }>;
+  }>;
   return (
     <div className="border border-[#2A2C32] rounded-sm">
       <div className="flex items-center justify-between px-1 py-0.5 bg-[#0E0E10] text-[11px]">
@@ -139,9 +142,32 @@ function OverlayRow({ overlay, index, total, availableChannels, onConfigChange, 
       </div>
       {open && (
         <div className="p-1">
-          <Editor config={overlay.config} onChange={onConfigChange} availableChannels={availableChannels} />
+          <Editor config={overlay.config} onChange={onConfigChange}
+            availableChannels={availableChannels} siblings={siblings} />
         </div>
       )}
+    </div>
+  );
+}
+
+function FilterInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const error = useMemo(() => {
+    if (!value.trim()) return null;
+    const r = parseExpr(value);
+    return r.error ?? null;
+  }, [value]);
+  return (
+    <div className="flex flex-col gap-0.5">
+      <label className="flex justify-between items-center"><span>filter (math-expr)</span>
+        <input type="text" value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="(none — e.g. throttle > 50)"
+          className={
+            "w-44 bg-[#0E0E10] border px-1 font-mono text-[11px] " +
+            (error ? "border-[#EF5350]" : "border-[#2A2C32]")
+          } />
+      </label>
+      {error && <div className="text-[10px] text-[#EF5350] text-right">{error}</div>}
     </div>
   );
 }

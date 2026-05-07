@@ -24,10 +24,14 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
   kind: "stats",
   availability: ["advanced"],
   defaultConfig() {
+    // Default to showing R² + equation. When no fit overlay exists in
+    // the plot they render "R² = —" which is harmless and prompts the
+    // user to add one. Way better than the previous default-off + opaque
+    // "fit overlay id" text input that made nobody see anything.
     return {
       position: "top-right",
       show: { count: true, meanXY: true, stdXY: true,
-              correlation: true, fitRSquared: false, fitEquation: false },
+              correlation: true, fitRSquared: true, fitEquation: true },
     };
   },
   compute(groups, cfg, ctx) {
@@ -87,32 +91,39 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
       </div>
     );
   },
-  Editor: ({ config, onChange }) => (
-    <>
-      <Row label="position">
-        <select value={config.position}
-          onChange={(e) => onChange({ ...config, position: e.target.value as typeof config.position })}
-          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
-          <option value="top-left">top left</option>
-          <option value="top-right">top right</option>
-          <option value="bottom-left">bottom left</option>
-          <option value="bottom-right">bottom right</option>
-        </select>
-      </Row>
-      {(["count", "meanXY", "stdXY", "correlation", "fitRSquared", "fitEquation"] as const).map((k) => (
-        <Row key={k} label={`show ${k}`}>
-          <input type="checkbox" checked={config.show[k]}
-            onChange={(e) => onChange({ ...config, show: { ...config.show, [k]: e.target.checked } })} />
+  Editor: ({ config, onChange, siblings }) => {
+    const fitSiblings = siblings.filter((s) => s.kind === "fit" || s.kind === "quadrant-fit");
+    return (
+      <>
+        <Row label="position">
+          <select value={config.position}
+            onChange={(e) => onChange({ ...config, position: e.target.value as typeof config.position })}
+            className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+            <option value="top-left">top left</option>
+            <option value="top-right">top right</option>
+            <option value="bottom-left">bottom left</option>
+            <option value="bottom-right">bottom right</option>
+          </select>
         </Row>
-      ))}
-      <Row label="fit overlay id">
-        <input type="text" value={config.fitOverlayId ?? ""}
-          onChange={(e) => onChange({ ...config, fitOverlayId: e.target.value || undefined })}
-          placeholder="(none)"
-          className="w-32 bg-[#0E0E10] border border-[#2A2C32] px-1 font-mono text-[11px]" />
-      </Row>
-    </>
-  ),
+        {(["count", "meanXY", "stdXY", "correlation", "fitRSquared", "fitEquation"] as const).map((k) => (
+          <Row key={k} label={`show ${k}`}>
+            <input type="checkbox" checked={config.show[k]}
+              onChange={(e) => onChange({ ...config, show: { ...config.show, [k]: e.target.checked } })} />
+          </Row>
+        ))}
+        <Row label="fit overlay">
+          <select value={config.fitOverlayId ?? ""}
+            onChange={(e) => onChange({ ...config, fitOverlayId: e.target.value || undefined })}
+            className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+            <option value="">(auto: first fit)</option>
+            {fitSiblings.map((s, i) => (
+              <option key={s.id} value={s.id}>{s.kind} #{i + 1}</option>
+            ))}
+          </select>
+        </Row>
+      </>
+    );
+  },
 };
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
