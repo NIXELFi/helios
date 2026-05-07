@@ -1,6 +1,6 @@
 import type { FC } from "react";
 import type { ChannelMeta, ChannelSlice, TimeRange } from "@helios/store";
-import type { CursorEmitter } from "@helios/lib";
+import type { CursorEmitter, ViewStateEmitter } from "@helios/lib";
 
 export interface OverlaySession {
   id: string;
@@ -22,6 +22,10 @@ export interface WidgetRenderProps<Config> {
    *  xy plot) iterate this; single-value widgets ignore it. Always populated by
    *  callers, length >= 1 when a session is loaded. */
   overlays?: OverlaySession[];
+  /** Global, session-scoped view state shared by every chart: datum markers
+   *  and an optional zoom range. Time-axis widgets (strip-chart) opt in by
+   *  reading from this; single-value widgets ignore it. */
+  viewState?: ViewStateEmitter;
 }
 
 export interface WidgetConfigEditorProps<Config> {

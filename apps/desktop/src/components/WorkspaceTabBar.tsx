@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { Workspace } from "../workspaces/types";
 import { SESSION_PALETTE } from "../lib/session";
@@ -39,6 +39,24 @@ export function computeDropIndex(
   return rects.length;
 }
 
+/** Pure math for the custom scroll indicator: given the scroller geometry,
+ *  return where the thumb sits and how wide it is, both as 0..1 fractions of
+ *  the track. Returns null when content doesn't overflow (no thumb needed).
+ *  Exported for unit testing. */
+export function computeThumb(
+  scrollLeft: number,
+  scrollWidth: number,
+  clientWidth: number,
+): { leftPct: number; widthPct: number } | null {
+  if (scrollWidth <= clientWidth + 0.5) return null;
+  const widthPct = clientWidth / scrollWidth;
+  const maxScroll = scrollWidth - clientWidth;
+  const progress = maxScroll > 0 ? scrollLeft / maxScroll : 0;
+  // Thumb travels from leftPct=0 to leftPct=(1 - widthPct).
+  const leftPct = progress * (1 - widthPct);
+  return { leftPct, widthPct };
+}
+
 export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
   const { workspaces, activeId, onSelect, onCreate, onImport, onExportAll } = props;
 
@@ -53,6 +71,64 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
 
   // Context menu state
   const [menuFor, setMenuFor] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+
+  // Custom scroll indicator: replaces the native horizontal scrollbar with a
+  // thin yellow thumb pinned to the bottom edge of the strip. Native bar is
+  // hidden via CSS (see scrollerStyle / class below). Thumb tracks scroll
+  // position via a scroll listener + ResizeObserver, and supports click-drag.
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ leftPct: number; widthPct: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const recompute = () => {
+      setThumb(computeThumb(el.scrollLeft, el.scrollWidth, el.clientWidth));
+    };
+    recompute();
+    el.addEventListener("scroll", recompute, { passive: true });
+    const ro = new ResizeObserver(recompute);
+    ro.observe(el);
+    // Also observe the inner row, since tab adds/removes change scrollWidth
+    // without triggering a resize on the scroller itself.
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", recompute);
+      ro.disconnect();
+    };
+  }, [workspaces.length]);
+
+  // Drag-to-scroll on the thumb. Mouse-down captures, mouse-move maps the
+  // delta in track-space to a delta in content-scroll-space, mouse-up
+  // releases. Doing it directly with native listeners (not React synthetic)
+  // so we keep receiving moves even when the cursor leaves the thumb.
+  const trackRef = useRef<HTMLDivElement>(null);
+  function onThumbMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+    const startX = e.clientX;
+    const startScrollLeft = scroller.scrollLeft;
+    const trackWidth = track.clientWidth;
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth;
+    if (maxScroll <= 0 || trackWidth <= 0) return;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      // Track-space delta → content-space delta. The thumb traverses
+      // (1 - widthPct) * trackWidth, mapping to maxScroll content pixels.
+      const widthPct = scroller.clientWidth / scroller.scrollWidth;
+      const usableTrack = trackWidth * (1 - widthPct);
+      const ratio = usableTrack > 0 ? maxScroll / usableTrack : 0;
+      scroller.scrollLeft = Math.max(0, Math.min(maxScroll, startScrollLeft + dx * ratio));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   function startRename(w: Workspace) {
     setRenamingId(w.id);
@@ -99,10 +175,17 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
   }
 
   return (
-    // Outer wrapper: takes available header width, clips overflow to its
-    // edge, scrolls horizontally on the wheel. Inner row stays a single
-    // line so tabs never wrap and grow header height.
-    <div className="ml-2 flex-1 min-w-0 overflow-x-auto">
+    // Outer wrapper holds two stacked things: the horizontally-scrolling
+    // strip (clipped to header width) and an absolutely-positioned custom
+    // scrollbar pinned to its bottom edge. Inner row stays a single line so
+    // tabs never wrap and grow header height. The native horizontal
+    // scrollbar is hidden via CSS so our thumb owns the visual.
+    <div className="ml-3 flex-1 min-w-0 relative">
+    <div
+      ref={scrollerRef}
+      className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+      style={{ scrollbarWidth: "none" }}
+    >
       <div className="flex gap-1 items-center w-max">
       <div
         role="tablist"
@@ -198,6 +281,25 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
         Export all…
       </button>
       </div>{/* end .w-max inner row */}
+    </div>{/* end scroller */}
+
+      {/* Custom scrollbar — thin yellow thumb pinned to the bottom edge of
+          the strip. Track is pointer-events-none so it doesn't intercept
+          clicks on tabs above; the thumb itself re-enables them so users
+          can drag to scroll. */}
+      {thumb && (
+        <div
+          ref={trackRef}
+          className="absolute -bottom-2 left-0 right-0 h-[4px] pointer-events-none"
+          aria-hidden
+        >
+          <div
+            onMouseDown={onThumbMouseDown}
+            className="absolute top-0 h-full bg-[#FFC627]/50 hover:bg-[#FFC627] rounded-full pointer-events-auto cursor-grab active:cursor-grabbing transition-colors"
+            style={{ left: `${thumb.leftPct * 100}%`, width: `${thumb.widthPct * 100}%` }}
+          />
+        </div>
+      )}
 
       {menuFor && (() => {
         const target = workspaces.find((w) => w.id === menuFor.workspaceId);

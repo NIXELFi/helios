@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 
 /** Lifecycle of the update checker, surfaced to the UI as a discriminated
  *  union so the header pill can pattern-match. */
@@ -57,7 +58,7 @@ export function useUpdater(): UpdaterApi {
       } else {
         // `check()` returns null when the app is already on the latest version.
         // We still want to surface the current version in the UI.
-        const currentVersion = getCurrentVersionSafe();
+        const currentVersion = await getCurrentVersionSafe();
         setState({ kind: "up_to_date", current: currentVersion });
       }
     } catch (e) {
@@ -116,12 +117,8 @@ export function useUpdater(): UpdaterApi {
   return { state, recheck: runCheck, installAndRelaunch };
 }
 
-function getCurrentVersionSafe(): string {
+async function getCurrentVersionSafe(): Promise<string> {
   try {
-    // Avoid pulling a heavyweight import — fetch the version string from the
-    // Tauri-injected window globals when available, fall back to empty string
-    // so the UI shows a graceful "✓" without a number.
-    const meta = (globalThis as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentVersion?: string } } }).__TAURI_INTERNALS__;
-    return meta?.metadata?.currentVersion ?? "";
+    return await getVersion();
   } catch { return ""; }
 }

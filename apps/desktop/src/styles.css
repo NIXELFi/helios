@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; margin: 0; }
+/* Kill horizontal rubber-band / overscroll on macOS WKWebView so two-finger
+   swipes on the trackpad don't translate the whole page sideways. Vertical
+   overscroll is still allowed where needed. */
+html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-serif; }
 .font-mono-num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 

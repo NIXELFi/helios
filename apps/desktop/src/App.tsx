@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { CursorEmitter, formatClock } from "@helios/lib";
+import { CursorEmitter, ViewStateEmitter, formatClock } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE } from "./lib/session";
@@ -39,6 +39,9 @@ export default function App() {
   const [primaryId, setPrimaryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emitter] = useState(() => new CursorEmitter());
+  // Global, session-scoped view state (datums + zoom range) shared by every
+  // chart. Survives workspace switches, resets on app restart.
+  const [viewState] = useState(() => new ViewStateEmitter());
   const [editMode, setEditMode] = useState(false);
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
   const [channelsOpen, setChannelsOpen] = useState(false);
@@ -406,24 +409,40 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
         <span className="font-helios text-sm text-[#FFC627]">HELIOS</span>
-        <span className="ml-3 text-[#7B8088]">{primary.label}</span>
-        <span className="ml-2 text-[#7B8088]">·</span>
-        <WorkspaceTabBar
-          workspaces={workspaces}
-          activeId={workspaceId}
-          appVersion={appVersion}
-          onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
-          onCreate={handleCreateWorkspace}
-          onRename={handleRenameWorkspace}
-          onRecolor={handleRecolorWorkspace}
-          onDuplicate={handleDuplicateWorkspace}
-          onDelete={handleRequestDeleteWorkspace}
-          onReorder={handleReorderWorkspaces}
-          onExport={handleExportWorkspace}
-          onExportAll={handleExportAllWorkspaces}
-          onImport={handleImportWorkspaces}
-        />
-        <div className="ml-auto flex items-center gap-2">
+        {/* Session label + workspace tabs only show in view mode. In edit
+            mode we hide everything except HELIOS so the controls (Add tile,
+            Snap, Reset, etc.) have the entire header to breathe. */}
+        {!editMode && (
+          <>
+            <span className="ml-3 text-[#7B8088]">{primary.label}</span>
+            <div className="ml-3 self-stretch border-l border-[#2A2C32]" aria-hidden />
+            <WorkspaceTabBar
+              workspaces={workspaces}
+              activeId={workspaceId}
+              appVersion={appVersion}
+              onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
+              onCreate={handleCreateWorkspace}
+              onRename={handleRenameWorkspace}
+              onRecolor={handleRecolorWorkspace}
+              onDuplicate={handleDuplicateWorkspace}
+              onDelete={handleRequestDeleteWorkspace}
+              onReorder={handleReorderWorkspaces}
+              onExport={handleExportWorkspace}
+              onExportAll={handleExportAllWorkspaces}
+              onImport={handleImportWorkspaces}
+            />
+          </>
+        )}
+        <div className={
+          "flex items-center gap-2 self-stretch " +
+          (editMode
+            // In edit mode there's no left content past HELIOS, so mx-auto
+            // centers the group in the remaining width — focus on the edit
+            // controls without the playback / updates pill cluttering it up.
+            ? "mx-auto"
+            : "ml-3 pl-3 border-l border-[#2A2C32]")
+        }>
+          <ViewStatePills viewState={viewState} />
           <button
             onClick={() => setChannelsOpen(true)}
             className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
@@ -482,18 +501,25 @@ export default function App() {
               </button>
             </>
           )}
-          <PlaybackControls emitter={emitter} ext={ext} playing={playing} onPlayingChange={setPlaying} />
-          <UpdatesPill
-            state={updater.state}
-            onClick={() => {
-              if (updater.state.kind === "up_to_date" || updater.state.kind === "offline") {
-                updater.recheck();
-              } else if (updater.state.kind === "available" || updater.state.kind === "downloading" || updater.state.kind === "installing") {
-                setUpdateModalOpen(true);
-              }
-            }}
-          />
-          <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
+          {/* Playback controls, updates pill, and cursor clock are view-mode
+              chrome — hidden in edit mode so the header stays focused on the
+              tile-editing actions. */}
+          {!editMode && (
+            <>
+              <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={setPlaying} />
+              <UpdatesPill
+                state={updater.state}
+                onClick={() => {
+                  if (updater.state.kind === "up_to_date" || updater.state.kind === "offline") {
+                    updater.recheck();
+                  } else if (updater.state.kind === "available" || updater.state.kind === "downloading" || updater.state.kind === "installing") {
+                    setUpdateModalOpen(true);
+                  }
+                }}
+              />
+              <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
+            </>
+          )}
         </div>
       </header>
 
@@ -513,6 +539,7 @@ export default function App() {
               primary={primary}
               visibleSessions={visibleSessions}
               cursorEmitter={emitter}
+              viewState={viewState}
               editMode={editMode}
               selected={editMode && spec.id === selectedTileId}
               onSelect={() => setSelectedTileId(spec.id)}
@@ -537,6 +564,7 @@ export default function App() {
         {" · "}primary: {primary.store.list().length} channels
         {" · "}range {(ext.endUs - ext.startUs) / 1_000_000}s
         {" · "}{workspace.tiles.length} tile{workspace.tiles.length === 1 ? "" : "s"}
+        {" · "}<FpsCounter />
         {editMode && <span className="ml-2 text-[#FFC627]">· editing</span>}
       </footer>
 
@@ -592,6 +620,79 @@ function CursorClock({ emitter }: { emitter: CursorEmitter }) {
   return <>{formatClock(t)}</>;
 }
 
+/** Subtle FPS / worst-frame readout for the footer. Counts frames over a
+ *  ~500 ms sliding window via rAF, color-shifts the number when things slow
+ *  down (≥55 fps inherits the muted footer color, 30–55 yellow, <30 red).
+ *  Style otherwise matches the surrounding footer text so it doesn't add
+ *  any visual weight when perf is fine. */
+function FpsCounter() {
+  const [stats, setStats] = useState({ fps: 0, ms: 0 });
+  useEffect(() => {
+    let rafId: number;
+    let frames = 0;
+    let windowStart = performance.now();
+    let lastFrame = windowStart;
+    let maxDt = 0;
+    const tick = (now: number) => {
+      frames += 1;
+      const dt = now - lastFrame;
+      if (dt > maxDt) maxDt = dt;
+      lastFrame = now;
+      const elapsed = now - windowStart;
+      if (elapsed >= 500) {
+        setStats({ fps: Math.round((frames * 1000) / elapsed), ms: Math.round(maxDt) });
+        frames = 0;
+        windowStart = now;
+        maxDt = 0;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+  // Only color when there's something to call out; otherwise inherit footer color.
+  const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-[#FFC627]" : "text-[#EF5350]";
+  return (
+    <span
+      className={`font-mono-num ${color}`}
+      title={`Worst frame in the last 500 ms took ${stats.ms} ms (${stats.fps} fps average)`}
+    >
+      {stats.fps}fps/{stats.ms}ms
+    </span>
+  );
+}
+
+/** Bright yellow header pills that surface the global view-state and let the
+ *  user reset it in one click. Only render when there's something to clear,
+ *  so the header stays uncluttered in the common case. */
+function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
+  const [state, setState] = useState(viewState.get());
+  useEffect(() => viewState.subscribe(setState), [viewState]);
+  if (!state.zoomRange && state.datums.length === 0) return null;
+  return (
+    <>
+      {state.zoomRange && (
+        <button
+          onClick={() => viewState.resetZoom()}
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          title="Reset zoom to the full session range (or double-click any chart)"
+        >
+          Reset zoom
+        </button>
+      )}
+      {state.datums.length > 0 && (
+        <button
+          onClick={() => viewState.clearDatums()}
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          title="Remove all datum markers"
+        >
+          Clear datums ({state.datums.length})
+        </button>
+      )}
+    </>
+  );
+}
+
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
 
 /** Drives the cursor emitter at wall-clock rate (modulated by `speed`) when
@@ -601,9 +702,10 @@ const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
  *  to the session start when the cursor passes the end so a casual press
  *  of play loops the lap rather than dead-stopping. */
 function PlaybackControls({
-  emitter, ext, playing, onPlayingChange,
+  emitter, viewState, ext, playing, onPlayingChange,
 }: {
   emitter: CursorEmitter;
+  viewState: ViewStateEmitter;
   ext: { startUs: number; endUs: number };
   playing: boolean;
   onPlayingChange: (p: boolean) => void;
@@ -611,9 +713,18 @@ function PlaybackControls({
   const setPlaying = onPlayingChange;
   const [speed, setSpeed] = useState<number>(1);
   // Live refs the rAF loop reads so we don't have to re-arm it whenever
-  // speed/extents change.
+  // speed/extents/view-state change.
   const speedRef = useRef(speed); speedRef.current = speed;
   const extRef = useRef(ext); extRef.current = ext;
+  const viewStateRef = useRef(viewState); viewStateRef.current = viewState;
+
+  // Effective playback bounds: zoom range when set, otherwise the full
+  // session extent. Centralized so playback start, wrap-on-end, and the
+  // out-of-bounds snap below all agree.
+  const effectiveBounds = (): { startUs: number; endUs: number } => {
+    const z = viewStateRef.current.get().zoomRange;
+    return z ?? extRef.current;
+  };
 
   useEffect(() => {
     if (!playing) return;
@@ -621,15 +732,18 @@ function PlaybackControls({
     let wallStartMs = performance.now();
     let cursorStartUs = emitter.get();
     let lastWrittenUs = cursorStartUs;
-    // If the cursor sits at (or past) the end when play is hit, restart from
-    // the beginning so a fresh press always plays the lap rather than no-op.
-    if (cursorStartUs >= extRef.current.endUs - 1000) {
-      cursorStartUs = extRef.current.startUs;
+    // If the cursor sits at (or past) the end of the effective range when
+    // play is hit, restart from the start so a fresh press always plays
+    // (whether that's the full lap or just the zoomed window).
+    const b0 = effectiveBounds();
+    if (cursorStartUs >= b0.endUs - 1000 || cursorStartUs < b0.startUs) {
+      cursorStartUs = b0.startUs;
       emitter.emit(cursorStartUs);
       lastWrittenUs = cursorStartUs;
     }
 
     const tick = () => {
+      const b = effectiveBounds();
       // External scrub since our last write? Anchor to the new spot.
       const currentUs = emitter.get();
       if (currentUs !== lastWrittenUs) {
@@ -643,8 +757,11 @@ function PlaybackControls({
       // see v2_changes/04. Without this round the strip chart cursor
       // moves but every gauge / GPS / numeric widget stays frozen.
       let next = Math.round(cursorStartUs + wallElapsedMs * 1000 * speedRef.current);
-      if (next >= extRef.current.endUs) {
-        next = extRef.current.startUs;
+      // Wrap on either end so a zoom that lands the cursor before its
+      // start (e.g. zoom set after a scrub) snaps back into the visible
+      // window on the next tick instead of grinding forward off-screen.
+      if (next >= b.endUs || next < b.startUs) {
+        next = b.startUs;
         wallStartMs = performance.now();
         cursorStartUs = next;
       }

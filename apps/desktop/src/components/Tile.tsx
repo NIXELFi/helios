@@ -5,7 +5,7 @@ import {
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
   type Widget, type OverlaySession,
 } from "@helios/widgets";
-import type { CursorEmitter } from "@helios/lib";
+import type { CursorEmitter, ViewStateEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
 import type { LoadedSession } from "../lib/session";
 import { snapTile, GRID_COLS, GRID_ROWS } from "../lib/grid";
@@ -30,6 +30,7 @@ interface Props {
   primary: LoadedSession;
   visibleSessions: LoadedSession[];
   cursorEmitter: CursorEmitter;
+  viewState: ViewStateEmitter;
   editMode: boolean;
   selected: boolean;
   onSelect?: () => void;
@@ -47,7 +48,7 @@ type DragState =
   | { kind: "resize"; dw: number; dh: number };
 
 export function Tile({
-  spec, primary, visibleSessions, cursorEmitter,
+  spec, primary, visibleSessions, cursorEmitter, viewState,
   editMode, selected, onSelect, onChange,
 }: Props) {
   const widget = widgets[spec.widgetType]!;
@@ -204,6 +205,7 @@ export function Tile({
           cursorEmitter={cursorEmitter}
           timeRange={{ startUs: primarySlice.range.startUs, endUs: primarySlice.range.endUs }}
           overlays={overlays}
+          viewState={viewState}
         />
         {editMode && (
           <>

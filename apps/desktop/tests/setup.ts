@@ -14,3 +14,14 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 }
 
 // crypto.randomUUID is available in modern jsdom; nothing to stub today.
+
+// jsdom does not implement ResizeObserver; stub a no-op so components that
+// observe element size in useEffect/useLayoutEffect don't blow up at render.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
+}

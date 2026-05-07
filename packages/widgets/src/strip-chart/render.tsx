@@ -91,8 +91,52 @@ function buildAlignedData(
   return { data: [x, ...ys], seriesMeta };
 }
 
+/** Render the datum vertical-lines as DOM children of `u.over`. Idempotent —
+ *  reuses existing elements where possible, removes excess on shrink, adds
+ *  new ones on grow. Each datum is a thin red-orange vertical line with a
+ *  small T+seconds label at the top so the user can always read off when
+ *  it was placed. */
+function drawDatums(u: uPlot, datums: number[]): void {
+  const over = u.over;
+  const existing = over.querySelectorAll<HTMLDivElement>(".helios-datum");
+  // Remove any extras when datums shrink.
+  for (let i = datums.length; i < existing.length; i++) existing[i]!.remove();
+  for (let i = 0; i < datums.length; i++) {
+    const tUs = datums[i]!;
+    const tS = tUs / 1_000_000;
+    const x = u.valToPos(tS, "x", false);
+    let el = existing[i] as HTMLDivElement | undefined;
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "helios-datum";
+      el.style.position = "absolute";
+      el.style.top = "0";
+      el.style.bottom = "0";
+      el.style.width = "1px";
+      el.style.background = "#FF6B4A";
+      el.style.pointerEvents = "none";
+      const label = document.createElement("div");
+      label.className = "helios-datum-label";
+      label.style.position = "absolute";
+      label.style.top = "2px";
+      label.style.left = "3px";
+      label.style.padding = "0 3px";
+      label.style.background = "#FF6B4A";
+      label.style.color = "#0E0E10";
+      label.style.font = "9px ui-monospace, monospace";
+      label.style.borderRadius = "2px";
+      label.style.whiteSpace = "nowrap";
+      el.appendChild(label);
+      over.appendChild(el);
+    }
+    el.style.left = `${x}px`;
+    const label = el.firstElementChild as HTMLDivElement;
+    label.textContent = formatElapsed(tS);
+  }
+}
+
 export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays, viewState } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
 
@@ -208,33 +252,105 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       const over = u.over;
       over.style.cursor = "crosshair";
 
-      let dragging = false;
-      const emitFromEvent = (e: PointerEvent) => {
+      // Apply current zoom range, if any, before painting the first frame.
+      const z0 = viewState?.get().zoomRange;
+      if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
+
+      // Pointer modes:
+      //   plain drag      → scrub cursor (existing behavior)
+      //   shift + click   → drop a datum at click X
+      //   shift + drag    → select an X range; release zooms all charts to it
+      //   double-click    → reset zoom to full extent
+      const ZOOM_DRAG_PX = 4;
+      type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
+      let mode: Mode = { kind: "none" };
+      let zoomBox: HTMLDivElement | null = null;
+
+      const xToTimeUs = (clientX: number): number => {
         const rect = over.getBoundingClientRect();
-        const localX = e.clientX - rect.left;
-        const tS = u.posToVal(localX, "x");
-        cursorEmitter.emit(Math.round(tS * 1_000_000));
+        const localX = clientX - rect.left;
+        const raw = Math.round(u.posToVal(localX, "x") * 1_000_000);
+        // Clamp to the effective range so a click that lands on the
+        // padding outside the data (or outside the zoom window) doesn't
+        // park the cursor in dead space. Zoom range wins when set;
+        // otherwise we use the underlying data extent.
+        const z = viewState?.get().zoomRange;
+        const lo = z ? z.startUs : timeRange.startUs;
+        const hi = z ? z.endUs : timeRange.endUs;
+        return Math.max(lo, Math.min(hi, raw));
       };
+      const localX = (clientX: number): number => clientX - over.getBoundingClientRect().left;
+
+      const ensureZoomBox = () => {
+        if (zoomBox) return zoomBox;
+        zoomBox = document.createElement("div");
+        zoomBox.className = "helios-zoom-box";
+        zoomBox.style.position = "absolute";
+        zoomBox.style.top = "0";
+        zoomBox.style.bottom = "0";
+        zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
+        zoomBox.style.borderLeft = "1px solid #FFC627";
+        zoomBox.style.borderRight = "1px solid #FFC627";
+        zoomBox.style.pointerEvents = "none";
+        over.appendChild(zoomBox);
+        return zoomBox;
+      };
+      const clearZoomBox = () => { zoomBox?.remove(); zoomBox = null; };
+
       const onDown = (e: PointerEvent) => {
         if (e.button !== 0) return;
-        dragging = true;
         over.setPointerCapture(e.pointerId);
-        emitFromEvent(e);
+        if (e.shiftKey && viewState) {
+          mode = { kind: "shift", startX: localX(e.clientX) };
+        } else {
+          mode = { kind: "scrub" };
+          cursorEmitter.emit(xToTimeUs(e.clientX));
+        }
       };
-      const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
+      const onMove = (e: PointerEvent) => {
+        if (mode.kind === "scrub") {
+          cursorEmitter.emit(xToTimeUs(e.clientX));
+        } else if (mode.kind === "shift") {
+          const x0 = mode.startX;
+          const x1 = localX(e.clientX);
+          if (Math.abs(x1 - x0) >= ZOOM_DRAG_PX) {
+            const box = ensureZoomBox();
+            box.style.left = `${Math.min(x0, x1)}px`;
+            box.style.width = `${Math.abs(x1 - x0)}px`;
+          }
+        }
+      };
       const onUp = (e: PointerEvent) => {
-        dragging = false;
         if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
+        if (mode.kind === "shift" && viewState) {
+          const x0 = mode.startX;
+          const x1 = localX(e.clientX);
+          clearZoomBox();
+          if (Math.abs(x1 - x0) < ZOOM_DRAG_PX) {
+            // Treated as a click: drop a datum at this X.
+            viewState.addDatum(xToTimeUs(e.clientX));
+          } else {
+            const a = u.posToVal(Math.min(x0, x1), "x") * 1_000_000;
+            const b = u.posToVal(Math.max(x0, x1), "x") * 1_000_000;
+            viewState.setZoom({ startUs: Math.round(a), endUs: Math.round(b) });
+          }
+        }
+        mode = { kind: "none" };
       };
+      const onDblClick = () => { viewState?.resetZoom(); };
+
       over.addEventListener("pointerdown", onDown);
       over.addEventListener("pointermove", onMove);
       over.addEventListener("pointerup", onUp);
       over.addEventListener("pointercancel", onUp);
+      over.addEventListener("dblclick", onDblClick);
       cleanupPointer = () => {
         over.removeEventListener("pointerdown", onDown);
         over.removeEventListener("pointermove", onMove);
         over.removeEventListener("pointerup", onUp);
         over.removeEventListener("pointercancel", onUp);
+        over.removeEventListener("dblclick", onDblClick);
+        clearZoomBox();
       };
     } catch (_e) {
       // jsdom canvas may not support 2d context; ignore in test environments
@@ -246,7 +362,42 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       plotRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slice, config, timeRange, cursorEmitter, JSON.stringify(visible.map((v) => v.id))]);
+  }, [slice, config, timeRange, cursorEmitter, viewState, JSON.stringify(visible.map((v) => v.id))]);
+
+  // Subscribe to view-state (zoom + datums). On each change: reapply zoom to
+  // uPlot's x-scale, then redraw datum lines. Datums are DOM divs in u.over,
+  // pinned at the X position of the datum's timestamp; reused across renders
+  // (we diff by index) so we don't thrash the DOM on cursor scrub.
+  useEffect(() => {
+    if (!viewState) return;
+    const apply = (state: { datums: number[]; zoomRange: { startUs: number; endUs: number } | null }) => {
+      const u = plotRef.current; if (!u) return;
+      // Zoom: setScale("x", ...) when zoomed; setScale to data extent when reset.
+      const z = state.zoomRange;
+      if (z) {
+        u.setScale("x", { min: z.startUs / 1_000_000, max: z.endUs / 1_000_000 });
+      } else {
+        const xs = u.data[0] as number[] | Float64Array;
+        if (xs.length > 0) {
+          u.setScale("x", { min: Number(xs[0]), max: Number(xs[xs.length - 1]) });
+        }
+      }
+      drawDatums(u, state.datums);
+    };
+    apply(viewState.get());
+    return viewState.subscribe(apply);
+  }, [viewState]);
+
+  // Also redraw datums when the cursor moves so they stay pinned even after
+  // a setScale (uPlot rescales the canvas; our DOM lines need a refresh).
+  useEffect(() => {
+    if (!viewState) return;
+    const off = cursorEmitter.subscribe(() => {
+      const u = plotRef.current; if (!u) return;
+      drawDatums(u, viewState.get().datums);
+    });
+    return off;
+  }, [cursorEmitter, viewState]);
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((tUs) => {
