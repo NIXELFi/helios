@@ -2,6 +2,18 @@ import { useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import wheelAssetUrl from "./assets/wheel.png";
+
+// Module-level singleton — every instance reuses the same decoded bitmap.
+const wheelImage: HTMLImageElement = new Image();
+let wheelImageReady = false;
+const wheelReadyListeners = new Set<() => void>();
+wheelImage.onload = () => {
+  wheelImageReady = true;
+  wheelReadyListeners.forEach((fn) => fn());
+  wheelReadyListeners.clear();
+};
+wheelImage.src = wheelAssetUrl;
 
 export interface SteeringWheelConfig {
   channelId: string;
@@ -31,6 +43,15 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
   }, [slice, config, cursorEmitter]);
 
   useEffect(() => { draw(); }, [config]);
+
+  // If the wheel asset is still decoding when this widget mounts, redraw once
+  // it's ready so the wheel actually appears (not just the readout).
+  useEffect(() => {
+    if (wheelImageReady) return;
+    const fn = () => draw();
+    wheelReadyListeners.add(fn);
+    return () => { wheelReadyListeners.delete(fn); };
+  }, []);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;
@@ -68,47 +89,17 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
     drawTickAt(-config.maxAngle, "#FFB800");             // left limit
     drawTickAt(config.maxAngle, "#FFB800");              // right limit
 
-    // The wheel itself, rotated by the steering input.
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(displayAngle * Math.PI / 180);
-
-    // Outer rim
-    ctx.strokeStyle = "#D8DCE2";
-    ctx.lineWidth = Math.max(2, r * 0.10);
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Three spokes — top (12 o'clock), bottom-left (8 o'clock), bottom-right (4 o'clock).
-    // Reads as a sport / FSAE wheel rather than a stock four-spoke.
-    const spokeAngles = [-Math.PI / 2, Math.PI - Math.PI / 6, Math.PI / 6];
-    ctx.lineCap = "round";
-    ctx.lineWidth = Math.max(2, r * 0.08);
-    for (const a of spokeAngles) {
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(a) * (r * 0.85), Math.sin(a) * (r * 0.85));
-      ctx.stroke();
+    // The wheel itself, rotated by the steering input. Drawn from a stylized
+    // PNG of the actual Helios wheel; sized so its bounding box matches the
+    // limit ring so the asset visually replaces the old vector rim+spokes.
+    if (wheelImageReady) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(displayAngle * Math.PI / 180);
+      const size = r * 2.2;
+      ctx.drawImage(wheelImage, -size / 2, -size / 2, size, size);
+      ctx.restore();
     }
-
-    // Hub
-    ctx.fillStyle = "#16171B";
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#D8DCE2";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Top mark on the rim — orientation cue so you can see the wheel rotate
-    // even when the angle is small.
-    ctx.fillStyle = "#FFC627";
-    ctx.beginPath();
-    ctx.arc(0, -r, Math.max(2, r * 0.08), 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
 
     // Numeric readout below the wheel.
     const overLimit = v !== null && Math.abs(displayAngle) > config.maxAngle;
