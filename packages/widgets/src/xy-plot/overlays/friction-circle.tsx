@@ -30,6 +30,10 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
     };
   },
   compute(groups, cfg) {
+    // Defensive default: configs saved before this schema (when the field
+    // was `radii: number[]`) won't have `percentiles`. Fall back to the
+    // factory default so they don't crash the whole app.
+    const requestedPercentiles = cfg.percentiles ?? [100, 99];
     // Pool magnitudes across every group. Filter / group-by / zoom were
     // already applied by the data pipeline, so this is exactly the set
     // of samples currently visible.
@@ -45,7 +49,7 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
       }
     }
     const rings: Ring[] = [];
-    for (const p of cfg.percentiles) {
+    for (const p of requestedPercentiles) {
       if (!Number.isFinite(p) || p < 0 || p > 100) continue;
       const radius = mags.length === 0 ? 0 : (p === 100 ? peak : percentile(mags, p));
       if (radius > 0) rings.push({ percentile: p, radius });
@@ -89,30 +93,34 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
     return [{ color: cfg.color, label: `friction circle (${summary})` }];
   },
   Editor: ({ config, onChange }) => {
+    // Defensive read: legacy configs (pre-percentile schema) won't have
+    // this field. Use the default so the editor renders something the
+    // user can interact with rather than crashing.
+    const percentiles = config.percentiles ?? [100, 99];
     const updatePercentile = (idx: number, val: number) => {
-      const next = [...config.percentiles];
+      const next = [...percentiles];
       next[idx] = val;
       onChange({ ...config, percentiles: next });
     };
     const removePercentile = (idx: number) => {
-      onChange({ ...config, percentiles: config.percentiles.filter((_, i) => i !== idx) });
+      onChange({ ...config, percentiles: percentiles.filter((_, i) => i !== idx) });
     };
     const addPercentile = () => {
-      const last = config.percentiles[config.percentiles.length - 1] ?? 100;
+      const last = percentiles[percentiles.length - 1] ?? 100;
       const next = Math.max(0, Math.min(100, last - 5));
-      onChange({ ...config, percentiles: [...config.percentiles, next] });
+      onChange({ ...config, percentiles: [...percentiles, next] });
     };
     return (
       <>
         <div className="flex flex-col gap-0.5">
           <span className="text-[#7B8088] text-[11px]">percentile rings (100 = peak)</span>
-          {config.percentiles.map((p, i) => (
+          {percentiles.map((p, i) => (
             <div key={i} className="flex items-center gap-1 text-[11px]">
               <input type="number" min={0} max={100} step={1} value={p}
                 onChange={(e) => updatePercentile(i, Number(e.target.value))}
                 className="w-20 bg-[#0E0E10] border border-[#2A2C32] px-1" />
               <button onClick={() => removePercentile(i)}
-                disabled={config.percentiles.length <= 1}
+                disabled={percentiles.length <= 1}
                 className="px-1 text-[#EF5350] disabled:opacity-30">✕</button>
             </div>
           ))}
