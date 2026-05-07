@@ -12,6 +12,7 @@ import "./overlays/formula";
 import "./overlays/bins";
 import "./overlays/stats";
 import "./overlays/quadrant-fit";
+import "./overlays/friction-circle";
 
 /* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
 export type { XyPlotConfig } from "./types";

@@ -30,13 +30,14 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
         ctx.fillRect(px - size / 2, py - size / 2, size, size);
       }
     } else {
-      // When no group-by is active every group has groupKey === ""; the
-      // scatter's configured color wins. When group-by IS active each group
-      // gets a palette-cycled color from the data pipeline; that wins instead
-      // so the eye can tell the groups apart.
-      const isGrouped = artifacts.groups.some((g) => g.groupKey !== "");
+      // Color rule: when there's exactly one group, the scatter overlay's
+      // own configured color wins (this is the "I just want everything
+      // yellow" case). When there's more than one group — whether from
+      // group-by OR multi-session overlay — each group's per-group color
+      // wins so you can tell them apart.
+      const useGroupColor = artifacts.groups.length > 1;
       for (const g of artifacts.groups) {
-        ctx.fillStyle = isGrouped ? g.color : cfg.color;
+        ctx.fillStyle = useGroupColor ? g.color : cfg.color;
         for (let i = 0; i < g.n; i++) {
           const x = g.xs[i]!, y = g.ys[i]!;
           if (!Number.isFinite(x) || !Number.isFinite(y)) continue;

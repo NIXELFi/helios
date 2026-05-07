@@ -35,12 +35,13 @@ export interface XyPlotConfig {
 /* ─── Overlay union ──────────────────────────────────────────────────── */
 
 export type Overlay =
-  | { id: string; kind: "scatter";       config: ScatterConfig }
-  | { id: string; kind: "fit";           config: FitConfig }
-  | { id: string; kind: "formula";       config: FormulaConfig }
-  | { id: string; kind: "bins";          config: BinsConfig }
-  | { id: string; kind: "stats";         config: StatsConfig }
-  | { id: string; kind: "quadrant-fit";  config: QuadrantFitConfig };
+  | { id: string; kind: "scatter";          config: ScatterConfig }
+  | { id: string; kind: "fit";              config: FitConfig }
+  | { id: string; kind: "formula";          config: FormulaConfig }
+  | { id: string; kind: "bins";             config: BinsConfig }
+  | { id: string; kind: "stats";            config: StatsConfig }
+  | { id: string; kind: "quadrant-fit";     config: QuadrantFitConfig }
+  | { id: string; kind: "friction-circle";  config: FrictionCircleConfig };
 
 export interface ScatterConfig {
   color: string;
@@ -103,6 +104,21 @@ export interface QuadrantFitConfig {
   lineWidth: number;
   showBand: boolean;
   showStatsOverlay: boolean;
+}
+
+export interface FrictionCircleConfig {
+  /** Radii in data-space units (for a g-g plot, these are g values).
+   *  Multiple radii draw concentric rings (e.g. [1, 1.5, 2]).
+   *  Drawn by sampling N points around the unit circle in data space and
+   *  projecting each — so on axes with mismatched scales the result is
+   *  the data-space ellipse, which is the geometrically meaningful
+   *  shape (constant magnitude in the underlying units). */
+  radii: number[];
+  color: string;
+  lineWidth: number;
+  dashed: boolean;
+  /** Render a small label next to each ring ("1.0", "1.5", …). */
+  showLabels: boolean;
 }
 
 /* ─── Pipeline + render contracts ────────────────────────────────────── */
