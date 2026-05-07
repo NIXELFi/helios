@@ -1,7 +1,10 @@
 import type { ChannelMeta, ChannelStore } from "@helios/store";
 import { parseExpr, evalAst, type Ast } from "@helios/lib";
+import type { LapSet } from "@helios/lib";
 import {
-  derivative, integral, shift, smooth, lowpass,
+  derivative, integral, shift, smooth, lowpass, highpass,
+  previousSample, timeValid, edgeDelay, rangeChange, flipFlop, statOver,
+  lapAggOp, type StatOp,
   VECTOR_OPS, LAP_OPS,
 } from "./vector-ops";
 
@@ -52,15 +55,20 @@ export interface ApplyResult {
 
 /** Compile every math channel and add it to the store as a real channel.
  *  Math channels are evaluated in declaration order, so a math channel may
- *  reference an earlier math channel if needed. */
+ *  reference an earlier math channel if needed.
+ *
+ *  When `laps` is provided, lap-aggregate functions (`lap_max`, etc.) become
+ *  available; otherwise they evaluate to NaN so the rest of the expression
+ *  can still parse/compile. */
 export function applyMathChannels(
   store: ChannelStore,
   channels: MathChannel[],
+  laps: LapSet | null = null,
 ): ApplyResult {
   const errors = new Map<string, string>();
   for (const mc of channels) {
     try {
-      compileAndApplyOne(store, mc);
+      compileAndApplyOne(store, mc, laps);
     } catch (e) {
       errors.set(mc.id, e instanceof Error ? e.message : String(e));
     }
@@ -79,9 +87,12 @@ interface PreprocessCtx {
    *  calls treat these as same-rate-group dependencies. */
   synthetics: Map<string, Float64Array>;
   synthCounter: { n: number };
+  /** Lap set for the session this expression is being applied to. Required
+   *  for `lap_*` ops; absent → those ops emit NaN. */
+  laps: LapSet | null;
 }
 
-function compileAndApplyOne(store: ChannelStore, mc: MathChannel): void {
+function compileAndApplyOne(store: ChannelStore, mc: MathChannel, laps: LapSet | null): void {
   const parsed = parseExpr(mc.expression);
   if (!parsed.ast) throw new Error(parsed.error ?? "parse error");
 
@@ -158,6 +169,7 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel): void {
     crossGroupCols,
     synthetics: new Map(),
     synthCounter: { n: 0 },
+    laps,
   };
   const ast = preprocessVectorOps(parsed.ast, ctx);
 
@@ -167,7 +179,7 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel): void {
 }
 
 /** Walk an AST and return a copy with every vector-op call replaced by an
- *  ident referencing a stashed synthetic Float64Array. Throws on `lap_*`. */
+ *  ident referencing a stashed synthetic Float64Array. */
 function preprocessVectorOps(ast: Ast, ctx: PreprocessCtx): Ast {
   switch (ast.kind) {
     case "num":
@@ -189,10 +201,7 @@ function preprocessVectorOps(ast: Ast, ctx: PreprocessCtx): Ast {
         else: preprocessVectorOps(ast.else, ctx),
       };
     case "call": {
-      if (LAP_OPS.has(ast.name)) {
-        throw new Error(`${ast.name}() needs lap detection, which is not implemented yet`);
-      }
-      if (VECTOR_OPS.has(ast.name)) {
+      if (LAP_OPS.has(ast.name) || VECTOR_OPS.has(ast.name)) {
         return computeVectorOp(ast, ctx);
       }
       return {
@@ -225,44 +234,113 @@ function evaluateVector(ast: Ast, ctx: PreprocessCtx): Float64Array {
   return out;
 }
 
+/** Evaluate an AST sub-expression to a Float64Array aligned to ctx.baseTime,
+ *  recursively pre-processing any nested vector ops. */
+function evalSubVector(arg: Ast, ctx: PreprocessCtx): Float64Array {
+  return evaluateVector(preprocessVectorOps(arg, ctx), ctx);
+}
+
 function computeVectorOp(call: Ast & { kind: "call" }, ctx: PreprocessCtx): Ast {
-  // First arg is the input expression; recursively preprocess so nested
-  // vector ops (e.g. `derivative(smooth(x, 5))`) are handled.
-  const inner = call.args[0];
-  if (!inner) throw new Error(`${call.name}() needs an argument`);
-  const innerProcessed = preprocessVectorOps(inner, ctx);
-  const innerValues = evaluateVector(innerProcessed, ctx);
+  const name = call.name;
+  if (LAP_OPS.has(name)) {
+    const inner = call.args[0];
+    if (!inner) throw new Error(`${name}() needs an argument`);
+    const innerValues = evalSubVector(inner, ctx);
+    const result = lapAggOp(
+      name as "lap_max" | "lap_min" | "lap_mean" | "lap_first" | "lap_last",
+      innerValues, ctx.baseTime, ctx.laps,
+    );
+    return stashSynthetic(result, ctx);
+  }
 
   let result: Float64Array;
-  switch (call.name) {
-    case "derivative":
-      result = derivative(innerValues, ctx.baseTime);
+  switch (name) {
+    case "derivative": {
+      result = derivative(evalSubVector(requireArg(call, 0), ctx), ctx.baseTime);
       break;
-    case "integral":
-      result = integral(innerValues, ctx.baseTime);
+    }
+    case "integral": {
+      result = integral(evalSubVector(requireArg(call, 0), ctx), ctx.baseTime);
       break;
+    }
     case "shift": {
       const dt = constNumberArg(call, 1, "dt_seconds");
-      result = shift(innerValues, ctx.baseTime, dt);
+      result = shift(evalSubVector(requireArg(call, 0), ctx), ctx.baseTime, dt);
       break;
     }
     case "smooth": {
       const win = constNumberArg(call, 1, "window_samples");
-      result = smooth(innerValues, win);
+      result = smooth(evalSubVector(requireArg(call, 0), ctx), win);
       break;
     }
     case "lowpass": {
       const fc = constNumberArg(call, 1, "fc_hz");
-      result = lowpass(innerValues, fc, ctx.baseRateHz);
+      result = lowpass(evalSubVector(requireArg(call, 0), ctx), fc, ctx.baseRateHz);
+      break;
+    }
+    case "highpass": {
+      const fc = constNumberArg(call, 1, "fc_hz");
+      result = highpass(evalSubVector(requireArg(call, 0), ctx), fc, ctx.baseRateHz);
+      break;
+    }
+    case "previous_sample": {
+      const def = call.args.length > 1 ? constNumberArg(call, 1, "default") : NaN;
+      result = previousSample(evalSubVector(requireArg(call, 0), ctx), def);
+      break;
+    }
+    case "time_valid": {
+      const hold = constNumberArg(call, 1, "hold_seconds");
+      result = timeValid(evalSubVector(requireArg(call, 0), ctx), ctx.baseTime, hold);
+      break;
+    }
+    case "edge_delay": {
+      const hold = constNumberArg(call, 1, "hold_seconds");
+      result = edgeDelay(evalSubVector(requireArg(call, 0), ctx), ctx.baseTime, hold, 0);
+      break;
+    }
+    case "range_change": {
+      result = rangeChange(evalSubVector(requireArg(call, 0), ctx));
+      break;
+    }
+    case "flip_flop": {
+      const setC = evalSubVector(requireArg(call, 0), ctx);
+      const resetC = evalSubVector(requireArg(call, 1), ctx);
+      result = flipFlop(setC, resetC);
+      break;
+    }
+    case "stat_min":
+    case "stat_max":
+    case "stat_mean":
+    case "stat_std_dev":
+    case "stat_start":
+    case "stat_end": {
+      const values = evalSubVector(requireArg(call, 0), ctx);
+      const cond = evalSubVector(requireArg(call, 1), ctx);
+      result = statOver(name as StatOp, values, cond, ctx.baseTime);
+      break;
+    }
+    case "integrate_over": {
+      const values = evalSubVector(requireArg(call, 0), ctx);
+      const cond = evalSubVector(requireArg(call, 1), ctx);
+      result = statOver("integrate", values, cond, ctx.baseTime);
       break;
     }
     default:
-      throw new Error(`vector op ${call.name}() not implemented`);
+      throw new Error(`vector op ${name}() not implemented`);
   }
+  return stashSynthetic(result, ctx);
+}
 
+function stashSynthetic(values: Float64Array, ctx: PreprocessCtx): Ast {
   const name = `__v${ctx.synthCounter.n++}`;
-  ctx.synthetics.set(name, result);
+  ctx.synthetics.set(name, values);
   return { kind: "ident", name };
+}
+
+function requireArg(call: Ast & { kind: "call" }, index: number): Ast {
+  const a = call.args[index];
+  if (!a) throw new Error(`${call.name}() needs argument ${index + 1}`);
+  return a;
 }
 
 /** Evaluate a single AST argument as a constant number. The arg must not

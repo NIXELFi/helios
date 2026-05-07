@@ -2,6 +2,7 @@ import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
+  channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
   type Widget,
 } from "@helios/widgets";
 import type { ChannelMeta } from "@helios/store";
@@ -20,6 +21,10 @@ const editors: Record<WidgetType, Widget<unknown>> = {
   histogram:       histogramWidget      as unknown as Widget<unknown>,
   xy_plot:         xyPlotWidget         as unknown as Widget<unknown>,
   steering_wheel:  steeringWheelWidget  as unknown as Widget<unknown>,
+  channel_report:  channelReportWidget  as unknown as Widget<unknown>,
+  time_report:     timeReportWidget     as unknown as Widget<unknown>,
+  zone_stats:      zoneStatsWidget      as unknown as Widget<unknown>,
+  fft:             fftWidget            as unknown as Widget<unknown>,
 };
 
 const WIDGET_LABELS: Record<WidgetType, string> = {
@@ -35,6 +40,10 @@ const WIDGET_LABELS: Record<WidgetType, string> = {
   histogram:       "Histogram",
   xy_plot:         "XY Plot",
   steering_wheel:  "Steering Wheel",
+  channel_report:  "Channel Report",
+  time_report:     "Time Report",
+  zone_stats:      "Zone Stats",
+  fft:             "FFT / Spectrum",
 };
 
 const WIDGET_TYPES = Object.keys(editors) as WidgetType[];

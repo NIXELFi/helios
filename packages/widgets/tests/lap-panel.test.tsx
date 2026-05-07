@@ -4,17 +4,20 @@ import { lapPanelWidget } from "../src/lap-panel";
 import { CursorEmitter } from "@helios/lib";
 
 describe("LapPanel", () => {
-  it("shows 'no laps detected' when empty", () => {
+  it("shows the empty-state hint when no laps are present", () => {
     render(<lapPanelWidget.Render
       config={{ laps: [] }}
       slice={{ time: new BigInt64Array(0), data: new Map(), range: { startUs: 0, endUs: 0 } }}
       cursorEmitter={new CursorEmitter()}
       timeRange={{ startUs: 0, endUs: 0 }}
     />);
-    expect(screen.getByText("no laps detected")).toBeDefined();
+    // The exact text changed when we added live detection, but the hint is
+    // still anchored on "no laps detected" — match a substring rather than
+    // pinning to the wording.
+    expect(screen.getByText(/no laps detected/i)).toBeDefined();
   });
 
-  it("renders laps and highlights the fastest", () => {
+  it("renders legacy static laps and highlights the fastest", () => {
     render(<lapPanelWidget.Render
       config={{ laps: [
         { number: 1, time_ms: 75432 },

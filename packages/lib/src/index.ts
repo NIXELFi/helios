@@ -4,3 +4,6 @@ export * from "./math-expr";
 export * from "./view-state";
 export * from "./regression";
 export * from "./statistics";
+export * from "./laps";
+export * from "./fft";
+export * from "./gps-picker";

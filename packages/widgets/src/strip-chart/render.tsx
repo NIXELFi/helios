@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import uPlot, { type AlignedData, type Axis, type Options, type Scales, type Series } from "uplot";
 import "uplot/dist/uPlot.min.css";
+import type { LapRef, LapSelection } from "@helios/lib";
+import { perSampleLapDistance, speedToMs } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -21,6 +23,11 @@ export interface StripChartConfig {
    *  for backward compatibility with single-scale charts. */
   yMin: number;
   yMax: number;
+  /** X axis basis. 'time' is elapsed seconds since session start (the v1
+   *  default). 'distance' projects onto per-lap distance in meters and
+   *  renders only the laps in the global Main/Ref/Overlays selection.
+   *  i2's F9 toggle lives here. Defaults to 'time'. */
+  xMode?: "time" | "distance";
 }
 
 const DASH_PATTERNS: number[][] = [
@@ -31,9 +38,6 @@ function rangeFor(c: StripChartChannel, fallback: StripChartConfig): [number, nu
   return [c.yMin ?? fallback.yMin, c.yMax ?? fallback.yMax];
 }
 
-/** Format an elapsed-seconds value as the time labels you'd expect on a
- *  motorsport chart: short laps stay sub-second precise, multi-minute
- *  stints fall back to M:SS. uPlot calls this for every tick. */
 function formatElapsed(v: number): string {
   if (!Number.isFinite(v)) return "";
   const sign = v < 0 ? "-" : "";
@@ -41,22 +45,25 @@ function formatElapsed(v: number): string {
   const min = Math.floor(abs / 60);
   const sec = abs - min * 60;
   if (min === 0) {
-    // Sub-minute — show seconds with one decimal at the start, plain int
-    // once we're past the first few seconds.
     if (abs < 10) return `${sign}${sec.toFixed(1)}`;
     return `${sign}${Math.round(sec)}`;
   }
   return `${sign}${min}:${Math.round(sec).toString().padStart(2, "0")}`;
 }
 
-/** Build a uPlot AlignedData payload covering every visible session.
- *  X = sorted union of all session timestamps (in seconds).
- *  Each series is one (session × channel) pair, NaN where the session lacks
- *  a sample at that X. Returns metadata so the caller can label each series. */
-function buildAlignedData(
+function formatDistance(v: number): string {
+  if (!Number.isFinite(v)) return "";
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(2)} km`;
+  return `${v.toFixed(0)} m`;
+}
+
+/** Build aligned data for time-mode rendering — one X is the union of every
+ *  visible session's timestamps in seconds, each Y is one (session × channel)
+ *  pair, NaN-padded where the session has no sample at that X. */
+function buildTimeData(
   overlays: OverlaySession[],
   channels: StripChartChannel[],
-): { data: AlignedData; seriesMeta: Array<{ session: OverlaySession; channelIndex: number }> } {
+): { data: AlignedData; seriesMeta: Array<{ session: OverlaySession; channelIndex: number; lapIndex?: number }> } {
   if (overlays.length === 0) {
     return { data: [new Float64Array(0)], seriesMeta: [] };
   }
@@ -68,14 +75,12 @@ function buildAlignedData(
   const x = Float64Array.from([...xSet].sort((a, b) => a - b));
   const xIndex = new Map<number, number>();
   for (let i = 0; i < x.length; i++) xIndex.set(x[i]!, i);
-
   const ys: Float64Array[] = [];
   const seriesMeta: Array<{ session: OverlaySession; channelIndex: number }> = [];
   for (const session of overlays) {
     for (let ci = 0; ci < channels.length; ci++) {
       const arr = session.slice.data.get(channels[ci]!.id);
-      const y = new Float64Array(x.length);
-      y.fill(NaN);
+      const y = new Float64Array(x.length); y.fill(NaN);
       if (arr) {
         const t = session.slice.time;
         for (let i = 0; i < t.length; i++) {
@@ -91,15 +96,112 @@ function buildAlignedData(
   return { data: [x, ...ys], seriesMeta };
 }
 
-/** Render the datum vertical-lines as DOM children of `u.over`. Idempotent —
- *  reuses existing elements where possible, removes excess on shrink, adds
- *  new ones on grow. Each datum is a thin red-orange vertical line with a
- *  small T+seconds label at the top so the user can always read off when
- *  it was placed. */
+/** Build aligned data for distance-mode rendering. For each lap selected via
+ *  the global Main/Ref/Overlays state, compute a per-sample distance trace
+ *  (resets to 0 at the lap boundary), then per channel emit one series with
+ *  X = distance, Y = sample value. Falls back to the primary session's best
+ *  lap when no selection is set. */
+function buildDistanceData(
+  overlays: OverlaySession[],
+  channels: StripChartChannel[],
+  selection: LapSelection | undefined,
+  speedChannelByOverlay: Map<string, { values: Float64Array; unit: string } | null>,
+): { data: AlignedData; seriesMeta: Array<{ session: OverlaySession; channelIndex: number; lapIndex: number; role: "main" | "ref" | "overlay" }>; emptyReason?: string } {
+  // Resolve which (session, lap) to render. Each entry produces one set of
+  // series — one per channel.
+  type Entry = { session: OverlaySession; lapIdx: number; role: "main" | "ref" | "overlay" };
+  const entries: Entry[] = [];
+  const seenKey = new Set<string>();
+  function addEntry(role: "main" | "ref" | "overlay", ref: LapRef | null) {
+    if (!ref) return;
+    const session = overlays.find((o) => o.id === ref.sessionId);
+    if (!session || !session.laps) return;
+    const lap = session.laps.laps[ref.lapIndex];
+    if (!lap) return;
+    const k = `${ref.sessionId}|${ref.lapIndex}`;
+    if (seenKey.has(k)) return;
+    seenKey.add(k);
+    entries.push({ session, lapIdx: ref.lapIndex, role });
+  }
+  if (selection) {
+    addEntry("main", selection.main);
+    addEntry("ref", selection.ref);
+    for (const r of selection.overlays) addEntry("overlay", r);
+  }
+  // Fallback: primary's best lap.
+  if (entries.length === 0) {
+    const primary = overlays.find((o) => o.isPrimary);
+    if (primary && primary.laps && primary.laps.bestLapIndex >= 0) {
+      addEntry("main", { sessionId: primary.id, lapIndex: primary.laps.bestLapIndex });
+    }
+  }
+  if (entries.length === 0) {
+    return { data: [new Float64Array(0)], seriesMeta: [],
+             emptyReason: "no laps detected — configure detection in the Sessions panel, or pick a lap in the Lap Panel" };
+  }
+
+  // Compute per-entry distance arrays (one per entry, length = lap sample count).
+  const perEntry: Array<{ entry: Entry; dist: Float64Array; firstSampleIdx: number; lapEndIdx: number }> = [];
+  for (const e of entries) {
+    const session = e.session;
+    const speedInfo = speedChannelByOverlay.get(session.id);
+    if (!speedInfo) continue;
+    const lap = session.laps!.laps[e.lapIdx]!;
+    // perSampleLapDistance returns NaN outside laps, 0 at lap start, accumulating.
+    // Call it on the slice's time + speed since that's what the strip-chart
+    // already has on hand.
+    const dist = perSampleLapDistance(speedInfo.values, speedInfo.unit, session.slice.time, session.laps!);
+    // Find lap-relative index range within the slice's time array.
+    const t = session.slice.time;
+    let i0 = 0, i1 = t.length;
+    while (i0 < i1 && Number(t[i0]!) < lap.startUs) i0++;
+    let j = i0;
+    while (j < i1 && Number(t[j]!) <= lap.endUs) j++;
+    if (j - i0 < 2) continue;
+    perEntry.push({ entry: e, dist, firstSampleIdx: i0, lapEndIdx: j });
+  }
+  if (perEntry.length === 0) {
+    return { data: [new Float64Array(0)], seriesMeta: [],
+             emptyReason: "selected laps don't have a usable speed channel — set one in Lap Config" };
+  }
+
+  // Union of all distances within the selected laps.
+  const xSet = new Set<number>();
+  for (const pe of perEntry) {
+    for (let i = pe.firstSampleIdx; i < pe.lapEndIdx; i++) {
+      const d = pe.dist[i]!;
+      if (Number.isFinite(d)) xSet.add(d);
+    }
+  }
+  const x = Float64Array.from([...xSet].sort((a, b) => a - b));
+  const xIndex = new Map<number, number>();
+  for (let i = 0; i < x.length; i++) xIndex.set(x[i]!, i);
+
+  const ys: Float64Array[] = [];
+  const seriesMeta: Array<{ session: OverlaySession; channelIndex: number; lapIndex: number; role: "main" | "ref" | "overlay" }> = [];
+  for (const pe of perEntry) {
+    for (let ci = 0; ci < channels.length; ci++) {
+      const arr = pe.entry.session.slice.data.get(channels[ci]!.id);
+      const y = new Float64Array(x.length); y.fill(NaN);
+      if (arr) {
+        for (let i = pe.firstSampleIdx; i < pe.lapEndIdx; i++) {
+          const d = pe.dist[i]!;
+          if (!Number.isFinite(d)) continue;
+          const idx = xIndex.get(d);
+          if (idx !== undefined) y[idx] = arr[i]!;
+        }
+      }
+      ys.push(y);
+      seriesMeta.push({ session: pe.entry.session, channelIndex: ci, lapIndex: pe.entry.lapIdx, role: pe.entry.role });
+    }
+  }
+  return { data: [x, ...ys], seriesMeta };
+}
+
+/** Render the datum vertical-lines as DOM children of `u.over`. */
 function drawDatums(u: uPlot, datums: number[]): void {
   const over = u.over;
   const existing = over.querySelectorAll<HTMLDivElement>(".helios-datum");
-  // Remove any extras when datums shrink.
   for (let i = datums.length; i < existing.length; i++) existing[i]!.remove();
   for (let i = 0; i < datums.length; i++) {
     const tUs = datums[i]!;
@@ -136,43 +238,64 @@ function drawDatums(u: uPlot, datums: number[]): void {
 }
 
 export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays, viewState } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
 
-  // Fall back to a synthetic single-overlay representation if no overlays were
-  // supplied (e.g. tests that pre-date the multi-session API).
   const visible: OverlaySession[] = overlays && overlays.length > 0
     ? overlays
     : [{ id: "primary", label: "primary", color: "#FFC627", slice, range: timeRange, isPrimary: true }];
   const isMulti = visible.length > 1;
+  const xMode = config.xMode ?? "time";
+  // Live-mirror lap selection so distance mode rebuilds when the user picks a
+  // different Main/Ref via the lap panel.
+  const [liveSelection, setLiveSelection] = useState<LapSelection | undefined>(lapSelection);
+  useEffect(() => {
+    if (!lapSelectionEmitter) return;
+    return lapSelectionEmitter.subscribe((s) => setLiveSelection(s));
+  }, [lapSelectionEmitter]);
+  // For distance mode, look up speed channels per session via lap config or
+  // gps.speed fallback. Captured here so buildDistanceData stays pure.
+  const speedByOverlay = useMemo(() => {
+    const m = new Map<string, { values: Float64Array; unit: string } | null>();
+    if (xMode !== "distance") return m;
+    for (const o of visible) {
+      const candidates = ["gps.speed", "vehicle.speed"];
+      let resolved: { values: Float64Array; unit: string } | null = null;
+      for (const id of candidates) {
+        const v = o.slice.data.get(id);
+        if (!v) continue;
+        // Take the unit hint from "the system" — gps.speed is m/s in MoTeC and
+        // most ECU exports. speedToMs is tolerant of unknown units.
+        resolved = { values: v, unit: id === "gps.speed" ? "m/s" : "km/h" };
+        break;
+      }
+      m.set(o.id, resolved);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xMode, JSON.stringify(visible.map((v) => v.id)), slice]);
+  void speedToMs;  // keep import alive — used at the lib boundary
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const { data, seriesMeta } = buildAlignedData(visible, config.channels);
+    let buildResult: ReturnType<typeof buildTimeData> | (ReturnType<typeof buildDistanceData> & { emptyReason?: string });
+    if (xMode === "distance") {
+      buildResult = buildDistanceData(visible, config.channels, liveSelection, speedByOverlay);
+    } else {
+      buildResult = buildTimeData(visible, config.channels);
+    }
+    const { data, seriesMeta } = buildResult as { data: AlignedData; seriesMeta: Array<{ session: OverlaySession; channelIndex: number; lapIndex?: number; role?: "main" | "ref" | "overlay" }> };
+    const emptyReason = (buildResult as { emptyReason?: string }).emptyReason;
 
-    // Group channels by their resolved Y range so channels that share a
-    // range share an axis. Without this, four shock channels at the same
-    // ±25 mm range would each get their own axis and the outer axes
-    // would clip at the tile edge. The first distinct range goes on the
-    // left, the second on the right; channels beyond that share the
-    // closest-matching existing axis (no third side, no triple-stacked
-    // axes that overflow the tile).
-    // X is elapsed time-in-seconds, NOT Unix epoch. Without this uPlot would
-    // format ticks as wall-clock dates (e.g. "12/31/69 5pm" for a value of 0
-    // in the local timezone). time: false flips it to a plain numeric scale,
-    // and the axis values formatter below renders M:SS / SS.s / etc.
     const scales: Scales = { x: { time: false } };
     const axes: Axis[] = [{
       stroke: "#5A5F66",
       grid: { stroke: "#23252B" },
-      values: (_u, splits) => splits.map(formatElapsed),
-      // Time axis at the bottom needs enough vertical room for the labels.
+      values: (_u, splits) => splits.map(xMode === "distance" ? formatDistance : formatElapsed),
       size: 30,
     }];
-    /** scaleId per channel index, threaded into series below */
     const channelScale: string[] = [];
-    /** ordered list of unique [lo, hi, scaleId, color, side] */
     const groups: Array<{ lo: number; hi: number; id: string; color: string; side: 1 | 3 }> = [];
     for (let ci = 0; ci < config.channels.length; ci++) {
       const ch = config.channels[ci]!;
@@ -181,10 +304,6 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       if (!group) {
         const id = `s${groups.length}`;
         const side: 1 | 3 = groups.length === 0 ? 3 : 1;
-        // First two distinct ranges get their own axis; further distinct
-        // ranges share the closer side's axis (range will be wrong but
-        // the trace still draws — the legend tells the user the actual
-        // channel range so this degradation is acceptable).
         group = { lo, hi, id, color: ch.color, side };
         groups.push(group);
         if (groups.length <= 2) {
@@ -193,15 +312,10 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             scale: id,
             side,
             stroke: ch.color,
-            // Only the left axis paints grid lines so the background
-            // stays clean when ranges differ.
             grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
-            // 60 px gives 5-digit labels like "15,000" room to breathe;
-            // 40 was clipping the leading comma on RPM-scale charts.
             size: 60,
           });
         } else {
-          // Fall back to the first group's scale.
           group.id = groups[0]!.id;
         }
       }
@@ -211,20 +325,31 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     const series: Series[] = [
       {},
       ...seriesMeta.map((meta): Series => {
-        // Single session: keep configured channel colors so multi-channel
-        // charts (e.g. RPM + throttle) stay visually distinct.
-        // Multiple sessions: use the session color so the overlay reads as
-        // "lap A vs lap B"; channels within a session are separated by dash.
-        const stroke = isMulti ? meta.session.color : config.channels[meta.channelIndex]!.color;
-        const dash = isMulti && config.channels.length > 1
-          ? DASH_PATTERNS[meta.channelIndex % DASH_PATTERNS.length]!
-          : [];
+        const ch = config.channels[meta.channelIndex]!;
+        let stroke = ch.color;
+        let dashIdx = 0;
+        if (xMode === "distance") {
+          // Distance mode: color encodes the LAP role (Main = brand yellow,
+          // Ref = cyan, Overlays = green) so the user can read the comparison
+          // at a glance. Channels within a lap are differentiated by their
+          // configured color.
+          if (meta.role === "ref") { stroke = "#4FC3F7"; dashIdx = 1; }
+          else if (meta.role === "overlay") { stroke = "#9CCC65"; dashIdx = 2; }
+          else { stroke = ch.color; dashIdx = 0; }
+        } else {
+          // Time mode (existing behavior):
+          // Single session → keep configured channel colors so multi-channel
+          // charts (RPM + throttle) stay visually distinct.
+          // Multi-session → session color, dash by channel index.
+          stroke = isMulti ? meta.session.color : ch.color;
+          dashIdx = isMulti && config.channels.length > 1 ? meta.channelIndex : 0;
+        }
+        const dash = DASH_PATTERNS[dashIdx % DASH_PATTERNS.length]!;
         return {
           stroke,
           width: 1,
           dash: dash.length ? dash : undefined,
           scale: channelScale[meta.channelIndex] ?? "s0",
-          // Disable point markers; we draw our own cursor line instead.
           points: { show: false },
         };
       }),
@@ -234,9 +359,6 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       width: containerRef.current.clientWidth || 600,
       height: containerRef.current.clientHeight || 200,
       pxAlign: 0,
-      // uPlot's default legend renders an HTML table below the canvas which
-      // gets clipped by neighboring tiles. Disable it; we draw our own
-      // overlay legend in the React tree (see JSX below).
       legend: { show: false },
       cursor: { show: false, drag: { x: false, y: false }, sync: undefined, points: { show: false } },
       scales,
@@ -250,110 +372,123 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       plotRef.current = new uPlot(opts, data, containerRef.current);
       const u = plotRef.current;
       const over = u.over;
-      over.style.cursor = "crosshair";
+      over.style.cursor = xMode === "distance" ? "default" : "crosshair";
 
-      // Apply current zoom range, if any, before painting the first frame.
-      const z0 = viewState?.get().zoomRange;
-      if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
+      if (xMode === "time") {
+        const z0 = viewState?.get().zoomRange;
+        if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
 
-      // Pointer modes:
-      //   plain drag      → scrub cursor (existing behavior)
-      //   shift + click   → drop a datum at click X
-      //   shift + drag    → select an X range; release zooms all charts to it
-      //   double-click    → reset zoom to full extent
-      const ZOOM_DRAG_PX = 4;
-      type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
-      let mode: Mode = { kind: "none" };
-      let zoomBox: HTMLDivElement | null = null;
+        // Pointer modes (time mode only):
+        //   plain drag      → scrub cursor
+        //   shift + click   → drop a datum
+        //   shift + drag    → zoom range
+        //   double-click    → reset zoom
+        // Distance mode is read-only — interaction would have to translate
+        // back through the lap-distance mapping which depends on which lap
+        // a sample belongs to; not handled in this iteration.
+        const ZOOM_DRAG_PX = 4;
+        type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
+        let mode: Mode = { kind: "none" };
+        let zoomBox: HTMLDivElement | null = null;
 
-      const xToTimeUs = (clientX: number): number => {
-        const rect = over.getBoundingClientRect();
-        const localX = clientX - rect.left;
-        const raw = Math.round(u.posToVal(localX, "x") * 1_000_000);
-        // Clamp to the effective range so a click that lands on the
-        // padding outside the data (or outside the zoom window) doesn't
-        // park the cursor in dead space. Zoom range wins when set;
-        // otherwise we use the underlying data extent.
-        const z = viewState?.get().zoomRange;
-        const lo = z ? z.startUs : timeRange.startUs;
-        const hi = z ? z.endUs : timeRange.endUs;
-        return Math.max(lo, Math.min(hi, raw));
-      };
-      const localX = (clientX: number): number => clientX - over.getBoundingClientRect().left;
+        const xToTimeUs = (clientX: number): number => {
+          const rect = over.getBoundingClientRect();
+          const localX = clientX - rect.left;
+          const raw = Math.round(u.posToVal(localX, "x") * 1_000_000);
+          const z = viewState?.get().zoomRange;
+          const lo = z ? z.startUs : timeRange.startUs;
+          const hi = z ? z.endUs : timeRange.endUs;
+          return Math.max(lo, Math.min(hi, raw));
+        };
+        const localX = (clientX: number): number => clientX - over.getBoundingClientRect().left;
 
-      const ensureZoomBox = () => {
-        if (zoomBox) return zoomBox;
-        zoomBox = document.createElement("div");
-        zoomBox.className = "helios-zoom-box";
-        zoomBox.style.position = "absolute";
-        zoomBox.style.top = "0";
-        zoomBox.style.bottom = "0";
-        zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
-        zoomBox.style.borderLeft = "1px solid #FFC627";
-        zoomBox.style.borderRight = "1px solid #FFC627";
-        zoomBox.style.pointerEvents = "none";
-        over.appendChild(zoomBox);
-        return zoomBox;
-      };
-      const clearZoomBox = () => { zoomBox?.remove(); zoomBox = null; };
+        const ensureZoomBox = () => {
+          if (zoomBox) return zoomBox;
+          zoomBox = document.createElement("div");
+          zoomBox.className = "helios-zoom-box";
+          zoomBox.style.position = "absolute";
+          zoomBox.style.top = "0";
+          zoomBox.style.bottom = "0";
+          zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
+          zoomBox.style.borderLeft = "1px solid #FFC627";
+          zoomBox.style.borderRight = "1px solid #FFC627";
+          zoomBox.style.pointerEvents = "none";
+          over.appendChild(zoomBox);
+          return zoomBox;
+        };
+        const clearZoomBox = () => { zoomBox?.remove(); zoomBox = null; };
 
-      const onDown = (e: PointerEvent) => {
-        if (e.button !== 0) return;
-        over.setPointerCapture(e.pointerId);
-        if (e.shiftKey && viewState) {
-          mode = { kind: "shift", startX: localX(e.clientX) };
-        } else {
-          mode = { kind: "scrub" };
-          cursorEmitter.emit(xToTimeUs(e.clientX));
-        }
-      };
-      const onMove = (e: PointerEvent) => {
-        if (mode.kind === "scrub") {
-          cursorEmitter.emit(xToTimeUs(e.clientX));
-        } else if (mode.kind === "shift") {
-          const x0 = mode.startX;
-          const x1 = localX(e.clientX);
-          if (Math.abs(x1 - x0) >= ZOOM_DRAG_PX) {
-            const box = ensureZoomBox();
-            box.style.left = `${Math.min(x0, x1)}px`;
-            box.style.width = `${Math.abs(x1 - x0)}px`;
-          }
-        }
-      };
-      const onUp = (e: PointerEvent) => {
-        if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
-        if (mode.kind === "shift" && viewState) {
-          const x0 = mode.startX;
-          const x1 = localX(e.clientX);
-          clearZoomBox();
-          if (Math.abs(x1 - x0) < ZOOM_DRAG_PX) {
-            // Treated as a click: drop a datum at this X.
-            viewState.addDatum(xToTimeUs(e.clientX));
+        const onDown = (e: PointerEvent) => {
+          if (e.button !== 0) return;
+          over.setPointerCapture(e.pointerId);
+          if (e.shiftKey && viewState) {
+            mode = { kind: "shift", startX: localX(e.clientX) };
           } else {
-            const a = u.posToVal(Math.min(x0, x1), "x") * 1_000_000;
-            const b = u.posToVal(Math.max(x0, x1), "x") * 1_000_000;
-            viewState.setZoom({ startUs: Math.round(a), endUs: Math.round(b) });
+            mode = { kind: "scrub" };
+            cursorEmitter.emit(xToTimeUs(e.clientX));
           }
-        }
-        mode = { kind: "none" };
-      };
-      const onDblClick = () => { viewState?.resetZoom(); };
+        };
+        const onMove = (e: PointerEvent) => {
+          if (mode.kind === "scrub") {
+            cursorEmitter.emit(xToTimeUs(e.clientX));
+          } else if (mode.kind === "shift") {
+            const x0 = mode.startX;
+            const x1 = localX(e.clientX);
+            if (Math.abs(x1 - x0) >= ZOOM_DRAG_PX) {
+              const box = ensureZoomBox();
+              box.style.left = `${Math.min(x0, x1)}px`;
+              box.style.width = `${Math.abs(x1 - x0)}px`;
+            }
+          }
+        };
+        const onUp = (e: PointerEvent) => {
+          if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
+          if (mode.kind === "shift" && viewState) {
+            const x0 = mode.startX;
+            const x1 = localX(e.clientX);
+            clearZoomBox();
+            if (Math.abs(x1 - x0) < ZOOM_DRAG_PX) {
+              viewState.addDatum(xToTimeUs(e.clientX));
+            } else {
+              const a = u.posToVal(Math.min(x0, x1), "x") * 1_000_000;
+              const b = u.posToVal(Math.max(x0, x1), "x") * 1_000_000;
+              viewState.setZoom({ startUs: Math.round(a), endUs: Math.round(b) });
+            }
+          }
+          mode = { kind: "none" };
+        };
+        const onDblClick = () => { viewState?.resetZoom(); };
 
-      over.addEventListener("pointerdown", onDown);
-      over.addEventListener("pointermove", onMove);
-      over.addEventListener("pointerup", onUp);
-      over.addEventListener("pointercancel", onUp);
-      over.addEventListener("dblclick", onDblClick);
-      cleanupPointer = () => {
-        over.removeEventListener("pointerdown", onDown);
-        over.removeEventListener("pointermove", onMove);
-        over.removeEventListener("pointerup", onUp);
-        over.removeEventListener("pointercancel", onUp);
-        over.removeEventListener("dblclick", onDblClick);
-        clearZoomBox();
-      };
+        over.addEventListener("pointerdown", onDown);
+        over.addEventListener("pointermove", onMove);
+        over.addEventListener("pointerup", onUp);
+        over.addEventListener("pointercancel", onUp);
+        over.addEventListener("dblclick", onDblClick);
+        cleanupPointer = () => {
+          over.removeEventListener("pointerdown", onDown);
+          over.removeEventListener("pointermove", onMove);
+          over.removeEventListener("pointerup", onUp);
+          over.removeEventListener("pointercancel", onUp);
+          over.removeEventListener("dblclick", onDblClick);
+          clearZoomBox();
+        };
+      }
     } catch (_e) {
       // jsdom canvas may not support 2d context; ignore in test environments
+    }
+
+    // Empty-state overlay for distance mode when nothing renderable.
+    if (emptyReason) {
+      const note = document.createElement("div");
+      note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4 pointer-events-none";
+      note.textContent = emptyReason;
+      containerRef.current!.appendChild(note);
+      return () => {
+        cleanupPointer?.();
+        plotRef.current?.destroy();
+        plotRef.current = null;
+        note.remove();
+      };
     }
 
     return () => {
@@ -362,17 +497,15 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       plotRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slice, config, timeRange, cursorEmitter, viewState, JSON.stringify(visible.map((v) => v.id))]);
+  }, [slice, config, timeRange, cursorEmitter, viewState, JSON.stringify(visible.map((v) => v.id)), xMode, JSON.stringify(liveSelection), speedByOverlay]);
 
-  // Subscribe to view-state (zoom + datums). On each change: reapply zoom to
-  // uPlot's x-scale, then redraw datum lines. Datums are DOM divs in u.over,
-  // pinned at the X position of the datum's timestamp; reused across renders
-  // (we diff by index) so we don't thrash the DOM on cursor scrub.
+  // Time-mode: subscribe to view-state (zoom + datums). Distance mode
+  // ignores datums/zoom for now.
   useEffect(() => {
+    if (xMode !== "time") return;
     if (!viewState) return;
     const apply = (state: { datums: number[]; zoomRange: { startUs: number; endUs: number } | null }) => {
       const u = plotRef.current; if (!u) return;
-      // Zoom: setScale("x", ...) when zoomed; setScale to data extent when reset.
       const z = state.zoomRange;
       if (z) {
         u.setScale("x", { min: z.startUs / 1_000_000, max: z.endUs / 1_000_000 });
@@ -386,20 +519,20 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     };
     apply(viewState.get());
     return viewState.subscribe(apply);
-  }, [viewState]);
+  }, [viewState, xMode]);
 
-  // Also redraw datums when the cursor moves so they stay pinned even after
-  // a setScale (uPlot rescales the canvas; our DOM lines need a refresh).
   useEffect(() => {
+    if (xMode !== "time") return;
     if (!viewState) return;
     const off = cursorEmitter.subscribe(() => {
       const u = plotRef.current; if (!u) return;
       drawDatums(u, viewState.get().datums);
     });
     return off;
-  }, [cursorEmitter, viewState]);
+  }, [cursorEmitter, viewState, xMode]);
 
   useEffect(() => {
+    if (xMode !== "time") return;
     const off = cursorEmitter.subscribe((tUs) => {
       const u = plotRef.current; if (!u) return;
       const tS = tUs / 1_000_000;
@@ -420,10 +553,8 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       line.style.left = `${left}px`;
     });
     return off;
-  }, [cursorEmitter]);
+  }, [cursorEmitter, xMode]);
 
-  // Resize the existing uPlot instance when the container changes size, rather
-  // than rebuilding the chart. setSize takes CSS pixels.
   const onResize = useCallback(({ width, height }: { width: number; height: number }) => {
     const u = plotRef.current;
     if (!u) return;
@@ -433,10 +564,6 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
-      {/* Compact in-canvas legend: single horizontal row in the top-right
-          so it doesn't overlap the data on the leading edge of a scrub.
-          Color chip + channel id only — the per-axis tick labels already
-          tell the user the range, so we don't duplicate that info. */}
       {config.channels.length > 0 && (
         <div className="absolute top-1 right-1 flex flex-row gap-1 z-10 pointer-events-none max-w-[80%] flex-wrap justify-end">
           {config.channels.map((c, i) => (
@@ -450,6 +577,13 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
           ))}
         </div>
       )}
+      {/* X-mode pill: shows current mode and lets the user toggle without
+          opening the config panel. Mirrors i2's F9 toggle. */}
+      <div className="absolute bottom-1 left-1 z-10 text-[9px]">
+        <span className="bg-[#0E0E10cc] text-[#7B8088] px-1.5 py-px rounded-sm font-mono-num">
+          x = {xMode === "distance" ? "distance" : "time"}
+        </span>
+      </div>
     </div>
   );
 }

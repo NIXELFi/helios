@@ -13,3 +13,7 @@ export * from "./tire-grid";
 export * from "./histogram";
 export * from "./xy-plot";
 export * from "./steering-wheel";
+export * from "./channel-report";
+export * from "./time-report";
+export * from "./zone-stats";
+export * from "./fft";

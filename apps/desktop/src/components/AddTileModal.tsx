@@ -2,6 +2,7 @@ import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
+  channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
   type Widget,
 } from "@helios/widgets";
 import type { TileSpec, WidgetType } from "../workspaces/types";
@@ -28,6 +29,10 @@ const PALETTE: PaletteEntry[] = [
   { type: "lap_panel",       label: "Lap Panel",       description: "List of laps with times",        defaultCells: { w: 6,  h: 5 }, widget: lapPanelWidget },
   { type: "alarm_panel",     label: "Alarm Panel",     description: "List of alarm events",           defaultCells: { w: 6,  h: 5 }, widget: alarmPanelWidget },
   { type: "steering_wheel",  label: "Steering Wheel",  description: "Animated wheel + degree readout", defaultCells: { w: 4,  h: 5 }, widget: steeringWheelWidget },
+  { type: "channel_report",  label: "Channel Report",  description: "Per-lap stats × per-channel",     defaultCells: { w: 12, h: 6 }, widget: channelReportWidget },
+  { type: "time_report",     label: "Time Report",     description: "Lap times w/ rolling minimum",    defaultCells: { w: 8,  h: 6 }, widget: timeReportWidget },
+  { type: "zone_stats",      label: "Zone Stats",      description: "Stats between two datums",        defaultCells: { w: 10, h: 5 }, widget: zoneStatsWidget },
+  { type: "fft",             label: "FFT / Spectrum",  description: "Frequency-domain magnitude",      defaultCells: { w: 10, h: 6 }, widget: fftWidget },
 ];
 
 interface Props {

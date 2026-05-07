@@ -3,9 +3,10 @@ import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
+  channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
   type Widget, type OverlaySession,
 } from "@helios/widgets";
-import type { CursorEmitter, ViewStateEmitter } from "@helios/lib";
+import type { CursorEmitter, ViewStateEmitter, LapSelectionEmitter, LapSelection, GpsPickerEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
 import type { LoadedSession } from "../lib/session";
 import { snapTile, GRID_COLS, GRID_ROWS } from "../lib/grid";
@@ -23,6 +24,10 @@ const widgets: Record<string, Widget<unknown>> = {
   histogram:       histogramWidget      as unknown as Widget<unknown>,
   xy_plot:         xyPlotWidget         as unknown as Widget<unknown>,
   steering_wheel:  steeringWheelWidget  as unknown as Widget<unknown>,
+  channel_report:  channelReportWidget  as unknown as Widget<unknown>,
+  time_report:     timeReportWidget     as unknown as Widget<unknown>,
+  zone_stats:      zoneStatsWidget      as unknown as Widget<unknown>,
+  fft:             fftWidget            as unknown as Widget<unknown>,
 };
 
 interface Props {
@@ -31,6 +36,9 @@ interface Props {
   visibleSessions: LoadedSession[];
   cursorEmitter: CursorEmitter;
   viewState: ViewStateEmitter;
+  lapSelectionEmitter: LapSelectionEmitter;
+  lapSelection: LapSelection;
+  gpsPickerEmitter: GpsPickerEmitter;
   editMode: boolean;
   selected: boolean;
   onSelect?: () => void;
@@ -49,6 +57,7 @@ type DragState =
 
 export function Tile({
   spec, primary, visibleSessions, cursorEmitter, viewState,
+  lapSelectionEmitter, lapSelection, gpsPickerEmitter,
   editMode, selected, onSelect, onChange,
 }: Props) {
   const widget = widgets[spec.widgetType]!;
@@ -67,9 +76,15 @@ export function Tile({
 
   const primarySlice = sliceFor(primary);
 
+  // Only filter out sessions whose slice came up empty when the widget
+  // ASKED FOR channels — lap-aware widgets (lap_panel, time_report) declare
+  // requiredChannels(): [] because they read laps from session metadata, and
+  // we shouldn't drop sessions with valid laps just because we requested no
+  // columns. Without this guard those widgets render "no laps detected" even
+  // when channel_report (same data, different requiredChannels) shows laps.
   const overlays: OverlaySession[] = visibleSessions
     .map((s) => ({ session: s, ...sliceFor(s) }))
-    .filter((entry) => entry.slice.data.size > 0)
+    .filter((entry) => channels.length === 0 || entry.slice.data.size > 0)
     .sort((a, b) => (a.session.id === primary.id ? -1 : b.session.id === primary.id ? 1 : 0))
     .map((entry) => ({
       id: entry.session.id,
@@ -78,6 +93,7 @@ export function Tile({
       slice: entry.slice,
       range: entry.range,
       isPrimary: entry.session.id === primary.id,
+      laps: entry.session.laps,
     }));
 
   const RenderC = widget.Render;
@@ -206,6 +222,10 @@ export function Tile({
           timeRange={{ startUs: primarySlice.range.startUs, endUs: primarySlice.range.endUs }}
           overlays={overlays}
           viewState={viewState}
+          laps={primary.laps}
+          lapSelectionEmitter={lapSelectionEmitter}
+          lapSelection={lapSelection}
+          gpsPickerEmitter={gpsPickerEmitter}
         />
         {editMode && (
           <>

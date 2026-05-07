@@ -62,14 +62,12 @@ export const overviewDefault: TileSpec[] = [
     x: 0.50, y: 0.40, w: 0.10, h: 0.30,
   },
   {
+    // Live lap detection — reads from session.laps (configured per-session
+    // via the Sessions panel). The empty `laps` array opts out of the legacy
+    // hand-entered list rendering.
     id: "lap-panel",
     widgetType: "lap_panel",
-    config: { laps: [
-      { number: 1, time_ms: 75432 },
-      { number: 2, time_ms: 74100 },
-      { number: 3, time_ms: 73850 },
-      { number: 4, time_ms: 74220 },
-    ] },
+    config: { laps: [], perSession: true, hideUntrusted: false },
     x: 0.60, y: 0.40, w: 0.20, h: 0.30,
   },
   {

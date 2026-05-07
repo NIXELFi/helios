@@ -167,6 +167,20 @@ function tokenize(src: string): TokenizeResult {
   while (i < src.length) {
     const c = src[i]!;
     if (/\s/.test(c)) { i++; continue; }
+    // Line comments — `//` to end-of-line. Lets users annotate maths
+    // libraries (a long-standing MoTeC i2 wishlist item).
+    if (c === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i + 2);
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    // Block comments — /* … */
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      if (end === -1) return { kind: "err", message: `unterminated block comment at ${i}` };
+      i = end + 2;
+      continue;
+    }
     if (c >= "0" && c <= "9" || c === ".") {
       let j = i;
       while (j < src.length && /[0-9.]/.test(src[j]!)) j++;

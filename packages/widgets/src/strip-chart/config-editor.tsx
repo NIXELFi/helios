@@ -87,6 +87,23 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
         >+ add channel</button>
       </div>
       <div className="border-t border-[#2A2C32] pt-2">
+        <div className="mb-1 text-[#7B8088] uppercase text-[10px] tracking-wider">X axis</div>
+        <label className="flex items-center gap-2 text-[11px]">
+          <span className="w-10">mode</span>
+          <select
+            value={config.xMode ?? "time"}
+            onChange={(e) => onChange({ ...config, xMode: e.target.value as "time" | "distance" })}
+            className="bg-[#0E0E10] border border-[#2A2C32] px-1 py-0.5"
+          >
+            <option value="time">Time (elapsed)</option>
+            <option value="distance">Distance (per-lap)</option>
+          </select>
+        </label>
+        <div className="text-[10px] text-[#5A5F66] mt-1">
+          Distance mode renders only the laps in the global Main / Ref / Overlays selection. Pick laps in the Lap Panel.
+        </div>
+      </div>
+      <div className="border-t border-[#2A2C32] pt-2">
         <div className="mb-1 text-[#7B8088] uppercase text-[10px] tracking-wider">Chart default Y range</div>
         <div className="text-[10px] text-[#5A5F66] mb-1">Used for any channel that doesn't set its own range above.</div>
         <label className="flex items-center gap-2">

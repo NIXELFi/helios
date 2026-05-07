@@ -1,4 +1,5 @@
 import type { ChannelStore } from "@helios/store";
+import type { LapDetectionConfig, LapSet } from "@helios/lib";
 
 export interface LoadedSession {
   id: string;
@@ -6,6 +7,12 @@ export interface LoadedSession {
   store: ChannelStore;
   color: string;
   visible: boolean;
+  /** Lap detection config — persisted per-session in localStorage. Null when
+   *  the session has no detectable structure (e.g. straight-line accel runs). */
+  lapConfig: LapDetectionConfig;
+  /** Cached LapSet computed from lapConfig + this session's data. Null when
+   *  detection hasn't been run yet, or when lapConfig.mode === "none". */
+  laps: LapSet | null;
 }
 
 /** Distinct colors for overlay traces; first session gets first color, etc. */

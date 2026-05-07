@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { CursorEmitter, ViewStateEmitter, formatClock } from "@helios/lib";
+import {
+  CursorEmitter, ViewStateEmitter, LapSelectionEmitter, GpsPickerEmitter,
+  detectLaps, formatClock,
+} from "@helios/lib";
+import type { LapDetectionConfig, LapSelection } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE } from "./lib/session";
+import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
 import type { TileSpec, Workspace } from "./workspaces/types";
 import { loadWorkspaces, saveWorkspaces, resetToBuiltins } from "./lib/workspace-storage";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
@@ -28,6 +33,7 @@ import { MathChannelsModal } from "./components/MathChannelsModal";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { WorkspaceTabBar } from "./components/WorkspaceTabBar";
+import { LapConfigDialog } from "./components/LapConfigDialog";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
@@ -39,20 +45,25 @@ export default function App() {
   const [primaryId, setPrimaryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emitter] = useState(() => new CursorEmitter());
-  // Global, session-scoped view state (datums + zoom range) shared by every
-  // chart. Survives workspace switches, resets on app restart.
   const [viewState] = useState(() => new ViewStateEmitter());
+  // Global Main/Ref/Overlay lap selection — drives multi-lap traces in
+  // distance mode and the lap-panel selection chrome. Initialized to all
+  // null; auto-populated to (best lap, second-best lap) once sessions land
+  // so the user has a useful default without having to click anything.
+  const [lapSelectionEmitter] = useState(() => new LapSelectionEmitter());
+  const [lapSelection, setLapSelection] = useState<LapSelection>(lapSelectionEmitter.get());
+  useEffect(() => lapSelectionEmitter.subscribe(setLapSelection), [lapSelectionEmitter]);
+  // Picker for "click on the GPS track to pick a coordinate" flows. The Lap
+  // Config dialog arms it; the GPS Track widget responds to clicks while armed.
+  const [gpsPickerEmitter] = useState(() => new GpsPickerEmitter());
+
   const [editMode, setEditMode] = useState(false);
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
   const [channelsOpen, setChannelsOpen] = useState(false);
   const [addTileOpen, setAddTileOpen] = useState(false);
   const [mathChannelsOpen, setMathChannelsOpen] = useState(false);
+  const [lapConfigSessionId, setLapConfigSessionId] = useState<string | null>(null);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
-  // Per-session apply errors: outer key = sessionId, inner = math channel id.
-  // Math channels that depend on session-specific inputs (e.g. `FL Strain
-  // Gauge`, only present in some sample CSVs) will fail to compile in the
-  // other sessions; that's not a user-visible error, just a missing input.
-  // The UI only surfaces errors from the *primary* session.
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   const updater = useUpdater();
   useFileOpener({ onPending: handleFileOpenPending });
@@ -69,9 +80,6 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("dev");
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
-  // Progress reported by the loader; drives the splash bar. The "stages" are
-  // (a) per-session load via loadAllSessions's onProgress, and (b) a single
-  // final "Computing math channels" beat we add ourselves.
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({
     label: "Starting…", loaded: 0, total: 1,
   });
@@ -87,13 +95,26 @@ export default function App() {
         const initialMath = loadMathChannels();
         const errors = new Map<string, Map<string, string>>();
         for (const session of loaded) {
-          const r = applyMathChannels(session.store, initialMath);
+          const r = applyMathChannels(session.store, initialMath, session.laps);
           errors.set(session.id, r.errors);
         }
         setMathErrors(errors);
         setSessions(loaded);
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
         setPrimaryId(firstVisible?.id ?? null);
+        // Default lap selection: best lap of primary as Main, second-best as Ref.
+        if (firstVisible?.laps && firstVisible.laps.bestLapIndex >= 0) {
+          const set = firstVisible.laps;
+          lapSelectionEmitter.setMain({ sessionId: firstVisible.id, lapIndex: set.bestLapIndex });
+          // Pick the second-fastest trusted lap for Ref, if there is one.
+          const trusted = set.laps
+            .map((l, i) => ({ l, i }))
+            .filter((x) => x.l.trusted && x.i !== set.bestLapIndex)
+            .sort((a, b) => a.l.durationS - b.l.durationS);
+          if (trusted.length > 0) {
+            lapSelectionEmitter.setRef({ sessionId: firstVisible.id, lapIndex: trusted[0]!.i });
+          }
+        }
         setLoadProgress({
           label: "Ready",
           loaded: loaded.length + 1,
@@ -101,11 +122,9 @@ export default function App() {
         });
       })
       .catch((e) => setError(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the updater transitions into "available" (after the auto-check on
-  // launch), auto-open the modal once. The user can dismiss with "Remind me
-  // later"; we don't auto-reopen on every state change to avoid being annoying.
   useEffect(() => {
     if (updater.state.kind === "available") setUpdateModalOpen(true);
   }, [updater.state.kind]);
@@ -124,13 +143,12 @@ export default function App() {
   const visibleSessions = sessions.filter((s) => s.visible);
   const primary = sessions.find((s) => s.id === primaryId) ?? visibleSessions[0] ?? sessions[0]!;
   const ext = primary.store.extentUs();
-  // Math channel errors specific to the currently-primary session. Errors in
-  // other sessions (e.g. a missing dependency channel) are intentionally
-  // ignored so the indicator stays calm when the math is fine where the user
-  // is actually looking.
   const primaryMathErrors = mathErrors.get(primary.id) ?? new Map<string, string>();
   const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
   const selectedTile = workspace.tiles.find((t) => t.id === selectedTileId) ?? null;
+  const lapConfigSession = lapConfigSessionId
+    ? sessions.find((s) => s.id === lapConfigSessionId) ?? null
+    : null;
 
   function toggleVisibility(id: string) {
     setSessions((prev) => {
@@ -141,6 +159,9 @@ export default function App() {
         const fallback = next.find((s) => s.visible);
         if (fallback) setPrimaryId(fallback.id);
       }
+      // Drop any lap selection pointing at sessions that just went invisible.
+      const visibleIds = new Set(next.filter((s) => s.visible).map((s) => s.id));
+      lapSelectionEmitter.prune(visibleIds);
       return next;
     });
   }
@@ -161,7 +182,6 @@ export default function App() {
   function handleCreateWorkspace() {
     const usedColors = new Set(workspaces.map((w) => w.color));
     const nextColor = SESSION_PALETTE.find((c) => !usedColors.has(c)) ?? SESSION_PALETTE[workspaces.length % SESSION_PALETTE.length]!;
-    // Pick the lowest-numbered "Workspace N" that isn't taken.
     const taken = new Set(workspaces.map((w) => w.label));
     let n = 1;
     while (taken.has(`Workspace ${n}`)) n++;
@@ -203,7 +223,7 @@ export default function App() {
   }
 
   function handleRequestDeleteWorkspace(id: string) {
-    if (workspaces.length <= 1) return;       // defensive — UI also disables
+    if (workspaces.length <= 1) return;
     const target = workspaces.find((w) => w.id === id);
     if (!target) return;
     setConfirmState({
@@ -214,7 +234,6 @@ export default function App() {
       cancelLabel: "Cancel",
       onConfirm: () => {
         commitWorkspaces((prev) => prev.filter((w) => w.id !== id));
-        // If we deleted the active workspace, switch to a neighbor.
         if (workspaceId === id) {
           const remaining = workspaces.filter((w) => w.id !== id);
           const idx = workspaces.findIndex((w) => w.id === id);
@@ -262,13 +281,6 @@ export default function App() {
       });
       return;
     }
-    // We snapshot the current `workspaces` length BEFORE calling
-    // commitWorkspaces, then look up the freshly-imported workspace by index in
-    // the merged array. This is correct here because mergeImported preserves
-    // the existing list's order at the front. Do NOT "fix" this to read from
-    // the post-update state — at this call site the closure's `workspaces` is
-    // the right reference for computing the index. The functional setState
-    // pattern still applies (commitWorkspaces takes a (prev) => next updater).
     const firstImportedIndex = workspaces.length;
     const merged = mergeImported(workspaces, result.bundle.workspaces);
     commitWorkspaces(() => merged);
@@ -298,12 +310,6 @@ export default function App() {
       confirmTone: "default",
       cancelLabel: "Cancel",
       onConfirm: () => {
-        // Read the LATEST committed workspaces inside the updater rather
-        // than from this closure. The dialog can sit open arbitrarily long
-        // before the user clicks Import, during which other actions (rename,
-        // delete, in-app Import) could mutate the list. Reading from `prev`
-        // guarantees the merge sees current state — same rationale as the
-        // commitWorkspaces docstring at the top of the file.
         let firstImportedId: string | null = null;
         commitWorkspaces((prev) => {
           const firstImportedIndex = prev.length;
@@ -390,6 +396,40 @@ export default function App() {
     });
   }
 
+  /** Update the lap detection config for one session, recompute its laps,
+   *  re-apply math channels (lap_* depends on the LapSet), and persist. */
+  function handleLapConfigSave(sessionId: string, cfg: LapDetectionConfig) {
+    setSessions((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        const laps = cfg.mode === "none" ? null : detectLaps(cfg, lapInputsFor(s.store));
+        return { ...s, lapConfig: cfg, laps };
+      });
+      // Re-apply math channels for the updated session so lap_* works.
+      const target = next.find((s) => s.id === sessionId)!;
+      // Math channels live as columns inside the rate group; remove the math
+      // ids first so a stale lap_* output doesn't survive.
+      for (const m of mathChannels) target.store.removeChannel(m.id);
+      const r = applyMathChannels(target.store, mathChannels, target.laps);
+      const newErrors = new Map(mathErrors);
+      newErrors.set(sessionId, r.errors);
+      setMathErrors(newErrors);
+      return next;
+    });
+    saveLapConfig(sessionId, cfg);
+    // Drop any current lap selection pointing into the session whose laps
+    // just changed — the indices may no longer be valid.
+    if (lapSelection.main?.sessionId === sessionId) lapSelectionEmitter.setMain(null);
+    if (lapSelection.ref?.sessionId === sessionId) lapSelectionEmitter.setRef(null);
+    if (lapSelection.overlays.some((r) => r.sessionId === sessionId)) {
+      lapSelectionEmitter.set({
+        ...lapSelection,
+        overlays: lapSelection.overlays.filter((r) => r.sessionId !== sessionId),
+      });
+    }
+  }
+
   /** Replace the math-channel set, persist, and re-apply against every loaded
    *  session. Old math-channel ids are removed from each store first so a
    *  rename/delete doesn't leave stale columns behind. */
@@ -401,7 +441,7 @@ export default function App() {
     const errors = new Map<string, Map<string, string>>();
     for (const session of sessions) {
       for (const id of allOldIds) session.store.removeChannel(id);
-      const r = applyMathChannels(session.store, next);
+      const r = applyMathChannels(session.store, next, session.laps);
       errors.set(session.id, r.errors);
     }
     setMathErrors(errors);
@@ -419,9 +459,6 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
         <span className="font-helios text-sm text-[#FFC627]">HELIOS</span>
-        {/* Session label + workspace tabs only show in view mode. In edit
-            mode we hide everything except HELIOS so the controls (Add tile,
-            Snap, Reset, etc.) have the entire header to breathe. */}
         {!editMode && (
           <>
             <span className="ml-3 text-[#7B8088]">{primary.label}</span>
@@ -445,14 +482,10 @@ export default function App() {
         )}
         <div className={
           "flex items-center gap-2 self-stretch " +
-          (editMode
-            // In edit mode there's no left content past HELIOS, so mx-auto
-            // centers the group in the remaining width — focus on the edit
-            // controls without the playback / updates pill cluttering it up.
-            ? "mx-auto"
-            : "ml-3 pl-3 border-l border-[#2A2C32]")
+          (editMode ? "mx-auto" : "ml-3 pl-3 border-l border-[#2A2C32]")
         }>
           <ViewStatePills viewState={viewState} />
+          <LapSelectionPill emitter={lapSelectionEmitter} sessions={sessions} />
           <button
             onClick={() => setChannelsOpen(true)}
             className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
@@ -474,6 +507,7 @@ export default function App() {
           >
             ƒ Math {mathChannels.length > 0 ? `(${mathChannels.length})` : ""}
           </button>
+          <ExportMenuButton sessions={sessions} primary={primary} viewState={viewState} />
           <button
             onClick={handleToggleEditMode}
             className={
@@ -492,28 +526,19 @@ export default function App() {
                 onClick={() => setAddTileOpen(true)}
                 className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
                 title="Add a tile"
-              >
-                + Add tile
-              </button>
+              >+ Add tile</button>
               <button
                 onClick={handleSnapToGrid}
                 className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
                 title="Snap every tile's position and size to the grid; sizes are preserved"
-              >
-                Snap to grid
-              </button>
+              >Snap to grid</button>
               <button
                 onClick={handleResetWorkspaces}
                 className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#7B8088] hover:text-[#EF5350] hover:border-[#EF5350] rounded-sm cursor-pointer transition-colors"
                 title="Reset every workspace to its built-in default"
-              >
-                Reset all
-              </button>
+              >Reset all</button>
             </>
           )}
-          {/* Playback controls, updates pill, and cursor clock are view-mode
-              chrome — hidden in edit mode so the header stays focused on the
-              tile-editing actions. */}
           {!editMode && (
             <>
               <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={setPlaying} />
@@ -539,6 +564,7 @@ export default function App() {
           primaryId={primary.id}
           onToggleVisibility={toggleVisibility}
           onSetPrimary={setPrimaryId}
+          onConfigureLaps={(id) => setLapConfigSessionId(id)}
         />
         <main className="flex-1 relative">
           {editMode && <GridOverlay />}
@@ -550,6 +576,9 @@ export default function App() {
               visibleSessions={visibleSessions}
               cursorEmitter={emitter}
               viewState={viewState}
+              lapSelectionEmitter={lapSelectionEmitter}
+              lapSelection={lapSelection}
+              gpsPickerEmitter={gpsPickerEmitter}
               editMode={editMode}
               selected={editMode && spec.id === selectedTileId}
               onSelect={() => setSelectedTileId(spec.id)}
@@ -601,6 +630,14 @@ export default function App() {
           onClose={() => setMathChannelsOpen(false)}
         />
       )}
+      {lapConfigSession && (
+        <LapConfigDialog
+          session={lapConfigSession}
+          gpsPickerEmitter={gpsPickerEmitter}
+          onSave={(cfg) => handleLapConfigSave(lapConfigSession.id, cfg)}
+          onClose={() => setLapConfigSessionId(null)}
+        />
+      )}
       {updateModalOpen && (
         <UpdateModal
           state={updater.state}
@@ -630,11 +667,6 @@ function CursorClock({ emitter }: { emitter: CursorEmitter }) {
   return <>{formatClock(t)}</>;
 }
 
-/** Subtle FPS / worst-frame readout for the footer. Counts frames over a
- *  ~500 ms sliding window via rAF, color-shifts the number when things slow
- *  down (≥55 fps inherits the muted footer color, 30–55 yellow, <30 red).
- *  Style otherwise matches the surrounding footer text so it doesn't add
- *  any visual weight when perf is fine. */
 function FpsCounter() {
   const [stats, setStats] = useState({ fps: 0, ms: 0 });
   useEffect(() => {
@@ -660,7 +692,6 @@ function FpsCounter() {
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, []);
-  // Only color when there's something to call out; otherwise inherit footer color.
   const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-[#FFC627]" : "text-[#EF5350]";
   return (
     <span
@@ -672,9 +703,6 @@ function FpsCounter() {
   );
 }
 
-/** Bright yellow header pills that surface the global view-state and let the
- *  user reset it in one click. Only render when there's something to clear,
- *  so the header stays uncluttered in the common case. */
 function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
   const [state, setState] = useState(viewState.get());
   useEffect(() => viewState.subscribe(setState), [viewState]);
@@ -703,14 +731,82 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
   );
 }
 
+/** Surfaces the active Main/Ref lap selection so the user can see at a glance
+ *  which laps the distance-axis traces are showing, and clear with one click. */
+function LapSelectionPill({ emitter, sessions }: { emitter: LapSelectionEmitter; sessions: LoadedSession[] }) {
+  const [sel, setSel] = useState(emitter.get());
+  useEffect(() => emitter.subscribe(setSel), [emitter]);
+  if (!sel.main && !sel.ref && sel.overlays.length === 0) return null;
+  function describe(ref: typeof sel.main): string {
+    if (!ref) return "—";
+    const s = sessions.find((x) => x.id === ref.sessionId);
+    if (!s || !s.laps) return "—";
+    const lap = s.laps.laps[ref.lapIndex];
+    if (!lap) return "—";
+    return `${s.label.split(" — ")[0] ?? s.label} L${lap.index}`;
+  }
+  return (
+    <button
+      onClick={() => emitter.set({ main: null, ref: null, overlays: [] })}
+      className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer bg-[#16171B] text-[#FFC627] border-[#FFC627] hover:brightness-110 font-mono-num"
+      title="Clear lap selection (Main, Ref, Overlays)"
+    >
+      M:{describe(sel.main)}
+      {sel.ref && <> · R:{describe(sel.ref)}</>}
+      {sel.overlays.length > 0 && <> · +{sel.overlays.length}</>}
+    </button>
+  );
+}
+
+/** Compact menu — opens a small popover with CSV / KML export actions. */
+function ExportMenuButton({ sessions, primary, viewState }: {
+  sessions: LoadedSession[]; primary: LoadedSession; viewState: ViewStateEmitter;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+  async function exportCsv(scope: "session" | "zoom") {
+    const { exportSessionCsv } = await import("./lib/csv-export");
+    const range = scope === "zoom" ? viewState.get().zoomRange : null;
+    await exportSessionCsv(primary, range);
+    setOpen(false);
+  }
+  async function exportKml() {
+    const { exportSessionKml } = await import("./lib/kml-export");
+    await exportSessionKml(primary);
+    setOpen(false);
+  }
+  // Keep `sessions` referenced so React's exhaustive-deps lint stays quiet
+  // even though we only consume the primary right now; multi-session export
+  // is on the roadmap.
+  void sessions;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        title="Export"
+      >Export ▾</button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+          <button onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
+          <button onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
+          <button onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
 
-/** Drives the cursor emitter at wall-clock rate (modulated by `speed`) when
- *  playing. Uses requestAnimationFrame to advance once per paint, comparing
- *  emitter.get() against the last value we wrote so a user scrub during
- *  playback re-anchors the start instead of fighting with playback. Wraps
- *  to the session start when the cursor passes the end so a casual press
- *  of play loops the lap rather than dead-stopping. */
 function PlaybackControls({
   emitter, viewState, ext, playing, onPlayingChange,
 }: {
@@ -722,15 +818,10 @@ function PlaybackControls({
 }) {
   const setPlaying = onPlayingChange;
   const [speed, setSpeed] = useState<number>(1);
-  // Live refs the rAF loop reads so we don't have to re-arm it whenever
-  // speed/extents/view-state change.
   const speedRef = useRef(speed); speedRef.current = speed;
   const extRef = useRef(ext); extRef.current = ext;
   const viewStateRef = useRef(viewState); viewStateRef.current = viewState;
 
-  // Effective playback bounds: zoom range when set, otherwise the full
-  // session extent. Centralized so playback start, wrap-on-end, and the
-  // out-of-bounds snap below all agree.
   const effectiveBounds = (): { startUs: number; endUs: number } => {
     const z = viewStateRef.current.get().zoomRange;
     return z ?? extRef.current;
@@ -742,9 +833,6 @@ function PlaybackControls({
     let wallStartMs = performance.now();
     let cursorStartUs = emitter.get();
     let lastWrittenUs = cursorStartUs;
-    // If the cursor sits at (or past) the end of the effective range when
-    // play is hit, restart from the start so a fresh press always plays
-    // (whether that's the full lap or just the zoomed window).
     const b0 = effectiveBounds();
     if (cursorStartUs >= b0.endUs - 1000 || cursorStartUs < b0.startUs) {
       cursorStartUs = b0.startUs;
@@ -754,22 +842,13 @@ function PlaybackControls({
 
     const tick = () => {
       const b = effectiveBounds();
-      // External scrub since our last write? Anchor to the new spot.
       const currentUs = emitter.get();
       if (currentUs !== lastWrittenUs) {
         wallStartMs = performance.now();
         cursorStartUs = currentUs;
       }
       const wallElapsedMs = performance.now() - wallStartMs;
-      // Round to integer microseconds. Subscribers that feed cursor time
-      // into BigInt() (sample-at binary search, gps-track index lookup,
-      // etc.) throw on fractional values and silently drop the frame —
-      // see v2_changes/04. Without this round the strip chart cursor
-      // moves but every gauge / GPS / numeric widget stays frozen.
       let next = Math.round(cursorStartUs + wallElapsedMs * 1000 * speedRef.current);
-      // Wrap on either end so a zoom that lands the cursor before its
-      // start (e.g. zoom set after a scrub) snaps back into the visible
-      // window on the next tick instead of grinding forward off-screen.
       if (next >= b.endUs || next < b.startUs) {
         next = b.startUs;
         wallStartMs = performance.now();
@@ -781,10 +860,9 @@ function PlaybackControls({
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, emitter]);
 
-  // Spacebar = play/pause when no input is focused. Common media-player
-  // convention; saves a hand-trip to the mouse during analysis.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.code !== "Space") return;
@@ -795,6 +873,7 @@ function PlaybackControls({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
 
   return (
@@ -826,9 +905,6 @@ function PlaybackControls({
   );
 }
 
-/** Faint dotted grid drawn behind tiles in edit mode. The CSS gradient stops
- *  draw a 1×1 dot at every grid intersection; spacing matches the
- *  GRID_COLS/GRID_ROWS used for snapping. */
 function GridOverlay() {
   const cellW = `${100 / GRID_COLS}%`;
   const cellH = `${100 / GRID_ROWS}%`;
@@ -843,3 +919,4 @@ function GridOverlay() {
     />
   );
 }
+

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { ChannelSlice } from "@helios/store";
+import type { GpsPickRequest } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
@@ -155,7 +156,7 @@ function buildStyle(mode: BasemapMode, customTileUrl: string | undefined): Style
 }
 
 export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays, gpsPickerEmitter } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -163,6 +164,14 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   const tRef = useRef<number>(cursorEmitter.get());
   const sessionRawsRef = useRef<SessionRaw[]>([]);
   const normBboxRef = useRef<NormBbox | null>(null);
+  // Live mirror of any active "pick a coordinate" request. While set, the
+  // widget swaps its click semantics: instead of scrubbing the cursor we
+  // project the click pixel back to lat/lon and emit through the picker.
+  const [pickRequest, setPickRequest] = useState<GpsPickRequest | null>(
+    gpsPickerEmitter?.get() ?? null,
+  );
+  const pickRequestRef = useRef<GpsPickRequest | null>(pickRequest);
+  pickRequestRef.current = pickRequest;
   /** True when the computed bbox is real (some session had GPS) but its
    *  lat/lon values fell outside legal ranges. Surfaced in the canvas
    *  overlay as a diagnostic so the user knows the basemap can't frame. */
@@ -286,12 +295,49 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     }
   }, []);
 
-  // Click/drag scrubbing — operates on the canvas overlay, finds nearest sample
-  // across all visible sessions in canvas-pixel space.
+  // Mirror picker state so click handling can branch.
+  useEffect(() => {
+    if (!gpsPickerEmitter) return;
+    return gpsPickerEmitter.subscribeState((req) => setPickRequest(req));
+  }, [gpsPickerEmitter]);
+
+  // Esc cancels an active pick.
+  useEffect(() => {
+    if (!pickRequest || !gpsPickerEmitter) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") gpsPickerEmitter.cancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickRequest, gpsPickerEmitter]);
+
+  /** Invert pixel → (lat, lon). Uses MapLibre when basemap is active so the
+   *  unprojection matches what the user sees on the basemap; otherwise
+   *  inverts the cached normalized-bbox projection. Returns null when no
+   *  GPS data is loaded yet (bbox not computed). */
+  function unprojectPixel(localX: number, localY: number, w: number, h: number): { lat: number; lon: number } | null {
+    if (useMap && mapRef.current) {
+      try {
+        const ll = mapRef.current.unproject([localX, localY]);
+        return { lat: ll.lat, lon: ll.lng };
+      } catch { /* fall through */ }
+    }
+    const bbox = normBboxRef.current;
+    if (!bbox) return null;
+    const xN = (localX - PAD) / Math.max(1, w - PAD * 2);
+    const yN = (localY - PAD) / Math.max(1, h - PAD * 2);
+    const lon = bbox.minLon + xN * (bbox.maxLon - bbox.minLon);
+    const lat = bbox.maxLat - yN * (bbox.maxLat - bbox.minLat);
+    return { lat, lon };
+  }
+
+  // Click/drag — branches on whether a picker is armed:
+  //   armed  → next click projects back to lat/lon and emits to the picker
+  //   normal → click + drag scrubs the cursor to the nearest GPS sample
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     let dragging = false;
-    const emitFromEvent = (e: PointerEvent) => {
+    const emitScrubFromEvent = (e: PointerEvent) => {
       const raws = sessionRawsRef.current; if (raws.length === 0) return;
       const rect = c.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -311,13 +357,28 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       const tUs = Number(best.session.slice.time[best.idx] ?? 0n);
       cursorEmitter.emit(tUs);
     };
+    const emitPickFromEvent = (e: PointerEvent) => {
+      if (!gpsPickerEmitter) return;
+      const rect = c.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      const ll = unprojectPixel(localX, localY, rect.width, rect.height);
+      if (!ll) return;
+      gpsPickerEmitter.emitResult(ll.lat, ll.lon);
+    };
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      if (pickRequestRef.current) {
+        emitPickFromEvent(e);
+        return;
+      }
       dragging = true;
       c.setPointerCapture(e.pointerId);
-      emitFromEvent(e);
+      emitScrubFromEvent(e);
     };
-    const onMove = (e: PointerEvent) => { if (dragging) emitFromEvent(e); };
+    const onMove = (e: PointerEvent) => {
+      if (dragging && !pickRequestRef.current) emitScrubFromEvent(e);
+    };
     const onUp = (e: PointerEvent) => {
       dragging = false;
       if (c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
@@ -332,7 +393,8 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       c.removeEventListener("pointerup", onUp);
       c.removeEventListener("pointercancel", onUp);
     };
-  }, [cursorEmitter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorEmitter, gpsPickerEmitter]);
 
   /** Compute the union lat/lon bbox over every visible session that has a
    *  real GPS track. Sessions whose values cluster around (0,0) (no GPS fix
@@ -566,13 +628,27 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       )}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full cursor-crosshair pointer-events-auto"
+        className={
+          "absolute inset-0 w-full h-full pointer-events-auto " +
+          (pickRequest ? "cursor-crosshair" : "cursor-crosshair")
+        }
         style={{ background: useMap ? "transparent" : undefined }}
       />
       <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-[#7B8088] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
         <span>basemap</span>
         <span className="text-[#FFC627]">{basemap}</span>
       </div>
+      {pickRequest && (
+        <>
+          {/* Pulsing yellow border to draw the eye to this widget when armed
+              — without it, a user with several tiles open might miss which
+              one is awaiting the click. */}
+          <div className="absolute inset-0 pointer-events-none border-2 border-[#FFC627] animate-pulse" />
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-[#FFC627] text-[#0E0E10] text-[11px] font-semibold px-3 py-1 rounded-sm pointer-events-none shadow-lg">
+            {pickRequest.prompt} · Esc to cancel
+          </div>
+        </>
+      )}
     </div>
   );
 }
