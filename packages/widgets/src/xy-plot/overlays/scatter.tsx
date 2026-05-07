@@ -20,16 +20,23 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
     const size = Math.max(1, cfg.pointSize);
     ctx.globalAlpha = Math.max(0, Math.min(1, cfg.alpha));
     if (cfg.trail && artifacts.groups.length === 1) {
+      const fromColor = cfg.trailFromColor ?? "#26A69A";
+      const toColor = cfg.trailToColor ?? "#FFB800";
       const g = artifacts.groups[0]!;
       for (let i = 0; i < g.n; i++) {
         const t = i / Math.max(1, g.n - 1);
-        ctx.fillStyle = lerpColor("#26A69A", "#FFB800", t);
+        ctx.fillStyle = lerpColor(fromColor, toColor, t);
         const { px, py } = project(g.xs[i]!, g.ys[i]!);
         ctx.fillRect(px - size / 2, py - size / 2, size, size);
       }
     } else {
+      // When no group-by is active every group has groupKey === ""; the
+      // scatter's configured color wins. When group-by IS active each group
+      // gets a palette-cycled color from the data pipeline; that wins instead
+      // so the eye can tell the groups apart.
+      const isGrouped = artifacts.groups.some((g) => g.groupKey !== "");
       for (const g of artifacts.groups) {
-        ctx.fillStyle = g.color || cfg.color;
+        ctx.fillStyle = isGrouped ? g.color : cfg.color;
         for (let i = 0; i < g.n; i++) {
           const x = g.xs[i]!, y = g.ys[i]!;
           if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
@@ -64,6 +71,18 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
         <input type="checkbox" checked={config.trail}
           onChange={(e) => onChange({ ...config, trail: e.target.checked })} />
       </Row>
+      {config.trail && (
+        <>
+          <Row label="trail from (oldest)">
+            <input type="color" value={config.trailFromColor ?? "#26A69A"}
+              onChange={(e) => onChange({ ...config, trailFromColor: e.target.value })} className="w-24" />
+          </Row>
+          <Row label="trail to (newest)">
+            <input type="color" value={config.trailToColor ?? "#FFB800"}
+              onChange={(e) => onChange({ ...config, trailToColor: e.target.value })} className="w-24" />
+          </Row>
+        </>
+      )}
     </>
   ),
 };

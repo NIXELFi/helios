@@ -40,12 +40,23 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
 
     let fitRSquared: number | null = null;
     let fitEquation: string | null = null;
+    // Look up the referenced fit overlay's artifact. If no explicit reference
+    // was set, fall back to the first prior overlay whose artifact is shaped
+    // like a fit (has a non-empty `fits` array). This is the common case —
+    // user dropped one fit and one stats panel on the same plot — and means
+    // they don't have to copy/paste an opaque uuid into the stats editor.
+    let fitArt: ReferencedFitArtifact | undefined;
     if (cfg.fitOverlayId) {
-      const fitArt = ctx.priorArtifacts.get(cfg.fitOverlayId) as ReferencedFitArtifact | undefined;
-      if (fitArt && fitArt.fits.length > 0) {
-        fitRSquared = fitArt.fits[0]!.rSquared;
-        fitEquation = formatEquation(fitArt.fits[0]!.coefficients);
+      fitArt = ctx.priorArtifacts.get(cfg.fitOverlayId) as ReferencedFitArtifact | undefined;
+    } else {
+      for (const [, art] of ctx.priorArtifacts) {
+        const candidate = art as ReferencedFitArtifact;
+        if (candidate?.fits && candidate.fits.length > 0) { fitArt = candidate; break; }
       }
+    }
+    if (fitArt && fitArt.fits.length > 0) {
+      fitRSquared = fitArt.fits[0]!.rSquared;
+      fitEquation = formatEquation(fitArt.fits[0]!.coefficients);
     }
 
     return {

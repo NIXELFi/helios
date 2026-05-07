@@ -47,6 +47,11 @@ export interface ScatterConfig {
   pointSize: number;
   alpha: number;
   trail: boolean;
+  /** When trail is on, the gradient ramps from `trailFromColor` (oldest
+   *  sample) to `trailToColor` (newest). Both optional with defaults so
+   *  configs from before this field existed render unchanged. */
+  trailFromColor?: string;
+  trailToColor?: string;
 }
 
 export type FitKind =
