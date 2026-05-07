@@ -107,17 +107,21 @@ export interface QuadrantFitConfig {
 }
 
 export interface FrictionCircleConfig {
-  /** Radii in data-space units (for a g-g plot, these are g values).
-   *  Multiple radii draw concentric rings (e.g. [1, 1.5, 2]).
-   *  Drawn by sampling N points around the unit circle in data space and
-   *  projecting each — so on axes with mismatched scales the result is
-   *  the data-space ellipse, which is the geometrically meaningful
-   *  shape (constant magnitude in the underlying units). */
-  radii: number[];
+  /** Percentiles of combined magnitude (sqrt(x² + y²)) to draw rings at,
+   *  computed from whatever samples currently feed the plot (filter +
+   *  group-by + zoom all already applied upstream). 100 = peak, 99 = 99th
+   *  percentile, etc. Multiple values draw concentric rings (e.g.
+   *  [100, 99, 95]). Default [100, 99] = peak + 99th to compare the
+   *  absolute max against the noise-filtered envelope.
+   *
+   *  Drawn by sampling around the unit circle in DATA space and
+   *  projecting each — preserves geometric meaning when X/Y scales
+   *  differ. */
+  percentiles: number[];
   color: string;
   lineWidth: number;
   dashed: boolean;
-  /** Render a small label next to each ring ("1.0", "1.5", …). */
+  /** Render a small label next to each ring ("p100: 1.42", "p99: 1.31"). */
   showLabels: boolean;
 }
 
