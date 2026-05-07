@@ -33,6 +33,7 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 25 | User-managed workspaces (CRUD, color, reorder, export/import) | [25-workspace-management.md](25-workspace-management.md) |
 | 26 | Workspace UX polish — tab-strip horizontal scroll + .helios launch handler | [26-workspace-ux-polish.md](26-workspace-ux-polish.md) |
 | 27 | XY analysis plot — overlay system (scatter / fit / formula / bins / stats / quadrant-fit) + filter / group-by / zoom integration | [27-xy-analysis-plot.md](27-xy-analysis-plot.md) |
+| 28 | 2.4.0 polish bundle — global datums/zoom, custom tab scrollbar, edit-mode header focus, FpsCounter, panther app icon, real steering wheel art, version-pill fix, macOS overscroll fix | [28-2.4.0-polish-bundle.md](28-2.4.0-polish-bundle.md) |
 
 ## New behaviors introduced
 
