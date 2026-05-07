@@ -100,11 +100,26 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel): void {
   }
 
   // Resolve which rate group each referenced channel lives in.
+  // Falls back to a case + whitespace-tolerant match against the store so a
+  // user typing `[fl shock]` or `[FL Shock]` resolves the same way as the
+  // canonical id, even when the source CSV header capitalization differs.
   const refGroups = new Map<string, ReturnType<typeof store.groupOf>>();
+  const refToActualId = new Map<string, string>();
+  let normIndex: Map<string, string> | null = null;
   for (const ref of refs) {
-    const g = store.groupOf(ref);
+    let actualId = ref;
+    let g = store.groupOf(ref);
+    if (!g) {
+      if (!normIndex) {
+        normIndex = new Map();
+        for (const m of store.list()) normIndex.set(normalizeChannelId(m.id), m.id);
+      }
+      const found = normIndex.get(normalizeChannelId(ref));
+      if (found) { actualId = found; g = store.groupOf(actualId); }
+    }
     if (!g) throw new Error(`unknown channel "${ref}"`);
     refGroups.set(ref, g);
+    refToActualId.set(ref, actualId);
   }
 
   // Pick the base — highest-rate dep wins so we don't lose information.
@@ -120,12 +135,15 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel): void {
     base = groups[0]!;
   }
 
-  // Bucket dependencies by same-group / cross-group.
+  // Bucket dependencies by same-group / cross-group. Columns are looked up by
+  // the resolved store id (which may differ from `ref` after tolerant match)
+  // but stashed under `ref` so the AST evaluator finds them by ident name.
   const sameGroupCols = new Map<string, Float64Array>();
   const crossGroupCols: PreprocessCtx["crossGroupCols"] = [];
   for (const ref of refs) {
     const g = refGroups.get(ref)!;
-    const col = g.columns.get(ref);
+    const actualId = refToActualId.get(ref)!;
+    const col = g.columns.get(actualId);
     if (!col) throw new Error(`channel "${ref}" missing data`);
     if (g.id === base.id) sameGroupCols.set(ref, col);
     else crossGroupCols.push({ name: ref, times: g.time, values: col });
@@ -328,4 +346,10 @@ export function checkExpression(src: string): { ok: true; refs: string[]; ast: A
   const r = parseExpr(src);
   if (!r.ast) return { ok: false, error: r.error ?? "parse error" };
   return { ok: true, refs: r.refs, ast: r.ast };
+}
+
+/** Normalize a channel id for tolerant matching: trims edges and lowercases.
+ *  `FL Shock`, `fl shock`, and ` FL Shock ` all collapse to `fl shock`. */
+export function normalizeChannelId(s: string): string {
+  return s.trim().toLowerCase();
 }

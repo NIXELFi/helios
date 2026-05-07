@@ -48,7 +48,12 @@ export default function App() {
   const [addTileOpen, setAddTileOpen] = useState(false);
   const [mathChannelsOpen, setMathChannelsOpen] = useState(false);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
-  const [mathErrors, setMathErrors] = useState<Map<string, string>>(new Map());
+  // Per-session apply errors: outer key = sessionId, inner = math channel id.
+  // Math channels that depend on session-specific inputs (e.g. `FL Strain
+  // Gauge`, only present in some sample CSVs) will fail to compile in the
+  // other sessions; that's not a user-visible error, just a missing input.
+  // The UI only surfaces errors from the *primary* session.
+  const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   const updater = useUpdater();
   useFileOpener({ onPending: handleFileOpenPending });
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
@@ -80,10 +85,10 @@ export default function App() {
           total: loaded.length + 1,
         });
         const initialMath = loadMathChannels();
-        const errors = new Map<string, string>();
+        const errors = new Map<string, Map<string, string>>();
         for (const session of loaded) {
           const r = applyMathChannels(session.store, initialMath);
-          for (const [k, v] of r.errors) errors.set(k, v);
+          errors.set(session.id, r.errors);
         }
         setMathErrors(errors);
         setSessions(loaded);
@@ -119,6 +124,11 @@ export default function App() {
   const visibleSessions = sessions.filter((s) => s.visible);
   const primary = sessions.find((s) => s.id === primaryId) ?? visibleSessions[0] ?? sessions[0]!;
   const ext = primary.store.extentUs();
+  // Math channel errors specific to the currently-primary session. Errors in
+  // other sessions (e.g. a missing dependency channel) are intentionally
+  // ignored so the indicator stays calm when the math is fine where the user
+  // is actually looking.
+  const primaryMathErrors = mathErrors.get(primary.id) ?? new Map<string, string>();
   const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
   const selectedTile = workspace.tiles.find((t) => t.id === selectedTileId) ?? null;
 
@@ -388,11 +398,11 @@ export default function App() {
     saveMathChannels(next);
     if (!sessions) return;
     const allOldIds = new Set([...mathChannels.map((m) => m.id), ...next.map((m) => m.id)]);
-    const errors = new Map<string, string>();
+    const errors = new Map<string, Map<string, string>>();
     for (const session of sessions) {
       for (const id of allOldIds) session.store.removeChannel(id);
       const r = applyMathChannels(session.store, next);
-      for (const [k, v] of r.errors) errors.set(k, v);
+      errors.set(session.id, r.errors);
     }
     setMathErrors(errors);
   }
@@ -454,12 +464,12 @@ export default function App() {
             onClick={() => setMathChannelsOpen(true)}
             className={
               "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
-              (mathErrors.size > 0
+              (primaryMathErrors.size > 0
                 ? "bg-[#16171B] text-[#EF5350] border-[#EF5350]"
                 : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
             }
-            title={mathErrors.size > 0
-              ? `${mathErrors.size} math channel(s) failed to compile`
+            title={primaryMathErrors.size > 0
+              ? `${primaryMathErrors.size} math channel(s) failed to compile`
               : "Define computed channels by formula"}
           >
             ƒ Math {mathChannels.length > 0 ? `(${mathChannels.length})` : ""}
@@ -585,7 +595,7 @@ export default function App() {
       {mathChannelsOpen && (
         <MathChannelsModal
           channels={mathChannels}
-          errors={mathErrors}
+          errors={primaryMathErrors}
           availableChannels={primary.store.list().filter((c) => c.source !== "math")}
           onChange={handleMathChannelsChange}
           onClose={() => setMathChannelsOpen(false)}

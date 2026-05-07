@@ -3,6 +3,7 @@ import type { ChannelMeta } from "@helios/store";
 import { MATH_BUILTINS } from "@helios/lib";
 import {
   type MathChannel, defaultMathChannel, isValidMathChannelId, checkExpression,
+  normalizeChannelId,
 } from "../lib/math-channels";
 import { VECTOR_OPS, LAP_OPS } from "../lib/vector-ops";
 
@@ -19,7 +20,13 @@ export function MathChannelsModal({
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(channels[0]?.id ?? null);
   const selected = channels.find((c) => c.id === selectedId) ?? null;
-  const availableSet = useMemo(() => new Set(availableChannels.map((c) => c.id)), [availableChannels]);
+  const availableSet = useMemo(() => {
+    // Both an exact-id set and a normalized lookup so the modal's unknown
+    // warning matches the tolerant resolution applied at evaluation time.
+    const exact = new Set(availableChannels.map((c) => c.id));
+    const norm = new Set(availableChannels.map((c) => normalizeChannelId(c.id)));
+    return { has: (id: string) => exact.has(id) || norm.has(normalizeChannelId(id)) };
+  }, [availableChannels]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   function add() {
@@ -198,7 +205,7 @@ function Palette({ channels, disabled, onInsert }: PaletteProps) {
                 <Token
                   key={c.id}
                   text={c.id}
-                  insert={c.id}
+                  insert={formatRefForExpr(c.id)}
                   disabled={disabled}
                   onInsert={onInsert}
                   swatch={c.color}
@@ -368,6 +375,12 @@ function vectorOpSig(name: string): string {
   }
 }
 
+/** Channel ids that aren't valid bare identifiers (e.g. contain spaces or
+ *  punctuation) must be wrapped in `[...]` for the math parser. */
+function formatRefForExpr(id: string): string {
+  return /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(id) ? id : `[${id}]`;
+}
+
 function vectorOpHint(name: string): string {
   switch (name) {
     case "derivative": return "d/dt of x";
@@ -382,7 +395,7 @@ function vectorOpHint(name: string): string {
 interface EditorProps {
   channel: MathChannel;
   errorFromApply: string | undefined;
-  availableSet: Set<string>;
+  availableSet: { has: (id: string) => boolean };
   textareaRef: React.MutableRefObject<HTMLTextAreaElement | null>;
   onChange: (next: MathChannel) => void;
   onDelete: () => void;
@@ -474,7 +487,7 @@ function Editor({
         )}
         {check.ok && unknownRefs.length > 0 && (
           <div className="text-[10px] text-[#FFB800]">
-            Unknown channel(s): {unknownRefs.map((r) => `"${r}"`).join(", ")}.
+            Unknown channel(s): {unknownRefs.map((r) => `"${formatRefForExpr(r)}"`).join(", ")}.
             Will evaluate to NaN unless this session has them.
           </div>
         )}
@@ -482,7 +495,7 @@ function Editor({
           <div className="text-[10px] text-[#EF5350]">Apply error: {errorFromApply}</div>
         )}
         {check.ok && check.refs.length > 0 && unknownRefs.length === 0 && (
-          <div className="text-[10px] text-[#7B8088]">References: {check.refs.join(", ")}</div>
+          <div className="text-[10px] text-[#7B8088]">References: {check.refs.map(formatRefForExpr).join(", ")}</div>
         )}
       </div>
 
