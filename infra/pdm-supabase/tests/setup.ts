@@ -61,6 +61,7 @@ export async function setRole(
 /** Wipes all pdm data (but keeps schema + auth users). Run between tests. */
 export async function resetPdmTables(): Promise<void> {
   const svc = serviceClient();
+  // Delete in FK-safe order. RPC wraps in a transaction.
   const { error } = await svc.rpc("pdm_test_reset");
   if (error && !error.message.includes("does not exist")) throw error;
 }
