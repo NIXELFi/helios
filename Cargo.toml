@@ -6,6 +6,7 @@ members = [
   "crates/helios-csv",
   "crates/pdm-core",
   "crates/pdm-sw-parser",
+  "crates/pdm-client",
   "apps/desktop/src-tauri",
 ]
 
@@ -26,3 +27,6 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 cfb = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+url = "2"
