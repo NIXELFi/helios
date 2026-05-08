@@ -1,6 +1,5 @@
-use crate::{delimiter::detect_delimiter, registry::ChannelRegistry, time_detect::detect_time_unit, CsvLoadError};
+use crate::{delimiter::detect_delimiter, registry::{ChannelRegistry, ResolveKind}, time_detect::detect_time_unit, CsvLoadError};
 use helios_core::{ChannelMeta, RateGroup};
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -28,18 +27,15 @@ pub fn load_csv(path: &Path, registry: &ChannelRegistry) -> Result<LoadResult, C
 pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadResult, CsvLoadError> {
     let raw = std::str::from_utf8(bytes)
         .map_err(|e| CsvLoadError::Malformed(format!("non-utf8 input: {e}")))?;
-    // Vendor-specific preamble strippers run before the CSV reader. Each is
-    // pattern-keyed off the first line so non-matching files pass through.
-    let after_motec: String = preprocess_motec_if_needed(raw).into_owned();
-    let text: String = preprocess_link_if_needed(&after_motec).into_owned();
-    let first_line = text.lines().next()
+    let prepared = prepare_csv_input(raw);
+    let first_line = prepared.text.lines().next()
         .ok_or_else(|| CsvLoadError::Malformed("empty file".into()))?;
     let delim = detect_delimiter(first_line);
 
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delim)
         .has_headers(true)
-        .from_reader(text.as_bytes());
+        .from_reader(prepared.text.as_bytes());
 
     let headers = rdr.headers()?.clone();
     if headers.is_empty() {
@@ -83,11 +79,21 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     for (i, name) in headers.iter().enumerate().skip(1) {
         let non_null = cols[i - 1].iter().filter(|x| x.is_some()).count();
         let inferred_rate = (non_null as f64 / span_s).round() as i32;
-        let (mut meta, was_known) = registry.resolve_or_default(name, inferred_rate.max(1) as f32);
-        if !was_known {
-            warnings.push(format!("unknown channel `{name}`, registered with defaults"));
-        } else {
-            meta.sample_rate_hz = meta.sample_rate_hz.max(1.0);
+        let unit_hint = prepared.units.get(i).map(String::as_str).unwrap_or("");
+        let res = registry.resolve_or_default(name, unit_hint, inferred_rate.max(1) as f32);
+        let mut meta = res.meta;
+        match res.kind {
+            ResolveKind::ExactAlias => { meta.sample_rate_hz = meta.sample_rate_hz.max(1.0); }
+            ResolveKind::Semantic => {
+                meta.sample_rate_hz = meta.sample_rate_hz.max(1.0);
+                warnings.push(format!(
+                    "channel `{name}` semantic-mapped to `{}` ({})",
+                    meta.id, meta.display_name,
+                ));
+            }
+            ResolveKind::Default => {
+                warnings.push(format!("unknown channel `{name}`, registered with defaults"));
+            }
         }
         let key = meta.sample_rate_hz.round() as i32;
         by_rate.entry(key).or_default().push((i - 1, meta));
@@ -119,41 +125,57 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     Ok(LoadResult { rate_groups, warnings, duration_us })
 }
 
+/// Output of the preamble-stripping pass: the cleaned text the CSV reader
+/// will consume, plus the per-column unit row (when the source had one). The
+/// units list is parallel to the header row, so `units[i]` is the unit string
+/// for `headers[i]`. An empty string means "unit unknown" (no units row, or a
+/// blank cell in the source's units row).
+struct CsvInput {
+    text: String,
+    units: Vec<String>,
+}
+
+fn prepare_csv_input(raw: &str) -> CsvInput {
+    if let Some(prep) = strip_motec(raw) {
+        return prep;
+    }
+    if let Some(prep) = strip_link(raw) {
+        return prep;
+    }
+    CsvInput { text: raw.to_string(), units: Vec::new() }
+}
+
 /// MoTeC-style CSV files start with ~12 lines of metadata, then a quoted
 /// channel-names row, then a units row, then blanks, then data. The standard
 /// `csv` crate handles quoted values fine, but the metadata block must be
-/// stripped first. Detection is keyed off the literal `"Format","MoTeC` prefix
-/// so non-MoTeC files pass through untouched.
-fn preprocess_motec_if_needed(text: &str) -> Cow<'_, str> {
+/// stripped first. Detection is keyed off the literal `"Format","MoTeC` prefix.
+fn strip_motec(text: &str) -> Option<CsvInput> {
     let first = text.lines().next().unwrap_or("");
     if !(first.starts_with("\"Format\"") && first.contains("MoTeC")) {
-        return Cow::Borrowed(text);
+        return None;
     }
     let lines: Vec<&str> = text.lines().collect();
-
-    // Header row = first row whose first cell is exactly "Time". Earlier
-    // metadata rows also start with quoted strings, so we use cell equality.
     let header_idx = lines.iter().position(|l| {
         first_csv_cell(l).map(|c| c == "Time").unwrap_or(false)
-    });
-    let Some(hi) = header_idx else { return Cow::Borrowed(text); };
-
-    // Skip past the header itself, the units row, and any blank rows until
-    // we land on a data row (first cell parses as a float).
-    let mut data_start = hi + 1;
+    })?;
+    // Skip past the header itself, capturing the units row if it's the next
+    // non-blank non-data line. MoTeC's row immediately after the header is the
+    // units row in every export I've seen, but the parser tolerates anything
+    // between header and first numeric row.
+    let mut data_start = header_idx + 1;
+    let mut units_line: Option<&str> = None;
     while data_start < lines.len() {
         let trimmed = lines[data_start].trim();
         if trimmed.is_empty() { data_start += 1; continue; }
         let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
         if first_cell.parse::<f64>().is_ok() { break; }
-        data_start += 1; // units row, "Beacon Markers", etc.
+        if units_line.is_none() {
+            units_line = Some(lines[data_start]);
+        }
+        data_start += 1;
     }
-
-    // Rebuild header with deduplicated column names. MoTeC files reuse "Time"
-    // for both relative-seconds and absolute-minute clocks; the second copy
-    // would otherwise collide in the channel id map.
-    let header_unique = dedupe_csv_header(lines[hi]);
-
+    let header_unique = dedupe_csv_header(lines[header_idx]);
+    let units = parse_units_line(units_line, count_csv_cells(&header_unique));
     let mut out = String::with_capacity(text.len());
     out.push_str(&header_unique);
     out.push('\n');
@@ -161,41 +183,34 @@ fn preprocess_motec_if_needed(text: &str) -> Cow<'_, str> {
         out.push_str(l);
         out.push('\n');
     }
-    Cow::Owned(out)
+    Some(CsvInput { text: out, units })
 }
 
 /// Link ECU CSV exports start with a single quoted preamble line:
 ///   "Name","ECU Internal Datalog - 2026-05-03 13;33;03"
-/// Then the channel-name row, units row, blank line, then data. The shape
-/// is similar to MoTeC but the trigger and the metadata block size differ.
-/// Pattern-keyed so non-Link files pass through.
-fn preprocess_link_if_needed(text: &str) -> Cow<'_, str> {
+/// Then the channel-name row, units row, blank line, then data.
+fn strip_link(text: &str) -> Option<CsvInput> {
     let mut iter = text.lines();
     let first = iter.next().unwrap_or("");
-    // Cheap gate: first cell must be exactly `Name`. The second cell varies
-    // by export type but always contains "ECU" (Internal Datalog, etc.).
-    if first_csv_cell(first).map(|c| c != "Name").unwrap_or(true) {
-        return Cow::Borrowed(text);
-    }
-    if !first.contains("ECU") {
-        return Cow::Borrowed(text);
-    }
+    if first_csv_cell(first).map(|c| c != "Name").unwrap_or(true) { return None; }
+    if !first.contains("ECU") { return None; }
     let lines: Vec<&str> = text.lines().collect();
-    if lines.len() < 3 { return Cow::Borrowed(text); }
-
-    // line[0] = preamble, line[1] = channel-name header, line[2] = units row,
-    // line[3] = blank (sometimes), line[4..] = data. Be permissive about which
-    // lines between the header and the first numeric row are skipped.
+    if lines.len() < 3 { return None; }
     let header = lines[1];
     let mut data_start = 2;
+    let mut units_line: Option<&str> = None;
     while data_start < lines.len() {
         let trimmed = lines[data_start].trim();
         if trimmed.is_empty() { data_start += 1; continue; }
         let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
         if first_cell.parse::<f64>().is_ok() { break; }
+        if units_line.is_none() {
+            units_line = Some(lines[data_start]);
+        }
         data_start += 1;
     }
     let header_unique = dedupe_csv_header(header);
+    let units = parse_units_line(units_line, count_csv_cells(&header_unique));
     let mut out = String::with_capacity(text.len());
     out.push_str(&header_unique);
     out.push('\n');
@@ -203,7 +218,7 @@ fn preprocess_link_if_needed(text: &str) -> Cow<'_, str> {
         out.push_str(l);
         out.push('\n');
     }
-    Cow::Owned(out)
+    Some(CsvInput { text: out, units })
 }
 
 fn first_csv_cell(line: &str) -> Option<&str> {
@@ -214,6 +229,29 @@ fn first_csv_cell(line: &str) -> Option<&str> {
     } else {
         Some(line.split(',').next()?.trim())
     }
+}
+
+fn count_csv_cells(line: &str) -> usize {
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(line.as_bytes());
+    rdr.records().next()
+        .and_then(|r| r.ok())
+        .map(|r| r.len())
+        .unwrap_or(0)
+}
+
+/// Parse the source's units row into a Vec<String>, padded to `expected_len`
+/// with empty strings. Returns an empty Vec when no units row was found.
+fn parse_units_line(line: Option<&str>, expected_len: usize) -> Vec<String> {
+    let Some(line) = line else { return Vec::new(); };
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(line.as_bytes());
+    let Some(Ok(record)) = rdr.records().next() else { return Vec::new(); };
+    let mut out: Vec<String> = record.iter().map(|s| s.to_string()).collect();
+    while out.len() < expected_len { out.push(String::new()); }
+    out
 }
 
 fn dedupe_csv_header(line: &str) -> String {
@@ -289,9 +327,6 @@ mod tests {
     #[test]
     fn loads_link_format_strips_preamble() {
         let r = load_csv(&fixture("good/link_minimal.csv"), &registry()).unwrap();
-        // Link's first line is `"Name","ECU…"` — without the preamble stripper
-        // the loader would treat that as the header and bail when the time
-        // column couldn't be parsed.
         let mut saw_rpm = false;
         let mut rpm_first: Option<f64> = None;
         for rg in &r.rate_groups {
@@ -302,14 +337,54 @@ mod tests {
         }
         assert!(saw_rpm, "engine.rpm not loaded from Link CSV (alias `Engine Speed`)");
         assert_eq!(rpm_first, Some(1000.0));
-        // 11 samples at 1ms steps → 10ms = 10_000 us span.
         assert_eq!(r.duration_us, 10_000);
+    }
+
+    /// End-to-end semantic mapping: a Link-flavoured CSV with a column whose
+    /// header isn't in any alias list ("Throttle Pedal Pos") but matches the
+    /// `engine.tps` semantic pattern via keyword `throttle` + unit `%`.
+    /// Verifies the units row survives the preamble strip and reaches the
+    /// resolver, AND that the heuristic match surfaces in warnings so users
+    /// can audit what got auto-routed.
+    #[test]
+    fn semantic_mapping_via_units_row() {
+        let csv: &[u8] = b"\"Name\",\"ECU Internal Datalog\"\n\
+            \"Time\",\"Throttle Pedal Pos\"\n\
+            \"s\",\"%\"\n\
+            \n\
+            \"0\",\"5\"\n\
+            \"0.001\",\"5\"\n\
+            \"0.002\",\"6\"\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let has_tps = r.rate_groups.iter().any(|rg| rg.meta("engine.tps").is_some());
+        assert!(has_tps, "expected semantic-mapping of `Throttle Pedal Pos` → engine.tps");
+        assert!(
+            r.warnings.iter().any(|w| w.contains("Throttle Pedal Pos") && w.contains("engine.tps")),
+            "expected mapping warning, got {:?}", r.warnings,
+        );
+    }
+
+    /// Companion to the above: when units conflict (here a temp channel named
+    /// `Pedal Coolant` with unit kPa shouldn't be mapped to either tps or
+    /// water_temp), the resolver should fall through to default rather than
+    /// guess.
+    #[test]
+    fn semantic_unit_mismatch_falls_through() {
+        let csv: &[u8] = b"\"Name\",\"ECU Internal Datalog\"\n\
+            \"Time\",\"Coolant Bypass Pressure\"\n\
+            \"s\",\"kPa\"\n\
+            \n\
+            \"0\",\"100\"\n\
+            \"0.001\",\"100\"\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        // Should NOT be misrouted to engine.water_temp despite "coolant" in name.
+        let has_water = r.rate_groups.iter().any(|rg| rg.meta("engine.water_temp").is_some());
+        assert!(!has_water, "incorrectly routed kPa channel to engine.water_temp");
     }
 
     #[test]
     fn loads_motec_format_via_aliases() {
         let r = load_csv(&fixture("good/motec_minimal.csv"), &registry()).unwrap();
-        // Both "Engine Speed" and "Throttle Position" should resolve via aliases.
         let mut rpm_value: Option<f64> = None;
         let mut saw_tps = false;
         for rg in &r.rate_groups {

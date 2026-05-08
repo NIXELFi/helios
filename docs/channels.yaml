@@ -1,6 +1,23 @@
 # Helios canonical channel registry
-# Each entry maps one channel id to its display metadata.
-# `aliases:` lists CSV header names that should resolve to this channel.
+#
+# Each entry maps one channel id to its display metadata. There are three
+# layers of name-resolution at load time, tried in order:
+#   1. `aliases:` — exact source-header match (after CSV unquote). Cheap and
+#      precise; use this whenever you know the exact header you want to map.
+#   2. `match_keywords:` + `match_units:` — semantic fallback. The loader
+#      tokenizes the source header (lowercase, strip punctuation, collapse
+#      spaces) and checks whether any keyword phrase appears as a contiguous
+#      run of tokens. When `match_units` is set the source CSV's units row
+#      must agree before the match is accepted, which prevents `Oil Pressure`
+#      (kPa) from being routed to `engine.oil_temp` (°C). Match warnings
+#      surface in LoadResult so users can audit what got auto-mapped.
+#   3. Default — synthesize a custom channel from the raw header.
+#
+# Adding a new vendor's name? Prefer (1) when you have a definitive list,
+# fall back to (2) when you want to cover the long tail of vendor variants
+# without curating each one. Keywords should be specific enough that you
+# wouldn't false-match unrelated names — e.g. `engine.oil_temp` uses just
+# `oil` because the unit gate (°C) keeps it from grabbing oil pressure.
 
 channels:
   - id: engine.rpm
@@ -16,7 +33,9 @@ channels:
     max: 15000
     warn: 13500
     alarm: 14500
-    aliases: [rpm, RPM, engine_rpm, "engine.rpm", "Engine Speed"]
+    aliases: [rpm, RPM, engine_rpm, "engine.rpm", "Engine Speed", "Engine RPM", "ENGINE_RPM", "N", "n_engine"]
+    match_keywords: ["engine speed", "engine rpm"]
+    match_units: [RPM, rpm]
 
   - id: engine.tps
     display_name: Throttle Position
@@ -29,7 +48,14 @@ channels:
     sample_rate_hz: 100
     min: 0
     max: 100
-    aliases: [tps, TPS, throttle, throttle_pct, "engine.tps", "Throttle Position", "APS Main"]
+    aliases: [
+      tps, TPS, throttle, throttle_pct, "engine.tps",
+      "Throttle Position", "Throttle Pos", "Throttle Pos.",
+      "TPS Main", "TPS (Main)", "TPS (Sub)", "TPS Sub",
+      "APS Main", "APS (Main)", "APS (Sub)",
+    ]
+    match_keywords: [tps, throttle, "accelerator pedal"]
+    match_units: ["%"]
 
   - id: engine.water_temp
     display_name: Water Temp
@@ -44,7 +70,13 @@ channels:
     max: 130
     warn: 105
     alarm: 115
-    aliases: [water_temp, ECT, "engine.water_temp", "Engine Coolant Temp"]
+    aliases: [
+      water_temp, ECT, "engine.water_temp",
+      "Engine Coolant Temp", "Coolant Temp", "Water Temp",
+      "Engine Water Temperature", "Coolant Temperature",
+    ]
+    match_keywords: ["coolant", "water temp", "ect"]
+    match_units: ["°C", C]
 
   - id: engine.oil_temp
     display_name: Oil Temp
@@ -59,7 +91,98 @@ channels:
     max: 150
     warn: 120
     alarm: 135
-    aliases: [oil_temp, OilT, "engine.oil_temp", "Engine Oil Temp"]
+    aliases: [
+      oil_temp, OilT, "engine.oil_temp",
+      "Engine Oil Temp", "Oil Temp", "Oil Temperature",
+    ]
+    match_keywords: ["oil temp", "oil temperature"]
+    match_units: ["°C", C]
+
+  - id: engine.oil_pressure
+    display_name: Oil Pressure
+    units: kPa
+    group: Engine
+    color: "#FF6F00"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    min: 0
+    max: 1000
+    warn: 200
+    alarm: 100
+    aliases: [
+      oil_pressure, "engine.oil_pressure",
+      "Oil Pressure", "Engine Oil Pressure",
+    ]
+    match_keywords: ["oil pressure", "oil press"]
+    match_units: [kPa, psi, bar]
+
+  - id: engine.fuel_pressure
+    display_name: Fuel Pressure
+    units: kPa
+    group: Engine
+    color: "#A1887F"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    min: 0
+    max: 700
+    aliases: [fuel_pressure, "engine.fuel_pressure", "Fuel Pressure"]
+    match_keywords: ["fuel pressure", "fuel press"]
+    match_units: [kPa, psi, bar]
+
+  - id: engine.map
+    display_name: MAP
+    units: kPa
+    group: Engine
+    color: "#90A4AE"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 200
+    aliases: [MAP, "engine.map", "Manifold Pressure", "Manifold Abs Pressure"]
+    # No match_keywords: "MAP" is too short to be safely keyword-matched and
+    # the alias list covers the main vendor variants.
+
+  - id: engine.lambda
+    display_name: Lambda
+    units: lambda
+    group: Engine
+    color: "#80DEEA"
+    decimals: 3
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0.6
+    max: 1.4
+    aliases: [
+      lambda, Lambda, "engine.lambda",
+      "Lambda 1", "Lambda1", "Wideband Lambda",
+    ]
+    match_keywords: [lambda]
+    match_units: [lambda]
+
+  - id: engine.battery_voltage
+    display_name: Battery Voltage
+    units: V
+    group: Engine
+    color: "#FFEE58"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    min: 8
+    max: 16
+    aliases: [
+      battery_voltage, "engine.battery_voltage",
+      "Batt Voltage", "Battery Voltage", "Battery Volts",
+    ]
+    match_keywords: ["batt voltage", "battery voltage", "battery volts"]
+    match_units: [V]
 
   - id: engine.gear
     display_name: Gear
@@ -72,7 +195,13 @@ channels:
     sample_rate_hz: 100
     min: 0
     max: 6
-    aliases: [gear, "engine.gear", "Gear Position"]
+    aliases: [
+      gear, "engine.gear", "Gear Position",
+      "Gear", "Current Gear",
+    ]
+    # Deliberately no match_keywords: "Gear Shift Status", "Gear Ratio Calc.",
+    # "MisShift Down Counter" all contain "gear" but aren't engine.gear.
+    # Stick to explicit aliases for this one.
 
   - id: gps.lat
     display_name: GPS Latitude
@@ -83,7 +212,12 @@ channels:
     data_type: f64
     source: gps_module
     sample_rate_hz: 10
-    aliases: [lat, latitude, "gps.lat", "GPS Latitude"]
+    aliases: [
+      lat, latitude, "gps.lat", "GPS Latitude",
+      "Latitude", "GPS Lat",
+    ]
+    match_keywords: [latitude, "gps lat"]
+    match_units: ["°", deg]
 
   - id: gps.lon
     display_name: GPS Longitude
@@ -94,7 +228,12 @@ channels:
     data_type: f64
     source: gps_module
     sample_rate_hz: 10
-    aliases: [lon, lng, longitude, "gps.lon", "GPS Longitude"]
+    aliases: [
+      lon, lng, longitude, "gps.lon", "GPS Longitude",
+      "Longitude", "GPS Lon",
+    ]
+    match_keywords: [longitude, "gps lon"]
+    match_units: ["°", deg]
 
   - id: gps.speed
     display_name: GPS Speed
@@ -105,7 +244,12 @@ channels:
     data_type: f32
     source: gps_module
     sample_rate_hz: 10
-    aliases: [speed, gps_speed, "gps.speed", "GPS Speed"]
+    aliases: [
+      speed, gps_speed, "gps.speed", "GPS Speed",
+      "Ground Speed", "GPS Ground Speed",
+    ]
+    match_keywords: ["gps speed", "ground speed"]
+    match_units: [m/s, kph, km/h, mph]
 
   - id: chassis.steering_angle
     display_name: Steering Angle
@@ -118,7 +262,12 @@ channels:
     sample_rate_hz: 100
     min: -120
     max: 120
-    aliases: [steering, Steering, steering_angle, "chassis.steering_angle"]
+    aliases: [
+      steering, Steering, steering_angle, "chassis.steering_angle",
+      "Steering Angle", "Steering Pos", "Steering Wheel Angle",
+    ]
+    match_keywords: ["steering angle", "steering pos", "steering wheel angle"]
+    match_units: ["°", deg]
 
   - id: imu.lat_g
     display_name: Lateral G
@@ -131,4 +280,27 @@ channels:
     sample_rate_hz: 100
     min: -3
     max: 3
-    aliases: [lat_g, "imu.lat_g", "Lat_Accel"]
+    aliases: [
+      lat_g, "imu.lat_g", "Lat_Accel",
+      "Lateral G", "Lat G", "G Force Lat", "GForce Lat",
+    ]
+    match_keywords: ["lateral g", "lat g", "g force lat", "lat accel"]
+    match_units: [g]
+
+  - id: imu.long_g
+    display_name: Longitudinal G
+    units: g
+    group: IMU
+    color: "#FFA726"
+    decimals: 2
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -3
+    max: 3
+    aliases: [
+      long_g, "imu.long_g",
+      "Longitudinal G", "Long G", "G Force Long", "GForce Long",
+    ]
+    match_keywords: ["longitudinal g", "long g", "g force long"]
+    match_units: [g]
