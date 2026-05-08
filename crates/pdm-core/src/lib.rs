@@ -12,3 +12,6 @@ pub mod ids;
 pub mod role;
 pub mod sha256;
 pub mod vault;
+
+pub use error::CoreError;
+pub use ids::{FileId, FolderId, LockId, UserId, VaultId, VersionId};
