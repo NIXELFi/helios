@@ -9,3 +9,6 @@ pdm-core = { path = "../pdm-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 cfb = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

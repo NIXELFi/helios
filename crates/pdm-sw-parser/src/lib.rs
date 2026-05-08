@@ -12,4 +12,7 @@ pub mod error;
 pub mod ref_hint;
 pub mod sldasm;
 
-// Re-exports + parse_refs added in Tasks 7-9 as their modules become populated.
+pub use error::ParseError;
+pub use ref_hint::RefHint;
+
+// parse_refs() will be added in Task 8 once cfb_reader is populated.
