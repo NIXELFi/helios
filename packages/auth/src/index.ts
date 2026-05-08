@@ -1,2 +1,1 @@
-// Filled in by subsequent tasks.
-export {};
+export { createSupabaseClient, type SupabaseConfig } from "./client";
