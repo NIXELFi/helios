@@ -17,3 +17,4 @@ pub use error::CoreError;
 pub use ids::{FileId, FolderId, LockId, UserId, VaultId, VersionId};
 pub use role::Role;
 pub use sha256::Sha256;
+pub use vault::{File, Folder, Lock, Ref, Vault, Version};
