@@ -11,7 +11,7 @@ pub struct RefHint {
 impl RefHint {
     /// Last path segment after either '/' or '\\'.
     pub fn basename(&self) -> &str {
-        let last_slash = self.path.rfind(|c: char| c == '/' || c == '\\');
+        let last_slash = self.path.rfind(['/', '\\']);
         match last_slash {
             Some(i) => &self.path[i + 1..],
             None => &self.path,
