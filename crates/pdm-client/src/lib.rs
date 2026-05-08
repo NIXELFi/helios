@@ -18,4 +18,5 @@ pub mod storage;
 pub mod vaults;
 pub mod versions;
 
-// Re-exports added in subsequent tasks once each module is filled in.
+pub use client::{Client, ClientBuilder};
+pub use error::ClientError;
