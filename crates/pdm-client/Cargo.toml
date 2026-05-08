@@ -16,3 +16,4 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+pdm-core = { path = "../pdm-core" }
