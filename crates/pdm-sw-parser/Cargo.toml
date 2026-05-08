@@ -12,3 +12,4 @@ cfb = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+cfb = { workspace = true }

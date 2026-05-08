@@ -15,4 +15,7 @@ pub mod sldasm;
 pub use error::ParseError;
 pub use ref_hint::RefHint;
 
-// parse_refs() will be added in Task 8 once cfb_reader is populated.
+/// Top-level entry point.
+pub fn parse_refs(bytes: &[u8]) -> alloc::vec::Vec<RefHint> {
+    cfb_reader::list_refs(bytes).unwrap_or_default()
+}
