@@ -1,0 +1,11 @@
+[package]
+name = "pdm-sw-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pdm-core = { path = "../pdm-core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+cfb = { workspace = true }
