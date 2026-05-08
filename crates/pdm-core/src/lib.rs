@@ -15,3 +15,4 @@ pub mod vault;
 
 pub use error::CoreError;
 pub use ids::{FileId, FolderId, LockId, UserId, VaultId, VersionId};
+pub use sha256::Sha256;
