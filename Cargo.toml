@@ -4,6 +4,7 @@ members = [
   "crates/helios-core",
   "crates/helios-arrow",
   "crates/helios-csv",
+  "crates/pdm-core",
   "apps/desktop/src-tauri",
 ]
 
@@ -21,3 +22,5 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
 anyhow = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
