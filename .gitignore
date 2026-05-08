@@ -35,3 +35,6 @@ helios-workspace-*.json
 coverage/
 playwright-report/
 test-results/
+
+# Supabase local secrets
+infra/pdm-supabase/.env
