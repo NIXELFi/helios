@@ -11,6 +11,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "@helios/auth": path.resolve(__dirname, "../../packages/auth/src"),
       "@helios/store": path.resolve(__dirname, "../../packages/store/src"),
       "@helios/lib": path.resolve(__dirname, "../../packages/lib/src"),
       "@helios/ui": path.resolve(__dirname, "../../packages/ui/src"),

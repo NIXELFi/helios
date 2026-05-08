@@ -1,4 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
+
+// Ensure RTL cleans up after every test so renders don't accumulate across tests.
+afterEach(cleanup);
 
 // jsdom does not implement matchMedia; stub it for any code that touches it.
 if (typeof window !== "undefined" && !window.matchMedia) {

@@ -17,6 +17,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@helios/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@helios/lib':
         specifier: workspace:*
         version: link:../../packages/lib
