@@ -8,8 +8,11 @@ import {
 import type { LapDetectionConfig, LapSelection } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
-import { SESSION_PALETTE } from "./lib/session";
+import { SESSION_PALETTE, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
+import { classifyPaths, loadUserSession } from "./lib/load-user-session";
+import { useFileDrop } from "./lib/use-file-drop";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { TileSpec, Workspace } from "./workspaces/types";
 import { loadWorkspaces, saveWorkspaces, resetToBuiltins } from "./lib/workspace-storage";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
@@ -67,6 +70,11 @@ export default function App() {
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   const updater = useUpdater();
   useFileOpener({ onPending: handleFileOpenPending });
+  // OS-level drag-drop of data files (CSV) onto the app window. .helios
+  // workspace bundles are routed away from this hook (they belong to the
+  // useFileOpener path above). Fires for any drop over the webview, so the
+  // user doesn't have to aim at the sessions panel specifically.
+  useFileDrop({ onDrop: (paths) => void handleAddSessionFiles(paths) });
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   type ConfirmRequest = {
     title: string;
@@ -396,6 +404,107 @@ export default function App() {
     });
   }
 
+  /** Add one or more user-supplied data files as new sessions. Each file
+   *  becomes its own LoadedSession with auto-detected laps and the same
+   *  math channels applied. Failures surface in a single ConfirmDialog
+   *  rather than per-file dialogs so a 5-file drop doesn't queue 5 modals. */
+  async function handleAddSessionFiles(paths: string[]) {
+    if (!sessions) return;
+    const { accepted, rejected } = classifyPaths(paths);
+    const failures: { path: string; reason: string }[] = rejected.slice();
+    const newSessions: LoadedSession[] = [];
+    // Collect the next color slot up-front so all newly-added sessions get
+    // distinct colors regardless of how many failures land in between.
+    let nextIndex = sessions.length;
+    for (const a of accepted) {
+      try {
+        const color = colorForIndex(nextIndex);
+        nextIndex++;
+        const session = await loadUserSession(a.path, color);
+        const r = applyMathChannels(session.store, mathChannels, session.laps);
+        const errorsForSession = r.errors;
+        // Replace any pre-existing session with the same id (re-loading the
+        // same file should refresh, not duplicate).
+        newSessions.push(session);
+        // Stash math errors for the new session id.
+        setMathErrors((prev) => {
+          const next = new Map(prev);
+          next.set(session.id, errorsForSession);
+          return next;
+        });
+      } catch (e) {
+        failures.push({ path: a.path, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (newSessions.length > 0) {
+      setSessions((prev) => {
+        if (!prev) return prev;
+        const idMap = new Map<string, LoadedSession>();
+        for (const s of prev) idMap.set(s.id, s);
+        for (const ns of newSessions) idMap.set(ns.id, ns);
+        return Array.from(idMap.values());
+      });
+    }
+    if (failures.length > 0) {
+      const lines = failures.map((f) => `${basenameOf(f.path)}: ${f.reason}`).join("\n");
+      setConfirmState({
+        title: failures.length === paths.length ? "Could not load file(s)" : "Some files failed to load",
+        body: <span style={{ whiteSpace: "pre-line" }}>{lines}</span>,
+        confirmLabel: "OK",
+        confirmTone: "default",
+        onConfirm: () => setConfirmState(null),
+      });
+    }
+  }
+
+  function handleRemoveSession(sessionId: string) {
+    const target = sessions?.find((s) => s.id === sessionId);
+    if (!target) return;
+    setConfirmState({
+      title: `Remove session "${target.label}"?`,
+      body: target.id.startsWith("user:")
+        ? "The file stays on disk; it just leaves this Helios session. Re-add it any time."
+        : "This is a bundled sample — it will reappear on next launch.",
+      confirmLabel: "Remove",
+      confirmTone: "danger",
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        setSessions((prev) => {
+          if (!prev) return prev;
+          const next = prev.filter((s) => s.id !== sessionId);
+          // Promote the first remaining visible session as primary if we just
+          // dropped the current primary.
+          if (sessionId === primaryId) {
+            const fallback = next.find((s) => s.visible) ?? next[0];
+            setPrimaryId(fallback?.id ?? null);
+          }
+          return next;
+        });
+        // Drop math errors and lap selections that point at the removed session.
+        setMathErrors((prev) => {
+          const next = new Map(prev);
+          next.delete(sessionId);
+          return next;
+        });
+        const validIds = new Set(
+          (sessions ?? []).filter((s) => s.id !== sessionId).map((s) => s.id),
+        );
+        lapSelectionEmitter.prune(validIds);
+        setConfirmState(null);
+      },
+    });
+  }
+
+  async function handleAddSessionDialog() {
+    const result = await openFileDialog({
+      multiple: true,
+      filters: [{ name: "Data files", extensions: ["csv"] }],
+    });
+    if (!result) return;
+    const paths = Array.isArray(result) ? result : [result];
+    void handleAddSessionFiles(paths);
+  }
+
   /** Update the lap detection config for one session, recompute its laps,
    *  re-apply math channels (lap_* depends on the LapSet), and persist. */
   function handleLapConfigSave(sessionId: string, cfg: LapDetectionConfig) {
@@ -565,6 +674,8 @@ export default function App() {
           onToggleVisibility={toggleVisibility}
           onSetPrimary={setPrimaryId}
           onConfigureLaps={(id) => setLapConfigSessionId(id)}
+          onAddSession={handleAddSessionDialog}
+          onRemoveSession={handleRemoveSession}
         />
         <main className="flex-1 relative">
           {editMode && <GridOverlay />}
@@ -903,6 +1014,11 @@ function PlaybackControls({
       </select>
     </div>
   );
+}
+
+function basenameOf(path: string): string {
+  const segs = path.split(/[\\/]/).filter(Boolean);
+  return segs[segs.length - 1] ?? path;
 }
 
 function GridOverlay() {

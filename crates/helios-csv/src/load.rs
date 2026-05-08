@@ -28,7 +28,10 @@ pub fn load_csv(path: &Path, registry: &ChannelRegistry) -> Result<LoadResult, C
 pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadResult, CsvLoadError> {
     let raw = std::str::from_utf8(bytes)
         .map_err(|e| CsvLoadError::Malformed(format!("non-utf8 input: {e}")))?;
-    let text = preprocess_motec_if_needed(raw);
+    // Vendor-specific preamble strippers run before the CSV reader. Each is
+    // pattern-keyed off the first line so non-matching files pass through.
+    let after_motec: String = preprocess_motec_if_needed(raw).into_owned();
+    let text: String = preprocess_link_if_needed(&after_motec).into_owned();
     let first_line = text.lines().next()
         .ok_or_else(|| CsvLoadError::Malformed("empty file".into()))?;
     let delim = detect_delimiter(first_line);
@@ -161,6 +164,48 @@ fn preprocess_motec_if_needed(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Link ECU CSV exports start with a single quoted preamble line:
+///   "Name","ECU Internal Datalog - 2026-05-03 13;33;03"
+/// Then the channel-name row, units row, blank line, then data. The shape
+/// is similar to MoTeC but the trigger and the metadata block size differ.
+/// Pattern-keyed so non-Link files pass through.
+fn preprocess_link_if_needed(text: &str) -> Cow<'_, str> {
+    let mut iter = text.lines();
+    let first = iter.next().unwrap_or("");
+    // Cheap gate: first cell must be exactly `Name`. The second cell varies
+    // by export type but always contains "ECU" (Internal Datalog, etc.).
+    if first_csv_cell(first).map(|c| c != "Name").unwrap_or(true) {
+        return Cow::Borrowed(text);
+    }
+    if !first.contains("ECU") {
+        return Cow::Borrowed(text);
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() < 3 { return Cow::Borrowed(text); }
+
+    // line[0] = preamble, line[1] = channel-name header, line[2] = units row,
+    // line[3] = blank (sometimes), line[4..] = data. Be permissive about which
+    // lines between the header and the first numeric row are skipped.
+    let header = lines[1];
+    let mut data_start = 2;
+    while data_start < lines.len() {
+        let trimmed = lines[data_start].trim();
+        if trimmed.is_empty() { data_start += 1; continue; }
+        let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
+        if first_cell.parse::<f64>().is_ok() { break; }
+        data_start += 1;
+    }
+    let header_unique = dedupe_csv_header(header);
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&header_unique);
+    out.push('\n');
+    for l in &lines[data_start..] {
+        out.push_str(l);
+        out.push('\n');
+    }
+    Cow::Owned(out)
+}
+
 fn first_csv_cell(line: &str) -> Option<&str> {
     let line = line.trim_start();
     if let Some(rest) = line.strip_prefix('"') {
@@ -239,6 +284,26 @@ mod tests {
     fn missing_header_row_is_treated_as_data_failure() {
         let r = load_csv(&fixture("malformed/missing_header.csv"), &registry()).unwrap();
         assert!(!r.warnings.is_empty());
+    }
+
+    #[test]
+    fn loads_link_format_strips_preamble() {
+        let r = load_csv(&fixture("good/link_minimal.csv"), &registry()).unwrap();
+        // Link's first line is `"Name","ECU…"` — without the preamble stripper
+        // the loader would treat that as the header and bail when the time
+        // column couldn't be parsed.
+        let mut saw_rpm = false;
+        let mut rpm_first: Option<f64> = None;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.rpm").is_some() {
+                saw_rpm = true;
+                rpm_first = Some(rg.channel_data("engine.rpm").unwrap().value(0));
+            }
+        }
+        assert!(saw_rpm, "engine.rpm not loaded from Link CSV (alias `Engine Speed`)");
+        assert_eq!(rpm_first, Some(1000.0));
+        // 11 samples at 1ms steps → 10ms = 10_000 us span.
+        assert_eq!(r.duration_us, 10_000);
     }
 
     #[test]
