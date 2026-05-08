@@ -3,7 +3,7 @@
 **Date:** 2026-05-07
 **Owner:** Sun Devil Motorsports (ASU FSAE)
 **Status:** Draft for review
-**Target version:** Helios 3.0 (introduces the suite-shell + first non-logs module; bump major because login becomes required and the app reframes from "logs viewer" to "Helios suite"). Do **not** tag/release as part of this work — `v*` tags trigger the GitHub Actions release pipeline.
+**Target version:** Helios 3.0 (introduces the suite-shell + first non-logs module). The upgrade is **additive and non-breaking** for existing users: Logs continues to work exactly as today, with no login required, no UX changes, no migration. The new Vault module is gated behind login, and login is prompted only when a user accesses Vault for the first time. Existing users get the new version through the same minisign-signed auto-update flow they use today (Updates pill in the header → release notes modal → Install and restart). Do **not** tag/release as part of this work — `v*` tags trigger the GitHub Actions release pipeline.
 
 ## Summary
 
@@ -11,7 +11,7 @@ Helios Vault is a SolidWorks-style Product Data Management (PDM) module added to
 
 This spec covers Phase 1 (the standalone vault — usable for the next car build, no SolidWorks add-in yet) and outlines Phases 2 and 3 at the level of detail needed to make Phase 1 architectural decisions correctly.
 
-The Vault module is the second software package in the Helios suite. It coexists with the existing log-management module inside one desktop app, behind a single suite-wide login. On Windows, daily check-out/check-in happens primarily in File Explorer (overlay icons + right-click context menu); the in-app Vault module covers history, search, "who has what checked out," admin operations, and settings. On Mac, the Vault module is read-only — full CAD operations are Windows-only (SolidWorks is Windows-only).
+The Vault module is the second software package in the Helios suite. It coexists with the existing log-management module inside one desktop app. **Login is required only for Vault**; Logs stays unauthenticated in Phase 1 so today's users can upgrade without any change to their workflow. The first time a user clicks Vault, they're prompted to sign in or create an account. On Windows, daily check-out/check-in happens primarily in File Explorer (overlay icons + right-click context menu); the in-app Vault module covers history, search, "who has what checked out," admin operations, and settings. On Mac, the Vault module is read-only — full CAD operations are Windows-only (SolidWorks is Windows-only).
 
 The backend is Supabase Pro (managed Postgres + Storage + Auth + Realtime + Edge Functions). The decision over self-hosted AWS reflects scale: the team is ~20 users with ~10 concurrent peak, and the working CAD set is ~8 GB. Supabase covers all of that for $25/month flat with vastly less code to maintain. Supabase's open-source stack (Postgres + GoTrue + PostgREST + Realtime + Storage) is self-hostable if we ever need to bail out.
 
@@ -22,7 +22,7 @@ The backend is Supabase Pro (managed Postgres + Storage + Auth + Realtime + Edge
 - Immutable versioning with author, timestamp, and comment for every check-in.
 - Native-feeling Windows experience: vault contents appear as a regular Explorer folder with overlay icons and a right-click context menu; designers don't have to leave their normal workflow to check files in/out.
 - A Vault module inside the Helios desktop app for browse, history, search, "who has what," admin (force-unlock, user invite, role management), and settings.
-- Suite-wide login: one user identity covers Logs, Vault, and any future Helios modules.
+- Suite-wide identity: one user identity covers Vault and any future authenticated Helios modules. Logs stays unauthenticated in Phase 1 — adding Vault must not break the existing Logs workflow for any current user.
 - Offline tolerance: a designer who has a file checked out can keep editing without network and push their work when reconnected.
 - Cross-platform identity, Windows-first CAD ops: Mac users log in and read the vault; they don't check out or edit CAD files.
 - Auto-track parent → child references between SolidWorks files (sufficient to power "where used").
@@ -273,7 +273,7 @@ create table pdm.user_roles (
 
 ## Suite-wide identity & login
 
-Both the existing Logs module and the new Vault module share one Supabase Auth user table.
+The Helios suite gains an identity layer for the new Vault module. **Logs is unaffected** — it does not require login, does not change behavior, does not migrate any data. A user can upgrade to the new Helios, never click Vault, and have the exact same experience as today. Login is prompted the first time a user clicks the Vault module in the left rail.
 
 ### Roles
 
@@ -281,7 +281,7 @@ Both the existing Logs module and the new Vault module share one Supabase Auth u
 - **editor** — check files in/out, create files, browse history, view audit log.
 - **viewer** — read-only across the suite.
 
-The existing Logs module ignores roles in Phase 1 (any logged-in user can use Logs). Roles only gate Vault operations for now.
+Roles gate Vault operations only. Logs ignores roles entirely (it has no auth in Phase 1).
 
 ### Bootstrap admin
 
@@ -295,22 +295,29 @@ The first admin is **nick532219@gmail.com** (project owner). Bootstrap procedure
 
 ### Login flow
 
-1. App starts → Helios shell checks for a stored refresh token in the OS keychain (Windows Credential Manager / macOS Keychain).
-2. Valid token → silently refresh → land on the user's last-used module.
-3. No token / expired → present the login screen (email + password, "Remember me" toggle).
-4. Login success → store refresh token in keychain → land on home view.
+1. App starts → lands on the last-used module exactly as today. **No login screen on launch** — that would break the existing user experience.
+2. Logs module → unauthenticated; works as it does today.
+3. User clicks Vault module in the left rail (or accepts an invite link):
+   a. If a valid refresh token is in the OS keychain (Windows Credential Manager / macOS Keychain) → silently refresh → drop into Vault.
+   b. Otherwise → in-app login pane appears within the Vault module area: email + password, "Remember me" toggle, "Create account" link for invited users completing signup.
+4. Login success → store refresh token in keychain → Vault module renders.
+5. Sign out (from Settings or the user menu) clears the keychain entry but does not affect Logs.
+
+This means existing users will see exactly one new affordance after upgrading: a "Vault" entry in the left rail with a small badge that reads **NEW**. Clicking it is the only thing that triggers any login or account flow. Everything else stays the same.
 
 ### Offline login
 
 The sync daemon caches the last-validated JWT plus an Argon2id hash of the user's password (with random salt, stored in `meta.sqlite`).
 
-- Launch offline + valid cached JWT → enter "limited offline session." Logs module is fully functional. Vault module operates in offline mode: existing checked-out files remain editable; no new lock acquisitions; queued check-ins flush on reconnect.
-- Launch offline + expired JWT → prompt for password → if it matches the cached hash, enter limited offline session. Same behavior.
+- Launch offline (any state) → Logs module is always available, no login involved.
+- User clicks Vault while offline + valid cached JWT → enter "limited offline Vault session." Existing checked-out files remain editable; no new lock acquisitions; queued check-ins flush on reconnect.
+- User clicks Vault while offline + expired JWT → prompt for password → if it matches the cached Argon2id hash, enter limited offline Vault session. Same behavior.
+- User has never logged into Vault on this machine and is offline → Vault module shows "Sign in to use Vault" with a "Try again when online" message.
 - Online reconnect → daemon revalidates with Supabase → upgrades to a real session.
 
 ### Session state in the codebase
 
-- **JS side:** `packages/auth/` exports a `SupabaseAuthProvider`, `useUser()`, `useSession()`, and a `RequireAuth` route guard. The Helios `apps/desktop/src/App.tsx` wraps everything in `<SupabaseAuthProvider>` and gates the module router behind `<RequireAuth>`.
+- **JS side:** `packages/auth/` exports a `SupabaseAuthProvider`, `useUser()`, `useSession()`, and a `RequireAuth` route guard. The Helios `apps/desktop/src/App.tsx` wraps everything in `<SupabaseAuthProvider>`. The Logs module renders unconditionally; only the Vault module is wrapped in `<RequireAuth>`. The provider initializes lazily — if no Vault interaction happens, no Supabase network call is made.
 - **Rust side (sync daemon):** the daemon doesn't have its own login UI. At app startup, the Tauri-side `helios.exe` performs the auth flow, then hands the daemon a session token via local IPC (named pipe). The daemon stores the token in memory + keychain and refreshes it on its own thereafter. If the daemon starts before Helios (e.g., on Windows boot), it tries the keychain first; if no stored token, it idles and the shell extension shows a "sign in to Helios" overlay state.
 
 ---
@@ -536,13 +543,13 @@ End state: a designer can log in, open the Vault folder in Explorer, right-click
 
 **R8 — Vendor coupling to Supabase.** Real but bounded. *Mitigation:* Supabase is open source — Postgres + GoTrue + PostgREST + Realtime + Storage all self-hostable on a single VM. The schema, RLS, and edge function are portable artifacts in `infra/pdm-supabase/`. We don't write Supabase-proprietary SQL.
 
-**R9 — Helios major-version bump.** Adding required login is a breaking change for existing Helios users. *Mitigation:* call it Helios 3.0 in release notes; existing users sign up with their email on first launch after upgrade. Logs functionality is unchanged. Provide a migration note in `v2_changes/` (or its v3 successor).
+**R9 — Upgrade impact on existing Helios users.** Adding a whole second module could in principle disrupt the existing Logs experience. *Mitigation:* the upgrade is engineered to be additive and non-breaking. Logs requires no login, no migration, and renders identically to today's behavior. The only change visible to a current Logs user after upgrading is a new "Vault" entry in the left rail with a NEW badge — they can ignore it forever and the app behaves exactly as it does today. Auto-update piggybacks on the existing minisign + GitHub Releases + UpdatesPill flow with no changes; the in-app release-notes modal walks them through what's new. Provide a write-up in `v2_changes/` (or v3 successor) that frames the new module as an opt-in addition.
 
 ---
 
 ## Open questions
 
-1. **Where does the local Vault folder live by default on Windows?** Two choices: `%LOCALAPPDATA%\Helios\Vault\` (out of the way, but designers don't normally browse there) or a top-level location like `C:\Helios\Vault\` (more visible but pollutes the C: root). Real SolidWorks PDM uses the latter. **Default proposal:** `C:\Helios\Vault\` to mirror PDM convention; configurable in Settings during install.
+1. **~~Where does the local Vault folder live by default on Windows?~~ Resolved.** Default location is `%LOCALAPPDATA%\Helios\Vault\` — kept under the Helios user-data namespace alongside the daemon's `meta.sqlite` and configuration. Configurable in Settings if a designer wants to relocate (e.g., to a different drive). Symlinked into `C:\Helios\Vault\` is **not** done by default to avoid polluting the C: root and to keep all Helios state under a single owned namespace.
 
 2. **Working-copy isolation between users on shared machines.** If two designers share a Windows login (rare but possible at the team shop), they share the same local vault. The lock model still works (Supabase is the source of truth), but local edits could be ambiguous about authorship. **Proposal:** punt — document that each designer should have their own Windows login. Revisit if it bites.
 
@@ -550,4 +557,4 @@ End state: a designer can log in, open the Vault folder in Explorer, right-click
 
 4. **History size growth.** Every check-in is an immutable version. After a year of active use, we may have 10k+ versions. Storage cost is fine (content-addressed dedup helps). UI: history list pagination should chunk to 50 versions at a time. **Proposal:** explicit pagination in Phase 1; Storage tiering is a Phase 3 concern.
 
-5. **Identity carry-over for the existing log-mgmt module.** Do log files become user-attributed once auth lands? **Proposal:** no — the Logs module is unchanged in Phase 1 except for being gated behind login. Per-user log libraries / sharing is a separate future spec.
+5. **~~Identity carry-over for the existing log-mgmt module.~~ Resolved.** Logs is unchanged in Phase 1: no login required, no per-user log libraries, no migration. If/when the team wants per-user log sharing, it'll be a separate future spec — and even then, login on the Logs side will be opt-in to preserve the current zero-friction experience.
