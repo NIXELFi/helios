@@ -9,8 +9,13 @@
  * password is generated and printed once. The admin must change it on first login.
  */
 import { config } from "dotenv";
+import WebSocket from "ws";
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
+
+// Node < 22 has no native WebSocket; supabase-js v2.105+ instantiates a
+// RealtimeClient at createClient() time even when realtime isn't used.
+(globalThis as any).WebSocket ??= WebSocket;
 
 config();
 
@@ -32,7 +37,10 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const svc = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const svc = createClient(url, serviceKey, {
+    auth: { persistSession: false },
+    db: { schema: "pdm" }, // pdm.user_roles, not public.user_roles
+  });
 
   // Find or create the user.
   const { data: list, error: listErr } = await svc.auth.admin.listUsers();
