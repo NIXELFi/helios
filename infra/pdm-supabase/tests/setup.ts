@@ -21,13 +21,16 @@ if (!url || !anonKey || !serviceKey) {
 
 // db.schema sets the default schema for `.from(table)` calls. Our tables are
 // all under `pdm`. Override per-call with `.schema('other')` if needed.
-export const serviceClient = (): SupabaseClient =>
+// (Return type is `SupabaseClient<any, any, "pdm", ...>` rather than the
+//  default `SupabaseClient<any, "public", "public", ...>`. Use `any` for the
+//  schema generic to avoid pinning callers to a specific schema literal.)
+export const serviceClient = (): SupabaseClient<any, any, any> =>
   createClient(url, serviceKey, {
     auth: { persistSession: false },
     db: { schema: "pdm" },
   });
 
-export const anonClient = (): SupabaseClient =>
+export const anonClient = (): SupabaseClient<any, any, any> =>
   createClient(url, anonKey, {
     auth: { persistSession: false },
     db: { schema: "pdm" },
