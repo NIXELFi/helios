@@ -133,4 +133,73 @@ describe("<FileTable>", () => {
     // onSelect must NOT be called
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("renders checkboxes when selectedIds prop is provided", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          selectedIds={new Set()}
+          onToggleSelect={() => {}}
+          onToggleSelectAll={() => {}}
+          allSelected={false}
+        />,
+      ),
+    );
+    // One per row + one header checkbox
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.length).toBe(files.length + 1); // header + one per file
+  });
+
+  it("clicking a row checkbox calls onToggleSelect with the file id", () => {
+    const onToggleSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          selectedIds={new Set()}
+          onToggleSelect={onToggleSelect}
+          onToggleSelectAll={() => {}}
+          allSelected={false}
+        />,
+      ),
+    );
+    const checkboxes = screen.getAllByRole("checkbox");
+    // First checkbox is the header; second is for files[0]
+    fireEvent.click(checkboxes[1]);
+    expect(onToggleSelect).toHaveBeenCalledWith("f1");
+  });
+
+  it("header checkbox calls onToggleSelectAll", () => {
+    const onToggleSelectAll = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          selectedIds={new Set()}
+          onToggleSelect={() => {}}
+          onToggleSelectAll={onToggleSelectAll}
+          allSelected={false}
+        />,
+      ),
+    );
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]); // header checkbox
+    expect(onToggleSelectAll).toHaveBeenCalled();
+  });
 });

@@ -10,6 +10,11 @@ interface Props {
   canEdit?: boolean;
   onSelect: (id: FileId) => void;
   onActionComplete?: () => void;
+  // Multi-select (optional — existing callers without selection still work)
+  selectedIds?: Set<FileId>;
+  onToggleSelect?: (id: FileId) => void;
+  onToggleSelectAll?: () => void;
+  allSelected?: boolean;
 }
 
 function lockStateFor(file: VaultFile, locks: Lock[], me: UserId) {
@@ -26,11 +31,26 @@ export function FileTable({
   canEdit = true,
   onSelect,
   onActionComplete,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  allSelected = false,
 }: Props) {
+  const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   return (
     <table className="w-full text-sm">
       <thead className="border-b border-zinc-800 text-left text-zinc-400">
         <tr>
+          {hasMultiSelect && (
+            <th className="w-8 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                aria-label="Select all"
+              />
+            </th>
+          )}
           <th className="px-3 py-2 font-normal">Name</th>
           <th className="px-3 py-2 font-normal">Status</th>
           <th className="px-3 py-2 font-normal">Actions</th>
@@ -49,6 +69,17 @@ export function FileTable({
                 (isSel ? "bg-zinc-800" : "hover:bg-zinc-900")
               }
             >
+              {hasMultiSelect && (
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds!.has(f.id)}
+                    onChange={(e) => { e.stopPropagation(); onToggleSelect!(f.id); }}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Select ${f.name}`}
+                  />
+                </td>
+              )}
               <td className="px-3 py-2 text-zinc-100">{f.name}</td>
               <td className="px-3 py-2">
                 <LockBadge state={state} />
