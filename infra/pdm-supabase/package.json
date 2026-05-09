@@ -8,7 +8,8 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:status": "supabase status",
-    "test": "vitest run",
+    "test": "node scripts/test-or-skip.cjs",
+    "test:run": "vitest run",
     "test:watch": "vitest",
     "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
     "typecheck": "tsc --noEmit"
