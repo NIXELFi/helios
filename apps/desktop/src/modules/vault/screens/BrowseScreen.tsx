@@ -15,9 +15,12 @@ import { useLatestVersions } from "../data/useLatestVersions";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { localDestPath } from "../data/folder-paths";
 import { matchLocal } from "../data/local-match";
+import { useAllFiles } from "../data/useAllFiles";
+import { findUnmatchedLocal } from "../data/find-unmatched";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
+import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
 import type { FileId, FolderId } from "../data/types";
 
@@ -45,6 +48,13 @@ export function BrowseScreen() {
   // Local vault folder scan
   const { path: vaultFolderPath } = useVaultFolder();
   const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath);
+
+  // All files in the vault (for unmatched-local detection across all folders)
+  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId);
+  const unmatched =
+    allFiles && localFiles && folders
+      ? findUnmatchedLocal(allFiles, localFiles, folders)
+      : [];
 
   // Latest versions for local-status matching
   const fileIds = (files ?? []).map((f) => f.id);
@@ -136,6 +146,7 @@ export function BrowseScreen() {
   function handleActionComplete() {
     refetchFiles();
     refetchLocks();
+    refetchAllFiles();
     rescan();
     bump();
   }
@@ -195,7 +206,20 @@ export function BrowseScreen() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      <UnmatchedFilesBanner
+        vaultId={vaultId}
+        folders={folders ?? []}
+        unmatched={unmatched}
+        onDone={() => {
+          refetchAllFiles();
+          refetchFolders();
+          refetchFiles();
+          refetchLocks();
+          rescan();
+        }}
+      />
+      <div className="flex min-h-0 flex-1">
       <div className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-950">
         <header className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
           <span className="text-xs uppercase tracking-wider text-zinc-500">
@@ -296,6 +320,7 @@ export function BrowseScreen() {
         )}
       </div>
       <FileDetailPanel fileId={selectedFile} />
+      </div>
       {confirmPullAll && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
