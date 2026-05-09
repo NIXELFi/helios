@@ -72,8 +72,8 @@ The Tauri desktop app, the existing crates (`helios-arrow`, `helios-core`, `heli
 1. **Supabase CLI installed.**
 
    ```bash
-   brew install supabase/tap/supabase
-   supabase --version   # should print 1.x or later
+   brew install supabase/tap/supabase-beta
+   supabase --version   # should print 2.x or later
    ```
 
 2. **Docker Desktop running.** The Supabase CLI runs Postgres + GoTrue + PostgREST + Realtime + Storage in containers locally.
@@ -220,7 +220,7 @@ Supabase project that backs the Helios Vault module. Holds the `pdm` schema migr
 
 ## Local development
 
-1. Install Supabase CLI: `brew install supabase/tap/supabase`.
+1. Install Supabase CLI: `brew install supabase/tap/supabase-beta` (the historical `supabase` formula was retired; `supabase-beta` is the current installable one).
 2. Start Docker Desktop.
 3. From this directory: `pnpm db:start`. First run takes ~2 minutes.
 4. Print local credentials: `pnpm db:status`. Copy the `anon key` and `service_role key` into `.env` (use `.env.example` as a template).

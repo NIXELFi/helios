@@ -4,11 +4,14 @@ members = [
   "crates/helios-core",
   "crates/helios-arrow",
   "crates/helios-csv",
+  "crates/pdm-core",
+  "crates/pdm-sw-parser",
+  "crates/pdm-client",
   "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
-version = "2.5.3"
+version = "3.0.0"
 edition = "2021"
 license = "MIT"
 
@@ -19,5 +22,11 @@ csv = "1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+cfb = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+url = "2"

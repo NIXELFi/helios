@@ -1,0 +1,21 @@
+//! Shared domain types for the Helios Vault PDM module.
+//!
+//! No I/O, no async, no std-only APIs — this crate is `no_std + alloc` clean
+//! so it can be compiled to WASM for the parse-refs edge function.
+
+#![cfg_attr(not(feature = "std"), no_std)]
+extern crate alloc;
+
+pub mod audit;
+pub mod error;
+pub mod ids;
+pub mod role;
+pub mod sha256;
+pub mod vault;
+
+pub use audit::{AuditAction, AuditEntry};
+pub use error::CoreError;
+pub use ids::{FileId, FolderId, LockId, UserId, VaultId, VersionId};
+pub use role::Role;
+pub use sha256::Sha256;
+pub use vault::{File, Folder, Lock, Ref, Vault, Version};

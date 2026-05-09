@@ -1,0 +1,41 @@
+use std::io::{Cursor, Write};
+use pdm_sw_parser::{parse_refs, RefHint};
+
+fn cfb_with_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    {
+        let cursor = Cursor::new(&mut buf);
+        let mut comp = cfb::CompoundFile::create(cursor).unwrap();
+        for (name, payload) in streams {
+            comp.create_stream(*name).unwrap().write_all(payload).unwrap();
+        }
+        comp.flush().unwrap();
+    }
+    buf
+}
+
+#[test]
+fn parse_refs_on_garbage_input_does_not_panic_and_returns_empty() {
+    let refs = parse_refs(b"\x00\x01\x02 not a cfb at all");
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn parse_refs_on_cfb_without_reference_streams_returns_empty() {
+    let cfb = cfb_with_streams(&[("Properties", b"hello")]);
+    let refs = parse_refs(&cfb);
+    assert!(refs.is_empty());
+}
+
+#[test]
+fn parse_refs_aggregates_hints_across_multiple_reference_streams() {
+    let cfb = cfb_with_streams(&[
+        ("External References", b"..\\parts\\a.sldprt\x00..\\parts\\b.sldprt\x00"),
+        ("Component References", b"..\\hardware\\bolt.sldprt\x00"),
+    ]);
+    let refs = parse_refs(&cfb);
+    let basenames: Vec<&str> = refs.iter().map(RefHint::basename).collect();
+    assert!(basenames.contains(&"a.sldprt"));
+    assert!(basenames.contains(&"b.sldprt"));
+    assert!(basenames.contains(&"bolt.sldprt"));
+}
