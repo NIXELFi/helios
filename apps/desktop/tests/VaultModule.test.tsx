@@ -48,6 +48,7 @@ describe("<VaultModule>", () => {
         if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
+      rpc: (name: string) => Promise.resolve({ data: false, error: null }),
     } as any;
     render(
       <SupabaseAuthProvider client={c}>

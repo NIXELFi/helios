@@ -5,7 +5,7 @@ import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BrowseScreen } from "../../src/modules/vault/screens/BrowseScreen";
 
-function buildMockClient(): SupabaseClient {
+function buildMockClient(isAdmin = false): SupabaseClient {
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({
@@ -13,6 +13,10 @@ function buildMockClient(): SupabaseClient {
         error: null,
       }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    rpc: (name: string) => {
+      if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
+      return Promise.resolve({ data: null, error: null });
     },
     from: vi.fn().mockImplementation((table: string) => {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [{ id: "v1", name: "sdm26", created_at: "x", created_by: "u1" }], error: null }) };
@@ -40,6 +44,29 @@ function buildMockClient(): SupabaseClient {
   } as any;
 }
 
+/** Client that returns no vaults so the empty-vault branch is hit. */
+function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: "u1", email: "u1@x.com" } } },
+        error: null,
+      }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    rpc: (name: string) => {
+      if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
+      return Promise.resolve({ data: null, error: null });
+    },
+    from: vi.fn().mockImplementation((table: string) => {
+      if (table === "vaults") return { select: () => Promise.resolve({ data: [], error: null }) };
+      if (table === "folders") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
+      if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    }),
+  } as any;
+}
+
 describe("<BrowseScreen>", () => {
   it("renders vault name + folder tree, then files after folder click", async () => {
     const c = buildMockClient();
@@ -62,5 +89,30 @@ describe("<BrowseScreen>", () => {
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/select a file/i)).toBeInTheDocument());
+  });
+
+  it("empty-vault state shows 'Create vault' form when admin", async () => {
+    const c = buildEmptyVaultClient(true);
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BrowseScreen />
+      </SupabaseAuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /create vault/i })).toBeInTheDocument(),
+    );
+    expect(screen.getByPlaceholderText(/vault name/i)).toBeInTheDocument();
+  });
+
+  it("empty-vault state shows nothing special when not admin", async () => {
+    const c = buildEmptyVaultClient(false);
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BrowseScreen />
+      </SupabaseAuthProvider>,
+    );
+    // Should NOT show the create-vault form; the normal layout renders instead
+    await waitFor(() => expect(screen.getByText(/no vault/i)).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /create vault/i })).toBeNull();
   });
 });

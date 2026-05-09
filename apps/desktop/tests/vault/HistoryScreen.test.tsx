@@ -16,6 +16,7 @@ function mockClient(): SupabaseClient {
       if (table === "folders") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
       return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
     }),
+    rpc: (_name: string) => Promise.resolve({ data: false, error: null }),
   } as any;
 }
 
