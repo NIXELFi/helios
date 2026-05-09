@@ -1,7 +1,18 @@
 import { useLocks } from "../data/useLocks";
+import { useForceUnlock } from "../data/useForceUnlock";
+import { useIsAdmin } from "../data/useIsAdmin";
 
 export function WhoHasWhatScreen() {
-  const { data: locks, loading, error } = useLocks();
+  const { data: locks, loading, error, refetch } = useLocks();
+  const forceUnlock = useForceUnlock();
+  const isAdmin = useIsAdmin();
+
+  async function handleForceUnlock(lockId: string) {
+    const reason = window.prompt("Reason for force unlock:");
+    if (!reason || reason.trim() === "") return;
+    const ok = await forceUnlock.run(lockId, reason.trim());
+    if (ok) refetch();
+  }
 
   return (
     <div className="h-full overflow-auto bg-zinc-900">
@@ -22,6 +33,7 @@ export function WhoHasWhatScreen() {
                 <th className="px-3 py-2 font-normal">File</th>
                 <th className="px-3 py-2 font-normal">Holder</th>
                 <th className="px-3 py-2 font-normal">Since</th>
+                {isAdmin && <th className="px-3 py-2 font-normal">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -30,6 +42,17 @@ export function WhoHasWhatScreen() {
                   <td className="px-3 py-2 font-mono text-xs text-zinc-400">{l.file_id}</td>
                   <td className="px-3 py-2 text-zinc-200">{l.user_id}</td>
                   <td className="px-3 py-2 text-zinc-500">{l.acquired_at}</td>
+                  {isAdmin && (
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={() => handleForceUnlock(l.id)}
+                        disabled={forceUnlock.loading}
+                        className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Force unlock
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
