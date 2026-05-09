@@ -3,6 +3,12 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 export interface SupabaseConfig {
   url?: string;
   anonKey?: string;
+  /**
+   * Default Postgres schema for `.from()` and `.rpc()` lookups.
+   * Defaults to `"pdm"` because the Vault module is the only consumer today.
+   * Override per-call with `client.schema('public').from(...)` if needed.
+   */
+  schema?: string;
 }
 
 /**
@@ -15,12 +21,13 @@ export interface SupabaseConfig {
  *
  * Throws if neither produces a non-empty URL.
  */
-export function createSupabaseClient(args: SupabaseConfig = {}): SupabaseClient {
+export function createSupabaseClient(args: SupabaseConfig = {}): SupabaseClient<any, any, any> {
   // Read directly from import.meta.env so Vitest's vi.stubEnv patches are
   // reflected at call time. Both Vite (production) and Vitest set up
   // import.meta.env; it is always available in these environments.
   const url = args.url ?? import.meta.env.VITE_SUPABASE_URL ?? "";
   const anonKey = args.anonKey ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+  const schema = args.schema ?? "pdm";
 
   if (!url) {
     throw new Error(
@@ -41,5 +48,6 @@ export function createSupabaseClient(args: SupabaseConfig = {}): SupabaseClient 
       // separate mechanism; for now, persistSession in localStorage is the
       // baseline and can be tightened in a follow-up.
     },
+    db: { schema },
   });
 }
