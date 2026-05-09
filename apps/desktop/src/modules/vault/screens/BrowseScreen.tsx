@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useUser } from "@helios/auth";
 import { useVaults } from "../data/useVaults";
 import { useFolders } from "../data/useFolders";
@@ -12,17 +12,20 @@ import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
-import { useDownloadVersion } from "../data/useDownloadVersion";
-import { localDestPath } from "../data/folder-paths";
-import { matchLocal } from "../data/local-match";
 import { useAllFiles } from "../data/useAllFiles";
+import { useAutoSync } from "../data/useAutoSync";
+import { useVaultRealtime } from "../data/useVaultRealtime";
 import { findUnmatchedLocal } from "../data/find-unmatched";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
-import type { FileId, FolderId } from "../data/types";
+import type { FileId, FolderId, Version } from "../data/types";
+
+// How often to fall back to a full local rescan if the filesystem watcher
+// drops events. 30s is short enough to feel live, long enough to be cheap.
+const LOCAL_RESCAN_INTERVAL_MS = 30_000;
 
 export function BrowseScreen() {
   const user = useUser();
@@ -45,23 +48,59 @@ export function BrowseScreen() {
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
 
-  // Local vault folder scan
+  // Local vault folder scan — auto-rescan on window focus + 30s interval +
+  // native filesystem watcher so the synced/modified state stays live without
+  // the user touching a button.
   const { path: vaultFolderPath } = useVaultFolder();
-  const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath);
+  const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
+    intervalMs: LOCAL_RESCAN_INTERVAL_MS,
+    rescanOnFocus: true,
+    watchFs: true,
+  });
 
-  // All files in the vault (for unmatched-local detection across all folders)
+  // Use vault-wide files for the auto-sync pass (so it covers folders the user
+  // hasn't opened yet) and for unmatched-local detection.
   const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId);
   const unmatched =
     allFiles && localFiles && folders
       ? findUnmatchedLocal(allFiles, localFiles, folders)
       : [];
 
-  // Latest versions for local-status matching
-  const fileIds = (files ?? []).map((f) => f.id);
-  const { data: latestByFileId } = useLatestVersions(fileIds);
-  const versionsByFileId = new Map(
-    Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),
+  // Latest versions across the entire vault. The current-folder file table
+  // and the background auto-sync both read from this single source so we
+  // don't duplicate the round-trip.
+  const allFileIds = useMemo(() => (allFiles ?? []).map((f) => f.id), [allFiles]);
+  const { data: latestByFileId, refetch: refetchLatest } = useLatestVersions(allFileIds);
+  const versionsByFileId = useMemo(
+    () => new Map<FileId, Version[]>(
+      Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),
+    ),
+    [latestByFileId],
   );
+
+  // Realtime: when anyone checks in / locks / unlocks / adds a file in this
+  // vault, refetch the affected slice. The auto-sync hook below picks up the
+  // new version state and downloads the bytes.
+  const onVersion = useCallback(() => { refetchLatest(); refetchAllFiles(); }, [refetchLatest, refetchAllFiles]);
+  const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
+  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
+  useVaultRealtime(vaultId, { onVersion, onLock, onFile });
+
+  // Background auto-sync: download every vault file that isn't already on
+  // disk and isn't locked by the current user. Re-runs whenever versions /
+  // locks / files / local scan change.
+  const onAutoSyncComplete = useCallback(() => { rescan(); }, [rescan]);
+  const autoSync = useAutoSync({
+    enabled: !!vaultFolderPath,
+    files: allFiles,
+    localFiles: localFiles ?? null,
+    versionsByFileId,
+    locks,
+    currentUserId: user?.id ?? null,
+    vaultRoot: vaultFolderPath,
+    folders: folders ?? [],
+    onComplete: onAutoSyncComplete,
+  });
 
   function toggleOne(id: FileId) {
     setSelected((prev) => {
@@ -86,7 +125,6 @@ export function BrowseScreen() {
   const createVault = useCreateVault();
   const createFolder = useCreateFolder();
   const createFile = useCreateFile();
-  const download = useDownloadVersion();
 
   const [vaultNameInput, setVaultNameInput] = useState("");
 
@@ -94,11 +132,6 @@ export function BrowseScreen() {
   const [prompt, setPrompt] = useState<{ kind: "folder" | "file" } | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
-
-  // Pull All confirmation modal
-  const [confirmPullAll, setConfirmPullAll] = useState(false);
-  const [pullAllBusy, setPullAllBusy] = useState(false);
-  const [pullAllStatus, setPullAllStatus] = useState<string | null>(null);
 
   async function handleCreateVault(e: React.FormEvent) {
     e.preventDefault();
@@ -147,32 +180,6 @@ export function BrowseScreen() {
     refetchFiles();
     refetchLocks();
     refetchAllFiles();
-    rescan();
-    bump();
-  }
-
-  // Pull All vault files in the current folder to local disk.
-  async function handlePullAll() {
-    if (!vaultFolderPath || !files) return;
-    setConfirmPullAll(false);
-    setPullAllBusy(true);
-    setPullAllStatus(null);
-    let ok = 0, fail = 0, skipped = 0;
-    for (const file of files) {
-      const ver = versionsByFileId.get(file.id)?.[0];
-      if (!ver) { skipped++; continue; }
-      const m = matchLocal(file, localFiles, versionsByFileId, folders ?? []);
-      // Skip files that are already synced.
-      if (m.status === "synced") { skipped++; continue; }
-      const dest = localDestPath(vaultFolderPath, file.folder_id, file.name, folders ?? []);
-      const r = await download.run(ver.sha256, dest);
-      if (r) ok++; else fail++;
-    }
-    setPullAllStatus(
-      `Downloaded ${ok}/${files.length}` +
-        (fail ? ` (${fail} failed, ${skipped} skipped)` : skipped ? ` (${skipped} skipped)` : ""),
-    );
-    setPullAllBusy(false);
     rescan();
     bump();
   }
@@ -256,26 +263,13 @@ export function BrowseScreen() {
           <>
             <div className="flex items-center justify-end gap-2 border-b border-zinc-800 px-3 py-1.5">
               {vaultFolderPath && (
-                <>
-                  <button
-                    onClick={rescan}
-                    className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                    title="Rescan local vault folder"
-                  >
-                    Rescan
-                  </button>
-                  <button
-                    onClick={() => { setPullAllStatus(null); setConfirmPullAll(true); }}
-                    disabled={pullAllBusy}
-                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                    title="Download all vault files in this folder to local disk"
-                  >
-                    {pullAllBusy ? "Pulling…" : "Pull All"}
-                  </button>
-                  {pullAllStatus && (
-                    <span className="text-xs text-zinc-500">{pullAllStatus}</span>
-                  )}
-                </>
+                <SyncStatusPill
+                  busy={autoSync.busy}
+                  lastDownloaded={autoSync.lastDownloaded}
+                  lastFailed={autoSync.lastFailed}
+                  lastRunAt={autoSync.lastRunAt}
+                  onRescan={rescan}
+                />
               )}
               {isAdmin && (
                 <button
@@ -325,40 +319,6 @@ export function BrowseScreen() {
       </div>
       <FileDetailPanel fileId={selectedFile} />
       </div>
-      {confirmPullAll && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setConfirmPullAll(false)}
-        >
-          <div
-            className="w-96 space-y-3 rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-semibold text-zinc-100">Pull all vault files?</h3>
-            <p className="text-xs text-zinc-400">
-              This will download {files?.length ?? 0} file{(files?.length ?? 0) === 1 ? "" : "s"} into{" "}
-              <span className="font-mono text-zinc-300">{vaultFolderPath}</span>, overwriting any
-              local copies with the same path. Already-synced files will be skipped.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmPullAll(false)}
-                className="rounded px-3 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handlePullAll}
-                className="rounded bg-blue-700 px-3 py-1 text-xs text-white hover:bg-blue-600"
-              >
-                Pull All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {prompt && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -401,5 +361,42 @@ export function BrowseScreen() {
         </div>
       )}
     </div>
+  );
+}
+
+function SyncStatusPill({ busy, lastDownloaded, lastFailed, lastRunAt, onRescan }: {
+  busy: boolean;
+  lastDownloaded: number;
+  lastFailed: number;
+  lastRunAt: string | null;
+  onRescan: () => void;
+}) {
+  let label: string;
+  let tone: string;
+  if (busy) {
+    label = "Syncing…";
+    tone = "text-yellow-400";
+  } else if (lastFailed > 0) {
+    label = `${lastFailed} failed`;
+    tone = "text-red-400";
+  } else if (lastDownloaded > 0) {
+    label = `Pulled ${lastDownloaded}`;
+    tone = "text-green-400";
+  } else if (lastRunAt) {
+    label = "Up to date";
+    tone = "text-zinc-500";
+  } else {
+    label = "Idle";
+    tone = "text-zinc-500";
+  }
+  return (
+    <button
+      onClick={onRescan}
+      className={"flex items-center gap-1.5 rounded px-2 py-0.5 text-xs hover:bg-zinc-800 " + tone}
+      title="Auto-syncs in the background. Click to rescan local folder."
+    >
+      <span className={"inline-block h-1.5 w-1.5 rounded-full " + (busy ? "bg-yellow-400 animate-pulse" : lastFailed > 0 ? "bg-red-400" : "bg-zinc-600")} />
+      {label}
+    </button>
   );
 }

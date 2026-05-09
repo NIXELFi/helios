@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatLapTime } from "@helios/lib";
+import type { LapRef, LapSelection, LapSelectionEmitter } from "@helios/lib";
 import type { LoadedSession } from "../lib/session";
 
 interface Props {
@@ -17,14 +18,20 @@ interface Props {
    *  applying. Bundled samples reappear on next launch; user-loaded files
    *  stay on disk. */
   onRemoveSession: (id: string) => void;
+  /** Lap-selection bus shared with lap-panel widget. Sidebar lap list reads
+   *  + writes through the same emitter so Main/Ref highlighting stays
+   *  in sync wherever it's surfaced. */
+  lapSelectionEmitter: LapSelectionEmitter;
+  lapSelection: LapSelection;
 }
 
 export function SessionPanel({
   sessions, primaryId, onToggleVisibility, onSetPrimary, onConfigureLaps,
-  onAddSession, onRemoveSession,
+  onAddSession, onRemoveSession, lapSelectionEmitter, lapSelection,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const primary = sessions.find((s) => s.id === primaryId) ?? null;
 
   if (collapsed) {
     return (
@@ -124,9 +131,97 @@ export function SessionPanel({
           );
         })}
       </div>
+      <SidebarLapList
+        primary={primary}
+        emitter={lapSelectionEmitter}
+        selection={lapSelection}
+      />
       <div className="px-2 py-1.5 border-t border-[#2A2C32] text-[10px] text-[#5A5F66]">
         Drag CSVs anywhere to add. + to browse.
       </div>
     </aside>
+  );
+}
+
+function SidebarLapList({ primary, emitter, selection }: {
+  primary: LoadedSession | null;
+  emitter: LapSelectionEmitter;
+  selection: LapSelection;
+}) {
+  const [sel, setSel] = useState(selection);
+  useEffect(() => emitter.subscribe(setSel), [emitter]);
+
+  if (!primary || !primary.laps || primary.laps.laps.length === 0) {
+    return null;
+  }
+
+  const all = primary.laps.laps;
+  const trustedTimes = all.filter((l) => l.trusted).map((l) => l.durationS);
+  const best = trustedTimes.length === 0 ? null : Math.min(...trustedTimes);
+
+  function isMain(ref: LapRef) {
+    return !!sel.main && sel.main.sessionId === ref.sessionId && sel.main.lapIndex === ref.lapIndex;
+  }
+  function isRef(ref: LapRef) {
+    return !!sel.ref && sel.ref.sessionId === ref.sessionId && sel.ref.lapIndex === ref.lapIndex;
+  }
+  function isOverlay(ref: LapRef) {
+    return sel.overlays.some((r) => r.sessionId === ref.sessionId && r.lapIndex === ref.lapIndex);
+  }
+  function selectLap(ref: LapRef, e: React.MouseEvent) {
+    if (e.metaKey || e.ctrlKey) emitter.setRef(ref);
+    else if (e.shiftKey) emitter.toggleOverlay(ref);
+    else emitter.setMain(ref);
+  }
+
+  return (
+    <div className="border-t border-[#2A2C32] flex flex-col min-h-0 max-h-[40%]">
+      <div className="h-7 flex items-center justify-between px-2 border-b border-[#2A2C32] flex-shrink-0">
+        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">Laps</span>
+        <span className="text-[9px] text-[#5A5F66]">{trustedTimes.length} trusted</span>
+      </div>
+      <div className="overflow-y-auto flex-1">
+        <table className="w-full text-xs font-mono-num">
+          <tbody>
+            {all.map((lap, i) => {
+              const ref: LapRef = { sessionId: primary.id, lapIndex: i };
+              const isBest = best !== null && lap.trusted && lap.durationS === best;
+              const dt = best !== null ? lap.durationS - best : 0;
+              const main = isMain(ref);
+              const refSel = isRef(ref);
+              const overlay = isOverlay(ref);
+              return (
+                <tr
+                  key={i}
+                  onClick={(e) => selectLap(ref, e)}
+                  className={
+                    "border-b border-[#16171B] cursor-pointer " +
+                    (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-[#0E0E10] ") +
+                    (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
+                  }
+                  title="click = Main · ⌘+click = Ref · shift+click = toggle overlay"
+                >
+                  <td className="px-2 py-0.5 w-8">
+                    {lap.index}
+                    {isBest && <span className="ml-0.5 text-[#FFC627]">★</span>}
+                  </td>
+                  <td className={"text-right px-2 py-0.5 " + (isBest ? "text-[#FFC627] font-bold" : "")}>
+                    {formatLapTime(lap.durationS * 1_000_000)}
+                  </td>
+                  <td className="text-right px-2 py-0.5 text-[#7B8088] w-12">
+                    {dt === 0 ? "—" : `+${dt.toFixed(2)}`}
+                  </td>
+                  <td className="text-right px-1 py-0.5 text-[10px] w-6">
+                    {main && <span className="text-[#FFC627]">M</span>}
+                    {refSel && <span className="text-[#4FC3F7]">R</span>}
+                    {overlay && <span className="text-[#9CCC65]">O</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

@@ -1,8 +1,28 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, Version } from "./types";
+import { gzipBytes } from "./compression";
 
 const BUCKET = "vault-objects";
+
+/** Storage paths in this bucket are content-addressed (path === sha256 of
+ *  bytes), so if the object already exists the bytes are guaranteed identical.
+ *  We probe via list() first and only upload when missing — this avoids the
+ *  fragile dance of trying to identify Supabase's "Duplicate" 400 response,
+ *  whose error shape varies across versions / proxies. */
+async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
+  const prefix = sha.slice(0, 2);
+  try {
+    const { data, error } = await client.storage.from(BUCKET).list(prefix, {
+      limit: 1,
+      search: sha,
+    });
+    if (error) return false;
+    return (data ?? []).some((o) => o.name === sha);
+  } catch {
+    return false;
+  }
+}
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   // Wrap in a Uint8Array first — this normalises the buffer across realms
@@ -31,14 +51,26 @@ export function useCheckIn() {
         const sha = await sha256Hex(bytes);
         const path = `${sha.slice(0, 2)}/${sha}`;
 
-        const { error: upErr } = await client.storage
-          .from(BUCKET)
-          .upload(path, bytes, {
-            contentType: "application/octet-stream",
-            upsert: false,
-          });
-        if (upErr && !/already exists/i.test(upErr.message)) {
-          throw new Error(`upload: ${upErr.message}`);
+        if (!(await objectExists(client, sha))) {
+          // Gzip before upload — keeps payloads under Supabase's 50 MiB free-
+          // plan cap for typical MoTeC / Link logs. Stored bytes are gzipped;
+          // the version's sha256 (and storage path) still identify the
+          // ORIGINAL uncompressed content, so download can decompress and
+          // verify integrity.
+          const compressed = gzipBytes(new Uint8Array(bytes));
+          const { error: upErr } = await client.storage
+            .from(BUCKET)
+            .upload(path, compressed as BufferSource, {
+              contentType: "application/octet-stream",
+              upsert: false,
+            });
+          if (upErr) {
+            // Race: another client uploaded the same content between our
+            // check and our upload. Re-probe once before giving up.
+            if (!(await objectExists(client, sha))) {
+              throw new Error(`upload: ${upErr.message}`);
+            }
+          }
         }
 
         const { data: ver, error: rpcErr } = await client.rpc("pdm_check_in", {

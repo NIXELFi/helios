@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { Workspace } from "../workspaces/types";
 import { SESSION_PALETTE } from "../lib/session";
@@ -55,6 +55,45 @@ export function computeThumb(
   // Thumb travels from leftPct=0 to leftPct=(1 - widthPct).
   const leftPct = progress * (1 - widthPct);
   return { leftPct, widthPct };
+}
+
+function WorkspaceOverflowMenu({ onImport, onExportAll }: {
+  onImport: () => void; onExportAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="More workspace actions"
+        className="w-6 h-6 flex items-center justify-center text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        title="More workspace actions"
+      >⋯</button>
+      {open && (
+        <div className="absolute left-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+          <button
+            onClick={() => { onImport(); setOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            title="Import workspaces from a Helios bundle"
+          >Import workspaces…</button>
+          <button
+            onClick={() => { onExportAll(); setOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            title="Export every workspace to a single file"
+          >Export all workspaces…</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
@@ -180,17 +219,17 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
     // scrollbar pinned to its bottom edge. Inner row stays a single line so
     // tabs never wrap and grow header height. The native horizontal
     // scrollbar is hidden via CSS so our thumb owns the visual.
-    <div className="ml-3 flex-1 min-w-0 relative">
+    <div className="ml-3 flex-1 min-w-0 flex items-center gap-1">
+    <div className="flex-1 min-w-0 relative">
     <div
       ref={scrollerRef}
       className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
       style={{ scrollbarWidth: "none" }}
     >
-      <div className="flex gap-1 items-center w-max">
       <div
         role="tablist"
         aria-label="Workspaces"
-        className="flex gap-1 items-center"
+        className="flex gap-1 items-center w-max"
         onDragOver={onTablistDragOver}
         onDrop={onTablistDrop}
       >
@@ -259,28 +298,6 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
           <span className="w-0.5 h-4 bg-[#FFC627] rounded-full ml-0.5 shrink-0" aria-hidden />
         )}
       </div>
-      <button
-        onClick={onCreate}
-        className="ml-1 px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
-        title="Create a new empty workspace"
-      >
-        + New workspace
-      </button>
-      <button
-        onClick={onImport}
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
-        title="Import workspaces from a Helios bundle"
-      >
-        Import…
-      </button>
-      <button
-        onClick={onExportAll}
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
-        title="Export every workspace to a single file"
-      >
-        Export all…
-      </button>
-      </div>{/* end .w-max inner row */}
     </div>{/* end scroller */}
 
       {/* Custom scrollbar — thin yellow thumb pinned to the bottom edge of
@@ -300,6 +317,14 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
           />
         </div>
       )}
+    </div>{/* end scroller-relative wrapper */}
+      <button
+        onClick={onCreate}
+        aria-label="New workspace"
+        className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        title="Create a new empty workspace"
+      >+</button>
+      <WorkspaceOverflowMenu onImport={onImport} onExportAll={onExportAll} />
 
       {menuFor && (() => {
         const target = workspaces.find((w) => w.id === menuFor.workspaceId);

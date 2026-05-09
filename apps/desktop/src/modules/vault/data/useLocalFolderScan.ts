@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { readDir, readFile } from "@tauri-apps/plugin-fs";
+import { readDir, readFile, watchImmediate } from "@tauri-apps/plugin-fs";
 
 export interface LocalFile {
   basename: string;
@@ -12,7 +12,7 @@ export interface LocalFile {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   // Pass the Uint8Array directly — this avoids realm-boundary issues where
   // .buffer.slice() returns a JSArrayBuffer that Node's SubtleCrypto rejects.
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -45,11 +45,26 @@ async function walk(dir: string, relPrefix: string, out: LocalFile[]): Promise<v
   }
 }
 
-export function useLocalFolderScan(rootPath: string | null) {
+export interface UseLocalFolderScanOptions {
+  /** Re-scan the folder on this interval. 0 / undefined = no polling. */
+  intervalMs?: number;
+  /** Re-scan when the window regains focus. */
+  rescanOnFocus?: boolean;
+  /** Subscribe to filesystem change events on rootPath (recursive). */
+  watchFs?: boolean;
+}
+
+export function useLocalFolderScan(
+  rootPath: string | null,
+  options: UseLocalFolderScanOptions = {},
+) {
+  const { intervalMs, rescanOnFocus, watchFs } = options;
   const [files, setFiles] = useState<LocalFile[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
+
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     if (!rootPath) {
@@ -81,6 +96,55 @@ export function useLocalFolderScan(rootPath: string | null) {
     };
   }, [rootPath, tick]);
 
-  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  // Periodic re-scan: fallback for environments where filesystem watch isn't
+  // available, and a backstop in case the watcher drops events.
+  useEffect(() => {
+    if (!rootPath || !intervalMs || intervalMs <= 0) return;
+    const id = window.setInterval(refetch, intervalMs);
+    return () => window.clearInterval(id);
+  }, [rootPath, intervalMs, refetch]);
+
+  // Re-scan when the user comes back to the window — covers the common case
+  // of editing a file in another app and tabbing back.
+  useEffect(() => {
+    if (!rootPath || !rescanOnFocus) return;
+    const onFocus = () => refetch();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [rootPath, rescanOnFocus, refetch]);
+
+  // Native filesystem watcher (Tauri/notify). Debounce small bursts of events
+  // — saving a file often produces several events in quick succession.
+  useEffect(() => {
+    if (!rootPath || !watchFs) return;
+    let unwatch: (() => void) | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const stop = await watchImmediate(
+          rootPath,
+          () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(refetch, 300);
+          },
+          { recursive: true },
+        );
+        if (cancelled) {
+          stop();
+        } else {
+          unwatch = stop;
+        }
+      } catch {
+        // Permission or platform issue — periodic + focus rescans still work.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (unwatch) unwatch();
+    };
+  }, [rootPath, watchFs, refetch]);
+
   return { files, loading, error, refetch };
 }

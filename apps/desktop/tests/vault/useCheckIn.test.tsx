@@ -20,7 +20,13 @@ const VERSION_ROW = {
 let capturedUpload: any = null;
 let capturedRpc: any = null;
 
-function mockClient(uploadError: any = null, rpcError: any = null, rpcData: any = VERSION_ROW): SupabaseClient {
+function mockClient(
+  uploadError: any = null,
+  rpcError: any = null,
+  rpcData: any = VERSION_ROW,
+  /** Simulate the bytes already existing in storage — list() returns a hit. */
+  objectAlreadyExists = false,
+): SupabaseClient {
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({
@@ -31,6 +37,13 @@ function mockClient(uploadError: any = null, rpcError: any = null, rpcData: any 
     },
     storage: {
       from: (bucket: string) => ({
+        list: (_prefix: string, opts: { search?: string }) => {
+          const sha = opts?.search;
+          if (objectAlreadyExists && sha) {
+            return Promise.resolve({ data: [{ name: sha }], error: null });
+          }
+          return Promise.resolve({ data: [], error: null });
+        },
         upload: (path: string, bytes: any, opts: any) => {
           capturedUpload = { bucket, path, opts };
           return Promise.resolve({ data: null, error: uploadError });
@@ -79,15 +92,17 @@ describe("useCheckIn", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("treats 'already exists' storage error as success and proceeds to RPC", async () => {
+  it("skips upload and proceeds to RPC when bytes already exist in storage", async () => {
+    capturedUpload = null;
     capturedRpc = null;
-    const c = mockClient({ message: "The resource already exists" });
+    const c = mockClient(null, null, VERSION_ROW, /* objectAlreadyExists */ true);
     const { result } = renderHook(() => useCheckIn(), { wrapper: wrap(c) });
     await act(async () => {
       await result.current.run("f1", makeBytes(), null);
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
-    // RPC should still be called
+    // Upload skipped, RPC still called.
+    expect(capturedUpload).toBeNull();
     expect(capturedRpc?.name).toBe("pdm_check_in");
     expect(result.current.error).toBeNull();
   });

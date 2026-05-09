@@ -3,11 +3,26 @@ import { useSupabaseClient, useUser } from "@helios/auth";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
+import { gzipBytes } from "./compression";
 
 const BUCKET = "vault-objects";
 
+async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
+  const prefix = sha.slice(0, 2);
+  try {
+    const { data, error } = await client.storage.from(BUCKET).list(prefix, {
+      limit: 1,
+      search: sha,
+    });
+    if (error) return false;
+    return (data ?? []).some((o) => o.name === sha);
+  } catch {
+    return false;
+  }
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -124,11 +139,16 @@ export function useAddLocalFile() {
 
         // 4. Upload bytes (skip if content already exists in storage by sha).
         const path = `${sha.slice(0, 2)}/${sha}`;
-        const { error: upErr } = await client.storage
-          .from(BUCKET)
-          .upload(path, bytes, { contentType: "application/octet-stream", upsert: false });
-        if (upErr && !/already exists/i.test(upErr.message)) {
-          throw new Error(`upload: ${upErr.message}`);
+        if (!(await objectExists(client, sha))) {
+          const compressed = gzipBytes(bytes);
+          const { error: upErr } = await client.storage
+            .from(BUCKET)
+            .upload(path, compressed as BufferSource, { contentType: "application/octet-stream", upsert: false });
+          if (upErr) {
+            if (!(await objectExists(client, sha))) {
+              throw new Error(`upload: ${upErr.message}`);
+            }
+          }
         }
 
         // 5. Acquire lock (required before check_in can insert a version).

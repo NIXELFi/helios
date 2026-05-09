@@ -567,11 +567,11 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
       <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
-        <span className="font-helios text-sm text-[#FFC627]">HELIOS</span>
+        <span className="font-helios text-sm text-[#FFC627] flex-shrink-0">HELIOS</span>
         {!editMode && (
           <>
-            <span className="ml-3 text-[#7B8088]">{primary.label}</span>
-            <div className="ml-3 self-stretch border-l border-[#2A2C32]" aria-hidden />
+            <span className="ml-3 text-[#7B8088] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
+            <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
             <WorkspaceTabBar
               workspaces={workspaces}
               activeId={workspaceId}
@@ -590,11 +590,10 @@ export default function App() {
           </>
         )}
         <div className={
-          "flex items-center gap-2 self-stretch " +
+          "flex items-center gap-2 self-stretch flex-shrink-0 " +
           (editMode ? "mx-auto" : "ml-3 pl-3 border-l border-[#2A2C32]")
         }>
           <ViewStatePills viewState={viewState} />
-          <LapSelectionPill emitter={lapSelectionEmitter} sessions={sessions} />
           <button
             onClick={() => setChannelsOpen(true)}
             className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
@@ -636,16 +635,10 @@ export default function App() {
                 className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
                 title="Add a tile"
               >+ Add tile</button>
-              <button
-                onClick={handleSnapToGrid}
-                className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
-                title="Snap every tile's position and size to the grid; sizes are preserved"
-              >Snap to grid</button>
-              <button
-                onClick={handleResetWorkspaces}
-                className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#7B8088] hover:text-[#EF5350] hover:border-[#EF5350] rounded-sm cursor-pointer transition-colors"
-                title="Reset every workspace to its built-in default"
-              >Reset all</button>
+              <EditMoreMenu
+                onSnapToGrid={handleSnapToGrid}
+                onResetAll={handleResetWorkspaces}
+              />
             </>
           )}
           {!editMode && (
@@ -667,7 +660,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 min-w-0">
         <SessionPanel
           sessions={sessions}
           primaryId={primary.id}
@@ -676,8 +669,10 @@ export default function App() {
           onConfigureLaps={(id) => setLapConfigSessionId(id)}
           onAddSession={handleAddSessionDialog}
           onRemoveSession={handleRemoveSession}
+          lapSelectionEmitter={lapSelectionEmitter}
+          lapSelection={lapSelection}
         />
-        <main className="flex-1 relative">
+        <main className="flex-1 relative min-w-0">
           {editMode && <GridOverlay />}
           {workspace.tiles.map((spec) => (
             <Tile
@@ -842,33 +837,6 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
   );
 }
 
-/** Surfaces the active Main/Ref lap selection so the user can see at a glance
- *  which laps the distance-axis traces are showing, and clear with one click. */
-function LapSelectionPill({ emitter, sessions }: { emitter: LapSelectionEmitter; sessions: LoadedSession[] }) {
-  const [sel, setSel] = useState(emitter.get());
-  useEffect(() => emitter.subscribe(setSel), [emitter]);
-  if (!sel.main && !sel.ref && sel.overlays.length === 0) return null;
-  function describe(ref: typeof sel.main): string {
-    if (!ref) return "—";
-    const s = sessions.find((x) => x.id === ref.sessionId);
-    if (!s || !s.laps) return "—";
-    const lap = s.laps.laps[ref.lapIndex];
-    if (!lap) return "—";
-    return `${s.label.split(" — ")[0] ?? s.label} L${lap.index}`;
-  }
-  return (
-    <button
-      onClick={() => emitter.set({ main: null, ref: null, overlays: [] })}
-      className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer bg-[#16171B] text-[#FFC627] border-[#FFC627] hover:brightness-110 font-mono-num"
-      title="Clear lap selection (Main, Ref, Overlays)"
-    >
-      M:{describe(sel.main)}
-      {sel.ref && <> · R:{describe(sel.ref)}</>}
-      {sel.overlays.length > 0 && <> · +{sel.overlays.length}</>}
-    </button>
-  );
-}
-
 /** Compact menu — opens a small popover with CSV / KML export actions. */
 function ExportMenuButton({ sessions, primary, viewState }: {
   sessions: LoadedSession[]; primary: LoadedSession; viewState: ViewStateEmitter;
@@ -910,6 +878,45 @@ function ExportMenuButton({ sessions, primary, viewState }: {
           <button onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
           <button onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
           <button onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditMoreMenu({ onSnapToGrid, onResetAll }: {
+  onSnapToGrid: () => void; onResetAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="More edit actions"
+        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        title="More actions"
+      >⋯</button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+          <button
+            onClick={() => { onSnapToGrid(); setOpen(false); }}
+            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            title="Snap every tile's position and size to the grid; sizes are preserved"
+          >Snap to grid</button>
+          <button
+            onClick={() => { onResetAll(); setOpen(false); }}
+            className="w-full text-left px-2 py-1.5 text-[#7B8088] hover:bg-[#16171B] hover:text-[#EF5350]"
+            title="Reset every workspace to its built-in default"
+          >Reset all workspaces</button>
         </div>
       )}
     </div>

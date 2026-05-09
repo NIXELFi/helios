@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import { writeFile, mkdir } from "@tauri-apps/plugin-fs";
+import { gunzipIfNeeded } from "./compression";
 
 const BUCKET = "vault-objects";
 
@@ -35,7 +36,11 @@ export function useDownloadVersion() {
         if (dlErr || !data) {
           throw new Error(dlErr?.message ?? "download failed");
         }
-        const arr = new Uint8Array(await data.arrayBuffer());
+        // New uploads are gzipped before storage to fit Supabase's 50 MiB
+        // free-tier cap; legacy uncompressed objects pass through unchanged.
+        // Detection is via gzip magic bytes (1f 8b) — see compression.ts.
+        const raw = new Uint8Array(await data.arrayBuffer());
+        const arr = gunzipIfNeeded(raw);
 
         // Create the parent directory tree if needed.
         const dir = parentDir(destPath);

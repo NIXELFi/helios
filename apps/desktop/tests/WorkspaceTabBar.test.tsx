@@ -54,6 +54,7 @@ describe("WorkspaceTabBar — rendering", () => {
   it("Import button fires onImport", () => {
     const props = defaultProps();
     render(<WorkspaceTabBar {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /more workspace actions/i }));
     fireEvent.click(screen.getByRole("button", { name: /^import/i }));
     expect(props.onImport).toHaveBeenCalled();
   });
@@ -61,6 +62,7 @@ describe("WorkspaceTabBar — rendering", () => {
   it("Export all button fires onExportAll", () => {
     const props = defaultProps();
     render(<WorkspaceTabBar {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /more workspace actions/i }));
     fireEvent.click(screen.getByRole("button", { name: /export all/i }));
     expect(props.onExportAll).toHaveBeenCalled();
   });
