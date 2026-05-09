@@ -67,6 +67,10 @@ export function useAutoSync(input: {
         : [],
     );
 
+    // Partition into "needs download" vs "skip" upfront so the worker pool
+    // only races on actual downloads.
+    type Task = { sha: string; dest: string };
+    const tasks: Task[] = [];
     for (const file of files) {
       // Don't clobber in-progress edits. If the user holds the lock, they may
       // have unsaved local changes that don't match the latest sha yet.
@@ -75,10 +79,29 @@ export function useAutoSync(input: {
       if (!ver) { skipped++; continue; }
       const m = matchLocal(file, localFiles, versionsByFileId, folders);
       if (m.status === "synced") { skipped++; continue; }
-      const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
-      const ok = await download.run(ver.sha256, dest);
-      if (ok) downloaded++; else failed++;
+      tasks.push({
+        sha: ver.sha256,
+        dest: localDestPath(vaultRoot, file.folder_id, file.name, folders),
+      });
     }
+
+    // Worker pool: N workers pull from a shared queue. 6 matches the per-
+    // origin HTTP/1.1 connection limit and keeps Supabase's storage CDN well
+    // utilised without saturating it. Net effect is roughly N× faster than
+    // the previous serial loop on the initial vault download.
+    const CONCURRENCY = 6;
+    let cursor = 0;
+    async function worker() {
+      while (true) {
+        const i = cursor++;
+        if (i >= tasks.length) return;
+        const t = tasks[i]!;
+        const ok = await download.run(t.sha, t.dest);
+        if (ok) downloaded++; else failed++;
+      }
+    }
+    const workerCount = Math.min(CONCURRENCY, tasks.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     setStatus({
       busy: false,
