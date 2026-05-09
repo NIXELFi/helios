@@ -48,14 +48,70 @@ channels:
     sample_rate_hz: 100
     min: 0
     max: 100
+    # TPS = throttle PLATE position (downstream of any DBW logic). Distinct
+    # from APS (pedal). The two diverge intentionally during idle correction,
+    # traction control, launch limits, etc. — collapsing them at load time
+    # would mask exactly the kind of behaviour an engine tuner is looking
+    # for. APS lives on `engine.aps` below.
     aliases: [
       tps, TPS, throttle, throttle_pct, "engine.tps",
       "Throttle Position", "Throttle Pos", "Throttle Pos.",
-      "TPS Main", "TPS (Main)", "TPS (Sub)", "TPS Sub",
-      "APS Main", "APS (Main)", "APS (Sub)",
+      "TPS Main", "TPS (Main)",
     ]
-    match_keywords: [tps, throttle, "accelerator pedal"]
+    match_keywords: [tps, throttle]
     match_units: ["%"]
+
+  - id: engine.tps_sub
+    display_name: TPS (Sub)
+    units: "%"
+    group: Engine
+    color: "#26C6DA"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 100
+    # Redundant secondary throttle sensor — diagnostic only. No semantic
+    # match keywords (we don't want to grab any "tps" channel by mistake);
+    # explicit aliases only.
+    aliases: ["TPS Sub", "TPS (Sub)"]
+
+  - id: engine.aps
+    display_name: Accelerator Pedal
+    units: "%"
+    group: Engine
+    color: "#7E57C2"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 100
+    # APS = pedal input (upstream of DBW). See engine.tps note. Workspaces
+    # that want "what the driver asked for" pick this; "what the engine
+    # actually got" picks engine.tps.
+    aliases: [
+      aps, APS, "engine.aps",
+      "APS Main", "APS (Main)",
+      "Accelerator Pedal", "Accelerator Pedal Position",
+      "Pedal Position", "Pedal Pos",
+    ]
+    match_keywords: [aps, "accelerator pedal", "pedal pos", "pedal position"]
+    match_units: ["%"]
+
+  - id: engine.aps_sub
+    display_name: APS (Sub)
+    units: "%"
+    group: Engine
+    color: "#9575CD"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    min: 0
+    max: 100
+    aliases: ["APS Sub", "APS (Sub)"]
 
   - id: engine.water_temp
     display_name: Water Temp

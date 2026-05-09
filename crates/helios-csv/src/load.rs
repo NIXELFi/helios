@@ -73,6 +73,15 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     // else inferred from non-None density.
     let mut warnings = Vec::new();
     let mut by_rate: BTreeMap<i32, Vec<(usize, ChannelMeta)>> = BTreeMap::new();
+    // Track which canonical ids have already been claimed by an earlier
+    // column, across all rate groups. Without this, two source headers that
+    // both resolve to the same id (e.g. `TPS (Main)` and `TPS (Sub)` both
+    // mapped to `engine.tps`) collide inside RateGroup's HashMap — only the
+    // last column would be reachable, and any widget asking for that id
+    // would get whichever column was loaded last. We keep the FIRST one
+    // mapped to the canonical id and demote subsequent collisions back to
+    // their raw header name so all columns stay reachable.
+    let mut claimed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let span_us = (*times_us.last().unwrap() - times_us[0]).max(1);
     let span_s = span_us as f64 / 1_000_000.0;
 
@@ -95,6 +104,19 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
                 warnings.push(format!("unknown channel `{name}`, registered with defaults"));
             }
         }
+        if claimed_ids.contains(&meta.id) && meta.id != *name {
+            // Two columns wanted the same canonical id. Keep the earlier
+            // mapping; the later column reverts to its raw header so
+            // downstream consumers can still reach it.
+            warnings.push(format!(
+                "channel `{name}` resolved to `{}` but that id was already claimed by an earlier column; \
+                 storing as `{name}` instead so both remain reachable",
+                meta.id,
+            ));
+            meta.id = name.to_string();
+            meta.display_name = name.to_string();
+        }
+        claimed_ids.insert(meta.id.clone());
         let key = meta.sample_rate_hz.round() as i32;
         by_rate.entry(key).or_default().push((i - 1, meta));
     }
@@ -361,6 +383,55 @@ mod tests {
         assert!(
             r.warnings.iter().any(|w| w.contains("Throttle Pedal Pos") && w.contains("engine.tps")),
             "expected mapping warning, got {:?}", r.warnings,
+        );
+    }
+
+    /// When two source headers both alias to the same canonical id (a real
+    /// case for Link CSVs that ship `TPS (Main)` and `TPS (Sub)` simultaneously
+    /// — both used to alias to `engine.tps` in v2.5.2 and the second silently
+    /// overwrote the first inside RateGroup's HashMap), the loader keeps the
+    /// FIRST mapping and demotes the colliding column back to its raw header
+    /// name so both columns remain reachable.
+    #[test]
+    fn collision_protection_keeps_both_columns_reachable() {
+        // Build a tiny inline registry where two distinct aliases route to
+        // the same canonical id, then confirm both columns are findable.
+        const COLLIDING_YAML: &str = r##"
+channels:
+  - id: engine.foo
+    display_name: Foo
+    units: ""
+    group: Engine
+    color: "#fff"
+    decimals: 0
+    data_type: f32
+    source: t
+    sample_rate_hz: 100
+    aliases: ["FOO_A", "FOO_B"]
+"##;
+        let reg = ChannelRegistry::from_yaml(COLLIDING_YAML).unwrap();
+        let csv: &[u8] = b"time,FOO_A,FOO_B\n0,1,10\n0.01,2,20\n0.02,3,30\n";
+        let r = load_csv_bytes(csv, &reg).unwrap();
+        // Find both columns: FOO_A should claim engine.foo (first); FOO_B
+        // should fall back to its raw name.
+        let mut saw_canonical = false;
+        let mut saw_raw_b = false;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.foo").is_some() {
+                saw_canonical = true;
+                // First column's data was 1, 2, 3 — check we kept the right one.
+                assert_eq!(rg.channel_data("engine.foo").unwrap().value(0), 1.0);
+            }
+            if rg.meta("FOO_B").is_some() {
+                saw_raw_b = true;
+                assert_eq!(rg.channel_data("FOO_B").unwrap().value(0), 10.0);
+            }
+        }
+        assert!(saw_canonical, "first FOO_A should hold engine.foo");
+        assert!(saw_raw_b, "second FOO_B should fall back to raw header");
+        assert!(
+            r.warnings.iter().any(|w| w.contains("FOO_B") && w.contains("engine.foo")),
+            "expected collision warning, got {:?}", r.warnings,
         );
     }
 
