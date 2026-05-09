@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 
 const FILE_ROW = { id: "fi1", vault_id: "v1", folder_id: null, name: "part.sldprt", latest_version_id: null, created_at: "x" };
 
-const localFile = {
+const localFileRoot = {
   basename: "part.sldprt",
   relativePath: "part.sldprt",
   absolutePath: "/vault/part.sldprt",
@@ -59,10 +59,38 @@ function buildHappyClient(): SupabaseClient {
       if (table === "locks") {
         return {
           insert: (_row: any) => {
-            // First call: acquire; second call: re-acquire
             callLog.push("locks.insert");
             return Promise.resolve({ data: { id: "l1" }, error: null });
           },
+        };
+      }
+      if (table === "folders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                is: () => {
+                  callLog.push("folders.lookup");
+                  return Promise.resolve({ data: [], error: null });
+                },
+                eq: () => {
+                  callLog.push("folders.lookup");
+                  return Promise.resolve({ data: [], error: null });
+                },
+              }),
+            }),
+          }),
+          insert: (_row: any) => ({
+            select: () => ({
+              single: () => {
+                callLog.push("folders.insert");
+                return Promise.resolve({
+                  data: { id: `dir-${callLog.filter((s) => s === "folders.insert").length}` },
+                  error: null,
+                });
+              },
+            }),
+          }),
         };
       }
       return { select: () => Promise.resolve({ data: [], error: null }) };
@@ -77,32 +105,115 @@ const wrap = (c: SupabaseClient) =>
 describe("useAddLocalFile", () => {
   beforeEach(() => { callLog = []; });
 
-  it("happy path: fires all 6 steps in order and returns true", async () => {
+  it("happy path (root file): fires all 5 steps in order and returns true", async () => {
     const c = buildHappyClient();
     const { result } = renderHook(
-      () => ({ hook: useAddLocalFile([]), authLoading: useAuthLoading() }),
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
       { wrapper: wrap(c) },
     );
-    // Wait for auth to resolve so useUser() returns the user
     await waitFor(() => expect(result.current.authLoading).toBe(false));
 
     let returned: boolean | undefined;
     await act(async () => {
-      returned = await result.current.hook.run("v1", localFile);
+      returned = await result.current.hook.run("v1", localFileRoot);
     });
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
     expect(result.current.hook.error?.message ?? null).toBeNull();
     expect(returned).toBe(true);
 
-    // Steps in order: create file row, upload bytes, acquire lock, check_in, re-acquire lock
+    // Root file means no folder lookups/creates. Steps in order:
     expect(callLog).toEqual([
       "files.insert",
       "storage.upload",
       "locks.insert",     // step 5: acquire
-      "rpc:pdm_check_in", // step 6: check in (releases lock server-side)
+      "rpc:pdm_check_in", // step 6: check in (releases server-side)
       "locks.insert",     // step 7: re-acquire (default checked out)
     ]);
+  });
+
+  it("nested file: looks up + creates each folder segment", async () => {
+    const c = buildHappyClient();
+    const nested = { ...localFileRoot, relativePath: "Engine/Internals/cylinder.sldprt", basename: "cylinder.sldprt" };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    await act(async () => { await result.current.hook.run("v1", nested); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(result.current.hook.error?.message ?? null).toBeNull();
+    // 2 folder lookups (Engine, Internals) + 2 folder inserts + the file flow
+    expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
+    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(2);
+  });
+
+  it("nested file with existing parent: only creates the missing leaf", async () => {
+    const c = buildHappyClient();
+    // Override folders mock so the FIRST lookup (Engine) returns a hit but the
+    // second (Internals under Engine) returns nothing.
+    let lookupCount = 0;
+    (c.from as any).mockImplementation((table: string) => {
+      if (table === "files") {
+        return {
+          insert: () => ({
+            select: () => ({
+              single: () => { callLog.push("files.insert"); return Promise.resolve({ data: FILE_ROW, error: null }); },
+            }),
+          }),
+        };
+      }
+      if (table === "locks") {
+        return { insert: () => { callLog.push("locks.insert"); return Promise.resolve({ data: { id: "l1" }, error: null }); } };
+      }
+      if (table === "folders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                is: () => {
+                  callLog.push("folders.lookup");
+                  // First lookup is for Engine (parent_id is null) → return existing
+                  lookupCount++;
+                  return Promise.resolve({ data: [{ id: "engine-existing" }], error: null });
+                },
+                eq: () => {
+                  callLog.push("folders.lookup");
+                  lookupCount++;
+                  return Promise.resolve({ data: [], error: null });
+                },
+              }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              single: () => {
+                callLog.push("folders.insert");
+                return Promise.resolve({ data: { id: "internals-new" }, error: null });
+              },
+            }),
+          }),
+        };
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    });
+
+    const nested = { ...localFileRoot, relativePath: "Engine/Internals/cylinder.sldprt", basename: "cylinder.sldprt" };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    await act(async () => { await result.current.hook.run("v1", nested); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(result.current.hook.error?.message ?? null).toBeNull();
+    expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
+    // Only 1 insert because Engine already existed
+    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(1);
   });
 
   it("returns false and sets error when not authenticated", async () => {
@@ -114,14 +225,14 @@ describe("useAddLocalFile", () => {
       from: vi.fn().mockReturnValue({ select: () => Promise.resolve({ data: null, error: null }) }),
     };
     const { result } = renderHook(
-      () => ({ hook: useAddLocalFile([]), authLoading: useAuthLoading() }),
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
       { wrapper: wrap(c) },
     );
     await waitFor(() => expect(result.current.authLoading).toBe(false));
 
     let returned: boolean | undefined;
     await act(async () => {
-      returned = await result.current.hook.run("v1", localFile);
+      returned = await result.current.hook.run("v1", localFileRoot);
     });
     expect(returned).toBe(false);
     expect(result.current.hook.error?.message).toMatch(/not authenticated/i);

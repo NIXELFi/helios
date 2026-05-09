@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { useAddLocalFile } from "../data/useAddLocalFile";
-import type { Folder, VaultId } from "../data/types";
+import type { VaultId } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface Props {
   vaultId: VaultId | undefined;
-  folders: Folder[];
   unmatched: LocalFile[];
   onDone?: () => void;
 }
 
-export function UnmatchedFilesBanner({ vaultId, folders, unmatched, onDone }: Props) {
-  const addFile = useAddLocalFile(folders);
+export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
+  const addFile = useAddLocalFile();
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);

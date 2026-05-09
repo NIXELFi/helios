@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import { readFile } from "@tauri-apps/plugin-fs";
-import type { Folder, FolderId, VaultId } from "./types";
+import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 
 const BUCKET = "vault-objects";
@@ -17,33 +17,66 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * Walks the local file's relative path; for each path segment that doesn't
  * already exist as a folder under the vault, creates it. Returns the leaf
  * folder_id (or null if the file is in the vault root).
+ *
+ * IMPORTANT: This function queries folders fresh from the database for EACH
+ * segment, on EVERY call. The previous implementation accepted a `folders`
+ * snapshot from React state, which went stale across batched bulk-adds —
+ * adding two files into the same brand-new deep folder failed on the second
+ * one with a unique-constraint violation. Querying live keeps a single hook
+ * instance correct across N sequential `run()` calls in a bulk add, and also
+ * handles concurrent races (two clients adding the same path) via a
+ * post-failure retry-by-query.
  */
 async function ensureFolderHierarchy(
   client: any,
   vaultId: VaultId,
-  folders: Folder[],
   relativeDirSegments: string[],
 ): Promise<FolderId | null> {
   let parentId: FolderId | null = null;
-  let known = [...folders];
+
   for (const seg of relativeDirSegments) {
-    let existing = known.find((f) => f.parent_id === parentId && f.name === seg);
-    if (!existing) {
+    // Look up: does a folder with (vault_id, parent_id, name) already exist?
+    // supabase-js distinguishes `IS NULL` (.is) from value match (.eq) for the
+    // parent_id of root-level folders; using .eq with null silently misses.
+    let q = client
+      .from("folders")
+      .select("*")
+      .eq("vault_id", vaultId)
+      .eq("name", seg);
+    q = parentId === null ? q.is("parent_id", null) : q.eq("parent_id", parentId);
+    const { data: existing, error: lookupErr } = await q;
+    if (lookupErr) throw new Error(`lookup folder "${seg}": ${lookupErr.message}`);
+
+    let found = existing?.[0];
+    if (!found) {
       const { data: created, error } = await client
         .from("folders")
         .insert({ vault_id: vaultId, parent_id: parentId, name: seg })
         .select()
         .single();
-      if (error) throw new Error(`create folder "${seg}": ${error.message}`);
-      existing = created;
-      known = [...known, created];
+      if (error) {
+        // Race: another op (or another iteration in this same batch) may have
+        // created it between our lookup and our insert. Re-query and reuse.
+        let raceQ = client
+          .from("folders")
+          .select("*")
+          .eq("vault_id", vaultId)
+          .eq("name", seg);
+        raceQ = parentId === null ? raceQ.is("parent_id", null) : raceQ.eq("parent_id", parentId);
+        const { data: race } = await raceQ;
+        if (race?.[0]) found = race[0];
+        else throw new Error(`create folder "${seg}": ${error.message}`);
+      } else {
+        found = created;
+      }
     }
-    parentId = existing!.id;
+    parentId = found.id;
   }
+
   return parentId;
 }
 
-export function useAddLocalFile(folders: Folder[]) {
+export function useAddLocalFile() {
   const client = useSupabaseClient();
   const user = useUser();
   const [loading, setLoading] = useState(false);
@@ -51,7 +84,7 @@ export function useAddLocalFile(folders: Folder[]) {
 
   /**
    * Adds a local file to the vault:
-   *   1. Ensures the folder hierarchy matches local relativePath
+   *   1. Ensures the folder hierarchy matches local relativePath (creates as needed)
    *   2. Creates the pdm.files row
    *   3. Reads local bytes + computes sha256
    *   4. Uploads bytes to Storage
@@ -59,14 +92,9 @@ export function useAddLocalFile(folders: Folder[]) {
    *   6. Calls pdm_check_in to insert version 1 — check_in releases the lock
    *   7. Re-acquires the lock so the user owns the file post-add
    *
-   * NOTE: Steps 5-7 are a deliberate dance. pdm_check_in's contract is
-   * "caller holds the lock, RPC releases it after recording the version".
-   * We re-acquire immediately after so the file lands in "checked out by me"
-   * state, matching the UX promise: drop a file → Add to Vault → it's yours
-   * (locked), ready for further edits or explicit Check In. A future
-   * pdm.add_file RPC could do this atomically server-side.
-   *
-   * Returns true on success.
+   * Steps 5-7 are a deliberate dance because pdm_check_in's contract releases
+   * the lock; we re-acquire so the file lands in "checked out by me" state.
+   * A future server-side `pdm.add_file` RPC could do this atomically.
    */
   const run = useCallback(
     async (vaultId: VaultId, local: LocalFile): Promise<boolean> => {
@@ -81,7 +109,7 @@ export function useAddLocalFile(folders: Folder[]) {
         const segments = local.relativePath.split("/");
         const fileName = segments[segments.length - 1];
         const dirSegments = segments.slice(0, -1);
-        const folderId = await ensureFolderHierarchy(client, vaultId, folders, dirSegments);
+        const folderId = await ensureFolderHierarchy(client, vaultId, dirSegments);
 
         // 2. Create file row.
         const { data: file, error: fileErr } = await (client.from("files") as any)
@@ -130,7 +158,7 @@ export function useAddLocalFile(folders: Folder[]) {
         return false;
       }
     },
-    [client, user, folders],
+    [client, user],
   );
 
   return { run, loading, error };

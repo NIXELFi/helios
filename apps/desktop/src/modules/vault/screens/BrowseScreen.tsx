@@ -209,7 +209,6 @@ export function BrowseScreen() {
     <div className="flex h-full flex-col">
       <UnmatchedFilesBanner
         vaultId={vaultId}
-        folders={folders ?? []}
         unmatched={unmatched}
         onDone={() => {
           refetchAllFiles();
