@@ -119,6 +119,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Vault module config — Vite reads VITE_* at build time and bakes
+          # them into the JS bundle. Both keys are non-secret (anon is public
+          # by design, gated by Supabase RLS on the server side). Stored as
+          # repository secrets so values aren't committed to git.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         with:
           tagName: ${{ steps.version.outputs.tag }}
           releaseName: "Helios ${{ steps.version.outputs.tag }}"
