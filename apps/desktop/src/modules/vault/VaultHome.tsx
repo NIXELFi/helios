@@ -3,6 +3,7 @@ import { NavRail, type VaultScreenId } from "./components/NavRail";
 import { BrowseScreen } from "./screens/BrowseScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { WhoHasWhatScreen } from "./screens/WhoHasWhatScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
 
 export function VaultHome() {
   const [active, setActive] = useState<VaultScreenId>("browse");
@@ -14,6 +15,7 @@ export function VaultHome() {
         {active === "browse" ? <BrowseScreen /> : null}
         {active === "history" ? <HistoryScreen /> : null}
         {active === "who" ? <WhoHasWhatScreen /> : null}
+        {active === "settings" ? <SettingsScreen /> : null}
       </main>
     </div>
   );

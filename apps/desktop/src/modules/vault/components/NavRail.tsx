@@ -1,9 +1,10 @@
-export type VaultScreenId = "browse" | "history" | "who";
+export type VaultScreenId = "browse" | "history" | "who" | "settings";
 
 const ENTRIES: { id: VaultScreenId; label: string }[] = [
   { id: "browse", label: "Browse" },
   { id: "history", label: "History" },
   { id: "who", label: "Who has what" },
+  { id: "settings", label: "Settings" },
 ];
 
 export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScreenId) => void }) {
