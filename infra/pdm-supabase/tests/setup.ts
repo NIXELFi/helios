@@ -1,5 +1,11 @@
 import { config } from "dotenv";
+import WebSocket from "ws";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+
+// Node < 22 has no native WebSocket; supabase-js v2.105+ instantiates a
+// RealtimeClient at createClient() time. Provide ws as a global to avoid
+// "Node.js 20 detected without native WebSocket support" at construction.
+(globalThis as any).WebSocket ??= WebSocket;
 
 config();
 
@@ -13,11 +19,19 @@ if (!url || !anonKey || !serviceKey) {
   );
 }
 
+// db.schema sets the default schema for `.from(table)` calls. Our tables are
+// all under `pdm`. Override per-call with `.schema('other')` if needed.
 export const serviceClient = (): SupabaseClient =>
-  createClient(url, serviceKey, { auth: { persistSession: false } });
+  createClient(url, serviceKey, {
+    auth: { persistSession: false },
+    db: { schema: "pdm" },
+  });
 
 export const anonClient = (): SupabaseClient =>
-  createClient(url, anonKey, { auth: { persistSession: false } });
+  createClient(url, anonKey, {
+    auth: { persistSession: false },
+    db: { schema: "pdm" },
+  });
 
 /** Creates a confirmed test user via the admin API and returns the User row. */
 export async function createTestUser(
@@ -58,17 +72,33 @@ export async function setRole(
   if (error) throw error;
 }
 
-/** Wipes all pdm data (but keeps schema + auth users). Run between tests. */
+/** Wipes all pdm data via a single SQL RPC defined in
+ *  20260508000100_pdm_test_reset.sql, plus storage objects via the Storage API. */
 export async function resetPdmTables(): Promise<void> {
   const svc = serviceClient();
-  // Delete in FK-safe order. RPC wraps in a transaction.
-  const { error } = await svc.rpc("pdm_test_reset");
-  if (error && !error.message.includes("does not exist")) throw error;
+  const { error } = await svc.rpc("test_reset");
+  if (error && !error.message.match(/does not exist|not found/i)) throw error;
+
+  // Storage cleanup: list everything in vault-objects and remove. Supabase blocks
+  // direct DELETE on storage.objects via trigger, so we use the Storage API.
+  const { data: prefixes } = await svc.storage.from("vault-objects").list();
+  if (prefixes && prefixes.length > 0) {
+    for (const prefix of prefixes) {
+      const { data: objs } = await svc.storage.from("vault-objects").list(prefix.name);
+      if (objs && objs.length > 0) {
+        const paths = objs.map((o) => `${prefix.name}/${o.name}`);
+        await svc.storage.from("vault-objects").remove(paths);
+      }
+    }
+  }
 }
 
-/** Deletes every auth user (and cascades to user_roles). */
+/** Deletes every auth user. Wipes pdm tables first to avoid FK violations
+ *  on vaults.created_by / versions.author_id / etc. (none of which CASCADE
+ *  to auth.users — only user_roles does). */
 export async function resetAuthUsers(): Promise<void> {
   const svc = serviceClient();
+  await resetPdmTables();
   const { data, error } = await svc.auth.admin.listUsers();
   if (error) throw error;
   for (const u of data.users) {
