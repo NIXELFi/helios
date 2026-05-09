@@ -34,4 +34,25 @@ describe("<FolderTree>", () => {
     fireEvent.click(screen.getByRole("button", { name: /chassis/i }));
     expect(onSelect).toHaveBeenCalledWith("f1");
   });
+
+  it("renders an 'All folders' entry that calls onSelect(null)", () => {
+    const onSelect = vi.fn();
+    render(<FolderTree folders={folders} selected="f1" onSelect={onSelect} />);
+    const all = screen.getByRole("button", { name: /all folders/i });
+    expect(all).toBeInTheDocument();
+    fireEvent.click(all);
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("auto-expands the ancestor chain when a deep folder is selected", () => {
+    // 'frame' has parent 'chassis'; passing selected='f2' should reveal 'frame'
+    // without requiring a manual click on the chassis chevron.
+    render(<FolderTree folders={folders} selected="f2" onSelect={() => {}} />);
+    expect(screen.getByRole("button", { name: /frame/i })).toBeInTheDocument();
+  });
+
+  it("marks the selected row with aria-current='page'", () => {
+    render(<FolderTree folders={folders} selected="f3" onSelect={() => {}} />);
+    expect(screen.getByRole("button", { name: /powertrain/i })).toHaveAttribute("aria-current", "page");
+  });
 });
