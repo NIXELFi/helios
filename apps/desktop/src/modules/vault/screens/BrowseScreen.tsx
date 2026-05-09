@@ -9,6 +9,9 @@ import { useMyRole } from "../data/useMyRole";
 import { useCreateVault } from "../data/useCreateVault";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
+import { useVaultFolder } from "../data/useVaultFolder";
+import { useLocalFolderScan } from "../data/useLocalFolderScan";
+import { useLatestVersions } from "../data/useLatestVersions";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
@@ -35,6 +38,17 @@ export function BrowseScreen() {
   const { data: locks, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
+
+  // Local vault folder scan
+  const { path: vaultFolderPath } = useVaultFolder();
+  const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath);
+
+  // Latest versions for local-status matching
+  const fileIds = (files ?? []).map((f) => f.id);
+  const { data: latestByFileId } = useLatestVersions(fileIds);
+  const versionsByFileId = new Map(
+    Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),
+  );
 
   function toggleOne(id: FileId) {
     setSelected((prev) => {
@@ -176,24 +190,37 @@ export function BrowseScreen() {
       <div className="flex-1 overflow-auto">
         {selectedFolder ? (
           <>
-            {isAdmin && (
-              <div className="flex justify-end border-b border-zinc-800 px-3 py-1.5">
+            <div className="flex items-center justify-end gap-2 border-b border-zinc-800 px-3 py-1.5">
+              {vaultFolderPath && (
+                <button
+                  onClick={rescan}
+                  className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  title="Rescan local vault folder"
+                >
+                  Rescan
+                </button>
+              )}
+              {isAdmin && (
                 <button
                   onClick={() => openPrompt("file")}
                   className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                 >
                   + File
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             <BulkActionBar
               selectedIds={Array.from(selected)}
               onClear={clearSelection}
               onDone={() => {
                 refetchFiles();
                 refetchLocks();
+                rescan();
                 clearSelection();
               }}
+              files={files ?? []}
+              localFiles={localFiles}
+              versionsByFileId={versionsByFileId}
             />
             <FileTable
               files={files ?? []}
@@ -207,6 +234,8 @@ export function BrowseScreen() {
               onToggleSelect={toggleOne}
               onToggleSelectAll={toggleAll}
               allSelected={files !== null && files.length > 0 && selected.size === files.length}
+              localFiles={localFiles}
+              versionsByFileId={versionsByFileId}
             />
           </>
         ) : (

@@ -5,6 +5,12 @@ import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BrowseScreen } from "../../src/modules/vault/screens/BrowseScreen";
 
+// Mock Tauri fs plugin — vault folder scan won't run in tests (path is null).
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readDir: vi.fn().mockResolvedValue([]),
+  readFile: vi.fn().mockResolvedValue(new Uint8Array()),
+}));
+
 function buildMockClient(isAdmin = false): SupabaseClient {
   return {
     auth: {
@@ -42,6 +48,9 @@ function buildMockClient(isAdmin = false): SupabaseClient {
       if (table === "user_roles") return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
       };
+      if (table === "versions") return {
+        select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+      };
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),
   } as any;
@@ -67,6 +76,9 @@ function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
       if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
       if (table === "user_roles") return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+      };
+      if (table === "versions") return {
+        select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
       };
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),

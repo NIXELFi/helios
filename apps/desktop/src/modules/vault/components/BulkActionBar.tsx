@@ -1,24 +1,81 @@
 import { useState } from "react";
+import { readFile } from "@tauri-apps/plugin-fs";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDeleteFile } from "../data/useDeleteFile";
 import { useIsAdmin } from "../data/useIsAdmin";
-import type { FileId } from "../data/types";
+import { useCheckIn } from "../data/useCheckIn";
+import { matchLocal } from "../data/local-match";
+import type { FileId, VaultFile, Version } from "../data/types";
+import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface Props {
   selectedIds: FileId[];
   onClear: () => void;
   onDone: () => void;
+  // Local folder sync (optional)
+  files?: VaultFile[];
+  localFiles?: LocalFile[] | null;
+  versionsByFileId?: Map<FileId, Version[]>;
 }
 
-export function BulkActionBar({ selectedIds, onClear, onDone }: Props) {
+export function BulkActionBar({
+  selectedIds,
+  onClear,
+  onDone,
+  files = [],
+  localFiles,
+  versionsByFileId = new Map(),
+}: Props) {
   const acquireLock = useAcquireLock();
   const releaseLock = useReleaseLock();
   const deleteFile = useDeleteFile();
+  const checkIn = useCheckIn();
   const isAdmin = useIsAdmin();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Determine which selected files have a modified local copy available.
+  const hasModifiedLocal =
+    localFiles != null &&
+    selectedIds.some((id) => {
+      const file = files.find((f) => f.id === id);
+      if (!file) return false;
+      const m = matchLocal(file, localFiles, versionsByFileId);
+      return m.status === "modified" && !!m.local;
+    });
+
+  async function bulkCheckInChanges() {
+    setBusy(true);
+    setStatus(null);
+    let ok = 0, fail = 0, skipped = 0;
+    for (const id of selectedIds) {
+      const file = files.find((f) => f.id === id);
+      if (!file) { skipped++; continue; }
+      const m = matchLocal(file, localFiles ?? null, versionsByFileId);
+      if (m.status !== "modified" || !m.local) { skipped++; continue; }
+      // Acquire lock first; may fail if another user holds it.
+      await acquireLock.run(id);
+      try {
+        const fileBytes = await readFile(m.local.absolutePath);
+        const ab = fileBytes.buffer.slice(
+          fileBytes.byteOffset,
+          fileBytes.byteOffset + fileBytes.byteLength,
+        ) as ArrayBuffer;
+        const r = await checkIn.run(id, ab, "bulk check-in");
+        if (r) ok++; else fail++;
+      } catch {
+        fail++;
+      }
+    }
+    setStatus(
+      `Checked in ${ok}/${selectedIds.length}` +
+        (fail ? ` (${fail} failed, ${skipped} skipped)` : ` (${skipped} skipped)`),
+    );
+    setBusy(false);
+    onDone();
+  }
 
   async function bulkCheckOut() {
     setBusy(true);
@@ -82,6 +139,16 @@ export function BulkActionBar({ selectedIds, onClear, onDone }: Props) {
       >
         Cancel Checkout
       </button>
+      {hasModifiedLocal && (
+        <button
+          type="button"
+          onClick={bulkCheckInChanges}
+          disabled={busy}
+          className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-600 disabled:opacity-50"
+        >
+          Check In Changes
+        </button>
+      )}
       {isAdmin && (
         <button
           type="button"

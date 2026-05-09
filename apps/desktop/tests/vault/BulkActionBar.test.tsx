@@ -7,6 +7,10 @@ import { BulkActionBar } from "../../src/modules/vault/components/BulkActionBar"
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+}));
+
 function mockClient(isAdmin = false, lockError: any = null): SupabaseClient {
   return {
     auth: {
@@ -98,6 +102,47 @@ describe("<BulkActionBar>", () => {
     const cancelBtns = screen.getAllByRole("button", { name: /^cancel$/i });
     fireEvent.click(cancelBtns[0]);
     await waitFor(() => expect(screen.queryByText(/this cannot be undone/i)).toBeNull());
+  });
+
+  it("Check In Changes button appears when selected files have modified local copies", () => {
+    const files = [
+      { id: "f1", vault_id: "v", folder_id: null, name: "frame.sldprt", latest_version_id: null, created_at: "x" },
+    ];
+    const localFiles = [
+      { basename: "frame.sldprt", relativePath: "frame.sldprt", absolutePath: "/vault/frame.sldprt", sha256: "abc", sizeBytes: 1 },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <BulkActionBar
+          selectedIds={["f1"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          files={files as any}
+          localFiles={localFiles}
+          versionsByFileId={new Map()}
+        />
+      </SupabaseAuthProvider>,
+    );
+    expect(screen.getByRole("button", { name: /check in changes/i })).toBeInTheDocument();
+  });
+
+  it("Check In Changes button does not appear when no local files are provided", () => {
+    const files = [
+      { id: "f1", vault_id: "v", folder_id: null, name: "frame.sldprt", latest_version_id: null, created_at: "x" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <BulkActionBar
+          selectedIds={["f1"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          files={files as any}
+          localFiles={null}
+          versionsByFileId={new Map()}
+        />
+      </SupabaseAuthProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /check in changes/i })).toBeNull();
   });
 
   it("bulk check out reports success status after running", async () => {
