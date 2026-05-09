@@ -1,25 +1,33 @@
 import { useEffect, useState } from "react";
-import type { Folder, FolderId } from "../data/types";
+import type { FileId, Folder, FolderId, Lock, UserId, VaultFile } from "../data/types";
 
 interface Props {
   folders: Folder[];
   selected: FolderId | null;
   onSelect: (id: FolderId | null) => void;
+  // Optional: when provided, files appear as leaves under their parent folder
+  // when that folder is expanded. Click a file → select its folder + the file.
+  files?: VaultFile[];
+  selectedFile?: FileId | null;
+  onSelectFile?: (id: FileId) => void;
+  // Optional: lock state used to color-code file leaves' status dots.
+  locks?: Lock[];
+  currentUserId?: UserId;
 }
 
-interface Node {
+interface FolderNode {
   folder: Folder;
-  children: Node[];
+  children: FolderNode[];
 }
 
-function buildTree(folders: Folder[]): Node[] {
+function buildTree(folders: Folder[]): FolderNode[] {
   const byParent = new Map<string | null, Folder[]>();
   for (const f of folders) {
     const arr = byParent.get(f.parent_id) ?? [];
     arr.push(f);
     byParent.set(f.parent_id, arr);
   }
-  function nodesFor(parentId: string | null): Node[] {
+  function nodesFor(parentId: string | null): FolderNode[] {
     return (byParent.get(parentId) ?? [])
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((f) => ({ folder: f, children: nodesFor(f.id) }));
@@ -50,6 +58,32 @@ function FolderIcon({ open }: { open: boolean }) {
   );
 }
 
+function FileIcon({ name }: { name: string }) {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  const tint =
+    ext === "sldprt" ? "text-sky-400" :
+    ext === "sldasm" ? "text-emerald-400" :
+    ext === "slddrw" ? "text-orange-400" :
+    "text-zinc-500";
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      className={"shrink-0 " + tint}
+      fill="currentColor"
+      fillOpacity="0.7"
+      stroke="currentColor"
+      strokeOpacity="0.95"
+      strokeWidth="0.6"
+      strokeLinejoin="round"
+    >
+      <path d="M3 2.5a1 1 0 0 1 1-1h5L13 5.5v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11Z" />
+      <path d="M9 1.5V5h4" fill="none" stroke="currentColor" strokeWidth="0.8" />
+    </svg>
+  );
+}
+
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
     <svg
@@ -64,13 +98,41 @@ function Chevron({ expanded }: { expanded: boolean }) {
   );
 }
 
-export function FolderTree({ folders, selected, onSelect }: Props) {
+/** Small dot indicating lock state of a file leaf. */
+function LockDot({ kind }: { kind: "none" | "me" | "other" }) {
+  const color =
+    kind === "me" ? "bg-sky-400" :
+    kind === "other" ? "bg-red-500" :
+    "bg-transparent";
+  if (kind === "none") return <span className="inline-block w-2" />;
+  return <span className={"inline-block h-2 w-2 shrink-0 rounded-full " + color} />;
+}
+
+export function FolderTree({
+  folders,
+  selected,
+  onSelect,
+  files = [],
+  selectedFile,
+  onSelectFile,
+  locks = [],
+  currentUserId,
+}: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const tree = buildTree(folders);
 
-  // When the selection changes externally (e.g. by clicking from a different
-  // screen), auto-expand the chain of ancestor folders so the selected one
-  // is visible.
+  // Pre-bucket files by folder_id for O(1) lookup during render.
+  const filesByFolder = new Map<string | null, VaultFile[]>();
+  for (const f of files) {
+    const key = f.folder_id;
+    const arr = filesByFolder.get(key) ?? [];
+    arr.push(f);
+    filesByFolder.set(key, arr);
+  }
+  for (const arr of filesByFolder.values()) {
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   useEffect(() => {
     if (!selected) return;
     const ancestors = ancestorsOf(selected, folders);
@@ -91,19 +153,68 @@ export function FolderTree({ folders, selected, onSelect }: Props) {
     });
   }
 
-  function handleRowClick(node: Node) {
+  function handleRowClick(node: FolderNode) {
     onSelect(node.folder.id);
-    // Selecting a parent also reveals its children; subsequent clicks on the
-    // row don't collapse — use the chevron for that.
-    if (node.children.length > 0 && !expanded.has(node.folder.id)) {
+    // Selecting a folder also reveals its contents (subfolders + files);
+    // subsequent clicks on the row don't collapse — use the chevron for that.
+    const hasContents = node.children.length > 0 || (filesByFolder.get(node.folder.id)?.length ?? 0) > 0;
+    if (hasContents && !expanded.has(node.folder.id)) {
       setExpanded((prev) => new Set(prev).add(node.folder.id));
     }
   }
 
-  function renderNode(node: Node, depth: number): React.ReactNode {
+  function lockKindFor(fileId: FileId): "none" | "me" | "other" {
+    const lock = locks.find((l) => l.file_id === fileId && l.released_at === null);
+    if (!lock) return "none";
+    return lock.user_id === currentUserId ? "me" : "other";
+  }
+
+  function renderFileLeaf(file: VaultFile, depth: number): React.ReactNode {
+    const isSelectedFile = selectedFile === file.id;
+    const lockKind = lockKindFor(file.id);
+    return (
+      <div
+        key={file.id}
+        role="button"
+        tabIndex={0}
+        aria-current={isSelectedFile ? "page" : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          // Select the file's folder so the right-side file table updates,
+          // AND signal the file selection for the detail panel.
+          if (file.folder_id) onSelect(file.folder_id);
+          onSelectFile?.(file.id);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (file.folder_id) onSelect(file.folder_id);
+            onSelectFile?.(file.id);
+          }
+        }}
+        className={
+          "flex cursor-pointer items-center gap-1.5 border-l-2 py-0.5 pr-2 text-[13px] outline-none transition-colors " +
+          "focus-visible:ring-1 focus-visible:ring-yellow-500 " +
+          (isSelectedFile
+            ? "border-yellow-500 bg-zinc-800/80 text-zinc-100"
+            : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")
+        }
+        style={{ paddingLeft: 6 + depth * 14 }}
+      >
+        <span className="inline-block w-4 shrink-0" />
+        <FileIcon name={file.name} />
+        <span className="truncate font-mono text-[12px]">{file.name}</span>
+        <LockDot kind={lockKind} />
+      </div>
+    );
+  }
+
+  function renderFolderNode(node: FolderNode, depth: number): React.ReactNode {
     const isExpanded = expanded.has(node.folder.id);
     const isSelected = selected === node.folder.id;
     const hasChildren = node.children.length > 0;
+    const folderFiles = filesByFolder.get(node.folder.id) ?? [];
+    const hasContents = hasChildren || folderFiles.length > 0;
 
     return (
       <div key={node.folder.id}>
@@ -127,7 +238,7 @@ export function FolderTree({ folders, selected, onSelect }: Props) {
           }
           style={{ paddingLeft: 6 + depth * 14 }}
         >
-          {hasChildren ? (
+          {hasContents ? (
             <span
               role="none"
               aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.folder.name}`}
@@ -146,8 +257,18 @@ export function FolderTree({ folders, selected, onSelect }: Props) {
             <FolderIcon open={isExpanded} />
           </span>
           <span className="truncate">{node.folder.name}</span>
+          {folderFiles.length > 0 && (
+            <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 group-hover:text-zinc-400">
+              {folderFiles.length}
+            </span>
+          )}
         </div>
-        {isExpanded && hasChildren && node.children.map((c) => renderNode(c, depth + 1))}
+        {isExpanded && (
+          <>
+            {node.children.map((c) => renderFolderNode(c, depth + 1))}
+            {folderFiles.map((f) => renderFileLeaf(f, depth + 1))}
+          </>
+        )}
       </div>
     );
   }
@@ -179,7 +300,7 @@ export function FolderTree({ folders, selected, onSelect }: Props) {
       {tree.length === 0 ? (
         <div className="px-3 py-3 text-xs italic text-zinc-500">No folders yet.</div>
       ) : (
-        tree.map((n) => renderNode(n, 0))
+        tree.map((n) => renderFolderNode(n, 0))
       )}
     </div>
   );

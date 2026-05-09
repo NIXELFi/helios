@@ -240,6 +240,11 @@ export function BrowseScreen() {
               folders={folders}
               selected={selectedFolder}
               onSelect={(id) => { setSelectedFolder(id); clearSelection(); }}
+              files={allFiles ?? []}
+              selectedFile={selectedFile}
+              onSelectFile={setSelectedFile}
+              locks={locks ?? []}
+              currentUserId={user?.id ?? ""}
             />
           ) : (
             <div className="p-3 text-sm text-zinc-500">Loading folders…</div>
