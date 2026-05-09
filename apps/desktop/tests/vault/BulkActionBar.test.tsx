@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+  mkdir: vi.fn().mockResolvedValue(undefined),
 }));
 
 function mockClient(isAdmin = false, lockError: any = null): SupabaseClient {
@@ -24,6 +26,11 @@ function mockClient(isAdmin = false, lockError: any = null): SupabaseClient {
       if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
       // pdm_cancel_checkout
       return Promise.resolve({ data: null, error: null });
+    },
+    storage: {
+      from: () => ({
+        download: vi.fn().mockResolvedValue({ data: new Blob([new Uint8Array([1])]), error: null }),
+      }),
     },
     from: (table: string) => {
       if (table === "locks") {
@@ -143,6 +150,31 @@ describe("<BulkActionBar>", () => {
       </SupabaseAuthProvider>,
     );
     expect(screen.queryByRole("button", { name: /check in changes/i })).toBeNull();
+  });
+
+  it("Get Latest button appears when at least one selected file is vault-only and vaultRoot is set", () => {
+    const files = [
+      { id: "f1", vault_id: "v", folder_id: null, name: "frame.sldprt", latest_version_id: "ver1", created_at: "x" },
+    ];
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <BulkActionBar
+          selectedIds={["f1"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          files={files as any}
+          localFiles={[]}
+          versionsByFileId={versions as any}
+          vaultRoot="/Users/me/Vault"
+          folders={[]}
+        />
+      </SupabaseAuthProvider>,
+    );
+    // f1 is vault-only (no local match), has a version sha, and vaultRoot is set → show Get Latest
+    expect(screen.getByRole("button", { name: /get latest/i })).toBeInTheDocument();
   });
 
   it("bulk check out reports success status after running", async () => {

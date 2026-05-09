@@ -1,8 +1,8 @@
 import { LockBadge } from "./LockBadge";
 import { LocalStatusBadge } from "./LocalStatusBadge";
-import { CheckOutButton, CheckInButton, CancelButton } from "./RowActions";
+import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
 import { matchLocal } from "../data/local-match";
-import type { FileId, Lock, UserId, VaultFile, Version } from "../data/types";
+import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface Props {
@@ -21,6 +21,9 @@ interface Props {
   // Local folder sync (optional — when undefined the Local column is hidden)
   localFiles?: LocalFile[] | null;
   versionsByFileId?: Map<FileId, Version[]>;
+  // Download support (optional — Get Latest hidden when absent)
+  vaultRoot?: string | null;
+  folders?: Folder[];
 }
 
 function lockStateFor(file: VaultFile, locks: Lock[], me: UserId) {
@@ -43,6 +46,8 @@ export function FileTable({
   allSelected = false,
   localFiles,
   versionsByFileId,
+  vaultRoot,
+  folders = [],
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const hasLocalColumn = localFiles !== undefined;
@@ -107,18 +112,32 @@ export function FileTable({
                 </td>
               )}
               <td className="px-3 py-2">
-                {state === "latest" && canEdit ? (
-                  <CheckOutButton fileId={f.id} onDone={onActionComplete} />
-                ) : state === "locked-by-me" ? (
-                  <>
-                    <CheckInButton
-                      fileId={f.id}
-                      localFile={localMatch?.local}
-                      onDone={onActionComplete}
-                    />
-                    <CancelButton fileId={f.id} onDone={onActionComplete} />
-                  </>
-                ) : null}
+                <div className="flex flex-wrap items-center gap-1">
+                  {state === "latest" && canEdit ? (
+                    <CheckOutButton fileId={f.id} onDone={onActionComplete} />
+                  ) : state === "locked-by-me" ? (
+                    <>
+                      <CheckInButton
+                        fileId={f.id}
+                        localFile={localMatch?.local}
+                        onDone={onActionComplete}
+                      />
+                      <CancelButton fileId={f.id} onDone={onActionComplete} />
+                    </>
+                  ) : null}
+                  {(localMatch?.status === "vault-only" || localMatch?.status === "modified") &&
+                    vaultRoot && (
+                      <GetLatestButton
+                        fileId={f.id}
+                        fileName={f.name}
+                        folderId={f.folder_id}
+                        latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
+                        vaultRoot={vaultRoot}
+                        folders={folders}
+                        onDone={onActionComplete}
+                      />
+                    )}
+                </div>
               </td>
             </tr>
           );

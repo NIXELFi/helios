@@ -237,4 +237,31 @@ describe("<FileTable>", () => {
     expect(screen.queryByText("Local")).toBeNull();
     expect(screen.queryByText("Modified")).toBeNull();
   });
+
+  it("Get Latest button appears when file is vault-only and vaultRoot + version sha are set", () => {
+    // f1 has a version; f2 does not. Neither has a local file → both vault-only.
+    // vaultRoot is set → Get Latest should appear for f1 (has sha) but not f2 (no sha).
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    const folders = [{ id: "fold1", vault_id: "v", parent_id: null, name: "chassis", created_at: "x" }];
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={[]}
+          versionsByFileId={versions}
+          vaultRoot="/Users/me/Vault"
+          folders={folders as any}
+        />,
+      ),
+    );
+    // f1 is vault-only and has a sha → Get Latest should appear
+    expect(screen.getByRole("button", { name: /get latest/i })).toBeInTheDocument();
+  });
 });

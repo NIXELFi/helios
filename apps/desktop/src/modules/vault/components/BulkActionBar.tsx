@@ -5,8 +5,10 @@ import { useReleaseLock } from "../data/useReleaseLock";
 import { useDeleteFile } from "../data/useDeleteFile";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useCheckIn } from "../data/useCheckIn";
+import { useDownloadVersion } from "../data/useDownloadVersion";
 import { matchLocal } from "../data/local-match";
-import type { FileId, VaultFile, Version } from "../data/types";
+import { localDestPath } from "../data/folder-paths";
+import type { FileId, Folder, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface Props {
@@ -17,6 +19,9 @@ interface Props {
   files?: VaultFile[];
   localFiles?: LocalFile[] | null;
   versionsByFileId?: Map<FileId, Version[]>;
+  // Download support (optional)
+  vaultRoot?: string | null;
+  folders?: Folder[];
 }
 
 export function BulkActionBar({
@@ -26,11 +31,14 @@ export function BulkActionBar({
   files = [],
   localFiles,
   versionsByFileId = new Map(),
+  vaultRoot,
+  folders = [],
 }: Props) {
   const acquireLock = useAcquireLock();
   const releaseLock = useReleaseLock();
   const deleteFile = useDeleteFile();
   const checkIn = useCheckIn();
+  const download = useDownloadVersion();
   const isAdmin = useIsAdmin();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -44,6 +52,17 @@ export function BulkActionBar({
       if (!file) return false;
       const m = matchLocal(file, localFiles, versionsByFileId);
       return m.status === "modified" && !!m.local;
+    });
+
+  // Determine if Get Latest is applicable for any selected file.
+  const hasGetLatest =
+    vaultRoot != null &&
+    selectedIds.some((id) => {
+      const file = files.find((f) => f.id === id);
+      if (!file) return false;
+      const m = matchLocal(file, localFiles ?? null, versionsByFileId);
+      return (m.status === "vault-only" || m.status === "modified") &&
+        !!versionsByFileId.get(id)?.[0];
     });
 
   async function bulkCheckInChanges() {
@@ -72,6 +91,27 @@ export function BulkActionBar({
     setStatus(
       `Checked in ${ok}/${selectedIds.length}` +
         (fail ? ` (${fail} failed, ${skipped} skipped)` : ` (${skipped} skipped)`),
+    );
+    setBusy(false);
+    onDone();
+  }
+
+  async function bulkGetLatest() {
+    setBusy(true);
+    setStatus(null);
+    let ok = 0, fail = 0, skipped = 0;
+    for (const id of selectedIds) {
+      const file = files.find((f) => f.id === id);
+      if (!file) { skipped++; continue; }
+      const ver = versionsByFileId.get(id)?.[0];
+      if (!ver) { skipped++; continue; }
+      const dest = localDestPath(vaultRoot!, file.folder_id, file.name, folders);
+      const r = await download.run(ver.sha256, dest);
+      if (r) ok++; else fail++;
+    }
+    setStatus(
+      `Downloaded ${ok}/${selectedIds.length}` +
+        (fail ? ` (${fail} failed, ${skipped} skipped)` : skipped ? ` (${skipped} skipped)` : ""),
     );
     setBusy(false);
     onDone();
@@ -147,6 +187,16 @@ export function BulkActionBar({
           className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-600 disabled:opacity-50"
         >
           Check In Changes
+        </button>
+      )}
+      {hasGetLatest && (
+        <button
+          type="button"
+          onClick={bulkGetLatest}
+          disabled={busy}
+          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          Get Latest
         </button>
       )}
       {isAdmin && (
