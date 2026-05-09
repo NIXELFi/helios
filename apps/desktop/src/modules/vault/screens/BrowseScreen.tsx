@@ -5,6 +5,7 @@ import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
+import { useMyRole } from "../data/useMyRole";
 import { useCreateVault } from "../data/useCreateVault";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
@@ -16,6 +17,8 @@ import type { FileId, FolderId } from "../data/types";
 export function BrowseScreen() {
   const user = useUser();
   const isAdmin = useIsAdmin();
+  const myRole = useMyRole();
+  const canEdit = isAdmin || myRole === "editor";
 
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
@@ -141,7 +144,7 @@ export function BrowseScreen() {
               selected={selectedFile}
               locks={locks ?? []}
               currentUserId={user?.id ?? ""}
-              canEdit={isAdmin}
+              canEdit={canEdit}
               onSelect={setSelectedFile}
               onActionComplete={handleActionComplete}
             />

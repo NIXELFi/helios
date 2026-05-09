@@ -33,6 +33,7 @@ export function HistoryScreen() {
             selected={fileId}
             locks={[]}
             currentUserId={user?.id ?? ""}
+            canEdit={false}
             onSelect={setFileId}
           />
         ) : (

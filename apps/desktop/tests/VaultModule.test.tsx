@@ -46,9 +46,10 @@ describe("<VaultModule>", () => {
         if (table === "folders") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
         if (table === "files") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
         if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
+        if (table === "user_roles") return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
-      rpc: (name: string) => Promise.resolve({ data: false, error: null }),
+      rpc: (_name: string) => Promise.resolve({ data: false, error: null }),
     } as any;
     render(
       <SupabaseAuthProvider client={c}>
