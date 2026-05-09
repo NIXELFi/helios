@@ -202,4 +202,39 @@ describe("<FileTable>", () => {
     fireEvent.click(checkboxes[0]); // header checkbox
     expect(onToggleSelectAll).toHaveBeenCalled();
   });
+
+  it("shows LocalStatusBadge in Local column when localFiles prop is provided", () => {
+    const localFiles = [
+      { basename: "frame.sldprt", relativePath: "frame.sldprt", absolutePath: "/x/frame.sldprt", sha256: "abc", sizeBytes: 1 },
+    ];
+    // No matching version → "modified" status for frame.sldprt; wheel.sldprt has no local match → "vault-only"
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={localFiles}
+          versionsByFileId={new Map()}
+        />,
+      ),
+    );
+    expect(screen.getByText("Modified")).toBeInTheDocument();
+    expect(screen.getByText("Not local")).toBeInTheDocument();
+    expect(screen.queryByText("Local")).toBeInTheDocument(); // column header
+  });
+
+  it("does not show Local column when localFiles prop is omitted", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={files} selected={null} locks={[]} currentUserId="u1" onSelect={() => {}} />,
+      ),
+    );
+    expect(screen.queryByText("Local")).toBeNull();
+    expect(screen.queryByText("Modified")).toBeNull();
+  });
 });

@@ -1,6 +1,9 @@
 import { LockBadge } from "./LockBadge";
+import { LocalStatusBadge } from "./LocalStatusBadge";
 import { CheckOutButton, CheckInButton, CancelButton } from "./RowActions";
-import type { FileId, Lock, UserId, VaultFile } from "../data/types";
+import { matchLocal } from "../data/local-match";
+import type { FileId, Lock, UserId, VaultFile, Version } from "../data/types";
+import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface Props {
   files: VaultFile[];
@@ -15,6 +18,9 @@ interface Props {
   onToggleSelect?: (id: FileId) => void;
   onToggleSelectAll?: () => void;
   allSelected?: boolean;
+  // Local folder sync (optional — when undefined the Local column is hidden)
+  localFiles?: LocalFile[] | null;
+  versionsByFileId?: Map<FileId, Version[]>;
 }
 
 function lockStateFor(file: VaultFile, locks: Lock[], me: UserId) {
@@ -35,8 +41,13 @@ export function FileTable({
   onToggleSelect,
   onToggleSelectAll,
   allSelected = false,
+  localFiles,
+  versionsByFileId,
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
+  const hasLocalColumn = localFiles !== undefined;
+  const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
+
   return (
     <table className="w-full text-sm">
       <thead className="border-b border-zinc-800 text-left text-zinc-400">
@@ -53,6 +64,9 @@ export function FileTable({
           )}
           <th className="px-3 py-2 font-normal">Name</th>
           <th className="px-3 py-2 font-normal">Status</th>
+          {hasLocalColumn && (
+            <th className="px-3 py-2 font-normal">Local</th>
+          )}
           <th className="px-3 py-2 font-normal">Actions</th>
         </tr>
       </thead>
@@ -60,6 +74,9 @@ export function FileTable({
         {files.map((f) => {
           const isSel = selected === f.id;
           const state = lockStateFor(f, locks, currentUserId);
+          const localMatch = hasLocalColumn
+            ? matchLocal(f, localFiles ?? null, versionsMap)
+            : null;
           return (
             <tr
               key={f.id}
@@ -84,12 +101,21 @@ export function FileTable({
               <td className="px-3 py-2">
                 <LockBadge state={state} />
               </td>
+              {hasLocalColumn && (
+                <td className="px-3 py-2">
+                  {localMatch && <LocalStatusBadge status={localMatch.status} />}
+                </td>
+              )}
               <td className="px-3 py-2">
                 {state === "latest" && canEdit ? (
                   <CheckOutButton fileId={f.id} onDone={onActionComplete} />
                 ) : state === "locked-by-me" ? (
                   <>
-                    <CheckInButton fileId={f.id} onDone={onActionComplete} />
+                    <CheckInButton
+                      fileId={f.id}
+                      localFile={localMatch?.local}
+                      onDone={onActionComplete}
+                    />
                     <CancelButton fileId={f.id} onDone={onActionComplete} />
                   </>
                 ) : null}

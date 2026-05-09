@@ -4,9 +4,16 @@ import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
 import type { FileId } from "../data/types";
+import type { LocalFile } from "../data/useLocalFolderScan";
 
 interface ActionProps {
   fileId: FileId;
+  onDone?: () => void;
+}
+
+interface CheckInButtonProps {
+  fileId: FileId;
+  localFile?: LocalFile;
   onDone?: () => void;
 }
 
@@ -30,16 +37,29 @@ export function CheckOutButton({ fileId, onDone }: ActionProps) {
   );
 }
 
-export function CheckInButton({ fileId, onDone }: ActionProps) {
+export function CheckInButton({ fileId, localFile, onDone }: CheckInButtonProps) {
   const checkIn = useCheckIn();
 
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    const path = await openFileDialog({ multiple: false });
-    if (!path || Array.isArray(path)) return;
-    const bytes = await readFile(path);
+    let bytes: ArrayBuffer;
+    if (localFile) {
+      const fileBytes = await readFile(localFile.absolutePath);
+      bytes = fileBytes.buffer.slice(
+        fileBytes.byteOffset,
+        fileBytes.byteOffset + fileBytes.byteLength,
+      ) as ArrayBuffer;
+    } else {
+      const path = await openFileDialog({ multiple: false });
+      if (!path || Array.isArray(path)) return;
+      const fileBytes = await readFile(path);
+      bytes = fileBytes.buffer.slice(
+        fileBytes.byteOffset,
+        fileBytes.byteOffset + fileBytes.byteLength,
+      ) as ArrayBuffer;
+    }
     const comment = window.prompt("Check-in comment (optional):") ?? null;
-    const result = await checkIn.run(fileId, bytes.buffer as ArrayBuffer, comment);
+    const result = await checkIn.run(fileId, bytes, comment);
     if (result) onDone?.();
   }
 
