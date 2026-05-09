@@ -150,7 +150,7 @@ export function BrowseScreen() {
     for (const file of files) {
       const ver = versionsByFileId.get(file.id)?.[0];
       if (!ver) { skipped++; continue; }
-      const m = matchLocal(file, localFiles, versionsByFileId);
+      const m = matchLocal(file, localFiles, versionsByFileId, folders ?? []);
       // Skip files that are already synced.
       if (m.status === "synced") { skipped++; continue; }
       const dest = localDestPath(vaultFolderPath, file.folder_id, file.name, folders ?? []);

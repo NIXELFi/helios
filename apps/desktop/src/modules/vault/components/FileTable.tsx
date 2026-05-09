@@ -80,7 +80,7 @@ export function FileTable({
           const isSel = selected === f.id;
           const state = lockStateFor(f, locks, currentUserId);
           const localMatch = hasLocalColumn
-            ? matchLocal(f, localFiles ?? null, versionsMap)
+            ? matchLocal(f, localFiles ?? null, versionsMap, folders)
             : null;
           return (
             <tr

@@ -50,7 +50,7 @@ export function BulkActionBar({
     selectedIds.some((id) => {
       const file = files.find((f) => f.id === id);
       if (!file) return false;
-      const m = matchLocal(file, localFiles, versionsByFileId);
+      const m = matchLocal(file, localFiles, versionsByFileId, folders);
       return m.status === "modified" && !!m.local;
     });
 
@@ -60,7 +60,7 @@ export function BulkActionBar({
     selectedIds.some((id) => {
       const file = files.find((f) => f.id === id);
       if (!file) return false;
-      const m = matchLocal(file, localFiles ?? null, versionsByFileId);
+      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
       return (m.status === "vault-only" || m.status === "modified") &&
         !!versionsByFileId.get(id)?.[0];
     });
@@ -72,7 +72,7 @@ export function BulkActionBar({
     for (const id of selectedIds) {
       const file = files.find((f) => f.id === id);
       if (!file) { skipped++; continue; }
-      const m = matchLocal(file, localFiles ?? null, versionsByFileId);
+      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
       if (m.status !== "modified" || !m.local) { skipped++; continue; }
       // Acquire lock first; may fail if another user holds it.
       await acquireLock.run(id);
