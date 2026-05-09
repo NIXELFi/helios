@@ -12,6 +12,9 @@ import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
+import { useDownloadVersion } from "../data/useDownloadVersion";
+import { localDestPath } from "../data/folder-paths";
+import { matchLocal } from "../data/local-match";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
@@ -73,6 +76,7 @@ export function BrowseScreen() {
   const createVault = useCreateVault();
   const createFolder = useCreateFolder();
   const createFile = useCreateFile();
+  const download = useDownloadVersion();
 
   const [vaultNameInput, setVaultNameInput] = useState("");
 
@@ -80,6 +84,11 @@ export function BrowseScreen() {
   const [prompt, setPrompt] = useState<{ kind: "folder" | "file" } | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
+
+  // Pull All confirmation modal
+  const [confirmPullAll, setConfirmPullAll] = useState(false);
+  const [pullAllBusy, setPullAllBusy] = useState(false);
+  const [pullAllStatus, setPullAllStatus] = useState<string | null>(null);
 
   async function handleCreateVault(e: React.FormEvent) {
     e.preventDefault();
@@ -127,6 +136,33 @@ export function BrowseScreen() {
   function handleActionComplete() {
     refetchFiles();
     refetchLocks();
+    rescan();
+    bump();
+  }
+
+  // Pull All vault files in the current folder to local disk.
+  async function handlePullAll() {
+    if (!vaultFolderPath || !files) return;
+    setConfirmPullAll(false);
+    setPullAllBusy(true);
+    setPullAllStatus(null);
+    let ok = 0, fail = 0, skipped = 0;
+    for (const file of files) {
+      const ver = versionsByFileId.get(file.id)?.[0];
+      if (!ver) { skipped++; continue; }
+      const m = matchLocal(file, localFiles, versionsByFileId);
+      // Skip files that are already synced.
+      if (m.status === "synced") { skipped++; continue; }
+      const dest = localDestPath(vaultFolderPath, file.folder_id, file.name, folders ?? []);
+      const r = await download.run(ver.sha256, dest);
+      if (r) ok++; else fail++;
+    }
+    setPullAllStatus(
+      `Downloaded ${ok}/${files.length}` +
+        (fail ? ` (${fail} failed, ${skipped} skipped)` : skipped ? ` (${skipped} skipped)` : ""),
+    );
+    setPullAllBusy(false);
+    rescan();
     bump();
   }
 
@@ -192,13 +228,26 @@ export function BrowseScreen() {
           <>
             <div className="flex items-center justify-end gap-2 border-b border-zinc-800 px-3 py-1.5">
               {vaultFolderPath && (
-                <button
-                  onClick={rescan}
-                  className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                  title="Rescan local vault folder"
-                >
-                  Rescan
-                </button>
+                <>
+                  <button
+                    onClick={rescan}
+                    className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    title="Rescan local vault folder"
+                  >
+                    Rescan
+                  </button>
+                  <button
+                    onClick={() => { setPullAllStatus(null); setConfirmPullAll(true); }}
+                    disabled={pullAllBusy}
+                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                    title="Download all vault files in this folder to local disk"
+                  >
+                    {pullAllBusy ? "Pulling…" : "Pull All"}
+                  </button>
+                  {pullAllStatus && (
+                    <span className="text-xs text-zinc-500">{pullAllStatus}</span>
+                  )}
+                </>
               )}
               {isAdmin && (
                 <button
@@ -221,6 +270,8 @@ export function BrowseScreen() {
               files={files ?? []}
               localFiles={localFiles}
               versionsByFileId={versionsByFileId}
+              vaultRoot={vaultFolderPath}
+              folders={folders ?? []}
             />
             <FileTable
               files={files ?? []}
@@ -236,6 +287,8 @@ export function BrowseScreen() {
               allSelected={files !== null && files.length > 0 && selected.size === files.length}
               localFiles={localFiles}
               versionsByFileId={versionsByFileId}
+              vaultRoot={vaultFolderPath}
+              folders={folders ?? []}
             />
           </>
         ) : (
@@ -243,6 +296,40 @@ export function BrowseScreen() {
         )}
       </div>
       <FileDetailPanel fileId={selectedFile} />
+      {confirmPullAll && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setConfirmPullAll(false)}
+        >
+          <div
+            className="w-96 space-y-3 rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-zinc-100">Pull all vault files?</h3>
+            <p className="text-xs text-zinc-400">
+              This will download {files?.length ?? 0} file{(files?.length ?? 0) === 1 ? "" : "s"} into{" "}
+              <span className="font-mono text-zinc-300">{vaultFolderPath}</span>, overwriting any
+              local copies with the same path. Already-synced files will be skipped.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmPullAll(false)}
+                className="rounded px-3 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePullAll}
+                className="rounded bg-blue-700 px-3 py-1 text-xs text-white hover:bg-blue-600"
+              >
+                Pull All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {prompt && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
