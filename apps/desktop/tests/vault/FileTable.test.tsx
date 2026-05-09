@@ -203,11 +203,11 @@ describe("<FileTable>", () => {
     expect(onToggleSelectAll).toHaveBeenCalled();
   });
 
-  it("shows LocalStatusBadge in Local column when localFiles prop is provided", () => {
+  it("shows the local sync state in the consolidated Status pill", () => {
     const localFiles = [
       { basename: "frame.sldprt", relativePath: "frame.sldprt", absolutePath: "/x/frame.sldprt", sha256: "abc", sizeBytes: 1 },
     ];
-    // No matching version → "modified" status for frame.sldprt; wheel.sldprt has no local match → "vault-only"
+    // No matching version → "modified" status for frame.sldprt; wheel.sldprt has no local match → "vault-only" → "Not local"
     render(
       wrap(
         mockClient(),
@@ -224,18 +224,19 @@ describe("<FileTable>", () => {
     );
     expect(screen.getByText("Modified")).toBeInTheDocument();
     expect(screen.getByText("Not local")).toBeInTheDocument();
-    expect(screen.queryByText("Local")).toBeInTheDocument(); // column header
   });
 
-  it("does not show Local column when localFiles prop is omitted", () => {
+  it("does not show local-state labels when localFiles prop is omitted", () => {
     render(
       wrap(
         mockClient(),
         <FileTable files={files} selected={null} locks={[]} currentUserId="u1" onSelect={() => {}} />,
       ),
     );
-    expect(screen.queryByText("Local")).toBeNull();
+    // Without localFiles, the Status column shows the placeholder neutral pill.
     expect(screen.queryByText("Modified")).toBeNull();
+    expect(screen.queryByText("Not local")).toBeNull();
+    expect(screen.queryByText("Synced")).toBeNull();
   });
 
   it("Get Latest button appears when file is vault-only and vaultRoot + version sha are set", () => {
