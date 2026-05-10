@@ -40,7 +40,7 @@ export function useDownloadVersion() {
         // free-tier cap; legacy uncompressed objects pass through unchanged.
         // Detection is via gzip magic bytes (1f 8b) — see compression.ts.
         const raw = new Uint8Array(await data.arrayBuffer());
-        const arr = gunzipIfNeeded(raw);
+        const arr = await gunzipIfNeeded(raw);
 
         // Create the parent directory tree if needed.
         const dir = parentDir(destPath);

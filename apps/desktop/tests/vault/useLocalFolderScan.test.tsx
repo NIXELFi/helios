@@ -5,6 +5,7 @@ import { useLocalFolderScan } from "../../src/modules/vault/data/useLocalFolderS
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readDir: vi.fn(),
   readFile: vi.fn(),
+  stat: vi.fn(),
 }));
 
 const fs = await import("@tauri-apps/plugin-fs");
@@ -13,6 +14,18 @@ describe("useLocalFolderScan", () => {
   beforeEach(() => {
     vi.mocked(fs.readDir).mockReset();
     vi.mocked(fs.readFile).mockReset();
+    vi.mocked(fs.stat).mockReset();
+    // Default stat: each call returns a unique mtime so the sha-cache treats
+    // every test file as fresh. Tests that exercise the cache can override.
+    let counter = 0;
+    vi.mocked(fs.stat).mockImplementation(async () => ({
+      isFile: true, isDirectory: false, isSymlink: false,
+      size: 3,
+      mtime: new Date(1_000_000 + ++counter),
+      atime: null, birthtime: null, readonly: false, fileAttributes: null,
+      dev: null, ino: null, mode: null, nlink: null, uid: null, gid: null, rdev: null,
+      blksize: null, blocks: null,
+    } as any));
   });
 
   it("returns null when no path is given", () => {

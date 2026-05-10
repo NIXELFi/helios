@@ -21,6 +21,7 @@
     "fs:allow-mkdir",
     "fs:allow-watch",
     "fs:allow-unwatch",
+    "fs:allow-stat",
     { "identifier": "fs:scope", "allow": [{ "path": "**" }] }
   ]
 }

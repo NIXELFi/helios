@@ -140,7 +140,7 @@ export function useAddLocalFile() {
         // 4. Upload bytes (skip if content already exists in storage by sha).
         const path = `${sha.slice(0, 2)}/${sha}`;
         if (!(await objectExists(client, sha))) {
-          const compressed = gzipBytes(bytes);
+          const compressed = await gzipBytes(bytes);
           const { error: upErr } = await client.storage
             .from(BUCKET)
             .upload(path, compressed as BufferSource, { contentType: "application/octet-stream", upsert: false });

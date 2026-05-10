@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@helios/auth";
 import { useVaults } from "../data/useVaults";
 import { useFolders } from "../data/useFolders";
@@ -21,7 +21,7 @@ import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
-import type { FileId, FolderId, Version } from "../data/types";
+import type { FileId, FolderId, VaultFile, Version } from "../data/types";
 
 // How often to fall back to a full local rescan if the filesystem watcher
 // drops events. 30s is short enough to feel live, long enough to be cheap.
@@ -52,10 +52,16 @@ export function BrowseScreen() {
   // native filesystem watcher so the synced/modified state stays live without
   // the user touching a button.
   const { path: vaultFolderPath } = useVaultFolder();
+  // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
+  // While a sync pass is writing files we suppress automatic rescans so the
+  // file table doesn't flicker between modified/synced as bytes land; the
+  // explicit rescan from onComplete catches the final state.
+  const [syncBusy, setSyncBusy] = useState(false);
   const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
     intervalMs: LOCAL_RESCAN_INTERVAL_MS,
     rescanOnFocus: true,
     watchFs: true,
+    paused: syncBusy,
   });
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
@@ -86,21 +92,13 @@ export function BrowseScreen() {
   const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   useVaultRealtime(vaultId, { onVersion, onLock, onFile });
 
-  // Background auto-sync: download every vault file that isn't already on
-  // disk and isn't locked by the current user. Re-runs whenever versions /
-  // locks / files / local scan change.
+  // Background auto-sync lives inside <VaultSyncSection> so its rapid status
+  // updates (one per file start + one per file end) re-render only that
+  // subtree, never BrowseScreen / FolderTree / FileTable. Busy state and
+  // completion are forwarded back up via callbacks for the rescan-pause and
+  // refetch wiring.
   const onAutoSyncComplete = useCallback(() => { rescan(); }, [rescan]);
-  const autoSync = useAutoSync({
-    enabled: !!vaultFolderPath,
-    files: allFiles,
-    localFiles: localFiles ?? null,
-    versionsByFileId,
-    locks,
-    currentUserId: user?.id ?? null,
-    vaultRoot: vaultFolderPath,
-    folders: folders ?? [],
-    onComplete: onAutoSyncComplete,
-  });
+  const onAutoSyncBusy = useCallback((b: boolean) => setSyncBusy(b), []);
 
   function toggleOne(id: FileId) {
     setSelected((prev) => {
@@ -263,11 +261,17 @@ export function BrowseScreen() {
           <>
             <div className="flex items-center justify-end gap-2 border-b border-zinc-800 px-3 py-1.5">
               {vaultFolderPath && (
-                <SyncStatusPill
-                  busy={autoSync.busy}
-                  lastDownloaded={autoSync.lastDownloaded}
-                  lastFailed={autoSync.lastFailed}
-                  lastRunAt={autoSync.lastRunAt}
+                <VaultSyncSection
+                  enabled
+                  files={allFiles}
+                  localFiles={localFiles ?? null}
+                  versionsByFileId={versionsByFileId}
+                  locks={locks}
+                  currentUserId={user?.id ?? null}
+                  vaultRoot={vaultFolderPath}
+                  folders={folders ?? []}
+                  onComplete={onAutoSyncComplete}
+                  onBusyChange={onAutoSyncBusy}
                   onRescan={rescan}
                 />
               )}
@@ -364,39 +368,173 @@ export function BrowseScreen() {
   );
 }
 
-function SyncStatusPill({ busy, lastDownloaded, lastFailed, lastRunAt, onRescan }: {
-  busy: boolean;
-  lastDownloaded: number;
-  lastFailed: number;
-  lastRunAt: string | null;
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(0)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/** Owns the autoSync state so its frequent status updates don't re-render the
+ *  parent BrowseScreen (and therefore don't churn FolderTree / FileTable on
+ *  every individual file download). */
+function VaultSyncSection(props: {
+  enabled: boolean;
+  files: VaultFile[] | null | undefined;
+  localFiles: import("../data/useLocalFolderScan").LocalFile[] | null;
+  versionsByFileId: Map<FileId, Version[]>;
+  locks: import("../data/types").Lock[] | null | undefined;
+  currentUserId: string | null;
+  vaultRoot: string | null;
+  folders: import("../data/types").Folder[];
+  onComplete: () => void;
+  onBusyChange: (busy: boolean) => void;
   onRescan: () => void;
 }) {
+  const status = useAutoSync({
+    enabled: props.enabled,
+    files: props.files,
+    localFiles: props.localFiles,
+    versionsByFileId: props.versionsByFileId,
+    locks: props.locks,
+    currentUserId: props.currentUserId,
+    vaultRoot: props.vaultRoot,
+    folders: props.folders,
+    onComplete: props.onComplete,
+  });
+  const onBusyChange = props.onBusyChange;
+  useEffect(() => { onBusyChange(status.busy); }, [status.busy, onBusyChange]);
+  return <SyncStatusPill status={status} onRescan={props.onRescan} />;
+}
+
+function SyncStatusPill({ status, onRescan }: {
+  status: import("../data/useAutoSync").AutoSyncStatus;
+  onRescan: () => void;
+}) {
+  // Tick once a second while syncing AND the popover is open, so elapsed/ETA
+  // updates inside the popover. Toolbar pill itself only re-renders on real
+  // status changes — no per-second flicker for users who aren't looking at
+  // the detail.
+  const [open, setOpen] = useState(false);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!status.busy || !open) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [status.busy, open]);
+
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const { busy, lastDownloaded, lastFailed, lastRunAt, totalTasks, completedTasks,
+    totalBytes, completedBytes, activeFiles, startedAt } = status;
+
   let label: string;
   let tone: string;
+  let dot: string;
   if (busy) {
-    label = "Syncing…";
+    label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
     tone = "text-yellow-400";
+    dot = "bg-yellow-400 animate-pulse";
   } else if (lastFailed > 0) {
     label = `${lastFailed} failed`;
     tone = "text-red-400";
+    dot = "bg-red-400";
   } else if (lastDownloaded > 0) {
     label = `Pulled ${lastDownloaded}`;
     tone = "text-green-400";
+    dot = "bg-green-400";
   } else if (lastRunAt) {
     label = "Up to date";
     tone = "text-zinc-500";
+    dot = "bg-zinc-600";
   } else {
     label = "Idle";
     tone = "text-zinc-500";
+    dot = "bg-zinc-600";
   }
+
   return (
-    <button
-      onClick={onRescan}
-      className={"flex items-center gap-1.5 rounded px-2 py-0.5 text-xs hover:bg-zinc-800 " + tone}
-      title="Auto-syncs in the background. Click to rescan local folder."
-    >
-      <span className={"inline-block h-1.5 w-1.5 rounded-full " + (busy ? "bg-yellow-400 animate-pulse" : lastFailed > 0 ? "bg-red-400" : "bg-zinc-600")} />
-      {label}
-    </button>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        onDoubleClick={onRescan}
+        className={"flex items-center gap-1.5 rounded px-2 py-0.5 text-xs hover:bg-zinc-800 " + tone}
+        title="Click for sync detail · double-click to rescan"
+      >
+        <span className={"inline-block h-1.5 w-1.5 rounded-full " + dot} />
+        {label}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-lg">
+          {busy ? (() => {
+            const pct = totalBytes > 0 ? Math.floor((completedBytes / totalBytes) * 100) : 0;
+            const elapsed = startedAt ? Date.now() - startedAt : 0;
+            const eta = completedBytes > 0 && totalBytes > completedBytes
+              ? Math.round((elapsed / completedBytes) * (totalBytes - completedBytes))
+              : null;
+            return (
+              <>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="font-semibold text-zinc-200">Syncing</span>
+                  <span className="text-zinc-500">{completedTasks}/{totalTasks} files</span>
+                </div>
+                <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                  <div
+                    className="h-full bg-yellow-400 transition-[width] duration-300"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-500">
+                  <span>{formatBytes(completedBytes)} / {formatBytes(totalBytes)} ({pct}%)</span>
+                  <span>
+                    {formatDuration(elapsed)} elapsed
+                    {eta != null && ` · ~${formatDuration(eta)} left`}
+                  </span>
+                </div>
+                {activeFiles.length > 0 && (
+                  <div className="space-y-0.5">
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-500">In flight</div>
+                    {activeFiles.map((name) => (
+                      <div key={name} className="truncate font-mono text-[11px] text-zinc-300">
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })() : (
+            <>
+              <div className="mb-1 font-semibold text-zinc-200">{label}</div>
+              <div className="text-zinc-500">
+                {lastRunAt
+                  ? `Last sync: ${new Date(lastRunAt).toLocaleTimeString()}`
+                  : "No sync yet this session."}
+              </div>
+              <button
+                onClick={() => { setOpen(false); onRescan(); }}
+                className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800"
+              >
+                Rescan local folder
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -57,7 +57,7 @@ export function useCheckIn() {
           // the version's sha256 (and storage path) still identify the
           // ORIGINAL uncompressed content, so download can decompress and
           // verify integrity.
-          const compressed = gzipBytes(new Uint8Array(bytes));
+          const compressed = await gzipBytes(new Uint8Array(bytes));
           const { error: upErr } = await client.storage
             .from(BUCKET)
             .upload(path, compressed as BufferSource, {
