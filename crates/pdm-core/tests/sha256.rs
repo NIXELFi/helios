@@ -8,9 +8,19 @@ fn parses_64_lowercase_hex_chars() {
 }
 
 #[test]
-fn rejects_uppercase_hex() {
-    let err = "A".repeat(64).parse::<Sha256>().unwrap_err();
-    assert!(matches!(err, CoreError::InvalidSha256(_)));
+fn accepts_uppercase_hex_and_lowercases_canonically() {
+    // Servers may return uppercase hex; round-trip should normalize.
+    let upper = "A".repeat(64);
+    let s: Sha256 = upper.parse().expect("uppercase hex must parse");
+    assert_eq!(s.as_str(), "a".repeat(64));
+    assert_eq!(s.to_string(), "a".repeat(64));
+}
+
+#[test]
+fn accepts_mixed_case_hex() {
+    let mixed = "AaBbCcDdEeFf0123456789".to_string() + &"0".repeat(42);
+    let s: Sha256 = mixed.parse().expect("mixed case hex must parse");
+    assert_eq!(s.as_str(), mixed.to_ascii_lowercase());
 }
 
 #[test]

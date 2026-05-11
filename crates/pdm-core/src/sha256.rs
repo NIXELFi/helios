@@ -33,13 +33,16 @@ impl FromStr for Sha256 {
         if s.len() != 64 {
             return Err(CoreError::InvalidSha256(s.to_string()));
         }
-        for c in s.chars() {
+        // Accept both upper- and lower-case hex from the wire, but store
+        // canonically lowercased so equality / hashing stay consistent.
+        let lower = s.to_ascii_lowercase();
+        for c in lower.chars() {
             let valid = c.is_ascii_digit() || ('a'..='f').contains(&c);
             if !valid {
                 return Err(CoreError::InvalidSha256(s.to_string()));
             }
         }
-        Ok(Self(s.to_string()))
+        Ok(Self(lower))
     }
 }
 

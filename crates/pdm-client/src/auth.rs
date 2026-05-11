@@ -10,11 +10,10 @@ pub struct SignInRequest {
     pub password: String,
 }
 
-pub fn build_sign_in_url(c: &Client) -> Url {
-    let mut u = c.rest_url("x"); // get a URL with the base structure
-    u.set_path("auth/v1/token");
+pub fn build_sign_in_url(c: &Client) -> Result<Url, ClientError> {
+    let mut u = c.base().join("auth/v1/token")?;
     u.set_query(Some("grant_type=password"));
-    u
+    Ok(u)
 }
 
 pub fn build_sign_in_body(req: &SignInRequest) -> Value {
@@ -35,7 +34,7 @@ struct GoTrueUser {
 
 impl Client {
     pub async fn sign_in(&self, req: SignInRequest) -> Result<Session, ClientError> {
-        let url = build_sign_in_url(self);
+        let url = build_sign_in_url(self)?;
         let body = build_sign_in_body(&req);
         let res = self
             .http()

@@ -7,16 +7,12 @@ use url::Url;
 
 pub const BUCKET: &str = "vault-objects";
 
-pub fn create_signed_upload_url_url(c: &Client, sha: &Sha256) -> Url {
-    let mut u = c.rest_url("x");
-    u.set_path(&format!("storage/v1/object/upload/sign/{}/{}", BUCKET, sha.storage_path()));
-    u
+pub fn create_signed_upload_url_url(c: &Client, sha: &Sha256) -> Result<Url, ClientError> {
+    Ok(c.base().join(&format!("storage/v1/object/upload/sign/{}/{}", BUCKET, sha.storage_path()))?)
 }
 
-pub fn create_signed_download_url_url(c: &Client, sha: &Sha256) -> Url {
-    let mut u = c.rest_url("x");
-    u.set_path(&format!("storage/v1/object/sign/{}/{}", BUCKET, sha.storage_path()));
-    u
+pub fn create_signed_download_url_url(c: &Client, sha: &Sha256) -> Result<Url, ClientError> {
+    Ok(c.base().join(&format!("storage/v1/object/sign/{}/{}", BUCKET, sha.storage_path()))?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,7 +25,7 @@ impl Client {
         let session = self.session().ok_or(ClientError::Unauthenticated)?;
         let res = self
             .http()
-            .post(create_signed_upload_url_url(self, sha))
+            .post(create_signed_upload_url_url(self, sha)?)
             .header("apikey", self.anon_key())
             .bearer_auth(&session.access_token)
             .send()
@@ -45,7 +41,7 @@ impl Client {
         let body = json!({ "expiresIn": expires_seconds });
         let res = self
             .http()
-            .post(create_signed_download_url_url(self, sha))
+            .post(create_signed_download_url_url(self, sha)?)
             .header("apikey", self.anon_key())
             .header("Content-Type", "application/json")
             .bearer_auth(&session.access_token)

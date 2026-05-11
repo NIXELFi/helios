@@ -1,6 +1,7 @@
 use crate::error::ClientError;
 use reqwest::Client as Http;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Clone)]
@@ -23,12 +24,22 @@ pub struct Session {
 }
 
 impl Client {
+    // TODO: convert to Result<Url, ClientError> if dynamic identifiers are ever supported.
     pub fn rest_url(&self, table: &str) -> Url {
+        // Caller contract: table/rpc names must be URL-safe identifiers (verified by unit test).
         self.inner.base.join(&format!("rest/v1/{}", table)).expect("valid table name")
     }
 
     pub fn rpc_url(&self, name: &str) -> Url {
+        // Caller contract: table/rpc names must be URL-safe identifiers (verified by unit test).
         self.inner.base.join(&format!("rest/v1/rpc/{}", name)).expect("valid rpc name")
+    }
+
+    /// Base URL of the Supabase project, always with a trailing `/` so callers
+    /// can use `.join("auth/v1/token")` style relative paths and preserve any
+    /// path prefix (e.g. `https://host/supabase/`).
+    pub fn base(&self) -> &Url {
+        &self.inner.base
     }
 
     pub fn anon_key(&self) -> &str {
@@ -40,11 +51,11 @@ impl Client {
     }
 
     pub fn session(&self) -> Option<Session> {
-        self.inner.session.lock().expect("poisoned").clone()
+        self.inner.session.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub(crate) fn set_session(&self, s: Option<Session>) {
-        *self.inner.session.lock().expect("poisoned") = s;
+        *self.inner.session.lock().unwrap_or_else(|e| e.into_inner()) = s;
     }
 }
 
@@ -77,7 +88,10 @@ impl ClientBuilder {
         if !base.path().ends_with('/') {
             base.set_path(&format!("{}/", base.path()));
         }
-        let http = Http::builder().build()?;
+        let http = Http::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()?;
         Ok(Client {
             inner: Arc::new(Inner {
                 base,
