@@ -1,31 +1,6 @@
-import {
-  stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
-  engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
-  tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
-  channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
-  type Widget,
-} from "@helios/widgets";
+import { widgetRegistry, BUILTIN_WIDGET_TYPES } from "@helios/widgets";
 import type { ChannelMeta } from "@helios/store";
 import type { TileSpec, WidgetType } from "../workspaces/types";
-
-const editors: Record<WidgetType, Widget<unknown>> = {
-  strip_chart:     stripChartWidget     as unknown as Widget<unknown>,
-  numeric_readout: numericReadoutWidget as unknown as Widget<unknown>,
-  round_gauge:     roundGaugeWidget     as unknown as Widget<unknown>,
-  bar_gauge:       barGaugeWidget       as unknown as Widget<unknown>,
-  engine_bar:      engineBarWidget      as unknown as Widget<unknown>,
-  gps_track:       gpsTrackWidget       as unknown as Widget<unknown>,
-  lap_panel:       lapPanelWidget       as unknown as Widget<unknown>,
-  alarm_panel:     alarmPanelWidget     as unknown as Widget<unknown>,
-  tire_grid:       tireGridWidget       as unknown as Widget<unknown>,
-  histogram:       histogramWidget      as unknown as Widget<unknown>,
-  xy_plot:         xyPlotWidget         as unknown as Widget<unknown>,
-  steering_wheel:  steeringWheelWidget  as unknown as Widget<unknown>,
-  channel_report:  channelReportWidget  as unknown as Widget<unknown>,
-  time_report:     timeReportWidget     as unknown as Widget<unknown>,
-  zone_stats:      zoneStatsWidget      as unknown as Widget<unknown>,
-  fft:             fftWidget            as unknown as Widget<unknown>,
-};
 
 const WIDGET_LABELS: Record<WidgetType, string> = {
   strip_chart:     "Strip Chart",
@@ -46,7 +21,7 @@ const WIDGET_LABELS: Record<WidgetType, string> = {
   fft:             "FFT / Spectrum",
 };
 
-const WIDGET_TYPES = Object.keys(editors) as WidgetType[];
+const WIDGET_TYPES = BUILTIN_WIDGET_TYPES as readonly WidgetType[];
 
 interface Props {
   tile: TileSpec;
@@ -58,7 +33,7 @@ interface Props {
 }
 
 export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, availableChannels }: Props) {
-  const widget = editors[tile.widgetType];
+  const widget = widgetRegistry.get(tile.widgetType);
   const Editor = widget.ConfigEditor;
 
   return (
@@ -99,7 +74,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           onChange={(e) => {
             const nextType = e.target.value as WidgetType;
             if (nextType === tile.widgetType) return;
-            const nextWidget = editors[nextType];
+            const nextWidget = widgetRegistry.get(nextType);
             if (!confirm(
               `Convert "${tile.id}" from ${WIDGET_LABELS[tile.widgetType]} to ${WIDGET_LABELS[nextType]}?\n\n`
               + `Position and size are kept; the widget's config will reset to its default channels and ranges.`

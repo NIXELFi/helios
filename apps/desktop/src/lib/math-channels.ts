@@ -106,6 +106,7 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel, laps: LapSet |
     const base = groups[0]!;
     const value = evalAst(parsed.ast, () => undefined);
     const values = new Float64Array(base.time.length).fill(value);
+    evictIfMigrating(store, mc.id, base.id);
     store.addChannel(base.id, makeMeta(mc, base.nominalRateHz), values);
     return;
   }
@@ -175,7 +176,17 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel, laps: LapSet |
 
   // Per-sample evaluation against the rewritten AST.
   const out = evaluateVector(ast, ctx);
+  evictIfMigrating(store, mc.id, base.id);
   store.addChannel(base.id, makeMeta(mc, base.nominalRateHz), out);
+}
+
+/** If `id` already exists in a rate group other than `targetGroupId`, remove
+ *  it first so its old column doesn't linger in the previous rate group.
+ *  Without this, recomputing a math channel whose dep moved to a different
+ *  rate group leaves a stale entry behind. */
+function evictIfMigrating(store: ChannelStore, id: string, targetGroupId: string): void {
+  const existing = store.groupOf(id);
+  if (existing && existing.id !== targetGroupId) store.removeChannel(id);
 }
 
 /** Walk an AST and return a copy with every vector-op call replaced by an
