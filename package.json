@@ -7,7 +7,6 @@
     "dev": "turbo run dev --filter=@helios/desktop",
     "build": "turbo run build",
     "test": "turbo run test",
-    "test:visual": "turbo run test:visual",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "bench": "turbo run bench"
