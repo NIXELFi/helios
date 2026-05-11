@@ -119,7 +119,11 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Run TS tests
-        run: pnpm -r --workspace-concurrency=1 test
+        # @helios/pdm-supabase is filtered out: needs a real Supabase backend
+        # and credentials (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY). To run
+        # it here, wire those as repo secrets, surface them in this step's
+        # env block, and remove the filter (and the matching one in ci.yml).
+        run: pnpm -r --workspace-concurrency=1 --filter '!@helios/pdm-supabase' test
 
       - name: Build + sign + upload
         uses: tauri-apps/tauri-action@v0

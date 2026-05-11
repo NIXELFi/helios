@@ -37,7 +37,14 @@ jobs:
       - name: Run TS tests
         # Serial across workspaces because some packages share fixture
         # filesystems / ports during integration runs. Matches release.yml.
-        run: pnpm -r --workspace-concurrency=1 test
+        #
+        # @helios/pdm-supabase is filtered out: its test suite hits a real
+        # Supabase database via supabase-js and needs SUPABASE_URL +
+        # SUPABASE_SERVICE_ROLE_KEY. To run it in CI, wire those as repo
+        # secrets and remove the filter (and the matching one in release.yml).
+        # Until then, those tests are run locally only — see
+        # infra/pdm-supabase/scripts/test-or-skip.cjs for the local skip path.
+        run: pnpm -r --workspace-concurrency=1 --filter '!@helios/pdm-supabase' test
 
   cargo-test:
     name: Rust tests
