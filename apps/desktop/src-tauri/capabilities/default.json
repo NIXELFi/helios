@@ -22,6 +22,19 @@
     "fs:allow-watch",
     "fs:allow-unwatch",
     "fs:allow-stat",
-    { "identifier": "fs:scope", "allow": [{ "path": "**" }] }
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/Documents/**" },
+        { "path": "$HOME/Downloads/**" },
+        { "path": "$HOME/Desktop/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$RESOURCE/**" },
+        { "path": "$TEMP/**" }
+      ]
+    }
   ]
 }

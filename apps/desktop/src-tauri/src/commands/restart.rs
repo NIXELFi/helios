@@ -16,6 +16,21 @@
 //!
 //! Windows and Linux fall through to the standard self-spawn path which
 //! works fine on those platforms.
+//!
+//! SECURITY TODO (ultrareview-2026-05-11, finding #5): this command is
+//! currently registered in the default capability and is therefore invocable
+//! from any renderer context — including injected content if an XSS ever
+//! reaches the WebView. A renderer can call `helios_relaunch` to terminate
+//! the process at will. Narrowing this needs design work:
+//!   1. Define a dedicated capability (e.g. `updater-relaunch`) granted only
+//!      to the main window AND only after the updater plugin emits an
+//!      "update ready" signal, then revoked.
+//!   2. OR replace this with a direct invocation from the Rust-side updater
+//!      hook so no IPC surface exists at all.
+//! Until then we accept the gap because (a) the renderer is bundled, not
+//! remote, so XSS surface is low, and (b) breaking the post-update relaunch
+//! UX would be worse than the current exposure. Revisit when the updater
+//! flow is refactored.
 
 use std::path::PathBuf;
 use std::process::Command;

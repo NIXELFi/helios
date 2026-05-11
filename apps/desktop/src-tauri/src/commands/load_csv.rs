@@ -28,8 +28,12 @@ pub fn load_csv(path: String, registry_path: String) -> Result<LoadCsvResponse, 
     let mut rate_groups = Vec::new();
     for rg in result.rate_groups {
         let metas: Vec<_> = rg.channel_ids().into_iter()
-            .map(|id| rg.meta(id).cloned().unwrap())
-            .collect();
+            .map(|id| {
+                rg.meta(id)
+                    .cloned()
+                    .ok_or_else(|| format!("missing meta for channel {}", id))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         let ipc = rate_group_to_ipc(&rg).map_err(|e| format!("ipc: {e}"))?;
         rate_groups.push(LoadedRateGroup {
             id: rg.id.clone(),
