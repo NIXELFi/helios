@@ -1,3 +1,4 @@
+use pdm_core::LockId;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,4 +17,6 @@ pub enum ClientError {
     Server { status: u16, body: String },
     #[error("decode response: {0}")]
     Decode(#[from] serde_json::Error),
+    #[error("lock {0} was already released by another client")]
+    LockAlreadyReleased(LockId),
 }

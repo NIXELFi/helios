@@ -174,6 +174,13 @@ export interface OverlayEditorProps<C> {
 export interface OverlayModule<C, A> {
   readonly kind: string;
   defaultConfig(): C;
+  /** Optional: declare which other overlay ids this overlay's compute
+   *  reads via `OverlayContext.priorArtifacts`. The renderer uses
+   *  these to topologically order compute calls so each overlay sees
+   *  its declared dependencies' artifacts in a single pass. When
+   *  omitted the overlay has no declared dependencies (computed first
+   *  among indegree-0 nodes, in insertion order). */
+  dependencies?(cfg: C): ReadonlyArray<string>;
   compute(groups: SessionGroup[], cfg: C, ctx: OverlayContext): A;
   draw?(ctx: CanvasRenderingContext2D, layout: PlotLayout, artifacts: A, cfg: C): void;
   Component?: FC<{ artifacts: A; cfg: C; layout: PlotLayout }>;

@@ -38,7 +38,7 @@ pub struct Version {
     pub version_num: u32,
     pub sha256: Sha256,
     pub size_bytes: u64,
-    pub author_id: UserId,
+    pub author_id: Option<UserId>,
     pub comment: Option<String>,
     pub parent_version_id: Option<VersionId>,
     pub created_at: DateTime<Utc>,

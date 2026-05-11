@@ -5,6 +5,7 @@ import { useResizeObserver } from "../lib/use-resize-observer";
 import type { XyPlotConfig, PlotLayout, OverlayContext, SessionGroup } from "./types";
 import { buildSessionGroups } from "./data-pipeline";
 import { getOverlayModule } from "./overlays/registry";
+import { topoSort, type TopoNode } from "./topo-sort";
 // Side-effect imports: each overlay self-registers on load.
 import "./overlays/scatter";
 import "./overlays/fit";
@@ -168,12 +169,13 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     }
     ctx.stroke();
 
-    // Two-pass overlay rendering. Pass 1: compute every overlay's artifact
-    // into a shared map, with that map ALSO exposed to each compute via
-    // OverlayContext.priorArtifacts so dependent overlays (e.g. stats →
-    // fit) can read each other regardless of array order. Pass 2: draw /
-    // emit DOM components with the full map available. Without this,
-    // putting a stats overlay above its fit silently produced "R² = —".
+    // Overlay rendering. We compute each overlay exactly once, in an
+    // order that satisfies declared dependencies (e.g. stats → fit
+    // via cfg.fitOverlayId). The shared artifact map is exposed to
+    // each compute via OverlayContext.priorArtifacts, so a dependent
+    // overlay reading a prior artifact by id always finds it
+    // populated. Previously two passes were used to paper over array
+    // ordering — that doubled CPU on every redraw with overlays.
     const allArtifacts = new Map<string, unknown>();
     const ctxObj: OverlayContext = {
       bounds: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax! },
@@ -190,19 +192,27 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
       eligible.push({ overlay, mod });
     }
 
-    // Pass 1: compute all. Two passes through compute lets every overlay
-    // see every artifact, which matters for stats reading from a fit that
-    // sits later in the array — a common UX mistake otherwise.
-    for (const { overlay, mod } of eligible) {
-      const artifacts = mod!.compute(groups, overlay.config as never, ctxObj);
-      allArtifacts.set(overlay.id, artifacts);
-    }
-    for (const { overlay, mod } of eligible) {
+    // Topologically order overlays by declared dependencies. Kahn's
+    // algorithm with insertion-order tie-breaking: overlays with no
+    // declared deps run first in array order; dependents run after
+    // their targets. Cycles fall back to insertion order with a
+    // single warning — shouldn't happen but cheap to handle.
+    const nodes: TopoNode<Eligible>[] = eligible.map((e) => ({
+      id: e.overlay.id,
+      dependsOn: e.mod!.dependencies?.(e.overlay.config as never) ?? [],
+      value: e,
+    }));
+    const { sorted, hadCycle } = topoSort(nodes);
+    if (hadCycle) console.warn("xy-plot: overlay dependency cycle detected; rendering in insertion order");
+
+    for (const { overlay, mod } of sorted) {
       const artifacts = mod!.compute(groups, overlay.config as never, ctxObj);
       allArtifacts.set(overlay.id, artifacts);
     }
 
-    // Pass 2: draw + collect DOM Components.
+    // Draw + collect DOM Components in the original array order so
+    // visual stacking (later overlays on top, DOM components in
+    // user-controlled order) is independent of compute order.
     const nextDomOverlays: Array<{ id: string; element: ReactNode }> = [];
     for (const { overlay, mod } of eligible) {
       const artifacts = allArtifacts.get(overlay.id);

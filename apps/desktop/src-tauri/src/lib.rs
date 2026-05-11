@@ -7,7 +7,9 @@ pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
 
 #[tauri::command]
 fn get_pending_open_files(state: tauri::State<'_, PendingOpenFiles>) -> Vec<String> {
-    let mut guard = state.0.lock().unwrap();
+    // Recover from a poisoned mutex instead of crashing the IPC command —
+    // any panic in a holder is non-fatal; the queue is just a Vec<String>.
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
     let drained: Vec<String> = guard.drain(..).collect();
     drained
 }
@@ -42,7 +44,11 @@ pub fn run() {
                     // Edge case: a 2nd launch arrived before this 1st instance
                     // finished booting. Queue the paths into PendingOpenFiles
                     // so on_page_load drains them when the window is ready.
-                    state.0.lock().unwrap().extend(helios_paths);
+                    state
+                        .0
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .extend(helios_paths);
                 }
             } else if let Some(window) = app.get_webview_window("main") {
                 // No .helios paths in argv — just bring the existing window
@@ -55,7 +61,7 @@ pub fn run() {
         .on_page_load(|window, _payload| {
             let app = window.app_handle();
             let state = app.state::<PendingOpenFiles>();
-            let mut guard = state.0.lock().unwrap();
+            let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
             if guard.is_empty() {
                 return;
             }

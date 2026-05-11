@@ -10,17 +10,19 @@ export interface LocalFile {
 }
 
 /**
- * Module-scoped sha256 cache keyed by absolute path. Filesystem watcher fires
+ * Hook-scoped sha256 cache keyed by absolute path. Filesystem watcher fires
  * many times during a download burst (one per chunk on some platforms), and
  * each rescan would otherwise re-hash every file — including 100 MB CSVs —
  * on the JS main thread. Hashing 250 MB of data per event freezes the UI.
  *
  * Cache hit requires both mtime AND size to match; either changing means the
- * file content changed and we must re-hash. Survives across rescans (module
- * scope), gets pruned implicitly when entries are simply not refreshed.
+ * file content changed and we must re-hash. The cache is held in a useRef
+ * inside `useLocalFolderScan` so it shares the React lifetime — it's cleared
+ * implicitly when the hook unmounts (e.g. user logs out / switches accounts),
+ * preventing cross-user leakage of file hashes.
  */
 interface ShaEntry { mtimeMs: number; size: number; sha256: string }
-const shaCache = new Map<string, ShaEntry>();
+type ShaCache = Map<string, ShaEntry>;
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   // Pass the Uint8Array directly — this avoids realm-boundary issues where
@@ -31,7 +33,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
-async function walk(dir: string, relPrefix: string, out: LocalFile[]): Promise<void> {
+async function walk(
+  dir: string,
+  relPrefix: string,
+  out: LocalFile[],
+  shaCache: ShaCache,
+): Promise<void> {
   const entries = await readDir(dir);
   for (const e of entries) {
     // Skip hidden + common cruft.
@@ -39,7 +46,7 @@ async function walk(dir: string, relPrefix: string, out: LocalFile[]): Promise<v
     const abs = `${dir}/${e.name}`;
     const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name;
     if (e.isDirectory) {
-      await walk(abs, rel, out);
+      await walk(abs, rel, out, shaCache);
     } else if (e.isFile) {
       try {
         // Probe via stat() to drive the sha cache (mtime+size key). If stat
@@ -109,7 +116,16 @@ export function useLocalFolderScan(
   const pausedRef = useRef<boolean>(paused ?? false);
   useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
+  // sha cache lives for the hook's lifetime; clears on unmount (e.g. logout).
+  const shaCacheRef = useRef<ShaCache>(new Map());
+
   const refetch = useCallback(() => setTick((t) => t + 1), []);
+
+  // Clear the sha cache whenever rootPath changes — entries are keyed by
+  // absolute path and would silently leak across folder/account switches.
+  useEffect(() => {
+    shaCacheRef.current.clear();
+  }, [rootPath]);
 
   useEffect(() => {
     if (!rootPath) {
@@ -124,7 +140,7 @@ export function useLocalFolderScan(
     (async () => {
       try {
         const collected: LocalFile[] = [];
-        await walk(rootPath, "", collected);
+        await walk(rootPath, "", collected, shaCacheRef.current);
         if (mounted) {
           setFiles(collected);
           setLoading(false);

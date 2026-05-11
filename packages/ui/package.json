@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"ui: no tests yet\""
+  },
   "devDependencies": { "typescript": "^5.4.0" }
 }

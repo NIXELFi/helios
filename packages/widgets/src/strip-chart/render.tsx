@@ -241,6 +241,11 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
+  // Track how many uPlot instances we've constructed in this widget lifetime.
+  // Tests assert this stays at 1 across re-renders that only change data, to
+  // catch a regression where uPlot gets destroyed/recreated on every render —
+  // which broke pointer-drag scrubbing.
+  const plotConstructCountRef = useRef(0);
 
   const visible: OverlaySession[] = overlays && overlays.length > 0
     ? overlays
@@ -277,8 +282,23 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   }, [xMode, JSON.stringify(visible.map((v) => v.id)), slice]);
   void speedToMs;  // keep import alive — used at the lib boundary
 
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Stable refs for values that pointer handlers need but should NOT trigger a
+  // uPlot recreate when they change. The pointer handlers are attached once on
+  // construction and dereference these refs every time they fire — that way
+  // cursor/zoom emitters update without tearing down the chart mid-drag.
+  const cursorEmitterRef = useRef(cursorEmitter);
+  const viewStateRef = useRef(viewState);
+  const timeRangeRef = useRef(timeRange);
+  useEffect(() => { cursorEmitterRef.current = cursorEmitter; }, [cursorEmitter]);
+  useEffect(() => { viewStateRef.current = viewState; }, [viewState]);
+  useEffect(() => { timeRangeRef.current = timeRange; }, [timeRange]);
+
+  // Build the aligned data + meta. This is a pure derivation from
+  // visible/config/xMode/selection — memoize so re-renders with stable inputs
+  // don't trigger downstream setData calls.
+  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
+  const liveSelectionKey = JSON.stringify(liveSelection);
+  const dataPack = useMemo(() => {
     let buildResult: ReturnType<typeof buildTimeData> | (ReturnType<typeof buildDistanceData> & { emptyReason?: string });
     if (xMode === "distance") {
       buildResult = buildDistanceData(visible, config.channels, liveSelection, speedByOverlay);
@@ -287,6 +307,23 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     }
     const { data, seriesMeta } = buildResult as { data: AlignedData; seriesMeta: Array<{ session: OverlaySession; channelIndex: number; lapIndex?: number; role?: "main" | "ref" | "overlay" }> };
     const emptyReason = (buildResult as { emptyReason?: string }).emptyReason;
+    return { data, seriesMeta, emptyReason };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xMode, config.channels, visibleIdsKey, liveSelectionKey, speedByOverlay, slice]);
+
+  // Effect 1: create / destroy the uPlot instance. Deps are limited to things
+  // that *structurally* require a new uPlot: the config (channels + ranges +
+  // xMode) and the series count (which depends on seriesMeta length, which is
+  // really driven by overlay+channel count, captured by visibleIdsKey).
+  //
+  // The data itself is NOT in this dep list — Effect 2 below pushes data via
+  // u.setData so the existing instance is preserved across data changes.
+  // This is the heart of the M14 fix: previously the effect ran on every
+  // parent render (slice was recreated each time) and destroyed/recreated
+  // uPlot mid-drag, breaking pointer scrubbing and leaking listeners.
+  const seriesCount = dataPack.seriesMeta.length;
+  useEffect(() => {
+    if (!containerRef.current) return;
 
     const scales: Scales = { x: { time: false } };
     const axes: Axis[] = [{
@@ -322,6 +359,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       channelScale.push(group.id);
     }
 
+    const seriesMeta = dataPack.seriesMeta;
     const series: Series[] = [
       {},
       ...seriesMeta.map((meta): Series => {
@@ -366,138 +404,153 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       series,
     };
 
+    // Construct with current data; Effect 2 will push subsequent updates via
+    // setData on the same instance.
+    plotRef.current = new uPlot(opts, dataPack.data, containerRef.current);
+    plotConstructCountRef.current += 1;
+    const u = plotRef.current;
+    const over = u.over;
+    over.style.cursor = xMode === "distance" ? "default" : "crosshair";
+
     let cleanupPointer: (() => void) | undefined;
-    try {
-      plotRef.current?.destroy();
-      plotRef.current = new uPlot(opts, data, containerRef.current);
-      const u = plotRef.current;
-      const over = u.over;
-      over.style.cursor = xMode === "distance" ? "default" : "crosshair";
+    if (xMode === "time") {
+      const z0 = viewStateRef.current?.get().zoomRange;
+      if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
 
-      if (xMode === "time") {
-        const z0 = viewState?.get().zoomRange;
-        if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
+      // Pointer modes (time mode only):
+      //   plain drag      → scrub cursor
+      //   shift + click   → drop a datum
+      //   shift + drag    → zoom range
+      //   double-click    → reset zoom
+      // Distance mode is read-only — interaction would have to translate
+      // back through the lap-distance mapping which depends on which lap
+      // a sample belongs to; not handled in this iteration.
+      const ZOOM_DRAG_PX = 4;
+      type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
+      let mode: Mode = { kind: "none" };
+      let zoomBox: HTMLDivElement | null = null;
 
-        // Pointer modes (time mode only):
-        //   plain drag      → scrub cursor
-        //   shift + click   → drop a datum
-        //   shift + drag    → zoom range
-        //   double-click    → reset zoom
-        // Distance mode is read-only — interaction would have to translate
-        // back through the lap-distance mapping which depends on which lap
-        // a sample belongs to; not handled in this iteration.
-        const ZOOM_DRAG_PX = 4;
-        type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
-        let mode: Mode = { kind: "none" };
-        let zoomBox: HTMLDivElement | null = null;
+      const xToTimeUs = (clientX: number): number => {
+        const rect = over.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        const raw = Math.round(u.posToVal(localX, "x") * 1_000_000);
+        const z = viewStateRef.current?.get().zoomRange;
+        const tr = timeRangeRef.current;
+        const lo = z ? z.startUs : tr.startUs;
+        const hi = z ? z.endUs : tr.endUs;
+        return Math.max(lo, Math.min(hi, raw));
+      };
+      const localX = (clientX: number): number => clientX - over.getBoundingClientRect().left;
 
-        const xToTimeUs = (clientX: number): number => {
-          const rect = over.getBoundingClientRect();
-          const localX = clientX - rect.left;
-          const raw = Math.round(u.posToVal(localX, "x") * 1_000_000);
-          const z = viewState?.get().zoomRange;
-          const lo = z ? z.startUs : timeRange.startUs;
-          const hi = z ? z.endUs : timeRange.endUs;
-          return Math.max(lo, Math.min(hi, raw));
-        };
-        const localX = (clientX: number): number => clientX - over.getBoundingClientRect().left;
+      const ensureZoomBox = () => {
+        if (zoomBox) return zoomBox;
+        zoomBox = document.createElement("div");
+        zoomBox.className = "helios-zoom-box";
+        zoomBox.style.position = "absolute";
+        zoomBox.style.top = "0";
+        zoomBox.style.bottom = "0";
+        zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
+        zoomBox.style.borderLeft = "1px solid #FFC627";
+        zoomBox.style.borderRight = "1px solid #FFC627";
+        zoomBox.style.pointerEvents = "none";
+        over.appendChild(zoomBox);
+        return zoomBox;
+      };
+      const clearZoomBox = () => { zoomBox?.remove(); zoomBox = null; };
 
-        const ensureZoomBox = () => {
-          if (zoomBox) return zoomBox;
-          zoomBox = document.createElement("div");
-          zoomBox.className = "helios-zoom-box";
-          zoomBox.style.position = "absolute";
-          zoomBox.style.top = "0";
-          zoomBox.style.bottom = "0";
-          zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
-          zoomBox.style.borderLeft = "1px solid #FFC627";
-          zoomBox.style.borderRight = "1px solid #FFC627";
-          zoomBox.style.pointerEvents = "none";
-          over.appendChild(zoomBox);
-          return zoomBox;
-        };
-        const clearZoomBox = () => { zoomBox?.remove(); zoomBox = null; };
-
-        const onDown = (e: PointerEvent) => {
-          if (e.button !== 0) return;
-          over.setPointerCapture(e.pointerId);
-          if (e.shiftKey && viewState) {
-            mode = { kind: "shift", startX: localX(e.clientX) };
-          } else {
-            mode = { kind: "scrub" };
-            cursorEmitter.emit(xToTimeUs(e.clientX));
+      const onDown = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        over.setPointerCapture(e.pointerId);
+        if (e.shiftKey && viewStateRef.current) {
+          mode = { kind: "shift", startX: localX(e.clientX) };
+        } else {
+          mode = { kind: "scrub" };
+          cursorEmitterRef.current.emit(xToTimeUs(e.clientX));
+        }
+      };
+      const onMove = (e: PointerEvent) => {
+        if (mode.kind === "scrub") {
+          cursorEmitterRef.current.emit(xToTimeUs(e.clientX));
+        } else if (mode.kind === "shift") {
+          const x0 = mode.startX;
+          const x1 = localX(e.clientX);
+          if (Math.abs(x1 - x0) >= ZOOM_DRAG_PX) {
+            const box = ensureZoomBox();
+            box.style.left = `${Math.min(x0, x1)}px`;
+            box.style.width = `${Math.abs(x1 - x0)}px`;
           }
-        };
-        const onMove = (e: PointerEvent) => {
-          if (mode.kind === "scrub") {
-            cursorEmitter.emit(xToTimeUs(e.clientX));
-          } else if (mode.kind === "shift") {
-            const x0 = mode.startX;
-            const x1 = localX(e.clientX);
-            if (Math.abs(x1 - x0) >= ZOOM_DRAG_PX) {
-              const box = ensureZoomBox();
-              box.style.left = `${Math.min(x0, x1)}px`;
-              box.style.width = `${Math.abs(x1 - x0)}px`;
-            }
-          }
-        };
-        const onUp = (e: PointerEvent) => {
-          if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
-          if (mode.kind === "shift" && viewState) {
-            const x0 = mode.startX;
-            const x1 = localX(e.clientX);
-            clearZoomBox();
-            if (Math.abs(x1 - x0) < ZOOM_DRAG_PX) {
-              viewState.addDatum(xToTimeUs(e.clientX));
-            } else {
-              const a = u.posToVal(Math.min(x0, x1), "x") * 1_000_000;
-              const b = u.posToVal(Math.max(x0, x1), "x") * 1_000_000;
-              viewState.setZoom({ startUs: Math.round(a), endUs: Math.round(b) });
-            }
-          }
-          mode = { kind: "none" };
-        };
-        const onDblClick = () => { viewState?.resetZoom(); };
-
-        over.addEventListener("pointerdown", onDown);
-        over.addEventListener("pointermove", onMove);
-        over.addEventListener("pointerup", onUp);
-        over.addEventListener("pointercancel", onUp);
-        over.addEventListener("dblclick", onDblClick);
-        cleanupPointer = () => {
-          over.removeEventListener("pointerdown", onDown);
-          over.removeEventListener("pointermove", onMove);
-          over.removeEventListener("pointerup", onUp);
-          over.removeEventListener("pointercancel", onUp);
-          over.removeEventListener("dblclick", onDblClick);
+        }
+      };
+      const onUp = (e: PointerEvent) => {
+        if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
+        const vs = viewStateRef.current;
+        if (mode.kind === "shift" && vs) {
+          const x0 = mode.startX;
+          const x1 = localX(e.clientX);
           clearZoomBox();
-        };
-      }
-    } catch (_e) {
-      // jsdom canvas may not support 2d context; ignore in test environments
-    }
+          if (Math.abs(x1 - x0) < ZOOM_DRAG_PX) {
+            vs.addDatum(xToTimeUs(e.clientX));
+          } else {
+            const a = u.posToVal(Math.min(x0, x1), "x") * 1_000_000;
+            const b = u.posToVal(Math.max(x0, x1), "x") * 1_000_000;
+            vs.setZoom({ startUs: Math.round(a), endUs: Math.round(b) });
+          }
+        }
+        mode = { kind: "none" };
+      };
+      const onDblClick = () => { viewStateRef.current?.resetZoom(); };
 
-    // Empty-state overlay for distance mode when nothing renderable.
-    if (emptyReason) {
-      const note = document.createElement("div");
-      note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4 pointer-events-none";
-      note.textContent = emptyReason;
-      containerRef.current!.appendChild(note);
-      return () => {
-        cleanupPointer?.();
-        plotRef.current?.destroy();
-        plotRef.current = null;
-        note.remove();
+      over.addEventListener("pointerdown", onDown);
+      over.addEventListener("pointermove", onMove);
+      over.addEventListener("pointerup", onUp);
+      over.addEventListener("pointercancel", onUp);
+      over.addEventListener("dblclick", onDblClick);
+      cleanupPointer = () => {
+        over.removeEventListener("pointerdown", onDown);
+        over.removeEventListener("pointermove", onMove);
+        over.removeEventListener("pointerup", onUp);
+        over.removeEventListener("pointercancel", onUp);
+        over.removeEventListener("dblclick", onDblClick);
+        clearZoomBox();
       };
     }
 
     return () => {
       cleanupPointer?.();
+      // Note: no try/catch here. uPlot.destroy() doesn't throw on a healthy
+      // instance — if it ever does, we want the error to surface, not get
+      // silently swallowed alongside unrelated real bugs.
       plotRef.current?.destroy();
       plotRef.current = null;
     };
+    // dataPack is intentionally accessed here for the initial data; we don't
+    // recreate the plot when only data changes — Effect 2 handles that via
+    // setData. The deps below are the things that genuinely require a fresh
+    // uPlot (configuration that uPlot can't mutate post-construction).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slice, config, timeRange, cursorEmitter, viewState, JSON.stringify(visible.map((v) => v.id)), xMode, JSON.stringify(liveSelection), speedByOverlay]);
+  }, [config, xMode, isMulti, seriesCount, visibleIdsKey]);
+
+  // Effect 2: push data to the existing uPlot instance. Runs whenever the
+  // aligned data changes but the plot's structural config does not.
+  useEffect(() => {
+    const u = plotRef.current;
+    if (!u) return;
+    u.setData(dataPack.data);
+  }, [dataPack.data]);
+
+  // Effect 3: empty-state DOM overlay for distance mode. Mounted as a sibling
+  // div inside the container; cleaned up when the reason changes or unmounts.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const reason = dataPack.emptyReason;
+    if (!reason) return;
+    const note = document.createElement("div");
+    note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4 pointer-events-none";
+    note.textContent = reason;
+    container.appendChild(note);
+    return () => { note.remove(); };
+  }, [dataPack.emptyReason]);
 
   // Time-mode: subscribe to view-state (zoom + datums). Distance mode
   // ignores datums/zoom for now.

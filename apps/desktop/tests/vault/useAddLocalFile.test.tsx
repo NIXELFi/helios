@@ -105,7 +105,7 @@ const wrap = (c: SupabaseClient) =>
 describe("useAddLocalFile", () => {
   beforeEach(() => { callLog = []; });
 
-  it("happy path (root file): fires all 5 steps in order and returns true", async () => {
+  it("happy path (root file): uploads then atomically calls pdm_add_and_lock", async () => {
     const c = buildHappyClient();
     const { result } = renderHook(
       () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
@@ -123,13 +123,72 @@ describe("useAddLocalFile", () => {
     expect(returned).toBe(true);
 
     // Root file means no folder lookups/creates. Steps in order:
+    //   upload bytes → single RPC that creates file + version + lock atomically.
     expect(callLog).toEqual([
-      "files.insert",
       "storage.upload",
-      "locks.insert",     // step 5: acquire
-      "rpc:pdm_check_in", // step 6: check in (releases server-side)
-      "locks.insert",     // step 7: re-acquire (default checked out)
+      "rpc:pdm_add_and_lock",
     ]);
+  });
+
+  it("forwards correct args to pdm_add_and_lock", async () => {
+    const rpcCalls: Array<{ name: string; args: any }> = [];
+    const c = buildHappyClient();
+    (c.rpc as any) = (name: string, args: any) => {
+      callLog.push(`rpc:${name}`);
+      rpcCalls.push({ name, args });
+      return Promise.resolve({
+        data: {
+          file_id: "fi1",
+          version_id: "ve1",
+          lock_id: "lo1",
+        },
+        error: null,
+      });
+    };
+
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    await act(async () => { await result.current.hook.run("v1", localFileRoot); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("pdm_add_and_lock");
+    expect(rpcCalls[0].args).toMatchObject({
+      p_vault_id: "v1",
+      p_folder_id: null,
+      p_name: "part.sldprt",
+      p_size: 3,
+    });
+    expect(typeof rpcCalls[0].args.p_sha256).toBe("string");
+    expect(rpcCalls[0].args.p_sha256.length).toBe(64);
+    expect(typeof rpcCalls[0].args.p_comment).toBe("string");
+  });
+
+  it("surfaces RPC error and returns false", async () => {
+    const c = buildHappyClient();
+    (c.rpc as any) = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      return Promise.resolve({ data: null, error: { message: "race: file exists" } });
+    };
+
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    let returned: boolean | undefined;
+    await act(async () => {
+      returned = await result.current.hook.run("v1", localFileRoot);
+    });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(returned).toBe(false);
+    expect(result.current.hook.error?.message).toMatch(/add_and_lock.*race: file exists/);
   });
 
   it("nested file: looks up + creates each folder segment", async () => {

@@ -49,6 +49,37 @@ describe("integral", () => {
     const out = integral(v, timeUs(n, dt));
     expect(out[n - 1]).toBeCloseTo(0.5, 4);
   });
+
+  it("NaN inputs emit NaN at that sample but don't propagate", () => {
+    // Constant 1 with one NaN gap: dt=1s, values [1, 1, NaN, 1, 1]
+    // Expected output: [0, 1, NaN, 2, 3]
+    //   i=0: 0 (base)
+    //   i=1: 0 + 0.5*(1+1)*1 = 1
+    //   i=2: NaN at sample, acc stays at 1
+    //   i=3: NaN gap contributes nothing; resume from acc=1, add nothing for
+    //        the NaN->1 step (prevV NaN), so acc stays 1
+    //   i=4: 1 + 0.5*(1+1)*1 = 2... wait — at i=3 prevV becomes 1 again, so
+    //        the i=3->i=4 step adds 0.5*(1+1)*1 = 1 → out[4] = 2
+    // Net: the NaN sample drops one trapezoid (the i=2->i=3 contribution),
+    // which matches "starting fresh from the next valid value (not propagating)".
+    const v = new Float64Array([1, 1, NaN, 1, 1]);
+    const out = integral(v, timeUs(5, 1));
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBeCloseTo(1);
+    expect(Number.isNaN(out[2]!)).toBe(true);
+    expect(out[3]).toBeCloseTo(1);
+    expect(out[4]).toBeCloseTo(2);
+  });
+
+  it("NaN as the first sample emits NaN at index 0", () => {
+    const v = new Float64Array([NaN, 1, 1]);
+    const out = integral(v, timeUs(3, 1));
+    expect(Number.isNaN(out[0]!)).toBe(true);
+    // i=1 is a valid sample but the gap from NaN doesn't contribute; acc=0
+    expect(out[1]).toBeCloseTo(0);
+    // i=2: acc += 0.5*(1+1)*1 = 1
+    expect(out[2]).toBeCloseTo(1);
+  });
 });
 
 describe("shift", () => {

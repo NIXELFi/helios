@@ -106,6 +106,7 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel, laps: LapSet |
     const base = groups[0]!;
     const value = evalAst(parsed.ast, () => undefined);
     const values = new Float64Array(base.time.length).fill(value);
+    evictIfMigrating(store, mc.id, base.id);
     store.addChannel(base.id, makeMeta(mc, base.nominalRateHz), values);
     return;
   }
@@ -175,7 +176,17 @@ function compileAndApplyOne(store: ChannelStore, mc: MathChannel, laps: LapSet |
 
   // Per-sample evaluation against the rewritten AST.
   const out = evaluateVector(ast, ctx);
+  evictIfMigrating(store, mc.id, base.id);
   store.addChannel(base.id, makeMeta(mc, base.nominalRateHz), out);
+}
+
+/** If `id` already exists in a rate group other than `targetGroupId`, remove
+ *  it first so its old column doesn't linger in the previous rate group.
+ *  Without this, recomputing a math channel whose dep moved to a different
+ *  rate group leaves a stale entry behind. */
+function evictIfMigrating(store: ChannelStore, id: string, targetGroupId: string): void {
+  const existing = store.groupOf(id);
+  if (existing && existing.id !== targetGroupId) store.removeChannel(id);
 }
 
 /** Walk an AST and return a copy with every vector-op call replaced by an
@@ -392,14 +403,22 @@ function makeMeta(mc: MathChannel, sampleRateHz: number): ChannelMeta {
   };
 }
 
-function sampleAtBigTime(times: BigInt64Array, values: Float64Array, t: bigint): number {
+/** @internal — exported for unit testing only. Looks up the value at the
+ *  largest sample time ≤ `t`. Returns NaN if `t` is before `times[0]` so
+ *  cross-rate sampling shows the real gap rather than silently snapping to
+ *  `values[0]`. */
+export function sampleAtBigTime(times: BigInt64Array, values: Float64Array, t: bigint): number {
+  if (times.length === 0) return NaN;
   let lo = 0, hi = times.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
     if (times[mid]! <= t) lo = mid + 1; else hi = mid;
   }
-  const idx = Math.max(0, lo - 1);
-  return values[idx]!;
+  // Underflow: requested time is before the dep's first sample. Return NaN so
+  // cross-rate sampling shows the real gap instead of silently snapping to
+  // values[0].
+  if (lo === 0) return NaN;
+  return values[lo - 1]!;
 }
 
 export function defaultMathChannel(existingIds: string[]): MathChannel {

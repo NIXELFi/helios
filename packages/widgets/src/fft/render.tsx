@@ -67,6 +67,17 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     const c = canvasRef.current; if (!c) return;
     const ctx = setupCanvas(c);
     const { w, h } = canvasLogicalSize(c);
+    // First-paint guard: if layout hasn't given the canvas a non-zero size
+    // yet (ResizeObserver can fire with a 0x0 contentRect on initial
+    // observation), schedule a retry on the next animation frame. The
+    // ResizeObserver will also fire when real dims arrive, so this is a
+    // belt-and-suspenders second chance, not the primary path.
+    if (w <= 0 || h <= 0) {
+      if (typeof requestAnimationFrame !== "undefined") {
+        requestAnimationFrame(() => drawRef.current());
+      }
+      return;
+    }
     ctx.clearRect(0, 0, w, h);
     if (spectra.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";

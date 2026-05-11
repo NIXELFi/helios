@@ -46,6 +46,9 @@ export function useFileOpener({ onPending }: UseFileOpenerProps) {
     listen<string[]>(EVENT_NAME, (event) => {
       void processPaths(event.payload);
     }).then((u) => {
+      // If the effect was torn down before the listener handle came back,
+      // detach immediately so we don't orphan the subscription.
+      if (cancelled) { u(); return; }
       unlisten = u;
     });
 

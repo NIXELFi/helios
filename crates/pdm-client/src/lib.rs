@@ -2,8 +2,8 @@
 //!
 //! Wraps the PostgREST + Storage + RPC surfaces defined by the migrations in
 //! `infra/pdm-supabase/`. All operations return strongly-typed results from
-//! `pdm-core`. Auth is JWT-based; the client refreshes its session token
-//! automatically on 401.
+//! `pdm-core`. Auth is JWT-based; callers must call `sign_in` to refresh after
+//! a 401 (automatic token refresh is not yet implemented).
 
 pub mod auth;
 pub mod cancel;

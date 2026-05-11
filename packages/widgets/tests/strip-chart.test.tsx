@@ -1,18 +1,39 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { stripChartWidget } from "../src/strip-chart";
 import { CursorEmitter } from "@helios/lib";
 import type { ChannelSlice } from "@helios/store";
 
-function fakeSlice(): ChannelSlice {
+// Spy on uPlot construction so we can assert how many instances are built
+// across re-renders. The actual uPlot module is preserved so behavior is
+// unchanged; we only intercept the constructor to count invocations.
+const uplotConstructSpy = vi.fn();
+vi.mock("uplot", async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actual = (await vi.importActual("uplot")) as any;
+  const Real = actual.default;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function SpiedUPlot(this: unknown, ...args: any[]): any {
+    uplotConstructSpy();
+    return new Real(...args);
+  }
+  // Preserve static members (uPlot.sync, uPlot.paths, etc).
+  Object.assign(SpiedUPlot, Real);
+  SpiedUPlot.prototype = Real.prototype;
+  return { ...actual, default: SpiedUPlot };
+});
+
+function fakeSlice(seed = 0): ChannelSlice {
   const N = 1000;
   const time = new BigInt64Array(N);
   const rpm = new Float64Array(N);
-  for (let i = 0; i < N; i++) { time[i] = BigInt(i * 10_000); rpm[i] = 1000 + i; }
+  for (let i = 0; i < N; i++) { time[i] = BigInt(i * 10_000); rpm[i] = 1000 + i + seed; }
   return { time, data: new Map([["engine.rpm", rpm]]), range: { startUs: 0, endUs: N * 10_000 } };
 }
 
 describe("StripChart", () => {
+  beforeEach(() => { uplotConstructSpy.mockClear(); });
+
   it("requiredChannels returns configured ids", () => {
     const ids = stripChartWidget.requiredChannels({
       channels: [{ id: "a", color: "#fff" }, { id: "b", color: "#000" }],
@@ -32,5 +53,48 @@ describe("StripChart", () => {
       timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
     />);
     expect(container.querySelector("div")).not.toBeNull();
+  });
+
+  it("does NOT recreate uPlot when only the data slice changes (M14 regression)", () => {
+    // Regression for the M14 ultrareview finding: previously the effect that
+    // built the uPlot instance had `slice` in its dep array, so any parent
+    // render (which always allocates a fresh slice reference) destroyed and
+    // re-created the chart — including mid pointer-drag. After the split-
+    // effect fix, only data changes flow through setData and the same
+    // uPlot instance is reused.
+    const config = { channels: [{ id: "engine.rpm", color: "#FFB800" }], yMin: 0, yMax: 15000 };
+    const cursorEmitter = new CursorEmitter();
+    const timeRange = { startUs: 0, endUs: 1_000 * 10_000 };
+    const { rerender } = render(<stripChartWidget.Render
+      config={config}
+      slice={fakeSlice(0)}
+      cursorEmitter={cursorEmitter}
+      timeRange={timeRange}
+    />);
+    const initialConstructs = uplotConstructSpy.mock.calls.length;
+    // uPlot may or may not be constructed under jsdom (canvas is stubbed).
+    // The contract we care about is: the construct count after subsequent
+    // data-only re-renders stays equal to the initial count.
+
+    // Re-render multiple times with different slices, same config + range.
+    rerender(<stripChartWidget.Render
+      config={config}
+      slice={fakeSlice(1)}
+      cursorEmitter={cursorEmitter}
+      timeRange={timeRange}
+    />);
+    rerender(<stripChartWidget.Render
+      config={config}
+      slice={fakeSlice(2)}
+      cursorEmitter={cursorEmitter}
+      timeRange={timeRange}
+    />);
+    rerender(<stripChartWidget.Render
+      config={config}
+      slice={fakeSlice(3)}
+      cursorEmitter={cursorEmitter}
+      timeRange={timeRange}
+    />);
+    expect(uplotConstructSpy.mock.calls.length).toBe(initialConstructs);
   });
 });

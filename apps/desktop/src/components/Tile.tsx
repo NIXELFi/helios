@@ -1,34 +1,9 @@
 import { useRef, useState } from "react";
-import {
-  stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
-  engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
-  tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
-  channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
-  type Widget, type OverlaySession,
-} from "@helios/widgets";
+import { widgetRegistry, type OverlaySession } from "@helios/widgets";
 import type { CursorEmitter, ViewStateEmitter, LapSelectionEmitter, LapSelection, GpsPickerEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
 import type { LoadedSession } from "../lib/session";
 import { snapTile, GRID_COLS, GRID_ROWS } from "../lib/grid";
-
-const widgets: Record<string, Widget<unknown>> = {
-  strip_chart:     stripChartWidget     as unknown as Widget<unknown>,
-  numeric_readout: numericReadoutWidget as unknown as Widget<unknown>,
-  round_gauge:     roundGaugeWidget     as unknown as Widget<unknown>,
-  bar_gauge:       barGaugeWidget       as unknown as Widget<unknown>,
-  engine_bar:      engineBarWidget      as unknown as Widget<unknown>,
-  gps_track:       gpsTrackWidget       as unknown as Widget<unknown>,
-  lap_panel:       lapPanelWidget       as unknown as Widget<unknown>,
-  alarm_panel:     alarmPanelWidget     as unknown as Widget<unknown>,
-  tire_grid:       tireGridWidget       as unknown as Widget<unknown>,
-  histogram:       histogramWidget      as unknown as Widget<unknown>,
-  xy_plot:         xyPlotWidget         as unknown as Widget<unknown>,
-  steering_wheel:  steeringWheelWidget  as unknown as Widget<unknown>,
-  channel_report:  channelReportWidget  as unknown as Widget<unknown>,
-  time_report:     timeReportWidget     as unknown as Widget<unknown>,
-  zone_stats:      zoneStatsWidget      as unknown as Widget<unknown>,
-  fft:             fftWidget            as unknown as Widget<unknown>,
-};
 
 interface Props {
   spec: TileSpec;
@@ -60,7 +35,7 @@ export function Tile({
   lapSelectionEmitter, lapSelection, gpsPickerEmitter,
   editMode, selected, onSelect, onChange,
 }: Props) {
-  const widget = widgets[spec.widgetType]!;
+  const widget = widgetRegistry.get(spec.widgetType);
   const channels = widget.requiredChannels(spec.config);
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState>({ kind: "none" });

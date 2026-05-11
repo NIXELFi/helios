@@ -10,6 +10,8 @@ use thiserror::Error;
 pub enum RateGroupError {
     #[error("channel id `{0}` not found in rate group")]
     UnknownChannel(String),
+    #[error("channel `{channel}` has wrong length: expected {expected}, got {got}")]
+    LengthMismatch { channel: String, expected: usize, got: usize },
     #[error("arrow error: {0}")]
     Arrow(#[from] arrow::error::ArrowError),
 }
@@ -29,11 +31,17 @@ impl RateGroup {
         id: impl Into<String>,
         nominal_rate_hz: f32,
         time_us: Vec<i64>,
-        channel_data: Vec<(ChannelMeta, Vec<f64>)>,
+        channel_data: Vec<(ChannelMeta, Vec<Option<f64>>)>,
     ) -> Result<Self, RateGroupError> {
         let n = time_us.len();
         for (m, v) in &channel_data {
-            assert_eq!(v.len(), n, "channel `{}` has wrong length", m.id);
+            if v.len() != n {
+                return Err(RateGroupError::LengthMismatch {
+                    channel: m.id.clone(),
+                    expected: n,
+                    got: v.len(),
+                });
+            }
         }
         let mut fields = vec![Field::new("time_us", ArrowDataType::Int64, false)];
         let mut arrays: Vec<ArrayRef> = vec![Arc::new(Int64Array::from(time_us))];
@@ -75,6 +83,7 @@ impl RateGroup {
 mod tests {
     use super::*;
     use crate::channel::DataType;
+    use arrow::array::Array;
 
     fn meta(id: &str) -> ChannelMeta {
         ChannelMeta {
@@ -91,8 +100,8 @@ mod tests {
             "100hz", 100.0,
             vec![0, 10_000, 20_000],
             vec![
-                (meta("engine.rpm"), vec![1000.0, 2000.0, 3000.0]),
-                (meta("engine.tps"), vec![10.0, 20.0, 30.0]),
+                (meta("engine.rpm"), vec![Some(1000.0), Some(2000.0), Some(3000.0)]),
+                (meta("engine.tps"), vec![Some(10.0), Some(20.0), Some(30.0)]),
             ],
         ).unwrap();
 
@@ -107,11 +116,42 @@ mod tests {
         let rg = RateGroup::build(
             "100hz", 100.0,
             vec![0, 10_000],
-            vec![(meta("a"), vec![1.0, 2.0])],
+            vec![(meta("a"), vec![Some(1.0), Some(2.0)])],
         ).unwrap();
         assert!(matches!(
             rg.channel_data("missing"),
             Err(RateGroupError::UnknownChannel(_))
         ));
+    }
+
+    /// Mismatched column length must surface as a Result error, not a panic.
+    /// (Previously this was an `assert_eq!` in a public fallible API.)
+    #[test]
+    fn length_mismatch_returns_error() {
+        let res = RateGroup::build(
+            "100hz", 100.0,
+            vec![0, 10_000, 20_000],
+            vec![(meta("engine.rpm"), vec![Some(1000.0), Some(2000.0)])],
+        );
+        assert!(matches!(
+            res,
+            Err(RateGroupError::LengthMismatch { ref channel, expected: 3, got: 2 })
+                if channel == "engine.rpm"
+        ));
+    }
+
+    /// Leading missing samples must surface as Arrow nulls, not NaN sentinels.
+    #[test]
+    fn leading_none_becomes_arrow_null() {
+        let rg = RateGroup::build(
+            "100hz", 100.0,
+            vec![0, 10_000, 20_000],
+            vec![(meta("engine.rpm"), vec![None, None, Some(3000.0)])],
+        ).unwrap();
+        let arr = rg.channel_data("engine.rpm").unwrap();
+        assert!(arr.is_null(0));
+        assert!(arr.is_null(1));
+        assert!(!arr.is_null(2));
+        assert_eq!(arr.value(2), 3000.0);
     }
 }
