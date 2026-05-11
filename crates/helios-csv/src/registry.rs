@@ -256,13 +256,23 @@ fn substring_match(norm_haystack: &str, keyword: &str) -> bool {
 /// survive normalization.
 pub(crate) fn normalize_unit(u: &str) -> String {
     let lower: String = u.to_lowercase();
+    // m/s and any case-variants must be detected BEFORE we strip the slash:
+    // without the slash, "m/s" → "ms", which collides with milliseconds
+    // ("ms"). The audit (2026-05-11) flagged this as a latent bug — no
+    // channel uses ms units today, but the collision would silently
+    // misroute the moment one was added. Special-case both spellings
+    // ("m/s" and the already-stripped "mps") and route to a distinct
+    // canonical that can never collide with a real unit token.
+    let lower_trimmed = lower.trim();
+    if lower_trimmed == "m/s" || lower_trimmed == "mps" {
+        return "m_per_s".to_string();
+    }
     let cleaned: String = lower.chars()
         .filter(|c| !c.is_whitespace() && *c != '°' && *c != '/' && *c != '.')
         .collect();
     let trimmed = cleaned.trim();
     match trimmed {
         "kph" | "kmh" | "kmph" => "kmh".to_string(),
-        "mps"   => "ms".to_string(),  // m/s, after stripping the slash
         "degc"  => "c".to_string(),
         "degf"  => "f".to_string(),
         "kpag"  => "kpa".to_string(),
@@ -514,7 +524,18 @@ channels:
         assert_eq!(normalize_unit("RPM"), "rpm");
         assert_eq!(normalize_unit("%"), "%");
         assert_eq!(normalize_unit(""), "");
-        assert_eq!(normalize_unit("m/s"), "ms");
+        assert_eq!(normalize_unit("m/s"), "m_per_s");
         assert_eq!(normalize_unit("kPa"), "kpa");
+    }
+
+    /// Regression for the audit (2026-05-11): m/s (which the normalizer
+    /// strips to "mps") must NOT collide with milliseconds ("ms"). Both
+    /// canonicalize to distinct strings so a future channel using either
+    /// unit can't be misrouted to the other.
+    #[test]
+    fn unit_normalize_mps_does_not_collide_with_ms() {
+        assert_eq!(normalize_unit("m/s"), "m_per_s");
+        assert_eq!(normalize_unit("ms"), "ms");
+        assert_ne!(normalize_unit("m/s"), normalize_unit("ms"));
     }
 }

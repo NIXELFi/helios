@@ -15,9 +15,11 @@ const MAX_STREAM_BYTES: u64 = 4 * 1024 * 1024;
 /// filled with synthetic extension noise can't produce unbounded allocations.
 const MAX_HINTS: usize = 1024;
 
-/// Walk the container, find streams whose name contains "Reference", and scan
-/// each one for printable-ASCII runs that end in a SolidWorks extension. Each
-/// match becomes a RefHint.
+/// Walk the container, find streams whose name contains "reference" (case-
+/// insensitive — SolidWorks streams vary in casing across versions:
+/// `References`, `Reference Data`, `DLBaseTreeRef`, etc.), and scan each one
+/// for printable-ASCII runs that end in a SolidWorks extension. Each match
+/// becomes a RefHint.
 ///
 /// Best-effort across SW versions — formats differ. We err on the side of
 /// recall over precision; consumers dedupe by basename.
@@ -26,7 +28,7 @@ pub fn extract_refs<F: Read + Seek>(comp: &mut CompoundFile<F>) -> Vec<RefHint> 
         .walk()
         .filter(|e| e.is_stream())
         .map(|e| e.path().to_string_lossy().into_owned())
-        .filter(|name| name.contains("Reference"))
+        .filter(|name| name.to_ascii_lowercase().contains("reference"))
         .collect();
 
     let mut hints = Vec::new();

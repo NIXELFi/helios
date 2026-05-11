@@ -39,3 +39,20 @@ fn parse_refs_aggregates_hints_across_multiple_reference_streams() {
     assert!(basenames.contains(&"b.sldprt"));
     assert!(basenames.contains(&"bolt.sldprt"));
 }
+
+/// SolidWorks stream names vary in casing across versions (`References`,
+/// `REFERENCES`, `reference data`, etc.). The audit (2026-05-11) flagged
+/// the prior case-sensitive `contains("Reference")` filter as silently
+/// skipping anything not capitalized the One True Way. Verify the
+/// case-insensitive filter catches lower- and upper-case variants.
+#[test]
+fn parse_refs_matches_stream_names_case_insensitively() {
+    let cfb = cfb_with_streams(&[
+        ("reference data", b"..\\parts\\lower.sldprt\x00"),
+        ("REFERENCES", b"..\\parts\\upper.sldprt\x00"),
+    ]);
+    let refs = parse_refs(&cfb);
+    let basenames: Vec<&str> = refs.iter().map(RefHint::basename).collect();
+    assert!(basenames.contains(&"lower.sldprt"), "got: {basenames:?}");
+    assert!(basenames.contains(&"upper.sldprt"), "got: {basenames:?}");
+}

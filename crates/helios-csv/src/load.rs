@@ -25,9 +25,17 @@ pub fn load_csv(path: &Path, registry: &ChannelRegistry) -> Result<LoadResult, C
 }
 
 pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadResult, CsvLoadError> {
-    let raw = std::str::from_utf8(bytes)
-        .map_err(|e| CsvLoadError::Malformed(format!("non-utf8 input: {e}")))?;
-    let prepared = prepare_csv_input(raw);
+    // Real MoTeC/Link CSVs are often Windows-exported and can contain stray
+    // non-UTF-8 bytes (degree sign in a Latin-1 / Windows-1252 unit string is
+    // the canonical case). The audit (2026-05-11) flagged the prior hard
+    // rejection as a usability bug: users couldn't load their own files. We
+    // fall back to `from_utf8_lossy`, which replaces each invalid byte with
+    // U+FFFD (`?`). Channel names and data values still parse; only the
+    // offending byte's textual rendering is lost. We deliberately don't add
+    // a dependency for perfect Windows-1252 decoding — the goal is to let
+    // the file load at all.
+    let raw_cow = String::from_utf8_lossy(bytes);
+    let prepared = prepare_csv_input(&raw_cow);
     let first_line = prepared.text.lines().next()
         .ok_or_else(|| CsvLoadError::Malformed("empty file".into()))?;
     let delim = detect_delimiter(first_line);
@@ -572,6 +580,25 @@ channels:
             }
         }
         assert!(checked, "engine.tps column not found in any rate group");
+    }
+
+    /// Audit 2026-05-11: real MoTeC/Link CSVs occasionally contain Latin-1
+    /// bytes (the degree sign in a unit row is the canonical case). The
+    /// loader used to hard-reject; now it falls back to lossy UTF-8 decoding
+    /// so the file loads with the offending byte rendered as U+FFFD.
+    #[test]
+    fn non_utf8_input_loads_with_lossy_fallback() {
+        // 0xB0 is the Latin-1 degree sign — invalid UTF-8 on its own. Place
+        // it inside a header so we exercise the channel-name path.
+        let mut csv: Vec<u8> = Vec::new();
+        csv.extend_from_slice(b"time,temp_");
+        csv.push(0xB0);
+        csv.extend_from_slice(b"C\n0,20\n0.01,21\n0.02,22\n");
+        let r = load_csv_bytes(&csv, &registry()).expect("lossy fallback must load");
+        // At least one rate group with one non-time column.
+        assert!(!r.rate_groups.is_empty(), "expected at least one rate group");
+        let has_column = r.rate_groups.iter().any(|rg| !rg.channel_ids().is_empty());
+        assert!(has_column, "expected at least one data column to load");
     }
 
     #[test]
