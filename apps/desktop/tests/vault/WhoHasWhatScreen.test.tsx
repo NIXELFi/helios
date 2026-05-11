@@ -39,8 +39,10 @@ describe("<WhoHasWhatScreen>", () => {
         <WhoHasWhatScreen />
       </SupabaseAuthProvider>,
     );
-    await waitFor(() => expect(screen.getByText(/active checkouts/i)).toBeInTheDocument());
-    expect(screen.getByText("fileA")).toBeInTheDocument();
+    // Wait on a data-dependent string, not the static "Active checkouts"
+    // header which renders before useLocks resolves. CI runners take longer
+    // to flush async state and would race the immediate getByText calls.
+    expect(await screen.findByText("fileA")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
     expect(screen.getByText("fileB")).toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
