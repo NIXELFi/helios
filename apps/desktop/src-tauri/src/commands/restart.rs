@@ -17,16 +17,31 @@
 //! Windows and Linux fall through to the standard self-spawn path which
 //! works fine on those platforms.
 //!
-//! SECURITY TODO (ultrareview-2026-05-11, finding #5): this command is
-//! currently registered in the default capability and is therefore invocable
-//! from any renderer context — including injected content if an XSS ever
-//! reaches the WebView. A renderer can call `helios_relaunch` to terminate
-//! the process at will. Narrowing this needs design work:
-//!   1. Define a dedicated capability (e.g. `updater-relaunch`) granted only
-//!      to the main window AND only after the updater plugin emits an
-//!      "update ready" signal, then revoked.
-//!   2. OR replace this with a direct invocation from the Rust-side updater
-//!      hook so no IPC surface exists at all.
+//! SECURITY TODO (ultrareview-2026-05-11, finding M19): this command is
+//! registered via `invoke_handler!` and is therefore invocable from any
+//! renderer context — including injected content if an XSS ever reaches
+//! the WebView. A renderer can call `helios_relaunch` to terminate the
+//! process at will.
+//!
+//! NOTE on why no capability-gate exists here: Tauri 2's capability /
+//! permission ACL system gates *plugin*-defined commands only. App-defined
+//! `#[tauri::command]` functions registered via `tauri::generate_handler!`
+//! are not subject to capability filtering by default — they would need an
+//! app-side permission manifest under `src-tauri/permissions/*.toml` plus
+//! corresponding wiring in `tauri.conf.json` (`app.security.capabilities`).
+//! That refactor is tracked separately; the new `capabilities/updates.json`
+//! file added alongside this change is a first step (it isolates the
+//! updater plugin's IPC surface so it can be revoked or rescoped without
+//! touching the always-on capability).
+//!
+//! Narrowing `helios_relaunch` itself needs one of:
+//!   1. Add `apps/desktop/src-tauri/permissions/allow-relaunch.toml`
+//!      defining `allow-helios-relaunch`, declare it under
+//!      `tauri.conf.json` -> `app.security.capabilities`, and grant it
+//!      ONLY from the `updates` capability (so it shares the updater's
+//!      gate and can be revoked together). Requires editing tauri.conf.json.
+//!   2. OR replace this with a direct invocation from the Rust-side
+//!      updater hook so no IPC surface exists at all.
 //! Until then we accept the gap because (a) the renderer is bundled, not
 //! remote, so XSS surface is low, and (b) breaking the post-update relaunch
 //! UX would be worse than the current exposure. Revisit when the updater

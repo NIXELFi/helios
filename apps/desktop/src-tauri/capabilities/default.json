@@ -10,7 +10,6 @@
     "core:path:allow-resolve",
     "core:path:allow-join",
     "core:path:allow-normalize",
-    "updater:default",
     "dialog:default",
     "fs:default",
     "fs:allow-read-text-file",
