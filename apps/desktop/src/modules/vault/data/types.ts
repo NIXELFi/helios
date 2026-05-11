@@ -35,7 +35,7 @@ export interface Version {
   version_num: number;
   sha256: string;
   size_bytes: number;
-  author_id: UserId;
+  author_id: UserId | null;
   comment: string | null;
   parent_version_id: VersionId | null;
   created_at: string;

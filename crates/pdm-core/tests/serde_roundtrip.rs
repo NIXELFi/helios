@@ -58,7 +58,7 @@ fn version_round_trips() {
         version_num: 7,
         sha256: sha(),
         size_bytes: 1234,
-        author_id: UserId::new(),
+        author_id: Some(UserId::new()),
         comment: Some("first cut".to_string()),
         parent_version_id: None,
         created_at: Utc::now(),
