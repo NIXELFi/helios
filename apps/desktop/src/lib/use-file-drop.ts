@@ -32,7 +32,12 @@ export function useFileDrop({ onDrop }: UseFileDropProps) {
         if (dataPaths.length === 0) return;
         onDrop(dataPaths);
       })
-      .then((u) => { unlisten = u; })
+      .then((u) => {
+        // If the effect was torn down before the listener handle came back,
+        // detach immediately so we don't orphan the subscription.
+        if (cancelled) { u(); return; }
+        unlisten = u;
+      })
       .catch((e) => { console.error("[helios] failed to attach drag-drop listener:", e); });
 
     return () => {

@@ -42,24 +42,29 @@ export function derivative(values: Float64Array, timeUs: BigInt64Array): Float64
 }
 
 /** Cumulative trapezoidal integral. ∫values dt from time[0] up to time[i].
- *  Output[0] = 0 by convention. NaNs in inputs reset the running sum to NaN
- *  for that sample, but later samples are treated as starting fresh from the
- *  next valid value (not propagating). */
+ *  Output[0] = 0 by convention (or NaN if input[0] is NaN). NaNs in inputs
+ *  emit NaN at that sample so widgets render data gaps as gaps. The running
+ *  accumulator is preserved across the gap, so the next valid sample resumes
+ *  integration from the last valid acc — the NaN gap itself contributes
+ *  nothing to the integral (not propagating). */
 export function integral(values: Float64Array, timeUs: BigInt64Array): Float64Array {
   const n = values.length;
   const out = new Float64Array(n);
   if (n === 0) return out;
   let acc = 0;
-  out[0] = 0;
+  const v0 = values[0]!;
+  out[0] = Number.isFinite(v0) ? 0 : NaN;
   let prevT = Number(timeUs[0]!) / 1_000_000;
-  let prevV = values[0]!;
+  let prevV = v0;
   for (let i = 1; i < n; i++) {
     const t = Number(timeUs[i]!) / 1_000_000;
     const v = values[i]!;
     if (Number.isFinite(prevV) && Number.isFinite(v)) {
       acc += 0.5 * (prevV + v) * (t - prevT);
     }
-    out[i] = acc;
+    // Emit NaN at NaN-input samples to surface gaps; keep `acc` intact so the
+    // next finite sample resumes from the previous valid accumulator.
+    out[i] = Number.isFinite(v) ? acc : NaN;
     prevT = t;
     prevV = v;
   }
