@@ -52,7 +52,7 @@ mod tests {
         let rg = RateGroup::build(
             "100hz", 100.0,
             vec![0, 10_000, 20_000],
-            vec![(meta("a"), vec![1.0, 2.0, 3.0])],
+            vec![(meta("a"), vec![Some(1.0), Some(2.0), Some(3.0)])],
         ).unwrap();
         let bytes = rate_group_to_ipc(&rg).unwrap();
         let back = batch_from_ipc(&bytes).unwrap();

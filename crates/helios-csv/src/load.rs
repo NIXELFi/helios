@@ -46,14 +46,34 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     // Read all rows into a Vec<Vec<Option<f64>>>; first column treated as time.
     let mut times_raw: Vec<f64> = Vec::new();
     let mut cols: Vec<Vec<Option<f64>>> = vec![Vec::new(); headers.len() - 1];
+    // Track per-column counts of non-empty cells that failed to parse as a
+    // number. Used after the read pass to surface a warning when a column is
+    // dominated by unparseable values (e.g. an "on"/"off" enum, or
+    // locale-formatted "1,234"). Individual failures still get coerced to
+    // None so legitimately sparse columns load cleanly.
+    let mut parse_fail: Vec<usize> = vec![0; headers.len() - 1];
+    let mut parse_attempt: Vec<usize> = vec![0; headers.len() - 1];
     for rec in rdr.records() {
         let rec = rec?;
-        let t: f64 = rec[0].trim().parse()
-            .map_err(|e| CsvLoadError::Malformed(format!("bad time `{}`: {e}", &rec[0])))?;
+        // `rec.get(0)` guards against a zero-field record (lone delimiter or
+        // fully-quoted empty cell would otherwise panic via index op). The
+        // empty string falls through to the parse-error branch with a clear
+        // "bad time" message.
+        let time_cell = rec.get(0).unwrap_or("");
+        let t: f64 = time_cell.trim().parse()
+            .map_err(|e| CsvLoadError::Malformed(format!("bad time `{}`: {e}", time_cell)))?;
         times_raw.push(t);
         for (i, c) in cols.iter_mut().enumerate() {
             let s = rec.get(i + 1).unwrap_or("").trim();
-            c.push(if s.is_empty() { None } else { s.parse().ok() });
+            if s.is_empty() {
+                c.push(None);
+            } else {
+                parse_attempt[i] += 1;
+                match s.parse::<f64>() {
+                    Ok(v) => c.push(Some(v)),
+                    Err(_) => { parse_fail[i] += 1; c.push(None); }
+                }
+            }
         }
     }
 
@@ -121,6 +141,22 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
         by_rate.entry(key).or_default().push((i - 1, meta));
     }
 
+    // Warn on columns that look like a fundamentally-unparseable type
+    // (>50% of non-empty cells failed to parse as a number, with at least a
+    // handful of attempts). Catches the "on"/"off" enum or `"1,234"`
+    // locale-formatted column that would otherwise silently load as all
+    // nulls.
+    const MIN_ATTEMPTS_FOR_WARN: usize = 4;
+    for (i, name) in headers.iter().enumerate().skip(1) {
+        let attempts = parse_attempt[i - 1];
+        let failures = parse_fail[i - 1];
+        if attempts >= MIN_ATTEMPTS_FOR_WARN && failures * 2 > attempts {
+            warnings.push(format!(
+                "column `{name}` has {failures}/{attempts} non-empty cells that failed to parse as number",
+            ));
+        }
+    }
+
     let mut rate_groups = Vec::new();
     for (rate, entries) in by_rate {
         let mut keep_indices = Vec::new();
@@ -130,12 +166,17 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
             }
         }
         let rg_times: Vec<i64> = keep_indices.iter().map(|&r| times_us[r]).collect();
-        let mut rg_cols: Vec<(ChannelMeta, Vec<f64>)> = Vec::new();
+        let mut rg_cols: Vec<(ChannelMeta, Vec<Option<f64>>)> = Vec::new();
         for (ci, meta) in entries {
-            let mut data = Vec::with_capacity(keep_indices.len());
-            let mut last = f64::NAN;
+            // Forward-fill interior gaps with the last-known sample, but
+            // preserve the LEADING gap (before any sample exists) as
+            // Option::None so it surfaces as a true Arrow null rather than a
+            // NaN sentinel. Downstream aggregations check `is_null()` and
+            // would otherwise silently fold NaN into min/max/sum.
+            let mut data: Vec<Option<f64>> = Vec::with_capacity(keep_indices.len());
+            let mut last: Option<f64> = None;
             for &r in &keep_indices {
-                if let Some(v) = cols[ci][r] { last = v; data.push(v); }
+                if let Some(v) = cols[ci][r] { last = Some(v); data.push(Some(v)); }
                 else { data.push(last); }
             }
             rg_cols.push((meta, data));
@@ -304,6 +345,7 @@ fn dedupe_csv_header(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::Array;
     use std::path::PathBuf;
 
     fn registry() -> ChannelRegistry {
@@ -469,6 +511,67 @@ channels:
         assert_eq!(rpm_value, Some(1000.0), "engine.rpm not loaded");
         assert!(saw_tps, "engine.tps not loaded");
         assert_eq!(r.duration_us, 40_000);
+    }
+
+    /// A zero-field record (here from a stray blank line that the csv reader
+    /// could feed through as an empty record in pathological inputs, or a
+    /// fully-quoted empty cell) used to panic via direct indexing of
+    /// `rec[0]`. With `rec.get(0)` the empty cell is reported via the
+    /// existing "bad time" malformed error.
+    #[test]
+    fn empty_time_cell_errors_not_panics() {
+        let csv: &[u8] = b"time,rpm\n,1000\n";
+        let err = load_csv_bytes(csv, &registry()).unwrap_err();
+        match err {
+            CsvLoadError::Malformed(msg) => assert!(msg.contains("bad time"), "got: {msg}"),
+            other => panic!("expected Malformed, got {other:?}"),
+        }
+    }
+
+    /// A column dominated by non-numeric values (e.g. an "on"/"off" enum)
+    /// silently became all-nulls. The loader now surfaces a warning so the
+    /// user can tell the column wasn't usefully ingested.
+    #[test]
+    fn warns_when_column_mostly_unparseable() {
+        let csv: &[u8] = b"time,Pump State\n\
+            0,on\n\
+            0.01,on\n\
+            0.02,off\n\
+            0.03,on\n\
+            0.04,off\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        assert!(
+            r.warnings.iter().any(|w| w.contains("Pump State") && w.contains("failed to parse")),
+            "expected parse-failure warning, got {:?}", r.warnings,
+        );
+    }
+
+    /// A leading gap (rows present before the first sample of a channel)
+    /// must show up as an Arrow null, not the NaN sentinel that the old
+    /// f64::NAN forward-fill produced. We force `rpm` and `tps` into the
+    /// same rate group (both resolve to engine.* at 100Hz) so the
+    /// rate-grouped row set includes all four rows, and the leading two
+    /// blanks in `tps` get carried as None rather than the f64::NAN
+    /// sentinel.
+    #[test]
+    fn leading_blank_is_arrow_null_not_nan() {
+        let csv: &[u8] = b"time,rpm,tps\n\
+            0,1000,\n\
+            0.01,1100,\n\
+            0.02,1200,42\n\
+            0.03,1300,43\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut checked = false;
+        for rg in &r.rate_groups {
+            if let Ok(arr) = rg.channel_data("engine.tps") {
+                assert!(arr.is_null(0), "leading blank must be Arrow null, not NaN");
+                assert!(arr.is_null(1), "leading blank must be Arrow null, not NaN");
+                assert!(!arr.is_null(2));
+                assert_eq!(arr.value(2), 42.0);
+                checked = true;
+            }
+        }
+        assert!(checked, "engine.tps column not found in any rate group");
     }
 
     #[test]

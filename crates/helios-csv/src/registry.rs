@@ -2,6 +2,17 @@ use helios_core::{ChannelMeta, DataType};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum RegistryError {
+    #[error("yaml: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error(
+        "duplicate alias `{alias}` in channels.yaml: claimed by both `{first_id}` and `{second_id}`"
+    )]
+    DuplicateAlias { alias: String, first_id: String, second_id: String },
+}
 
 #[derive(Debug, Deserialize)]
 struct RegistryFile { channels: Vec<RegistryEntry> }
@@ -48,10 +59,14 @@ pub struct ChannelRegistry {
 }
 
 impl ChannelRegistry {
-    pub fn from_yaml(yaml: &str) -> Result<Self, serde_yaml::Error> {
+    pub fn from_yaml(yaml: &str) -> Result<Self, RegistryError> {
         let file: RegistryFile = serde_yaml::from_str(yaml)?;
-        let mut by_alias = HashMap::new();
+        let mut by_alias: HashMap<String, ChannelMeta> = HashMap::new();
         let mut semantic = Vec::new();
+        // Helper closure to flag duplicate inserts. Duplicates used to be
+        // silently overwritten — the second entry won, and any channel that
+        // depended on the first alias would mysteriously route elsewhere.
+        // Now we fail loudly so channels.yaml authors see the collision.
         for e in file.channels {
             let meta = ChannelMeta {
                 id: e.id.clone(),
@@ -65,8 +80,32 @@ impl ChannelRegistry {
                 sample_rate_hz: e.sample_rate_hz,
                 min: e.min, max: e.max, warn: e.warn, alarm: e.alarm,
             };
+            if let Some(prev) = by_alias.get(&e.id) {
+                // Only conflicting if the previous entry pointed somewhere
+                // else; a self-redundant entry (id-as-alias) is benign and
+                // we treat it as a no-op so existing channels.yaml files
+                // that list their own id under `aliases:` keep working.
+                if prev.id != meta.id {
+                    return Err(RegistryError::DuplicateAlias {
+                        alias: e.id.clone(),
+                        first_id: prev.id.clone(),
+                        second_id: meta.id.clone(),
+                    });
+                }
+            }
             by_alias.insert(e.id.clone(), meta.clone());
             for a in e.aliases {
+                if let Some(prev) = by_alias.get(&a) {
+                    if prev.id != meta.id {
+                        return Err(RegistryError::DuplicateAlias {
+                            alias: a,
+                            first_id: prev.id.clone(),
+                            second_id: meta.id.clone(),
+                        });
+                    }
+                    // Same target — redundant alias, no-op.
+                    continue;
+                }
                 by_alias.insert(a, meta.clone());
             }
             if !e.match_keywords.is_empty() {
@@ -403,6 +442,68 @@ channels:
         assert_eq!(normalize_name("TPS (Main)"), "tps main");
         assert_eq!(normalize_name("DI 1 - TransSpeed"), "di 1 transspeed");
         assert_eq!(normalize_name("  spaces   collapsed  "), "spaces collapsed");
+    }
+
+    /// Two distinct canonical ids competing for the same alias used to
+    /// silently overwrite (last entry wins). Now it surfaces as a
+    /// `DuplicateAlias` error so the channels.yaml author sees it.
+    #[test]
+    fn duplicate_alias_across_channels_errors() {
+        const YAML_DUP: &str = r##"
+channels:
+  - id: engine.a
+    display_name: A
+    units: ""
+    group: t
+    color: "#fff"
+    decimals: 0
+    data_type: f32
+    source: t
+    sample_rate_hz: 100
+    aliases: [shared]
+  - id: engine.b
+    display_name: B
+    units: ""
+    group: t
+    color: "#fff"
+    decimals: 0
+    data_type: f32
+    source: t
+    sample_rate_hz: 100
+    aliases: [shared]
+"##;
+        let err = ChannelRegistry::from_yaml(YAML_DUP).err()
+            .expect("expected DuplicateAlias error");
+        match err {
+            RegistryError::DuplicateAlias { alias, first_id, second_id } => {
+                assert_eq!(alias, "shared");
+                assert_eq!(first_id, "engine.a");
+                assert_eq!(second_id, "engine.b");
+            }
+            other => panic!("expected DuplicateAlias, got {other:?}"),
+        }
+    }
+
+    /// A channel listing its own id in `aliases:` is harmless redundancy
+    /// (and exists in docs/channels.yaml today) — must NOT error.
+    #[test]
+    fn self_alias_is_not_a_duplicate() {
+        const YAML_SELF: &str = r##"
+channels:
+  - id: engine.rpm
+    display_name: RPM
+    units: rpm
+    group: Engine
+    color: "#fff"
+    decimals: 0
+    data_type: f32
+    source: t
+    sample_rate_hz: 100
+    aliases: ["engine.rpm", rpm]
+"##;
+        let r = ChannelRegistry::from_yaml(YAML_SELF).expect("self-aliasing must load cleanly");
+        assert_eq!(r.resolve("engine.rpm").unwrap().id, "engine.rpm");
+        assert_eq!(r.resolve("rpm").unwrap().id, "engine.rpm");
     }
 
     #[test]
