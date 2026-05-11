@@ -23,6 +23,15 @@ interface ReferencedFitArtifact {
 export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
   kind: "stats",
   availability: ["advanced"],
+  dependencies(cfg) {
+    // Stats reads R² + equation from a referenced fit overlay's
+    // artifact map. Declaring the dependency lets the renderer
+    // compute that fit before stats in a single pass. When no
+    // explicit reference is set we fall back at compute time to
+    // scanning prior artifacts (see compute()) — the renderer's
+    // insertion-order tie-break preserves the array's intent.
+    return cfg.fitOverlayId ? [cfg.fitOverlayId] : [];
+  },
   defaultConfig() {
     // Default to showing R² + equation. When no fit overlay exists in
     // the plot they render "R² = —" which is harmless and prompts the
