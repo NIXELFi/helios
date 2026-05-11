@@ -102,51 +102,117 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     let mut warnings = Vec::new();
     let mut by_rate: BTreeMap<i32, Vec<(usize, ChannelMeta)>> = BTreeMap::new();
     // Track which canonical ids have already been claimed by an earlier
-    // column, across all rate groups. Without this, two source headers that
-    // both resolve to the same id (e.g. `TPS (Main)` and `TPS (Sub)` both
-    // mapped to `engine.tps`) collide inside RateGroup's HashMap — only the
-    // last column would be reachable, and any widget asking for that id
-    // would get whichever column was loaded last. We keep the FIRST one
-    // mapped to the canonical id and demote subsequent collisions back to
-    // their raw header name so all columns stay reachable.
+    // column, across all rate groups. We keep the FIRST mapping; subsequent
+    // collisions demote back to the raw header so both columns stay
+    // reachable.
+    //
+    // We MUST resolve in two passes — exact-alias first across every
+    // column, semantic second — so a precise alias on a later column wins
+    // over a loose semantic match on an earlier one. Single-pass ordering
+    // was wrong: e.g. a MoTeC export with `Throttle Load` (%) before
+    // `Throttle Position` (%) used to let the semantic keyword squat on
+    // `engine.tps` for Throttle Load; the real Throttle Position then
+    // hit a claimed id and was demoted to its raw header — every widget
+    // configured for engine.tps showed Throttle Load data instead.
     let mut claimed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let span_us = (*times_us.last().unwrap() - times_us[0]).max(1);
     let span_s = span_us as f64 / 1_000_000.0;
 
-    for (i, name) in headers.iter().enumerate().skip(1) {
+    // Per-column resolution outcome, keyed by header index (1..headers.len()).
+    // `None` means "not yet resolved — try the next pass".
+    let mut resolved: Vec<Option<(ChannelMeta, ResolveKind)>> = vec![None; headers.len()];
+
+    let infer_rate = |i: usize| -> i32 {
         let non_null = cols[i - 1].iter().filter(|x| x.is_some()).count();
-        let inferred_rate = (non_null as f64 / span_s).round() as i32;
+        (non_null as f64 / span_s).round() as i32
+    };
+
+    // Pass 1: exact alias only. Every column gets first crack at a precise
+    // alias hit before any semantic guesses get to claim canonical ids.
+    // Two columns aliasing the same canonical id (e.g. Link's TPS (Main)
+    // + TPS (Sub) before the v2.5.3 split) — first wins, second demotes
+    // to its raw header so both stay reachable.
+    for (i, name) in headers.iter().enumerate().skip(1) {
+        if let Some(m) = registry.resolve(name) {
+            let mut meta = m.clone();
+            meta.sample_rate_hz = meta.sample_rate_hz.max(1.0);
+            if claimed_ids.contains(&meta.id) && meta.id != *name {
+                warnings.push(format!(
+                    "channel `{name}` resolved to `{}` but that id was already claimed by an earlier column; storing as `{name}` instead so both remain reachable",
+                    meta.id,
+                ));
+                meta.id = name.to_string();
+                meta.display_name = name.to_string();
+            }
+            claimed_ids.insert(meta.id.clone());
+            resolved[i] = Some((meta, ResolveKind::ExactAlias));
+        }
+    }
+
+    // Pass 2: semantic fallback for columns that still have no resolution.
+    // A semantic hit against an already-claimed canonical id falls through
+    // to default (don't bother carrying through to a demotion warning —
+    // pass 3's "unknown channel" path covers it).
+    for (i, name) in headers.iter().enumerate().skip(1) {
+        if resolved[i].is_some() { continue; }
         let unit_hint = prepared.units.get(i).map(String::as_str).unwrap_or("");
-        let res = registry.resolve_or_default(name, unit_hint, inferred_rate.max(1) as f32);
-        let mut meta = res.meta;
+        let inferred_rate = infer_rate(i).max(1) as f32;
+        let res = registry.resolve_or_default(name, unit_hint, inferred_rate);
         match res.kind {
-            ResolveKind::ExactAlias => { meta.sample_rate_hz = meta.sample_rate_hz.max(1.0); }
-            ResolveKind::Semantic => {
+            ResolveKind::Semantic if !claimed_ids.contains(&res.meta.id) => {
+                let mut meta = res.meta;
                 meta.sample_rate_hz = meta.sample_rate_hz.max(1.0);
                 warnings.push(format!(
                     "channel `{name}` semantic-mapped to `{}` ({})",
                     meta.id, meta.display_name,
                 ));
+                claimed_ids.insert(meta.id.clone());
+                resolved[i] = Some((meta, ResolveKind::Semantic));
             }
-            ResolveKind::Default => {
-                warnings.push(format!("unknown channel `{name}`, registered with defaults"));
+            _ => {
+                // Either semantic hit a claimed id, or it was Default to
+                // begin with. Treat both the same: registered with defaults.
+                // (ExactAlias can't happen here — pass 1 caught those.)
             }
         }
-        if claimed_ids.contains(&meta.id) && meta.id != *name {
-            // Two columns wanted the same canonical id. Keep the earlier
-            // mapping; the later column reverts to its raw header so
-            // downstream consumers can still reach it.
+    }
+
+    // Pass 3: anything still unresolved gets a default ChannelMeta keyed by
+    // the raw header. This is also the demotion path for source columns
+    // whose semantic hit lost to a pass-1 exact alias.
+    for (i, name) in headers.iter().enumerate().skip(1) {
+        if resolved[i].is_some() { continue; }
+        let unit_hint = prepared.units.get(i).map(String::as_str).unwrap_or("");
+        let inferred_rate = infer_rate(i).max(1) as f32;
+        // Force the default branch by going through resolve_or_default on a
+        // header we know won't alias (registry.resolve already returned None
+        // in pass 1) and won't semantic-match into anything unclaimed (pass 2
+        // already tried).
+        let mut res = registry.resolve_or_default(name, unit_hint, inferred_rate);
+        // If pass-2 detected a semantic hit on a claimed id, surface that as
+        // a "collision" warning so users can see why the precise channel
+        // they expected didn't pick up a particular header.
+        if matches!(res.kind, ResolveKind::Semantic) {
             warnings.push(format!(
-                "channel `{name}` resolved to `{}` but that id was already claimed by an earlier column; \
-                 storing as `{name}` instead so both remain reachable",
-                meta.id,
+                "channel `{name}` would have semantic-mapped to `{}` but that id was already claimed by an exact alias on another column; storing as `{name}` instead",
+                res.meta.id,
             ));
-            meta.id = name.to_string();
-            meta.display_name = name.to_string();
+            // Override to the synthesized-from-header default by re-running
+            // resolution with a never-matching name. Simpler: build the
+            // default meta inline.
+            res.meta.id = name.to_string();
+            res.meta.display_name = name.to_string();
+        } else {
+            warnings.push(format!("unknown channel `{name}`, registered with defaults"));
         }
-        claimed_ids.insert(meta.id.clone());
+        claimed_ids.insert(res.meta.id.clone());
+        resolved[i] = Some((res.meta, ResolveKind::Default));
+    }
+
+    for (i, slot) in resolved.iter().enumerate().skip(1) {
+        let Some((meta, _kind)) = slot else { continue; };
         let key = meta.sample_rate_hz.round() as i32;
-        by_rate.entry(key).or_default().push((i - 1, meta));
+        by_rate.entry(key).or_default().push((i - 1, meta.clone()));
     }
 
     // Warn on columns that look like a fundamentally-unparseable type
@@ -413,11 +479,11 @@ mod tests {
     }
 
     /// End-to-end semantic mapping: a Link-flavoured CSV with a column whose
-    /// header isn't in any alias list ("Throttle Pedal Pos") but matches the
-    /// `engine.tps` semantic pattern via keyword `throttle` + unit `%`.
-    /// Verifies the units row survives the preamble strip and reaches the
-    /// resolver, AND that the heuristic match surfaces in warnings so users
-    /// can audit what got auto-routed.
+    /// header isn't in any alias list ("Throttle Pedal Pos") but matches a
+    /// canonical channel's semantic pattern + unit. Per change-doc 33's
+    /// TPS/APS split, "Throttle Pedal Pos" is the pedal sensor (engine.aps),
+    /// not the throttle plate (engine.tps). The `pedal pos` keyword on
+    /// engine.aps + `%` unit gate routes it correctly.
     #[test]
     fn semantic_mapping_via_units_row() {
         let csv: &[u8] = b"\"Name\",\"ECU Internal Datalog\"\n\
@@ -428,12 +494,62 @@ mod tests {
             \"0.001\",\"5\"\n\
             \"0.002\",\"6\"\n";
         let r = load_csv_bytes(csv, &registry()).unwrap();
-        let has_tps = r.rate_groups.iter().any(|rg| rg.meta("engine.tps").is_some());
-        assert!(has_tps, "expected semantic-mapping of `Throttle Pedal Pos` → engine.tps");
+        let has_aps = r.rate_groups.iter().any(|rg| rg.meta("engine.aps").is_some());
+        assert!(has_aps, "expected semantic-mapping of `Throttle Pedal Pos` → engine.aps");
         assert!(
-            r.warnings.iter().any(|w| w.contains("Throttle Pedal Pos") && w.contains("engine.tps")),
+            r.warnings.iter().any(|w| w.contains("Throttle Pedal Pos") && w.contains("engine.aps")),
             "expected mapping warning, got {:?}", r.warnings,
         );
+    }
+
+    /// Regression for the v2.5.2 → v2.5.3 → 3.1.0 saga: a MoTeC export that
+    /// includes BOTH `Throttle Load` (a Link/MoTeC engine-load metric, %)
+    /// AND the canonical `Throttle Position` column (%) must put the real
+    /// throttle data under engine.tps. Pre-fix, the loader's single-pass
+    /// resolver let `Throttle Load`'s semantic match squat on engine.tps
+    /// (keyword `throttle` matched, unit `%` matched), then demoted the
+    /// genuine `Throttle Position` to its raw header on the collision-
+    /// protection path — every dashboard tile pinned to engine.tps showed
+    /// Throttle Load data instead.
+    ///
+    /// The fix is two-pronged: keyword tightening (engine.tps no longer
+    /// keyword-matches bare "throttle") + two-pass resolution (exact alias
+    /// wins across all columns before any semantic guess can claim an id).
+    #[test]
+    fn throttle_position_wins_over_earlier_throttle_load_match() {
+        // Approximate the MoTeC ADL header layout: Throttle Load appears
+        // BEFORE Throttle Position in column order, which used to let it
+        // squat on engine.tps before the precise alias arrived.
+        let csv: &[u8] = b"\"Format\",\"MoTeC CSV File\"\n\
+            \"Time\",\"Throttle Load\",\"Throttle Position\"\n\
+            \"s\",\"%\",\"%\"\n\
+            \n\
+            \"0.000\",\"5\",\"14\"\n\
+            \"0.001\",\"6\",\"15\"\n\
+            \"0.002\",\"7\",\"16\"\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        // engine.tps must be present and hold the Throttle Position data
+        // (first sample = 14), NOT Throttle Load (first sample = 5).
+        let mut tps_first: Option<f64> = None;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.tps").is_some() {
+                tps_first = Some(rg.channel_data("engine.tps").unwrap().value(0));
+            }
+        }
+        assert_eq!(
+            tps_first, Some(14.0),
+            "engine.tps must hold `Throttle Position` data (14), not `Throttle Load` (5)"
+        );
+        // `Throttle Load` must still be reachable under its raw header name
+        // (or with a default ChannelMeta; we don't care which, just that the
+        // column wasn't silently dropped).
+        let mut saw_load = false;
+        for rg in &r.rate_groups {
+            if rg.meta("Throttle Load").is_some() {
+                saw_load = true;
+            }
+        }
+        assert!(saw_load, "Throttle Load column should still be loaded as its raw header");
     }
 
     /// When two source headers both alias to the same canonical id (a real
