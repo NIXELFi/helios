@@ -58,7 +58,13 @@ channels:
       "Throttle Position", "Throttle Pos", "Throttle Pos.",
       "TPS Main", "TPS (Main)",
     ]
-    match_keywords: [tps, throttle]
+    # Keywords are phrase-level on purpose — bare "throttle" is too broad,
+    # MoTeC ADL exports include a `Throttle Load` column (engine-load
+    # attribution metric, %) that's physically distinct from throttle plate
+    # angle. The old bare-word keyword matched that column and squatted on
+    # `engine.tps`, demoting the real `Throttle Position` to its raw header
+    # under the collision-protection path.
+    match_keywords: [tps, "throttle position", "throttle pos", "throttle plate"]
     match_units: ["%"]
 
   - id: engine.tps_sub
@@ -97,6 +103,8 @@ channels:
       "Accelerator Pedal", "Accelerator Pedal Position",
       "Pedal Position", "Pedal Pos",
     ]
+    # APS keywords already phrase-level except "aps" itself which is
+    # unambiguous (three-letter acronym only used for accelerator pedal sensor).
     match_keywords: [aps, "accelerator pedal", "pedal pos", "pedal position"]
     match_units: ["%"]
 

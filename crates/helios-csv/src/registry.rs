@@ -203,7 +203,7 @@ impl ChannelRegistry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveKind {
     /// Header (or one of its aliases) was found in the registry as-written.
     ExactAlias,
