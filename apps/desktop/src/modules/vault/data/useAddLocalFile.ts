@@ -100,16 +100,17 @@ export function useAddLocalFile() {
   /**
    * Adds a local file to the vault:
    *   1. Ensures the folder hierarchy matches local relativePath (creates as needed)
-   *   2. Creates the pdm.files row
-   *   3. Reads local bytes + computes sha256
-   *   4. Uploads bytes to Storage
-   *   5. Acquires lock (RLS requires holding a lock to insert a version)
-   *   6. Calls pdm_check_in to insert version 1 — check_in releases the lock
-   *   7. Re-acquires the lock so the user owns the file post-add
+   *   2. Reads local bytes + computes sha256
+   *   3. Uploads bytes to Storage (skip if already present by sha)
+   *   4. Calls pdm_add_and_lock RPC — atomically creates the file row,
+   *      inserts version 1, sets latest_version_id, and acquires the lock for
+   *      the caller. Single transaction; rolls back on any error.
    *
-   * Steps 5-7 are a deliberate dance because pdm_check_in's contract releases
-   * the lock; we re-acquire so the file lands in "checked out by me" state.
-   * A future server-side `pdm.add_file` RPC could do this atomically.
+   * Previously this hook did create-file → acquire-lock → check_in (which
+   * releases the lock) → re-acquire-lock as four separate client calls. That
+   * was non-atomic: if the re-acquire raced with another user, the file ended
+   * up added-but-unlocked while the UI surfaced a misleading "re-acquire lock"
+   * error (ultrareview 2026-05-11, finding H13). The RPC fixes that.
    */
   const run = useCallback(
     async (vaultId: VaultId, local: LocalFile): Promise<boolean> => {
@@ -126,18 +127,11 @@ export function useAddLocalFile() {
         const dirSegments = segments.slice(0, -1);
         const folderId = await ensureFolderHierarchy(client, vaultId, dirSegments);
 
-        // 2. Create file row.
-        const { data: file, error: fileErr } = await (client.from("files") as any)
-          .insert({ vault_id: vaultId, folder_id: folderId, name: fileName })
-          .select()
-          .single();
-        if (fileErr) throw new Error(`create file: ${fileErr.message}`);
-
-        // 3. Read local bytes + hash.
+        // 2. Read local bytes + hash.
         const bytes = await readFile(local.absolutePath);
         const sha = await sha256Hex(bytes);
 
-        // 4. Upload bytes (skip if content already exists in storage by sha).
+        // 3. Upload bytes (skip if content already exists in storage by sha).
         const path = `${sha.slice(0, 2)}/${sha}`;
         if (!(await objectExists(client, sha))) {
           const compressed = await gzipBytes(bytes);
@@ -151,24 +145,16 @@ export function useAddLocalFile() {
           }
         }
 
-        // 5. Acquire lock (required before check_in can insert a version).
-        const { error: lockErr } = await (client.from("locks") as any)
-          .insert({ file_id: file.id, user_id: user.id });
-        if (lockErr) throw new Error(`acquire lock: ${lockErr.message}`);
-
-        // 6. Check in as version 1 — this also releases the lock.
-        const { error: ciErr } = await client.rpc("pdm_check_in", {
-          p_file_id: file.id,
+        // 4. Atomic create-file + version 1 + acquire-lock.
+        const { error: rpcErr } = await client.rpc("pdm_add_and_lock", {
+          p_vault_id: vaultId,
+          p_folder_id: folderId,
+          p_name: fileName,
           p_sha256: sha,
           p_size: bytes.length,
           p_comment: "added from local folder",
         });
-        if (ciErr) throw new Error(`check_in: ${ciErr.message}`);
-
-        // 7. Re-acquire lock so the user owns the file post-add ("default checked out").
-        const { error: relockErr } = await (client.from("locks") as any)
-          .insert({ file_id: file.id, user_id: user.id });
-        if (relockErr) throw new Error(`re-acquire lock: ${relockErr.message}`);
+        if (rpcErr) throw new Error(`add_and_lock: ${rpcErr.message}`);
 
         setLoading(false);
         return true;
