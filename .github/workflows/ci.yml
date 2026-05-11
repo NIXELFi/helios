@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  # Cancel superseded PR runs; for main pushes, group by sha so each push runs.
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Typecheck + JS/TS tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up pnpm
+        # Version intentionally not specified — picked up from package.json's
+        # "packageManager" field. Setting both is an error in pnpm/action-setup@v4.
+        uses: pnpm/action-setup@v4
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run TS tests
+        # Serial across workspaces because some packages share fixture
+        # filesystems / ports during integration runs. Matches release.yml.
+        run: pnpm -r --workspace-concurrency=1 test
+
+  cargo-test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Linux dependencies
+        # Required for the tauri crate (webkit + gtk) to compile under cargo
+        # test against the workspace. Mirror release.yml's list.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Virtual workspace: a single shared target/ at the root, so cache
+          # the root rather than per-member paths (which would miss).
+          workspaces: .
+
+      - name: Run Rust tests
+        run: cargo test --workspace --locked

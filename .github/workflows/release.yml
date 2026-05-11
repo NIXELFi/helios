@@ -20,6 +20,12 @@ permissions:
 jobs:
   build:
     name: Build (${{ matrix.platform }})
+    # Expose the resolved release tag (from push.tags or workflow_dispatch
+    # input) so downstream jobs can gate on the *tag*, not `github.ref_name`
+    # — which on `workflow_dispatch` is the branch name and would let manual
+    # dispatches of "v3.0.7-rc.1" auto-publish (audit 2026-05-11).
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     strategy:
       fail-fast: false
       # Sequential builds: tauri-action's `latest.json` merge across matrix
@@ -90,11 +96,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            apps/desktop/src-tauri
-            crates/helios-core
-            crates/helios-csv
-            crates/helios-arrow
+          # Virtual workspace: a single shared target/ at the root, so cache
+          # the root rather than per-member paths. Listing only some members
+          # caused cache misses on pdm-* crates (audit 2026-05-11).
+          workspaces: .
 
       - name: Linux dependencies
         if: matrix.platform == 'linux'
@@ -111,7 +116,7 @@ jobs:
         run: node scripts/check-versions.mjs
 
       - name: Run Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Run TS tests
         run: pnpm -r --workspace-concurrency=1 test
@@ -148,7 +153,11 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Auto-publish only for stable releases (no `-rc`, `-beta`, etc. in the
+    # *resolved tag*). Using needs.build.outputs.tag rather than
+    # github.ref_name so workflow_dispatch (where ref_name is the branch)
+    # correctly gates on the input tag.
+    if: ${{ !contains(needs.build.outputs.tag, '-') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -156,4 +165,5 @@ jobs:
       - name: Promote draft release to published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+        run: gh release edit "${RELEASE_TAG}" --draft=false

@@ -4,6 +4,16 @@
 //
 // Asserts that all four version fields equal the supplied tag (after stripping
 // the leading "v"). Exits non-zero if anything mismatches.
+//
+// Scope (by design): this script only checks the four user-facing release
+// version fields — the root package.json, apps/desktop/package.json,
+// apps/desktop/src-tauri/tauri.conf.json, and the Cargo workspace.package
+// version in Cargo.toml. Internal packages under `packages/*` and `infra/*`
+// are intentionally NOT checked: they are independently versioned (e.g.
+// @helios/ui stays at 0.0.x while the desktop app advances), and forcing
+// them in lockstep with the release tag would create noisy bumps on
+// every release. If you add a new top-level release artifact, add it
+// here; do not auto-include `packages/*`.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";

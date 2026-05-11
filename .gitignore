@@ -27,9 +27,16 @@ apps/desktop/src-tauri/target/
 helios-workspaces.json
 helios-workspace-*.json
 
-# Env
+# Env — catch every flavor of dotenv except committed examples.
+# `!.env.example` ensures `cp .env.example .env` workflows still ship the
+# template in git.
 .env
 .env.local
+.env.production
+.env.staging
+.env.*.local
+.env.*
+!.env.example
 
 # Test artifacts
 coverage/
