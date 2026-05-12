@@ -144,6 +144,10 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
                 meta.id = name.to_string();
                 meta.display_name = name.to_string();
             }
+            // Record the original CSV header so the per-session override UI
+            // can address this column by what the user actually saw in their
+            // file, not the canonical id the resolver picked.
+            meta.source_header = Some(name.to_string());
             claimed_ids.insert(meta.id.clone());
             resolved[i] = Some((meta, ResolveKind::ExactAlias));
         }
@@ -162,6 +166,7 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
             ResolveKind::Semantic if !claimed_ids.contains(&res.meta.id) => {
                 let mut meta = res.meta;
                 meta.sample_rate_hz = meta.sample_rate_hz.max(1.0);
+                meta.source_header = Some(name.to_string());
                 warnings.push(format!(
                     "channel `{name}` semantic-mapped to `{}` ({})",
                     meta.id, meta.display_name,
@@ -205,6 +210,7 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
         } else {
             warnings.push(format!("unknown channel `{name}`, registered with defaults"));
         }
+        res.meta.source_header = Some(name.to_string());
         claimed_ids.insert(res.meta.id.clone());
         resolved[i] = Some((res.meta, ResolveKind::Default));
     }
@@ -715,6 +721,45 @@ channels:
         assert!(!r.rate_groups.is_empty(), "expected at least one rate group");
         let has_column = r.rate_groups.iter().any(|rg| !rg.channel_ids().is_empty());
         assert!(has_column, "expected at least one data column to load");
+    }
+
+    /// Every ingested ChannelMeta must carry the original CSV header in
+    /// `source_header`. Covers all three resolution outcomes:
+    /// ExactAlias (header in alias list), Semantic (keyword + unit match),
+    /// and Default (unknown header).
+    #[test]
+    fn source_header_is_populated_for_all_resolve_outcomes() {
+        // Throttle Pedal Pos → engine.aps via Semantic (per change-doc 33).
+        // Engine Speed → engine.rpm via ExactAlias.
+        // Mystery Probe → kept as Default under its raw header.
+        let csv: &[u8] = b"\"Name\",\"ECU Internal Datalog\"\n\
+            \"Time\",\"Engine Speed\",\"Throttle Pedal Pos\",\"Mystery Probe\"\n\
+            \"s\",\"rpm\",\"%\",\"\"\n\
+            \n\
+            \"0.000\",\"1000\",\"5\",\"42\"\n\
+            \"0.010\",\"1100\",\"6\",\"43\"\n\
+            \"0.020\",\"1200\",\"7\",\"44\"\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut found_rpm = false;
+        let mut found_aps = false;
+        let mut found_mystery = false;
+        for rg in &r.rate_groups {
+            if let Some(m) = rg.meta("engine.rpm") {
+                assert_eq!(m.source_header.as_deref(), Some("Engine Speed"));
+                found_rpm = true;
+            }
+            if let Some(m) = rg.meta("engine.aps") {
+                assert_eq!(m.source_header.as_deref(), Some("Throttle Pedal Pos"));
+                found_aps = true;
+            }
+            if let Some(m) = rg.meta("Mystery Probe") {
+                assert_eq!(m.source_header.as_deref(), Some("Mystery Probe"));
+                found_mystery = true;
+            }
+        }
+        assert!(found_rpm, "engine.rpm missing");
+        assert!(found_aps, "engine.aps missing");
+        assert!(found_mystery, "Mystery Probe missing");
     }
 
     #[test]

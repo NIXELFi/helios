@@ -19,6 +19,19 @@ pub struct ChannelMeta {
     pub max: Option<f64>,
     pub warn: Option<f64>,
     pub alarm: Option<f64>,
+    /// The original CSV header text that resolved to this channel, when the
+    /// channel was ingested from a tabular source. `None` for math/derived
+    /// channels (no source column exists). Required for the per-session
+    /// channel-override UI (v3.2.0): a user-facing remap of `engine.aps` to a
+    /// different source column needs to identify columns by what they actually
+    /// looked like in the CSV, not by the canonical id the resolver assigned.
+    ///
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]` keeps
+    /// older serialized blobs (e.g. legacy stored math-channel JSON) accepted
+    /// and avoids bloating output for math channels that don't have a source
+    /// header to record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_header: Option<String>,
 }
 
 #[cfg(test)]
@@ -41,9 +54,32 @@ mod tests {
             max: Some(15000.0),
             warn: Some(13500.0),
             alarm: Some(14500.0),
+            source_header: Some("Engine Speed".into()),
         };
         let s = serde_json::to_string(&m).unwrap();
         let back: ChannelMeta = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
+    }
+
+    /// Older serialized ChannelMeta blobs (pre-3.2.0) do not include the
+    /// `source_header` field. With `#[serde(default)]` they must still
+    /// deserialize cleanly and surface `None`.
+    #[test]
+    fn channel_meta_deserializes_without_source_header() {
+        let legacy = r##"{
+            "id": "engine.rpm",
+            "display_name": "Engine RPM",
+            "units": "rpm",
+            "group": "Engine",
+            "color": "#FFB800",
+            "decimals": 0,
+            "data_type": "f32",
+            "source": "link_g4x",
+            "sample_rate_hz": 100.0,
+            "min": 0.0, "max": 15000.0,
+            "warn": 13500.0, "alarm": 14500.0
+        }"##;
+        let m: ChannelMeta = serde_json::from_str(legacy).unwrap();
+        assert_eq!(m.source_header, None);
     }
 }

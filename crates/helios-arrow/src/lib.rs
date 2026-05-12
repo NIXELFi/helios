@@ -44,6 +44,7 @@ mod tests {
             group: "t".into(), color: "#fff".into(), decimals: 2,
             data_type: DataType::F64, source: "t".into(),
             sample_rate_hz: 100.0, min: None, max: None, warn: None, alarm: None,
+            source_header: None,
         }
     }
 
