@@ -10,6 +10,7 @@ import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
+import { saveChannelOverrides } from "./lib/channel-overrides";
 import { classifyPaths, loadUserSession } from "./lib/load-user-session";
 import { useFileDrop } from "./lib/use-file-drop";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -539,6 +540,37 @@ export default function App() {
     }
   }
 
+  /** Bind a canonical channel id to a different source CSV column for a single
+   *  session (or pass `null` for sourceHeader to reset to auto). Mutates the
+   *  session's ChannelStore directly so existing widgets pick up the new
+   *  routing on next paint, and persists to localStorage so the override
+   *  survives app restart. */
+  function handleChannelOverrideChange(
+    sessionId: string,
+    canonicalId: string,
+    sourceHeader: string | null,
+  ) {
+    setSessions((prev) => {
+      if (!prev) return prev;
+      let saved: Record<string, string> | null = null;
+      const next = prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        const overrides = { ...s.channelOverrides };
+        if (sourceHeader === null) {
+          delete overrides[canonicalId];
+          s.store.clearChannelOverride(canonicalId);
+        } else {
+          overrides[canonicalId] = sourceHeader;
+          s.store.setChannelOverride(canonicalId, sourceHeader);
+        }
+        saved = overrides;
+        return { ...s, channelOverrides: overrides };
+      });
+      if (saved) saveChannelOverrides(sessionId, saved);
+      return next;
+    });
+  }
+
   /** Replace the math-channel set, persist, and re-apply against every loaded
    *  session. Old math-channel ids are removed from each store first so a
    *  rename/delete doesn't leave stale columns behind. */
@@ -717,6 +749,11 @@ export default function App() {
         <ChannelsModal
           channels={primary.store.list()}
           sessionLabel={primary.label}
+          sourceHeaders={primary.store.listSourceHeaders()}
+          overrides={primary.channelOverrides}
+          onOverrideChange={(canonicalId, sourceHeader) =>
+            handleChannelOverrideChange(primary.id, canonicalId, sourceHeader)
+          }
           onClose={() => setChannelsOpen(false)}
         />
       )}
