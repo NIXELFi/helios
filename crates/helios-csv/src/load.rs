@@ -546,16 +546,17 @@ mod tests {
             tps_first, Some(14.0),
             "engine.tps must hold `Throttle Position` data (14), not `Throttle Load` (5)"
         );
-        // `Throttle Load` must still be reachable under its raw header name
-        // (or with a default ChannelMeta; we don't care which, just that the
-        // column wasn't silently dropped).
+        // `Throttle Load` must still be reachable. As of the 3.2.0 registry
+        // expansion it has its own canonical `engine.throttle_load`; pre-3.2.0
+        // it lived under its raw header. Accept either path — the contract
+        // is "the column isn't silently dropped".
         let mut saw_load = false;
         for rg in &r.rate_groups {
-            if rg.meta("Throttle Load").is_some() {
+            if rg.meta("Throttle Load").is_some() || rg.meta("engine.throttle_load").is_some() {
                 saw_load = true;
             }
         }
-        assert!(saw_load, "Throttle Load column should still be loaded as its raw header");
+        assert!(saw_load, "Throttle Load column should still be loaded (raw or as engine.throttle_load)");
     }
 
     /// When two source headers both alias to the same canonical id (a real

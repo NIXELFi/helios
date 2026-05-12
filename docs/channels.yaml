@@ -344,9 +344,16 @@ channels:
     sample_rate_hz: 100
     min: -3
     max: 3
+    # Aliases cover three common sources for lateral g in MoTeC ADL exports:
+    # the chassis-mounted accelerometer ("Lat_Accel"), the body-mounted IMU's
+    # Y axis ("IMU Y Accel" — Y is lateral in the conventional X-forward
+    # mounting), and the ECU's own derived value ("ECU Lateral Accel").
+    # First-wins picks one; the override UI lets the user re-bind if a
+    # different source is preferred. Same pattern for long_g / vert_g.
     aliases: [
       lat_g, "imu.lat_g", "Lat_Accel",
       "Lateral G", "Lat G", "G Force Lat", "GForce Lat",
+      "IMU Y Accel", "ECU Lateral Accel",
     ]
     match_keywords: ["lateral g", "lat g", "g force lat", "lat accel"]
     match_units: [g]
@@ -365,6 +372,914 @@ channels:
     aliases: [
       long_g, "imu.long_g",
       "Longitudinal G", "Long G", "G Force Long", "GForce Long",
+      "IMU X Accel", "ECU Longitudinal Accel",
     ]
     match_keywords: ["longitudinal g", "long g", "g force long"]
     match_units: [g]
+
+  # ─── IMU additions ────────────────────────────────────────────────────────
+
+  - id: imu.vert_g
+    display_name: Vertical G
+    units: g
+    group: IMU
+    color: "#7E57C2"
+    decimals: 2
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -3
+    max: 3
+    # IMU Z accel: vertical, sitting still ≈ 1g.
+    aliases: [vert_g, "imu.vert_g", "Vertical G", "Vert G", "IMU Z Accel", "ECU Vertical Accel"]
+    match_keywords: ["vertical g", "vert g", "imu z accel", "ecu vertical accel"]
+    match_units: [g]
+
+  - id: imu.roll_rate
+    display_name: Roll Rate
+    units: deg/s
+    group: IMU
+    color: "#26C6DA"
+    decimals: 1
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -360
+    max: 360
+    # IMU X gyro = rotation around longitudinal axis (X-forward convention) =
+    # body roll. Body-frame rates; not chassis-stabilized.
+    aliases: [roll_rate, "imu.roll_rate", "Roll Rate", "IMU X Gyro"]
+    match_keywords: ["roll rate", "imu x gyro"]
+    match_units: ["deg/s", "deg per s"]
+
+  - id: imu.pitch_rate
+    display_name: Pitch Rate
+    units: deg/s
+    group: IMU
+    color: "#26A69A"
+    decimals: 1
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -360
+    max: 360
+    aliases: [pitch_rate, "imu.pitch_rate", "Pitch Rate", "IMU Y Gyro"]
+    match_keywords: ["pitch rate", "imu y gyro"]
+    match_units: ["deg/s", "deg per s"]
+
+  - id: imu.yaw_rate
+    display_name: Yaw Rate
+    units: deg/s
+    group: IMU
+    color: "#FFCA28"
+    decimals: 1
+    data_type: f32
+    source: imu
+    sample_rate_hz: 100
+    min: -360
+    max: 360
+    aliases: [yaw_rate, "imu.yaw_rate", "Yaw Rate", "IMU Z Gyro"]
+    match_keywords: ["yaw rate", "imu z gyro"]
+    match_units: ["deg/s", "deg per s"]
+
+  # ─── Brakes ───────────────────────────────────────────────────────────────
+
+  - id: brake.front_pressure
+    display_name: Front Brake Pressure
+    units: kPa
+    group: Brake
+    color: "#FF1744"
+    decimals: 0
+    data_type: f32
+    source: pressure_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 10000
+    aliases: [
+      "Front Brake Pressure", "Brake Pressure Front", "BPF",
+      "Front Brake Press", "F Brake Pressure",
+    ]
+    match_keywords: ["front brake pressure", "brake pressure front"]
+    match_units: [kPa, psi, bar]
+
+  - id: brake.rear_pressure
+    display_name: Rear Brake Pressure
+    units: kPa
+    group: Brake
+    color: "#D50000"
+    decimals: 0
+    data_type: f32
+    source: pressure_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 10000
+    aliases: [
+      "Rear Brake Pressure", "Brake Pressure Rear", "BPR",
+      "Rear Brake Press", "R Brake Pressure",
+    ]
+    match_keywords: ["rear brake pressure", "brake pressure rear"]
+    match_units: [kPa, psi, bar]
+
+  - id: brake.driver_load
+    display_name: Brake Pedal Load
+    units: "%"
+    group: Brake
+    color: "#EF5350"
+    decimals: 1
+    data_type: f32
+    source: pressure_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 100
+    # Driver pedal demand sensor, percentage. Distinct from the line-pressure
+    # sensors above.
+    aliases: ["Brake Load", "Brake Pedal", "Brake Pedal Position"]
+    match_keywords: ["brake load", "brake pedal"]
+    match_units: ["%"]
+
+  # ─── Suspension ───────────────────────────────────────────────────────────
+
+  - id: suspension.travel_fl
+    display_name: Suspension Travel FL
+    units: mm
+    group: Suspension
+    color: "#42A5F5"
+    decimals: 1
+    data_type: f32
+    source: damper_pot
+    sample_rate_hz: 100
+    aliases: ["FL Shock", "FL Damper", "Damper FL", "Shock FL", "LF Shock"]
+    match_keywords: ["fl shock", "fl damper", "shock fl", "damper fl", "left front shock"]
+    match_units: [mm]
+
+  - id: suspension.travel_fr
+    display_name: Suspension Travel FR
+    units: mm
+    group: Suspension
+    color: "#5C6BC0"
+    decimals: 1
+    data_type: f32
+    source: damper_pot
+    sample_rate_hz: 100
+    aliases: ["FR Shock", "FR Damper", "Damper FR", "Shock FR", "RF Shock"]
+    match_keywords: ["fr shock", "fr damper", "shock fr", "damper fr", "right front shock"]
+    match_units: [mm]
+
+  - id: suspension.travel_rl
+    display_name: Suspension Travel RL
+    units: mm
+    group: Suspension
+    color: "#42A5F5"
+    decimals: 1
+    data_type: f32
+    source: damper_pot
+    sample_rate_hz: 100
+    aliases: ["RL Shock", "RL Damper", "Damper RL", "Shock RL", "LR Shock"]
+    match_keywords: ["rl shock", "rl damper", "shock rl", "damper rl", "left rear shock"]
+    match_units: [mm]
+
+  - id: suspension.travel_rr
+    display_name: Suspension Travel RR
+    units: mm
+    group: Suspension
+    color: "#5C6BC0"
+    decimals: 1
+    data_type: f32
+    source: damper_pot
+    sample_rate_hz: 100
+    aliases: ["RR Shock", "RR Damper", "Damper RR", "Shock RR", "RR Shock"]
+    match_keywords: ["rr shock", "rr damper", "shock rr", "damper rr", "right rear shock"]
+    match_units: [mm]
+
+  # ─── Drivetrain / wheel speeds ────────────────────────────────────────────
+
+  - id: drivetrain.wheel_speed_fl
+    display_name: Wheel Speed FL
+    units: rpm
+    group: Drivetrain
+    color: "#80CBC4"
+    decimals: 0
+    data_type: f32
+    source: wheel_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 4000
+    aliases: ["FL Wheel RPM", "Wheel Speed FL", "LF Wheel RPM"]
+    match_keywords: ["fl wheel rpm", "wheel speed fl", "lf wheel rpm"]
+    match_units: [rpm]
+
+  - id: drivetrain.wheel_speed_fr
+    display_name: Wheel Speed FR
+    units: rpm
+    group: Drivetrain
+    color: "#4DB6AC"
+    decimals: 0
+    data_type: f32
+    source: wheel_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 4000
+    aliases: ["FR Wheel RPM", "Wheel Speed FR", "RF Wheel RPM"]
+    match_keywords: ["fr wheel rpm", "wheel speed fr", "rf wheel rpm"]
+    match_units: [rpm]
+
+  - id: drivetrain.wheel_speed_rl
+    display_name: Wheel Speed RL
+    units: rpm
+    group: Drivetrain
+    color: "#80CBC4"
+    decimals: 0
+    data_type: f32
+    source: wheel_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 4000
+    aliases: ["RL Wheel RPM", "Wheel Speed RL", "LR Wheel RPM"]
+    match_keywords: ["rl wheel rpm", "wheel speed rl", "lr wheel rpm"]
+    match_units: [rpm]
+
+  - id: drivetrain.wheel_speed_rr
+    display_name: Wheel Speed RR
+    units: rpm
+    group: Drivetrain
+    color: "#4DB6AC"
+    decimals: 0
+    data_type: f32
+    source: wheel_sensor
+    sample_rate_hz: 100
+    min: 0
+    max: 4000
+    aliases: ["RR Wheel RPM", "Wheel Speed RR"]
+    match_keywords: ["rr wheel rpm", "wheel speed rr"]
+    match_units: [rpm]
+
+  - id: drivetrain.vehicle_speed
+    display_name: Vehicle Speed
+    units: km/h
+    group: Drivetrain
+    color: "#26A69A"
+    decimals: 1
+    data_type: f32
+    source: ecu
+    sample_rate_hz: 100
+    min: 0
+    max: 400
+    aliases: ["Vehicle Speed", "Ground Speed Vehicle"]
+    match_keywords: ["vehicle speed"]
+    match_units: [kmh, kph, mph, "km/h"]
+
+  - id: drivetrain.driving_wheel_speed
+    display_name: Driving Wheel Speed
+    units: mph
+    group: Drivetrain
+    color: "#00897B"
+    decimals: 1
+    data_type: f32
+    source: ecu
+    sample_rate_hz: 100
+    min: 0
+    max: 250
+    aliases: ["Driving Wheel Speed"]
+    match_keywords: ["driving wheel speed"]
+    match_units: [mph, kmh, kph]
+
+  - id: drivetrain.driven_wheel_speed
+    display_name: Driven Wheel Speed
+    units: mph
+    group: Drivetrain
+    color: "#00897B"
+    decimals: 1
+    data_type: f32
+    source: ecu
+    sample_rate_hz: 100
+    min: 0
+    max: 250
+    aliases: ["Driven Wheel Speed"]
+    match_keywords: ["driven wheel speed"]
+    match_units: [mph, kmh, kph]
+
+  # ─── Tire temps (IR + array sensors) ──────────────────────────────────────
+
+  - id: tire.surface_temp_fl
+    display_name: Tire Surface Temp FL
+    units: "°C"
+    group: Tire
+    color: "#FF6E40"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: ["FL Wheel Object", "Tire Temp FL", "FL Tire Temp"]
+    match_keywords: ["fl wheel object", "tire temp fl", "fl tire temp"]
+    match_units: ["°C", C]
+
+  - id: tire.surface_temp_fr
+    display_name: Tire Surface Temp FR
+    units: "°C"
+    group: Tire
+    color: "#FF8A65"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: ["FR Wheel Object", "Tire Temp FR", "FR Tire Temp"]
+    match_keywords: ["fr wheel object", "tire temp fr", "fr tire temp"]
+    match_units: ["°C", C]
+
+  - id: tire.surface_temp_rl
+    display_name: Tire Surface Temp RL
+    units: "°C"
+    group: Tire
+    color: "#FF6E40"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: ["RL Wheel Object", "Tire Temp RL", "RL Tire Temp"]
+    match_keywords: ["rl wheel object", "tire temp rl", "rl tire temp"]
+    match_units: ["°C", C]
+
+  - id: tire.surface_temp_rr
+    display_name: Tire Surface Temp RR
+    units: "°C"
+    group: Tire
+    color: "#FF8A65"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: ["RR Wheel Object", "Tire Temp RR", "RR Tire Temp"]
+    match_keywords: ["rr wheel object", "tire temp rr", "rr tire temp"]
+    match_units: ["°C", C]
+
+  - id: tire.ambient_temp_fl
+    display_name: Tire Ambient Temp FL
+    units: "°C"
+    group: Tire
+    color: "#90CAF9"
+    decimals: 1
+    data_type: f32
+    source: ambient_sensor
+    sample_rate_hz: 10
+    aliases: ["FL Wheel Ambient"]
+    match_keywords: ["fl wheel ambient"]
+    match_units: ["°C", C]
+
+  - id: tire.ambient_temp_fr
+    display_name: Tire Ambient Temp FR
+    units: "°C"
+    group: Tire
+    color: "#90CAF9"
+    decimals: 1
+    data_type: f32
+    source: ambient_sensor
+    sample_rate_hz: 10
+    aliases: ["FR Wheel Ambient"]
+    match_keywords: ["fr wheel ambient"]
+    match_units: ["°C", C]
+
+  - id: tire.ambient_temp_rl
+    display_name: Tire Ambient Temp RL
+    units: "°C"
+    group: Tire
+    color: "#90CAF9"
+    decimals: 1
+    data_type: f32
+    source: ambient_sensor
+    sample_rate_hz: 10
+    aliases: ["RL Wheel Ambient"]
+    match_keywords: ["rl wheel ambient"]
+    match_units: ["°C", C]
+
+  - id: tire.ambient_temp_rr
+    display_name: Tire Ambient Temp RR
+    units: "°C"
+    group: Tire
+    color: "#90CAF9"
+    decimals: 1
+    data_type: f32
+    source: ambient_sensor
+    sample_rate_hz: 10
+    aliases: ["RR Wheel Ambient"]
+    match_keywords: ["rr wheel ambient"]
+    match_units: ["°C", C]
+
+  # SDM26-specific tire-temp array sensors (TTA / TTB = inner/outer probes).
+  # No semantic keywords because the names are too vendor-specific; aliases
+  # only.
+  - id: tire.array_temp_fl_inner
+    display_name: Tire Array FL Inner
+    units: "°C"
+    group: Tire
+    color: "#FFAB91"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [FLT_TTA, "FLT TTA"]
+
+  - id: tire.array_temp_fl_outer
+    display_name: Tire Array FL Outer
+    units: "°C"
+    group: Tire
+    color: "#FFAB91"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [FLT_TTB, "FLT TTB"]
+
+  - id: tire.array_temp_fr_inner
+    display_name: Tire Array FR Inner
+    units: "°C"
+    group: Tire
+    color: "#FFCC80"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [FRT_TTA, "FRT TTA"]
+
+  - id: tire.array_temp_fr_outer
+    display_name: Tire Array FR Outer
+    units: "°C"
+    group: Tire
+    color: "#FFCC80"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [FRT_TTB, "FRT TTB"]
+
+  - id: tire.array_temp_rl_inner
+    display_name: Tire Array RL Inner
+    units: "°C"
+    group: Tire
+    color: "#FFAB91"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [RLT_TTA, "RLT TTA"]
+
+  - id: tire.array_temp_rl_outer
+    display_name: Tire Array RL Outer
+    units: "°C"
+    group: Tire
+    color: "#FFAB91"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [RLT_TTB, "RLT TTB"]
+
+  - id: tire.array_temp_rr_inner
+    display_name: Tire Array RR Inner
+    units: "°C"
+    group: Tire
+    color: "#FFCC80"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [RRT_TTA, "RRT TTA"]
+
+  - id: tire.array_temp_rr_outer
+    display_name: Tire Array RR Outer
+    units: "°C"
+    group: Tire
+    color: "#FFCC80"
+    decimals: 1
+    data_type: f32
+    source: ir_pyrometer
+    sample_rate_hz: 10
+    aliases: [RRT_TTB, "RRT TTB"]
+
+  # ─── Power ────────────────────────────────────────────────────────────────
+
+  - id: power.supply_current
+    display_name: Supply Current
+    units: A
+    group: Power
+    color: "#FFEE58"
+    decimals: 1
+    data_type: f32
+    source: current_sensor
+    sample_rate_hz: 10
+    aliases: ["Supplied Current", "Supply Current", "Total Current"]
+    match_keywords: ["supplied current", "supply current"]
+    match_units: [A]
+
+  # ─── Engine extras (knock, idle, ignition, injection) ─────────────────────
+
+  - id: engine.ignition_angle
+    display_name: Ignition Angle
+    units: "° BTDC"
+    group: Engine
+    color: "#FF8A65"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Ignition Angle", "Ign Angle", "Spark Advance"]
+    match_keywords: ["ignition angle", "ign angle", "spark advance"]
+
+  - id: engine.knock_count
+    display_name: Knock Count
+    units: ""
+    group: Engine
+    color: "#E57373"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Knock Count Global", "Knock Count", "Knock Counter"]
+    match_keywords: ["knock count"]
+
+  - id: engine.knock_level
+    display_name: Knock Level
+    units: ""
+    group: Engine
+    color: "#EF5350"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Knock Level  Global", "Knock Level Global", "Knock Level"]
+    match_keywords: ["knock level"]
+
+  - id: engine.idle_target
+    display_name: Idle Target
+    units: RPM
+    group: Engine
+    color: "#FFCA28"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["Idle Target", "Target Idle RPM"]
+    match_keywords: ["idle target"]
+    match_units: [rpm, RPM]
+
+  - id: engine.fuel_cut
+    display_name: Fuel Cut
+    units: "%"
+    group: Engine
+    color: "#FF7043"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["% Fuel Cut", "Fuel Cut", "Fuel Cut %"]
+    match_keywords: ["fuel cut"]
+    match_units: ["%"]
+
+  - id: engine.ignition_cut
+    display_name: Ignition Cut
+    units: "%"
+    group: Engine
+    color: "#FFB300"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["% Ignition Cut", "Ignition Cut", "Ignition Cut %"]
+    match_keywords: ["ignition cut"]
+    match_units: ["%"]
+
+  - id: engine.throttle_load
+    display_name: Throttle Load
+    units: "%"
+    group: Engine
+    color: "#80CBC4"
+    decimals: 1
+    data_type: f32
+    source: ecu
+    sample_rate_hz: 100
+    # MoTeC-specific engine-load attribution metric. Distinct from engine.tps
+    # (plate position) and engine.aps (pedal). This used to silently squat on
+    # engine.tps via a too-loose semantic keyword (see v3.1.1 fix); now it
+    # has its own canonical so the data is reachable from a dashboard tile
+    # without the user having to pin to the raw header.
+    aliases: ["Throttle Load"]
+    match_keywords: ["throttle load"]
+    match_units: ["%"]
+
+  # ─── Transmission / shifter ───────────────────────────────────────────────
+
+  - id: transmission.in_driving_gear
+    display_name: In Driving Gear
+    units: ""
+    group: Transmission
+    color: "#BA68C8"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["In Driving Gear"]
+
+  - id: transmission.upshift_switch
+    display_name: Upshift Switch
+    units: ""
+    group: Transmission
+    color: "#9C27B0"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["DI 5 - Upshift Switch", "Upshift Switch"]
+
+  - id: transmission.downshift_switch
+    display_name: Downshift Switch
+    units: ""
+    group: Transmission
+    color: "#7B1FA2"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["DI 4 - Downshift Switch", "Downshift Switch"]
+
+  - id: transmission.upshift_actuator
+    display_name: Upshift Actuator
+    units: "%"
+    group: Transmission
+    color: "#AB47BC"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Aux 5 - UpShift Actuator", "Upshift Actuator"]
+
+  - id: transmission.downshift_actuator
+    display_name: Downshift Actuator
+    units: "%"
+    group: Transmission
+    color: "#8E24AA"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Aux 8 - DownShift Actuator", "Downshift Actuator"]
+
+  - id: transmission.gear_ratio
+    display_name: Gear Ratio
+    units: ""
+    group: Transmission
+    color: "#CE93D8"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Gear Ratio Calc.", "Current Gear Ratio", "Gear Ratio"]
+    match_keywords: ["gear ratio calc", "current gear ratio"]
+
+  # ─── Aero ─────────────────────────────────────────────────────────────────
+
+  - id: aero.drs
+    display_name: DRS
+    units: ""
+    group: Aero
+    color: "#4FC3F7"
+    decimals: 0
+    data_type: u16
+    source: ecu
+    sample_rate_hz: 100
+    aliases: [DRS, "DRS Status"]
+
+  # ─── GPS extras ───────────────────────────────────────────────────────────
+
+  - id: gps.fix_quality
+    display_name: GPS Fix Quality
+    units: ""
+    group: GPS
+    color: "#9CCC65"
+    decimals: 0
+    data_type: u16
+    source: gps_module
+    sample_rate_hz: 10
+    aliases: ["GPS Fix", "GPS Fix Quality", "Fix Quality"]
+    match_keywords: ["gps fix"]
+
+  # ─── Engine injection (Link per-cylinder pulse widths) ────────────────────
+
+  - id: engine.injection_pw_cyl_1
+    display_name: Injection PW Cyl 1
+    units: ms
+    group: Engine
+    color: "#FFD180"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Inj 1 - Injection", "Inj 1 Injection", "Injection Cyl 1"]
+
+  - id: engine.injection_pw_cyl_2
+    display_name: Injection PW Cyl 2
+    units: ms
+    group: Engine
+    color: "#FFAB91"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Inj 2 - Injection", "Inj 2 Injection", "Injection Cyl 2"]
+
+  - id: engine.injection_pw_cyl_3
+    display_name: Injection PW Cyl 3
+    units: ms
+    group: Engine
+    color: "#FF8A80"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Inj 3 - Injection", "Inj 3 Injection", "Injection Cyl 3"]
+
+  - id: engine.injection_pw_cyl_4
+    display_name: Injection PW Cyl 4
+    units: ms
+    group: Engine
+    color: "#FF5252"
+    decimals: 2
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Inj 4 - Injection", "Inj 4 Injection", "Injection Cyl 4"]
+
+  - id: engine.rpm_limit
+    display_name: RPM Limit
+    units: rpm
+    group: Engine
+    color: "#FFAB00"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["RPM Limit", "Rev Limit", "GP RPM Limit 1"]
+    match_keywords: ["rpm limit", "rev limit"]
+    match_units: [rpm, RPM]
+
+  - id: engine.idle_status
+    display_name: Idle Status
+    units: ""
+    group: Engine
+    color: "#9FA8DA"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["Idle Status"]
+
+  # ─── Transmission additions ──────────────────────────────────────────────
+
+  - id: transmission.shift_status
+    display_name: Shift Status
+    units: ""
+    group: Transmission
+    color: "#BA68C8"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Gear Shift Status"]
+
+  - id: transmission.gear_ratio_status
+    display_name: Gear Ratio Status
+    units: ""
+    group: Transmission
+    color: "#CE93D8"
+    decimals: 0
+    data_type: u16
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["Gear Ratio Status"]
+
+  - id: transmission.misshift_down
+    display_name: MisShift Down Count
+    units: ""
+    group: Transmission
+    color: "#7E57C2"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["MisShift Down Counter"]
+
+  - id: transmission.misshift_up
+    display_name: MisShift Up Count
+    units: ""
+    group: Transmission
+    color: "#7E57C2"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["MisShift Up Counter"]
+
+  - id: transmission.stacked_shifts
+    display_name: Stacked Shifts
+    units: ""
+    group: Transmission
+    color: "#9575CD"
+    decimals: 0
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 10
+    aliases: ["Stacked Shifts"]
+
+  - id: transmission.trans_speed
+    display_name: Trans Output Speed
+    units: mph
+    group: Transmission
+    color: "#7C4DFF"
+    decimals: 1
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["GP Speed 1 - TransSpeed", "DI 1 - TransSpeed"]
+    match_keywords: ["transspeed", "trans speed", "transmission speed"]
+    match_units: [mph, kmh, kph]
+
+  # ─── Engine secondary lambda ──────────────────────────────────────────────
+
+  - id: engine.lambda_target
+    display_name: Lambda Target
+    units: lambda
+    group: Engine
+    color: "#26C6DA"
+    decimals: 3
+    data_type: f32
+    source: link_g4x
+    sample_rate_hz: 100
+    aliases: ["AFR/Lambda Target", "Lambda Target"]
+    match_keywords: ["lambda target", "afr target"]
+    match_units: [lambda]
+
+  - id: chassis.neutral_status
+    display_name: Neutral Status
+    units: ""
+    group: Chassis
+    color: "#9E9E9E"
+    decimals: 0
+    data_type: u16
+    source: ecu
+    sample_rate_hz: 10
+    aliases: ["Neutral Status"]
+
+  # ─── Wheel load (strain gauges) ───────────────────────────────────────────
+
+  - id: chassis.strain_fl
+    display_name: Strain Gauge FL
+    units: raw
+    group: Chassis
+    color: "#5C6BC0"
+    decimals: 0
+    data_type: f32
+    source: strain_gauge
+    sample_rate_hz: 100
+    aliases: ["FL Strain Gauge", "Strain FL"]
+
+  - id: chassis.strain_fr
+    display_name: Strain Gauge FR
+    units: raw
+    group: Chassis
+    color: "#7986CB"
+    decimals: 0
+    data_type: f32
+    source: strain_gauge
+    sample_rate_hz: 100
+    aliases: ["FR Strain Gauge", "Strain FR"]
+
+  - id: chassis.strain_rl
+    display_name: Strain Gauge RL
+    units: raw
+    group: Chassis
+    color: "#5C6BC0"
+    decimals: 0
+    data_type: f32
+    source: strain_gauge
+    sample_rate_hz: 100
+    aliases: ["RL Strain Gauge", "Strain RL"]
+
+  - id: chassis.strain_rr
+    display_name: Strain Gauge RR
+    units: raw
+    group: Chassis
+    color: "#7986CB"
+    decimals: 0
+    data_type: f32
+    source: strain_gauge
+    sample_rate_hz: 100
+    aliases: ["RR Strain Gauge", "Strain RR"]
+
+  - id: brake.fluid_level
+    display_name: Brake Fluid
+    units: ""
+    group: Brake
+    color: "#F06292"
+    decimals: 0
+    data_type: u16
+    source: ecu
+    sample_rate_hz: 10
+    aliases: ["Brake Fluid", "Brake Fluid Level"]
