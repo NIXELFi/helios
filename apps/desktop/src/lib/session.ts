@@ -13,6 +13,10 @@ export interface LoadedSession {
   /** Cached LapSet computed from lapConfig + this session's data. Null when
    *  detection hasn't been run yet, or when lapConfig.mode === "none". */
   laps: LapSet | null;
+  /** Canonical-id → source_header overrides. Mirrors what's set on the
+   *  store. Persisted per-session in localStorage (channel-overrides.ts).
+   *  Empty when the session is on full auto-resolution. */
+  channelOverrides: Record<string, string>;
 }
 
 /** Distinct colors for overlay traces; first session gets first color, etc. */
