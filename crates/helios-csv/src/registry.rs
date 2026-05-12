@@ -79,6 +79,10 @@ impl ChannelRegistry {
                 source: e.source,
                 sample_rate_hz: e.sample_rate_hz,
                 min: e.min, max: e.max, warn: e.warn, alarm: e.alarm,
+                // Populated by the loader once it knows which CSV header
+                // resolved through this registry entry. Registry templates
+                // themselves carry no source.
+                source_header: None,
             };
             if let Some(prev) = by_alias.get(&e.id) {
                 // Only conflicting if the previous entry pointed somewhere
@@ -161,6 +165,8 @@ impl ChannelRegistry {
             source: "csv".into(),
             sample_rate_hz: default_rate_hz,
             min: None, max: None, warn: None, alarm: None,
+            // Same here: the loader stamps this with the actual CSV header.
+            source_header: None,
         };
         ResolveResult { meta, kind: ResolveKind::Default }
     }

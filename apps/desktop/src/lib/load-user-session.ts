@@ -10,6 +10,9 @@ import { ChannelStore, loadCsvIntoStore } from "@helios/store";
 import { detectLaps } from "@helios/lib";
 import type { LoadedSession } from "./session";
 import { defaultLapConfig, lapInputsFor, loadLapConfig } from "./lap-config";
+import {
+  applyOverridesToStore, loadChannelOverrides, saveChannelOverrides,
+} from "./channel-overrides";
 
 const HASH_PREFIX = "user:";
 
@@ -38,6 +41,18 @@ export async function loadUserSession(absPath: string, color: string): Promise<L
   const yaml = await resolveResource("channels.yaml");
   await loadCsvIntoStore(store, absPath, yaml);
   const id = userSessionIdFor(absPath);
+  // Apply any saved channel overrides BEFORE building lap config /
+  // computing laps — lapConfig's defaults pick speed/gps channels by id,
+  // and the user may have overridden which physical column those ids point
+  // at. Stale targets (header gone after a fresh CSV export) are dropped.
+  const savedOverrides = loadChannelOverrides(id);
+  const channelOverrides = applyOverridesToStore(store, savedOverrides);
+  if (
+    Object.keys(channelOverrides).length !== Object.keys(savedOverrides).length
+  ) {
+    // Re-save the cleaned set so dead entries don't accumulate forever.
+    saveChannelOverrides(id, channelOverrides);
+  }
   const cfg = loadLapConfig(id) ?? defaultLapConfig(store);
   const laps = cfg.mode === "none" ? null : detectLaps(cfg, lapInputsFor(store));
   return {
@@ -48,6 +63,7 @@ export async function loadUserSession(absPath: string, color: string): Promise<L
     visible: true,
     lapConfig: cfg,
     laps,
+    channelOverrides,
   };
 }
 

@@ -3,6 +3,9 @@ import { ChannelStore, loadCsvIntoStore } from "@helios/store";
 import { detectLaps } from "@helios/lib";
 import { type LoadedSession, colorForIndex } from "./session";
 import { defaultLapConfig, lapInputsFor, loadLapConfig } from "./lap-config";
+import {
+  applyOverridesToStore, loadChannelOverrides, saveChannelOverrides,
+} from "./channel-overrides";
 
 export interface SampleEntry { id: string; label: string; resource: string; }
 
@@ -53,6 +56,16 @@ export async function loadAllSessions(
   onProgress?.({ label: "Sessions ready", loaded: total, total });
   return SAMPLES.map((s, i) => {
     const store = stores[i]!;
+    // Apply saved overrides before lap detection — picked speed/gps
+    // channels could route through an override.
+    const savedOverrides = loadChannelOverrides(s.id);
+    const channelOverrides = applyOverridesToStore(store, savedOverrides);
+    if (
+      Object.keys(channelOverrides).length !==
+      Object.keys(savedOverrides).length
+    ) {
+      saveChannelOverrides(s.id, channelOverrides);
+    }
     const cfg = loadLapConfig(s.id) ?? defaultLapConfig(store);
     const laps = cfg.mode === "none" ? null : detectLaps(cfg, lapInputsFor(store));
     return {
@@ -63,6 +76,7 @@ export async function loadAllSessions(
       visible: i === 0,
       lapConfig: cfg,
       laps,
+      channelOverrides,
     };
   });
 }

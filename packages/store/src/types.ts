@@ -14,6 +14,12 @@ export interface ChannelMeta {
   max?: number;
   warn?: number;
   alarm?: number;
+  /** Original CSV header text that resolved to this channel. Defined for
+   *  ingested channels (every column the CSV loader produces) and undefined
+   *  for math/derived channels added at runtime. Used by the per-session
+   *  channel-override system: the UI lists every source_header as a possible
+   *  override target for any canonical id. */
+  source_header?: string;
 }
 
 export interface TimeRange {
