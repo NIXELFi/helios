@@ -15,20 +15,20 @@ export function WhoHasWhatScreen() {
   }
 
   return (
-    <div className="h-full overflow-auto bg-zinc-900">
-      <header className="border-b border-zinc-800 px-4 py-3 text-zinc-400">
+    <div className="h-full overflow-auto bg-helios-panel">
+      <header className="border-b border-helios-line px-4 py-3 text-helios-dim">
         Active checkouts
       </header>
       <div className="p-2">
         {loading ? (
-          <div className="p-4 text-sm text-zinc-500">Loading…</div>
+          <div className="p-4 text-sm text-helios-dim">Loading…</div>
         ) : error ? (
-          <div className="p-4 text-sm text-red-400">{error.message}</div>
+          <div className="p-4 text-sm text-[#EF5350]">{error.message}</div>
         ) : !locks || locks.length === 0 ? (
-          <div className="p-4 text-sm text-zinc-500">Nothing checked out right now.</div>
+          <div className="p-4 text-sm text-helios-dim">Nothing checked out right now.</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-wider text-zinc-500">
+            <thead className="text-left text-xs uppercase tracking-wider text-helios-dim">
               <tr>
                 <th className="px-3 py-2 font-normal">File</th>
                 <th className="px-3 py-2 font-normal">Holder</th>
@@ -38,10 +38,10 @@ export function WhoHasWhatScreen() {
             </thead>
             <tbody>
               {locks.map((l) => (
-                <tr key={l.id} className="border-t border-zinc-800">
-                  <td className="px-3 py-2 font-mono text-xs text-zinc-400">{l.file_id}</td>
-                  <td className="px-3 py-2 text-zinc-200">{l.user_id}</td>
-                  <td className="px-3 py-2 text-zinc-500">{l.acquired_at}</td>
+                <tr key={l.id} className="border-t border-helios-line">
+                  <td className="px-3 py-2 font-mono-num text-xs text-helios-dim">{l.file_id}</td>
+                  <td className="px-3 py-2 text-helios-text">{l.user_id}</td>
+                  <td className="px-3 py-2 text-helios-dim">{l.acquired_at}</td>
                   {isAdmin && (
                     <td className="px-3 py-2">
                       <button

@@ -6,7 +6,11 @@ export function ModulePicker(props: {
 }) {
   const { active, onSelect } = props;
   return (
-    <nav className="flex w-44 flex-col gap-1 border-r border-zinc-800 bg-zinc-950 p-2">
+    // Top padding clears the macOS traffic-lights overlay (window
+    // `titleBarStyle: "Overlay"` puts them at ~(14, 14), spanning roughly
+    // 14..84 × 14..28). Harmless on Windows/Linux — the rail just starts a
+    // touch lower than it used to.
+    <nav className="flex w-44 flex-col gap-1 border-r border-helios-line bg-helios-base p-2 pt-12">
       <button
         type="button"
         aria-current={active === "logs" ? "page" : undefined}
@@ -14,8 +18,8 @@ export function ModulePicker(props: {
         className={
           "rounded px-3 py-2 text-left text-sm " +
           (active === "logs"
-            ? "bg-zinc-800 text-zinc-100"
-            : "text-zinc-400 hover:bg-zinc-900")
+            ? "bg-helios-line text-helios-text"
+            : "text-helios-dim hover:bg-helios-panel")
         }
       >
         Logs
@@ -27,12 +31,12 @@ export function ModulePicker(props: {
         className={
           "flex items-center justify-between rounded px-3 py-2 text-left text-sm " +
           (active === "vault"
-            ? "bg-zinc-800 text-zinc-100"
-            : "text-zinc-400 hover:bg-zinc-900")
+            ? "bg-helios-line text-helios-text"
+            : "text-helios-dim hover:bg-helios-panel")
         }
       >
         <span>Vault</span>
-        <span className="ml-2 rounded bg-yellow-500 px-1.5 py-0.5 text-xs font-bold text-zinc-900">
+        <span className="ml-2 rounded bg-asu-gold px-1.5 py-0.5 text-xs font-bold text-helios-base">
           NEW
         </span>
       </button>

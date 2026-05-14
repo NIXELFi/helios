@@ -67,8 +67,8 @@ function deriveRowState(
     const email = holderEmailById.get(lockK.lock.user_id);
     return {
       state: "locked-other",
-      stripe: "border-red-500",
-      pill: "bg-red-500/15 text-red-200 border-red-700/60",
+      stripe: "border-[#EF5350]",
+      pill: "bg-[#EF5350]/15 text-red-200 border-red-700/60",
       label: email ? `Locked by ${email}` : "Locked by other",
       glyph: "🔒",
     };
@@ -77,8 +77,8 @@ function deriveRowState(
     if (localStatus === "modified") {
       return {
         state: "locked-me-modified",
-        stripe: "border-amber-400",
-        pill: "bg-amber-500/20 text-amber-200 border-amber-600/70",
+        stripe: "border-[#FFB800]",
+        pill: "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/50",
         label: "Locked by me · Modified",
         glyph: "🔒",
       };
@@ -103,8 +103,8 @@ function deriveRowState(
   if (localStatus === "vault-only") {
     return {
       state: "vault-only",
-      stripe: "border-zinc-600",
-      pill: "bg-zinc-700/40 text-zinc-300 border-zinc-700",
+      stripe: "border-helios-line",
+      pill: "bg-helios-line/40 text-helios-text border-helios-line",
       label: "Not local",
       glyph: "↓",
     };
@@ -112,8 +112,8 @@ function deriveRowState(
   if (localStatus === "synced") {
     return {
       state: "synced",
-      stripe: "border-emerald-500",
-      pill: "bg-emerald-500/15 text-emerald-300 border-emerald-700/60",
+      stripe: "border-[#66BB6A]",
+      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/40/60",
       label: "Synced",
       glyph: "✓",
     };
@@ -121,8 +121,8 @@ function deriveRowState(
   // no-folder, or vault file with no local match info — neutral.
   return {
     state: "neutral",
-    stripe: "border-zinc-700",
-    pill: "bg-zinc-800/60 text-zinc-400 border-zinc-700",
+    stripe: "border-helios-line",
+    pill: "bg-helios-line/60 text-helios-dim border-helios-line",
     label: "—",
   };
 }
@@ -132,9 +132,9 @@ function FileTypeIcon({ name }: { name: string }) {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   const tint =
     ext === "sldprt" ? "text-sky-400" :
-    ext === "sldasm" ? "text-emerald-400" :
+    ext === "sldasm" ? "text-[#66BB6A]" :
     ext === "slddrw" ? "text-orange-400" :
-    "text-zinc-500";
+    "text-helios-dim";
   return (
     <svg
       width="14"
@@ -194,7 +194,7 @@ export function FileTable({
 
   return (
     <table className="w-full text-sm">
-      <thead className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur text-left text-[11px] uppercase tracking-wider text-zinc-500">
+      <thead className="sticky top-0 z-10 bg-helios-base/95 backdrop-blur text-left text-[11px] uppercase tracking-wider text-helios-dim">
         <tr>
           {hasMultiSelect && (
             <th className="w-10 px-3 py-2.5">
@@ -203,7 +203,7 @@ export function FileTable({
                 checked={allSelected}
                 onChange={onToggleSelectAll}
                 aria-label="Select all"
-                className="accent-yellow-500"
+                className="accent-asu-gold"
               />
             </th>
           )}
@@ -229,10 +229,10 @@ export function FileTable({
               key={f.id}
               onClick={() => onSelect(f.id)}
               className={
-                "group cursor-pointer border-b border-zinc-900/80 transition-colors " +
+                "group cursor-pointer border-b border-helios-line/60 transition-colors " +
                 (isSel
-                  ? "bg-zinc-800/80"
-                  : "hover:bg-zinc-900/60")
+                  ? "bg-helios-line/80"
+                  : "hover:bg-helios-panel/60")
               }
             >
               {hasMultiSelect && (
@@ -243,18 +243,18 @@ export function FileTable({
                     onChange={(e) => { e.stopPropagation(); onToggleSelect!(f.id); }}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={`Select ${f.name}`}
-                    className="accent-yellow-500"
+                    className="accent-asu-gold"
                   />
                 </td>
               )}
               <td
                 className={
-                  "px-3 py-2 text-zinc-100 border-l-[3px] " + info.stripe
+                  "px-3 py-2 text-helios-text border-l-[3px] " + info.stripe
                 }
               >
                 <div className="flex items-center gap-2">
                   <FileTypeIcon name={f.name} />
-                  <span className="truncate font-mono text-[13px]">{f.name}</span>
+                  <span className="truncate font-mono-num text-[13px]">{f.name}</span>
                 </div>
               </td>
               <td className="px-3 py-2">

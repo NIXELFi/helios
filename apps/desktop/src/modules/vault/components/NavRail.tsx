@@ -10,7 +10,7 @@ const ENTRIES: { id: VaultScreenId; label: string }[] = [
 export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScreenId) => void }) {
   const { active, onSelect } = props;
   return (
-    <nav className="flex w-40 flex-col gap-1 border-r border-zinc-800 bg-zinc-950 p-2">
+    <nav className="flex w-40 flex-col gap-1 border-r border-helios-line bg-helios-base p-2">
       {ENTRIES.map((e) => (
         <button
           key={e.id}
@@ -19,7 +19,7 @@ export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScre
           onClick={() => onSelect(e.id)}
           className={
             "rounded px-3 py-2 text-left text-sm " +
-            (active === e.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900")
+            (active === e.id ? "bg-helios-line text-helios-text" : "text-helios-dim hover:bg-helios-panel")
           }
         >
           {e.label}

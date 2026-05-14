@@ -161,13 +161,13 @@ export function BulkActionBar({
   if (selectedIds.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-      <span className="text-zinc-400">{selectedIds.length} selected</span>
+    <div className="flex items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2 text-xs">
+      <span className="text-helios-dim">{selectedIds.length} selected</span>
       <button
         type="button"
         onClick={bulkCheckOut}
         disabled={busy}
-        className="rounded bg-blue-700 px-2 py-1 text-white hover:bg-blue-600 disabled:opacity-50"
+        className="rounded bg-asu-gold px-2 py-1 text-white hover:bg-asu-gold disabled:opacity-50"
       >
         Check Out
       </button>
@@ -175,7 +175,7 @@ export function BulkActionBar({
         type="button"
         onClick={bulkCancel}
         disabled={busy}
-        className="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+        className="rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line disabled:opacity-50"
       >
         Cancel Checkout
       </button>
@@ -184,7 +184,7 @@ export function BulkActionBar({
           type="button"
           onClick={bulkCheckInChanges}
           disabled={busy}
-          className="rounded bg-emerald-700 px-2 py-1 text-white hover:bg-emerald-600 disabled:opacity-50"
+          className="rounded bg-[#66BB6A] px-2 py-1 text-white hover:bg-[#66BB6A] disabled:opacity-50"
         >
           Check In Changes
         </button>
@@ -194,7 +194,7 @@ export function BulkActionBar({
           type="button"
           onClick={bulkGetLatest}
           disabled={busy}
-          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          className="rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line disabled:opacity-50"
         >
           Get Latest
         </button>
@@ -212,24 +212,24 @@ export function BulkActionBar({
       <button
         type="button"
         onClick={onClear}
-        className="ml-auto rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800"
+        className="ml-auto rounded px-2 py-1 text-helios-dim hover:bg-helios-line"
       >
         Clear
       </button>
-      {status && <span className="ml-2 text-zinc-500">{status}</span>}
+      {status && <span className="ml-2 text-helios-dim">{status}</span>}
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
           onClick={() => setConfirmDelete(false)}
         >
           <div
-            className="w-96 space-y-3 rounded-lg border border-zinc-700 bg-zinc-900 p-4"
+            className="w-96 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-zinc-100">
+            <h3 className="text-sm font-semibold text-helios-text">
               Delete {selectedIds.length} file{selectedIds.length === 1 ? "" : "s"}?
             </h3>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-helios-dim">
               This cannot be undone. All versions, references, and audit history for the selected
               files will be removed.
             </p>
@@ -237,7 +237,7 @@ export function BulkActionBar({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded px-3 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
+                className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
               >
                 Cancel
               </button>

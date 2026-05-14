@@ -185,25 +185,25 @@ export function BrowseScreen() {
   // Empty-vault state for admins
   if (isAdmin && (!vaults || vaults.length === 0)) {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950">
+      <div className="flex h-full items-center justify-center bg-helios-base">
         <form onSubmit={handleCreateVault} className="flex flex-col items-center gap-3">
-          <p className="text-sm text-zinc-400">No vault exists yet. Create one to get started.</p>
+          <p className="text-sm text-helios-dim">No vault exists yet. Create one to get started.</p>
           <input
             type="text"
             placeholder="Vault name"
             value={vaultNameInput}
             onChange={(e) => setVaultNameInput(e.target.value)}
-            className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-600"
+            className="rounded border border-helios-line bg-helios-panel px-3 py-1.5 text-sm text-helios-text placeholder-helios-dim focus:outline-none focus:ring-1 focus:ring-asu-gold"
           />
           <button
             type="submit"
             disabled={createVault.loading || !vaultNameInput.trim()}
-            className="rounded bg-blue-700 px-4 py-1.5 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
+            className="rounded bg-asu-gold px-4 py-1.5 text-sm text-white hover:bg-asu-gold disabled:opacity-50"
           >
             Create vault
           </button>
           {createVault.error && (
-            <p className="text-xs text-red-400">{createVault.error.message}</p>
+            <p className="text-xs text-[#EF5350]">{createVault.error.message}</p>
           )}
         </form>
       </div>
@@ -224,15 +224,15 @@ export function BrowseScreen() {
         }}
       />
       <div className="flex min-h-0 flex-1">
-      <div className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-950">
-        <header className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-          <span className="text-xs uppercase tracking-wider text-zinc-500">
+      <div className="flex w-64 flex-col border-r border-helios-line bg-helios-base">
+        <header className="flex items-center justify-between border-b border-helios-line px-3 py-2">
+          <span className="text-xs uppercase tracking-wider text-helios-dim">
             {vault?.name ?? "(no vault)"}
           </span>
           {isAdmin && vaultId && (
             <button
               onClick={() => openPrompt("folder")}
-              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              className="rounded px-1.5 py-0.5 text-xs text-helios-dim hover:bg-helios-line hover:text-helios-text"
               title="New folder"
             >
               + Folder
@@ -252,14 +252,14 @@ export function BrowseScreen() {
               currentUserId={user?.id ?? ""}
             />
           ) : (
-            <div className="p-3 text-sm text-zinc-500">Loading folders…</div>
+            <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
           )}
         </div>
       </div>
       <div className="flex-1 overflow-auto">
         {selectedFolder ? (
           <>
-            <div className="flex items-center justify-end gap-2 border-b border-zinc-800 px-3 py-1.5">
+            <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
               {vaultFolderPath && (
                 <VaultSyncSection
                   enabled
@@ -278,7 +278,7 @@ export function BrowseScreen() {
               {isAdmin && (
                 <button
                   onClick={() => openPrompt("file")}
-                  className="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  className="rounded px-2 py-0.5 text-xs text-helios-dim hover:bg-helios-line hover:text-helios-text"
                 >
                   + File
                 </button>
@@ -318,7 +318,7 @@ export function BrowseScreen() {
             />
           </>
         ) : (
-          <div className="p-6 text-sm text-zinc-500">Select a folder to see its files.</div>
+          <div className="p-6 text-sm text-helios-dim">Select a folder to see its files.</div>
         )}
       </div>
       <FileDetailPanel fileId={selectedFile} />
@@ -331,9 +331,9 @@ export function BrowseScreen() {
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={handlePromptSubmit}
-            className="w-80 space-y-3 rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-lg"
+            className="w-80 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4 shadow-lg"
           >
-            <h3 className="text-sm font-semibold text-zinc-100">
+            <h3 className="text-sm font-semibold text-helios-text">
               {prompt.kind === "folder" ? "New folder" : "New file"}
             </h3>
             <input
@@ -342,21 +342,21 @@ export function BrowseScreen() {
               value={promptValue}
               onChange={(e) => setPromptValue(e.target.value)}
               placeholder={prompt.kind === "folder" ? "Folder name" : "File name (e.g. frame.sldprt)"}
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-600"
+              className="w-full rounded border border-helios-line bg-helios-base px-2 py-1 text-sm text-helios-text placeholder-helios-dim focus:outline-none focus:ring-1 focus:ring-asu-gold"
             />
-            {promptError && <p className="text-xs text-red-400">{promptError}</p>}
+            {promptError && <p className="text-xs text-[#EF5350]">{promptError}</p>}
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setPrompt(null)}
-                className="rounded px-3 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
+                className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!promptValue.trim() || createFolder.loading || createFile.loading}
-                className="rounded bg-blue-700 px-3 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
               >
                 Create
               </button>
@@ -447,24 +447,24 @@ function SyncStatusPill({ status, onRescan }: {
   let dot: string;
   if (busy) {
     label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
-    tone = "text-yellow-400";
+    tone = "text-asu-gold";
     dot = "bg-yellow-400 animate-pulse";
   } else if (lastFailed > 0) {
     label = `${lastFailed} failed`;
-    tone = "text-red-400";
-    dot = "bg-red-400";
+    tone = "text-[#EF5350]";
+    dot = "bg-[#EF5350]";
   } else if (lastDownloaded > 0) {
     label = `Pulled ${lastDownloaded}`;
     tone = "text-green-400";
     dot = "bg-green-400";
   } else if (lastRunAt) {
     label = "Up to date";
-    tone = "text-zinc-500";
-    dot = "bg-zinc-600";
+    tone = "text-helios-dim";
+    dot = "bg-helios-line";
   } else {
     label = "Idle";
-    tone = "text-zinc-500";
-    dot = "bg-zinc-600";
+    tone = "text-helios-dim";
+    dot = "bg-helios-line";
   }
 
   return (
@@ -472,14 +472,14 @@ function SyncStatusPill({ status, onRescan }: {
       <button
         onClick={() => setOpen((o) => !o)}
         onDoubleClick={onRescan}
-        className={"flex items-center gap-1.5 rounded px-2 py-0.5 text-xs hover:bg-zinc-800 " + tone}
+        className={"flex items-center gap-1.5 rounded px-2 py-0.5 text-xs hover:bg-helios-line " + tone}
         title="Click for sync detail · double-click to rescan"
       >
         <span className={"inline-block h-1.5 w-1.5 rounded-full " + dot} />
         {label}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-lg">
+        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-helios-line bg-helios-panel p-3 text-xs shadow-lg">
           {busy ? (() => {
             const pct = totalBytes > 0 ? Math.floor((completedBytes / totalBytes) * 100) : 0;
             const elapsed = startedAt ? Date.now() - startedAt : 0;
@@ -489,16 +489,16 @@ function SyncStatusPill({ status, onRescan }: {
             return (
               <>
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="font-semibold text-zinc-200">Syncing</span>
-                  <span className="text-zinc-500">{completedTasks}/{totalTasks} files</span>
+                  <span className="font-semibold text-helios-text">Syncing</span>
+                  <span className="text-helios-dim">{completedTasks}/{totalTasks} files</span>
                 </div>
-                <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-helios-line">
                   <div
                     className="h-full bg-yellow-400 transition-[width] duration-300"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-500">
+                <div className="mb-2 flex items-center justify-between text-[11px] text-helios-dim">
                   <span>{formatBytes(completedBytes)} / {formatBytes(totalBytes)} ({pct}%)</span>
                   <span>
                     {formatDuration(elapsed)} elapsed
@@ -507,9 +507,9 @@ function SyncStatusPill({ status, onRescan }: {
                 </div>
                 {activeFiles.length > 0 && (
                   <div className="space-y-0.5">
-                    <div className="text-[10px] uppercase tracking-wider text-zinc-500">In flight</div>
+                    <div className="text-[10px] uppercase tracking-wider text-helios-dim">In flight</div>
                     {activeFiles.map((name) => (
-                      <div key={name} className="truncate font-mono text-[11px] text-zinc-300">
+                      <div key={name} className="truncate font-mono-num text-[11px] text-helios-text">
                         {name}
                       </div>
                     ))}
@@ -519,15 +519,15 @@ function SyncStatusPill({ status, onRescan }: {
             );
           })() : (
             <>
-              <div className="mb-1 font-semibold text-zinc-200">{label}</div>
-              <div className="text-zinc-500">
+              <div className="mb-1 font-semibold text-helios-text">{label}</div>
+              <div className="text-helios-dim">
                 {lastRunAt
                   ? `Last sync: ${new Date(lastRunAt).toLocaleTimeString()}`
                   : "No sync yet this session."}
               </div>
               <button
                 onClick={() => { setOpen(false); onRescan(); }}
-                className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800"
+                className="mt-2 w-full rounded border border-helios-line px-2 py-1 text-helios-text hover:bg-helios-line"
               >
                 Rescan local folder
               </button>

@@ -27,13 +27,13 @@ export function LoginPane() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center bg-zinc-900 text-zinc-100">
+    <div className="flex h-full items-center justify-center bg-helios-panel text-helios-text">
       <form
         onSubmit={onSubmit}
-        className="w-80 space-y-4 rounded-lg border border-zinc-700 bg-zinc-800 p-6 shadow-lg"
+        className="w-80 space-y-4 rounded-lg border border-helios-line bg-helios-line p-6 shadow-lg"
       >
         <h2 className="text-lg font-semibold">Sign in to Helios Vault</h2>
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-helios-dim">
           Vault requires an account. Logs continues to work without one. Ask your
           team admin to invite you if you don't have one yet.
         </p>
@@ -48,7 +48,7 @@ export function LoginPane() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm focus:border-yellow-500 focus:outline-none"
+            className="w-full rounded border border-helios-line bg-helios-panel px-2 py-1 text-sm focus:border-asu-gold focus:outline-none"
           />
         </div>
         <div className="space-y-1">
@@ -62,18 +62,18 @@ export function LoginPane() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm focus:border-yellow-500 focus:outline-none"
+            className="w-full rounded border border-helios-line bg-helios-panel px-2 py-1 text-sm focus:border-asu-gold focus:outline-none"
           />
         </div>
         {error ? (
-          <div role="alert" className="text-sm text-red-400">
+          <div role="alert" className="text-sm text-[#EF5350]">
             {error}
           </div>
         ) : null}
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-zinc-900 hover:bg-yellow-400 disabled:bg-zinc-600"
+          className="w-full rounded bg-asu-gold px-3 py-1.5 text-sm font-semibold text-helios-base hover:bg-[#FFB800] disabled:bg-helios-line"
         >
           {submitting ? "Signing in…" : "Sign in"}
         </button>

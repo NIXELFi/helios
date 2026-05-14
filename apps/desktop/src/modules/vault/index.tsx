@@ -6,7 +6,7 @@ export function VaultModule() {
   return (
     <RequireAuth
       fallback={
-        <div className="flex h-full items-center justify-center bg-zinc-900 text-zinc-400">
+        <div className="flex h-full items-center justify-center bg-helios-panel text-helios-dim">
           Loading…
         </div>
       }

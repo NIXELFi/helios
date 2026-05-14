@@ -62,9 +62,9 @@ function FileIcon({ name }: { name: string }) {
   const ext = name.toLowerCase().split(".").pop() ?? "";
   const tint =
     ext === "sldprt" ? "text-sky-400" :
-    ext === "sldasm" ? "text-emerald-400" :
+    ext === "sldasm" ? "text-[#66BB6A]" :
     ext === "slddrw" ? "text-orange-400" :
-    "text-zinc-500";
+    "text-helios-dim";
   return (
     <svg
       width="12"
@@ -102,7 +102,7 @@ function Chevron({ expanded }: { expanded: boolean }) {
 function LockDot({ kind }: { kind: "none" | "me" | "other" }) {
   const color =
     kind === "me" ? "bg-sky-400" :
-    kind === "other" ? "bg-red-500" :
+    kind === "other" ? "bg-[#EF5350]" :
     "bg-transparent";
   if (kind === "none") return <span className="inline-block w-2" />;
   return <span className={"inline-block h-2 w-2 shrink-0 rounded-full " + color} />;
@@ -194,16 +194,16 @@ export function FolderTree({
         }}
         className={
           "flex cursor-pointer items-center gap-1.5 border-l-2 py-0.5 pr-2 text-[13px] outline-none transition-colors " +
-          "focus-visible:ring-1 focus-visible:ring-yellow-500 " +
+          "focus-visible:ring-1 focus-visible:ring-asu-gold " +
           (isSelectedFile
-            ? "border-yellow-500 bg-zinc-800/80 text-zinc-100"
-            : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")
+            ? "border-asu-gold bg-helios-line/80 text-helios-text"
+            : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
         }
         style={{ paddingLeft: 6 + depth * 14 }}
       >
         <span className="inline-block w-4 shrink-0" />
         <FileIcon name={file.name} />
-        <span className="truncate font-mono text-[12px]">{file.name}</span>
+        <span className="truncate font-mono-num text-[12px]">{file.name}</span>
         <LockDot kind={lockKind} />
       </div>
     );
@@ -231,10 +231,10 @@ export function FolderTree({
           }}
           className={
             "group flex cursor-pointer items-center gap-1.5 border-l-2 py-1 pr-2 text-sm outline-none transition-colors " +
-            "focus-visible:ring-1 focus-visible:ring-yellow-500 " +
+            "focus-visible:ring-1 focus-visible:ring-asu-gold " +
             (isSelected
-              ? "border-yellow-500 bg-zinc-800 text-zinc-100"
-              : "border-transparent text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100")
+              ? "border-asu-gold bg-helios-line text-helios-text"
+              : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text")
           }
           style={{ paddingLeft: 6 + depth * 14 }}
         >
@@ -246,19 +246,19 @@ export function FolderTree({
                 e.stopPropagation();
                 toggleExpanded(node.folder.id);
               }}
-              className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200"
+              className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-helios-dim hover:bg-helios-line hover:text-helios-text"
             >
               <Chevron expanded={isExpanded} />
             </span>
           ) : (
             <span className="inline-block w-4 shrink-0" />
           )}
-          <span className={"shrink-0 " + (isSelected ? "text-yellow-400" : "text-zinc-500")}>
+          <span className={"shrink-0 " + (isSelected ? "text-asu-gold" : "text-helios-dim")}>
             <FolderIcon open={isExpanded} />
           </span>
           <span className="truncate">{node.folder.name}</span>
           {folderFiles.length > 0 && (
-            <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 group-hover:text-zinc-400">
+            <span className="ml-auto shrink-0 rounded bg-helios-line px-1.5 py-0.5 text-[10px] font-mono-num text-helios-dim group-hover:text-helios-dim">
               {folderFiles.length}
             </span>
           )}
@@ -288,17 +288,17 @@ export function FolderTree({
         }}
         className={
           "flex cursor-pointer items-center gap-1.5 border-l-2 px-2 py-1.5 text-xs uppercase tracking-wider outline-none transition-colors " +
-          "focus-visible:ring-1 focus-visible:ring-yellow-500 " +
+          "focus-visible:ring-1 focus-visible:ring-asu-gold " +
           (selected === null
-            ? "border-yellow-500 bg-zinc-800 text-zinc-100"
-            : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300")
+            ? "border-asu-gold bg-helios-line text-helios-text"
+            : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
         }
       >
         <span className="inline-block w-4 shrink-0" />
         <span>All folders</span>
       </div>
       {tree.length === 0 ? (
-        <div className="px-3 py-3 text-xs italic text-zinc-500">No folders yet.</div>
+        <div className="px-3 py-3 text-xs italic text-helios-dim">No folders yet.</div>
       ) : (
         tree.map((n) => renderFolderNode(n, 0))
       )}

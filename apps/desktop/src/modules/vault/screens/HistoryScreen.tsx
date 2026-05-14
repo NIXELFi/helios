@@ -21,12 +21,12 @@ export function HistoryScreen() {
 
   return (
     <div className="flex h-full">
-      <div className="w-56 border-r border-zinc-800 bg-zinc-950 overflow-auto">
+      <div className="w-56 border-r border-helios-line bg-helios-base overflow-auto">
         {folders ? (
           <FolderTree folders={folders} selected={folderId} onSelect={setFolderId} />
         ) : null}
       </div>
-      <div className="w-72 border-r border-zinc-800 overflow-auto">
+      <div className="w-72 border-r border-helios-line overflow-auto">
         {folderId && files ? (
           <FileTable
             files={files}
@@ -37,14 +37,14 @@ export function HistoryScreen() {
             onSelect={setFileId}
           />
         ) : (
-          <div className="p-6 text-sm text-zinc-500">Pick a folder.</div>
+          <div className="p-6 text-sm text-helios-dim">Pick a folder.</div>
         )}
       </div>
       <div className="flex-1 overflow-auto">
         {fileId && versions ? (
           <VersionList versions={versions} onSelect={() => {}} />
         ) : (
-          <div className="p-6 text-sm text-zinc-500">Pick a file to see its history.</div>
+          <div className="p-6 text-sm text-helios-dim">Pick a file to see its history.</div>
         )}
       </div>
     </div>

@@ -32,7 +32,7 @@ export function CheckOutButton({ fileId, onDone }: ActionProps) {
     <button
       onClick={handleClick}
       disabled={acquireLock.loading}
-      className="rounded bg-blue-700 px-2 py-0.5 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
     >
       Check Out
     </button>
@@ -110,7 +110,7 @@ export function GetLatestButton({
       type="button"
       onClick={handleClick}
       disabled={download.loading}
-      className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+      className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line disabled:opacity-50"
       title="Download latest version to local vault folder"
     >
       {download.loading ? "…" : "Get Latest"}
@@ -131,7 +131,7 @@ export function CancelButton({ fileId, onDone }: ActionProps) {
     <button
       onClick={handleClick}
       disabled={releaseLock.loading}
-      className="ml-1 rounded bg-zinc-700 px-2 py-0.5 text-xs text-white hover:bg-zinc-600 disabled:opacity-50"
+      className="ml-1 rounded bg-helios-line px-2 py-0.5 text-xs text-white hover:bg-helios-line disabled:opacity-50"
     >
       Cancel
     </button>

@@ -3,10 +3,10 @@ export type LockState = "latest" | "out-of-date" | "locked-by-me" | "locked-by-o
 export function LockBadge(props: { state: LockState; holderEmail?: string }) {
   const { state, holderEmail } = props;
   const color = {
-    "latest": "bg-emerald-500/20 text-emerald-300 border-emerald-700",
-    "out-of-date": "bg-yellow-500/20 text-yellow-300 border-yellow-700",
-    "locked-by-me": "bg-red-500/30 text-red-200 border-red-700",
-    "locked-by-other": "bg-red-500/20 text-red-300 border-red-700",
+    "latest": "bg-[#66BB6A]/20 text-[#9CCC65] border-[#66BB6A]/40",
+    "out-of-date": "bg-asu-gold/20 text-yellow-300 border-yellow-700",
+    "locked-by-me": "bg-[#EF5350]/30 text-red-200 border-red-700",
+    "locked-by-other": "bg-[#EF5350]/20 text-red-300 border-red-700",
   }[state];
   const label = {
     "latest": "Up to date",
