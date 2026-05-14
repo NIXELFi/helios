@@ -5,13 +5,16 @@ interface Props {
   stage: string;
   /** Optional error to surface in place of the spinner. */
   error?: string | null;
+  /** App version string, surfaced in the bottom strip. Passed in (rather
+   *  than imported) so this component stays trivially testable. */
+  version?: string;
 }
 
 /** Splash/loading screen shown while sessions and math channels are being
  *  computed. Static wordmark + subtitle, plus a real progress bar driven by
  *  the loader's `onProgress` callback. The bar has a subtle sliding-highlight
  *  overlay so it still feels alive between discrete progress events. */
-export function LoadingScreen({ progress, stage, error }: Props) {
+export function LoadingScreen({ progress, stage, error, version }: Props) {
   const pct = Math.max(0, Math.min(1, progress));
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-[#0E0E10] text-[#D8DCE2]">
@@ -19,7 +22,7 @@ export function LoadingScreen({ progress, stage, error }: Props) {
         <h1 className="font-helios text-[5rem] md:text-[7rem] leading-none text-[#FFC627]">
           HELIOS
         </h1>
-        <div className="text-[10px] md:text-xs uppercase tracking-[0.4em] text-[#7B8088]">
+        <div className="text-[10px] md:text-xs uppercase tracking-[0.4em] text-[#9097A0]">
           Sun Devil Motorsports · Telemetry
         </div>
       </div>
@@ -31,7 +34,7 @@ export function LoadingScreen({ progress, stage, error }: Props) {
           </div>
         ) : (
           <>
-            <div className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[#7B8088]">
+            <div className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[#9097A0]">
               <span className="truncate">{stage}</span>
               <span className="font-mono-num text-[#FFC627] flex-shrink-0 ml-2">
                 {Math.round(pct * 100)}%
@@ -57,7 +60,7 @@ export function LoadingScreen({ progress, stage, error }: Props) {
       </div>
 
       <div className="absolute bottom-4 left-0 right-0 text-center text-[10px] uppercase tracking-wider text-[#5A5F66]">
-        v2.1 · ground-station
+        v{version ?? "dev"} · ground-station
       </div>
     </div>
   );
