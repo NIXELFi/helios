@@ -32,7 +32,16 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
     return off;
   }, [slice, config, cursorEmitter]);
 
-  useEffect(() => { peakRef.current = rpmRef.current; drawRef.current(); }, [config]);
+  // Reset peak RPM whenever the viewing window or RPM channel changes.
+  // Otherwise the peak ratchets upward forever — switching primary session
+  // or scrubbing into a slower lap leaves the user staring at an unreachable
+  // peak marker from data they're no longer looking at.
+  useEffect(() => {
+    const r = sampleAt(slice, config.rpmChannelId, cursorEmitter.get());
+    rpmRef.current = r;
+    peakRef.current = r;
+    drawRef.current();
+  }, [slice.range.startUs, slice.range.endUs, config.rpmChannelId, cursorEmitter, slice, config]);
 
   const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);

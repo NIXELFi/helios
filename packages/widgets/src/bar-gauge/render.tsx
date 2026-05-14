@@ -33,7 +33,17 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     return off;
   }, [slice, config, cursorEmitter]);
 
-  useEffect(() => { peakRef.current = valueRef.current; drawRef.current(); }, [config]);
+  // Reset peak-hold whenever the viewing window or channel changes — that's
+  // the natural "different context, start a new peak" signal. Without this,
+  // peak only ever moves up across the entire app lifetime: scrubbing back
+  // to a slower section, switching primary session, or applying a zoom all
+  // leave the peak marker stuck at a value the user can't currently see.
+  useEffect(() => {
+    const v = sampleAt(slice, config.channelId, cursorEmitter.get());
+    valueRef.current = v;
+    peakRef.current = v;
+    drawRef.current();
+  }, [slice.range.startUs, slice.range.endUs, config.channelId, cursorEmitter, slice, config]);
 
   const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
