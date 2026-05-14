@@ -16,6 +16,12 @@ import { useFileDrop } from "./lib/use-file-drop";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { TileSpec, Workspace } from "./workspaces/types";
 import { loadWorkspaces, saveWorkspaces, resetToBuiltins } from "./lib/workspace-storage";
+import {
+  loadLastWorkspaceId, saveLastWorkspaceId,
+  loadRecentSessions, addRecentSession, removeRecentSession,
+  loadViewStateFor, saveViewStateFor,
+  loadLapSelection, saveLapSelection,
+} from "./lib/app-state";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
 import {
   type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
@@ -38,13 +44,26 @@ import { LoadingScreen } from "./components/LoadingScreen";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { WorkspaceTabBar } from "./components/WorkspaceTabBar";
 import { LapConfigDialog } from "./components/LapConfigDialog";
+import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
+import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
-  const [workspaceId, setWorkspaceId] = useState(() => {
+  const [workspaceId, setWorkspaceIdRaw] = useState(() => {
     const list = loadWorkspaces();
+    const saved = loadLastWorkspaceId();
+    // Restore the last active workspace if it still exists; otherwise fall
+    // back to the first workspace so a stale id doesn't strand the user on
+    // a blank header.
+    if (saved && list.some((w) => w.id === saved)) return saved;
     return list[0]?.id ?? "overview";
   });
+  // Wrap setWorkspaceId to persist the choice. Every call site (tab click,
+  // import, duplicate, new) flows through this so we never miss a write.
+  const setWorkspaceId = (id: string) => {
+    setWorkspaceIdRaw(id);
+    saveLastWorkspaceId(id);
+  };
   const [sessions, setSessions] = useState<LoadedSession[] | null>(null);
   const [primaryId, setPrimaryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +86,8 @@ export default function App() {
   const [addTileOpen, setAddTileOpen] = useState(false);
   const [mathChannelsOpen, setMathChannelsOpen] = useState(false);
   const [lapConfigSessionId, setLapConfigSessionId] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   const updater = useUpdater();
@@ -95,7 +116,29 @@ export default function App() {
 
   useEffect(() => {
     loadAllSessions((p) => setLoadProgress(p))
-      .then((loaded) => {
+      .then(async (bundled) => {
+        // Silently re-load recent user sessions before the first paint. Files
+        // that no longer exist (deleted, moved off a removable drive) are
+        // dropped from the recents list and never bother the user with a
+        // popup — they came from days-ago activity, not the current intent.
+        const recents = loadRecentSessions();
+        const userLoaded: LoadedSession[] = [];
+        let colorIdx = bundled.length;
+        for (const path of recents) {
+          setLoadProgress({
+            label: `Re-opening ${path.split(/[\\/]/).pop() ?? path}`,
+            loaded: bundled.length,
+            total: bundled.length + recents.length + 1,
+          });
+          try {
+            const session = await loadUserSession(path, colorForIndex(colorIdx));
+            colorIdx++;
+            userLoaded.push(session);
+          } catch {
+            removeRecentSession(path);
+          }
+        }
+        const loaded = [...bundled, ...userLoaded];
         setLoadProgress({
           label: "Computing math channels",
           loaded: loaded.length,
@@ -111,11 +154,33 @@ export default function App() {
         setSessions(loaded);
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
         setPrimaryId(firstVisible?.id ?? null);
-        // Default lap selection: best lap of primary as Main, second-best as Ref.
-        if (firstVisible?.laps && firstVisible.laps.bestLapIndex >= 0) {
+        // Restore the user's last manual lap selection if any of its refs
+        // still point at a valid (loaded session, in-range lap). Falls back
+        // to the auto-pick (best/2nd-best on the primary) only when there's
+        // nothing to restore — i.e. the user never explicitly picked, or
+        // every saved ref points at a session that's no longer loaded.
+        const saved = loadLapSelection();
+        const validRef = (r: { sessionId: string; lapIndex: number } | null) => {
+          if (!r) return null;
+          const s = loaded.find((x) => x.id === r.sessionId);
+          if (!s?.laps) return null;
+          if (r.lapIndex < 0 || r.lapIndex >= s.laps.laps.length) return null;
+          return r;
+        };
+        const restoredMain = saved ? validRef(saved.main) : null;
+        const restoredRef  = saved ? validRef(saved.ref)  : null;
+        const restoredOverlays = saved
+          ? saved.overlays.map(validRef).filter((r): r is { sessionId: string; lapIndex: number } => r !== null)
+          : [];
+        if (restoredMain || restoredRef || restoredOverlays.length > 0) {
+          lapSelectionEmitter.set({
+            main: restoredMain,
+            ref: restoredRef,
+            overlays: restoredOverlays,
+          });
+        } else if (firstVisible?.laps && firstVisible.laps.bestLapIndex >= 0) {
           const set = firstVisible.laps;
           lapSelectionEmitter.setMain({ sessionId: firstVisible.id, lapIndex: set.bestLapIndex });
-          // Pick the second-fastest trusted lap for Ref, if there is one.
           const trusted = set.laps
             .map((l, i) => ({ l, i }))
             .filter((x) => x.l.trusted && x.i !== set.bestLapIndex)
@@ -138,6 +203,178 @@ export default function App() {
     if (updater.state.kind === "available") setUpdateModalOpen(true);
   }, [updater.state.kind]);
 
+  // Global keyboard shortcuts. Universal hotkeys (⌘K) fire from anywhere;
+  // single-key shortcuts ([ ] etc.) skip text inputs so typing still works.
+  // The hotkey set deliberately mirrors a subset of MoTeC i2 / Catalyst —
+  // a user coming from those tools should feel at home.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+      // ⌘K — toggle command palette (works from anywhere).
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      // ⌘1..9 — jump to workspace by index.
+      if (mod && /^[1-9]$/.test(e.key) && !inField) {
+        const idx = parseInt(e.key, 10) - 1;
+        const target = workspaces[idx];
+        if (target) {
+          e.preventDefault();
+          setWorkspaceId(target.id);
+          setSelectedTileId(null);
+        }
+        return;
+      }
+      // ⌘E — toggle edit mode.
+      if (mod && e.key.toLowerCase() === "e" && !inField) {
+        e.preventDefault();
+        setEditMode((v) => !v);
+        return;
+      }
+      // ⌘O — open file dialog. The OS-level "open recent" stays available
+      // via the system menu; this is just the fast keyboard route to add a
+      // session without picking it from the sidebar.
+      if (mod && e.key.toLowerCase() === "o" && !inField) {
+        e.preventDefault();
+        void handleAddSessionDialog();
+        return;
+      }
+      // ? — show keyboard shortcuts overlay. No modifier; works from
+      // anywhere outside a text input (typing ? into a search field should
+      // type the character, not summon a dialog).
+      if (e.key === "?" && !inField && !mod) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      // M / R — single-key lap assignment. Finds the lap containing the
+      // current cursor on the primary session and sets it as Main (M) or
+      // Ref (R). Power-user shortcut for the M/R/O buttons in the Sessions
+      // panel; mirrors MoTeC's lap-pinning workflow.
+      if ((e.key === "m" || e.key === "M") && !inField && !mod) {
+        const p = sessions?.find((s) => s.id === primaryId);
+        if (!p?.laps) return;
+        const cur = emitter.get();
+        const idx = p.laps.laps.findIndex((l) => cur >= l.startUs && cur <= l.endUs);
+        if (idx >= 0) {
+          e.preventDefault();
+          lapSelectionEmitter.setMain({ sessionId: p.id, lapIndex: idx });
+        }
+        return;
+      }
+      if ((e.key === "r" || e.key === "R") && !inField && !mod) {
+        const p = sessions?.find((s) => s.id === primaryId);
+        if (!p?.laps) return;
+        const cur = emitter.get();
+        const idx = p.laps.laps.findIndex((l) => cur >= l.startUs && cur <= l.endUs);
+        if (idx >= 0) {
+          e.preventDefault();
+          lapSelectionEmitter.setRef({ sessionId: p.id, lapIndex: idx });
+        }
+        return;
+      }
+      // [ / ] — step cursor to previous/next lap boundary on the primary.
+      if ((e.key === "[" || e.key === "]") && !inField && !mod && !e.shiftKey) {
+        const p = sessions?.find((s) => s.id === primaryId);
+        if (!p?.laps || p.laps.laps.length === 0) return;
+        e.preventDefault();
+        const cur = emitter.get();
+        if (e.key === "]") {
+          const next = p.laps.laps.find((l) => l.startUs > cur);
+          if (next) emitter.emit(next.startUs);
+        } else {
+          // Find the lap boundary strictly less than cursor, walking backwards.
+          let target: number | null = null;
+          for (const lap of p.laps.laps) {
+            if (lap.startUs < cur) target = lap.startUs;
+            else break;
+          }
+          if (target !== null) emitter.emit(target);
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaces, sessions, primaryId, emitter]);
+
+  // Restore cursor + zoom whenever the primary session changes (including on
+  // first boot). Cursor is clamped to the current session's extent so a saved
+  // value that no longer fits the data is silently dropped to the closest edge.
+  // We guard with a ref to ensure we only restore once per *real* primary
+  // transition — React can call this effect with the same primaryId during
+  // unrelated state churn, and re-emitting cursor on every churn would yank
+  // the user out of wherever they're currently scrubbing.
+  const lastRestoredPrimaryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessions || !primaryId) return;
+    if (lastRestoredPrimaryRef.current === primaryId) return;
+    lastRestoredPrimaryRef.current = primaryId;
+    const snap = loadViewStateFor(primaryId);
+    if (!snap) return;
+    const primary = sessions.find((s) => s.id === primaryId);
+    if (!primary) return;
+    const ext = primary.store.extentUs();
+    const cur = Math.max(ext.startUs, Math.min(ext.endUs, snap.cursorUs));
+    emitter.emit(cur);
+    if (snap.zoomRange) {
+      const a = Math.max(ext.startUs, snap.zoomRange.startUs);
+      const b = Math.min(ext.endUs, snap.zoomRange.endUs);
+      if (b > a) viewState.setZoom({ startUs: a, endUs: b });
+    }
+    // Restore datums (vertical markers). Clamped to the session's extent so
+    // a marker dropped at a moment that no longer exists silently drops.
+    if (snap.datums && snap.datums.length > 0) {
+      viewState.clearDatums();
+      for (const d of snap.datums) {
+        if (d >= ext.startUs && d <= ext.endUs) viewState.addDatum(d);
+      }
+    }
+  }, [primaryId, sessions, emitter, viewState]);
+
+  // Save cursor + zoom under the current primary id whenever they change,
+  // debounced 500ms so a 60Hz scrub doesn't write localStorage 60 times a
+  // second. Each new primary gets its own debounce window — switching primary
+  // mid-debounce flushes nothing and starts a fresh timer for the new id.
+  useEffect(() => {
+    if (!primaryId) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const vs = viewState.get();
+        saveViewStateFor(primaryId, {
+          cursorUs: emitter.get(),
+          zoomRange: vs.zoomRange,
+          datums: vs.datums.length > 0 ? vs.datums.slice() : undefined,
+        });
+      }, 500);
+    };
+    const offCursor = emitter.subscribe(schedule);
+    const offView = viewState.subscribe(schedule);
+    return () => {
+      offCursor(); offView();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [primaryId, emitter, viewState]);
+
+  // Persist the global lap selection on every change so user-driven Main/Ref
+  // overrides survive restart. Debounced so rapid clicks through laps don't
+  // hammer localStorage. The restore happens in the boot useEffect above.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = lapSelectionEmitter.subscribe((s) => {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => saveLapSelection(s), 400);
+    });
+    return () => { off(); if (timer !== null) clearTimeout(timer); };
+  }, [lapSelectionEmitter]);
+
   if (error || !sessions || !primaryId) {
     const denom = Math.max(1, loadProgress.total);
     return (
@@ -145,6 +382,7 @@ export default function App() {
         progress={loadProgress.loaded / denom}
         stage={loadProgress.label}
         error={error}
+        version={appVersion}
       />
     );
   }
@@ -153,6 +391,145 @@ export default function App() {
   const primary = sessions.find((s) => s.id === primaryId) ?? visibleSessions[0] ?? sessions[0]!;
   const ext = primary.store.extentUs();
   const primaryMathErrors = mathErrors.get(primary.id) ?? new Map<string, string>();
+
+  // Build the command-palette action list from current state. Re-derived
+  // every render — cheap, and avoids stale-closure subtleties.
+  const paletteActions: PaletteAction[] = [];
+  workspaces.forEach((w, i) => {
+    paletteActions.push({
+      id: `ws:${w.id}`,
+      label: `Switch to ${w.label}`,
+      sublabel: w.id === workspaceId ? "(current)" : undefined,
+      kind: "workspace",
+      hint: i < 9 ? `⌘${i + 1}` : undefined,
+      keywords: [w.id, "workspace", "tab"],
+      run: () => { setWorkspaceId(w.id); setSelectedTileId(null); },
+    });
+  });
+  sessions.forEach((s) => {
+    paletteActions.push({
+      id: `ses:${s.id}`,
+      label: `Set primary: ${s.label}`,
+      sublabel: s.id === primaryId ? "(current)" : undefined,
+      kind: "session",
+      keywords: [s.id, "primary", "session"],
+      run: () => setPrimaryId(s.id),
+    });
+  });
+  paletteActions.push(
+    { id: "sys:channels", label: "Open Channels", kind: "system", keywords: ["inspect", "data"], run: () => setChannelsOpen(true) },
+    { id: "sys:math",     label: "Open Math channels", kind: "system", keywords: ["formula", "expression"], run: () => setMathChannelsOpen(true) },
+    { id: "sys:add-tile", label: "Add tile…", kind: "system", run: () => { if (!editMode) setEditMode(true); setAddTileOpen(true); } },
+    { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: "⌘E", run: () => setEditMode((e) => !e) },
+    { id: "sys:shortcuts", label: "Keyboard shortcuts", kind: "system", hint: "?", keywords: ["help", "hotkeys"], run: () => setShortcutsOpen(true) },
+    { id: "sys:reset-zoom", label: "Reset zoom", kind: "system", run: () => viewState.resetZoom() },
+    { id: "sys:clear-datums", label: "Clear datums", kind: "system", run: () => viewState.clearDatums() },
+    {
+      id: "sys:drop-datum",
+      label: "Drop datum at current cursor",
+      sublabel: "Same as shift-click on a strip chart",
+      kind: "system",
+      keywords: ["mark", "annotate", "datum"],
+      run: () => viewState.addDatum(emitter.get()),
+    },
+    {
+      id: "sys:zoom-to-lap",
+      label: "Zoom to current lap",
+      sublabel: "Fit chart x-range to the lap containing the cursor",
+      kind: "system",
+      keywords: ["fit", "lap", "zoom"],
+      run: () => {
+        const cur = emitter.get();
+        const ls = primary.laps;
+        if (!ls) return;
+        const lap = ls.laps.find((l) => cur >= l.startUs && cur <= l.endUs);
+        if (lap) viewState.setZoom({ startUs: lap.startUs, endUs: lap.endUs });
+      },
+    },
+  );
+  // Lap-selection helpers. The user can also drive these from the Lap Panel,
+  // but ⌘K → "main" → enter is the fastest way to retarget the Δt and any
+  // distance-mode strip-chart on the current workspace.
+  if (primary.laps && primary.laps.laps.length > 0) {
+    const set = primary.laps;
+    const trustedSorted = set.laps
+      .map((l, i) => ({ l, i }))
+      .filter((x) => x.l.trusted)
+      .sort((a, b) => a.l.durationS - b.l.durationS);
+    const best = trustedSorted[0];
+    const second = trustedSorted[1];
+    if (best) {
+      paletteActions.push({
+        id: "lap:best-main",
+        label: `Set best lap as Main`,
+        sublabel: `lap ${best.l.index} · ${best.l.durationS.toFixed(2)}s`,
+        kind: "lap",
+        keywords: ["main", "best", "fastest"],
+        run: () => lapSelectionEmitter.setMain({ sessionId: primary.id, lapIndex: best.i }),
+      });
+    }
+    if (second) {
+      paletteActions.push({
+        id: "lap:second-ref",
+        label: `Set 2nd-best lap as Ref`,
+        sublabel: `lap ${second.l.index} · ${second.l.durationS.toFixed(2)}s`,
+        kind: "lap",
+        keywords: ["ref", "reference", "compare"],
+        run: () => lapSelectionEmitter.setRef({ sessionId: primary.id, lapIndex: second.i }),
+      });
+    }
+    if (lapSelection.main && lapSelection.ref) {
+      paletteActions.push({
+        id: "lap:swap-main-ref",
+        label: "Swap Main and Ref",
+        kind: "lap",
+        keywords: ["compare", "flip", "reverse"],
+        run: () => {
+          const m = lapSelection.main!;
+          const r = lapSelection.ref!;
+          lapSelectionEmitter.setMain(r);
+          lapSelectionEmitter.setRef(m);
+        },
+      });
+    }
+    if (lapSelection.ref) {
+      paletteActions.push({
+        id: "lap:clear-ref",
+        label: "Clear Ref lap (hide Δt)",
+        kind: "lap",
+        keywords: ["delta", "clear", "remove"],
+        run: () => lapSelectionEmitter.setRef(null),
+      });
+    }
+    // Per-lap "Set as Main/Ref" actions. Surfaced for every trusted lap so the
+    // user can ⌘K → "lap 5 main" → Enter without leaving the keyboard.
+    // Capped to a sane number to keep the palette responsive on endurance
+    // sessions with hundreds of laps.
+    const MAX_PER_LAP = 30;
+    let lapActionCount = 0;
+    for (let i = 0; i < set.laps.length && lapActionCount < MAX_PER_LAP; i++) {
+      const lap = set.laps[i]!;
+      if (!lap.trusted) continue;
+      const lapNum = lap.index;
+      paletteActions.push({
+        id: `lap:${i}-main`,
+        label: `Set lap ${lapNum} as Main`,
+        sublabel: `${lap.durationS.toFixed(2)}s${lap.index === set.bestLapIndex + 1 ? " · best" : ""}`,
+        kind: "lap",
+        keywords: ["main", `lap ${lapNum}`, String(lapNum)],
+        run: () => lapSelectionEmitter.setMain({ sessionId: primary.id, lapIndex: i }),
+      });
+      paletteActions.push({
+        id: `lap:${i}-ref`,
+        label: `Set lap ${lapNum} as Ref`,
+        sublabel: `${lap.durationS.toFixed(2)}s`,
+        kind: "lap",
+        keywords: ["ref", "reference", `lap ${lapNum}`, String(lapNum)],
+        run: () => lapSelectionEmitter.setRef({ sessionId: primary.id, lapIndex: i }),
+      });
+      lapActionCount++;
+    }
+  }
   const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
   const selectedTile = workspace.tiles.find((t) => t.id === selectedTileId) ?? null;
   const lapConfigSession = lapConfigSessionId
@@ -427,6 +804,9 @@ export default function App() {
         // Replace any pre-existing session with the same id (re-loading the
         // same file should refresh, not duplicate).
         newSessions.push(session);
+        // Promote this path to the head of the recent-sessions list so it
+        // silently re-opens on next launch.
+        addRecentSession(a.path);
         // Stash math errors for the new session id.
         setMathErrors((prev) => {
           const next = new Map(prev);
@@ -491,6 +871,9 @@ export default function App() {
           (sessions ?? []).filter((s) => s.id !== sessionId).map((s) => s.id),
         );
         lapSelectionEmitter.prune(validIds);
+        // If this was a user-opened file, take it off the silent re-load list
+        // so removal feels durable across restarts.
+        if (target.sourcePath) removeRecentSession(target.sourcePath);
         setConfirmState(null);
       },
     });
@@ -598,11 +981,19 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
-      <header className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs">
+      {/* Header doubles as the macOS drag region under titleBarStyle: Overlay.
+          No extra left padding needed here: the 176px-wide ModulePicker rail
+          sits to the left of this header in the Shell layout, so the inset
+          traffic lights (positioned at 14,14 in tauri.conf.json) overlap
+          ONLY the ModulePicker — which handles its own top clearance. */}
+      <header
+        data-tauri-drag-region
+        className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs"
+      >
         <span className="font-helios text-sm text-[#FFC627] flex-shrink-0">HELIOS</span>
         {!editMode && (
           <>
-            <span className="ml-3 text-[#7B8088] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
+            <span className="ml-3 text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
             <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
             <WorkspaceTabBar
               workspaces={workspaces}
@@ -626,6 +1017,13 @@ export default function App() {
           (editMode ? "mx-auto" : "ml-3 pl-3 border-l border-[#2A2C32]")
         }>
           <ViewStatePills viewState={viewState} />
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-dim hover:border-asu-gold hover:text-helios-text rounded-sm cursor-pointer transition-colors flex items-center gap-1 font-mono-num"
+            title="Open command palette"
+          >
+            <span>⌘K</span>
+          </button>
           <button
             onClick={() => setChannelsOpen(true)}
             className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
@@ -736,11 +1134,12 @@ export default function App() {
         )}
       </div>
 
-      <footer className="h-6 flex items-center px-3 border-t border-[#2A2C32] text-[10px] text-[#7B8088]">
+      <footer className="h-6 flex items-center px-3 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
         {visibleSessions.length} session{visibleSessions.length === 1 ? "" : "s"} visible
         {" · "}primary: {primary.store.list().length} channels
         {" · "}range {(ext.endUs - ext.startUs) / 1_000_000}s
         {" · "}{workspace.tiles.length} tile{workspace.tiles.length === 1 ? "" : "s"}
+        <LapCompareSegment sessions={sessions} selection={lapSelection} />
         {" · "}<FpsCounter />
         {editMode && <span className="ml-2 text-[#FFC627]">· editing</span>}
       </footer>
@@ -800,8 +1199,53 @@ export default function App() {
           onClose={() => setConfirmState(null)}
         />
       )}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
+      />
+      <ShortcutsOverlay
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </div>
   );
+}
+
+/** Footer segment that shows Main lap time, Ref lap time, and Δ whenever
+ *  the global lap selection has both. Silent otherwise so the footer doesn't
+ *  flicker between content/no-content as the user assigns laps. */
+function LapCompareSegment({ sessions, selection }: { sessions: LoadedSession[]; selection: LapSelection }) {
+  if (!selection.main || !selection.ref) return null;
+  const mainSes = sessions.find((s) => s.id === selection.main!.sessionId);
+  const refSes = sessions.find((s) => s.id === selection.ref!.sessionId);
+  if (!mainSes?.laps || !refSes?.laps) return null;
+  const mainLap = mainSes.laps.laps[selection.main.lapIndex];
+  const refLap = refSes.laps.laps[selection.ref.lapIndex];
+  if (!mainLap || !refLap) return null;
+  const delta = mainLap.durationS - refLap.durationS;
+  const deltaColor =
+    delta > 0.005 ? "#EF5350"
+    : delta < -0.005 ? "#66BB6A"
+    : "#D8DCE2";
+  return (
+    <span className="ml-2 pl-2 border-l border-[#2A2C32] font-mono-num tabular-nums">
+      <span className="text-[#9097A0]">Main</span>{" "}
+      <span className="text-[#D8DCE2]">{formatLapTime(mainLap.durationS)}</span>
+      <span className="text-[#9097A0]"> · Ref</span>{" "}
+      <span className="text-[#D8DCE2]">{formatLapTime(refLap.durationS)}</span>
+      <span className="text-[#9097A0]"> · Δ</span>{" "}
+      <span style={{ color: deltaColor }}>{delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)}s</span>
+    </span>
+  );
+}
+
+function formatLapTime(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return "—";
+  const min = Math.floor(s / 60);
+  const sec = s - min * 60;
+  if (min === 0) return `${sec.toFixed(2)}s`;
+  return `${min}:${sec.toFixed(2).padStart(5, "0")}`;
 }
 
 function CursorClock({ emitter }: { emitter: CursorEmitter }) {
@@ -951,7 +1395,7 @@ function EditMoreMenu({ onSnapToGrid, onResetAll }: {
           >Snap to grid</button>
           <button
             onClick={() => { onResetAll(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 text-[#7B8088] hover:bg-[#16171B] hover:text-[#EF5350]"
+            className="w-full text-left px-2 py-1.5 text-[#9097A0] hover:bg-[#16171B] hover:text-[#EF5350]"
             title="Reset every workspace to its built-in default"
           >Reset all workspaces</button>
         </div>

@@ -19,6 +19,8 @@ const WIDGET_LABELS: Record<WidgetType, string> = {
   time_report:     "Time Report",
   zone_stats:      "Zone Stats",
   fft:             "FFT / Spectrum",
+  lap_delta:       "Lap Δt",
+  sector_table:    "Sector Splits",
 };
 
 const WIDGET_TYPES = BUILTIN_WIDGET_TYPES as readonly WidgetType[];
@@ -39,13 +41,13 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
   return (
     <aside className="w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
       <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">Configure</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Configure</span>
         <div className="flex items-center gap-1">
           <button
             aria-label="Duplicate tile"
             onClick={onDuplicate}
             title="Duplicate this tile"
-            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
           >
             duplicate
           </button>
@@ -53,14 +55,14 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             aria-label="Delete tile"
             onClick={onDelete}
             title="Delete this tile"
-            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#7B8088] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm"
+            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm"
           >
             delete
           </button>
           <button
             aria-label="Close config"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
             title="Close"
           >
             ×
@@ -68,7 +70,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
         </div>
       </div>
       <div className="px-2 py-1.5 border-b border-[#2A2C32] flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088] flex-shrink-0">type</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-shrink-0">type</span>
         <select
           value={tile.widgetType}
           onChange={(e) => {
@@ -92,7 +94,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           ))}
         </select>
       </div>
-      <div className="px-2 py-1 border-b border-[#2A2C32] text-[10px] uppercase tracking-wider text-[#7B8088]">
+      <div className="px-2 py-1 border-b border-[#2A2C32] text-[10px] uppercase tracking-wider text-[#9097A0]">
         id · <span className="text-[#D8DCE2] normal-case">{tile.id}</span>
       </div>
       <div className="flex-1 overflow-y-auto">
@@ -102,7 +104,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           availableChannels={availableChannels}
         />
       </div>
-      <div className="px-2 py-2 border-t border-[#2A2C32] text-[10px] text-[#7B8088]">
+      <div className="px-2 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
         Changes save automatically.
       </div>
     </aside>

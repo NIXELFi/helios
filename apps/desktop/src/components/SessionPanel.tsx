@@ -39,7 +39,7 @@ export function SessionPanel({
         <button
           aria-label="Expand sessions panel"
           onClick={() => setCollapsed(false)}
-          className="w-6 h-6 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+          className="w-6 h-6 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
           title="Sessions"
         >›</button>
       </aside>
@@ -49,7 +49,7 @@ export function SessionPanel({
   return (
     <aside className="w-60 flex-shrink-0 border-r border-[#2A2C32] bg-[#0E0E10] flex flex-col">
       <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">Sessions</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Sessions</span>
         <div className="flex items-center gap-1">
           <button
             aria-label="Add session"
@@ -60,7 +60,7 @@ export function SessionPanel({
           <button
             aria-label="Collapse sessions panel"
             onClick={() => setCollapsed(true)}
-            className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
             title="Collapse"
           >‹</button>
         </div>
@@ -110,15 +110,15 @@ export function SessionPanel({
               {isExpanded && (
                 <div className="px-3 py-1.5 bg-[#0B0B0D] flex flex-col gap-1.5 text-[10px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-[#7B8088] uppercase tracking-wider">Laps</span>
+                    <span className="text-[#9097A0] uppercase tracking-wider">Laps</span>
                     <span className="text-[#D8DCE2]">
                       {s.lapConfig.mode === "none"
-                        ? <span className="text-[#7B8088]">not configured</span>
+                        ? <span className="text-[#9097A0]">not configured</span>
                         : `${lapCount} trusted${bestLap ? ` · best ${formatLapTime(bestLap.durationS * 1_000_000)}` : ""}`}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[#7B8088] uppercase tracking-wider">Mode</span>
+                    <span className="text-[#9097A0] uppercase tracking-wider">Mode</span>
                     <span className="text-[#9AA0A6] font-mono-num">{s.lapConfig.mode}</span>
                   </div>
                   <button
@@ -177,7 +177,7 @@ function SidebarLapList({ primary, emitter, selection }: {
   return (
     <div className="border-t border-[#2A2C32] flex flex-col min-h-0 max-h-[40%]">
       <div className="h-7 flex items-center justify-between px-2 border-b border-[#2A2C32] flex-shrink-0">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">Laps</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Laps</span>
         <span className="text-[9px] text-[#5A5F66]">{trustedTimes.length} trusted</span>
       </div>
       <div className="overflow-y-auto flex-1">
@@ -199,7 +199,7 @@ function SidebarLapList({ primary, emitter, selection }: {
                     (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-[#0E0E10] ") +
                     (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
                   }
-                  title="click = Main · ⌘+click = Ref · shift+click = toggle overlay"
+                  title="Row click sets Main. Use the M / R / O buttons on the right for explicit control."
                 >
                   <td className="px-2 py-0.5 w-8">
                     {lap.index}
@@ -208,13 +208,33 @@ function SidebarLapList({ primary, emitter, selection }: {
                   <td className={"text-right px-2 py-0.5 " + (isBest ? "text-[#FFC627] font-bold" : "")}>
                     {formatLapTime(lap.durationS * 1_000_000)}
                   </td>
-                  <td className="text-right px-2 py-0.5 text-[#7B8088] w-12">
+                  <td className="text-right px-2 py-0.5 text-[#9097A0] w-12">
                     {dt === 0 ? "—" : `+${dt.toFixed(2)}`}
                   </td>
-                  <td className="text-right px-1 py-0.5 text-[10px] w-6">
-                    {main && <span className="text-[#FFC627]">M</span>}
-                    {refSel && <span className="text-[#4FC3F7]">R</span>}
-                    {overlay && <span className="text-[#9CCC65]">O</span>}
+                  <td className="text-right px-1 py-0 w-[64px]">
+                    <div className="inline-flex items-center gap-px">
+                      <LapToggleBtn
+                        letter="M"
+                        active={main}
+                        activeColor="#FFC627"
+                        title="Set as Main lap (or row click)"
+                        onClick={(e) => { e.stopPropagation(); emitter.setMain(main ? null : ref); }}
+                      />
+                      <LapToggleBtn
+                        letter="R"
+                        active={refSel}
+                        activeColor="#4FC3F7"
+                        title="Set as Ref lap (also ⌘+click row)"
+                        onClick={(e) => { e.stopPropagation(); emitter.setRef(refSel ? null : ref); }}
+                      />
+                      <LapToggleBtn
+                        letter="O"
+                        active={overlay}
+                        activeColor="#9CCC65"
+                        title="Toggle overlay (also shift+click row)"
+                        onClick={(e) => { e.stopPropagation(); emitter.toggleOverlay(ref); }}
+                      />
+                    </div>
                   </td>
                 </tr>
               );
@@ -223,5 +243,32 @@ function SidebarLapList({ primary, emitter, selection }: {
         </table>
       </div>
     </div>
+  );
+}
+
+function LapToggleBtn({
+  letter, active, activeColor, title, onClick,
+}: {
+  letter: string;
+  active: boolean;
+  activeColor: string;
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      className={
+        "w-[18px] h-[16px] flex items-center justify-center text-[10px] font-mono-num leading-none rounded-sm cursor-pointer transition-colors " +
+        (active ? "text-helios-base font-bold" : "text-helios-dim hover:text-helios-text hover:bg-helios-panel")
+      }
+      style={active ? { background: activeColor } : undefined}
+    >
+      {letter}
+    </button>
   );
 }
