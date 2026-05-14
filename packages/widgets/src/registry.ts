@@ -15,6 +15,8 @@ import { channelReportWidget } from "./channel-report";
 import { timeReportWidget } from "./time-report";
 import { zoneStatsWidget } from "./zone-stats";
 import { fftWidget } from "./fft";
+import { lapDeltaWidget } from "./lap-delta";
+import { sectorTableWidget } from "./sector-table";
 
 class Registry {
   #widgets = new Map<string, Widget<unknown>>();
@@ -59,6 +61,8 @@ const BUILTIN_WIDGETS: ReadonlyArray<Widget<unknown>> = [
   timeReportWidget     as unknown as Widget<unknown>,
   zoneStatsWidget      as unknown as Widget<unknown>,
   fftWidget            as unknown as Widget<unknown>,
+  lapDeltaWidget       as unknown as Widget<unknown>,
+  sectorTableWidget    as unknown as Widget<unknown>,
 ];
 
 for (const w of BUILTIN_WIDGETS) {

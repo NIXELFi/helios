@@ -17,3 +17,5 @@ export * from "./channel-report";
 export * from "./time-report";
 export * from "./zone-stats";
 export * from "./fft";
+export * from "./lap-delta";
+export * from "./sector-table";
