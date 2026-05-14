@@ -137,8 +137,38 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
       for (let i = 0; i < bins; i++) if (c[i]! > maxCount) maxCount = c[i]!;
     }
 
-    const padL = 4, padR = 4, padT = 18, padB = 16;
+    const padL = 28, padR = 4, padT = 18, padB = 16;
     const plotW = w - padL - padR, plotH = h - padT - padB;
+
+    // Y-axis grid + labels. 4 evenly-spaced tick lines including the top.
+    // Counts above 1000 collapse to "1.2k"-style; sub-1000 are integers.
+    // The grid sits behind the bars so we draw it first, before any fill.
+    if (maxCount > 0 && plotH > 30) {
+      ctx.save();
+      ctx.strokeStyle = "#23252B";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#5A5F66";
+      ctx.font = "9px Inter, system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      const ticks = 4;
+      for (let i = 0; i <= ticks; i++) {
+        const frac = i / ticks;
+        const y = padT + plotH * (1 - frac);
+        const value = Math.round(maxCount * frac);
+        if (i > 0) {
+          ctx.beginPath();
+          ctx.moveTo(padL, y + 0.5);
+          ctx.lineTo(padL + plotW, y + 0.5);
+          ctx.stroke();
+        }
+        const label = value >= 10000 ? `${(value / 1000).toFixed(0)}k`
+          : value >= 1000 ? `${(value / 1000).toFixed(1)}k`
+          : `${value}`;
+        ctx.fillText(label, padL - 3, y);
+      }
+      ctx.restore();
+    }
     const splitX = splitOn ? padL + plotW * (negSpan / span) : padL;
     const binWNeg = splitOn && nNeg > 0 ? (splitX - padL) / nNeg : plotW / bins;
     const binWPos = splitOn && nPos > 0 ? (padL + plotW - splitX) / nPos : plotW / bins;
