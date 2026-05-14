@@ -64,6 +64,7 @@ export async function loadUserSession(absPath: string, color: string): Promise<L
     lapConfig: cfg,
     laps,
     channelOverrides,
+    sourcePath: absPath,
   };
 }
 

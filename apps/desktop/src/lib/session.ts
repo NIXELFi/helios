@@ -17,6 +17,12 @@ export interface LoadedSession {
    *  store. Persisted per-session in localStorage (channel-overrides.ts).
    *  Empty when the session is on full auto-resolution. */
   channelOverrides: Record<string, string>;
+  /** Absolute filesystem path the session was loaded from. Set for
+   *  user-opened files; undefined for bundled samples (which are bundled by
+   *  resource id, not file path). Used to drive the recent-sessions
+   *  persistence list — removal hands this back so we can drop the file
+   *  from "load on next boot." */
+  sourcePath?: string;
 }
 
 /** Distinct colors for overlay traces; first session gets first color, etc. */
