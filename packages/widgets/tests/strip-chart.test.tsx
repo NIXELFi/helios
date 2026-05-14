@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { stripChartWidget } from "../src/strip-chart";
 import { CursorEmitter } from "@helios/lib";
 import type { ChannelSlice } from "@helios/store";
@@ -96,5 +96,46 @@ describe("StripChart", () => {
       timeRange={timeRange}
     />);
     expect(uplotConstructSpy.mock.calls.length).toBe(initialConstructs);
+  });
+
+  it("shows live cursor readout values per channel and updates on cursor emit", () => {
+    // Slice has engine.rpm = 1000 + i for i in [0..1000), one sample every
+    // 10ms. At t=0us → 1000; at t=500_000us (sample 50) → 1050;
+    // at t=999_990us (last sample) → 1999.
+    const slice = fakeSlice(0);
+    const cursorEmitter = new CursorEmitter();
+    const { container } = render(<stripChartWidget.Render
+      config={{ channels: [{ id: "engine.rpm", color: "#FFB800" }], yMin: 0, yMax: 15000 }}
+      slice={slice}
+      cursorEmitter={cursorEmitter}
+      timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
+    />);
+
+    const readout = container.querySelector('[data-testid="strip-chart-readout-value-primary-engine.rpm"]');
+    expect(readout).not.toBeNull();
+    // Initial seed at cursor=0 should read sample 0 → 1000.
+    expect(readout!.textContent).toBe("1000");
+
+    // Emit cursor at sample 500 → value 1500.
+    act(() => { cursorEmitter.emit(500 * 10_000); });
+    expect(readout!.textContent).toBe("1500");
+
+    // Emit cursor at last sample → value 1999.
+    act(() => { cursorEmitter.emit(999 * 10_000); });
+    expect(readout!.textContent).toBe("1999");
+  });
+
+  it("renders em-dash for empty channel id (placeholder row before user configures)", () => {
+    const cursorEmitter = new CursorEmitter();
+    const { container } = render(<stripChartWidget.Render
+      config={{ channels: [{ id: "", color: "#FFB800" }], yMin: 0, yMax: 15000 }}
+      slice={fakeSlice()}
+      cursorEmitter={cursorEmitter}
+      timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
+    />);
+    // Channel with empty id renders the row but the value is "—".
+    const valueSpans = container.querySelectorAll('[data-testid^="strip-chart-readout-value-"]');
+    expect(valueSpans.length).toBe(1);
+    expect(valueSpans[0]!.textContent).toBe("—");
   });
 });

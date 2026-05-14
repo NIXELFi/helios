@@ -6,7 +6,7 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
   return (
     <div className="flex flex-col gap-2 p-2 text-xs text-[#D8DCE2]">
       <div>
-        <div className="mb-1 text-[#7B8088] uppercase text-[10px] tracking-wider">Channels</div>
+        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">Channels</div>
         {config.channels.map((c, i) => (
           <div key={i} className="flex flex-col gap-1 mt-1 mb-2 p-1 border border-[#2A2C32] rounded-sm">
             <div className="flex gap-1 items-center min-w-0">
@@ -48,11 +48,11 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
               </label>
               <button
                 aria-label="Remove channel"
-                className="shrink-0 w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm leading-none text-base"
+                className="shrink-0 w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm leading-none text-base"
                 onClick={() => onChange({ ...config, channels: config.channels.filter((_, j) => j !== i) })}
               >×</button>
             </div>
-            <div className="flex gap-1 items-center text-[10px] text-[#7B8088]">
+            <div className="flex gap-1 items-center text-[10px] text-[#9097A0]">
               <span>Y</span>
               <input
                 type="number"
@@ -87,7 +87,7 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
         >+ add channel</button>
       </div>
       <div className="border-t border-[#2A2C32] pt-2">
-        <div className="mb-1 text-[#7B8088] uppercase text-[10px] tracking-wider">X axis</div>
+        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">X axis</div>
         <label className="flex items-center gap-2 text-[11px]">
           <span className="w-10">mode</span>
           <select
@@ -104,7 +104,7 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
         </div>
       </div>
       <div className="border-t border-[#2A2C32] pt-2">
-        <div className="mb-1 text-[#7B8088] uppercase text-[10px] tracking-wider">Chart default Y range</div>
+        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">Chart default Y range</div>
         <div className="text-[10px] text-[#5A5F66] mb-1">Used for any channel that doesn't set its own range above.</div>
         <label className="flex items-center gap-2">
           <span className="w-10">Y min</span>

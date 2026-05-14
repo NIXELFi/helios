@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import uPlot, { type AlignedData, type Axis, type Options, type Scales, type Series } from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { LapRef, LapSelection } from "@helios/lib";
 import { perSampleLapDistance, speedToMs } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface StripChartChannel {
@@ -55,6 +56,18 @@ function formatDistance(v: number): string {
   if (!Number.isFinite(v)) return "";
   if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(2)} km`;
   return `${v.toFixed(0)} m`;
+}
+
+/** Format a channel value for the cursor readout. Auto-decimals: large magnitudes
+ *  show as integers (RPM, ms, mm), mid-range shows 1 decimal, small values 2 decimals.
+ *  This is intentionally heuristic — when ChannelMeta-driven decimals land at the
+ *  widget-render boundary we'll pull from there instead. */
+function formatReadout(v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1000) return v.toFixed(0);
+  if (abs >= 10) return v.toFixed(1);
+  return v.toFixed(2);
 }
 
 /** Build aligned data for time-mode rendering — one X is the union of every
@@ -289,9 +302,13 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   const cursorEmitterRef = useRef(cursorEmitter);
   const viewStateRef = useRef(viewState);
   const timeRangeRef = useRef(timeRange);
+  const visibleRef = useRef(visible);
+  const liveSelectionRef = useRef(liveSelection);
   useEffect(() => { cursorEmitterRef.current = cursorEmitter; }, [cursorEmitter]);
   useEffect(() => { viewStateRef.current = viewState; }, [viewState]);
   useEffect(() => { timeRangeRef.current = timeRange; }, [timeRange]);
+  useEffect(() => { visibleRef.current = visible; }, [visible]);
+  useEffect(() => { liveSelectionRef.current = liveSelection; }, [liveSelection]);
 
   // Build the aligned data + meta. This is a pure derivation from
   // visible/config/xMode/selection — memoize so re-renders with stable inputs
@@ -332,19 +349,30 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       values: (_u, splits) => splits.map(xMode === "distance" ? formatDistance : formatElapsed),
       size: 30,
     }];
+    // Per-channel Y scale assignment. Each *distinct* (lo,hi) range gets its
+    // own uPlot scale so traces render correctly regardless of how many
+    // ranges the chart hosts. Only the first two distinct ranges get a drawn
+    // axis (right side then left side); any 3+ groups still have their own
+    // scale but no labelled axis. The corner readout (channel id + live
+    // value) makes the extra traces fully legible without competing for the
+    // axis gutter.
+    //
+    // Before this fix, ranges 3+ aliased onto group 0's scale, which made a
+    // 0..100 % throttle trace render as a flat line at the bottom of a
+    // 0..14000 RPM chart. See audit list A item 2.
     const channelScale: string[] = [];
-    const groups: Array<{ lo: number; hi: number; id: string; color: string; side: 1 | 3 }> = [];
+    const groups: Array<{ lo: number; hi: number; id: string; color: string; side: 1 | 3 | null }> = [];
     for (let ci = 0; ci < config.channels.length; ci++) {
       const ch = config.channels[ci]!;
       const [lo, hi] = rangeFor(ch, config);
       let group = groups.find((g) => g.lo === lo && g.hi === hi);
       if (!group) {
         const id = `s${groups.length}`;
-        const side: 1 | 3 = groups.length === 0 ? 3 : 1;
+        const side: 1 | 3 | null = groups.length === 0 ? 3 : groups.length === 1 ? 1 : null;
         group = { lo, hi, id, color: ch.color, side };
         groups.push(group);
-        if (groups.length <= 2) {
-          scales[id] = { range: [lo, hi] };
+        scales[id] = { range: [lo, hi] };
+        if (side !== null) {
           axes.push({
             scale: id,
             side,
@@ -352,8 +380,6 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
             size: 60,
           });
-        } else {
-          group.id = groups[0]!.id;
         }
       }
       channelScale.push(group.id);
@@ -513,6 +539,58 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
         over.removeEventListener("dblclick", onDblClick);
         clearZoomBox();
       };
+    } else {
+      // Distance-mode pointer scrub. Project the click's X coordinate from
+      // distance back to a time on the Main lap, then emit that cursor.
+      // Other widgets — including the time-mode strip-charts on the same
+      // workspace — pick this up via the cursor emitter. Read-only beyond
+      // this: no zoom drag or datum drop in distance mode (those concepts
+      // need a distance-aware persistence model that hasn't shipped yet).
+      over.style.cursor = "crosshair";
+      const onDistClick = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        const sel = liveSelectionRef.current;
+        const sessions = visibleRef.current;
+        if (!sessions || sessions.length === 0) return;
+        // Resolve Main lap: explicit selection wins, else primary's best.
+        let mainSession = sel?.main ? sessions.find((o) => o.id === sel.main!.sessionId) : undefined;
+        let mainLapIdx: number | null = sel?.main ? sel.main.lapIndex : null;
+        if (!mainSession || mainLapIdx === null) {
+          mainSession = sessions.find((o) => o.isPrimary) ?? sessions[0];
+          mainLapIdx = mainSession?.laps?.bestLapIndex ?? null;
+        }
+        if (!mainSession || !mainSession.laps || mainLapIdx === null || mainLapIdx < 0) return;
+        const lap = mainSession.laps.laps[mainLapIdx];
+        if (!lap) return;
+        const speedInfo = speedByOverlay.get(mainSession.id);
+        if (!speedInfo) return;
+        const dist = perSampleLapDistance(speedInfo.values, speedInfo.unit, mainSession.slice.time, mainSession.laps);
+        const rect = over.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const clickedDist = u.posToVal(localX, "x");
+        if (!Number.isFinite(clickedDist)) return;
+        // Find the sample within the lap whose distance is closest to the
+        // clicked value. Distance is monotonic non-decreasing within a lap,
+        // so a linear scan over the lap window is fine.
+        const t = mainSession.slice.time;
+        let bestI = -1, bestDelta = Infinity;
+        for (let i = 0; i < t.length; i++) {
+          const tUs = Number(t[i]!);
+          if (tUs < lap.startUs) continue;
+          if (tUs > lap.endUs) break;
+          const d = dist[i]!;
+          if (!Number.isFinite(d)) continue;
+          const delta = Math.abs(d - clickedDist);
+          if (delta < bestDelta) { bestDelta = delta; bestI = i; }
+        }
+        if (bestI >= 0) {
+          cursorEmitterRef.current.emit(Number(t[bestI]!));
+        }
+      };
+      over.addEventListener("pointerdown", onDistClick);
+      cleanupPointer = () => {
+        over.removeEventListener("pointerdown", onDistClick);
+      };
     }
 
     return () => {
@@ -546,7 +624,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     const reason = dataPack.emptyReason;
     if (!reason) return;
     const note = document.createElement("div");
-    note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4 pointer-events-none";
+    note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4 pointer-events-none";
     note.textContent = reason;
     container.appendChild(note);
     return () => { note.remove(); };
@@ -585,11 +663,62 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   }, [cursorEmitter, viewState, xMode]);
 
   useEffect(() => {
-    if (xMode !== "time") return;
+    if (xMode === "time") {
+      const off = cursorEmitter.subscribe((tUs) => {
+        const u = plotRef.current; if (!u) return;
+        const tS = tUs / 1_000_000;
+        const left = u.valToPos(tS, "x", false);
+        const over = u.over;
+        let line = over.querySelector<HTMLDivElement>(".helios-cursor");
+        if (!line) {
+          line = document.createElement("div");
+          line.className = "helios-cursor";
+          line.style.position = "absolute";
+          line.style.top = "0";
+          line.style.bottom = "0";
+          line.style.width = "1px";
+          line.style.background = "#FFC627";
+          line.style.pointerEvents = "none";
+          over.appendChild(line);
+        }
+        line.style.left = `${left}px`;
+      });
+      return off;
+    }
+    // Distance mode: project the time cursor onto the Main lap's distance
+    // axis, then draw the crosshair at that x. Without this, scrubbing in
+    // any time-mode chart leaves distance-mode charts on the same workspace
+    // with no visible position indicator — the user loses the "this is
+    // where you are in the lap" reference.
     const off = cursorEmitter.subscribe((tUs) => {
       const u = plotRef.current; if (!u) return;
-      const tS = tUs / 1_000_000;
-      const left = u.valToPos(tS, "x", false);
+      const sel = liveSelectionRef.current;
+      const sessions = visibleRef.current;
+      if (!sessions || sessions.length === 0) return;
+      let mainSession = sel?.main ? sessions.find((o) => o.id === sel.main!.sessionId) : undefined;
+      let mainLapIdx: number | null = sel?.main ? sel.main.lapIndex : null;
+      if (!mainSession || mainLapIdx === null) {
+        mainSession = sessions.find((o) => o.isPrimary) ?? sessions[0];
+        mainLapIdx = mainSession?.laps?.bestLapIndex ?? null;
+      }
+      if (!mainSession || !mainSession.laps || mainLapIdx === null || mainLapIdx < 0) return;
+      const lap = mainSession.laps.laps[mainLapIdx];
+      if (!lap) return;
+      const speedInfo = speedByOverlay.get(mainSession.id);
+      if (!speedInfo) return;
+      const dist = perSampleLapDistance(speedInfo.values, speedInfo.unit, mainSession.slice.time, mainSession.laps);
+      const t = mainSession.slice.time;
+      // Clamp to lap window so an out-of-lap cursor pins to the nearest edge.
+      const clamped = Math.max(lap.startUs, Math.min(lap.endUs, tUs));
+      let lo = 0, hi = t.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (Number(t[mid]!) <= clamped) lo = mid + 1; else hi = mid;
+      }
+      const idx = Math.max(0, lo - 1);
+      const d = dist[idx];
+      if (!Number.isFinite(d)) return;
+      const left = u.valToPos(d!, "x", false);
       const over = u.over;
       let line = over.querySelector<HTMLDivElement>(".helios-cursor");
       if (!line) {
@@ -606,7 +735,8 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       line.style.left = `${left}px`;
     });
     return off;
-  }, [cursorEmitter, xMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorEmitter, xMode, speedByOverlay]);
 
   const onResize = useCallback(({ width, height }: { width: number; height: number }) => {
     const u = plotRef.current;
@@ -615,17 +745,77 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   }, []);
   useResizeObserver(containerRef, onResize);
 
+  // Live cursor readouts — one value per (session × channel) at the current
+  // cursor time. Stored in a ref so the binary-search sample lookup at 60Hz
+  // doesn't push React state through 16+ entries every frame; we tick a
+  // single reducer only when at least one value actually changed.
+  const readoutsRef = useRef<Map<string, number | null>>(new Map());
+  const [, tickReadouts] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    // Seed from the current cursor before subscribing, so the first paint shows
+    // values rather than em-dashes.
+    const seed = (tUs: number) => {
+      let changed = false;
+      for (const session of visible) {
+        for (const ch of config.channels) {
+          if (!ch.id) continue;
+          const key = `${session.id}|${ch.id}`;
+          const v = sampleAt(session.slice, ch.id, tUs);
+          if (readoutsRef.current.get(key) !== v) {
+            readoutsRef.current.set(key, v);
+            changed = true;
+          }
+        }
+      }
+      if (changed) tickReadouts();
+    };
+    seed(cursorEmitter.get());
+    return cursorEmitter.subscribe(seed);
+    // visibleIdsKey + channels stringified deps below — visible[] identity
+    // changes per parent render but its session-id set is what we actually
+    // care about.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorEmitter, visibleIdsKey, JSON.stringify(config.channels.map((c) => c.id))]);
+
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
       {config.channels.length > 0 && (
-        <div className="absolute top-1 right-1 flex flex-row gap-1 z-10 pointer-events-none max-w-[80%] flex-wrap justify-end">
-          {config.channels.map((c, i) => (
+        <div
+          className="absolute top-1 right-1 z-10 pointer-events-none max-w-[85%] flex flex-col gap-px items-end"
+          data-testid="strip-chart-readout"
+        >
+          {visible.map((session) => (
             <div
-              key={i}
-              className="flex items-center gap-1 text-[9px] text-[#D8DCE2] bg-[#0E0E10cc] px-1 py-px rounded-sm"
+              key={session.id}
+              className="flex flex-row gap-1 flex-wrap justify-end items-center"
             >
-              <span className="inline-block w-1.5 h-1.5" style={{ background: c.color }} />
-              <span className="font-mono-num leading-none">{c.id || "—"}</span>
+              {isMulti && (
+                <span
+                  className="text-[9px] font-mono-num leading-none bg-[#0E0E10cc] px-1 py-px rounded-sm tabular-nums"
+                  style={{ color: session.color }}
+                >
+                  {session.label}
+                </span>
+              )}
+              {config.channels.map((c, i) => {
+                const v = c.id ? (readoutsRef.current.get(`${session.id}|${c.id}`) ?? null) : null;
+                return (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1 text-[9px] text-[#D8DCE2] bg-[#0E0E10cc] px-1 py-px rounded-sm"
+                  >
+                    <span className="inline-block w-1.5 h-1.5" style={{ background: c.color }} />
+                    <span className="font-mono-num leading-none">{c.id || "—"}</span>
+                    <span
+                      className="font-mono-num leading-none text-[#FFC627] tabular-nums text-right"
+                      style={{ minWidth: "2.4em" }}
+                      data-testid={`strip-chart-readout-value-${session.id}-${c.id}`}
+                    >
+                      {formatReadout(v)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -633,7 +823,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       {/* X-mode pill: shows current mode and lets the user toggle without
           opening the config panel. Mirrors i2's F9 toggle. */}
       <div className="absolute bottom-1 left-1 z-10 text-[9px]">
-        <span className="bg-[#0E0E10cc] text-[#7B8088] px-1.5 py-px rounded-sm font-mono-num">
+        <span className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num">
           x = {xMode === "distance" ? "distance" : "time"}
         </span>
       </div>
