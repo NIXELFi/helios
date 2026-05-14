@@ -44,6 +44,9 @@ interface Props {
 export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add tile"
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
       onClick={onClose}
     >
@@ -56,7 +59,7 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
           <button
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
           >×</button>
         </div>
         <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-2 p-3">
@@ -78,14 +81,14 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
               className="flex flex-col items-start text-left bg-[#16171B] border border-[#2A2C32] hover:border-[#FFC627] rounded-sm p-3 cursor-pointer transition-colors"
             >
               <span className="text-xs text-[#FFC627] font-semibold">{entry.label}</span>
-              <span className="text-[10px] text-[#7B8088] mt-1">{entry.description}</span>
+              <span className="text-[10px] text-[#9097A0] mt-1">{entry.description}</span>
               <span className="text-[10px] text-[#5A5F66] mt-2 font-mono-num">
                 {entry.defaultCells.w} × {entry.defaultCells.h} cells
               </span>
             </button>
           ))}
         </div>
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#7B8088]">
+        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
           New tiles drop into the next free slot. You can drag and resize them once placed.
         </div>
       </div>

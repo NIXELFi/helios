@@ -47,7 +47,7 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
 
   if (!hasAnyDetected) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4">
+      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
         no laps detected — open a session and configure lap detection from the Sessions panel
       </div>
     );
@@ -75,13 +75,13 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
           {visible.length > 1 && (
             <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
               <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: session.color }} aria-hidden />
-              <span className="text-[10px] uppercase tracking-wider text-[#7B8088] flex-1 truncate">{session.label}</span>
+              <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-1 truncate">{session.label}</span>
               <span className="text-[9px] text-[#5A5F66]">{laps.length} laps</span>
             </div>
           )}
           <table className="w-full text-xs font-mono-num">
             {bi === 0 && (
-              <thead className="text-[#7B8088] uppercase text-[10px]">
+              <thead className="text-[#9097A0] uppercase text-[10px]">
                 <tr className="border-b border-[#2A2C32]">
                   <th className="text-left px-2 py-1">Lap</th>
                   <th className="text-right px-2 py-1">Time</th>
@@ -114,13 +114,13 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
                   >
                     <td className="px-2 py-0.5">
                       {lap.index}
-                      {!lap.trusted && <span className="ml-1 text-[#7B8088]">·</span>}
+                      {!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
                       {isBest && <span className="ml-1 text-[#FFC627]">★</span>}
                     </td>
                     <td className={"text-right px-2 py-0.5 " + (isBest ? "text-[#FFC627] font-bold" : "")}>
                       {formatLapTime(lap.durationS * 1_000_000)}
                     </td>
-                    <td className="text-right px-2 py-0.5 text-[#7B8088]">
+                    <td className="text-right px-2 py-0.5 text-[#9097A0]">
                       {dt === 0 ? "—" : `+${dt.toFixed(3)}`}
                     </td>
                     <td className="text-right px-2 py-0.5 text-[10px]">
@@ -147,7 +147,7 @@ function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
   return (
     <div className="w-full h-full bg-[#16171B] overflow-auto">
       <table className="w-full text-xs font-mono-num">
-        <thead className="text-[#7B8088] uppercase text-[10px]">
+        <thead className="text-[#9097A0] uppercase text-[10px]">
           <tr className="border-b border-[#2A2C32]">
             <th className="text-left px-2 py-1">Lap</th>
             <th className="text-right px-2 py-1">Time</th>
@@ -162,7 +162,7 @@ function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
               <tr key={lap.number} className={`border-b border-[#23252B] ${isBest ? "bg-[#0E0E10]" : ""}`}>
                 <td className="px-2 py-1">{lap.number}</td>
                 <td className={`text-right px-2 py-1 ${isBest ? "text-[#FFC627] font-bold" : "text-[#D8DCE2]"}`}>{formatLapTime(lap.time_ms * 1000)}</td>
-                <td className="text-right px-2 py-1 text-[#7B8088]">{dt === 0 ? "—" : `+${(dt / 1000).toFixed(3)}`}</td>
+                <td className="text-right px-2 py-1 text-[#9097A0]">{dt === 0 ? "—" : `+${(dt / 1000).toFixed(3)}`}</td>
               </tr>
             );
           })}

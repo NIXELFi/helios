@@ -91,7 +91,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
         onMouseLeave={() => setColorOpen(false)}
       >
         <span>Color</span>
-        <span className="text-[#7B8088]">▸</span>
+        <span className="text-[#9097A0]">▸</span>
         {colorOpen && (
           <div
             role="menu"

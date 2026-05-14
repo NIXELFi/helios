@@ -174,7 +174,7 @@ export function Tile({
     >
       <div
         className={
-          "bg-[#0E0E10] text-[#7B8088] text-[10px] uppercase tracking-wider px-2 py-1 border-b border-[#2A2C32] " +
+          "bg-[#0E0E10] text-[#9097A0] text-[10px] uppercase tracking-wider px-2 py-1 border-b border-[#2A2C32] " +
           (editMode ? "cursor-grab active:cursor-grabbing select-none" : "")
         }
         onPointerDown={onMoveDown}

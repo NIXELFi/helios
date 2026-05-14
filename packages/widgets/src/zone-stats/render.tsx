@@ -84,7 +84,7 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
 
   if (!zone) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#7B8088] text-center px-4">
+      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
         Place a datum (shift+click on a strip chart). The zone is the segment between two datums, or between a datum and the cursor.
       </div>
     );
@@ -109,13 +109,13 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
   return (
     <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
       <div className="px-2 py-1 flex items-center justify-between bg-[#0E0E10] border-b border-[#2A2C32] sticky top-0">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">
           {zone.kind === "datum-datum" ? "Δ datum" : "datum → cursor"}
         </span>
         <span className="font-mono-num text-[10px] text-[#FFC627]">{fmtDur((zone.endUs - zone.startUs) / 1_000_000)}</span>
       </div>
       <table className="w-full font-mono-num">
-        <thead className="text-[#7B8088] text-[9px] uppercase tracking-wider">
+        <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
           <tr className="border-b border-[#2A2C32]">
             <th className="text-left px-2 py-0.5">Channel</th>
             <th className="text-right px-2 py-0.5">start</th>
@@ -137,13 +137,13 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
               <td className="text-right px-2 py-0.5 text-[#FFB800]">{fmt(agg.end - agg.start)}</td>
               <td className="text-right px-2 py-0.5">{fmt(mean)}</td>
               <td className="text-right px-2 py-0.5">{fmt(stddev)}</td>
-              <td className="text-right px-2 py-0.5 text-[#7B8088]">{fmt(agg.min === Infinity ? NaN : agg.min)}</td>
-              <td className="text-right px-2 py-0.5 text-[#7B8088]">{fmt(agg.max === -Infinity ? NaN : agg.max)}</td>
+              <td className="text-right px-2 py-0.5 text-[#9097A0]">{fmt(agg.min === Infinity ? NaN : agg.min)}</td>
+              <td className="text-right px-2 py-0.5 text-[#9097A0]">{fmt(agg.max === -Infinity ? NaN : agg.max)}</td>
               <td className="text-right px-2 py-0.5">{fmt(slope, 3)}</td>
             </tr>
           ))}
           {rows.length === 0 && (
-            <tr><td colSpan={9} className="text-center text-[#7B8088] py-2">add channels in the config panel</td></tr>
+            <tr><td colSpan={9} className="text-center text-[#9097A0] py-2">add channels in the config panel</td></tr>
           )}
         </tbody>
       </table>

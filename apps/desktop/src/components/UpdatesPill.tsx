@@ -31,13 +31,13 @@ function pillFor(state: UpdaterState): { label: string; title: string; className
       return {
         label: "checking…",
         title: "Checking for updates",
-        className: "bg-[#16171B] text-[#7B8088] border-[#2A2C32]",
+        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32]",
       };
     case "up_to_date":
       return {
         label: `✓ v${state.current || "—"}`,
         title: "You're on the latest version. Click to recheck.",
-        className: "bg-[#16171B] text-[#7B8088] border-[#2A2C32] hover:border-[#FFC627]",
+        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32] hover:border-[#FFC627]",
       };
     case "available":
       return {
@@ -63,7 +63,7 @@ function pillFor(state: UpdaterState): { label: string; title: string; className
       return {
         label: "– offline",
         title: `Update check failed: ${state.error}. Click to retry.`,
-        className: "bg-[#16171B] text-[#7B8088] border-[#2A2C32] hover:border-[#FFC627]",
+        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32] hover:border-[#FFC627]",
       };
   }
 }

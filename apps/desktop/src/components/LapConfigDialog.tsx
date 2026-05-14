@@ -80,12 +80,12 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="Lap detection config" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-[#0E0E10] border border-[#2A2C32] w-[720px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
           <span className="text-xs uppercase tracking-wider text-[#FFC627]">Lap detection · {session.label}</span>
           <button aria-label="Close" onClick={onClose}
-                  className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm">×</button>
+                  className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm">×</button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs text-[#D8DCE2]">
@@ -119,17 +119,17 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
           </Field>
 
           <div className="border-t border-[#2A2C32] pt-3 mt-2">
-            <div className="text-[10px] uppercase tracking-wider text-[#7B8088] mb-2">Preview</div>
+            <div className="text-[10px] uppercase tracking-wider text-[#9097A0] mb-2">Preview</div>
             {preview ? (
               <PreviewTable set={preview} />
             ) : (
-              <div className="text-[#7B8088] text-[11px]">{cfg.mode === "none" ? "no detection — entire session is one untrusted lap" : "(no preview)"}</div>
+              <div className="text-[#9097A0] text-[11px]">{cfg.mode === "none" ? "no detection — entire session is one untrusted lap" : "(no preview)"}</div>
             )}
           </div>
         </div>
 
         <div className="px-3 py-2 border-t border-[#2A2C32] flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1 text-xs text-[#7B8088] hover:text-[#D8DCE2]">Cancel</button>
+          <button onClick={onClose} className="px-3 py-1 text-xs text-[#9097A0] hover:text-[#D8DCE2]">Cancel</button>
           <button onClick={() => { onSave(cfg); onClose(); }}
                   className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] font-semibold hover:brightness-110">
             Save
@@ -143,7 +143,7 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">{label}</label>
+      <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">{label}</label>
       {children}
       {hint && <span className="text-[10px] text-[#5A5F66]">{hint}</span>}
     </div>
@@ -262,7 +262,7 @@ function PreviewTable({ set }: { set: LapSet }) {
       </div>
       <div className="max-h-40 overflow-y-auto border border-[#2A2C32]">
         <table className="w-full font-mono-num">
-          <thead className="text-[#7B8088] text-[9px] uppercase tracking-wider sticky top-0 bg-[#0E0E10]">
+          <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider sticky top-0 bg-[#0E0E10]">
             <tr><th className="text-left px-2 py-0.5">#</th><th className="text-right px-2 py-0.5">Time</th><th className="text-right px-2 py-0.5">Distance</th><th className="text-left px-2 py-0.5">Trust</th></tr>
           </thead>
           <tbody>

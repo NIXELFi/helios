@@ -98,7 +98,7 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#7B8088]">
+      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#9097A0]">
         no laps detected — configure detection in the Sessions panel
       </div>
     );
@@ -112,11 +112,11 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
             {visible.length > 1 && (
               <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
                 <span className="w-2 h-2 rounded-sm" style={{ background: session.color }} aria-hidden />
-                <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">{session.label}</span>
+                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{session.label}</span>
               </div>
             )}
             <table className="w-full font-mono-num">
-              <thead className="text-[#7B8088] text-[9px] uppercase tracking-wider">
+              <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
                 <tr className="border-b border-[#2A2C32]">
                   <th className="text-left px-2 py-1">Lap</th>
                   <th className="text-right px-2 py-1">Time</th>
@@ -141,13 +141,13 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
                     }>
                       <td className="px-2 py-0.5">
                         {lap.index}
-                        {!lap.trusted && <span className="ml-1 text-[#7B8088]">·</span>}
+                        {!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
                         {isBest && <span className="ml-1 text-[#FFC627]">★</span>}
                       </td>
                       <td className={"text-right px-2 py-0.5 " + (isBest ? "font-bold" : "")}>{fmtSec(lap.durationS)}</td>
                       <td className="text-right px-2 py-0.5">{fmtDelta(dt)}</td>
                       <td className="text-right px-2 py-0.5">{fmtDelta(dAvg)}</td>
-                      <td className="text-right px-2 py-0.5 text-[#7B8088]">
+                      <td className="text-right px-2 py-0.5 text-[#9097A0]">
                         {Number.isFinite(lap.distanceM) ? `${(lap.distanceM / 1000).toFixed(2)} km` : "—"}
                       </td>
                     </tr>

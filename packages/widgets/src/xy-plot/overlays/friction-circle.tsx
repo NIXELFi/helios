@@ -113,7 +113,7 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
     return (
       <>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[#7B8088] text-[11px]">percentile rings (100 = peak)</span>
+          <span className="text-[#9097A0] text-[11px]">percentile rings (100 = peak)</span>
           {percentiles.map((p, i) => (
             <div key={i} className="flex items-center gap-1 text-[11px]">
               <input type="number" min={0} max={100} step={1} value={p}
@@ -156,7 +156,7 @@ register(frictionCircleOverlay);
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#7B8088]">{label}</span>
+      <span className="text-[#9097A0]">{label}</span>
       {children}
     </label>
   );

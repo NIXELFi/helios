@@ -24,3 +24,14 @@ body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-
   100% { transform: translateX(100%); }
 }
 .helios-bar-slide { animation: helios-bar-slide 1.4s linear infinite; }
+
+/* Respect the user's OS-level "reduce motion" setting. Animations are
+   decorative here — the progress bar fills regardless, and the UpdatesPill
+   "available" state is still legible without the pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .helios-bar-slide { animation: none; }
+  /* Tailwind's animate-pulse on UpdatesPill etc. */
+  .animate-pulse { animation: none !important; }
+  /* Generic transitions on hover/focus stay; only continuous animations are
+     disabled. Tailwind's transition-* classes are short and discrete. */
+}

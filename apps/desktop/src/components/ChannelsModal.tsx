@@ -58,6 +58,9 @@ export function ChannelsModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Channels"
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
       onClick={onClose}
     >
@@ -67,11 +70,11 @@ export function ChannelsModal({
       >
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
           <span className="text-xs uppercase tracking-wider text-[#FFC627]">Channels</span>
-          <span className="text-[11px] text-[#7B8088]">{sessionLabel}</span>
+          <span className="text-[11px] text-[#9097A0]">{sessionLabel}</span>
           <button
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
           >×</button>
         </div>
         <div className="px-3 py-2 border-b border-[#2A2C32] flex items-center gap-2">
@@ -82,7 +85,7 @@ export function ChannelsModal({
             onChange={(e) => setFilter(e.target.value)}
             className="flex-1 bg-[#16171B] border border-[#2A2C32] rounded-sm px-2 py-1 text-xs text-[#D8DCE2] focus:outline-none focus:border-[#FFC627]"
           />
-          <span className="text-[10px] text-[#7B8088]">
+          <span className="text-[10px] text-[#9097A0]">
             {totalShown} / {channels.length}
             {overrideCount > 0 && (
               <>
@@ -95,7 +98,7 @@ export function ChannelsModal({
         <div className="flex-1 overflow-y-auto">
           <table className="w-full text-xs text-[#D8DCE2]">
             <thead className="sticky top-0 bg-[#0E0E10] border-b border-[#2A2C32]">
-              <tr className="text-[10px] uppercase tracking-wider text-[#7B8088]">
+              <tr className="text-[10px] uppercase tracking-wider text-[#9097A0]">
                 <th className="text-left px-2 py-1 w-2"></th>
                 <th className="text-left px-2 py-1">id</th>
                 <th className="text-left px-2 py-1">display name</th>
@@ -110,7 +113,7 @@ export function ChannelsModal({
               {grouped.map(([group, list]) => (
                 <>
                   <tr key={`g-${group}`} className="bg-[#16171B]">
-                    <td colSpan={8} className="px-2 py-1 text-[10px] uppercase tracking-wider text-[#7B8088]">{group}</td>
+                    <td colSpan={8} className="px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">{group}</td>
                   </tr>
                   {list.map((c) => {
                     const overrideTarget = overrides[c.id];
@@ -146,13 +149,13 @@ export function ChannelsModal({
                               }}
                             />
                           ) : (
-                            <span className="text-[#7B8088]">{shownLabel}</span>
+                            <span className="text-[#9097A0]">{shownLabel}</span>
                           )}
                         </td>
-                        <td className="px-2 py-1 text-[#7B8088]">{c.units || "—"}</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#7B8088]">{c.sample_rate_hz} Hz</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#7B8088]">{c.min ?? "—"}</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#7B8088]">{c.max ?? "—"}</td>
+                        <td className="px-2 py-1 text-[#9097A0]">{c.units || "—"}</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.sample_rate_hz} Hz</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.min ?? "—"}</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.max ?? "—"}</td>
                       </tr>
                     );
                   })}
@@ -161,7 +164,7 @@ export function ChannelsModal({
             </tbody>
           </table>
         </div>
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#7B8088]">
+        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
           Click a source cell to rebind the canonical channel to a different CSV column.
           {" "}Overrides are per-session and survive app restart.
         </div>
@@ -216,7 +219,7 @@ function SourcePicker({
           "text-left px-1.5 py-0.5 rounded-sm border text-[11px] font-mono-num " +
           (isOverridden
             ? "bg-[#1B1A14] text-[#FFC627] border-[#FFC627]/40 hover:border-[#FFC627]"
-            : "bg-transparent text-[#7B8088] border-transparent hover:border-[#2A2C32] hover:text-[#D8DCE2]")
+            : "bg-transparent text-[#9097A0] border-transparent hover:border-[#2A2C32] hover:text-[#D8DCE2]")
         }
         title={
           isOverridden
@@ -243,7 +246,7 @@ function SourcePicker({
             className="block w-full text-left px-2 py-1 text-[11px] text-[#D8DCE2] hover:bg-[#16171B] border-b border-[#2A2C32]"
           >
             <span className="text-[#FFC627]">Reset to auto</span>
-            <span className="ml-1 text-[10px] text-[#7B8088]">({autoLabel})</span>
+            <span className="ml-1 text-[10px] text-[#9097A0]">({autoLabel})</span>
           </button>
           {sourceHeaders.map((h) => (
             <button
@@ -263,7 +266,7 @@ function SourcePicker({
               }
             >
               <div className="font-mono-num">{h.sourceHeader}</div>
-              <div className="text-[10px] text-[#7B8088]">→ {h.channelId}</div>
+              <div className="text-[10px] text-[#9097A0]">→ {h.channelId}</div>
             </button>
           ))}
         </div>

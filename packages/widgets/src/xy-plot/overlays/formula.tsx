@@ -96,7 +96,7 @@ export const formulaOverlay: OverlayModule<FormulaConfig, FormulaArtifact> = {
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#7B8088]">{label}</span>
+      <span className="text-[#9097A0]">{label}</span>
       {children}
     </label>
   );

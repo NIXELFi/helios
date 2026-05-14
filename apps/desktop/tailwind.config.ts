@@ -13,7 +13,7 @@ export default {
         "helios-panel": "#16171B",
         "helios-line": "#2A2C32",
         "helios-text": "#D8DCE2",
-        "helios-dim":  "#7B8088",
+        "helios-dim":  "#9097A0",
         "asu-maroon": "#8C1D40",
         "asu-gold":   "#FFC627",
       },

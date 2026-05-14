@@ -85,7 +85,7 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
           </div>
 
           <div className="flex flex-col gap-1 border-t border-[#2A2C32] pt-2">
-            <div className="text-[10px] text-[#7B8088] uppercase tracking-wider">overlays</div>
+            <div className="text-[10px] text-[#9097A0] uppercase tracking-wider">overlays</div>
             {config.overlays.map((o, idx) => (
               <OverlayRow key={o.id} overlay={o} index={idx} total={config.overlays.length}
                 availableChannels={availableChannels}

@@ -71,6 +71,9 @@ export function MathChannelsModal({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Math channels"
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
       onClick={onClose}
     >
@@ -83,7 +86,7 @@ export function MathChannelsModal({
           <button
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
           >×</button>
         </div>
 
@@ -91,7 +94,7 @@ export function MathChannelsModal({
           {/* Channel list */}
           <aside className="w-52 flex-shrink-0 border-r border-[#2A2C32] flex flex-col">
             <div className="px-2 py-1 border-b border-[#2A2C32] flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">{channels.length} defined</span>
+              <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{channels.length} defined</span>
               <button
                 onClick={add}
                 className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#16171B] rounded-sm cursor-pointer"
@@ -99,7 +102,7 @@ export function MathChannelsModal({
             </div>
             <div className="flex-1 overflow-y-auto">
               {channels.length === 0 && (
-                <div className="px-3 py-2 text-[11px] text-[#7B8088]">
+                <div className="px-3 py-2 text-[11px] text-[#9097A0]">
                   No math channels yet. Click <span className="text-[#FFC627]">+ add</span>.
                 </div>
               )}
@@ -123,7 +126,7 @@ export function MathChannelsModal({
                     <span className="flex-1 truncate">
                       <span className="font-mono-num text-[#FFC627]">{c.id}</span>
                       <br />
-                      <span className="text-[10px] text-[#7B8088]">{c.display_name}</span>
+                      <span className="text-[10px] text-[#9097A0]">{c.display_name}</span>
                     </span>
                     {hasError && (
                       <span title={errors.get(c.id)} className="text-[#EF5350] flex-shrink-0">!</span>
@@ -152,12 +155,12 @@ export function MathChannelsModal({
                   onChange={update}
                   onDelete={() => remove(selected.id)}
                 />
-              : <div className="p-6 text-xs text-[#7B8088]">Select a math channel from the list, or click + add to create one.</div>
+              : <div className="p-6 text-xs text-[#9097A0]">Select a math channel from the list, or click + add to create one.</div>
             }
           </main>
         </div>
 
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#7B8088]">
+        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
           Drag tokens from the palette into the expression box, or click them to insert at the cursor.
         </div>
       </div>
@@ -191,12 +194,12 @@ function Palette({ channels, disabled, onInsert }: PaletteProps) {
   return (
     <aside className="w-60 flex-shrink-0 border-r border-[#2A2C32] flex flex-col bg-[#0B0B0D]">
       <div className="px-2 py-1 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">Palette</span>
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Palette</span>
       </div>
       <div className="flex-1 overflow-y-auto">
         <Section title="Channels" open={open["Channels"] ?? true} onToggle={() => toggle("Channels")}>
           {channelsByGroup.length === 0 && (
-            <div className="px-3 py-1 text-[10px] text-[#7B8088]">No channels in primary session.</div>
+            <div className="px-3 py-1 text-[10px] text-[#9097A0]">No channels in primary session.</div>
           )}
           {channelsByGroup.map(([group, list]) => (
             <div key={group} className="mb-1">
@@ -287,7 +290,7 @@ function Section({ title, open, onToggle, children }: {
     <div className="border-b border-[#16171B]">
       <button
         onClick={onToggle}
-        className="w-full px-2 py-1 text-left text-[10px] uppercase tracking-wider text-[#7B8088] hover:text-[#FFC627] hover:bg-[#16171B] flex items-center justify-between"
+        className="w-full px-2 py-1 text-left text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] flex items-center justify-between"
       >
         <span>{title}</span>
         <span className="text-[#5A5F66]">{open ? "−" : "+"}</span>
@@ -417,7 +420,7 @@ function Editor({
   return (
     <div className="p-4 flex flex-col gap-3 text-xs text-[#D8DCE2]">
       <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-2 items-center">
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">id</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">id</label>
         <div className="flex items-center gap-2">
           <input
             value={channel.id}
@@ -430,21 +433,21 @@ function Editor({
           {!idValid && <span className="text-[10px] text-[#EF5350]">id must match [a-zA-Z_][a-zA-Z0-9_.]*</span>}
         </div>
 
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">name</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">name</label>
         <input
           value={channel.display_name}
           onChange={(e) => set("display_name", e.target.value)}
           className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">units</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">units</label>
         <input
           value={channel.units}
           onChange={(e) => set("units", e.target.value)}
           className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">decimals</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">decimals</label>
         <input
           type="number" min={0} max={6}
           value={channel.decimals}
@@ -452,7 +455,7 @@ function Editor({
           className="w-20 bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">color</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">color</label>
         <input
           type="color"
           value={channel.color}
@@ -460,7 +463,7 @@ function Editor({
           className="w-12 h-7 bg-[#16171B] border border-[#2A2C32] cursor-pointer"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">group</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">group</label>
         <input
           value={channel.group}
           onChange={(e) => set("group", e.target.value)}
@@ -469,7 +472,7 @@ function Editor({
       </div>
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] uppercase tracking-wider text-[#7B8088]">expression</label>
+        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">expression</label>
         <textarea
           ref={textareaRef}
           value={channel.expression}
@@ -495,7 +498,7 @@ function Editor({
           <div className="text-[10px] text-[#EF5350]">Apply error: {errorFromApply}</div>
         )}
         {check.ok && check.refs.length > 0 && unknownRefs.length === 0 && (
-          <div className="text-[10px] text-[#7B8088]">References: {check.refs.map(formatRefForExpr).join(", ")}</div>
+          <div className="text-[10px] text-[#9097A0]">References: {check.refs.map(formatRefForExpr).join(", ")}</div>
         )}
       </div>
 
@@ -509,9 +512,9 @@ function Editor({
       <div className="flex items-center justify-between pt-2 border-t border-[#2A2C32] mt-2">
         <button
           onClick={onDelete}
-          className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#7B8088] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm cursor-pointer"
+          className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm cursor-pointer"
         >Delete</button>
-        <span className="text-[10px] text-[#7B8088]">Edits save automatically.</span>
+        <span className="text-[10px] text-[#9097A0]">Edits save automatically.</span>
       </div>
     </div>
   );
@@ -524,7 +527,7 @@ function NumberField({ label, value, onChange }: {
 }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="text-[10px] uppercase tracking-wider text-[#7B8088] w-12">{label}</span>
+      <span className="text-[10px] uppercase tracking-wider text-[#9097A0] w-12">{label}</span>
       <input
         type="number"
         value={value ?? ""}

@@ -20,11 +20,11 @@ export function TimeReportConfigEditor({ config, onChange }: WidgetConfigEditorP
         Show all visible sessions
       </label>
       <label className="flex items-center gap-2 text-[11px]">
-        <span className="text-[#7B8088] w-24">rolling window</span>
+        <span className="text-[#9097A0] w-24">rolling window</span>
         <input type="number" min={0} max={20} value={config.rollingWindow}
                onChange={(e) => set("rollingWindow", Math.max(0, Math.min(20, Number(e.target.value))))}
                className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1 py-0.5" />
-        <span className="text-[10px] text-[#7B8088]">laps (0 = off)</span>
+        <span className="text-[10px] text-[#9097A0]">laps (0 = off)</span>
       </label>
     </div>
   );

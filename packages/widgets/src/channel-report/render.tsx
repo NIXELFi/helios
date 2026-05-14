@@ -114,7 +114,7 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#7B8088]">
+      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#9097A0]">
         no laps detected — configure detection in the Sessions panel
       </div>
     );
@@ -127,11 +127,11 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
           {visible.length > 1 && (
             <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
               <span className="w-2 h-2 rounded-sm" style={{ background: session.color }} aria-hidden />
-              <span className="text-[10px] uppercase tracking-wider text-[#7B8088]">{session.label}</span>
+              <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{session.label}</span>
             </div>
           )}
           <table className="w-full font-mono-num">
-            <thead className="text-[#7B8088] text-[9px] uppercase tracking-wider">
+            <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
               <tr className="border-b border-[#2A2C32]">
                 <th className="text-left px-2 py-1 sticky left-0 bg-[#16171B]">Lap</th>
                 <th className="text-right px-2 py-1">Time</th>
@@ -160,7 +160,7 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
                   "border-b border-[#23252B] " + (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
                 }>
                   <td className="px-2 py-0.5 sticky left-0 bg-[#16171B]">
-                    {lap.index}{!lap.trusted && <span className="ml-1 text-[#7B8088]">·</span>}
+                    {lap.index}{!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
                   </td>
                   <td className="text-right px-2 py-0.5">{formatLapTime(lap.durationS * 1_000_000)}</td>
                   {cells.flatMap((cellStats, ci) =>

@@ -634,7 +634,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         }
         style={{ background: useMap ? "transparent" : undefined }}
       />
-      <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-[#7B8088] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
+      <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-[#9097A0] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
         <span>basemap</span>
         <span className="text-[#FFC627]">{basemap}</span>
       </div>

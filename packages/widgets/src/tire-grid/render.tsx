@@ -52,14 +52,14 @@ export function TireGridRender(props: WidgetRenderProps<TireGridConfig>) {
     const d = data[c];
     return (
       <div className="flex flex-col bg-[#0E0E10] border border-[#2A2C32] m-1 p-2 flex-1">
-        <div className="text-[10px] uppercase text-[#7B8088]">{c.toUpperCase()}</div>
+        <div className="text-[10px] uppercase text-[#9097A0]">{c.toUpperCase()}</div>
         <div className="flex-1 flex items-center justify-center">
           <div className="w-full h-2 rounded-sm" style={{ background: tempColor(d.temp) }} />
         </div>
         <div className="font-mono-num text-lg text-[#D8DCE2] text-center">
           {d.temp === null ? "—" : `${d.temp.toFixed(0)}°`}
         </div>
-        <div className="font-mono-num text-xs text-[#7B8088] text-center">
+        <div className="font-mono-num text-xs text-[#9097A0] text-center">
           {d.pressure === null ? "—" : `${d.pressure.toFixed(1)} psi`}
         </div>
         {config.wearChannels && (

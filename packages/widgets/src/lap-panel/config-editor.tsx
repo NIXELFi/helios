@@ -20,13 +20,13 @@ export function LapPanelConfigEditor({ config, onChange }: WidgetConfigEditorPro
                className="accent-[#FFC627]" />
         Hide out-laps / in-laps
       </label>
-      <div className="text-[10px] text-[#7B8088] mt-2">
+      <div className="text-[10px] text-[#9097A0] mt-2">
         Lap detection is configured per-session in the Sessions panel.
         Click a lap to make it Main; ⌘-click to make it Ref; shift-click to toggle as an overlay.
       </div>
       {hasLegacy && (
         <button
-          className="self-start mt-2 px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#7B8088] hover:text-[#EF5350] border border-[#2A2C32] hover:border-[#EF5350]"
+          className="self-start mt-2 px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#EF5350] border border-[#2A2C32] hover:border-[#EF5350]"
           onClick={() => set("laps", [])}
           title="Remove the legacy static lap list — this widget will read from session lap detection"
         >Clear legacy laps ({config.laps.length})</button>

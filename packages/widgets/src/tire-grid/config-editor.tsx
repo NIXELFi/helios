@@ -12,9 +12,9 @@ export function TireGridConfigEditor({ config, onChange, availableChannels }: Wi
   return (
     <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
       <div className="grid grid-cols-[auto_1fr_1fr] gap-1 items-center">
-        <span className="text-[10px] uppercase text-[#7B8088]"></span>
-        <span className="text-[10px] uppercase text-[#7B8088]">temp</span>
-        <span className="text-[10px] uppercase text-[#7B8088]">pressure</span>
+        <span className="text-[10px] uppercase text-[#9097A0]"></span>
+        <span className="text-[10px] uppercase text-[#9097A0]">temp</span>
+        <span className="text-[10px] uppercase text-[#9097A0]">pressure</span>
         {CORNERS.map((c) => (
           <div key={c} className="contents">
             <span className="font-mono-num">{c.toUpperCase()}</span>
