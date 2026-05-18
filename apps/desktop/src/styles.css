@@ -35,3 +35,68 @@ body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-
   /* Generic transitions on hover/focus stay; only continuous animations are
      disabled. Tailwind's transition-* classes are short and discrete. */
 }
+
+/* In-app wiki / help-menu typography. Tailwind's @tailwindcss/typography is
+   not installed; we style the rendered markdown directly here. */
+.helios-wiki-prose { color: #D8DCE2; font-size: 13px; line-height: 1.6; }
+.helios-wiki-prose h1 { font-size: 1.65rem; font-weight: 700; color: #FFC627; margin: 0 0 0.75em; letter-spacing: 0.01em; }
+.helios-wiki-prose h2 { font-size: 1.3rem;  font-weight: 700; color: #D8DCE2; margin: 1.6em 0 0.5em; border-bottom: 1px solid #2A2C32; padding-bottom: 0.25em; }
+.helios-wiki-prose h3 { font-size: 1.05rem; font-weight: 600; color: #D8DCE2; margin: 1.4em 0 0.4em; }
+.helios-wiki-prose h4 { font-size: 0.95rem; font-weight: 600; color: #9097A0; margin: 1.2em 0 0.3em; text-transform: uppercase; letter-spacing: 0.05em; }
+.helios-wiki-prose p  { margin: 0.6em 0; }
+.helios-wiki-prose strong { color: #FFC627; font-weight: 600; }
+.helios-wiki-prose em { color: #D8DCE2; font-style: italic; }
+.helios-wiki-prose a  { color: #4FC3F7; text-decoration: none; }
+.helios-wiki-prose a:hover { text-decoration: underline; color: #FFC627; }
+.helios-wiki-prose ul, .helios-wiki-prose ol { margin: 0.5em 0 0.8em 1.4em; padding: 0; }
+.helios-wiki-prose li { margin: 0.15em 0; }
+.helios-wiki-prose code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+  background: #16171B;
+  border: 1px solid #2A2C32;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #FFC627;
+}
+.helios-wiki-prose pre {
+  background: #16171B;
+  border: 1px solid #2A2C32;
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin: 0.8em 0;
+  overflow-x: auto;
+}
+.helios-wiki-prose pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #D8DCE2;
+  font-size: 0.85em;
+}
+.helios-wiki-prose blockquote {
+  border-left: 3px solid #FFC627;
+  background: #16171B;
+  margin: 0.8em 0;
+  padding: 0.5em 1em;
+  color: #9097A0;
+}
+.helios-wiki-prose blockquote p { margin: 0.25em 0; }
+.helios-wiki-prose hr { border: none; border-top: 1px solid #2A2C32; margin: 1.6em 0; }
+.helios-wiki-prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.9em 0;
+  font-size: 0.95em;
+}
+.helios-wiki-prose th, .helios-wiki-prose td {
+  border: 1px solid #2A2C32;
+  padding: 6px 10px;
+}
+.helios-wiki-prose th {
+  background: #16171B;
+  color: #FFC627;
+  font-weight: 600;
+  text-align: left;
+}
+.helios-wiki-prose tr:nth-child(even) td { background: rgba(22,23,27,0.4); }
