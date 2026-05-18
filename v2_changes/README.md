@@ -34,6 +34,13 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 26 | Workspace UX polish — tab-strip horizontal scroll + .helios launch handler | [26-workspace-ux-polish.md](26-workspace-ux-polish.md) |
 | 27 | XY analysis plot — overlay system (scatter / fit / formula / bins / stats / quadrant-fit) + filter / group-by / zoom integration | [27-xy-analysis-plot.md](27-xy-analysis-plot.md) |
 | 28 | 2.4.0 polish bundle — global datums/zoom, custom tab scrollbar, edit-mode header focus, FpsCounter, panther app icon, real steering wheel art, version-pill fix, macOS overscroll fix | [28-2.4.0-polish-bundle.md](28-2.4.0-polish-bundle.md) |
+| 29 | 2.4.1 — histogram split-at + zoom integration; math palette `[id]` auto-wrap; per-session math errors | [29-2.4.1-histogram-and-math.md](29-2.4.1-histogram-and-math.md) |
+| 30 | 2.5.0 i2-parity pass — laps as first-class, distance-axis strip chart, channel/time/zone reports, FFT, CSV + KML export | [30-i2-parity-laps-distance-reports-fft-export.md](30-i2-parity-laps-distance-reports-fft-export.md) |
+| 31 | 2.5.1 — add / remove / drag-drop user-loaded CSV sessions; Link ECU CSV preamble | [31-add-remove-drag-drop-sessions.md](31-add-remove-drag-drop-sessions.md) |
+| 32 | 2.5.2 — smart channel resolver with semantic matching gated by source units; six new canonical channels | [32-smart-channel-resolver-motec-link.md](32-smart-channel-resolver-motec-link.md) |
+| 33 | 2.5.3 — split `engine.tps` / `engine.aps` (+ `_sub` variants); loader collision protection | [33-tps-aps-split-and-collision-protection.md](33-tps-aps-split-and-collision-protection.md) |
+
+> **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 
 ## New behaviors introduced
 
