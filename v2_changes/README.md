@@ -39,6 +39,7 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 31 | 2.5.1 — add / remove / drag-drop user-loaded CSV sessions; Link ECU CSV preamble | [31-add-remove-drag-drop-sessions.md](31-add-remove-drag-drop-sessions.md) |
 | 32 | 2.5.2 — smart channel resolver with semantic matching gated by source units; six new canonical channels | [32-smart-channel-resolver-motec-link.md](32-smart-channel-resolver-motec-link.md) |
 | 33 | 2.5.3 — split `engine.tps` / `engine.aps` (+ `_sub` variants); loader collision protection | [33-tps-aps-split-and-collision-protection.md](33-tps-aps-split-and-collision-protection.md) |
+| 34 | 3.2.2 — full user + developer wiki under `docs/wiki/` and in-app Help & Wiki modal (F1, ⌘K, header) | [34-wiki-and-in-app-help.md](34-wiki-and-in-app-help.md) |
 
 > **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 
