@@ -19,6 +19,7 @@ const GROUPS: Group[] = [
       { keys: ["⌘", "K"], label: "Open command palette" },
       { keys: ["⌘", "O"], label: "Open data file…" },
       { keys: ["?"],      label: "Show this overlay" },
+      { keys: ["F1"],     label: "Open Help & Wiki" },
     ],
   },
   {
