@@ -13,8 +13,8 @@ describe("NavRail", () => {
 
   it("marks the active entry with aria-current=page", () => {
     render(<NavRail active="results" onSelect={() => {}} />);
-    expect(screen.getByText("Results")).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("Config")).not.toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /results/i })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /config/i })).not.toHaveAttribute("aria-current", "page");
   });
 
   it("invokes onSelect with the entry id", () => {

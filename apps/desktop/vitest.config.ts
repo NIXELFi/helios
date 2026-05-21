@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
-    include: ["tests/**/*.test.{ts,tsx}"],
+    include: [
+      "tests/**/*.test.{ts,tsx}",
+      "src/**/__tests__/**/*.test.{ts,tsx}",
+    ],
     setupFiles: ["tests/setup.ts"],
   },
   resolve: {
