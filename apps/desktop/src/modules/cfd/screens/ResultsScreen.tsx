@@ -7,11 +7,11 @@ export function ResultsScreen() {
 
   if (!activeStudy) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-helios-dim">
-        <p className="mb-4 text-sm">Pick a study on the left, or start a new one.</p>
+      <div className="flex h-full flex-col items-center justify-center bg-[#0B0B0D] text-[#9097A0]">
+        <p className="mb-4 text-[11px] uppercase tracking-wider text-[#5A5F66]">No study selected</p>
         <button
           type="button"
-          className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-yellow-300"
+          className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300"
           onClick={() => navigateTo("studies")}
         >
           Go to studies
@@ -25,6 +25,6 @@ export function ResultsScreen() {
     case "single-rpm":
       return <SingleRpmResults study={activeStudy} />;
     default:
-      return <div className="p-4 text-helios-dim">Unknown study kind.</div>;
+      return <div className="p-4 text-[#9097A0]">Unknown study kind.</div>;
   }
 }

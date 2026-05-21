@@ -18,77 +18,87 @@ export function SingleRpmResults({ study }: Props) {
   }, [study.finishedAt, study.startedAt]);
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-helios-line bg-helios-base px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-helios-text">
-              Single-RPM run · {study.params.rpm.toFixed(0)} rpm · {study.params.junctionKind}
-            </h1>
-            <p className="text-xs text-helios-dim" title={study.configPath}>
-              {basename(study.configPath)} · {study.cycles.length} / {study.params.nCyclesMax} cycles
-              · {elapsed}s
-              · <StatusText status={study.status} />
-              {study.summary && study.summary.convergedCycle >= 0 && (
-                <> · converged at cycle {study.summary.convergedCycle}</>
-              )}
-            </p>
-            {study.error && (
-              <p className="mt-1 text-xs text-red-300" role="alert">
-                {study.errorReason ? `${study.errorReason}: ` : ""}{study.error}
-              </p>
+    <div className="flex h-full flex-col bg-[#0B0B0D] text-[#D8DCE2]">
+      {/* Header strip — matches Logs WorkspaceTabBar density */}
+      <header className="flex flex-shrink-0 items-center gap-3 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 text-[11px] uppercase tracking-wider text-[#9097A0]">
+            <span className="text-[#FFC627]">Single-RPM</span>
+            <span>·</span>
+            <span>{study.params.rpm.toFixed(0)} rpm</span>
+            <span>·</span>
+            <span>{study.params.junctionKind}</span>
+            <StatusBadge status={study.status} />
+          </div>
+          <div className="mt-0.5 truncate text-[10px] text-[#5A5F66]" title={study.configPath}>
+            {basename(study.configPath)} · {study.cycles.length}/{study.params.nCyclesMax} cycles · {elapsed}s
+            {study.summary && study.summary.convergedCycle >= 0 && (
+              <> · converged @ cycle {study.summary.convergedCycle}</>
             )}
           </div>
-          {study.status === "running" && (
-            <button
-              type="button"
-              className="rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm text-red-200 hover:bg-red-500/20"
-              onClick={() => cancelStudy(study.id)}
-            >
-              Cancel
-            </button>
+          {study.error && (
+            <div className="mt-0.5 text-[10px] text-red-300" role="alert">
+              {study.errorReason ? `${study.errorReason}: ` : ""}{study.error}
+            </div>
           )}
         </div>
+        {study.status === "running" && (
+          <button
+            type="button"
+            className="rounded-sm border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-wider text-red-200 hover:bg-red-500/20"
+            onClick={() => cancelStudy(study.id)}
+          >
+            Cancel
+          </button>
+        )}
       </header>
 
-      <div className="flex-1 overflow-auto p-4">
+      {/* Scrollable body so charts + table never push each other off-screen */}
+      <div className="flex-1 min-h-0 overflow-auto">
         {study.cycles.length === 0 ? (
-          <div className="rounded border border-helios-line bg-helios-panel p-8 text-center text-sm text-helios-dim">
+          <div className="m-6 rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-8 text-center text-[11px] text-[#5A5F66]">
             {study.status === "running" ? "Waiting for the first cycle…" : "No cycles to display."}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {/* Charts grid — each card constrains its own height so charts
+                cannot push the table or each other. Min row height is
+                large enough that uPlot axis labels never clip into the
+                title strip or out of the plot. */}
+            <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
               <ChartCard>
                 <CycleChart
                   title="IMEP / BMEP / FMEP (bar)"
                   cycles={study.cycles}
                   series={[
-                    { label: "IMEP", field: "imepBar", color: "#4FC3F7" },
+                    { label: "IMEP", field: "imepBar", color: "#FFC627" },
                     { label: "BMEP", field: "bmepBar", color: "#A5D6A7" },
-                    { label: "FMEP", field: "fmepBar", color: "#FFB300" },
+                    { label: "FMEP", field: "fmepBar", color: "#FF8A65" },
                   ]}
                   yLabel="bar"
+                  height={260}
                 />
               </ChartCard>
               <ChartCard>
                 <CycleChart
-                  title="VE (%) and Indicated power (kW)"
+                  title="VE & Indicated power"
                   cycles={study.cycles}
                   series={[
-                    { label: "VE", field: "veAtm", color: "#CE93D8" },
-                    { label: "P_ind (kW)", field: "indicatedPowerKW", color: "#FF8A65", axis: "y2" },
+                    { label: "VE", field: "veAtm", color: "#4FC3F7" },
+                    { label: "P_ind (kW)", field: "indicatedPowerKW", color: "#CE93D8", axis: "y2" },
                   ]}
                   yLabel="VE"
                   y2Label="kW"
+                  height={260}
                 />
               </ChartCard>
               <ChartCard>
                 <CycleChart
-                  title="EGT mean (K)"
+                  title="EGT (K)"
                   cycles={study.cycles}
                   series={[{ label: "EGT", field: "egtMean", color: "#F48FB1" }]}
                   yLabel="K"
+                  height={260}
                 />
               </ChartCard>
               <ChartCard>
@@ -100,58 +110,77 @@ export function SingleRpmResults({ study }: Props) {
                     { label: "nonconserv", field: "nonconservation", color: "#FFB300" },
                   ]}
                   yLabel="kg"
+                  height={260}
                 />
               </ChartCard>
             </div>
 
-            <section className="mt-4 overflow-x-auto rounded border border-helios-line bg-helios-panel">
-              <table className="w-full min-w-[1000px] text-left text-xs">
-                <thead className="text-helios-dim">
-                  <tr className="[&>th]:px-2 [&>th]:py-1.5">
-                    <th className="text-right">#</th>
-                    <th className="text-right">IMEP</th>
-                    <th className="text-right">BMEP</th>
-                    <th className="text-right">FMEP</th>
-                    <th className="text-right">VE</th>
-                    <th className="text-right">EGT (K)</th>
-                    <th className="text-right">P_ind (kW)</th>
-                    <th className="text-right">P_brake (kW)</th>
-                    <th className="text-right">P_wheel (kW)</th>
-                    <th className="text-right">τ_ind (Nm)</th>
-                    <th className="text-right">τ_brake (Nm)</th>
-                    <th className="text-right">τ_wheel (Nm)</th>
-                    <th className="text-right">m drift</th>
-                    <th className="text-right">nonconserv</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {study.cycles.map((c, i) => {
-                    const isLast = i === study.cycles.length - 1;
-                    return (
-                      <tr key={i} className={"border-t border-helios-line " + (isLast ? "font-semibold text-helios-text" : "")}>
-                        <td className="px-2 py-1 text-right text-helios-dim">{c.cycle}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.imepBar.toFixed(3)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.bmepBar.toFixed(3)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.fmepBar.toFixed(3)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{(c.veAtm * 100).toFixed(2)}%</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.egtMean.toFixed(1)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.indicatedPowerKW.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.brakePowerKW.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.wheelPowerKW.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.indicatedTorqueNm.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.brakeTorqueNm.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.wheelTorqueNm.toFixed(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.massDrift.toExponential(2)}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{c.nonconservation.toExponential(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {/* Cycle table — sits below the charts, never overlaps them */}
+            <section className="m-2 mt-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+                  Cycle stats
+                </div>
+                <div className="text-[10px] text-[#5A5F66]">
+                  {study.cycles.length} cycle{study.cycles.length === 1 ? "" : "s"}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1080px] text-left font-mono text-[11px]">
+                  <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
+                    <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:font-normal">
+                      <th className="text-right">#</th>
+                      <th className="text-right">IMEP</th>
+                      <th className="text-right">BMEP</th>
+                      <th className="text-right">FMEP</th>
+                      <th className="text-right">VE</th>
+                      <th className="text-right">EGT</th>
+                      <th className="text-right">P_ind</th>
+                      <th className="text-right">P_brake</th>
+                      <th className="text-right">P_wheel</th>
+                      <th className="text-right">τ_ind</th>
+                      <th className="text-right">τ_brake</th>
+                      <th className="text-right">τ_wheel</th>
+                      <th className="text-right">m drift</th>
+                      <th className="text-right">nonc.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {study.cycles.map((c, i) => {
+                      const isLast = i === study.cycles.length - 1;
+                      return (
+                        <tr
+                          key={i}
+                          className={
+                            "border-t border-[#16171B] " +
+                            (isLast ? "bg-[#16171B] text-[#D8DCE2]" : "text-[#9097A0] hover:bg-[#16171B]/50")
+                          }
+                        >
+                          <td className="px-2 py-1 text-right text-[#5A5F66]">{c.cycle}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.imepBar.toFixed(3)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.bmepBar.toFixed(3)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.fmepBar.toFixed(3)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{(c.veAtm * 100).toFixed(2)}%</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.egtMean.toFixed(1)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.indicatedPowerKW.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.brakePowerKW.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.wheelPowerKW.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.indicatedTorqueNm.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.brakeTorqueNm.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.wheelTorqueNm.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.massDrift.toExponential(2)}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{c.nonconservation.toExponential(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
+
             {last && (
-              <div className="mt-2 text-xs text-helios-dim">
-                Last cycle: IMEP={last.imepBar.toFixed(3)} bar · VE={(last.veAtm * 100).toFixed(2)}% · EGT={last.egtMean.toFixed(0)} K · P_ind={last.indicatedPowerKW.toFixed(2)} kW
+              <div className="px-3 pb-3 text-[10px] text-[#5A5F66]">
+                Last cycle: IMEP <span className="text-[#D8DCE2]">{last.imepBar.toFixed(3)}</span> bar · VE <span className="text-[#D8DCE2]">{(last.veAtm * 100).toFixed(2)}%</span> · EGT <span className="text-[#D8DCE2]">{last.egtMean.toFixed(0)}</span> K · P_ind <span className="text-[#D8DCE2]">{last.indicatedPowerKW.toFixed(2)}</span> kW
               </div>
             )}
           </>
@@ -162,17 +191,25 @@ export function SingleRpmResults({ study }: Props) {
 }
 
 function ChartCard({ children }: { children: React.ReactNode }) {
-  return <div className="rounded border border-helios-line bg-helios-panel p-3">{children}</div>;
+  return (
+    <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      {children}
+    </div>
+  );
 }
 
-function StatusText({ status }: { status: SingleRpmStudy["status"] }) {
-  const labels: Record<SingleRpmStudy["status"], string> = {
-    idle: "idle",
-    running: "running",
-    cancelling: "cancelling…",
-    done: "done",
-    cancelled: "cancelled",
-    error: "error",
+function StatusBadge({ status }: { status: SingleRpmStudy["status"] }) {
+  const styles: Record<SingleRpmStudy["status"], string> = {
+    idle:        "border-[#2A2C32] text-[#5A5F66]",
+    running:     "border-[#FFC627]/40 text-[#FFC627]",
+    cancelling:  "border-amber-500/40 text-amber-300",
+    done:        "border-green-500/40 text-green-300",
+    cancelled:   "border-[#2A2C32] text-[#5A5F66]",
+    error:       "border-red-500/40 text-red-300",
   };
-  return <span className="text-helios-text">{labels[status]}</span>;
+  return (
+    <span className={"ml-1 rounded-sm border px-1.5 py-[1px] text-[9px] " + styles[status]}>
+      {status}
+    </span>
+  );
 }
