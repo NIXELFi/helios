@@ -22,3 +22,5 @@ serde_json = { workspace = true }
 helios-core = { path = "../../../crates/helios-core" }
 helios-csv = { path = "../../../crates/helios-csv" }
 helios-arrow = { path = "../../../crates/helios-arrow" }
+engine-sim = { path = "../../../crates/engine-sim" }
+ulid = "1"
