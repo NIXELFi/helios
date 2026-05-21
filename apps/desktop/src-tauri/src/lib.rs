@@ -75,6 +75,8 @@ pub fn run() {
             commands::restart::helios_relaunch,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
+            cfd::commands::cfd_save_config,
+            cfd::commands::cfd_default_save_dir,
             cfd::commands::cfd_list_examples,
             cfd::commands::cfd_start_job,
             cfd::commands::cfd_cancel_job,

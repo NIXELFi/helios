@@ -40,6 +40,38 @@ pub fn cfd_load_config(app: AppHandle, path: String) -> Result<LoadedConfig, Str
     cfd_core::load::load_config_from_path(&p, resource_dir.as_deref())
 }
 
+#[tauri::command]
+pub fn cfd_save_config(
+    app: AppHandle,
+    path: String,
+    raw: serde_json::Value,
+) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    // Defense-in-depth: refuse to overwrite a bundled example. The UI
+    // already redirects Save -> Save-As for examples, but a stale
+    // frontend or a misbehaved client could try.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        if cfd_core::load::path_under(&target, &resource_dir) {
+            return Err(
+                "Cannot overwrite bundled example. Use Save As… to choose a user path.".into(),
+            );
+        }
+    }
+    cfd_core::save::save_config(&target, &raw)
+}
+
+#[tauri::command]
+pub fn cfd_default_save_dir(app: AppHandle) -> Result<String, String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let dir = docs.join("Helios").join("cfd").join("configs");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("create_dir_all {}: {}", dir.display(), e))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 // ---------------- cfd_list_examples ----------------
 
 #[tauri::command]
