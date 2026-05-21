@@ -18,12 +18,16 @@ export interface Template {
 
 // Deep-freeze a JSON-shaped value so the same template object can be
 // re-used across loadTemplate calls without leaking mutations.
+// Best-effort: silently skips properties that can't be frozen (some
+// Vite JSON imports use getters that may not be reconfigurable).
 function deepFreeze<T>(o: T): T {
   if (o == null || typeof o !== "object") return o;
-  Object.freeze(o);
-  for (const k of Object.keys(o)) {
-    deepFreeze((o as Record<string, unknown>)[k]);
-  }
+  try { Object.freeze(o); } catch { /* skip */ }
+  try {
+    for (const k of Object.keys(o)) {
+      deepFreeze((o as Record<string, unknown>)[k]);
+    }
+  } catch { /* skip */ }
   return o;
 }
 

@@ -71,7 +71,11 @@ function ConfigScreenBody() {
 
   const { state, dispatch, isDirty, canSave } = editor;
   const loaded = cfdState.loadedConfig;
-  const hasConfig = loaded != null && Object.keys(state.draft).length > 0;
+  // Show the form when the editor has any draft content. The draft is
+  // populated either by Open/Examples (which sets loadedConfig and the
+  // editor's loadFromConfig effect dispatches a load) or by template
+  // selection (which dispatches loadTemplate directly with no loadedConfig).
+  const hasConfig = Object.keys(state.draft).length > 0;
 
   return (
     <div className="flex h-full flex-col bg-[#0B0B0D] text-[#D8DCE2]">

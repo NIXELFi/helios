@@ -32,3 +32,56 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   }
   (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
 }
+
+// jsdom does not implement Path2D — uPlot's points renderer constructs one.
+if (typeof (globalThis as { Path2D?: unknown }).Path2D === "undefined") {
+  class Path2DStub {
+    addPath() {}
+    arc() {}
+    arcTo() {}
+    bezierCurveTo() {}
+    closePath() {}
+    ellipse() {}
+    lineTo() {}
+    moveTo() {}
+    quadraticCurveTo() {}
+    rect() {}
+    roundRect() {}
+  }
+  (globalThis as unknown as { Path2D: typeof Path2DStub }).Path2D = Path2DStub;
+}
+
+// jsdom's HTMLCanvasElement.getContext returns null, which causes uPlot
+// (used by the CFD CycleChart + Cd-table plot) to throw "Cannot read
+// properties of null (reading 'clearRect')". Stub a minimal 2D context
+// that no-ops the methods uPlot uses so tests that render uPlot widgets
+// don't generate unhandled errors.
+if (typeof HTMLCanvasElement !== "undefined") {
+  const noop = () => {};
+  const stubCtx: Record<string, unknown> = new Proxy(
+    {
+      canvas: null,
+      // Some uPlot paths read these properties.
+      lineWidth: 1, strokeStyle: "#000", fillStyle: "#000",
+      globalAlpha: 1, font: "10px sans-serif",
+    },
+    {
+      get(target, prop) {
+        if (prop in target) return (target as Record<string | symbol, unknown>)[prop];
+        // Every other property — drawing methods etc. — is a no-op.
+        return noop;
+      },
+      set(target, prop, value) {
+        (target as Record<string | symbol, unknown>)[prop] = value;
+        return true;
+      },
+    },
+  );
+  HTMLCanvasElement.prototype.getContext = function (
+    this: HTMLCanvasElement,
+    _type: string,
+  ): RenderingContext | null {
+    stubCtx.canvas = this;
+    return stubCtx as unknown as RenderingContext;
+  } as typeof HTMLCanvasElement.prototype.getContext;
+}
