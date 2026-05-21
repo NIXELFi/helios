@@ -23,8 +23,10 @@ A given commit of this script always emits byte-identical fixtures.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -915,32 +917,354 @@ def capture_engine_5cycle():
 
 
 # ====================================================================
+# Phase 1 CFD parity broadening
+# ====================================================================
+
+PHASE1_MATRIX_CONFIGS = ["sdm25", "sdm26"]
+PHASE1_MATRIX_JUNCTIONS = ["stagnation", "characteristic"]
+PHASE1_MATRIX_RPMS = [4000.0, 6000.0, 8000.0, 10000.0, 12000.0]
+
+
+def _load_config(name: str):
+    from configs.config_loader import load_v1_json
+    return load_v1_json(REF_ROOT / "configs" / f"{name}.json")
+
+
+def capture_engine_matrix():
+    """Capture 2 configs * 2 junctions * 5 RPMs = 20 engine-level fixtures.
+
+    Each fixture is a 5-cycle run with stop_at_convergence=False, dumping
+    every cycle's stats. Tolerance is ENGINE_TOLERANCE (rtol=1e-6).
+    """
+    from models.sdm26 import SDM26Engine
+
+    total = (
+        len(PHASE1_MATRIX_CONFIGS)
+        * len(PHASE1_MATRIX_JUNCTIONS)
+        * len(PHASE1_MATRIX_RPMS)
+    )
+    idx = 0
+    t_all = time.time()
+    for cfg_name in PHASE1_MATRIX_CONFIGS:
+        cfg = _load_config(cfg_name)
+        for junction in PHASE1_MATRIX_JUNCTIONS:
+            for rpm in PHASE1_MATRIX_RPMS:
+                idx += 1
+                t0 = time.time()
+                eng = SDM26Engine(cfg, junction_type=junction)
+                result = eng.run_single_rpm(
+                    rpm,
+                    n_cycles=5,
+                    stop_at_convergence=False,
+                    verbose=False,
+                )
+                wall = time.time() - t0
+                rpm_label = f"{int(rpm)}"
+                case = {
+                    "name": f"{cfg_name}_{junction}_{rpm_label}_5cyc",
+                    "inputs": {
+                        "config": cfg_name,
+                        "junction_type": junction,
+                        "rpm": rpm,
+                        "n_cycles": 5,
+                        "stop_at_convergence": False,
+                    },
+                    "outputs": {
+                        "cycle_stats": result["cycle_stats"],
+                        "step_count": result["step_count"],
+                        "n_cycles_run": result["n_cycles_run"],
+                    },
+                }
+                fixture_name = f"engine_matrix_{cfg_name}_{junction}_{rpm_label}_5cyc"
+                _write(fixture_name, [case], ENGINE_TOLERANCE)
+                print(
+                    f"    [{idx}/{total}] {cfg_name} {junction} {rpm_label}rpm "
+                    f"5cyc wall={wall:5.1f}s"
+                )
+    print(f"  capture_engine_matrix total wall={time.time() - t_all:.1f}s")
+
+
+def capture_engine_convergence():
+    """Two long-run convergence fixtures: SDM25 + SDM26 at 6000 RPM,
+    Stagnation junctions, n_cycles_max=25, stop_at_convergence=True.
+
+    Verifies: long-run cycle-stats drift + Python's converged-cycle pick.
+    """
+    from models.sdm26 import SDM26Engine
+
+    for cfg_name in PHASE1_MATRIX_CONFIGS:
+        t0 = time.time()
+        cfg = _load_config(cfg_name)
+        eng = SDM26Engine(cfg, junction_type="stagnation")
+        result = eng.run_single_rpm(
+            6000.0,
+            n_cycles=25,
+            stop_at_convergence=True,
+            convergence_tol_imep=1e-3,
+            convergence_min_cycles=5,
+            verbose=False,
+        )
+        wall = time.time() - t0
+        case = {
+            "name": f"{cfg_name}_6000rpm_25cyc_stagnation_converged",
+            "inputs": {
+                "config": cfg_name,
+                "junction_type": "stagnation",
+                "rpm": 6000.0,
+                "n_cycles_max": 25,
+                "convergence_tol_imep": 1e-3,
+                "convergence_min_cycles": 5,
+                "stop_at_convergence": True,
+            },
+            "outputs": {
+                "cycle_stats": result["cycle_stats"],
+                "step_count": result["step_count"],
+                "n_cycles_run": result["n_cycles_run"],
+                "converged_cycle": result.get("converged_cycle", -1),
+            },
+        }
+        fixture_name = f"engine_convergence_{cfg_name}_25cyc"
+        _write(fixture_name, [case], ENGINE_TOLERANCE)
+        print(f"    {cfg_name} 25cyc wall={wall:5.1f}s")
+
+
+def _muscl_run(L, R, gamma, n_cells, length, n_steps, limiter, name):
+    """Helper: replicates capture_muscl's per-case logic for arbitrary L/R/gamma."""
+    from solver.state import make_pipe_state, set_left_right
+    from solver.muscl import muscl_hancock_step, cfl_dt
+    from bcs.simple import fill_transmissive_left, fill_transmissive_right
+
+    s = make_pipe_state(n_cells, length, area_fn=lambda x: 1.0, gamma=gamma)
+    set_left_right(s, length / 2.0, L[0], L[1], L[2], L[3], R[0], R[1], R[2], R[3])
+    ng = s.n_ghost
+    n = s.n_total
+    w = np.zeros((n, 4))
+    slopes = np.zeros((n, 4))
+    wL = np.zeros((n, 4))
+    wR = np.zeros((n, 4))
+    flux = np.zeros((n + 1, 4))
+    for _ in range(n_steps):
+        dt = cfl_dt(s.q, s.area, s.dx, gamma, 0.85, ng)
+        if dt <= 0:
+            break
+        fill_transmissive_left(s)
+        fill_transmissive_right(s)
+        muscl_hancock_step(
+            s.q, s.area, s.area_f, s.dx, dt, gamma, ng, limiter,
+            w, slopes, wL, wR, flux,
+        )
+    return {
+        "name": name,
+        "inputs": {
+            "n_cells": n_cells, "length": length, "n_steps": n_steps,
+            "limiter": int(limiter), "gamma": gamma,
+            "L": list(L), "R": list(R),
+        },
+        "outputs": {
+            "q_final": s.q.tolist(),
+            "flux_final": flux.tolist(),
+        },
+    }
+
+
+def capture_muscl_extras():
+    """Four additional MUSCL cases beyond the existing Sod variants.
+
+    Cases:
+      - contact: pure contact discontinuity (no shock, no rarefaction)
+      - left_rarefaction: outward flow producing left-going rarefaction
+      - supersonic_shock: strong right-running shock with Mach > 1
+      - mixed_gamma: same pressure jump as Sod but with gamma=1.30
+    """
+    from solver.muscl import LIMITER_MINMOD
+    cases = [
+        # contact discontinuity: same p, same u, different rho + Y
+        _muscl_run(
+            L=(1.5, 50.0, 1.0e5, 0.0),
+            R=(0.8, 50.0, 1.0e5, 1.0),
+            gamma=1.4, n_cells=100, length=1.0,
+            n_steps=50, limiter=LIMITER_MINMOD,
+            name="contact_50step_minmod",
+        ),
+        # left rarefaction: outward-moving (diverging) initial flow
+        _muscl_run(
+            L=(1.0, -200.0, 1.0e5, 0.0),
+            R=(1.0,  200.0, 1.0e5, 0.0),
+            gamma=1.4, n_cells=100, length=1.0,
+            n_steps=50, limiter=LIMITER_MINMOD,
+            name="left_rarefaction_50step_minmod",
+        ),
+        # supersonic shock: very strong right-running shock
+        _muscl_run(
+            L=(5.0, 800.0, 5.0e5, 0.0),
+            R=(0.5,   0.0, 5.0e4, 0.0),
+            gamma=1.4, n_cells=200, length=1.0,
+            n_steps=50, limiter=LIMITER_MINMOD,
+            name="supersonic_shock_50step_minmod",
+        ),
+        # mixed-gamma Sod (matches base gas-property choice in engine work)
+        _muscl_run(
+            L=(1.0, 0.0, 1.0, 0.0),
+            R=(0.125, 0.0, 0.1, 0.0),
+            gamma=1.3, n_cells=100, length=1.0,
+            n_steps=50, limiter=LIMITER_MINMOD,
+            name="sod_50step_gamma13_minmod",
+        ),
+    ]
+    for case in cases:
+        # write each as its own fixture so per-case Rust test reporting is clean
+        _write(f"muscl_{case['name']}", [case], ARRAY_TOLERANCE)
+
+
+def capture_hllc_extras():
+    """500 random Riemann problems (different seed than `hllc.json`)
+    plus 8 Toro textbook shock-tube cases.
+
+    Tolerance: KERNEL_TOLERANCE (rtol=1e-12, atol=1e-14). HLLC is a pure
+    flux function, no time-stepping, so machine precision is achievable.
+    """
+    from solver.hllc import hllc_flux
+
+    rng = np.random.default_rng(seed=20260521)
+    cases = []
+
+    # 500 random Riemann problems
+    for i in range(500):
+        rho_l = float(rng.uniform(0.05, 5.0))
+        u_l   = float(rng.uniform(-400.0, 400.0))
+        p_l   = float(rng.uniform(1.0e3, 5.0e5))
+        Y_l   = float(rng.uniform(0.0, 1.0))
+        rho_r = float(rng.uniform(0.05, 5.0))
+        u_r   = float(rng.uniform(-400.0, 400.0))
+        p_r   = float(rng.uniform(1.0e3, 5.0e5))
+        Y_r   = float(rng.uniform(0.0, 1.0))
+        gamma = float(rng.choice([1.3, 1.35, 1.4]))
+        f = hllc_flux(rho_l, u_l, p_l, Y_l, rho_r, u_r, p_r, Y_r, gamma)
+        cases.append({
+            "name": f"random_{i:03d}",
+            "inputs": {
+                "L": [rho_l, u_l, p_l, Y_l],
+                "R": [rho_r, u_r, p_r, Y_r],
+                "gamma": gamma,
+            },
+            "outputs": {"flux": list(f)},
+        })
+
+    # 8 Toro textbook + edge cases
+    toro_cases = [
+        # name,              L=(rho,u,p,Y),                R=(rho,u,p,Y),                gamma
+        ("toro_A",            (1.0, 0.75, 1.0, 0.0),       (0.125, 0.0, 0.1, 0.0),       1.4),
+        ("toro_B",            (1.0, -2.0, 0.4, 0.0),       (1.0, 2.0, 0.4, 0.0),         1.4),
+        ("toro_C",            (1.0, 0.0, 1000.0, 0.0),     (1.0, 0.0, 0.01, 0.0),        1.4),
+        ("toro_D",            (5.99924, 19.5975, 460.894, 0.0), (5.99242, -6.19633, 46.0950, 0.0), 1.4),
+        ("toro_E",            (1.0, -19.59745, 1000.0, 0.0),(1.0, -19.59745, 0.01, 0.0), 1.4),
+        ("low_density",       (1e-3, 0.0, 1e2, 0.0),       (1.0, 0.0, 1.0e5, 0.0),       1.4),
+        ("slow_contact",      (1.2, 1.0, 1.0e5, 0.0),      (0.6, 1.0, 1.0e5, 1.0),       1.4),
+        ("near_vacuum",       (1.0, 0.0, 1.0e5, 0.0),      (1e-6, 0.0, 1e-3, 0.0),       1.4),
+    ]
+    for name, L, R, g in toro_cases:
+        f = hllc_flux(L[0], L[1], L[2], L[3], R[0], R[1], R[2], R[3], g)
+        cases.append({
+            "name": name,
+            "inputs": {"L": list(L), "R": list(R), "gamma": g},
+            "outputs": {"flux": list(f)},
+        })
+
+    _write("hllc_extras", cases, KERNEL_TOLERANCE)
+
+
+# ====================================================================
 # main
 # ====================================================================
 
-def main():
+ORIGINAL_CAPTURES = [
+    capture_gas_properties,
+    capture_geometry,
+    capture_kinematics,
+    capture_combustion,
+    capture_heat_transfer,
+    capture_valve_cyl,
+    capture_state,
+    capture_hllc,
+    capture_muscl,
+    capture_sources,
+    capture_bcs_simple,
+    capture_bcs_restrictor,
+    capture_bcs_subsonic,
+    capture_bcs_junction_cv,
+    capture_bcs_junction_characteristic,
+    capture_bcs_valve,
+    capture_cylinder_advance,
+    capture_engine_5cycle,
+]
+
+PHASE1_CAPTURES = {
+    "matrix": capture_engine_matrix,
+    "convergence": capture_engine_convergence,
+    "muscl-extras": capture_muscl_extras,
+    "hllc-extras": capture_hllc_extras,
+}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Capture deterministic kernel + engine outputs as parity fixtures."
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="Run every capture (original 18 + Phase 1).",
+    )
+    parser.add_argument(
+        "--original", action="store_true",
+        help="Run only the original 18 capture functions (pre-Phase-1).",
+    )
+    parser.add_argument(
+        "--matrix", action="store_true",
+        help="Engine-level RPM/config/junction matrix (20 fixtures).",
+    )
+    parser.add_argument(
+        "--convergence", action="store_true",
+        help="Long-run convergence fixtures (2 fixtures).",
+    )
+    parser.add_argument(
+        "--muscl-extras", action="store_true",
+        help="Additional MUSCL initial conditions (4 fixtures).",
+    )
+    parser.add_argument(
+        "--hllc-extras", action="store_true",
+        help="Extra HLLC Riemann problems (1 consolidated fixture).",
+    )
+    args = parser.parse_args(argv)
+
     print(f"Pinned SHA: {PINNED_SHA}")
     print(f"Writing fixtures to: {FIXTURES_DIR}")
-    # Order matters only for reading; capture order is arbitrary.
-    capture_gas_properties()
-    capture_geometry()
-    capture_kinematics()
-    capture_combustion()
-    capture_heat_transfer()
-    capture_valve_cyl()
-    capture_state()
-    capture_hllc()
-    capture_muscl()
-    capture_sources()
-    capture_bcs_simple()
-    capture_bcs_restrictor()
-    capture_bcs_subsonic()
-    capture_bcs_junction_cv()
-    capture_bcs_junction_characteristic()
-    capture_bcs_valve()
-    capture_cylinder_advance()
-    capture_engine_5cycle()
-    print("\nAll fixtures captured.")
+
+    # If no flags given, default to running all four Phase-1 captures.
+    selected_phase1 = [
+        ("matrix", args.matrix),
+        ("convergence", args.convergence),
+        ("muscl-extras", args.muscl_extras),
+        ("hllc-extras", args.hllc_extras),
+    ]
+    any_phase1_flag = any(v for _, v in selected_phase1)
+    if args.all:
+        for fn in ORIGINAL_CAPTURES:
+            fn()
+        for fn in PHASE1_CAPTURES.values():
+            fn()
+    elif args.original:
+        for fn in ORIGINAL_CAPTURES:
+            fn()
+    elif any_phase1_flag:
+        for name, on in selected_phase1:
+            if on:
+                PHASE1_CAPTURES[name]()
+    else:
+        # default: run all Phase 1 captures
+        for fn in PHASE1_CAPTURES.values():
+            fn()
+
+    print("\nAll requested fixtures captured.")
 
 
 if __name__ == "__main__":
