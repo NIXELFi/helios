@@ -196,6 +196,10 @@ fn cfd_start_job(
     state: tauri::State<CfdState>,
     request: StartJobRequest,
 ) -> Result<StartJobResponse, String>;     // { job_id: String }
+// Rust-side gate: rejects with Err("another <kind> job is already running:
+// <existing-id>") if a job of the same kind is in CfdState.jobs with status
+// Running. Frontend's "are you sure?" modal is convenience; Rust is the
+// source of truth so a stale frontend cannot double-start.
 
 #[tauri::command]
 fn cfd_cancel_job(state: tauri::State<CfdState>, job_id: String) -> Result<(), String>;
@@ -266,10 +270,14 @@ fn run_single_rpm_job(
                 return RunOutcome::Cancelled(accumulated);
             }
             // Drive ONE 720° cycle so we can stream progress + check cancel.
+            // Convergence args are passed as 0.0 / 0 — engine-sim ignores them
+            // when stop_at_convergence=false, and the explicit zeros document
+            // that the runner (not the crate) owns convergence detection here.
             let r = eng.run_single_rpm(
                 params.rpm, 1, false,
-                params.convergence_tol_imep, params.convergence_min_cycles,
-                /* stop_at_convergence = */ false,
+                /* convergence_tol_imep */ 0.0,
+                /* convergence_min_cycles */ 0,
+                /* stop_at_convergence */ false,
             );
             let cs = r.cycle_stats.last().cloned().expect("one cycle");
             if !cycle_stats_finite(&cs) {
@@ -496,9 +504,13 @@ desktop tests do not re-test the math.
     `job-progress`, one `job-cancelled`; no `job-done`
   - bad config path → `job-started` then `job-error { reason:
     "config-load" }`; no progress
-  - divergence: stub a configuration (or inject via a test-only seam)
-    producing non-finite IMEP → partial progress + `job-error { reason:
-    "solver-diverged" }`
+  - divergence: the runner's cycle-stats check is gated through a
+    test-only `#[cfg(test)] trait DivergenceProbe` (default impl uses
+    `f64::is_finite`); the test injects a probe that returns
+    "non-finite" on a chosen cycle, asserting partial progress emission +
+    `job-error { reason: "solver-diverged" }`. Avoids fabricating a
+    physically-diverging config (none exists in our matrix) while
+    exercising the exact code path.
 - `state.rs` — concurrent-map semantics: insert/remove/cancel under
   contention with a couple of threads (`std::thread::scope` test).
 
