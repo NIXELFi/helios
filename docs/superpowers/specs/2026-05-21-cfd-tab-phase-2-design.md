@@ -131,6 +131,11 @@ redirects to Save-As" and disables the "Save" button when
 edit the Save button becomes active and a small "(example: edits
 will require Save As…)" hint appears under the path.
 
+Both the explicit `Examples ▾` dropdown (existing Phase 1 flow)
+and the file-picker `Open…` flow route through `cfd_load_config`,
+so `isExample` is set identically in both cases — there is no
+separate "load example" code path that bypasses the check.
+
 ## Section 2 — Tauri command surface
 
 New commands registered alongside Phase 1's in
@@ -207,6 +212,13 @@ interface FieldMeta {
 For SI-converted display (bore: 67.0 mm rendered, stored as 0.067 m):
 `format` produces the display string, `formatInverse` parses the
 user's typed value back to SI for storage. NumberField uses both.
+
+**Units rule:** `min`, `max`, `step`, and the stored value are all in
+**SI base units** (meters, seconds, kelvin, etc. — matching the V1
+JSON on disk). `format` / `formatInverse` only affect the displayed
+input string. Range hints in the field UI render via `format` so the
+user sees "67.0 – 120.0 mm" not "0.067 – 0.120 m". The validator
+operates on the stored SI value.
 
 ### Field components
 
@@ -335,6 +347,12 @@ The diff is computed by `diff-engine.ts` — a pure function over
 two `Record<string, unknown>` returning `Array<{ group, key,
 left, right, kind: "added" | "removed" | "changed" | "same" }>`.
 
+If the second source fails to parse as a V1 SDM JSON (Rust's
+`cfd_load_config` returns Err), the diff modal renders a red
+banner `"Couldn't load comparison config: {error}"` and offers a
+"Pick a different file" button — no diff rendered. Phase 2's diff
+is V1-only; non-V1 schemas are not in scope.
+
 ### Topology change
 
 Implemented as a select in the schema (group "Exhaust"). The
@@ -451,7 +469,6 @@ Before claiming Phase 2 done:
 - **No `window.alert/confirm/prompt`.** Memory:
   `feedback_no_browser_dialogs.md`. Reuse Phase 1's
   `ConfirmModal`.
-- **No Python in Helios.** Memory: `feedback_no_python_in_helios.md`.
 - **`f64` end-to-end.** JSON serialization is exact.
 - **`v2_changes/` log.** Memory: `feedback_v2_changes_log.md`. A
   short entry per shipped change (one file per issue/fix).
@@ -459,7 +476,8 @@ Before claiming Phase 2 done:
 ## Non-decisions explicitly punted
 
 - Multi-step undo/redo (only last-saved-vs-draft).
-- Drag-to-reorder for `firing_order` if the up/down arrow approach
-  ships first — drag is a polish item.
+- Drag-to-reorder for `firing_order` — Phase 2 ships up/down arrow
+  buttons; the drag affordance can land later as polish without
+  changing the underlying field shape.
 - Schema migrations (V1 → V2 JSON). V2 doesn't exist yet.
 - Editing arbitrary JSON outside the SDM schema.
