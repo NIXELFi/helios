@@ -46,6 +46,7 @@ import { WorkspaceTabBar } from "./components/WorkspaceTabBar";
 import { LapConfigDialog } from "./components/LapConfigDialog";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
+import { HelpModal } from "./help/HelpModal";
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
@@ -88,6 +89,9 @@ export default function App() {
   const [lapConfigSessionId, setLapConfigSessionId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [helpState, setHelpState] = useState<{ open: boolean; slug?: string }>({ open: false });
+  const openHelp = (slug?: string) => setHelpState({ open: true, slug });
+  const closeHelp = () => setHelpState({ open: false });
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   const updater = useUpdater();
@@ -250,6 +254,13 @@ export default function App() {
       if (e.key === "?" && !inField && !mod) {
         e.preventDefault();
         setShortcutsOpen(true);
+        return;
+      }
+      // F1 — open the in-app Help & Wiki. Universal (works from form fields
+      // too) since it never interferes with text input.
+      if (e.key === "F1") {
+        e.preventDefault();
+        openHelp();
         return;
       }
       // M / R — single-key lap assignment. Finds the lap containing the
@@ -422,6 +433,13 @@ export default function App() {
     { id: "sys:add-tile", label: "Add tile…", kind: "system", run: () => { if (!editMode) setEditMode(true); setAddTileOpen(true); } },
     { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: "⌘E", run: () => setEditMode((e) => !e) },
     { id: "sys:shortcuts", label: "Keyboard shortcuts", kind: "system", hint: "?", keywords: ["help", "hotkeys"], run: () => setShortcutsOpen(true) },
+    { id: "sys:help",      label: "Open Help & Wiki",   kind: "system", hint: "F1", keywords: ["docs", "guide", "manual", "wiki"], run: () => openHelp() },
+    { id: "sys:help-getting-started", label: "Help: Getting started",    kind: "system", keywords: ["docs", "onboarding"], run: () => openHelp("01-getting-started") },
+    { id: "sys:help-widgets",         label: "Help: Widgets reference",  kind: "system", keywords: ["docs", "widget"],      run: () => openHelp("04-widgets-reference") },
+    { id: "sys:help-channels",        label: "Help: Channels & data",    kind: "system", keywords: ["docs", "csv"],         run: () => openHelp("05-channels-and-data") },
+    { id: "sys:help-math",            label: "Help: Math channels",      kind: "system", keywords: ["docs", "formula"],     run: () => openHelp("06-math-channels") },
+    { id: "sys:help-laps",            label: "Help: Laps & analysis",    kind: "system", keywords: ["docs", "lap"],         run: () => openHelp("07-laps-and-analysis") },
+    { id: "sys:help-keyboard",        label: "Help: Keyboard & commands",kind: "system", keywords: ["docs", "hotkey"],      run: () => openHelp("08-keyboard-and-commands") },
     { id: "sys:reset-zoom", label: "Reset zoom", kind: "system", run: () => viewState.resetZoom() },
     { id: "sys:clear-datums", label: "Clear datums", kind: "system", run: () => viewState.clearDatums() },
     {
@@ -1025,6 +1043,13 @@ export default function App() {
             <span>⌘K</span>
           </button>
           <button
+            onClick={() => openHelp()}
+            className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+            title="Open Help &amp; Wiki"
+          >
+            Help
+          </button>
+          <button
             onClick={() => setChannelsOpen(true)}
             className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
             title={`Inspect channels in ${primary.label}`}
@@ -1207,6 +1232,11 @@ export default function App() {
       <ShortcutsOverlay
         open={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
+      />
+      <HelpModal
+        open={helpState.open}
+        initialSlug={helpState.slug}
+        onClose={closeHelp}
       />
     </div>
   );

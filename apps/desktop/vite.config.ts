@@ -5,7 +5,11 @@ import path from "node:path";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true },
+  server: {
+    port: 1420,
+    strictPort: true,
+    fs: { allow: [".", "../../docs/wiki"] },
+  },
   envPrefix: ["VITE_", "TAURI_"],
   build: { target: "esnext", minify: "esbuild" },
   resolve: {
