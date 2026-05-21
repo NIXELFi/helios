@@ -13,6 +13,8 @@ import type {
 
 export interface CfdBridge {
   loadConfig(path: string): Promise<LoadedConfig>;
+  saveConfig(path: string, raw: Record<string, unknown>): Promise<void>;
+  defaultSaveDir(): Promise<string>;
   listExamples(): Promise<ExampleConfig[]>;
   startJob(request: StartJobRequest): Promise<{ jobId: string }>;
   cancelJob(jobId: string): Promise<void>;
@@ -30,6 +32,8 @@ const EVENT_NAMES = [
 
 export const realBridge: CfdBridge = {
   loadConfig: (path) => invoke<LoadedConfig>("cfd_load_config", { path }),
+  saveConfig: (path, raw) => invoke<void>("cfd_save_config", { path, raw }),
+  defaultSaveDir: () => invoke<string>("cfd_default_save_dir"),
   listExamples: () => invoke<ExampleConfig[]>("cfd_list_examples"),
   startJob: (request) => {
     // Tauri receives camelCase top-level args; the discriminated union

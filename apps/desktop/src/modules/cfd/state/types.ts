@@ -57,6 +57,7 @@ export interface LoadedConfig {
   path: string;
   raw: Record<string, unknown>;
   summary: ConfigSummary;
+  isExample: boolean;
 }
 
 export interface ExampleConfig {

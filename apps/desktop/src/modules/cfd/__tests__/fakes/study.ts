@@ -67,6 +67,7 @@ export function makeLoadedConfig(overrides: Partial<LoadedConfig> = {}): LoadedC
     path: "C:/configs/sdm26.json",
     raw: { name: "Honda CBR600RR (FSAE)", n_cylinders: 4 },
     summary: makeSummary(),
+    isExample: false,
     ...overrides,
   };
 }
