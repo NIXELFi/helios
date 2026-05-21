@@ -81,6 +81,7 @@ pub fn run() {
             cfd::commands::cfd_start_job,
             cfd::commands::cfd_cancel_job,
             cfd::commands::cfd_list_jobs,
+            cfd::commands::cfd_load_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Helios");

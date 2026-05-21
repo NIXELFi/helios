@@ -5,6 +5,7 @@
 //! desktop crate's `cfd/commands.rs` is a thin `#[tauri::command]`
 //! adapter that delegates here.
 
+pub mod capture;
 pub mod dto;
 pub mod load;
 pub mod runner;

@@ -41,6 +41,7 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 33 | 2.5.3 — split `engine.tps` / `engine.aps` (+ `_sub` variants); loader collision protection | [33-tps-aps-split-and-collision-protection.md](33-tps-aps-split-and-collision-protection.md) |
 | 34 | 3.2.2 — full user + developer wiki under `docs/wiki/` and in-app Help & Wiki modal (F1, ⌘K, header) | [34-wiki-and-in-app-help.md](34-wiki-and-in-app-help.md) |
 | 35 | CFD tab Phases 1+2 — engine-sim Rust port + tab scaffold + 27 new parity fixtures + full SDM26 config editor (save/save-as, validation, Cd-table + pipe-array editors, topology switch, templates, side-by-side diff) | [35-cfd-tab-phases-1-2.md](35-cfd-tab-phases-1-2.md) |
+| 36 | CFD tab Phase 3 — multi-RPM sweeps with curve plots, per-cylinder P-V loops + crank-angle traces, end-of-cycle pipe profiles, sweep-vs-sweep comparison, per-step wave-capture writer (Phase-4 viewer pending) | [36-cfd-phase-3-sweeps-postcycle-viz.md](36-cfd-phase-3-sweeps-postcycle-viz.md) |
 
 > **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 

@@ -66,7 +66,7 @@ impl From<JunctionKindDto> for EsJunctionKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SingleRpmParams {
     pub rpm: f64,
@@ -75,6 +75,34 @@ pub struct SingleRpmParams {
     #[serde(rename = "convergenceTolImep")]
     pub convergence_tol_imep: f64,
     pub convergence_min_cycles: u32,
+    /// Phase 3 capture flags. Default to "off, on, on" — wave capture
+    /// is opt-in (disk-heavy), but the inexpensive P-V + profile
+    /// snapshots default on so per-RPM exploration "just works".
+    #[serde(default)]
+    pub capture_waves: bool,
+    #[serde(default = "default_capture_pv")]
+    pub capture_pv_loops: bool,
+    #[serde(default = "default_capture_pv")]
+    pub capture_pipe_profiles: bool,
+}
+
+fn default_capture_pv() -> bool { true }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SweepParams {
+    pub rpm_list: Vec<f64>,
+    pub n_cycles_max: u32,
+    pub junction_kind: JunctionKindDto,
+    #[serde(rename = "convergenceTolImep")]
+    pub convergence_tol_imep: f64,
+    pub convergence_min_cycles: u32,
+    #[serde(default)]
+    pub capture_waves: bool,
+    #[serde(default = "default_capture_pv")]
+    pub capture_pv_loops: bool,
+    #[serde(default = "default_capture_pv")]
+    pub capture_pipe_profiles: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +113,11 @@ pub enum StartJobRequest {
         config_path: String,
         params: SingleRpmParams,
     },
-    // Sweep { ... }           // Phase 3
+    Sweep {
+        #[serde(rename = "configPath")]
+        config_path: String,
+        params: SweepParams,
+    },
     // Optimization { ... }    // Phase 5
 }
 
@@ -93,11 +125,13 @@ impl StartJobRequest {
     pub fn kind(&self) -> StudyKind {
         match self {
             StartJobRequest::SingleRpm { .. } => StudyKind::SingleRpm,
+            StartJobRequest::Sweep { .. } => StudyKind::Sweep,
         }
     }
     pub fn config_path(&self) -> &str {
         match self {
             StartJobRequest::SingleRpm { config_path, .. } => config_path,
+            StartJobRequest::Sweep { config_path, .. } => config_path,
         }
     }
 }
@@ -114,6 +148,7 @@ pub struct StartJobResponse {
 #[serde(rename_all = "kebab-case")]
 pub enum StudyKind {
     SingleRpm,
+    Sweep,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,10 +193,49 @@ pub struct JobProgressSingleRpm {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SweepPoint {
+    pub rpm: f64,
+    pub converged_cycle: i64,
+    pub n_cycles_run: u32,
+    pub last_cycle: engine_sim::model::sdm26::CycleStats,
+    pub nonconservation_max: f64,
+    pub wall_time_s: f64,
+    pub step_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum JobProgressPayload {
+    SingleRpm(JobProgressSingleRpm),
+    #[serde(rename_all = "camelCase")]
+    SweepRpmStarted {
+        rpm_idx: u32,
+        total_rpms: u32,
+        rpm: f64,
+    },
+    #[serde(rename_all = "camelCase")]
+    SweepCycle {
+        rpm_idx: u32,
+        rpm: f64,
+        cycle: u32,
+        total: u32,
+        cycle_stats: engine_sim::model::sdm26::CycleStats,
+    },
+    #[serde(rename_all = "camelCase")]
+    SweepRpmDone {
+        rpm_idx: u32,
+        rpm: f64,
+        point: SweepPoint,
+        capture_dir: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobProgressEvent {
     pub job_id: String,
     pub kind: StudyKind,
-    pub payload: JobProgressSingleRpm,
+    pub payload: JobProgressPayload,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,6 +244,26 @@ pub struct SingleRpmDoneSummary {
     pub converged_cycle: i64,
     pub n_cycles_run: u32,
     pub step_count: u64,
+    /// Directory under captures/ containing pv.json / profiles.json /
+    /// waves.jsonl + manifest.json for this run, when any capture was
+    /// enabled. `None` if all capture flags were off.
+    pub capture_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SweepDoneSummary {
+    pub n_rpms: u32,
+    pub n_completed: u32,
+    pub total_step_count: u64,
+    pub total_wall_time_s: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum JobDoneSummary {
+    SingleRpm(SingleRpmDoneSummary),
+    Sweep(SweepDoneSummary),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,14 +271,20 @@ pub struct SingleRpmDoneSummary {
 pub struct JobDoneEvent {
     pub job_id: String,
     pub kind: StudyKind,
-    pub payload: SingleRpmDoneSummary,
+    pub payload: JobDoneSummary,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobCancelledEvent {
     pub job_id: String,
+    pub kind: StudyKind,
+    /// Single-RPM only: cycles that ran before cancellation.
+    #[serde(default)]
     pub partial_cycles: Vec<engine_sim::model::sdm26::CycleStats>,
+    /// Sweep only: RPMs that completed before cancellation.
+    #[serde(default)]
+    pub partial_points: Vec<SweepPoint>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -200,9 +300,13 @@ pub enum ErrorReason {
 #[serde(rename_all = "camelCase")]
 pub struct JobErrorEvent {
     pub job_id: String,
+    pub kind: StudyKind,
     pub reason: ErrorReason,
     pub message: String,
+    #[serde(default)]
     pub partial_cycles: Vec<engine_sim::model::sdm26::CycleStats>,
+    #[serde(default)]
+    pub partial_points: Vec<SweepPoint>,
 }
 
 // ---------------- Config summary builder ----------------
@@ -285,6 +389,9 @@ mod tests {
                 junction_kind: JunctionKindDto::Stagnation,
                 convergence_tol_imep: 1e-3,
                 convergence_min_cycles: 5,
+                capture_waves: false,
+                capture_pv_loops: true,
+                capture_pipe_profiles: true,
             },
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -293,6 +400,8 @@ mod tests {
         assert!(json.contains("\"junctionKind\":\"stagnation\""), "{json}");
         assert!(json.contains("\"nCyclesMax\":25"), "{json}");
         assert!(json.contains("\"convergenceTolImep\":0.001"), "{json}");
+        assert!(json.contains("\"captureWaves\":false"), "{json}");
+        assert!(json.contains("\"capturePvLoops\":true"), "{json}");
         let back: StartJobRequest = serde_json::from_str(&json).unwrap();
         match (&req, &back) {
             (
@@ -302,7 +411,60 @@ mod tests {
                 assert_eq!(cp1, cp2);
                 assert_eq!(p1, p2);
             }
+            _ => panic!("variant mismatch"),
         }
+    }
+
+    #[test]
+    fn sweep_request_serde_roundtrip() {
+        let req = StartJobRequest::Sweep {
+            config_path: "C:/x/sdm26.json".into(),
+            params: SweepParams {
+                rpm_list: vec![4000.0, 6000.0, 8000.0],
+                n_cycles_max: 20,
+                junction_kind: JunctionKindDto::Characteristic,
+                convergence_tol_imep: 5e-3,
+                convergence_min_cycles: 3,
+                capture_waves: true,
+                capture_pv_loops: true,
+                capture_pipe_profiles: false,
+            },
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"kind\":\"sweep\""), "{json}");
+        assert!(json.contains("\"rpmList\":[4000.0,6000.0,8000.0]"), "{json}");
+        assert!(json.contains("\"captureWaves\":true"), "{json}");
+        let back: StartJobRequest = serde_json::from_str(&json).unwrap();
+        match (&req, &back) {
+            (
+                StartJobRequest::Sweep { config_path: cp1, params: p1 },
+                StartJobRequest::Sweep { config_path: cp2, params: p2 },
+            ) => {
+                assert_eq!(cp1, cp2);
+                assert_eq!(p1, p2);
+            }
+            _ => panic!("variant mismatch"),
+        }
+    }
+
+    #[test]
+    fn job_progress_payload_tagged_dispatch() {
+        // SweepRpmStarted
+        let p = JobProgressPayload::SweepRpmStarted { rpm_idx: 0, total_rpms: 3, rpm: 4000.0 };
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains("\"kind\":\"sweep-rpm-started\""), "{s}");
+        assert!(s.contains("\"rpmIdx\":0"), "{s}");
+        assert!(s.contains("\"totalRpms\":3"), "{s}");
+    }
+
+    #[test]
+    fn job_done_summary_tagged_dispatch() {
+        let s = JobDoneSummary::Sweep(SweepDoneSummary {
+            n_rpms: 5, n_completed: 5, total_step_count: 12345, total_wall_time_s: 1.23,
+        });
+        let j = serde_json::to_string(&s).unwrap();
+        assert!(j.contains("\"kind\":\"sweep\""), "{j}");
+        assert!(j.contains("\"nRpms\":5"), "{j}");
     }
 
     #[test]

@@ -58,7 +58,7 @@ describe("CfdContext state machine", () => {
         payload: {
           jobId: "j-2",
           kind: "single-rpm",
-          payload: { cycle: 1, total: 3, cycleStats: makeCycleStats({ cycle: 1, imepBar: 9.5 }) },
+          payload: { kind: "single-rpm", cycle: 1, total: 3, cycleStats: makeCycleStats({ cycle: 1, imepBar: 9.5 }) },
         },
       });
       fake.emit({
@@ -66,7 +66,7 @@ describe("CfdContext state machine", () => {
         payload: {
           jobId: "j-2",
           kind: "single-rpm",
-          payload: { cycle: 2, total: 3, cycleStats: makeCycleStats({ cycle: 2, imepBar: 10.1 }) },
+          payload: { kind: "single-rpm", cycle: 2, total: 3, cycleStats: makeCycleStats({ cycle: 2, imepBar: 10.1 }) },
         },
       });
     });
@@ -84,7 +84,7 @@ describe("CfdContext state machine", () => {
         payload: {
           jobId: "j-2",
           kind: "single-rpm",
-          payload: { convergedCycle: -1, nCyclesRun: 2, stepCount: 1234 },
+          payload: { kind: "single-rpm", convergedCycle: -1, nCyclesRun: 2, stepCount: 1234 },
         },
       });
     });
@@ -113,7 +113,7 @@ describe("CfdContext state machine", () => {
     act(() => {
       fake.emit({
         name: "cfd:job-cancelled",
-        payload: { jobId: "j-3", partialCycles: [] },
+        payload: { jobId: "j-3", kind: "single-rpm", partialCycles: [], partialPoints: [] },
       });
     });
     expect(result.current.state.studies["j-3"]?.status).toBe("cancelled");
@@ -137,12 +137,14 @@ describe("CfdContext state machine", () => {
         name: "cfd:job-error",
         payload: {
           jobId: "j-4",
+          kind: "single-rpm",
           reason: "solver-diverged",
           message: "non-finite cycle stats at cycle 2",
           partialCycles: [
             makeCycleStats({ cycle: 1, imepBar: 9.9 }),
             makeCycleStats({ cycle: 2, imepBar: NaN }),
           ],
+          partialPoints: [],
         },
       });
     });

@@ -20,7 +20,7 @@ use cfd_core::dto::{
     StartJobRequest, StartJobResponse,
 };
 use cfd_core::runner::{
-    run_single_rpm_job, DefaultDivergenceProbe, JobEmitter, RunOutcome,
+    run_single_rpm_job, run_sweep_job, DefaultDivergenceProbe, JobEmitter, RunOutcome,
 };
 use cfd_core::state::{CfdState, JobHandle};
 
@@ -126,6 +126,7 @@ impl JobEmitter for TauriEmitter {
 
 #[tauri::command]
 pub fn cfd_start_job(
+    app: AppHandle,
     window: Window,
     state: tauri::State<'_, CfdState>,
     request: StartJobRequest,
@@ -135,15 +136,20 @@ pub fn cfd_start_job(
     let config_path = request.config_path().to_string();
     let started_at = now_ms();
 
-    // Register first so the running-kind gate is enforced atomically.
     let handle = JobHandle::new(kind, config_path.clone(), started_at);
     let cancel = handle.cancel.clone();
     let status = handle.status.clone();
     let finished_at_arc = handle.finished_at.clone();
     state.register(job_id.clone(), handle)?;
 
-    // Spawn the worker. SDM26Engine isn't Send so it can never leave
-    // this thread.
+    // Resolve the capture root once (best-effort — runner gracefully
+    // handles None). Lives under <Documents>/Helios/cfd/captures.
+    let capture_root: Option<PathBuf> = app
+        .path()
+        .document_dir()
+        .ok()
+        .map(|d| d.join("Helios").join("cfd").join("captures"));
+
     let job_id_owned = job_id.clone();
     let request_clone = request.clone();
     std::thread::spawn(move || {
@@ -151,17 +157,26 @@ pub fn cfd_start_job(
         let probe = DefaultDivergenceProbe;
         let outcome = match request_clone {
             StartJobRequest::SingleRpm { config_path, params } => run_single_rpm_job(
-                &emitter,
-                &probe,
+                &emitter, &probe,
                 job_id_owned.clone(),
                 PathBuf::from(config_path),
                 params,
                 Arc::clone(&cancel),
                 started_at,
+                capture_root.clone(),
+            ),
+            StartJobRequest::Sweep { config_path, params } => run_sweep_job(
+                &emitter, &probe,
+                job_id_owned.clone(),
+                PathBuf::from(config_path),
+                params,
+                Arc::clone(&cancel),
+                started_at,
+                capture_root.clone(),
             ),
         };
         let final_status = match outcome {
-            RunOutcome::Completed(_) => JobStatus::Done,
+            RunOutcome::Completed(_) | RunOutcome::CompletedSweep(_) => JobStatus::Done,
             RunOutcome::Cancelled => JobStatus::Cancelled,
             RunOutcome::Errored => JobStatus::Error,
         };
@@ -170,6 +185,50 @@ pub fn cfd_start_job(
     });
 
     Ok(StartJobResponse { job_id })
+}
+
+// ---------------- cfd_load_capture ----------------
+
+/// Read one of the JSON capture artifacts for a job/rpm pair. The
+/// `file` is whitelisted to `pv.json`, `profiles.json`, or
+/// `manifest.json`. `waves.jsonl` is deliberately NOT exposed via this
+/// command — Phase 4 will read it via a streaming command.
+#[tauri::command]
+pub fn cfd_load_capture(
+    app: AppHandle,
+    job_id: String,
+    study_kind: String,    // "single-rpm" | "sweep"
+    rpm_int: u32,
+    file: String,
+) -> Result<serde_json::Value, String> {
+    if file.contains("..") || file.contains('/') || file.contains('\\') {
+        return Err("invalid file argument".into());
+    }
+    match file.as_str() {
+        "pv.json" | "profiles.json" | "manifest.json" => {}
+        _ => return Err(format!("file not whitelisted: {file}")),
+    }
+    match study_kind.as_str() {
+        "single-rpm" | "sweep" => {}
+        _ => return Err(format!("invalid study_kind: {study_kind}")),
+    }
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let root = docs.join("Helios").join("cfd").join("captures");
+    let p = root
+        .join(&job_id)
+        .join(&study_kind)
+        .join(rpm_int.to_string())
+        .join(&file);
+    if !p.exists() {
+        return Err(format!("capture not found: {}", p.display()));
+    }
+    let bytes = std::fs::read(&p)
+        .map_err(|e| format!("read {}: {}", p.display(), e))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| format!("parse {}: {}", p.display(), e))
 }
 
 // ---------------- cfd_cancel_job ----------------

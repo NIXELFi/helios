@@ -7,13 +7,18 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 import { loadPersisted, savePersisted } from "../lib/cfdStorage";
 import { type CfdBridge, realBridge } from "../lib/tauriBridge";
 import type {
+  CycleStats,
   JobEvent,
+  JobProgressPayload,
   LoadedConfig,
   NavId,
-  StartJobRequest,
+  SingleRpmParams,
+  SingleRpmStudy,
   Study,
-  StudyHeader,
   StudyStatus,
+  SweepParams,
+  SweepPoint,
+  SweepStudy,
 } from "./types";
 
 interface State {
@@ -38,7 +43,11 @@ type Action =
   | { type: "setActiveStudy"; id: string | null }
   | { type: "addStudy"; study: Study }
   | { type: "updateStudy"; id: string; patch: Partial<Study> }
-  | { type: "appendCycle"; id: string; cycle: import("./types").CycleStats; total: number }
+  | { type: "appendCycle"; id: string; cycle: CycleStats; total: number }
+  | { type: "sweepRpmStarted"; id: string; rpmIdx: number; rpm: number }
+  | { type: "sweepCycle"; id: string; rpmIdx: number; rpm: number; cycleStats: CycleStats }
+  | { type: "sweepRpmDone"; id: string; point: Omit<SweepPoint, "cycles" | "captureDir">; captureDir?: string }
+  | { type: "setSweepCompare"; id: string; compareWithStudyId?: string }
   | { type: "deleteStudy"; id: string }
   | { type: "rehydrate"; studies: Study[]; lastConfigPath: string | null };
 
@@ -66,12 +75,77 @@ function reducer(s: State, a: Action): State {
     }
     case "appendCycle": {
       const existing = s.studies[a.id];
-      if (!existing) return s;
+      if (!existing || existing.kind !== "single-rpm") return s;
       return {
         ...s,
         studies: {
           ...s.studies,
           [a.id]: { ...existing, cycles: [...existing.cycles, a.cycle] },
+        },
+      };
+    }
+    case "sweepRpmStarted": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      const inFlight = { ...(existing.inFlight ?? {}) };
+      inFlight[String(a.rpmIdx)] = { idx: a.rpmIdx, rpm: a.rpm, cycles: [] };
+      return {
+        ...s,
+        studies: { ...s.studies, [a.id]: { ...existing, inFlight } },
+      };
+    }
+    case "sweepCycle": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      const key = String(a.rpmIdx);
+      const inFlight = { ...(existing.inFlight ?? {}) };
+      const slot = inFlight[key] ?? { idx: a.rpmIdx, rpm: a.rpm, cycles: [] };
+      inFlight[key] = { ...slot, cycles: [...slot.cycles, a.cycleStats] };
+      return {
+        ...s,
+        studies: { ...s.studies, [a.id]: { ...existing, inFlight } },
+      };
+    }
+    case "sweepRpmDone": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      // Find the in-flight slot by matching rpm. Drain its cycles into
+      // the new SweepPoint and free the slot.
+      const inFlight = { ...(existing.inFlight ?? {}) };
+      let cycles: CycleStats[] = [];
+      for (const key of Object.keys(inFlight)) {
+        const slot = inFlight[key];
+        if (slot && Math.abs(slot.rpm - a.point.rpm) < 1e-9) {
+          cycles = slot.cycles;
+          delete inFlight[key];
+          break;
+        }
+      }
+      const newPoint: SweepPoint = {
+        ...a.point,
+        cycles,
+        captureDir: a.captureDir,
+      };
+      return {
+        ...s,
+        studies: {
+          ...s.studies,
+          [a.id]: {
+            ...existing,
+            points: [...existing.points, newPoint],
+            inFlight,
+          },
+        },
+      };
+    }
+    case "setSweepCompare": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      return {
+        ...s,
+        studies: {
+          ...s.studies,
+          [a.id]: { ...existing, compareWithStudyId: a.compareWithStudyId },
         },
       };
     }
@@ -88,7 +162,7 @@ function reducer(s: State, a: Action): State {
         ...s,
         hydrated: true,
         studies: Object.fromEntries(a.studies.map((st) => [st.id, st])),
-        loadedConfig: s.loadedConfig, // never re-hydrate the loaded config; user re-opens
+        loadedConfig: s.loadedConfig,
       };
   }
 }
@@ -99,12 +173,11 @@ export interface CfdContextValue {
   setLoadedConfig: (cfg: LoadedConfig | null) => void;
   navigateTo: (screen: NavId) => void;
   setActiveStudy: (id: string | null) => void;
-  startSingleRpm: (
-    configPath: string,
-    params: import("./types").SingleRpmParams
-  ) => Promise<string>;
+  startSingleRpm: (configPath: string, params: SingleRpmParams) => Promise<string>;
+  startSweep: (configPath: string, params: SweepParams) => Promise<string>;
   cancelStudy: (id: string) => Promise<void>;
   deleteStudy: (id: string) => void;
+  setSweepCompare: (id: string, compareWithStudyId?: string) => void;
   /** Test-only entry point. Dispatches actions as if a Tauri event fired. */
   __dispatchTestEvent?: (event: JobEvent) => void;
 }
@@ -119,88 +192,8 @@ export function useCfd(): CfdContextValue {
 
 interface ProviderProps {
   children: ReactNode;
-  /** Tests inject a fake bridge; production uses the real one. */
   bridge?: CfdBridge;
-  /** Tests skip the rehydration network call. */
   skipRehydrate?: boolean;
-}
-
-export function applyEvent(state: State, event: JobEvent): State {
-  switch (event.name) {
-    case "cfd:job-started": {
-      // No-op: addStudy already set status to "running" optimistically.
-      return state;
-    }
-    case "cfd:job-progress": {
-      const p = event.payload;
-      const existing = state.studies[p.jobId];
-      if (!existing || existing.kind !== "single-rpm") return state;
-      return {
-        ...state,
-        studies: {
-          ...state.studies,
-          [p.jobId]: { ...existing, cycles: [...existing.cycles, p.payload.cycleStats] },
-        },
-      };
-    }
-    case "cfd:job-done": {
-      const p = event.payload;
-      const existing = state.studies[p.jobId];
-      if (!existing || existing.kind !== "single-rpm") return state;
-      return {
-        ...state,
-        studies: {
-          ...state.studies,
-          [p.jobId]: {
-            ...existing,
-            status: "done" as StudyStatus,
-            finishedAt: Date.now(),
-            summary: p.payload,
-          },
-        },
-      };
-    }
-    case "cfd:job-cancelled": {
-      const p = event.payload;
-      const existing = state.studies[p.jobId];
-      if (!existing) return state;
-      return {
-        ...state,
-        studies: {
-          ...state.studies,
-          [p.jobId]: { ...existing, status: "cancelled", finishedAt: Date.now() } as Study,
-        },
-      };
-    }
-    case "cfd:job-error": {
-      const p = event.payload;
-      const existing = state.studies[p.jobId];
-      if (!existing) return state;
-      return {
-        ...state,
-        studies: {
-          ...state.studies,
-          [p.jobId]: {
-            ...existing,
-            status: "error",
-            finishedAt: Date.now(),
-            error: p.message,
-            errorReason: p.reason,
-            cycles: existing.kind === "single-rpm"
-              ? mergePartial(existing.cycles, p.partialCycles)
-              : existing.cycles,
-          } as Study,
-        },
-      };
-    }
-  }
-}
-
-function mergePartial<T extends { cycle: number }>(have: T[], partial: T[]): T[] {
-  // Prefer cycles we already streamed (they came through progress); fill
-  // any missing trailing cycles from the partial payload.
-  if (partial.length <= have.length) return have;
-  return [...have, ...partial.slice(have.length)];
 }
 
 export function CfdProvider({ children, bridge = realBridge, skipRehydrate = false }: ProviderProps) {
@@ -208,24 +201,56 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Apply incoming events through the same reducer path.
   function applyEventAction(event: JobEvent) {
-    // Compute the new state with applyEvent (pure) then dispatch a single
-    // "rehydrate"-style action. We model it as a specific action for each
-    // event type via the existing reducer where possible.
     switch (event.name) {
       case "cfd:job-progress": {
         const p = event.payload;
-        dispatch({ type: "appendCycle", id: p.jobId, cycle: p.payload.cycleStats, total: p.payload.total });
+        const payload: JobProgressPayload = p.payload;
+        switch (payload.kind) {
+          case "single-rpm":
+            dispatch({ type: "appendCycle", id: p.jobId, cycle: payload.cycleStats, total: payload.total });
+            return;
+          case "sweep-rpm-started":
+            dispatch({ type: "sweepRpmStarted", id: p.jobId, rpmIdx: payload.rpmIdx, rpm: payload.rpm });
+            return;
+          case "sweep-cycle":
+            dispatch({ type: "sweepCycle", id: p.jobId, rpmIdx: payload.rpmIdx, rpm: payload.rpm, cycleStats: payload.cycleStats });
+            return;
+          case "sweep-rpm-done":
+            dispatch({ type: "sweepRpmDone", id: p.jobId, point: payload.point, captureDir: payload.captureDir });
+            return;
+        }
         return;
       }
       case "cfd:job-done": {
         const p = event.payload;
-        dispatch({
-          type: "updateStudy",
-          id: p.jobId,
-          patch: { status: "done", finishedAt: Date.now(), summary: p.payload } as Partial<Study>,
-        });
+        if (p.payload.kind === "single-rpm") {
+          dispatch({
+            type: "updateStudy", id: p.jobId,
+            patch: {
+              status: "done", finishedAt: Date.now(),
+              summary: {
+                convergedCycle: p.payload.convergedCycle,
+                nCyclesRun: p.payload.nCyclesRun,
+                stepCount: p.payload.stepCount,
+                captureDir: p.payload.captureDir,
+              },
+            } as Partial<SingleRpmStudy>,
+          });
+        } else {
+          dispatch({
+            type: "updateStudy", id: p.jobId,
+            patch: {
+              status: "done", finishedAt: Date.now(),
+              summary: {
+                nRpms: p.payload.nRpms,
+                nCompleted: p.payload.nCompleted,
+                totalStepCount: p.payload.totalStepCount,
+                totalWallTimeS: p.payload.totalWallTimeS,
+              },
+            } as Partial<SweepStudy>,
+          });
+        }
         return;
       }
       case "cfd:job-cancelled": {
@@ -236,11 +261,10 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
       case "cfd:job-error": {
         const p = event.payload;
         dispatch({
-          type: "updateStudy",
-          id: p.jobId,
+          type: "updateStudy", id: p.jobId,
           patch: { status: "error", finishedAt: Date.now(), error: p.message, errorReason: p.reason } as Partial<Study>,
         });
-        // Merge any partial cycles we missed.
+        // Single-RPM: merge any missed cycles.
         const existing = stateRef.current.studies[p.jobId];
         if (existing && existing.kind === "single-rpm" && p.partialCycles.length > existing.cycles.length) {
           for (let i = existing.cycles.length; i < p.partialCycles.length; i++) {
@@ -256,24 +280,23 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
     }
   }
 
-  // Mount: rehydrate from localStorage + Rust, subscribe to events.
+  // Mount: rehydrate from localStorage, subscribe to events.
   useEffect(() => {
     let cancelled = false;
     let unsubPromise: Promise<() => Promise<void>> | null = null;
 
     const persisted = loadPersisted();
-    // Re-materialize StudyHeader -> Study with empty cycles. We don't
-    // refetch cycle data — Phase 1 keeps that in memory only.
-    const rehydratedStudies: Study[] = persisted.studies.map((h) => ({
-      id: h.id,
-      kind: h.kind,
-      status: h.status,
-      configPath: h.configPath,
-      startedAt: h.startedAt,
-      finishedAt: h.finishedAt,
-      params: h.params,
-      cycles: [],
-    }));
+    // v2 persistence carries full studies (cycles + sweep points) so a
+    // dev-server restart preserves the data, not just the headers.
+    // Studies that were `running` when the previous session ended are
+    // demoted to `cancelled` since their worker thread is dead.
+    const rehydratedStudies: Study[] = persisted.studies.map((s) => {
+      if (s.status === "running" || s.status === "cancelling") {
+        return { ...s, status: "cancelled" as StudyStatus,
+                 finishedAt: s.finishedAt ?? Date.now() };
+      }
+      return s;
+    });
     dispatch({
       type: "rehydrate",
       studies: rehydratedStudies,
@@ -285,14 +308,12 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
       applyEventAction(event);
     });
 
-    // Fetch live Rust-side jobs to recover after HMR.
     if (!skipRehydrate) {
       bridge.listJobs().then((jobs) => {
         if (cancelled) return;
         for (const j of jobs) {
           dispatch({
-            type: "updateStudy",
-            id: j.id,
+            type: "updateStudy", id: j.id,
             patch: { status: j.status, finishedAt: j.finishedAt } as Partial<Study>,
           });
         }
@@ -306,23 +327,14 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge]);
 
-  // Persist headers + last config path whenever they change.
+  // Persist full studies + last config path whenever they change. v2
+  // storage keeps per-cycle stats and sweep points so a dev-server
+  // restart preserves data the user already paid solver time for.
   useEffect(() => {
     if (!state.hydrated) return;
-    const headers: StudyHeader[] = Object.values(state.studies)
-      .filter((s): s is import("./types").SingleRpmStudy => s.kind === "single-rpm")
-      .sort((a, b) => b.startedAt - a.startedAt)
-      .slice(0, 50)
-      .map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        status: s.status,
-        configPath: s.configPath,
-        startedAt: s.startedAt,
-        finishedAt: s.finishedAt,
-        params: s.params,
-      }));
-    savePersisted({ lastConfigPath: state.loadedConfig?.path ?? null, studies: headers });
+    const studies = Object.values(state.studies)
+      .sort((a, b) => b.startedAt - a.startedAt);
+    savePersisted({ lastConfigPath: state.loadedConfig?.path ?? null, studies });
   }, [state.studies, state.loadedConfig, state.hydrated]);
 
   const value: CfdContextValue = useMemo(
@@ -333,21 +345,24 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
       navigateTo: (screen) => dispatch({ type: "setActiveScreen", screen }),
       setActiveStudy: (id) => dispatch({ type: "setActiveStudy", id }),
       startSingleRpm: async (configPath, params) => {
-        const { jobId } = await bridge.startJob({
-          kind: "single-rpm",
-          configPath,
-          params,
-        });
+        const { jobId } = await bridge.startJob({ kind: "single-rpm", configPath, params });
         dispatch({
           type: "addStudy",
           study: {
-            id: jobId,
-            kind: "single-rpm",
-            status: "running",
-            configPath,
-            startedAt: Date.now(),
-            params,
-            cycles: [],
+            id: jobId, kind: "single-rpm", status: "running", configPath,
+            startedAt: Date.now(), params, cycles: [],
+          },
+        });
+        dispatch({ type: "setActiveScreen", screen: "results" });
+        return jobId;
+      },
+      startSweep: async (configPath, params) => {
+        const { jobId } = await bridge.startJob({ kind: "sweep", configPath, params });
+        dispatch({
+          type: "addStudy",
+          study: {
+            id: jobId, kind: "sweep", status: "running", configPath,
+            startedAt: Date.now(), params, points: [],
           },
         });
         dispatch({ type: "setActiveScreen", screen: "results" });
@@ -358,6 +373,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         await bridge.cancelJob(id);
       },
       deleteStudy: (id) => dispatch({ type: "deleteStudy", id }),
+      setSweepCompare: (id, compareWithStudyId) => dispatch({ type: "setSweepCompare", id, compareWithStudyId }),
       __dispatchTestEvent: (event: JobEvent) => applyEventAction(event),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,5 +1,6 @@
 import { useCfd } from "../state/CfdContext";
 import { SingleRpmResults } from "../results/SingleRpmResults";
+import { SweepResults } from "../results/SweepResults";
 
 export function ResultsScreen() {
   const { state, navigateTo } = useCfd();
@@ -20,10 +21,11 @@ export function ResultsScreen() {
     );
   }
 
-  // Dispatch on study.kind — future kinds get their own renderer here.
   switch (activeStudy.kind) {
     case "single-rpm":
       return <SingleRpmResults study={activeStudy} />;
+    case "sweep":
+      return <SweepResults study={activeStudy} />;
     default:
       return <div className="p-4 text-[#9097A0]">Unknown study kind.</div>;
   }

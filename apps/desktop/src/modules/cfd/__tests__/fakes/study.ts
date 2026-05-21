@@ -44,6 +44,9 @@ export function makeParams(overrides: Partial<SingleRpmParams> = {}): SingleRpmP
     junctionKind: "stagnation",
     convergenceTolImep: 1e-3,
     convergenceMinCycles: 5,
+    captureWaves: false,
+    capturePvLoops: false,
+    capturePipeProfiles: false,
     ...overrides,
   };
 }

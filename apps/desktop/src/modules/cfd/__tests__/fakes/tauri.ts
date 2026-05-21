@@ -26,6 +26,14 @@ export interface FakeBridgeState {
   setStartJob(impl: (req: StartJobRequest) => Promise<{ jobId: string }>): void;
   setCancelJob(impl: (jobId: string) => Promise<void>): void;
   setListJobs(impl: () => Promise<JobSummary[]>): void;
+  setLoadCapture(
+    impl: (
+      jobId: string,
+      studyKind: "single-rpm" | "sweep",
+      rpmInt: number,
+      file: "pv.json" | "profiles.json" | "manifest.json",
+    ) => Promise<unknown>,
+  ): void;
 }
 
 export function makeFakeBridge(): FakeBridgeState {
@@ -43,6 +51,14 @@ export function makeFakeBridge(): FakeBridgeState {
   });
   let cancelJob: (jobId: string) => Promise<void> = async () => {};
   let listJobs: () => Promise<JobSummary[]> = async () => [];
+  let loadCapture: (
+    jobId: string,
+    studyKind: "single-rpm" | "sweep",
+    rpmInt: number,
+    file: "pv.json" | "profiles.json" | "manifest.json",
+  ) => Promise<unknown> = async () => {
+    throw new Error("loadCapture not configured");
+  };
 
   const bridge: CfdBridge = {
     async loadConfig(path) {
@@ -73,6 +89,10 @@ export function makeFakeBridge(): FakeBridgeState {
       invocations.push({ command: "cfd_list_jobs", args: {} });
       return listJobs();
     },
+    async loadCapture(jobId, studyKind, rpmInt, file) {
+      invocations.push({ command: "cfd_load_capture", args: { jobId, studyKind, rpmInt, file } });
+      return loadCapture(jobId, studyKind, rpmInt, file);
+    },
     async subscribe(handler) {
       subscribers.add(handler);
       return async () => {
@@ -94,5 +114,6 @@ export function makeFakeBridge(): FakeBridgeState {
     setStartJob(impl) { startJob = impl; },
     setCancelJob(impl) { cancelJob = impl; },
     setListJobs(impl) { listJobs = impl; },
+    setLoadCapture(impl) { loadCapture = impl; },
   };
 }

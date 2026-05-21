@@ -1,6 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { CycleChart } from "../components/charts/CycleChart";
+import { PvLoopView } from "./PvLoopView";
+import { PipeProfileView } from "./PipeProfileView";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
 import type { SingleRpmStudy } from "../state/types";
@@ -11,11 +13,15 @@ interface Props {
 
 export function SingleRpmResults({ study }: Props) {
   const { cancelStudy } = useCfd();
+  const [showPv, setShowPv] = useState(false);
+  const [showProfiles, setShowProfiles] = useState(false);
   const last = study.cycles[study.cycles.length - 1];
   const elapsed = useMemo(() => {
     const end = study.finishedAt ?? Date.now();
     return ((end - study.startedAt) / 1000).toFixed(1);
   }, [study.finishedAt, study.startedAt]);
+  const hasCaptures = !!study.summary?.captureDir;
+  const rpmInt = Math.round(study.params.rpm);
 
   return (
     <div className="flex h-full flex-col bg-[#0B0B0D] text-[#D8DCE2]">
@@ -182,6 +188,47 @@ export function SingleRpmResults({ study }: Props) {
               <div className="px-3 pb-3 text-[10px] text-[#5A5F66]">
                 Last cycle: IMEP <span className="text-[#D8DCE2]">{last.imepBar.toFixed(3)}</span> bar · VE <span className="text-[#D8DCE2]">{(last.veAtm * 100).toFixed(2)}%</span> · EGT <span className="text-[#D8DCE2]">{last.egtMean.toFixed(0)}</span> K · P_ind <span className="text-[#D8DCE2]">{last.indicatedPowerKW.toFixed(2)}</span> kW
               </div>
+            )}
+
+            {hasCaptures && (
+              <section className="m-2 mt-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <div className="flex items-center gap-2 border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider">
+                  <span className="text-[#9097A0]">Captures</span>
+                  {study.params.capturePvLoops && (
+                    <button type="button"
+                      className={
+                        "rounded-sm border px-2 py-0.5 " +
+                        (showPv ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                      }
+                      onClick={() => setShowPv((v) => !v)}>
+                      {showPv ? "Hide P-V" : "Show P-V"}
+                    </button>
+                  )}
+                  {study.params.capturePipeProfiles && (
+                    <button type="button"
+                      className={
+                        "rounded-sm border px-2 py-0.5 " +
+                        (showProfiles ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                      }
+                      onClick={() => setShowProfiles((v) => !v)}>
+                      {showProfiles ? "Hide profiles" : "Show profiles"}
+                    </button>
+                  )}
+                  {study.params.captureWaves && (
+                    <span className="text-[10px] text-[#5A5F66]">Wave frames captured on disk (viewer in Phase 4).</span>
+                  )}
+                </div>
+                {showPv && (
+                  <div className="p-2">
+                    <PvLoopView jobId={study.id} studyKind="single-rpm" rpmInt={rpmInt} />
+                  </div>
+                )}
+                {showProfiles && (
+                  <div className="p-2">
+                    <PipeProfileView jobId={study.id} studyKind="single-rpm" rpmInt={rpmInt} />
+                  </div>
+                )}
+              </section>
             )}
           </>
         )}

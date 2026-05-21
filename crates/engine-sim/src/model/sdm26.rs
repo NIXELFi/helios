@@ -717,7 +717,7 @@ impl SDM26Engine {
         let target_theta = (n_cycles as f64) * 720.0;
 
         while state.theta < target_theta && !state.step_budget_exhausted() {
-            match self.advance_one_cycle(rpm, &mut state, Some(target_theta)) {
+            match self.advance_one_cycle(rpm, &mut state, Some(target_theta), None) {
                 CycleOutcome::Cycle(stats) => {
                     if verbose {
                         println!(
@@ -765,11 +765,17 @@ impl SDM26Engine {
     ///
     /// Used by `run_single_rpm` internally and by `cfd-core`'s runner so
     /// the math is shared across both code paths.
+    ///
+    /// An optional `observer` is invoked after every internal solver step
+    /// for capture purposes (P-V loops, wave-frame writers, etc.). Passing
+    /// `None` keeps behavior bit-identical to the older signature — the
+    /// branch is a single Option check the optimizer elides.
     pub fn advance_one_cycle(
         &mut self,
         rpm: f64,
         state: &mut CycleLoopState,
         theta_limit: Option<f64>,
+        mut observer: Option<&mut dyn CycleObserver>,
     ) -> CycleOutcome {
         let cfg = self.cfg.clone();
         let omega = omega_from_rpm(rpm);
@@ -800,6 +806,9 @@ impl SDM26Engine {
             self.step(state.theta, dt, rpm);
             state.step_count += 1;
             state.theta += dt * (180.0 / PI) * omega;
+            if let Some(ref mut obs) = observer {
+                obs.on_step(state.theta, dt, self);
+            }
             let new_cycle = (state.theta / 720.0) as i64;
             if new_cycle > state.prev_cycle {
                 let m_now = self.system_mass();
@@ -870,6 +879,19 @@ impl SDM26Engine {
             }
         }
     }
+}
+
+/// Observer invoked after every internal step in `advance_one_cycle`.
+///
+/// Implementations are read-only viewers — they MUST NOT mutate the
+/// engine. They're used for capture (P-V loops, pipe profiles, wave-
+/// frame writers) without touching the parity-locked math.
+///
+/// The observer is invoked AFTER the step has been applied and AFTER
+/// `state.theta` has been updated, so the values reported via the
+/// engine and the supplied `theta_global_deg` are consistent.
+pub trait CycleObserver {
+    fn on_step(&mut self, theta_global_deg: f64, dt: f64, eng: &SDM26Engine);
 }
 
 /// State carried across `advance_one_cycle` invocations to preserve

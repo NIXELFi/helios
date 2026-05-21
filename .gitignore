@@ -51,3 +51,11 @@ test-results/
 
 # Supabase local secrets
 infra/pdm-supabase/.env
+
+# Local Claude config
+.claude/
+
+# CFD capture artifacts written by the runner — per-job sweep outputs
+# (P-V, profiles, wave frames). Reproducible by re-running the sweep;
+# can reach multi-GB and must not be committed.
+/cfd/

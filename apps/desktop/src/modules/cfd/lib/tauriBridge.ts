@@ -20,6 +20,17 @@ export interface CfdBridge {
   cancelJob(jobId: string): Promise<void>;
   listJobs(): Promise<JobSummary[]>;
   subscribe(handler: (e: JobEvent) => void): Promise<() => Promise<void>>;
+  /**
+   * Load one of the on-disk capture artifacts written by the runner.
+   * `file` is restricted by the Tauri side to `pv.json`, `profiles.json`,
+   * or `manifest.json`. Returns raw parsed JSON; cast at call site.
+   */
+  loadCapture(
+    jobId: string,
+    studyKind: "single-rpm" | "sweep",
+    rpmInt: number,
+    file: "pv.json" | "profiles.json" | "manifest.json",
+  ): Promise<unknown>;
 }
 
 const EVENT_NAMES = [
@@ -44,6 +55,13 @@ export const realBridge: CfdBridge = {
   },
   cancelJob: (jobId) => invoke<void>("cfd_cancel_job", { jobId }),
   listJobs: () => invoke<JobSummary[]>("cfd_list_jobs"),
+  loadCapture: (jobId, studyKind, rpmInt, file) =>
+    invoke<unknown>("cfd_load_capture", {
+      jobId,
+      studyKind,
+      rpmInt,
+      file,
+    }),
   subscribe: async (handler) => {
     const w = getCurrentWindow();
     const unsubs = await Promise.all(
