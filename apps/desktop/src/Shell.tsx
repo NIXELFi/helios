@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { SupabaseAuthProvider, createSupabaseClient } from "@helios/auth";
 import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
 import { VaultModule } from "./modules/vault";
+import { CfdModule } from "./modules/cfd";
 import LogsApp from "./App";
 
 function tryCreateClient() {
@@ -47,6 +48,11 @@ export default function HeliosShell() {
                 <code className="ml-1">.env.local</code>.
               </div>
             )}
+          </div>
+        )}
+        {visited.has("cfd") && (
+          <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
+            <CfdModule />
           </div>
         )}
       </main>

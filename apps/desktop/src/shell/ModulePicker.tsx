@@ -1,4 +1,4 @@
-export type ModuleId = "logs" | "vault";
+export type ModuleId = "logs" | "vault" | "cfd";
 
 export function ModulePicker(props: {
   active: ModuleId;
@@ -36,6 +36,22 @@ export function ModulePicker(props: {
         }
       >
         <span>Vault</span>
+        <span className="ml-2 rounded bg-asu-gold px-1.5 py-0.5 text-xs font-bold text-helios-base">
+          NEW
+        </span>
+      </button>
+      <button
+        type="button"
+        aria-current={active === "cfd" ? "page" : undefined}
+        onClick={() => onSelect("cfd")}
+        className={
+          "flex items-center justify-between rounded px-3 py-2 text-left text-sm " +
+          (active === "cfd"
+            ? "bg-helios-line text-helios-text"
+            : "text-helios-dim hover:bg-helios-panel")
+        }
+      >
+        <span>CFD</span>
         <span className="ml-2 rounded bg-asu-gold px-1.5 py-0.5 text-xs font-bold text-helios-base">
           NEW
         </span>

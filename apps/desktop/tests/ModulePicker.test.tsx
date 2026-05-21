@@ -4,12 +4,13 @@ import "@testing-library/jest-dom/vitest";
 import { ModulePicker } from "../src/shell/ModulePicker";
 
 describe("<ModulePicker>", () => {
-  it("renders Logs (active) and Vault (with NEW badge) entries", () => {
+  it("renders Logs (active), Vault, and CFD entries with NEW badges", () => {
     render(<ModulePicker active="logs" onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: /logs/i })).toBeInTheDocument();
-    const vaultBtn = screen.getByRole("button", { name: /vault/i });
-    expect(vaultBtn).toBeInTheDocument();
-    expect(screen.getByText(/new/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /vault/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cfd/i })).toBeInTheDocument();
+    // Two "NEW" badges now (Vault + CFD).
+    expect(screen.getAllByText(/^new$/i).length).toBeGreaterThanOrEqual(2);
   });
 
   it("highlights the active module via aria-current", () => {
