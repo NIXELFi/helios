@@ -1,0 +1,99 @@
+{
+  "kernel": "engine_5cycle",
+  "git_sha": "24ba2f41cff8b47a8829d7ba7e4f1299de97ef27",
+  "tolerance": {
+    "rtol": 1e-06,
+    "atol": 1e-09
+  },
+  "cases": [
+    {
+      "name": "sdm26_default_6000rpm_3cycles_stagnation",
+      "inputs": {
+        "rpm": 6000.0,
+        "n_cycles": 3,
+        "junction_type": "stagnation"
+      },
+      "outputs": {
+        "cycle_stats": [
+          {
+            "cycle": 1,
+            "mass_total": 0.005766348189649245,
+            "mass_drift": -0.00033273692606513704,
+            "mass_in_restrictor": 0.0004027590396407562,
+            "mass_out_collector": 0.0007354959657058901,
+            "net_port_flow": -0.0003327369260651339,
+            "nonconservation": -3.144186300207963e-18,
+            "imep_bar": 9.14378426333073,
+            "bmep_bar": 7.577034263330729,
+            "fmep_bar": 1.56675,
+            "ve_atm": 0.7675046248332624,
+            "intake_mass_per_cycle_g": 0.5413558949036501,
+            "f_residual": 0.0,
+            "indicated_power_kW": 27.402133847197632,
+            "indicated_power_hp": 36.74686046291757,
+            "brake_power_kW": 22.70689039342674,
+            "brake_power_hp": 30.45043635969792,
+            "wheel_power_kW": 19.300856834412727,
+            "wheel_power_hp": 25.88287090574323,
+            "indicated_torque_Nm": 43.61185053047238,
+            "brake_torque_Nm": 36.13913848359738,
+            "wheel_torque_Nm": 30.71826771105777,
+            "EGT_mean": 897.740224132657
+          },
+          {
+            "cycle": 2,
+            "mass_total": 0.004810626537699617,
+            "mass_drift": -0.0009557216519496285,
+            "mass_in_restrictor": 0.00048686015557481484,
+            "mass_out_collector": 0.0014425818075244458,
+            "net_port_flow": -0.000955721651949631,
+            "nonconservation": 2.4936649967166602e-18,
+            "imep_bar": 10.966509403010079,
+            "bmep_bar": 9.39975940301008,
+            "fmep_bar": 1.56675,
+            "ve_atm": 0.7271313418680327,
+            "intake_mass_per_cycle_g": 0.5128787834665843,
+            "f_residual": 0.0,
+            "indicated_power_kW": 32.86448475200255,
+            "indicated_power_hp": 44.07199242591195,
+            "brake_power_kW": 28.169241298231654,
+            "brake_power_hp": 37.7755683226923,
+            "wheel_power_kW": 23.943855103496904,
+            "wheel_power_hp": 32.10923307428846,
+            "indicated_torque_Nm": 52.30545200449427,
+            "brake_torque_Nm": 44.83273995761927,
+            "wheel_torque_Nm": 38.107828963976374,
+            "EGT_mean": 1155.7571508286187
+          },
+          {
+            "cycle": 3,
+            "mass_total": 0.004435973594063981,
+            "mass_drift": -0.0003746529436356354,
+            "mass_in_restrictor": 0.0004945512525225185,
+            "mass_out_collector": 0.0008692041961581568,
+            "net_port_flow": -0.00037465294363563833,
+            "nonconservation": 2.927345865710862e-18,
+            "imep_bar": 10.508190611397866,
+            "bmep_bar": 8.941440611397867,
+            "fmep_bar": 1.56675,
+            "ve_atm": 0.7227144240385054,
+            "intake_mass_per_cycle_g": 0.5097633305729432,
+            "f_residual": 0.0,
+            "indicated_power_kW": 31.49099293387111,
+            "indicated_power_hp": 42.23010987511212,
+            "brake_power_kW": 26.795749480100216,
+            "brake_power_hp": 35.93368577189247,
+            "wheel_power_kW": 22.776387058085184,
+            "wheel_power_hp": 30.5436329061086,
+            "indicated_torque_Nm": 50.11947188297534,
+            "brake_torque_Nm": 42.646759836100344,
+            "wheel_torque_Nm": 36.249745860685294,
+            "EGT_mean": 1157.1925249281162
+          }
+        ],
+        "step_count": 7255,
+        "n_cycles_run": 3
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ members = [
   "crates/pdm-core",
   "crates/pdm-sw-parser",
   "crates/pdm-client",
+  "crates/engine-sim",
   "apps/desktop/src-tauri",
 ]
 

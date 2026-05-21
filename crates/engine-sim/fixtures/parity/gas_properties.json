@@ -1,0 +1,1682 @@
+{
+  "kernel": "gas_properties",
+  "git_sha": "24ba2f41cff8b47a8829d7ba7e4f1299de97ef27",
+  "tolerance": {
+    "rtol": 1e-12,
+    "atol": 1e-14
+  },
+  "cases": [
+    {
+      "name": "gamma_unburned@T=200",
+      "inputs": {
+        "T": 200
+      },
+      "outputs": {
+        "gamma_unburned": 1.378023
+      }
+    },
+    {
+      "name": "gamma_burned@T=200",
+      "inputs": {
+        "T": 200
+      },
+      "outputs": {
+        "gamma_burned": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=250",
+      "inputs": {
+        "T": 250
+      },
+      "outputs": {
+        "gamma_unburned": 1.378023
+      }
+    },
+    {
+      "name": "gamma_burned@T=250",
+      "inputs": {
+        "T": 250
+      },
+      "outputs": {
+        "gamma_burned": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=300",
+      "inputs": {
+        "T": 300
+      },
+      "outputs": {
+        "gamma_unburned": 1.378023
+      }
+    },
+    {
+      "name": "gamma_burned@T=300",
+      "inputs": {
+        "T": 300
+      },
+      "outputs": {
+        "gamma_burned": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=350",
+      "inputs": {
+        "T": 350
+      },
+      "outputs": {
+        "gamma_unburned": 1.37282075
+      }
+    },
+    {
+      "name": "gamma_burned@T=350",
+      "inputs": {
+        "T": 350
+      },
+      "outputs": {
+        "gamma_burned": 1.3603895500000003
+      }
+    },
+    {
+      "name": "gamma_unburned@T=400",
+      "inputs": {
+        "T": 400
+      },
+      "outputs": {
+        "gamma_unburned": 1.367712
+      }
+    },
+    {
+      "name": "gamma_burned@T=400",
+      "inputs": {
+        "T": 400
+      },
+      "outputs": {
+        "gamma_burned": 1.3549688
+      }
+    },
+    {
+      "name": "gamma_unburned@T=450",
+      "inputs": {
+        "T": 450
+      },
+      "outputs": {
+        "gamma_unburned": 1.36269675
+      }
+    },
+    {
+      "name": "gamma_burned@T=450",
+      "inputs": {
+        "T": 450
+      },
+      "outputs": {
+        "gamma_burned": 1.3496739500000001
+      }
+    },
+    {
+      "name": "gamma_unburned@T=500",
+      "inputs": {
+        "T": 500
+      },
+      "outputs": {
+        "gamma_unburned": 1.357775
+      }
+    },
+    {
+      "name": "gamma_burned@T=500",
+      "inputs": {
+        "T": 500
+      },
+      "outputs": {
+        "gamma_burned": 1.344505
+      }
+    },
+    {
+      "name": "gamma_unburned@T=550",
+      "inputs": {
+        "T": 550
+      },
+      "outputs": {
+        "gamma_unburned": 1.35294675
+      }
+    },
+    {
+      "name": "gamma_burned@T=550",
+      "inputs": {
+        "T": 550
+      },
+      "outputs": {
+        "gamma_burned": 1.3394619500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=600",
+      "inputs": {
+        "T": 600
+      },
+      "outputs": {
+        "gamma_unburned": 1.348212
+      }
+    },
+    {
+      "name": "gamma_burned@T=600",
+      "inputs": {
+        "T": 600
+      },
+      "outputs": {
+        "gamma_burned": 1.3345448000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=650",
+      "inputs": {
+        "T": 650
+      },
+      "outputs": {
+        "gamma_unburned": 1.3435707499999998
+      }
+    },
+    {
+      "name": "gamma_burned@T=650",
+      "inputs": {
+        "T": 650
+      },
+      "outputs": {
+        "gamma_burned": 1.32975355
+      }
+    },
+    {
+      "name": "gamma_unburned@T=700",
+      "inputs": {
+        "T": 700
+      },
+      "outputs": {
+        "gamma_unburned": 1.339023
+      }
+    },
+    {
+      "name": "gamma_burned@T=700",
+      "inputs": {
+        "T": 700
+      },
+      "outputs": {
+        "gamma_burned": 1.3250882000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=750",
+      "inputs": {
+        "T": 750
+      },
+      "outputs": {
+        "gamma_unburned": 1.3345687499999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=750",
+      "inputs": {
+        "T": 750
+      },
+      "outputs": {
+        "gamma_burned": 1.3205487500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=800",
+      "inputs": {
+        "T": 800
+      },
+      "outputs": {
+        "gamma_unburned": 1.330208
+      }
+    },
+    {
+      "name": "gamma_burned@T=800",
+      "inputs": {
+        "T": 800
+      },
+      "outputs": {
+        "gamma_burned": 1.3161352000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=850",
+      "inputs": {
+        "T": 850
+      },
+      "outputs": {
+        "gamma_unburned": 1.32594075
+      }
+    },
+    {
+      "name": "gamma_burned@T=850",
+      "inputs": {
+        "T": 850
+      },
+      "outputs": {
+        "gamma_burned": 1.31184755
+      }
+    },
+    {
+      "name": "gamma_unburned@T=900",
+      "inputs": {
+        "T": 900
+      },
+      "outputs": {
+        "gamma_unburned": 1.3217670000000001
+      }
+    },
+    {
+      "name": "gamma_burned@T=900",
+      "inputs": {
+        "T": 900
+      },
+      "outputs": {
+        "gamma_burned": 1.3076858
+      }
+    },
+    {
+      "name": "gamma_unburned@T=950",
+      "inputs": {
+        "T": 950
+      },
+      "outputs": {
+        "gamma_unburned": 1.31768675
+      }
+    },
+    {
+      "name": "gamma_burned@T=950",
+      "inputs": {
+        "T": 950
+      },
+      "outputs": {
+        "gamma_burned": 1.30364995
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1000",
+      "inputs": {
+        "T": 1000
+      },
+      "outputs": {
+        "gamma_unburned": 1.3136999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=1000",
+      "inputs": {
+        "T": 1000
+      },
+      "outputs": {
+        "gamma_burned": 1.2997400000000001
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1050",
+      "inputs": {
+        "T": 1050
+      },
+      "outputs": {
+        "gamma_unburned": 1.3098067500000001
+      }
+    },
+    {
+      "name": "gamma_burned@T=1050",
+      "inputs": {
+        "T": 1050
+      },
+      "outputs": {
+        "gamma_burned": 1.2959559500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1100",
+      "inputs": {
+        "T": 1100
+      },
+      "outputs": {
+        "gamma_unburned": 1.306007
+      }
+    },
+    {
+      "name": "gamma_burned@T=1100",
+      "inputs": {
+        "T": 1100
+      },
+      "outputs": {
+        "gamma_burned": 1.2922978
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1150",
+      "inputs": {
+        "T": 1150
+      },
+      "outputs": {
+        "gamma_unburned": 1.3023007500000001
+      }
+    },
+    {
+      "name": "gamma_burned@T=1150",
+      "inputs": {
+        "T": 1150
+      },
+      "outputs": {
+        "gamma_burned": 1.2887655500000001
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1200",
+      "inputs": {
+        "T": 1200
+      },
+      "outputs": {
+        "gamma_unburned": 1.298688
+      }
+    },
+    {
+      "name": "gamma_burned@T=1200",
+      "inputs": {
+        "T": 1200
+      },
+      "outputs": {
+        "gamma_burned": 1.2853592
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1250",
+      "inputs": {
+        "T": 1250
+      },
+      "outputs": {
+        "gamma_unburned": 1.29516875
+      }
+    },
+    {
+      "name": "gamma_burned@T=1250",
+      "inputs": {
+        "T": 1250
+      },
+      "outputs": {
+        "gamma_burned": 1.2820787500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1300",
+      "inputs": {
+        "T": 1300
+      },
+      "outputs": {
+        "gamma_unburned": 1.291743
+      }
+    },
+    {
+      "name": "gamma_burned@T=1300",
+      "inputs": {
+        "T": 1300
+      },
+      "outputs": {
+        "gamma_burned": 1.2789242000000003
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1350",
+      "inputs": {
+        "T": 1350
+      },
+      "outputs": {
+        "gamma_unburned": 1.28841075
+      }
+    },
+    {
+      "name": "gamma_burned@T=1350",
+      "inputs": {
+        "T": 1350
+      },
+      "outputs": {
+        "gamma_burned": 1.27589555
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1400",
+      "inputs": {
+        "T": 1400
+      },
+      "outputs": {
+        "gamma_unburned": 1.285172
+      }
+    },
+    {
+      "name": "gamma_burned@T=1400",
+      "inputs": {
+        "T": 1400
+      },
+      "outputs": {
+        "gamma_burned": 1.2729928000000001
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1450",
+      "inputs": {
+        "T": 1450
+      },
+      "outputs": {
+        "gamma_unburned": 1.28202675
+      }
+    },
+    {
+      "name": "gamma_burned@T=1450",
+      "inputs": {
+        "T": 1450
+      },
+      "outputs": {
+        "gamma_burned": 1.27021595
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1500",
+      "inputs": {
+        "T": 1500
+      },
+      "outputs": {
+        "gamma_unburned": 1.278975
+      }
+    },
+    {
+      "name": "gamma_burned@T=1500",
+      "inputs": {
+        "T": 1500
+      },
+      "outputs": {
+        "gamma_burned": 1.267565
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1550",
+      "inputs": {
+        "T": 1550
+      },
+      "outputs": {
+        "gamma_unburned": 1.27601675
+      }
+    },
+    {
+      "name": "gamma_burned@T=1550",
+      "inputs": {
+        "T": 1550
+      },
+      "outputs": {
+        "gamma_burned": 1.26503995
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1600",
+      "inputs": {
+        "T": 1600
+      },
+      "outputs": {
+        "gamma_unburned": 1.2731519999999998
+      }
+    },
+    {
+      "name": "gamma_burned@T=1600",
+      "inputs": {
+        "T": 1600
+      },
+      "outputs": {
+        "gamma_burned": 1.2626408
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1650",
+      "inputs": {
+        "T": 1650
+      },
+      "outputs": {
+        "gamma_unburned": 1.27038075
+      }
+    },
+    {
+      "name": "gamma_burned@T=1650",
+      "inputs": {
+        "T": 1650
+      },
+      "outputs": {
+        "gamma_burned": 1.26036755
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1700",
+      "inputs": {
+        "T": 1700
+      },
+      "outputs": {
+        "gamma_unburned": 1.267703
+      }
+    },
+    {
+      "name": "gamma_burned@T=1700",
+      "inputs": {
+        "T": 1700
+      },
+      "outputs": {
+        "gamma_burned": 1.2582202000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1750",
+      "inputs": {
+        "T": 1750
+      },
+      "outputs": {
+        "gamma_unburned": 1.26511875
+      }
+    },
+    {
+      "name": "gamma_burned@T=1750",
+      "inputs": {
+        "T": 1750
+      },
+      "outputs": {
+        "gamma_burned": 1.2561987500000003
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1800",
+      "inputs": {
+        "T": 1800
+      },
+      "outputs": {
+        "gamma_unburned": 1.262628
+      }
+    },
+    {
+      "name": "gamma_burned@T=1800",
+      "inputs": {
+        "T": 1800
+      },
+      "outputs": {
+        "gamma_burned": 1.2543032
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1850",
+      "inputs": {
+        "T": 1850
+      },
+      "outputs": {
+        "gamma_unburned": 1.2602307499999998
+      }
+    },
+    {
+      "name": "gamma_burned@T=1850",
+      "inputs": {
+        "T": 1850
+      },
+      "outputs": {
+        "gamma_burned": 1.25253355
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1900",
+      "inputs": {
+        "T": 1900
+      },
+      "outputs": {
+        "gamma_unburned": 1.257927
+      }
+    },
+    {
+      "name": "gamma_burned@T=1900",
+      "inputs": {
+        "T": 1900
+      },
+      "outputs": {
+        "gamma_burned": 1.2508898000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=1950",
+      "inputs": {
+        "T": 1950
+      },
+      "outputs": {
+        "gamma_unburned": 1.25571675
+      }
+    },
+    {
+      "name": "gamma_burned@T=1950",
+      "inputs": {
+        "T": 1950
+      },
+      "outputs": {
+        "gamma_burned": 1.2493719500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2000",
+      "inputs": {
+        "T": 2000
+      },
+      "outputs": {
+        "gamma_unburned": 1.2536
+      }
+    },
+    {
+      "name": "gamma_burned@T=2000",
+      "inputs": {
+        "T": 2000
+      },
+      "outputs": {
+        "gamma_burned": 1.24798
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2050",
+      "inputs": {
+        "T": 2050
+      },
+      "outputs": {
+        "gamma_unburned": 1.25157675
+      }
+    },
+    {
+      "name": "gamma_burned@T=2050",
+      "inputs": {
+        "T": 2050
+      },
+      "outputs": {
+        "gamma_burned": 1.24671395
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2100",
+      "inputs": {
+        "T": 2100
+      },
+      "outputs": {
+        "gamma_unburned": 1.2496470000000002
+      }
+    },
+    {
+      "name": "gamma_burned@T=2100",
+      "inputs": {
+        "T": 2100
+      },
+      "outputs": {
+        "gamma_burned": 1.2455738
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2150",
+      "inputs": {
+        "T": 2150
+      },
+      "outputs": {
+        "gamma_unburned": 1.24781075
+      }
+    },
+    {
+      "name": "gamma_burned@T=2150",
+      "inputs": {
+        "T": 2150
+      },
+      "outputs": {
+        "gamma_burned": 1.2445595500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2200",
+      "inputs": {
+        "T": 2200
+      },
+      "outputs": {
+        "gamma_unburned": 1.246068
+      }
+    },
+    {
+      "name": "gamma_burned@T=2200",
+      "inputs": {
+        "T": 2200
+      },
+      "outputs": {
+        "gamma_burned": 1.2436712
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2250",
+      "inputs": {
+        "T": 2250
+      },
+      "outputs": {
+        "gamma_unburned": 1.2444187500000001
+      }
+    },
+    {
+      "name": "gamma_burned@T=2250",
+      "inputs": {
+        "T": 2250
+      },
+      "outputs": {
+        "gamma_burned": 1.2429087500000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2300",
+      "inputs": {
+        "T": 2300
+      },
+      "outputs": {
+        "gamma_unburned": 1.242863
+      }
+    },
+    {
+      "name": "gamma_burned@T=2300",
+      "inputs": {
+        "T": 2300
+      },
+      "outputs": {
+        "gamma_burned": 1.2422722
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2350",
+      "inputs": {
+        "T": 2350
+      },
+      "outputs": {
+        "gamma_unburned": 1.24140075
+      }
+    },
+    {
+      "name": "gamma_burned@T=2350",
+      "inputs": {
+        "T": 2350
+      },
+      "outputs": {
+        "gamma_burned": 1.24176155
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2400",
+      "inputs": {
+        "T": 2400
+      },
+      "outputs": {
+        "gamma_unburned": 1.240032
+      }
+    },
+    {
+      "name": "gamma_burned@T=2400",
+      "inputs": {
+        "T": 2400
+      },
+      "outputs": {
+        "gamma_burned": 1.2413768
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2450",
+      "inputs": {
+        "T": 2450
+      },
+      "outputs": {
+        "gamma_unburned": 1.23875675
+      }
+    },
+    {
+      "name": "gamma_burned@T=2450",
+      "inputs": {
+        "T": 2450
+      },
+      "outputs": {
+        "gamma_burned": 1.24111795
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2500",
+      "inputs": {
+        "T": 2500
+      },
+      "outputs": {
+        "gamma_unburned": 1.237575
+      }
+    },
+    {
+      "name": "gamma_burned@T=2500",
+      "inputs": {
+        "T": 2500
+      },
+      "outputs": {
+        "gamma_burned": 1.2409850000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2550",
+      "inputs": {
+        "T": 2550
+      },
+      "outputs": {
+        "gamma_unburned": 1.2364867499999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=2550",
+      "inputs": {
+        "T": 2550
+      },
+      "outputs": {
+        "gamma_burned": 1.24097795
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2600",
+      "inputs": {
+        "T": 2600
+      },
+      "outputs": {
+        "gamma_unburned": 1.235492
+      }
+    },
+    {
+      "name": "gamma_burned@T=2600",
+      "inputs": {
+        "T": 2600
+      },
+      "outputs": {
+        "gamma_burned": 1.2410968
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2650",
+      "inputs": {
+        "T": 2650
+      },
+      "outputs": {
+        "gamma_unburned": 1.23459075
+      }
+    },
+    {
+      "name": "gamma_burned@T=2650",
+      "inputs": {
+        "T": 2650
+      },
+      "outputs": {
+        "gamma_burned": 1.24134155
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2700",
+      "inputs": {
+        "T": 2700
+      },
+      "outputs": {
+        "gamma_unburned": 1.2337829999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=2700",
+      "inputs": {
+        "T": 2700
+      },
+      "outputs": {
+        "gamma_burned": 1.2417122000000003
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2750",
+      "inputs": {
+        "T": 2750
+      },
+      "outputs": {
+        "gamma_unburned": 1.23306875
+      }
+    },
+    {
+      "name": "gamma_burned@T=2750",
+      "inputs": {
+        "T": 2750
+      },
+      "outputs": {
+        "gamma_burned": 1.24220875
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2800",
+      "inputs": {
+        "T": 2800
+      },
+      "outputs": {
+        "gamma_unburned": 1.232448
+      }
+    },
+    {
+      "name": "gamma_burned@T=2800",
+      "inputs": {
+        "T": 2800
+      },
+      "outputs": {
+        "gamma_burned": 1.2428312
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2850",
+      "inputs": {
+        "T": 2850
+      },
+      "outputs": {
+        "gamma_unburned": 1.23192075
+      }
+    },
+    {
+      "name": "gamma_burned@T=2850",
+      "inputs": {
+        "T": 2850
+      },
+      "outputs": {
+        "gamma_burned": 1.24357955
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2900",
+      "inputs": {
+        "T": 2900
+      },
+      "outputs": {
+        "gamma_unburned": 1.231487
+      }
+    },
+    {
+      "name": "gamma_burned@T=2900",
+      "inputs": {
+        "T": 2900
+      },
+      "outputs": {
+        "gamma_burned": 1.2444538
+      }
+    },
+    {
+      "name": "gamma_unburned@T=2950",
+      "inputs": {
+        "T": 2950
+      },
+      "outputs": {
+        "gamma_unburned": 1.2311467500000002
+      }
+    },
+    {
+      "name": "gamma_burned@T=2950",
+      "inputs": {
+        "T": 2950
+      },
+      "outputs": {
+        "gamma_burned": 1.2454539500000001
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3000",
+      "inputs": {
+        "T": 3000
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3000",
+      "inputs": {
+        "T": 3000
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3050",
+      "inputs": {
+        "T": 3050
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3050",
+      "inputs": {
+        "T": 3050
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3100",
+      "inputs": {
+        "T": 3100
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3100",
+      "inputs": {
+        "T": 3100
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3150",
+      "inputs": {
+        "T": 3150
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3150",
+      "inputs": {
+        "T": 3150
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3200",
+      "inputs": {
+        "T": 3200
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3200",
+      "inputs": {
+        "T": 3200
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3250",
+      "inputs": {
+        "T": 3250
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3250",
+      "inputs": {
+        "T": 3250
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3300",
+      "inputs": {
+        "T": 3300
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3300",
+      "inputs": {
+        "T": 3300
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3350",
+      "inputs": {
+        "T": 3350
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3350",
+      "inputs": {
+        "T": 3350
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3400",
+      "inputs": {
+        "T": 3400
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3400",
+      "inputs": {
+        "T": 3400
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3450",
+      "inputs": {
+        "T": 3450
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3450",
+      "inputs": {
+        "T": 3450
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3500",
+      "inputs": {
+        "T": 3500
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3500",
+      "inputs": {
+        "T": 3500
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=299.999",
+      "inputs": {
+        "T": 299.999
+      },
+      "outputs": {
+        "gamma_unburned": 1.378023
+      }
+    },
+    {
+      "name": "gamma_burned@T=299.999",
+      "inputs": {
+        "T": 299.999
+      },
+      "outputs": {
+        "gamma_burned": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=300.0",
+      "inputs": {
+        "T": 300.0
+      },
+      "outputs": {
+        "gamma_unburned": 1.378023
+      }
+    },
+    {
+      "name": "gamma_burned@T=300.0",
+      "inputs": {
+        "T": 300.0
+      },
+      "outputs": {
+        "gamma_burned": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=300.001",
+      "inputs": {
+        "T": 300.001
+      },
+      "outputs": {
+        "gamma_unburned": 1.3780228950200188
+      }
+    },
+    {
+      "name": "gamma_burned@T=300.001",
+      "inputs": {
+        "T": 300.001
+      },
+      "outputs": {
+        "gamma_burned": 1.3659360878080253
+      }
+    },
+    {
+      "name": "gamma_unburned@T=900.0",
+      "inputs": {
+        "T": 900.0
+      },
+      "outputs": {
+        "gamma_unburned": 1.3217670000000001
+      }
+    },
+    {
+      "name": "gamma_burned@T=900.0",
+      "inputs": {
+        "T": 900.0
+      },
+      "outputs": {
+        "gamma_burned": 1.3076858
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3000.0",
+      "inputs": {
+        "T": 3000.0
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3000.0",
+      "inputs": {
+        "T": 3000.0
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_unburned@T=3000.001",
+      "inputs": {
+        "T": 3000.001
+      },
+      "outputs": {
+        "gamma_unburned": 1.2308999999999999
+      }
+    },
+    {
+      "name": "gamma_burned@T=3000.001",
+      "inputs": {
+        "T": 3000.001
+      },
+      "outputs": {
+        "gamma_burned": 1.2465800000000002
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.0",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.378023
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.001",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.001
+      },
+      "outputs": {
+        "gamma_mixture": 1.3780109132
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.25",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.25
+      },
+      "outputs": {
+        "gamma_mixture": 1.3750013
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.5",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.5
+      },
+      "outputs": {
+        "gamma_mixture": 1.3719796
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.75",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.75
+      },
+      "outputs": {
+        "gamma_mixture": 1.3689579
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=0.999",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 0.999
+      },
+      "outputs": {
+        "gamma_mixture": 1.3659482868000001
+      }
+    },
+    {
+      "name": "gamma_mixture@T=300.0,xb=1.0",
+      "inputs": {
+        "T": 300.0,
+        "x_b": 1.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.3659362000000002
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.0",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.357775
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.001",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.001
+      },
+      "outputs": {
+        "gamma_mixture": 1.35776173
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.25",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.25
+      },
+      "outputs": {
+        "gamma_mixture": 1.3544574999999999
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.5",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.5
+      },
+      "outputs": {
+        "gamma_mixture": 1.35114
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.75",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.75
+      },
+      "outputs": {
+        "gamma_mixture": 1.3478225000000001
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=0.999",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 0.999
+      },
+      "outputs": {
+        "gamma_mixture": 1.34451827
+      }
+    },
+    {
+      "name": "gamma_mixture@T=500.0,xb=1.0",
+      "inputs": {
+        "T": 500.0,
+        "x_b": 1.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.344505
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.0",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.298688
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.001",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.001
+      },
+      "outputs": {
+        "gamma_mixture": 1.2986746712
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.25",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.25
+      },
+      "outputs": {
+        "gamma_mixture": 1.2953558
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.5",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.5
+      },
+      "outputs": {
+        "gamma_mixture": 1.2920236
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.75",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.75
+      },
+      "outputs": {
+        "gamma_mixture": 1.2886914
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=0.999",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 0.999
+      },
+      "outputs": {
+        "gamma_mixture": 1.2853725288000002
+      }
+    },
+    {
+      "name": "gamma_mixture@T=1200.0,xb=1.0",
+      "inputs": {
+        "T": 1200.0,
+        "x_b": 1.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.2853592
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.0",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.240032
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.001",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.001
+      },
+      "outputs": {
+        "gamma_mixture": 1.2400333448
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.25",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.25
+      },
+      "outputs": {
+        "gamma_mixture": 1.2403682
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.5",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.5
+      },
+      "outputs": {
+        "gamma_mixture": 1.2407044
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.75",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.75
+      },
+      "outputs": {
+        "gamma_mixture": 1.2410406
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=0.999",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 0.999
+      },
+      "outputs": {
+        "gamma_mixture": 1.2413754552
+      }
+    },
+    {
+      "name": "gamma_mixture@T=2400.0,xb=1.0",
+      "inputs": {
+        "T": 2400.0,
+        "x_b": 1.0
+      },
+      "outputs": {
+        "gamma_mixture": 1.2413768
+      }
+    },
+    {
+      "name": "R_mixture@xb=0.0",
+      "inputs": {
+        "x_b": 0.0
+      },
+      "outputs": {
+        "R_mixture": 287.0
+      }
+    },
+    {
+      "name": "R_mixture@xb=0.1",
+      "inputs": {
+        "x_b": 0.1
+      },
+      "outputs": {
+        "R_mixture": 287.8
+      }
+    },
+    {
+      "name": "R_mixture@xb=0.5",
+      "inputs": {
+        "x_b": 0.5
+      },
+      "outputs": {
+        "R_mixture": 291.0
+      }
+    },
+    {
+      "name": "R_mixture@xb=0.9",
+      "inputs": {
+        "x_b": 0.9
+      },
+      "outputs": {
+        "R_mixture": 294.2
+      }
+    },
+    {
+      "name": "R_mixture@xb=1.0",
+      "inputs": {
+        "x_b": 1.0
+      },
+      "outputs": {
+        "R_mixture": 295.0
+      }
+    },
+    {
+      "name": "speed_of_sound@g=1.4,R=287.0,T=300.0",
+      "inputs": {
+        "gamma": 1.4,
+        "R": 287.0,
+        "T": 300.0
+      },
+      "outputs": {
+        "a": 347.18870949384285
+      }
+    },
+    {
+      "name": "speed_of_sound@g=1.3,R=295.0,T=1500.0",
+      "inputs": {
+        "gamma": 1.3,
+        "R": 295.0,
+        "T": 1500.0
+      },
+      "outputs": {
+        "a": 758.4523716094506
+      }
+    },
+    {
+      "name": "speed_of_sound@g=1.35,R=290.0,T=1.0",
+      "inputs": {
+        "gamma": 1.35,
+        "R": 290.0,
+        "T": 1.0
+      },
+      "outputs": {
+        "a": 19.78635893740938
+      }
+    }
+  ]
+}
