@@ -19,6 +19,11 @@ pub struct LoadedConfig {
     /// from this same shape.
     pub raw: serde_json::Value,
     pub summary: ConfigSummary,
+    /// True when `path` resolves under the bundled resource directory.
+    /// The frontend uses this to redirect Save → Save-As so bundled
+    /// examples can't be overwritten in place. Defense-in-depth check
+    /// also runs Rust-side in `cfd_save_config`.
+    pub is_example: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -248,6 +253,27 @@ pub fn build_config_summary(raw: &serde_json::Value) -> ConfigSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loaded_config_camel_case_includes_is_example() {
+        let lc = LoadedConfig {
+            path: "x".into(),
+            raw: serde_json::json!({}),
+            summary: ConfigSummary {
+                display_name: "x".into(),
+                n_cylinders: 4,
+                bore_mm: 0.0,
+                stroke_mm: 0.0,
+                compression_ratio: 0.0,
+                displacement_l: 0.0,
+                restrictor_throat_mm: 0.0,
+                plenum_volume_l: 0.0,
+            },
+            is_example: true,
+        };
+        let s = serde_json::to_string(&lc).unwrap();
+        assert!(s.contains("\"isExample\":true"), "{s}");
+    }
 
     #[test]
     fn single_rpm_request_serde_roundtrip() {

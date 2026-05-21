@@ -12,11 +12,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, Window};
 
 use cfd_core::dto::{
-    build_config_summary, ExampleConfig, JobCancelledEvent, JobDoneEvent,
+    ExampleConfig, JobCancelledEvent, JobDoneEvent,
     JobErrorEvent, JobProgressEvent, JobStartedEvent, JobStatus, JobSummary, LoadedConfig,
     StartJobRequest, StartJobResponse,
 };
@@ -35,19 +34,10 @@ fn now_ms() -> u64 {
 // ---------------- cfd_load_config ----------------
 
 #[tauri::command]
-pub fn cfd_load_config(path: String) -> Result<LoadedConfig, String> {
+pub fn cfd_load_config(app: AppHandle, path: String) -> Result<LoadedConfig, String> {
     let p = PathBuf::from(&path);
-    let text = std::fs::read_to_string(&p)
-        .map_err(|e| format!("Couldn't read {}: {}", p.display(), e))?;
-    let raw: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("JSON parse error in {}: {}", p.display(), e))?;
-    // Validate via the engine-sim loader so the user sees schema errors
-    // before they try to run a sim. The parsed cfg is discarded — we
-    // re-load on the runner thread (engine-sim's loader is cheap).
-    engine_sim::config::loader::load_v1_json(&p)
-        .map_err(|e| format!("Schema error in {}: {}", p.display(), e))?;
-    let summary = build_config_summary(&raw);
-    Ok(LoadedConfig { path, raw, summary })
+    let resource_dir = app.path().resource_dir().ok();
+    cfd_core::load::load_config_from_path(&p, resource_dir.as_deref())
 }
 
 // ---------------- cfd_list_examples ----------------
@@ -178,28 +168,7 @@ pub fn cfd_list_jobs(state: tauri::State<'_, CfdState>) -> Vec<JobSummary> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn load_config_fails_with_clear_message_for_missing_file() {
-        let result = cfd_load_config("/nope/does/not/exist.json".to_string());
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
-        assert!(msg.contains("Couldn't read"), "got: {msg}");
-    }
-
-    #[test]
-    fn load_config_returns_summary_for_bundled_sdm26() {
-        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/cfd/configs/sdm26.json");
-        let result = cfd_load_config(p.to_string_lossy().into_owned()).unwrap();
-        assert_eq!(result.summary.n_cylinders, 4);
-        assert!((result.summary.bore_mm - 67.0).abs() < 1e-9);
-        assert!((result.summary.compression_ratio - 12.2).abs() < 1e-9);
-        // Raw is the full JSON
-        assert!(result.raw.get("cylinder").is_some());
-        assert!(result.raw.get("intake_pipes").is_some());
-    }
-}
+// Note: pure load logic + tests live in `cfd_core::load`. Tauri lib
+// tests don't run on Windows/GNU (Tauri runtime DLL footprint causes
+// STATUS_ENTRYPOINT_NOT_FOUND in the test binary), so adapter tests
+// would not execute anyway.
