@@ -276,7 +276,8 @@ impl Junction {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CycleStats {
     pub cycle: i64,
     pub mass_total: f64,
@@ -291,15 +292,25 @@ pub struct CycleStats {
     pub ve_atm: f64,
     pub intake_mass_per_cycle_g: f64,
     pub f_residual: f64,
+    #[serde(rename = "indicatedPowerKW")]
     pub indicated_power_k_w: f64,
+    #[serde(rename = "indicatedPowerHp")]
     pub indicated_power_hp: f64,
+    #[serde(rename = "brakePowerKW")]
     pub brake_power_k_w: f64,
+    #[serde(rename = "brakePowerHp")]
     pub brake_power_hp: f64,
+    #[serde(rename = "wheelPowerKW")]
     pub wheel_power_k_w: f64,
+    #[serde(rename = "wheelPowerHp")]
     pub wheel_power_hp: f64,
+    #[serde(rename = "indicatedTorqueNm")]
     pub indicated_torque_nm: f64,
+    #[serde(rename = "brakeTorqueNm")]
     pub brake_torque_nm: f64,
+    #[serde(rename = "wheelTorqueNm")]
     pub wheel_torque_nm: f64,
+    #[serde(rename = "egtMean")]
     pub egt_mean: f64,
 }
 
@@ -697,19 +708,78 @@ impl SDM26Engine {
         convergence_tol_imep: f64, convergence_min_cycles: usize,
         stop_at_convergence: bool,
     ) -> RunResult {
+        // Delegate to the externally-drivable cycle stepper so this path
+        // and the runner's cycle-by-cycle path share one body. This keeps
+        // engine math identical regardless of who drives.
+        let mut state = CycleLoopState::new(self);
+        let mut cycle_stats: Vec<CycleStats> = Vec::new();
+        let mut converged_cycle: i64 = -1;
+        let target_theta = (n_cycles as f64) * 720.0;
+
+        while state.theta < target_theta && !state.step_budget_exhausted() {
+            match self.advance_one_cycle(rpm, &mut state, Some(target_theta)) {
+                CycleOutcome::Cycle(stats) => {
+                    if verbose {
+                        println!(
+                            "  cycle {:3}: IMEP={:6.2} bar  VE={:6.2}%  EGT={:5.0} K  drift={:+.3e}  nonconserv={:+.2e}",
+                            stats.cycle, stats.imep_bar, stats.ve_atm * 100.0,
+                            stats.egt_mean, stats.mass_drift, stats.nonconservation,
+                        );
+                    }
+                    cycle_stats.push(stats);
+                    if stop_at_convergence
+                        && cycle_stats.len() >= convergence_min_cycles + 1
+                    {
+                        let n = cycle_stats.len();
+                        let prev_imep = cycle_stats[n - 2].imep_bar;
+                        let this_imep = cycle_stats[n - 1].imep_bar;
+                        if prev_imep.abs() > 1e-6 {
+                            let rel = (this_imep - prev_imep).abs() / prev_imep.abs();
+                            if rel < convergence_tol_imep && converged_cycle < 0 {
+                                converged_cycle = stats.cycle;
+                            }
+                        }
+                        if converged_cycle > 0 && stats.cycle >= converged_cycle + 1 {
+                            break;
+                        }
+                    }
+                }
+                CycleOutcome::TargetReached => break,
+            }
+        }
+
+        RunResult {
+            rpm,
+            n_cycles_requested: n_cycles,
+            n_cycles_run: cycle_stats.len(),
+            step_count: state.step_count,
+            cycle_stats,
+            converged_cycle,
+        }
+    }
+
+    /// Externally-drivable cycle stepper. Advances the simulation until
+    /// theta crosses the next 720° boundary (or `theta_limit` is reached),
+    /// returning the just-completed cycle's stats. Per-cycle accumulators
+    /// are reset at end-of-cycle, same as in `run_single_rpm`.
+    ///
+    /// Used by `run_single_rpm` internally and by `cfd-core`'s runner so
+    /// the math is shared across both code paths.
+    pub fn advance_one_cycle(
+        &mut self,
+        rpm: f64,
+        state: &mut CycleLoopState,
+        theta_limit: Option<f64>,
+    ) -> CycleOutcome {
         let cfg = self.cfg.clone();
         let omega = omega_from_rpm(rpm);
-        let mut theta = 0.0_f64;
-        let target_theta = (n_cycles as f64) * 720.0;
-        let mut cycle_stats: Vec<CycleStats> = Vec::new();
-        let mut prev_cycle: i64 = 0;
-        let mut last_mass_total = self.system_mass();
-        let mut step_count: u64 = 0;
-        self.reset_flow_accumulators();
-        let mut converged_cycle: i64 = -1;
-        let max_steps: u64 = 10_000_000;
-
-        while theta < target_theta && step_count < max_steps {
+        loop {
+            if state.step_budget_exhausted() {
+                return CycleOutcome::TargetReached;
+            }
+            if let Some(lim) = theta_limit {
+                if state.theta >= lim { return CycleOutcome::TargetReached; }
+            }
             // dt: min CFL across all pipes
             let mut dt = cfl_dt(
                 &self.pipes[self.plenum_idx].q,
@@ -724,17 +794,17 @@ impl SDM26Engine {
                 }
             }
             if dt <= 0.0 {
-                panic!("positivity failure at theta={theta:.1}°");
+                panic!("positivity failure at theta={:.1}°", state.theta);
             }
             if dt > 1e-4 { dt = 1e-4; }
-            self.step(theta, dt, rpm);
-            step_count += 1;
-            theta += dt * (180.0 / PI) * omega;
-            let new_cycle = (theta / 720.0) as i64;
-            if new_cycle > prev_cycle {
+            self.step(state.theta, dt, rpm);
+            state.step_count += 1;
+            state.theta += dt * (180.0 / PI) * omega;
+            let new_cycle = (state.theta / 720.0) as i64;
+            if new_cycle > state.prev_cycle {
                 let m_now = self.system_mass();
                 let net_port = self.mass_in_restrictor - self.mass_out_collector;
-                let actual_drift = m_now - last_mass_total;
+                let actual_drift = m_now - state.last_mass_total;
                 let v_d_total = self.cylinders[0].geom.v_d() * (cfg.n_cylinders as f64);
                 let total_work: f64 = self.cylinders.iter().map(|c| c.state.work_cycle).sum();
                 let total_intake: f64 = self.cylinders.iter().map(|c| c.state.m_intake_total).sum();
@@ -747,9 +817,9 @@ impl SDM26Engine {
                 let fmep_pa = fmep_bar * 1e5;
                 let friction_power_w = fmep_pa * v_d_total * rpm / 120.0;
                 let brake_power_w = (indicated_power_w - friction_power_w).max(0.0);
-                let omega = 2.0 * PI * rpm / 60.0;
-                let indicated_torque_nm = if omega > 0.0 { indicated_power_w / omega } else { 0.0 };
-                let brake_torque_nm = if omega > 0.0 { brake_power_w / omega } else { 0.0 };
+                let omega_rad = 2.0 * PI * rpm / 60.0;
+                let indicated_torque_nm = if omega_rad > 0.0 { indicated_power_w / omega_rad } else { 0.0 };
+                let brake_torque_nm = if omega_rad > 0.0 { brake_power_w / omega_rad } else { 0.0 };
                 let wheel_power_w = brake_power_w * cfg.drivetrain_efficiency;
                 let wheel_torque_nm = brake_torque_nm * cfg.drivetrain_efficiency;
                 let bmep_bar = if v_d_total > 0.0 {
@@ -788,43 +858,49 @@ impl SDM26Engine {
                     wheel_torque_nm,
                     egt_mean,
                 };
-                cycle_stats.push(stats);
-                last_mass_total = m_now;
-                if verbose {
-                    println!("  cycle {new_cycle:3}: IMEP={imep_bar:6.2} bar  VE={:6.2}%  EGT={egt_mean:5.0} K  drift={actual_drift:+.3e}  nonconserv={:+.2e}",
-                        ve_atm * 100.0, stats.nonconservation);
-                }
-                if stop_at_convergence
-                    && cycle_stats.len() >= convergence_min_cycles + 1
-                {
-                    let prev_imep = cycle_stats[cycle_stats.len() - 2].imep_bar;
-                    let this_imep = cycle_stats[cycle_stats.len() - 1].imep_bar;
-                    if prev_imep.abs() > 1e-6 {
-                        let rel = (this_imep - prev_imep).abs() / prev_imep.abs();
-                        if rel < convergence_tol_imep && converged_cycle < 0 {
-                            converged_cycle = new_cycle;
-                        }
-                    }
-                }
+                state.last_mass_total = m_now;
                 for c in self.cylinders.iter_mut() {
                     c.state.m_intake_total = 0.0;
                     c.state.m_exhaust_total = 0.0;
                     c.state.work_cycle = 0.0;
                 }
                 self.reset_flow_accumulators();
-                prev_cycle = new_cycle;
-                if stop_at_convergence && converged_cycle > 0 && new_cycle >= converged_cycle + 1 {
-                    break;
-                }
+                state.prev_cycle = new_cycle;
+                return CycleOutcome::Cycle(stats);
             }
         }
-        RunResult {
-            rpm,
-            n_cycles_requested: n_cycles,
-            n_cycles_run: cycle_stats.len(),
-            step_count,
-            cycle_stats,
-            converged_cycle,
+    }
+}
+
+/// State carried across `advance_one_cycle` invocations to preserve
+/// the simulation's cycle accounting (theta, mass-drift baseline, etc.).
+#[derive(Debug, Clone)]
+pub struct CycleLoopState {
+    pub theta: f64,
+    pub step_count: u64,
+    pub prev_cycle: i64,
+    pub last_mass_total: f64,
+    pub max_steps: u64,
+}
+
+impl CycleLoopState {
+    pub fn new(engine: &mut SDM26Engine) -> Self {
+        engine.reset_flow_accumulators();
+        Self {
+            theta: 0.0,
+            step_count: 0,
+            prev_cycle: 0,
+            last_mass_total: engine.system_mass(),
+            max_steps: 10_000_000,
         }
     }
+    pub fn step_budget_exhausted(&self) -> bool {
+        self.step_count >= self.max_steps
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum CycleOutcome {
+    Cycle(CycleStats),
+    TargetReached,
 }

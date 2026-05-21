@@ -1,3 +1,4 @@
+mod cfd;
 mod commands;
 
 use std::sync::Mutex;
@@ -58,6 +59,7 @@ pub fn run() {
             }
         }))
         .manage(pending)
+        .manage(cfd::CfdState::default())
         .on_page_load(|window, _payload| {
             let app = window.app_handle();
             let state = app.state::<PendingOpenFiles>();
@@ -72,6 +74,11 @@ pub fn run() {
             commands::load_csv::load_csv,
             commands::restart::helios_relaunch,
             get_pending_open_files,
+            cfd::commands::cfd_load_config,
+            cfd::commands::cfd_list_examples,
+            cfd::commands::cfd_start_job,
+            cfd::commands::cfd_cancel_job,
+            cfd::commands::cfd_list_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Helios");

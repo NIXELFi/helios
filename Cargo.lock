@@ -692,6 +692,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cfd-core"
+version = "3.2.1"
+dependencies = [
+ "engine-sim",
+ "serde",
+ "serde_json",
+ "ulid",
+]
+
+[[package]]
 name = "cfg-expr"
 version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1856,6 +1866,7 @@ dependencies = [
 name = "helios-desktop"
 version = "3.2.1"
 dependencies = [
+ "cfd-core",
  "engine-sim",
  "helios-arrow",
  "helios-core",
