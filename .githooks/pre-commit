@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+#
+# Helios physics-fixes pre-commit hook.
+#
+# Enforces:
+#   - Spec C3: source-file write-claim manifest (`.physics_locks/NNNN-slug.lock`).
+#   - Spec C3: refuses any change to `crates/engine-sim/python_ref/` (parity anchor).
+#   - Spec C3: refuses any change to `.physics_locks/` from inside a worktree.
+#   - Spec C5: parity test suite is green at commit time.
+#   - Spec C5: inside an agent worktree (path matches `worktrees/agent-*`), commits
+#     require `HELIOS_PHYSICS_AGENT=1` — this is the `--no-verify` defense.
+#
+# Activated via `core.hooksPath = .githooks` (see `.githooks/install.{sh,ps1}`).
+#
+# Runs under Git for Windows' bundled bash (msys2). No separate WSL or Cygwin
+# install needed (Known Issue I-6).
+
+set -e
+set -u
+
+# --------------------------------------------------------------------------
+# Allow opting out (interactive debugging of the hook itself only).
+# Researchers in agent worktrees MUST NOT set this; the marker check in step 2
+# is the policy gate that catches such attempts.
+# --------------------------------------------------------------------------
+if [[ "${HELIOS_HOOKS_DISABLE:-}" == "1" ]]; then
+    echo "[pre-commit] HELIOS_HOOKS_DISABLE=1 — skipping (debug only)" >&2
+    exit 0
+fi
+
+hook_dir="$(cd "$(dirname "$0")" && pwd)"
+worktree_root="$(git rev-parse --show-toplevel)"
+# `git rev-parse --git-common-dir` resolves the shared `.git` dir (the main
+# checkout's `.git/`); its parent is the main checkout root.
+common_git="$(git rev-parse --git-common-dir)"
+case "$common_git" in
+    /*) main_root="$(dirname "$common_git")" ;;
+    *)  main_root="$(cd "$worktree_root" && cd "$(dirname "$common_git")" && pwd)" ;;
+esac
+
+# --------------------------------------------------------------------------
+# 1. Detect agent worktree.
+#    Agent worktrees live at `<main_root>/worktrees/agent-NNNN-<slug>/`. The
+#    detector is a path-suffix match on the worktree root.
+# --------------------------------------------------------------------------
+is_agent_worktree=0
+case "$worktree_root" in
+    */worktrees/agent-*) is_agent_worktree=1 ;;
+esac
+
+# --------------------------------------------------------------------------
+# 2. Agent worktrees require the HELIOS_PHYSICS_AGENT marker (spec C5).
+# --------------------------------------------------------------------------
+if [[ "$is_agent_worktree" == "1" && "${HELIOS_PHYSICS_AGENT:-}" != "1" ]]; then
+    echo "ERROR: agent worktree commit requires HELIOS_PHYSICS_AGENT=1" >&2
+    echo "       (spec C5 --no-verify defense; set the env var in the worktree shell)" >&2
+    echo "       worktree: $worktree_root" >&2
+    exit 1
+fi
+
+# --------------------------------------------------------------------------
+# 3. Collect staged paths (Added/Copied/Modified/Renamed/Type-changed).
+# --------------------------------------------------------------------------
+staged="$(git diff --cached --name-only --diff-filter=ACMRT)"
+
+# --------------------------------------------------------------------------
+# 4. Refuse python_ref/ changes (parity anchor, spec C3).
+# --------------------------------------------------------------------------
+if echo "$staged" | grep -q '^crates/engine-sim/python_ref/'; then
+    echo "ERROR: changes to crates/engine-sim/python_ref/ are forbidden" >&2
+    echo "       (parity anchor, locked by default per spec C3)" >&2
+    echo "       Offending files:" >&2
+    echo "$staged" | grep '^crates/engine-sim/python_ref/' | sed 's/^/         /' >&2
+    exit 1
+fi
+
+# --------------------------------------------------------------------------
+# 5. Refuse `.physics_locks/` writes from agent worktrees (spec C3).
+#    Only the main checkout (orchestrator) writes the ledger.
+# --------------------------------------------------------------------------
+if [[ "$is_agent_worktree" == "1" ]] && echo "$staged" | grep -q '^\.physics_locks/'; then
+    echo "ERROR: .physics_locks/ is writable only from the main checkout" >&2
+    echo "       (spec C3 — orchestrator owns the ledger)" >&2
+    echo "       Offending files:" >&2
+    echo "$staged" | grep '^\.physics_locks/' | sed 's/^/         /' >&2
+    exit 1
+fi
+
+# --------------------------------------------------------------------------
+# 6. Manifest enforcement (agent worktrees only).
+#    Worktree dir name is `agent-NNNN-<slug>`; manifest lives at
+#    `.physics_locks/NNNN-<slug>.lock` in the main checkout. Parse the
+#    manifest's `files[]` via `helios-bench locks parse-manifest` — no
+#    python or jq dependency on Windows (Known Issue I-11).
+#
+#    Allowlist (always writable, never need to appear in `files[]`):
+#      - `physics_findings/NNNN-<slug>/...`  (the finding's own directory)
+#      - `tmp/...`                           (scratch space)
+#      - `target/...`                        (build artifacts; gitignored
+#                                             but staged-by-mistake is caught here)
+#      - `Cargo.lock`                        (per-worktree lockfile)
+#      - `*.md` at the repo root             (progress notes)
+# --------------------------------------------------------------------------
+if [[ "$is_agent_worktree" == "1" && -n "$staged" ]]; then
+    wt_name="$(basename "$worktree_root")"
+    manifest_id="${wt_name#agent-}"
+    manifest_file="$main_root/.physics_locks/${manifest_id}.lock"
+
+    if [[ ! -f "$manifest_file" ]]; then
+        echo "ERROR: manifest not found: $manifest_file" >&2
+        echo "       worktree dir is '$wt_name' — expected manifest id '${manifest_id}'" >&2
+        exit 1
+    fi
+
+    # Locate a helios-bench binary. Prefer the worktree's own target/,
+    # fall back to the main checkout, finally to `cargo run --quiet`.
+    hb=""
+    for candidate in \
+        "$worktree_root/target/debug/helios-bench" \
+        "$worktree_root/target/debug/helios-bench.exe" \
+        "$worktree_root/target/release/helios-bench" \
+        "$worktree_root/target/release/helios-bench.exe" \
+        "$main_root/target/debug/helios-bench" \
+        "$main_root/target/debug/helios-bench.exe" \
+        "$main_root/target/release/helios-bench" \
+        "$main_root/target/release/helios-bench.exe"; do
+        if [[ -x "$candidate" ]]; then
+            hb="$candidate"
+            break
+        fi
+    done
+
+    if [[ -n "$hb" ]]; then
+        allowed="$("$hb" locks parse-manifest "$manifest_file")"
+    else
+        # Last resort: cargo run. Slow but always available.
+        allowed="$(cd "$main_root" && cargo run --quiet -p helios-bench -- locks parse-manifest "$manifest_file")"
+    fi
+
+    if [[ -z "$allowed" ]]; then
+        echo "ERROR: manifest $manifest_file has an empty files[] list" >&2
+        echo "       (helios-bench locks parse-manifest returned no entries)" >&2
+        exit 1
+    fi
+
+    finding_dir="physics_findings/${manifest_id}/"
+
+    # `<<<` is bash-only; we already require bash via the shebang.
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+
+        # Allowlist (always-writable paths, regardless of manifest).
+        case "$f" in
+            "$finding_dir"*) continue ;;
+            tmp/*)           continue ;;
+            target/*)        continue ;;
+            Cargo.lock)      continue ;;
+        esac
+        # Top-level *.md (no slash in the path).
+        if [[ "$f" != */* && "$f" == *.md ]]; then
+            continue
+        fi
+
+        # Manifest membership (exact match against the parsed files[] list).
+        if ! printf '%s\n' "$allowed" | grep -Fxq "$f"; then
+            echo "ERROR: '$f' is not in the write-claim manifest" >&2
+            echo "       Manifest: $manifest_file" >&2
+            echo "       Allowed entries:" >&2
+            printf '%s\n' "$allowed" | sed 's/^/         /' >&2
+            echo "       Either narrow the change or submit a pending_amend.json." >&2
+            exit 1
+        fi
+    done <<< "$staged"
+fi
+
+# --------------------------------------------------------------------------
+# 7. Parity test suite (spec C5).
+#    Sourced helper enumerates parity_*.rs test files (Known Issue I-10).
+#    Skipped when HELIOS_SKIP_PARITY=1 (only used for the orchestrator's
+#    own ledger-only commits — the doctor merge gate is the backstop).
+# --------------------------------------------------------------------------
+if [[ "${HELIOS_SKIP_PARITY:-}" == "1" ]]; then
+    if [[ "$is_agent_worktree" == "1" ]]; then
+        echo "ERROR: HELIOS_SKIP_PARITY is not honored inside agent worktrees" >&2
+        echo "       (spec C5 — parity gate is mandatory in worktrees)" >&2
+        exit 1
+    fi
+    echo "[pre-commit] HELIOS_SKIP_PARITY=1 — skipping parity (main checkout only)" >&2
+else
+    echo "[pre-commit] running parity suite (spec C5)..."
+    # shellcheck source=lib/parity_runner.sh
+    source "$hook_dir/lib/parity_runner.sh"
+    run_parity_tests
+fi
+
+echo "[pre-commit] OK"
+exit 0
