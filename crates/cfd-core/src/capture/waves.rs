@@ -278,9 +278,10 @@ mod tests {
         let mut state = CycleLoopState::new(&mut eng);
         {
             let obs: &mut dyn CycleObserver = &mut writer;
-            match eng.advance_one_cycle(8000.0, &mut state, None, Some(obs)) {
+            match eng.advance_one_cycle(8000.0, &mut state, None, Some(obs), None) {
                 CycleOutcome::Cycle(_) => {}
                 CycleOutcome::TargetReached => panic!("unexpected"),
+                CycleOutcome::Cancelled => unreachable!("test passed None cancel"),
             }
         }
         let manifest = writer.finalize(1).expect("finalize");

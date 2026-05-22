@@ -36,9 +36,10 @@ fn run_5_cycles_baseline() -> Vec<CycleStats> {
     let mut state = CycleLoopState::new(&mut eng);
     let mut out = Vec::with_capacity(5);
     for _ in 0..5 {
-        match eng.advance_one_cycle(8000.0, &mut state, None, None) {
+        match eng.advance_one_cycle(8000.0, &mut state, None, None, None) {
             CycleOutcome::Cycle(s) => out.push(s),
             CycleOutcome::TargetReached => break,
+            CycleOutcome::Cancelled => break,
         }
     }
     out
@@ -53,9 +54,10 @@ fn run_5_cycles_with(obs: &mut NoopObserver) -> Vec<CycleStats> {
         // Reborrow `obs` each iteration so the loop body owns a fresh
         // &mut dyn CycleObserver each call.
         let observer: &mut dyn CycleObserver = &mut *obs;
-        match eng.advance_one_cycle(8000.0, &mut state, None, Some(observer)) {
+        match eng.advance_one_cycle(8000.0, &mut state, None, Some(observer), None) {
             CycleOutcome::Cycle(s) => out.push(s),
             CycleOutcome::TargetReached => break,
+            CycleOutcome::Cancelled => break,
         }
     }
     out

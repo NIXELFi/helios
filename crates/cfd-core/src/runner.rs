@@ -159,7 +159,7 @@ fn capture_one_extra_cycle(
         // accumulated this cycle, waves are accumulated next cycle.
         if let Some(pv_rec) = pv.as_mut() {
             let obs: &mut dyn CycleObserver = pv_rec;
-            let _ = eng.advance_one_cycle(rpm, state, None, Some(obs));
+            let _ = eng.advance_one_cycle(rpm, state, None, Some(obs), None);
         }
         // Snapshot pipe profiles between passes so they reflect the
         // state at end of the PV pass.
@@ -170,11 +170,11 @@ fn capture_one_extra_cycle(
         }
         if let Some(w) = waves.as_mut() {
             let obs: &mut dyn CycleObserver = w;
-            let _ = eng.advance_one_cycle(rpm, state, None, Some(obs));
+            let _ = eng.advance_one_cycle(rpm, state, None, Some(obs), None);
         }
     } else if let Some(pv_rec) = pv.as_mut() {
         let obs: &mut dyn CycleObserver = pv_rec;
-        let _ = eng.advance_one_cycle(rpm, state, None, Some(obs));
+        let _ = eng.advance_one_cycle(rpm, state, None, Some(obs), None);
         if flags.pipe_profiles {
             let mut prec = PipeProfileRecorder::new();
             prec.snapshot_from(eng);
@@ -182,7 +182,7 @@ fn capture_one_extra_cycle(
         }
     } else if let Some(w) = waves.as_mut() {
         let obs: &mut dyn CycleObserver = w;
-        let _ = eng.advance_one_cycle(rpm, state, None, Some(obs));
+        let _ = eng.advance_one_cycle(rpm, state, None, Some(obs), None);
         if flags.pipe_profiles {
             let mut prec = PipeProfileRecorder::new();
             prec.snapshot_from(eng);
@@ -192,7 +192,7 @@ fn capture_one_extra_cycle(
         // Profiles only — no extra cycle needed but capture state is
         // taken AFTER one extra cycle for consistency with the wave/PV
         // paths.
-        let _ = eng.advance_one_cycle(rpm, state, None, None);
+        let _ = eng.advance_one_cycle(rpm, state, None, None, None);
         let mut prec = PipeProfileRecorder::new();
         prec.snapshot_from(eng);
         let _ = write_json(&rpm_dir.join("profiles.json"), &prec.into_artifact());
@@ -264,9 +264,10 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
             });
             return RunOutcome::Cancelled;
         }
-        let cs = match eng.advance_one_cycle(params.rpm, &mut loop_state, None, None) {
+        let cs = match eng.advance_one_cycle(params.rpm, &mut loop_state, None, None, Some(&cancel)) {
             CycleOutcome::Cycle(stats) => stats,
             CycleOutcome::TargetReached => break,
+            CycleOutcome::Cancelled => break,
         };
         if probe.is_diverged(&cs) {
             accumulated.push(cs);
@@ -432,9 +433,10 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
                 if stop.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst) {
                     return;
                 }
-                let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None) {
+                let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(&cancel)) {
                     CycleOutcome::Cycle(stats) => stats,
                     CycleOutcome::TargetReached => break,
+                    CycleOutcome::Cancelled => break,
                 };
                 if probe.is_diverged(&cs) {
                     accumulated.push(cs);
@@ -594,9 +596,10 @@ fn run_single_rpm_inline<P: DivergenceProbe>(
         if cancel.load(Ordering::SeqCst) {
             return Err("cancelled".to_string());
         }
-        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None) {
+        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(cancel)) {
             CycleOutcome::Cycle(stats) => stats,
             CycleOutcome::TargetReached => break,
+            CycleOutcome::Cancelled => return Err("cancelled".to_string()),
         };
         if probe.is_diverged(&cs) {
             return Err(format!(
@@ -930,9 +933,10 @@ pub fn drive_runner_no_emit(
     let probe = DefaultDivergenceProbe;
     let mut accumulated: Vec<CycleStats> = Vec::with_capacity(n_cycles as usize);
     for _ in 0..n_cycles {
-        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None) {
+        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None, None) {
             CycleOutcome::Cycle(stats) => stats,
             CycleOutcome::TargetReached => break,
+            CycleOutcome::Cancelled => break,
         };
         assert!(!probe.is_diverged(&cs), "non-finite cycle in drive_runner_no_emit");
         accumulated.push(cs);

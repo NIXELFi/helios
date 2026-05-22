@@ -717,7 +717,7 @@ impl SDM26Engine {
         let target_theta = (n_cycles as f64) * 720.0;
 
         while state.theta < target_theta && !state.step_budget_exhausted() {
-            match self.advance_one_cycle(rpm, &mut state, Some(target_theta), None) {
+            match self.advance_one_cycle(rpm, &mut state, Some(target_theta), None, None) {
                 CycleOutcome::Cycle(stats) => {
                     if verbose {
                         println!(
@@ -745,6 +745,7 @@ impl SDM26Engine {
                     }
                 }
                 CycleOutcome::TargetReached => break,
+                CycleOutcome::Cancelled => break,
             }
         }
 
@@ -776,12 +777,18 @@ impl SDM26Engine {
         state: &mut CycleLoopState,
         theta_limit: Option<f64>,
         mut observer: Option<&mut dyn CycleObserver>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> CycleOutcome {
         let cfg = self.cfg.clone();
         let omega = omega_from_rpm(rpm);
         loop {
             if state.step_budget_exhausted() {
                 return CycleOutcome::TargetReached;
+            }
+            if let Some(c) = cancel {
+                if c.load(std::sync::atomic::Ordering::Relaxed) {
+                    return CycleOutcome::Cancelled;
+                }
             }
             if let Some(lim) = theta_limit {
                 if state.theta >= lim { return CycleOutcome::TargetReached; }
@@ -925,4 +932,8 @@ impl CycleLoopState {
 pub enum CycleOutcome {
     Cycle(CycleStats),
     TargetReached,
+    /// Cancel atomic was observed `true` partway through the cycle.
+    /// No CycleStats are produced — caller should treat this trial/cycle
+    /// as aborted.
+    Cancelled,
 }

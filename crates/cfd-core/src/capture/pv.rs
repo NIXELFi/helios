@@ -83,9 +83,10 @@ mod tests {
         let mut rec = PvLoopRecorder::new(n_cyl);
         {
             let obs: &mut dyn CycleObserver = &mut rec;
-            match eng.advance_one_cycle(8000.0, &mut state, None, Some(obs)) {
+            match eng.advance_one_cycle(8000.0, &mut state, None, Some(obs), None) {
                 CycleOutcome::Cycle(_) => {}
                 CycleOutcome::TargetReached => panic!("cycle ended before completion"),
+                CycleOutcome::Cancelled => unreachable!("test passed None cancel"),
             }
         }
         let artifact = rec.into_artifact();

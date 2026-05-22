@@ -140,9 +140,10 @@ mod tests {
         let n_pipes = eng.pipes.len();
         // Run one cycle so the state isn't trivially uniform.
         let mut state = CycleLoopState::new(&mut eng);
-        match eng.advance_one_cycle(8000.0, &mut state, None, None) {
+        match eng.advance_one_cycle(8000.0, &mut state, None, None, None) {
             CycleOutcome::Cycle(_) => {}
             CycleOutcome::TargetReached => panic!("unexpected target reached"),
+            CycleOutcome::Cancelled => unreachable!("test passed None cancel"),
         }
 
         let mut rec = PipeProfileRecorder::new();
