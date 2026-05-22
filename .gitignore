@@ -59,3 +59,15 @@ infra/pdm-supabase/.env
 # (P-V, profiles, wave frames). Reproducible by re-running the sweep;
 # can reach multi-GB and must not be committed.
 /cfd/
+
+# Physics agent isolation (spec C2/C3) — worktrees, transient lock state,
+# in-flight amendment proposals. The worktrees/.gitkeep is tracked so the
+# dir exists even when no agents are active.
+worktrees/agent-*/
+.physics_locks/_orchestrator.mutex
+.physics_locks/_orchestrator.mutex_dir/
+worktrees/agent-*/pending_amend.json
+worktrees/agent-*/pending_amend.rejected.json
+
+# Physics agent scratch space (smoke outputs, ad-hoc sweep results)
+/tmp/
