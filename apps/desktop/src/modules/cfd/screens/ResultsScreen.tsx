@@ -1,6 +1,7 @@
 import { useCfd } from "../state/CfdContext";
 import { SingleRpmResults } from "../results/SingleRpmResults";
 import { SweepResults } from "../results/SweepResults";
+import { OptimizationResults } from "../results/OptimizationResults";
 
 export function ResultsScreen() {
   const { state, navigateTo } = useCfd();
@@ -26,6 +27,8 @@ export function ResultsScreen() {
       return <SingleRpmResults study={activeStudy} />;
     case "sweep":
       return <SweepResults study={activeStudy} />;
+    case "optimization":
+      return <OptimizationResults study={activeStudy} />;
     default:
       return <div className="p-4 text-[#9097A0]">Unknown study kind.</div>;
   }
