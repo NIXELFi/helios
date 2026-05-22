@@ -26,12 +26,15 @@ fn help_lists_subcommands() {
 
 /// plan-review-v1 #14: behavioral failing-then-passing test.
 /// Subcommands that are still stubs should exit non-zero with a
-/// "not yet implemented" message. `run` is implemented in Task 4 so
-/// we exercise one of the still-stubbed subcommands.
+/// "not yet implemented" message. We rotate through whichever
+/// subcommand is still a stub at the current Phase 0 milestone.
+/// As of Tasks 10/11 land, `plot` and `compare` are still stubs;
+/// `plot` is picked here.
 #[test]
 fn stubbed_subcommand_bails_with_not_yet_implemented() {
+    // `compare` is the last subcommand still a stub at this milestone.
     let out = bin()
-        .args(["validate", "no-such.ndjson"])
+        .args(["compare", "no-such-a.ndjson", "no-such-b.ndjson"])
         .output()
         .expect("spawn");
     assert!(!out.status.success(), "expected non-zero exit");
