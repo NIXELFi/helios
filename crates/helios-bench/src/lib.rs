@@ -5,5 +5,6 @@
 
 pub mod cmd;
 pub mod environment;
+pub mod locks;
 pub mod ndjson;
 pub mod study;
