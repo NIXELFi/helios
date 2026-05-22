@@ -13,3 +13,5 @@ ulid = "1"
 tempfile = "3"
 rayon = { workspace = true }
 num_cpus = { workspace = true }
+thiserror = { workspace = true }
+rand = "0.8"

@@ -660,6 +660,8 @@ mod tests {
             JobProgressPayload::SweepRpmStarted { .. } => "sweep-rpm-started",
             JobProgressPayload::SweepCycle { .. } => "sweep-cycle",
             JobProgressPayload::SweepRpmDone { .. } => "sweep-rpm-done",
+            JobProgressPayload::OptimizationTrialStarted { .. } => "optimization-trial-started",
+            JobProgressPayload::OptimizationTrialDone { .. } => "optimization-trial-done",
         }
     }
 
