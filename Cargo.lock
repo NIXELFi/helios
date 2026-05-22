@@ -1980,6 +1980,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "svg",
  "tempfile",
  "thiserror 2.0.18",
  "toml 0.8.2",
@@ -4486,6 +4487,12 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "svg"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94afda9cd163c04f6bee8b4bf2501c91548deae308373c436f36aeff3cf3c4a3"
 
 [[package]]
 name = "swift-rs"

@@ -25,6 +25,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 rayon = { workspace = true }
 chrono = { workspace = true }
+svg = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

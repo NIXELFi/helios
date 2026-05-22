@@ -30,19 +30,22 @@ fn help_lists_subcommands() {
 /// subcommand is still a stub at the current Phase 0 milestone.
 /// As of Tasks 10/11 land, `plot` and `compare` are still stubs;
 /// `plot` is picked here.
+/// All subcommands are implemented as of Phase 0 Tasks 4 / 8–14.
+/// This test now confirms the inverse: a deliberately missing input
+/// file produces a non-zero exit with a real filesystem error message
+/// (not a clap parse error and not the legacy "not yet implemented"
+/// stub message).
 #[test]
-fn stubbed_subcommand_bails_with_not_yet_implemented() {
-    // `plot` is the last subcommand still a stub at this milestone
-    // (Task 14 implements it next).
+fn missing_input_produces_filesystem_error() {
     let out = bin()
-        .args(["plot", "no-such.ndjson", "--out", "no-such.svg"])
+        .args(["validate", "no-such.ndjson"])
         .output()
         .expect("spawn");
     assert!(!out.status.success(), "expected non-zero exit");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("not yet implemented"),
-        "stderr should mention 'not yet implemented': {stderr}"
+        !stderr.contains("not yet implemented"),
+        "should be a real error now, not a stub: {stderr}"
     );
 }
 
