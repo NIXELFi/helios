@@ -197,3 +197,95 @@ test(physics): validation suite + reports baseline
 2. Port-flow Mach correction on Cd table (closes ~5% at high RPM)
 3. Turbulent burn-rate correlation (further refinement of combustion phasing)
 4. The ~30% remaining gap to unrestricted real CBR600 requires solver-class change (1D → quasi-3D port flow) which is out of scope.
+
+---
+
+## Appendix: Pushing further
+
+After the initial fixes, additional iteration uncovered more leverage:
+
+### Additional model improvement: tumble-enhanced burn rate
+
+Added `cfg.tumble_burn_factor` that scales Wiebe's `a` coefficient. Models the early-flame acceleration from charge motion (tumble + swirl) in modern high-performance combustion chambers.
+
+Effect is modest (~0.5% IMEP boost) because the single-zone Wiebe is already near-complete. Worth keeping as a tuning knob but not a primary lever.
+
+### Final "race calibration" benchmark
+
+With every model fix enabled + parameters tuned to a plausible racing-team calibration:
+
+| RPM | Legacy restricted (kW) | Race restricted (kW) | Legacy unrestricted (kW) | Race unrestricted (kW) |
+|---|---|---|---|---|
+| 6000 | 28.5 | 33.6 | 29.7 | 35.1 |
+| 8000 | 32.0 | 41.6 | 33.9 | 44.4 |
+| 10000 | 31.0 | 47.3 | 34.0 | 51.7 |
+| 12000 | 29.1 | 50.5 | 33.0 | 57.5 |
+| 13500 | 24.8 | **51.3** | 29.2 | 60.0 |
+| 14000 | 23.0 | 51.2 | 27.4 | **60.4** |
+
+**Restricted peak: 51.3 kW @ 13500 RPM** — exceeds real-world FSAE-typical (47 kW) by 9 %, well within the published 41-52 kW range. The simulator now produces race-team-competitive predictions in its actual operating regime.
+
+**Unrestricted peak: 60.4 kW @ 14000 RPM** — 69 % of stock CBR600's 88 kW. The remaining ~30 % gap is the inherent 1D-Eulerian + single-zone-Wiebe modeling-class limit, structurally not closable without a different solver class.
+
+### What hit the modeling-class ceiling
+
+Tested in the iterative campaign and found NOT to break the ~60 kW unrestricted ceiling:
+
+- **Wiebe shape parameter `m`**: m = 2.0, 2.5, 3.0, 4.0, 5.0 all converge to similar peak (60-61 kW). Steeper rise doesn't compensate for single-zone temperature averaging.
+- **Wiebe duration**: 20°, 25°, 30°, 35°, 50° all converge near the same ceiling. Faster burn doesn't beat the single-zone limit.
+- **Tumble enhancement**: 0.0, 0.2, 0.4, 0.6, 0.8, 1.0 all within 0.6 % of each other.
+- **MBT spark optimization per RPM**: found ~17-19° BTDC is MBT for the fast-burn race calibration (vs 25° for the slow legacy Wiebe). Doesn't lift the ceiling.
+
+The convergent ceiling implies the missing power is in the **work-per-charge** factor that single-zone combustion can't reach — burned-gas temperature (and therefore peak pressure) is fundamentally underestimated when burned and unburned gases share one temperature node.
+
+### Race calibration JSON
+
+```jsonc
+{
+  // Bug fixes (correct math)
+  "intake_junction_loss_coef": 1.0,
+
+  // Combustion realism
+  "afr_eta_enabled": true,
+  "afr_target": 12.3,
+  "combustion_duration": 30.0,
+  "wiebe_m": 3.0,
+  "tumble_burn_factor": 0.4,
+  "spark_advance": 19.0,
+  "eta_comb": 0.98,
+
+  // Valve flow realism
+  "intake_lift_flat_top_ramp": 0.22,
+  "exhaust_lift_flat_top_ramp": 0.22,
+
+  // Compression
+  "cr": 13.0,
+
+  // FMEP realism (Heywood-typical for motorcycle engine)
+  "fmep_a": 0.35,
+  "fmep_b": 0.045,
+  "fmep_c": 0.0005,
+
+  // Heat-loss tweak for race chamber
+  "woschni_c1_combustion_scale": 0.7
+}
+```
+
+(`woschni_c1_combustion_scale` is shorthand for `woschni_c1_combustion *= 0.7` applied to the bundled default of 2.28 → 1.596.)
+
+### Branch and commits
+
+Pushed to `origin/physics-fixes/math-corrections`:
+
+```
+docs(physics-fixes): comprehensive final report
+test(physics): final benchmark
+feat(engine-sim): tumble-enhanced burn-rate factor
+feat(engine-sim): expose Chen-Flynn FMEP coefficients
+feat(engine-sim): configurable trapezoidal valve lift profile
+feat(engine-sim): Heywood-shape AFR-dependent combustion efficiency
+fix(engine-sim): wire intake_junction_loss_coef into JunctionCV
+fix(engine-sim): wire cfg.limiter through to MUSCL step
+test(physics): validation suite + reports baseline
+```
+
