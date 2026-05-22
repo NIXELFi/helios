@@ -5,6 +5,7 @@ use std::f64::consts::PI;
 
 use crate::bcs::junction_characteristic::{CharJunctionLeg, CharacteristicJunction};
 use crate::bcs::junction_cv::{JunctionCV, JunctionCVLeg, PipeEnd};
+use crate::cylinder::valve::LiftProfile;
 use crate::bcs::restrictor::fill_choked_restrictor_left;
 use crate::bcs::simple::fill_transmissive_right;
 use crate::bcs::valve::{fill_valve_ghost_characteristic, PipeEndStr, ValveType};
@@ -134,6 +135,13 @@ pub struct SDM26Config {
     pub exhaust_ld_table: Vec<f64>,
     pub exhaust_cd_table: Vec<f64>,
     // topology + drivetrain
+    /// Intake-valve lift-profile selector.
+    ///   0.0 (default)  → sin² profile (parity with Python reference)
+    ///   > 0.0          → flat-top trapezoidal lift with this ramp fraction
+    ///                    (typical race cam: ~0.20–0.30)
+    pub intake_lift_flat_top_ramp: f64,
+    /// Exhaust-valve lift-profile selector (same semantics as intake).
+    pub exhaust_lift_flat_top_ramp: f64,
     pub exhaust_topology: ExhaustTopology,
     pub drivetrain_efficiency: f64,
     // residual-gas
@@ -195,6 +203,8 @@ impl Default for SDM26Config {
             exhaust_valve_seat_angle: 45.0, exhaust_n_valves: 2,
             exhaust_ld_table: EXHAUST_LD_TABLE.to_vec(),
             exhaust_cd_table: EXHAUST_CD_TABLE.to_vec(),
+            intake_lift_flat_top_ramp: 0.0,
+            exhaust_lift_flat_top_ramp: 0.0,
             exhaust_topology: ExhaustTopology::FourTwoOne,
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
@@ -501,6 +511,16 @@ impl SDM26Engine {
             c1_combustion: cfg.woschni_c1_combustion,
             c2_combustion: cfg.woschni_c2_combustion,
         };
+        let intake_profile = if cfg.intake_lift_flat_top_ramp > 0.0 {
+            LiftProfile::FlatTop { ramp_frac: cfg.intake_lift_flat_top_ramp }
+        } else {
+            LiftProfile::Sin2
+        };
+        let exhaust_profile = if cfg.exhaust_lift_flat_top_ramp > 0.0 {
+            LiftProfile::FlatTop { ramp_frac: cfg.exhaust_lift_flat_top_ramp }
+        } else {
+            LiftProfile::Sin2
+        };
         let intake_valve = ValveParams {
             diameter: cfg.intake_valve_diameter,
             max_lift: cfg.intake_valve_max_lift,
@@ -510,6 +530,7 @@ impl SDM26Engine {
             n_valves: cfg.intake_n_valves,
             ld_table: cfg.intake_ld_table.clone(),
             cd_table: cfg.intake_cd_table.clone(),
+            profile: intake_profile,
         };
         let exhaust_valve = ValveParams {
             diameter: cfg.exhaust_valve_diameter,
@@ -520,6 +541,7 @@ impl SDM26Engine {
             n_valves: cfg.exhaust_n_valves,
             ld_table: cfg.exhaust_ld_table.clone(),
             cd_table: cfg.exhaust_cd_table.clone(),
+            profile: exhaust_profile,
         };
         let mut cylinders = Vec::with_capacity(n_cyl);
         for i in 0..n_cyl {

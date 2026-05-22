@@ -9,6 +9,32 @@ pub const INTAKE_CD_TABLE: [f64; 6] = [0.19, 0.38, 0.494, 0.551, 0.57, 0.57];
 pub const EXHAUST_LD_TABLE: [f64; 6] = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30];
 pub const EXHAUST_CD_TABLE: [f64; 6] = [0.171, 0.333, 0.456, 0.523, 0.542, 0.551];
 
+/// Lift-profile shape selector.
+///
+/// `Sin2` is the original sin²(π·τ) profile (mean lift = 0.5·max_lift).
+/// Matches the Python reference exactly — preserves bit-exact parity.
+///
+/// `FlatTop` uses a piecewise profile with a hold at peak lift:
+///   ramp up over `ramp_frac` of the duration,
+///   hold at max_lift,
+///   ramp down over `ramp_frac`.
+/// For `ramp_frac = 0.25`, mean lift ≈ 0.75·max_lift (50 % more area
+/// than sin² for the same max). Closer to real cam profiles which
+/// have a flat-top dwell at peak lift.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LiftProfile {
+    /// sin² — legacy default, parity-preserving.
+    Sin2,
+    /// Trapezoidal with linear ramps. `ramp_frac` ∈ (0, 0.5] is the
+    /// fraction of the open duration spent in each ramp; the remaining
+    /// (1 − 2·ramp_frac) holds at max_lift.
+    FlatTop { ramp_frac: f64 },
+}
+
+impl Default for LiftProfile {
+    fn default() -> Self { LiftProfile::Sin2 }
+}
+
 #[derive(Debug, Clone)]
 pub struct ValveParams {
     pub diameter: f64,
@@ -19,6 +45,8 @@ pub struct ValveParams {
     pub n_valves: usize,
     pub ld_table: Vec<f64>,
     pub cd_table: Vec<f64>,
+    /// Lift-profile shape. Default `Sin2` preserves Python parity.
+    pub profile: LiftProfile,
 }
 
 impl ValveParams {
@@ -36,28 +64,52 @@ impl ValveParams {
 /// sin² lift profile: L(θ) = max_lift · sin²(π·(θ − θ_open)/duration).
 pub fn valve_lift(theta_local_deg: f64,
                   open_angle: f64, close_angle: f64, max_lift: f64) -> f64 {
+    valve_lift_profile(theta_local_deg, open_angle, close_angle, max_lift, LiftProfile::Sin2)
+}
+
+/// Lift profile with selectable shape. `Sin2` preserves the legacy
+/// `valve_lift` behavior exactly. `FlatTop` uses a trapezoidal profile.
+pub fn valve_lift_profile(theta_local_deg: f64,
+                          open_angle: f64, close_angle: f64,
+                          max_lift: f64, profile: LiftProfile) -> f64 {
     let theta = theta_local_deg.rem_euclid(720.0);
     let duration = close_angle - open_angle;
-    let phase = if open_angle < close_angle {
+    // Normalize theta to position within the open window in [0, duration].
+    let theta_in_window = if open_angle < close_angle {
         if theta < open_angle || theta > close_angle {
             return 0.0;
         }
-        PI * (theta - open_angle) / duration
+        theta - open_angle
     } else {
-        // Wrap-around (valve event straddles 720→0)
         if theta >= open_angle {
-            PI * (theta - open_angle) / duration
+            theta - open_angle
         } else if theta <= close_angle {
-            PI * (theta + 720.0 - open_angle) / duration
+            theta + 720.0 - open_angle
         } else {
             return 0.0;
         }
     };
-    if phase < 0.0 || phase > PI {
+    if theta_in_window < 0.0 || theta_in_window > duration {
         return 0.0;
     }
-    let s = phase.sin();
-    max_lift * s * s
+    let tau = theta_in_window / duration; // ∈ [0, 1]
+
+    match profile {
+        LiftProfile::Sin2 => {
+            let s = (PI * tau).sin();
+            max_lift * s * s
+        }
+        LiftProfile::FlatTop { ramp_frac } => {
+            let r = ramp_frac.clamp(0.05, 0.5);
+            if tau < r {
+                max_lift * (tau / r)
+            } else if tau < 1.0 - r {
+                max_lift
+            } else {
+                max_lift * ((1.0 - tau) / r)
+            }
+        }
+    }
 }
 
 /// Linear interpolation on the Cd(L/D) table; below table[0] linear to 0.
@@ -106,7 +158,23 @@ pub fn valve_effective_area(
     diameter: f64, seat_angle_rad: f64, n_valves: usize,
     ld_table: &[f64], cd_table: &[f64],
 ) -> f64 {
-    let l = valve_lift(theta_local_deg, open_angle, close_angle, max_lift);
+    valve_effective_area_profile(
+        theta_local_deg, open_angle, close_angle, max_lift,
+        diameter, seat_angle_rad, n_valves, ld_table, cd_table,
+        LiftProfile::Sin2,
+    )
+}
+
+/// Effective area with a selectable lift profile.
+#[allow(clippy::too_many_arguments)]
+pub fn valve_effective_area_profile(
+    theta_local_deg: f64,
+    open_angle: f64, close_angle: f64, max_lift: f64,
+    diameter: f64, seat_angle_rad: f64, n_valves: usize,
+    ld_table: &[f64], cd_table: &[f64],
+    profile: LiftProfile,
+) -> f64 {
+    let l = valve_lift_profile(theta_local_deg, open_angle, close_angle, max_lift, profile);
     if l <= 0.0 {
         return 0.0;
     }

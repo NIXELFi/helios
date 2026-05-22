@@ -6,7 +6,7 @@
 
 use crate::bcs::simple::{fill_reflective_left, fill_reflective_right};
 use crate::cylinder::gas_properties::{gamma_mixture, r_mixture, R_AIR};
-use crate::cylinder::valve::{valve_effective_area, ValveParams};
+use crate::cylinder::valve::{valve_effective_area_profile, ValveParams};
 use crate::solver::state::{
     PipeState, N_VARS, I_RHO_A, I_MOM_A, I_E_A, I_Y_A,
 };
@@ -93,10 +93,10 @@ pub fn fill_valve_ghost(
     let n_total = state.n_total();
     let gamma_pipe = state.gamma;
     let seat_rad = vp.seat_angle_deg.to_radians();
-    let a_eff = valve_effective_area(
+    let a_eff = valve_effective_area_profile(
         theta_local_deg, vp.open_angle_deg, vp.close_angle_deg, vp.max_lift,
         vp.diameter, seat_rad, vp.n_valves,
-        &vp.ld_table, &vp.cd_table,
+        &vp.ld_table, &vp.cd_table, vp.profile,
     );
     if a_eff < 1e-12 {
         fill_reflective_at_end(state, pipe_end);
@@ -355,10 +355,10 @@ pub fn fill_valve_ghost_characteristic(
     let gm1 = gamma - 1.0;
 
     let seat_rad = vp.seat_angle_deg.to_radians();
-    let a_eff = valve_effective_area(
+    let a_eff = valve_effective_area_profile(
         theta_local_deg, vp.open_angle_deg, vp.close_angle_deg, vp.max_lift,
         vp.diameter, seat_rad, vp.n_valves,
-        &vp.ld_table, &vp.cd_table,
+        &vp.ld_table, &vp.cd_table, vp.profile,
     );
     if a_eff < A_EFF_CLOSED_M2 {
         fill_reflective_at_end(state, pipe_end);
