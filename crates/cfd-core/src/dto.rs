@@ -313,6 +313,23 @@ pub enum JobProgressPayload {
         point: SweepPoint,
         capture_dir: Option<String>,
     },
+    #[serde(rename_all = "camelCase")]
+    OptimizationTrialStarted {
+        trial_idx: u32,
+        n_trials: u32,
+        /// path -> physical value (already snapped to step grid).
+        parameter_values: std::collections::BTreeMap<String, f64>,
+    },
+    #[serde(rename_all = "camelCase")]
+    OptimizationTrialDone {
+        trial_idx: u32,
+        n_trials: u32,
+        objective_value: f64,
+        /// Sweep points produced by this trial — one per RPM in the
+        /// objective's rpm_list.
+        sweep_points: Vec<SweepPoint>,
+        wall_time_s: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -345,10 +362,23 @@ pub struct SweepDoneSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizationDoneSummary {
+    pub n_trials_requested: u32,
+    pub n_trials_run: u32,
+    pub best_trial_idx: Option<u32>,
+    pub best_objective_value: Option<f64>,
+    pub parameter_paths: Vec<String>,
+    pub objective_direction: ObjectiveDirection,
+    pub total_wall_time_s: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum JobDoneSummary {
     SingleRpm(SingleRpmDoneSummary),
     Sweep(SweepDoneSummary),
+    Optimization(OptimizationDoneSummary),
 }
 
 #[derive(Debug, Clone, Serialize)]
