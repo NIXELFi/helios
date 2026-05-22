@@ -142,6 +142,13 @@ pub struct SDM26Config {
     pub intake_lift_flat_top_ramp: f64,
     /// Exhaust-valve lift-profile selector (same semantics as intake).
     pub exhaust_lift_flat_top_ramp: f64,
+    /// Chen-Flynn FMEP coefficients: fmep[bar] = fmep_a + fmep_b · sp + fmep_c · sp²
+    /// where sp = mean piston speed (m/s). Defaults match the legacy
+    /// hardcoded values (0.5, 0.1, 0.003) which are on the high side for a
+    /// motorcycle engine. Heywood Tab. 13.3 typical: (0.3–0.5, 0.04–0.05, 5e-4–1e-3).
+    pub fmep_a: f64,
+    pub fmep_b: f64,
+    pub fmep_c: f64,
     pub exhaust_topology: ExhaustTopology,
     pub drivetrain_efficiency: f64,
     // residual-gas
@@ -205,6 +212,9 @@ impl Default for SDM26Config {
             exhaust_cd_table: EXHAUST_CD_TABLE.to_vec(),
             intake_lift_flat_top_ramp: 0.0,
             exhaust_lift_flat_top_ramp: 0.0,
+            fmep_a: 0.5,
+            fmep_b: 0.1,
+            fmep_c: 0.003,
             exhaust_topology: ExhaustTopology::FourTwoOne,
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
@@ -859,7 +869,7 @@ impl SDM26Engine {
                 let ve_atm = if v_d_total > 0.0 { total_intake / (rho_atm * v_d_total) } else { 0.0 };
                 let indicated_power_w = total_work * rpm / 120.0;
                 let sp = 2.0 * cfg.stroke * rpm / 60.0;
-                let fmep_bar = 0.5 + 0.1 * sp + 0.003 * sp * sp;
+                let fmep_bar = cfg.fmep_a + cfg.fmep_b * sp + cfg.fmep_c * sp * sp;
                 let fmep_pa = fmep_bar * 1e5;
                 let friction_power_w = fmep_pa * v_d_total * rpm / 120.0;
                 let brake_power_w = (indicated_power_w - friction_power_w).max(0.0);

@@ -110,3 +110,61 @@ fn final_summary() {
     println!("  Unrestricted (stock):     88 kW.  C/unrestricted hits {:.0}% of target.",
         100.0 * pc_open / 88.0);
 }
+
+#[test]
+#[ignore]
+fn final_summary_with_fmep() {
+    let base = load_v1_json(sdm26_path()).unwrap();
+
+    println!("\n=== Final summary including realistic FMEP ===\n");
+    println!("Real-world: FSAE-restricted ≈ 41-52 kW, unrestricted stock ≈ 88 kW.\n");
+
+    // A: legacy
+    let (pa, ra) = peak(&base);
+    let open = unrestricted(&base);
+    let (pa_open, ra_open) = peak(&open);
+    println!("A. Default (legacy)");
+    println!("   Restricted:     {:.2} kW @ {:.0} RPM", pa, ra);
+    println!("   Unrestricted:   {:.2} kW @ {:.0} RPM", pa_open, ra_open);
+
+    // D: all model improvements + Heywood FMEP
+    let mut d = base.clone();
+    d.intake_lift_flat_top_ramp = 0.25;
+    d.exhaust_lift_flat_top_ramp = 0.25;
+    d.afr_eta_enabled = true;
+    d.fmep_a = 0.4;
+    d.fmep_b = 0.05;
+    d.fmep_c = 0.0005;
+    let (pd, rd) = peak(&d);
+    let d_open = unrestricted(&d);
+    let (pd_open, rd_open) = peak(&d_open);
+    println!();
+    println!("D. + flat-top lift + AFR-quench + Heywood-mid FMEP (0.4, 0.05, 5e-4)");
+    println!("   Restricted:     {:.2} kW @ {:.0} RPM  ({:+.1}% vs A)",
+        pd, rd, 100.0 * (pd - pa) / pa);
+    println!("   Unrestricted:   {:.2} kW @ {:.0} RPM  ({:+.1}% vs A)",
+        pd_open, rd_open, 100.0 * (pd_open - pa_open) / pa_open);
+
+    // E: D + slightly tuned (AFR 12.5 + Wiebe 35)
+    let mut e = d.clone();
+    e.afr_target = 12.5;
+    e.combustion_duration = 35.0;
+    let (pe, re) = peak(&e);
+    let e_open = unrestricted(&e);
+    let (pe_open, re_open) = peak(&e_open);
+    println!();
+    println!("E. D + AFR 12.5 + Wiebe 35° (a realistic CBR600 calibration)");
+    println!("   Restricted:     {:.2} kW @ {:.0} RPM  ({:+.1}% vs A)",
+        pe, re, 100.0 * (pe - pa) / pa);
+    println!("   Unrestricted:   {:.2} kW @ {:.0} RPM  ({:+.1}% vs A)",
+        pe_open, re_open, 100.0 * (pe_open - pa_open) / pa_open);
+
+    println!();
+    println!("Real-world targets:");
+    println!("  Restricted (FSAE bottom): 41 kW.   E/restricted hits {:.0}% of target.",
+        100.0 * pe / 41.0);
+    println!("  Restricted (FSAE typical): 47 kW.  E/restricted hits {:.0}% of target.",
+        100.0 * pe / 47.0);
+    println!("  Unrestricted (stock):     88 kW.   E/unrestricted hits {:.0}% of target.",
+        100.0 * pe_open / 88.0);
+}
