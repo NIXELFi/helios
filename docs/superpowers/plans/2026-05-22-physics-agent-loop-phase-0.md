@@ -1334,13 +1334,17 @@ git commit -m "feat(physics-findings): seed literature corpus (Heywood, Woschni,
 
 ---
 
-## Task 7: Second-engine reference dataset (C10 corpus)
+## Task 7: Two-calibration reference dataset (C10 corpus — SDM25 + SDM26 baseline)
+
+**SDM25 + SDM26 both model the Honda CBR600RR with different solver calibrations** (pre-Phase-F vs current). For Phase 0–2, "second engine" is **SDM25 against the same CBR600 dyno**, which catches coefficient over-fit as the SDM25 result diverging. Phase 4 broadens to a truly different engine. See spec C10 "Phase reconciliation" for the rationale.
 
 **Files:**
-- Create: `physics_findings/references/dyno/cbr600rr-fsae-restricted.csv` (copy from existing project data)
-- Create: `physics_findings/references/dyno/cbr600rr-stock-unrestricted.csv` (copy from existing project data)
-- Create: `physics_findings/references/dyno/fsae-ka100-single-cylinder.csv` (new — second reference per C10)
-- Create: `physics_findings/references/dyno/README.md` (provenance)
+- Create: `physics_findings/references/dyno/cbr600rr-fsae-restricted.csv` (CBR600RR — FSAE 20mm restrictor target)
+- Create: `physics_findings/references/dyno/cbr600rr-stock-unrestricted.csv` (CBR600RR — Honda factory unrestricted target)
+- Create: `physics_findings/references/dyno/README.md` (provenance + per-calibration notes for SDM25 vs SDM26)
+- Create: `physics_findings/references/configs/README.md` documenting that SDM25 (`crates/engine-sim/python_ref/configs/sdm25.json`) and SDM26 (`crates/engine-sim/python_ref/configs/sdm26.json`) are the two baseline calibrations against the CBR600 dyno corpus.
+
+NOTE: original plan called for a `fsae-ka100-single-cylinder.csv` second-engine dataset. SUPERSEDED by the SDM25 + SDM26 two-calibration baseline (the user redirected mid-execution). External-engine cross-validation (KA100, CRF250R, FSAE published dynos, or Heywood Appendix D) lands in Phase 4 instead.
 
 - [ ] **Step 7.1: Locate existing CBR600 calibration**
 
@@ -2836,9 +2840,9 @@ citation = "engine_matrix_sdm26_baseline parity golden (commit 4f930b7)"
 
 `physics_findings/0000-phase0-smoke/literature.md` (cite the existing parity test files).
 
-- [ ] **Step 19.2: Run the full lifecycle manually**
+- [ ] **Step 19.2: Run the full lifecycle manually — SDM26 and SDM25 both**
 
-From the main checkout:
+From the main checkout, the smoke must validate BOTH calibrations work end-to-end (spec C10 two-calibration baseline):
 
 ```powershell
 # 1. Spawn worktree
@@ -2849,21 +2853,25 @@ Push-Location worktrees/agent-0000-phase0-smoke
 $env:HELIOS_PHYSICS_AGENT = "1"
 cargo build --release -p helios-bench
 
-# 3. Run the study
-.\target\release\helios-bench run physics_findings/0000-phase0-smoke/study.toml --out physics_findings/0000-phase0-smoke/results.ndjson
+# 3. Run BOTH calibrations
+.\target\release\helios-bench run physics_findings/0000-phase0-smoke/study_sdm26.toml --out physics_findings/0000-phase0-smoke/results_sdm26.ndjson
+.\target\release\helios-bench run physics_findings/0000-phase0-smoke/study_sdm25.toml --out physics_findings/0000-phase0-smoke/results_sdm25.ndjson
 
-# 4. Validate
-.\target\release\helios-bench validate physics_findings/0000-phase0-smoke/results.ndjson
+# 4. Validate both
+.\target\release\helios-bench validate physics_findings/0000-phase0-smoke/results_sdm26.ndjson
+.\target\release\helios-bench validate physics_findings/0000-phase0-smoke/results_sdm25.ndjson
 
-# 5. Bit-compare against the parity golden
-# (This is the actual gate — compare imep_bar from the existing parity_engine_matrix.rs golden vs the helios-bench output.)
-# The parity test for engine_matrix_sdm26_baseline.json @ 9000 RPM produces a specific imep_bar value;
-# helios-bench run must produce the same value to 16 decimal digits.
+# 5. Bit-compare against existing parity goldens
+# - SDM26: compare to crates/engine-sim/fixtures/parity/engine_matrix_sdm26_characteristic_10000_5cyc.json
+# - SDM25: compare to crates/engine-sim/fixtures/parity/engine_matrix_sdm25_characteristic_10000_5cyc.json
+# helios-bench run output for each calibration must match its golden to 16 decimal digits.
 
 # 6. Reap
 Pop-Location
 .\scripts\physics\reap-worktree.ps1 -Id 0 -Slug "phase0-smoke"
 ```
+
+The two-calibration smoke catches anything that's only working for one engine's tuning (e.g., parameter-name mismatches that silently fall through to a default).
 
 - [ ] **Step 19.3: Compare bit-exact**
 
