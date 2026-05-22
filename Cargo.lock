@@ -2030,6 +2030,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-mcp"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "helios-bench",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5085,7 +5098,9 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

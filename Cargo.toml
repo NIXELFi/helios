@@ -10,6 +10,7 @@ members = [
   "crates/engine-sim",
   "crates/cfd-core",
   "crates/helios-bench",
+  "crates/helios-mcp",
   "apps/desktop/src-tauri",
 ]
 
