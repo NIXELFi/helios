@@ -616,7 +616,7 @@ impl SDM26Engine {
             let sc = &mut self.scratches[k];
             muscl_hancock_step(
                 &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
-                gamma, pipe.n_ghost, LIMITER_MINMOD,
+                gamma, pipe.n_ghost, cfg.limiter,
                 &mut sc.w, &mut sc.slopes, &mut sc.w_pred_l, &mut sc.w_pred_r,
                 &mut sc.flux,
             );
