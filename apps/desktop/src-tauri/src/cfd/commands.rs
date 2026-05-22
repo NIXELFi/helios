@@ -242,6 +242,22 @@ pub fn cfd_load_capture(
         .map_err(|e| format!("parse {}: {}", p.display(), e))
 }
 
+// ---------------- cfd_get_parameter_schema ----------------
+
+/// Enumerate optimizable parameters for the given config. Used by the
+/// optimization UI to populate the tunables picker. Returns the full
+/// schema (every numeric leaf grouped by panel) — the frontend filters
+/// to opt-in tunables.
+#[tauri::command]
+pub fn cfd_get_parameter_schema(
+    config_path: String,
+) -> Result<Vec<cfd_core::params::ParameterMeta>, String> {
+    let p = PathBuf::from(&config_path);
+    let cfg = engine_sim::config::loader::load_v1_json(&p)
+        .map_err(|e| format!("Schema error in {}: {}", p.display(), e))?;
+    Ok(cfd_core::params::enumerate_schema(&cfg))
+}
+
 // ---------------- cfd_cancel_job ----------------
 
 #[tauri::command]
