@@ -1,7 +1,9 @@
 //! `helios-bench validate` checks invariants per spec C9:
 //!
-//! - mass: `±1e-10` relative per cycle (uses `mass_drift_kg` / `mass_total_kg`
-//!   if both present, else `nonconservation`)
+//! - mass: `±1e-10` magnitude per cycle on the `nonconservation` field
+//!   (the FP-roundoff residual of the mass-balance closure). `mass_drift_kg`
+//!   is a cycle-to-cycle convergence metric, NOT a conservation residual —
+//!   do not confuse the two.
 //! - positivity: imep, brake_power, egt, ve must be ≥ 0; egt above 200 K floor
 //! - monotonicity: per-RPM brake_power non-negative across rows
 //! - energy + momentum: Phase 0 emits a WARNING that the checks are skipped
@@ -69,10 +71,12 @@ fn validate_fails_on_negative_imep() {
 }
 
 #[test]
-fn validate_fails_on_mass_drift_above_band() {
+fn validate_fails_on_nonconservation_above_band() {
     let dir = tempdir().unwrap();
     let p = dir.path().join("r.ndjson");
-    // relative drift = 1.0 / 1.0 = 1.0 — way above 1e-10
+    // mass_drift = 1.0 is a 100% cycle-to-cycle delta (non-converged sim);
+    // by itself that is NOT a conservation violation. The real test is
+    // `nonconservation`, which we set to 1e-2 (well above the 1e-10 band).
     write_ndjson(
         &p,
         r#"{"kind":"trial","rpm":9000,"imep_bar":9.0,"brake_power_kW":40.0,"ve_atm":0.85,"egt_mean_K":900.0,"mass_drift_kg":1.0,"mass_total_kg":1.0,"nonconservation":1e-2}"#,
@@ -80,8 +84,53 @@ fn validate_fails_on_mass_drift_above_band() {
     let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
     assert!(
         !r.status.success(),
-        "validate should FAIL on >band mass drift: stderr={}",
+        "validate should FAIL on >band nonconservation: stderr={}",
         String::from_utf8_lossy(&r.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("nonconservation"),
+        "failure message should reference 'nonconservation', not 'mass drift': stderr={stderr}"
+    );
+}
+
+#[test]
+fn validate_passes_when_nonconservation_tiny_even_with_large_mass_drift() {
+    // The original validate.rs treated mass_drift_kg/mass_total_kg as the
+    // conservation check, which mistakenly failed an unconverged-but-perfectly-
+    // conservative trial. Confirm we now ignore mass_drift_kg.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","rpm":10000,"imep_bar":11.19,"brake_power_kW":43.3,"ve_atm":0.76,"egt_mean_K":1137.0,"mass_drift_kg":-8.68e-05,"mass_total_kg":0.00413,"nonconservation":5.85e-18}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        r.status.success(),
+        "validate should PASS — large mass_drift but tiny nonconservation: stderr={} stdout={}",
+        String::from_utf8_lossy(&r.stderr),
+        String::from_utf8_lossy(&r.stdout)
+    );
+}
+
+#[test]
+fn validate_fails_when_nonconservation_field_is_missing() {
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","rpm":9000,"imep_bar":9.0,"brake_power_kW":40.0,"ve_atm":0.85,"egt_mean_K":900.0,"mass_drift_kg":0.0,"mass_total_kg":0.005}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        !r.status.success(),
+        "validate should FAIL when nonconservation field is missing"
+    );
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("missing"),
+        "failure should mention missing field: stderr={stderr}"
     );
 }
 

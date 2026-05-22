@@ -135,29 +135,29 @@ fn check_positivity(idx: usize, t: &Value, failures: &mut Vec<String>) {
 }
 
 fn check_mass(idx: usize, t: &Value, failures: &mut Vec<String>) {
-    // Preferred: mass_drift_kg / mass_total_kg if both present.
-    // Fallback: nonconservation magnitude.
-    if let (Some(drift), Some(total)) = (
-        t.get("mass_drift_kg").and_then(Value::as_f64),
-        t.get("mass_total_kg").and_then(Value::as_f64),
-    ) {
-        if total > 0.0 {
-            let rel = (drift / total).abs();
-            if rel > MASS_REL_BAND {
-                failures.push(format!(
-                    "trial {idx}: mass drift rel={rel:.3e} exceeds C9 band {MASS_REL_BAND:.0e}"
-                ));
-            }
-        }
-        return;
-    }
+    // Spec C9 mass conservation: the per-cycle FP roundoff residual must
+    // be at or below `MASS_REL_BAND`. The correct field is `nonconservation`
+    // (computed by engine-sim as the floating-point closure error of the
+    // mass-balance equation). `mass_drift_kg` is NOT a conservation residual
+    // — it's the cycle-to-cycle convergence delta (intake mass minus exhaust
+    // mass minus stored mass change), which is expected to be nonzero until
+    // the engine reaches steady state. Treating mass_drift as a conservation
+    // failure is wrong (caught while running the 0001-limiter-revalidation
+    // finding on commit ac4a6fa).
     if let Some(nc) = t.get("nonconservation").and_then(Value::as_f64) {
         if nc.abs() > MASS_REL_BAND {
             failures.push(format!(
                 "trial {idx}: nonconservation={nc:.3e} exceeds C9 band {MASS_REL_BAND:.0e}"
             ));
         }
+        return;
     }
+    // No nonconservation field at all is a schema bug worth flagging — the
+    // engine-sim CycleStats always includes it, so its absence means the
+    // NDJSON came from a different source than this validator expects.
+    failures.push(format!(
+        "trial {idx}: missing `nonconservation` field — cannot check mass conservation"
+    ));
 }
 
 fn check_monotonicity(idx: usize, t: &Value, failures: &mut Vec<String>) {
