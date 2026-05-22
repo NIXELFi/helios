@@ -559,11 +559,353 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
     RunOutcome::CompletedSweep(points)
 }
 
+// ---------------- Optimization runner ----------------
+
+/// Run a single RPM inline (no emit events, no captures) and return the
+/// per-RPM SweepPoint or None if the trial was cancelled / diverged
+/// mid-run. Used by `run_optimization_job` — trials never write disk
+/// artifacts (capture flags are forced off).
+fn run_single_rpm_inline<P: DivergenceProbe>(
+    cfg: &engine_sim::model::sdm26::SDM26Config,
+    junction: engine_sim::model::sdm26::JunctionKind,
+    rpm: f64,
+    n_cycles_max: u32,
+    tol: f64,
+    min_cycles: u32,
+    probe: &P,
+    cancel: &AtomicBool,
+) -> Result<SweepPoint, String> {
+    let mut eng = SDM26Engine::new(cfg.clone(), junction);
+    let mut loop_state = CycleLoopState::new(&mut eng);
+    let mut accumulated: Vec<CycleStats> = Vec::with_capacity(n_cycles_max as usize);
+    let rpm_t0 = Instant::now();
+    let mut converged_cycle: i64 = -1;
+    let mut nonconservation_max = 0.0_f64;
+
+    for cycle_i in 0..n_cycles_max {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("cancelled".to_string());
+        }
+        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None) {
+            CycleOutcome::Cycle(stats) => stats,
+            CycleOutcome::TargetReached => break,
+        };
+        if probe.is_diverged(&cs) {
+            return Err(format!(
+                "non-finite cycle stats at rpm {rpm:.0} cycle {ci}",
+                ci = cycle_i + 1,
+            ));
+        }
+        nonconservation_max = nonconservation_max.max(cs.nonconservation.abs());
+        accumulated.push(cs);
+        let (new_conv, should_break) =
+            check_converged_engine_sim(&accumulated, tol, min_cycles, converged_cycle);
+        if let Some(c) = new_conv {
+            converged_cycle = c;
+        }
+        if should_break {
+            break;
+        }
+    }
+
+    let wall_time_s = rpm_t0.elapsed().as_secs_f64();
+    let last_cs = accumulated.last().copied().ok_or_else(|| {
+        format!("no cycles completed at rpm {rpm:.0}")
+    })?;
+    Ok(SweepPoint {
+        rpm,
+        converged_cycle,
+        n_cycles_run: accumulated.len() as u32,
+        last_cycle: last_cs,
+        nonconservation_max,
+        wall_time_s,
+        step_count: loop_state.step_count,
+    })
+}
+
+/// Run an optimization study: N parallel trials, each a small sweep
+/// over `objective.rpm_list` with a perturbed config. Captures are
+/// always off for trials — we don't want to explode disk with one
+/// artifact-set per trial × per RPM.
+pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
+    emitter: &E,
+    probe: &P,
+    job_id: String,
+    config_path: PathBuf,
+    params: crate::dto::OptimizationParams,
+    cancel: Arc<AtomicBool>,
+    started_at: u64,
+) -> RunOutcome {
+    use crate::optimization::{bounds, objective, sampler};
+
+    emitter.emit_started(JobStartedEvent {
+        job_id: job_id.clone(),
+        kind: StudyKind::Optimization,
+        started_at,
+    });
+
+    // 1. Load base config.
+    let base_cfg = match load_v1_json(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::ConfigLoad,
+                message: e.to_string(),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    };
+
+    // 2. Validate inputs.
+    if params.tunables.is_empty() {
+        emitter.emit_error(JobErrorEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::Optimization,
+            reason: ErrorReason::Other,
+            message: "optimization requires at least 1 tunable parameter".into(),
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Errored;
+    }
+    if params.objective.rpm_list.is_empty() {
+        emitter.emit_error(JobErrorEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::Optimization,
+            reason: ErrorReason::Other,
+            message: "optimization requires at least 1 rpm in objective rpm_list".into(),
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Errored;
+    }
+    if params.n_trials == 0 {
+        emitter.emit_error(JobErrorEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::Optimization,
+            reason: ErrorReason::Other,
+            message: "optimization requires n_trials >= 1".into(),
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Errored;
+    }
+
+    // 3. Sample N normalized rows + map to physical overrides.
+    let normalized = sampler::sample(
+        params.sampler,
+        params.n_trials as usize,
+        params.tunables.len(),
+        params.seed,
+    );
+    let n_trials = params.n_trials;
+    let trials_input: Vec<std::collections::BTreeMap<String, f64>> = normalized
+        .iter()
+        .map(|row| {
+            params
+                .tunables
+                .iter()
+                .zip(row.iter())
+                .map(|(b, n)| (b.path.clone(), bounds::map_to_physical(b, *n)))
+                .collect()
+        })
+        .collect();
+
+    let parameter_paths: Vec<String> = params.tunables.iter().map(|b| b.path.clone()).collect();
+    let total_t0 = Instant::now();
+    let junction: engine_sim::model::sdm26::JunctionKind = params.junction_kind.into();
+
+    // 4. Parallel trial execution via a private rayon pool (same pattern
+    //    as sweep: cores - 1, min 1).
+    let n_cpus = num_cpus::get().saturating_sub(1).max(1);
+    let pool = match ThreadPoolBuilder::new().num_threads(n_cpus).build() {
+        Ok(p) => p,
+        Err(e) => {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!("rayon pool: {e}"),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    };
+
+    // (trial_idx, Ok(objective_value, sweep_points) | Err(msg))
+    type TrialResult = (u32, Result<(f64, Vec<SweepPoint>), String>);
+    let results: Arc<Mutex<Vec<TrialResult>>> =
+        Arc::new(Mutex::new(Vec::with_capacity(n_trials as usize)));
+
+    pool.install(|| {
+        use rayon::prelude::*;
+        let trials_indexed: Vec<(u32, std::collections::BTreeMap<String, f64>)> = trials_input
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| (i as u32, m))
+            .collect();
+
+        trials_indexed.into_par_iter().for_each(|(trial_idx, overrides)| {
+            if cancel.load(Ordering::SeqCst) {
+                results
+                    .lock()
+                    .unwrap()
+                    .push((trial_idx, Err("cancelled".to_string())));
+                return;
+            }
+
+            emitter.emit_progress(JobProgressEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                payload: JobProgressPayload::OptimizationTrialStarted {
+                    trial_idx,
+                    n_trials,
+                    parameter_values: overrides.clone(),
+                },
+            });
+
+            let trial_t0 = Instant::now();
+            let mut cfg = base_cfg.clone();
+            for (path, value) in &overrides {
+                if let Err(e) = crate::params::apply_override(&mut cfg, path, *value) {
+                    results.lock().unwrap().push((
+                        trial_idx,
+                        Err(format!("apply_override({path}): {e}")),
+                    ));
+                    return;
+                }
+            }
+
+            // Run inline sweep over the objective's rpm_list.
+            let mut points: Vec<SweepPoint> = Vec::with_capacity(params.objective.rpm_list.len());
+            for &rpm in &params.objective.rpm_list {
+                match run_single_rpm_inline(
+                    &cfg,
+                    junction,
+                    rpm,
+                    params.n_cycles_max,
+                    params.convergence_tol_imep,
+                    params.convergence_min_cycles,
+                    probe,
+                    &cancel,
+                ) {
+                    Ok(pt) => points.push(pt),
+                    Err(e) => {
+                        results
+                            .lock()
+                            .unwrap()
+                            .push((trial_idx, Err(format!("rpm {rpm:.0}: {e}"))));
+                        return;
+                    }
+                }
+            }
+
+            let obj_value = match objective::evaluate(&params.objective, &points) {
+                Ok(v) => v,
+                Err(e) => {
+                    results.lock().unwrap().push((
+                        trial_idx,
+                        Err(format!("objective eval: {e}")),
+                    ));
+                    return;
+                }
+            };
+
+            let wall_time_s = trial_t0.elapsed().as_secs_f64();
+            emitter.emit_progress(JobProgressEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                payload: JobProgressPayload::OptimizationTrialDone {
+                    trial_idx,
+                    n_trials,
+                    objective_value: obj_value,
+                    sweep_points: points.clone(),
+                    wall_time_s,
+                },
+            });
+
+            results
+                .lock()
+                .unwrap()
+                .push((trial_idx, Ok((obj_value, points))));
+        });
+    });
+
+    // 5. Drain + pick best by direction.
+    let drained: Vec<TrialResult> = {
+        let mut v = results.lock().unwrap();
+        v.sort_by_key(|(idx, _)| *idx);
+        std::mem::take(&mut *v)
+    };
+
+    let n_trials_run: u32 = drained
+        .iter()
+        .filter(|(_, r)| matches!(r, Ok((v, _)) if v.is_finite()))
+        .count() as u32;
+
+    let direction = params.objective.direction;
+    let best = drained
+        .iter()
+        .filter_map(|(idx, r)| match r {
+            Ok((v, _)) if v.is_finite() => Some((*idx, *v)),
+            _ => None,
+        })
+        .fold(None, |acc, (idx, v)| match acc {
+            None => Some((idx, v)),
+            Some((bi, bv)) => {
+                let take_new = match direction {
+                    crate::dto::ObjectiveDirection::Maximize => v > bv,
+                    crate::dto::ObjectiveDirection::Minimize => v < bv,
+                };
+                if take_new {
+                    Some((idx, v))
+                } else {
+                    Some((bi, bv))
+                }
+            }
+        });
+
+    let summary = crate::dto::OptimizationDoneSummary {
+        n_trials_requested: n_trials,
+        n_trials_run,
+        best_trial_idx: best.map(|(i, _)| i),
+        best_objective_value: best.map(|(_, v)| v),
+        parameter_paths,
+        objective_direction: direction,
+        total_wall_time_s: total_t0.elapsed().as_secs_f64(),
+    };
+
+    // 6. If cancelled, surface as Cancelled (with no partial_points — the
+    //    UI rebuilds from per-trial progress events). Otherwise Done.
+    if cancel.load(Ordering::SeqCst) {
+        emitter.emit_cancelled(JobCancelledEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::Optimization,
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Cancelled;
+    }
+
+    emitter.emit_done(JobDoneEvent {
+        job_id: job_id.clone(),
+        kind: StudyKind::Optimization,
+        payload: JobDoneSummary::Optimization(summary),
+    });
+    RunOutcome::CompletedOptimization
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum RunOutcome {
     Completed(Vec<CycleStats>),
     CompletedSweep(Vec<SweepPoint>),
+    CompletedOptimization,
     Cancelled,
     Errored,
 }
