@@ -2,7 +2,7 @@
 // Field names match the Rust DTO crate (cfd-core::dto) via serde's
 // rename_all = "camelCase" / "kebab-case".
 
-export type StudyKind = "single-rpm" | "sweep";
+export type StudyKind = "single-rpm" | "sweep" | "optimization";
 
 export type StudyStatus =
   | "idle"
@@ -89,9 +89,80 @@ export interface SweepParams {
   capturePipeProfiles: boolean;
 }
 
+// ---- Optimization (Phase 5) ----
+
+export type ParameterType = "scalar" | "array";
+
+/** Backend ParameterMeta (cfd_core::params::ParameterMeta). */
+export interface ParameterMeta {
+  path: string;
+  kind: ParameterType;
+  arrayLen: number;
+  unit: string;
+  default: number;
+  suggestedMin: number;
+  suggestedMax: number;
+  group: string;
+}
+
+/** UI-side per-row bounds (one per ParameterMeta path). Only enabled rows
+ *  get serialized to backend ParameterBounds. */
+export interface ParameterBoundsUI {
+  /** Backend path (no `[N]` suffix; per-element is encoded via perElement). */
+  path: string;
+  enabled: boolean;
+  /** null = uniform-write to scalar+array; integer = per-element index. */
+  perElement: number | null;
+  min: number;
+  max: number;
+  step: number | null;
+}
+
+/** Backend ParameterBounds — what we serialize over the wire. */
+export interface ParameterBounds {
+  /** Path with optional `[N]` suffix for per-element. */
+  path: string;
+  min: number;
+  max: number;
+  step: number | null;
+}
+
+export type ObjectiveAggregator =
+  | { kind: "max" }
+  | { kind: "min" }
+  | { kind: "mean" }
+  | { kind: "auc" }
+  | { kind: "sum" }
+  | { kind: "at-rpm"; rpmInt: number };
+
+export type ObjectiveDirection = "maximize" | "minimize";
+
+export interface ObjectiveSpec {
+  /** snake_case CycleStats field name (e.g. "imep_bar", "ve_atm"). */
+  metric: string;
+  aggregator: ObjectiveAggregator;
+  rpmList: number[];
+  direction: ObjectiveDirection;
+}
+
+export type SamplerKind = "lhs" | "random";
+
+export interface OptimizationParams {
+  tunables: ParameterBounds[];
+  objective: ObjectiveSpec;
+  nTrials: number;
+  sampler: SamplerKind;
+  seed: number | null;
+  nCyclesMax: number;
+  junctionKind: JunctionKind;
+  convergenceTolImep: number;
+  convergenceMinCycles: number;
+}
+
 export type StartJobRequest =
   | { kind: "single-rpm"; configPath: string; params: SingleRpmParams }
-  | { kind: "sweep"; configPath: string; params: SweepParams };
+  | { kind: "sweep"; configPath: string; params: SweepParams }
+  | { kind: "optimization"; configPath: string; params: OptimizationParams };
 
 export interface SingleRpmDoneSummary {
   convergedCycle: number;
@@ -150,7 +221,42 @@ export interface SweepStudy extends StudyBase {
   compareWithStudyId?: string;
 }
 
-export type Study = SingleRpmStudy | SweepStudy;
+// ---- Optimization study state ----
+
+export type TrialStatus = "pending" | "running" | "done" | "error";
+
+export interface OptimizationTrial {
+  trialIdx: number;
+  /** path -> physical value (snapped to step grid by the backend). */
+  parameterValues: Record<string, number>;
+  status: TrialStatus;
+  objectiveValue: number | null;
+  sweepPoints: SweepPoint[] | null;
+  wallTimeS: number | null;
+}
+
+export interface OptimizationDoneSummary {
+  nTrialsRequested: number;
+  nTrialsRun: number;
+  bestTrialIdx: number | null;
+  bestObjectiveValue: number | null;
+  parameterPaths: string[];
+  objectiveDirection: ObjectiveDirection;
+  totalWallTimeS: number;
+}
+
+export interface OptimizationStudy extends StudyBase {
+  kind: "optimization";
+  params: OptimizationParams;
+  trials: OptimizationTrial[];
+  bestTrialIdx: number | null;
+  bestObjectiveValue: number | null;
+  parameterPaths: string[];
+  objectiveDirection: ObjectiveDirection;
+  summary?: OptimizationDoneSummary;
+}
+
+export type Study = SingleRpmStudy | SweepStudy | OptimizationStudy;
 
 // Stored snapshot — bulk data omitted for storage hygiene.
 export type StudyHeader =
@@ -171,6 +277,15 @@ export type StudyHeader =
       startedAt: number;
       finishedAt?: number;
       params: SweepParams;
+    }
+  | {
+      id: string;
+      kind: "optimization";
+      status: StudyStatus;
+      configPath: string;
+      startedAt: number;
+      finishedAt?: number;
+      params: OptimizationParams;
     };
 
 // ---- Tauri event payloads (camelCase from serde) ----
@@ -208,6 +323,21 @@ export type JobProgressPayload =
       rpm: number;
       point: Omit<SweepPoint, "cycles" | "captureDir"> & { captureDir?: string };
       captureDir?: string;
+    }
+  | {
+      kind: "optimization-trial-started";
+      trialIdx: number;
+      nTrials: number;
+      /** path -> physical value (already snapped to step grid). */
+      parameterValues: Record<string, number>;
+    }
+  | {
+      kind: "optimization-trial-done";
+      trialIdx: number;
+      nTrials: number;
+      objectiveValue: number;
+      sweepPoints: Omit<SweepPoint, "cycles" | "captureDir">[];
+      wallTimeS: number;
     };
 
 export interface JobProgressEvent {
@@ -218,7 +348,17 @@ export interface JobProgressEvent {
 
 export type JobDoneSummary =
   | { kind: "single-rpm"; convergedCycle: number; nCyclesRun: number; stepCount: number; captureDir?: string }
-  | { kind: "sweep"; nRpms: number; nCompleted: number; totalStepCount: number; totalWallTimeS: number };
+  | { kind: "sweep"; nRpms: number; nCompleted: number; totalStepCount: number; totalWallTimeS: number }
+  | {
+      kind: "optimization";
+      nTrialsRequested: number;
+      nTrialsRun: number;
+      bestTrialIdx: number | null;
+      bestObjectiveValue: number | null;
+      parameterPaths: string[];
+      objectiveDirection: ObjectiveDirection;
+      totalWallTimeS: number;
+    };
 
 export interface JobDoneEvent {
   jobId: string;

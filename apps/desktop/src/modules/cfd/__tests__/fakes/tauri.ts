@@ -7,6 +7,7 @@ import type {
   JobEvent,
   JobSummary,
   LoadedConfig,
+  ParameterMeta,
   StartJobRequest,
 } from "../../state/types";
 
@@ -34,6 +35,7 @@ export interface FakeBridgeState {
       file: "pv.json" | "profiles.json" | "manifest.json",
     ) => Promise<unknown>,
   ): void;
+  setGetParameterSchema(impl: (configPath: string) => Promise<ParameterMeta[]>): void;
 }
 
 export function makeFakeBridge(): FakeBridgeState {
@@ -59,6 +61,8 @@ export function makeFakeBridge(): FakeBridgeState {
   ) => Promise<unknown> = async () => {
     throw new Error("loadCapture not configured");
   };
+  let getParameterSchema: (configPath: string) => Promise<ParameterMeta[]> =
+    async () => [];
 
   const bridge: CfdBridge = {
     async loadConfig(path) {
@@ -93,6 +97,10 @@ export function makeFakeBridge(): FakeBridgeState {
       invocations.push({ command: "cfd_load_capture", args: { jobId, studyKind, rpmInt, file } });
       return loadCapture(jobId, studyKind, rpmInt, file);
     },
+    async getParameterSchema(configPath) {
+      invocations.push({ command: "cfd_get_parameter_schema", args: { configPath } });
+      return getParameterSchema(configPath);
+    },
     async subscribe(handler) {
       subscribers.add(handler);
       return async () => {
@@ -115,5 +123,6 @@ export function makeFakeBridge(): FakeBridgeState {
     setCancelJob(impl) { cancelJob = impl; },
     setListJobs(impl) { listJobs = impl; },
     setLoadCapture(impl) { loadCapture = impl; },
+    setGetParameterSchema(impl) { getParameterSchema = impl; },
   };
 }

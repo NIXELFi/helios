@@ -8,6 +8,7 @@ import type {
   JobEvent,
   JobSummary,
   LoadedConfig,
+  ParameterMeta,
   StartJobRequest,
 } from "../state/types";
 
@@ -31,6 +32,10 @@ export interface CfdBridge {
     rpmInt: number,
     file: "pv.json" | "profiles.json" | "manifest.json",
   ): Promise<unknown>;
+  /** Optimization (Phase 5): enumerate the optimizable parameter schema
+   *  for a given config file. Backend reads `n_cylinders` from the config
+   *  to populate `arrayLen` for per-cylinder fields. */
+  getParameterSchema(configPath: string): Promise<ParameterMeta[]>;
 }
 
 const EVENT_NAMES = [
@@ -62,6 +67,8 @@ export const realBridge: CfdBridge = {
       rpmInt,
       file,
     }),
+  getParameterSchema: (configPath) =>
+    invoke<ParameterMeta[]>("cfd_get_parameter_schema", { configPath }),
   subscribe: async (handler) => {
     const w = getCurrentWindow();
     const unsubs = await Promise.all(
