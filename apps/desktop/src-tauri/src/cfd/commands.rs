@@ -20,7 +20,8 @@ use cfd_core::dto::{
     StartJobRequest, StartJobResponse,
 };
 use cfd_core::runner::{
-    run_single_rpm_job, run_sweep_job, DefaultDivergenceProbe, JobEmitter, RunOutcome,
+    run_optimization_job, run_single_rpm_job, run_sweep_job, DefaultDivergenceProbe, JobEmitter,
+    RunOutcome,
 };
 use cfd_core::state::{CfdState, JobHandle};
 
@@ -174,9 +175,19 @@ pub fn cfd_start_job(
                 started_at,
                 capture_root.clone(),
             ),
+            StartJobRequest::Optimization { config_path, params } => run_optimization_job(
+                &emitter, &probe,
+                job_id_owned.clone(),
+                PathBuf::from(config_path),
+                params,
+                Arc::clone(&cancel),
+                started_at,
+            ),
         };
         let final_status = match outcome {
-            RunOutcome::Completed(_) | RunOutcome::CompletedSweep(_) => JobStatus::Done,
+            RunOutcome::Completed(_)
+            | RunOutcome::CompletedSweep(_)
+            | RunOutcome::CompletedOptimization => JobStatus::Done,
             RunOutcome::Cancelled => JobStatus::Cancelled,
             RunOutcome::Errored => JobStatus::Error,
         };
