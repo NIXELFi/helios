@@ -425,11 +425,13 @@ impl SDM26Engine {
                 JunctionKind::Stagnation => {
                     let legs = leg_specs.into_iter()
                         .map(|(idx, end)| JunctionCVLeg::new(idx, end)).collect();
-                    Junction::Cv(JunctionCV::from_legs(
+                    let mut cv = JunctionCV::from_legs(
                         legs, pipes,
                         cfg.p_ambient, cfg.t_ambient, 0.0,
                         1.4, 287.0, 1.0,
-                    ))
+                    );
+                    cv.inflow_loss_coef = inflow_loss_coef;
+                    Junction::Cv(cv)
                 }
                 JunctionKind::Characteristic => {
                     let legs = leg_specs.into_iter()

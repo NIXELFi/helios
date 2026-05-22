@@ -31,6 +31,12 @@ pub struct JunctionCV {
     pub legs: Vec<JunctionCVLeg>,
     pub last_p: f64,
     pub last_t: f64,
+    /// Dynamic-pressure loss coefficient applied when flow enters the CV
+    /// from a pipe leg. Matches the convention used by
+    /// `CharacteristicJunction::inflow_loss_coef`. Defaults to 0 — when 0
+    /// the junction is pure stagnation and Python-reference parity is
+    /// preserved bit-for-bit.
+    pub inflow_loss_coef: f64,
 }
 
 impl JunctionCV {
@@ -61,6 +67,7 @@ impl JunctionCV {
             volume: v_j, m, e, m_y,
             gamma, r_gas, legs,
             last_p: p_init, last_t: t_init,
+            inflow_loss_coef: 0.0,
         }
     }
 
@@ -84,14 +91,20 @@ impl JunctionCV {
 
     /// Fill each leg's pipe-end ghost cells with the CV's stagnation state.
     /// `_dt` is accepted for interface symmetry with CharacteristicJunction.
+    ///
+    /// When `inflow_loss_coef > 0` and flow is INTO the CV from a pipe leg,
+    /// the ghost-cell pressure is reduced by `K · ½ρu²` (mirrors the
+    /// CharacteristicJunction inflow-loss model). When loss_coef = 0 the
+    /// behavior is unchanged from the pure-stagnation original — preserves
+    /// Python-reference parity at default config.
     pub fn fill_ghosts(&mut self, pipes: &mut [PipeState], _dt: f64) {
-        let rho = self.rho();
-        let p = self.p();
+        let rho_cv = self.rho();
+        let p_cv = self.p();
         let y = self.y();
         let gm1 = self.gamma - 1.0;
-        let e_density = p / gm1;
+        let e_density_stagnation = p_cv / gm1;
 
-        self.last_p = p;
+        self.last_p = p_cv;
         self.last_t = self.t();
 
         for leg in &self.legs {
@@ -99,16 +112,52 @@ impl JunctionCV {
             let ng = pipe.n_ghost;
             let nc = pipe.n_cells;
             let n_total = pipe.n_total();
+
+            // Decide whether the pipe is drawing FROM the CV (i.e. flow
+            // OUT of CV into pipe = pipe inflow). This is the case where
+            // an entrance loss applies — gas accelerating from a stagnant
+            // reservoir into a pipe at the pipe-end face. Matches the
+            // CharacteristicJunction `signed_into_hllc < 0.0` branch.
+            //   - Left end of pipe: pipe inflow means u_interior > 0
+            //     (flow accelerates away from CV down the pipe).
+            //   - Right end of pipe: pipe inflow means u_interior < 0.
+            let (rho_g, e_g) = if self.inflow_loss_coef > 0.0 {
+                let int_idx = match leg.end {
+                    PipeEnd::Left => ng,
+                    PipeEnd::Right => ng + nc - 1,
+                };
+                let rho_a_i = pipe.q[int_idx * N_VARS + I_RHO_A];
+                let mom_a_i = pipe.q[int_idx * N_VARS + I_MOM_A];
+                let a_i = pipe.area[int_idx].max(1e-20);
+                let rho_i = (rho_a_i / a_i).max(1e-12);
+                let u_i = mom_a_i / (rho_i * a_i);
+                let pipe_inflow = match leg.end {
+                    PipeEnd::Left => u_i > 0.0,
+                    PipeEnd::Right => u_i < 0.0,
+                };
+                if pipe_inflow {
+                    let dp_loss = self.inflow_loss_coef * 0.5 * rho_i * u_i * u_i;
+                    let p_new = (p_cv - dp_loss).max(0.5 * p_cv);
+                    // Isentropic density update consistent with characteristic-junction model
+                    let rho_new = rho_cv * (p_new / p_cv.max(1.0)).powf(1.0 / self.gamma);
+                    (rho_new, p_new / gm1)
+                } else {
+                    (rho_cv, e_density_stagnation)
+                }
+            } else {
+                (rho_cv, e_density_stagnation)
+            };
+
             let indices: Box<dyn Iterator<Item = usize>> = match leg.end {
                 PipeEnd::Left => Box::new(0..ng),
                 PipeEnd::Right => Box::new((ng + nc)..n_total),
             };
             for i in indices {
                 let a = pipe.area[i];
-                pipe.q[i * N_VARS + I_RHO_A] = rho * a;
+                pipe.q[i * N_VARS + I_RHO_A] = rho_g * a;
                 pipe.q[i * N_VARS + I_MOM_A] = 0.0;
-                pipe.q[i * N_VARS + I_E_A]   = e_density * a;
-                pipe.q[i * N_VARS + I_Y_A]   = rho * y * a;
+                pipe.q[i * N_VARS + I_E_A]   = e_g * a;
+                pipe.q[i * N_VARS + I_Y_A]   = rho_g * y * a;
             }
         }
     }
