@@ -25,11 +25,13 @@ fn help_lists_subcommands() {
 }
 
 /// plan-review-v1 #14: behavioral failing-then-passing test.
-/// Each subcommand stub should exit non-zero with a "not yet implemented" message.
+/// Subcommands that are still stubs should exit non-zero with a
+/// "not yet implemented" message. `run` is implemented in Task 4 so
+/// we exercise one of the still-stubbed subcommands.
 #[test]
-fn run_subcommand_bails_with_not_yet_implemented() {
+fn stubbed_subcommand_bails_with_not_yet_implemented() {
     let out = bin()
-        .args(["run", "no-such.toml", "--out", "no-such.ndjson"])
+        .args(["validate", "no-such.ndjson"])
         .output()
         .expect("spawn");
     assert!(!out.status.success(), "expected non-zero exit");
@@ -37,5 +39,22 @@ fn run_subcommand_bails_with_not_yet_implemented() {
     assert!(
         stderr.contains("not yet implemented"),
         "stderr should mention 'not yet implemented': {stderr}"
+    );
+}
+
+/// `run` rejects a missing study.toml with a clear filesystem error
+/// (not the "not yet implemented" message anymore — it now actually
+/// tries to read the file).
+#[test]
+fn run_rejects_missing_study_file() {
+    let out = bin()
+        .args(["run", "definitely-not-a-file.toml", "--out", "x.ndjson"])
+        .output()
+        .expect("spawn");
+    assert!(!out.status.success(), "expected non-zero exit");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("read") || stderr.to_lowercase().contains("system cannot find"),
+        "stderr should describe a read error: {stderr}"
     );
 }
