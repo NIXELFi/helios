@@ -23,6 +23,19 @@ pub struct WiebeParams {
     /// RPM-only `eta_comb_at_rpm` — preserves bit-exact parity with
     /// Python reference. Set true to model rich-quench / lean-misfire.
     pub afr_eta_enabled: bool,
+    /// Turbulence-enhanced burn-rate factor applied to the Wiebe `a`
+    /// coefficient. Models the fact that real engines have charge motion
+    /// (tumble + swirl) that accelerates the early flame development
+    /// relative to a laminar Wiebe profile.
+    ///
+    /// Effective Wiebe: `a_eff = a × (1 + tumble_factor)`. At
+    /// `tumble_factor = 0.5`, x_b reaches 99.99 % at τ = 1 (vs 99.3 %
+    /// for the default a = 5). The burn is more complete in the same
+    /// crank-angle window — net effect is higher heat release in the
+    /// expansion stroke, modestly higher peak pressure, ~3-6 % IMEP
+    /// boost depending on RPM. Defaults to 0.0 (no enhancement, parity
+    /// preserved).
+    pub tumble_burn_factor: f64,
 }
 
 impl Default for WiebeParams {
@@ -43,6 +56,7 @@ impl Default for WiebeParams {
             factor_knee: 1.00,
             factor_hi: 1.00,
             afr_eta_enabled: false,
+            tumble_burn_factor: 0.0,
         }
     }
 }

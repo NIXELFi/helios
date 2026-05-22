@@ -185,18 +185,19 @@ impl CylinderModel {
         let d_q_ht_dt = h_c * a_surf * (self.state.t - self.woschni.t_wall);
 
         let eta = self.wiebe.eta_at(rpm);
+        let a_eff = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
         let mut d_q_comb_dt = 0.0_f64;
         if is_combusting(theta_local, self.wiebe.theta_start(), self.wiebe.duration_deg)
             && self.state.m_fuel > 0.0
         {
             let dxb_dtheta = wiebe_burn_rate(
-                theta_local, self.wiebe.a, self.wiebe.m,
+                theta_local, a_eff, self.wiebe.m,
                 self.wiebe.theta_start(), self.wiebe.duration_deg,
             );
             let dxb_dt = dxb_dtheta * 180.0 / PI * omega;
             d_q_comb_dt = eta * self.state.m_fuel * self.wiebe.q_lhv * dxb_dt;
             self.state.x_b = wiebe_xb(
-                theta_local, self.wiebe.a, self.wiebe.m,
+                theta_local, a_eff, self.wiebe.m,
                 self.wiebe.theta_start(), self.wiebe.duration_deg,
             );
         }
@@ -245,7 +246,7 @@ impl CylinderModel {
             let c1co = self.woschni.c1_compression;
             let c1cb = self.woschni.c1_combustion;
             let c2cb = self.woschni.c2_combustion;
-            let wiebe_a = self.wiebe.a;
+            let wiebe_a = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
             let wiebe_m = self.wiebe.m;
             let theta_start = self.wiebe.theta_start();
             let duration = self.wiebe.duration_deg;

@@ -149,6 +149,9 @@ pub struct SDM26Config {
     pub fmep_a: f64,
     pub fmep_b: f64,
     pub fmep_c: f64,
+    /// Tumble/swirl turbulent burn-rate enhancement on Wiebe's `a` coefficient.
+    /// 0.0 (default) = no enhancement. 0.3-0.7 typical for modern high-tumble heads.
+    pub tumble_burn_factor: f64,
     pub exhaust_topology: ExhaustTopology,
     pub drivetrain_efficiency: f64,
     // residual-gas
@@ -215,6 +218,7 @@ impl Default for SDM26Config {
             fmep_a: 0.5,
             fmep_b: 0.1,
             fmep_c: 0.003,
+            tumble_burn_factor: 0.0,
             exhaust_topology: ExhaustTopology::FourTwoOne,
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
@@ -512,6 +516,7 @@ impl SDM26Engine {
             eta_comb: cfg.eta_comb,
             q_lhv: cfg.q_lhv, afr_target: cfg.afr_target,
             afr_eta_enabled: cfg.afr_eta_enabled,
+            tumble_burn_factor: cfg.tumble_burn_factor,
             ..WiebeParams::default()
         };
         let woschni = WoschniParams {
