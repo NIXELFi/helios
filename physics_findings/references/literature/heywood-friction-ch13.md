@@ -70,35 +70,43 @@ depending on author).
 
 (Heywood eq. 13.26; full derivation in `chen-flynn-1965.md`.)
 
+The full Chen-Flynn form includes a peak-pressure linear term:
+
 ```
 FMEP [kPa] = A + B · P_max [kPa] + C · S_p̄ [m/s] + D · S_p̄² [m²/s²]
 ```
 
-Or in bar / m/s units common in modern practice:
+However, **Heywood Tab. 13.3 (Friction MEP vs. mean piston speed — typical
+correlations for modern SI engines)** gives a *peak-pressure-free* reduction
+that fits the same data within ~5 % at full load, where the P_max-linear term
+is absorbed into a re-calibrated linear-`S_p̄` term:
 
 ```
-FMEP [bar] = a + b · P_max [bar] + c · S_p̄² [m²/s²]
+FMEP [bar] = a + b · S_p̄ [m/s] + c · S_p̄² [m²/s²]
 ```
 
-(The linear `S_p̄` term is sometimes dropped; Heywood Tab 13.6 lists fits both
-with and without it.)
+This is the form implemented in engine-sim
+(`crates/engine-sim/src/model/sdm26.rs` line 145–148 + 884–885):
+`fmep_bar = fmep_a + fmep_b · sp + fmep_c · sp²` where `sp = 2·stroke·N/60`.
 
-Coefficient ranges (Heywood Tab 13.6, modern SI engines):
+Coefficient ranges (Heywood Tab 13.3, modern SI engines — peak-pressure-free
+reduction):
 
-| Coefficient | Typical value | Range          |
-|-------------|---------------|----------------|
-| a [bar]     | 0.5           | 0.4-0.8        |
-| b [—]       | 0.012-0.015   | 0.008-0.02     |
-| c [bar·s²/m²] | 0.003       | 0.002-0.005    |
+| Coefficient            | Typical value | Range          | Engine class                    |
+|------------------------|---------------|----------------|---------------------------------|
+| a [bar]                | 0.5           | 0.4-0.8        | constant offset                 |
+| b [bar·s/m]            | 0.04-0.05     | 0.03-0.06      | passenger SI; bearings + valvetrain |
+| c [bar·s²/m²]          | 0.003         | 0.002-0.005    | piston-assembly hydrodynamic    |
 
-Note `b` is sometimes called `K_pmax` or similar; it captures the
-peak-pressure-driven hydrodynamic load on the piston rings + main bearings.
+(High-load Heywood Tab. 13.6 *with* P_max gives a separate fit with smaller
+`b` ≈ 0.012–0.015 [dimensionless] applied to `P_max [bar]`, not S_p̄.)
 
 Engine-sim's PARITY_FLAGS.toml lists `fmep_a = 0.5`, `fmep_b = 0.1`,
-`fmep_c = 0.003`. The `fmep_b = 0.1` is suspiciously large vs Heywood's
-0.012-0.015 — Phase 1 finding #11 (friction decomposition) is the open
-investigation. *This may be a sign-of-units issue or a non-Heywood
-convention; flag for verification.* See "Known disagreements" below.
+`fmep_c = 0.003`. The `fmep_b = 0.1` is roughly 2× the Heywood-typical linear
+`S_p̄` coefficient. This *is* a real disagreement, not a units error —
+finding 0002 confirmed the implementation form is `fmep_b · S_p̄` and the
+value is genuinely on the high side. See "Known disagreements" below and
+`physics_findings/0002-fmep-b-vs-heywood-typical/` for the empirical sweep.
 
 ### Eq. 5 — Mechanical efficiency
 
@@ -127,45 +135,49 @@ With k ≈ 0.006-0.012 (dimensionless) per Heywood Fig 13.24.
 
 ## Constants / coefficients
 
-| Constant       | Value          | Source                          |
-|----------------|----------------|---------------------------------|
-| Chen-Flynn a   | 0.5 bar (typ)  | Heywood Tab 13.6, modern SI     |
-| Chen-Flynn b   | 0.012-0.015    | Heywood Tab 13.6                |
-| Chen-Flynn c   | 0.003 bar·s²/m² | Heywood Tab 13.6               |
-| Piston-assy %  | 0.40-0.55      | Heywood Tab 13.5                |
-| Bearing %      | 0.20-0.30      | Heywood Tab 13.5                |
-| Valvetrain %   | 0.10-0.20      | Heywood Tab 13.5                |
-| η_m peak       | 0.80-0.92      | Heywood §13.4                   |
+| Constant         | Value             | Source                                  |
+|------------------|-------------------|-----------------------------------------|
+| Chen-Flynn a     | 0.5 bar (typ)     | Heywood Tab 13.3, modern SI             |
+| Chen-Flynn b     | 0.04-0.05 bar·s/m | Heywood Tab 13.3 (peak-pressure-free)   |
+| Chen-Flynn c     | 0.003 bar·s²/m²   | Heywood Tab 13.3                        |
+| Piston-assy %    | 0.40-0.55         | Heywood Tab 13.5                        |
+| Bearing %        | 0.20-0.30         | Heywood Tab 13.5                        |
+| Valvetrain %     | 0.10-0.20         | Heywood Tab 13.5                        |
+| η_m peak         | 0.80-0.92         | Heywood §13.4                           |
 
 ## Expected ranges (what the solver should produce)
 
 At CBR600-class operating points (10000-13000 RPM, WOT, P_max ≈ 85-95 bar,
-S_p̄ ≈ 22-26 m/s):
+S_p̄ ≈ 14.2-18.4 m/s — *note: 42.5 mm stroke gives lower S_p̄ than typical
+auto SI*):
 
-- **FMEP**: 1.8-3.0 bar (Heywood Chen-Flynn projection with `a=0.5, b=0.013,
+- **FMEP**: 1.8-3.0 bar (Heywood Chen-Flynn projection with `a=0.5, b=0.045,
   c=0.003`).
 - **PMEP**: 0.2-0.5 bar (low at WOT; rises sharply at partial throttle).
 - **η_m**: 0.75-0.85.
 - **BMEP**: 8.5-11.0 bar (matches measured at typical FSAE-restricted dynos).
 
-If the simulator currently reports FMEP outside this range, finding #11 will
+If the simulator currently reports FMEP outside this range, finding 0002 will
 investigate. Per physics_synthesis.md §A1, the existing race calibration
 gives roughly the right BMEP, suggesting the FMEP value is roughly correct
-even if `fmep_b = 0.1` looks off — possible explanations: different unit
-convention, or P_max is in MPa not bar in the calling code.
+even if `fmep_b = 0.1` looks ~2× too high — likely absorbing other model
+gaps (e.g., missing variable-γ chemistry that under-predicts peak pressure).
 
 ## Known disagreements
 
-- **`fmep_b = 0.1` vs Heywood Tab 13.6 0.012-0.015 (10× larger):** Likely a
-  unit-system mismatch. If P_max is fed in MPa instead of bar, then
-  `0.1 / 10 = 0.01` aligns with Heywood. *This must be verified at finding #11
-  before any retune.* Adding to PARITY_FLAGS.toml as a known flag is correct;
-  silently changing the value is not.
-- **Chen-Flynn linear `S_p̄` term:** Heywood Tab 13.6 includes both with-and-without
-  variants. Modern Patton-Nitschke (SAE 890836) uses with-linear. Engine-sim's
-  PARITY_FLAGS.toml lists no `S_p̄` (linear) coefficient — current implementation
-  uses the squared-only form. Consistent with Heywood eq. 13.26 lower-row fit
-  but loses some fidelity at low RPM. Phase 1 finding #11 will audit.
+- **`fmep_b = 0.1` vs Heywood Tab 13.3 0.04-0.05 (~2× larger):** Confirmed
+  finding 0002 — NOT a unit-system mismatch; the implementation form is
+  `fmep_b · S_p̄` (linear piston speed), and `fmep_b = 0.1 bar·s/m` is
+  genuinely on the high side relative to Heywood-typical SI values. Most
+  likely empirically calibrated to compensate for under-predicted peak
+  pressure (variable-γ chemistry absent → IMEP too low → BMEP would be
+  too high without elevated FMEP).
+- **Chen-Flynn full vs reduced form:** The implementation uses the
+  peak-pressure-free reduction (Heywood Tab 13.3). The full form
+  (Heywood Tab 13.6 / Chen-Flynn 1965) includes a `B · P_max` term that
+  engine-sim does NOT model directly. This is acceptable provided the
+  linear `S_p̄` coefficient is re-tuned to absorb the load-dependent
+  friction (which is what `fmep_b = 0.1` may be doing).
 - **PMEP at WOT vs partial:** Heywood §13.4 gives 0.2-0.5 bar at WOT; FSAE
   20mm-restricted operation may push PMEP to 0.5-1.0 bar because the
   restrictor's pressure drop counts as pumping work. The simulator includes

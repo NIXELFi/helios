@@ -182,6 +182,14 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("woschni_c1_combustion", Scalar, 1, "-", cfg.woschni_c1_combustion, 1.0, 6.0, "Combustion"),
         m("woschni_c2_combustion", Scalar, 1, "-", cfg.woschni_c2_combustion, 0.0, 1.0e-2, "Combustion"),
 
+        // --- Friction (Chen-Flynn FMEP) ---
+        // fmep_bar = fmep_a + fmep_b * sp + fmep_c * sp^2, sp = mean piston speed.
+        // Heywood Tab 13.3 SI typical: (0.4-0.8, 0.04-0.05, 0.002-0.005).
+        // See physics_findings/0002-fmep-b-vs-heywood-typical/.
+        m("fmep_a", Scalar, 1, "bar", cfg.fmep_a, 0.3, 0.8, "Friction"),
+        m("fmep_b", Scalar, 1, "bar*s/m", cfg.fmep_b, 0.02, 0.15, "Friction"),
+        m("fmep_c", Scalar, 1, "bar*s^2/m^2", cfg.fmep_c, 0.001, 0.006, "Friction"),
+
         // --- Valves ---
         m("intake_valve_diameter", Scalar, 1, "m", cfg.intake_valve_diameter, 0.020, 0.040, "Valves"),
         m("intake_valve_max_lift", Scalar, 1, "m", cfg.intake_valve_max_lift, 0.005, 0.014, "Valves"),
@@ -546,6 +554,11 @@ pub fn apply_override(
         "woschni_c1_combustion" => cfg.woschni_c1_combustion = value,
         "woschni_c2_combustion" => cfg.woschni_c2_combustion = value,
 
+        // Friction (Chen-Flynn FMEP) — see physics_findings/0002.
+        "fmep_a" => cfg.fmep_a = value,
+        "fmep_b" => cfg.fmep_b = value,
+        "fmep_c" => cfg.fmep_c = value,
+
         // Valves
         "intake_valve_diameter" => cfg.intake_valve_diameter = value,
         "intake_valve_max_lift" => cfg.intake_valve_max_lift = value,
@@ -616,6 +629,7 @@ mod tests {
             "Exhaust",
             "Ambient",
             "Combustion",
+            "Friction",
             "Valves",
             "Drivetrain",
             "Numerics",
@@ -708,5 +722,66 @@ mod tests {
         assert_eq!(cfg.runner_n_cells, 43);
         apply_override(&mut cfg, "runner_n_cells", 42.4).unwrap();
         assert_eq!(cfg.runner_n_cells, 42);
+    }
+
+    /// Finding 0002 — Chen-Flynn FMEP coefficient sweep wiring.
+    ///
+    /// Verifies:
+    ///   (1) `fmep_a`, `fmep_b`, `fmep_c` are accepted by `apply_override`.
+    ///   (2) Each writes to the matching SDM26Config field exactly.
+    ///   (3) The compiled defaults are still (0.5, 0.1, 0.003) — i.e., this
+    ///       extension is wiring-only, parity must hold.
+    #[test]
+    fn override_chen_flynn_fmep_coefficients() {
+        // Use Default (not loaded JSON) so this test is locked to the
+        // physics defaults rather than whatever the example file says.
+        let mut cfg = SDM26Config::default();
+
+        // (3) Default parity check — assert before we mutate anything.
+        assert!((cfg.fmep_a - 0.5).abs() < 1e-15, "default fmep_a drifted");
+        assert!((cfg.fmep_b - 0.1).abs() < 1e-15, "default fmep_b drifted");
+        assert!((cfg.fmep_c - 0.003).abs() < 1e-15, "default fmep_c drifted");
+
+        // (1)+(2) Sweep each coefficient across a representative range from
+        // study.toml (Heywood-typical low end up through the current default
+        // and slightly beyond).
+        for &v in &[0.04_f64, 0.05, 0.06, 0.075, 0.1, 0.12] {
+            apply_override(&mut cfg, "fmep_b", v).unwrap();
+            assert!(
+                (cfg.fmep_b - v).abs() < 1e-15,
+                "fmep_b override failed: expected {v}, got {}",
+                cfg.fmep_b
+            );
+        }
+
+        apply_override(&mut cfg, "fmep_a", 0.4).unwrap();
+        assert!((cfg.fmep_a - 0.4).abs() < 1e-15);
+
+        apply_override(&mut cfg, "fmep_c", 0.002).unwrap();
+        assert!((cfg.fmep_c - 0.002).abs() < 1e-15);
+
+        // Restore defaults via override (round-trip).
+        apply_override(&mut cfg, "fmep_a", 0.5).unwrap();
+        apply_override(&mut cfg, "fmep_b", 0.1).unwrap();
+        apply_override(&mut cfg, "fmep_c", 0.003).unwrap();
+        assert!((cfg.fmep_a - 0.5).abs() < 1e-15);
+        assert!((cfg.fmep_b - 0.1).abs() < 1e-15);
+        assert!((cfg.fmep_c - 0.003).abs() < 1e-15);
+    }
+
+    /// FMEP coefficients are present in the optimization schema (Friction
+    /// group) so the UI / sweep tooling can discover them.
+    #[test]
+    fn schema_exposes_fmep_coefficients() {
+        let cfg = load_cfg();
+        let s = enumerate_schema(&cfg);
+        for name in ["fmep_a", "fmep_b", "fmep_c"] {
+            let meta = s
+                .iter()
+                .find(|m| m.path == name)
+                .unwrap_or_else(|| panic!("schema missing {name}"));
+            assert_eq!(meta.group, "Friction", "{name} not in Friction group");
+            assert_eq!(meta.kind, ParameterType::Scalar);
+        }
     }
 }
