@@ -152,6 +152,12 @@ pub struct SDM26Config {
     /// Tumble/swirl turbulent burn-rate enhancement on Wiebe's `a` coefficient.
     /// 0.0 (default) = no enhancement. 0.3-0.7 typical for modern high-tumble heads.
     pub tumble_burn_factor: f64,
+    /// Opt-in two-zone combustion model. When true, the cylinder tracks
+    /// burned and unburned zones separately during the combustion window,
+    /// splitting Woschni heat loss by zone volume fraction and using a
+    /// mass-averaged γ across the two zones. Default false → behaviour
+    /// (and parity tests) match the legacy single-zone model exactly.
+    pub two_zone_enabled: bool,
     pub exhaust_topology: ExhaustTopology,
     pub drivetrain_efficiency: f64,
     // residual-gas
@@ -219,6 +225,7 @@ impl Default for SDM26Config {
             fmep_b: 0.1,
             fmep_c: 0.003,
             tumble_burn_factor: 0.0,
+            two_zone_enabled: false,
             exhaust_topology: ExhaustTopology::FourTwoOne,
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
@@ -517,6 +524,7 @@ impl SDM26Engine {
             q_lhv: cfg.q_lhv, afr_target: cfg.afr_target,
             afr_eta_enabled: cfg.afr_eta_enabled,
             tumble_burn_factor: cfg.tumble_burn_factor,
+            two_zone_enabled: cfg.two_zone_enabled,
             ..WiebeParams::default()
         };
         let woschni = WoschniParams {

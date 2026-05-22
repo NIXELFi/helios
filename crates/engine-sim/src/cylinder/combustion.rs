@@ -36,6 +36,28 @@ pub struct WiebeParams {
     /// boost depending on RPM. Defaults to 0.0 (no enhancement, parity
     /// preserved).
     pub tumble_burn_factor: f64,
+    /// Opt-in two-zone combustion model. When false (default), the
+    /// cylinder integrates a single mass-averaged temperature. When
+    /// true, the burned and unburned zones are tracked separately
+    /// during combustion, which splits Woschni heat loss according
+    /// to per-zone volume fractions and uses a per-zone γ.
+    ///
+    /// Pressure is still spatially uniform (P_b = P_u = P) per the
+    /// usual zero-D assumption, so peak P is largely unchanged
+    /// vs single-zone at matched calibration. The earned benefit
+    /// (or cost) shows up as a different heat-loss split:
+    ///   - Burned zone (T_b ~ 2500-2800 K) occupies a much larger
+    ///     volume fraction than its mass fraction (P·V_b = m_b R T_b
+    ///     with hot T_b), so it sees a larger wall-area share.
+    ///   - Unburned zone (T_u ~ 700-1500 K) is squeezed into a
+    ///     smaller volume and is at lower T, so its heat loss
+    ///     becomes negligible.
+    ///   - The net heat loss is generally HIGHER than single-zone
+    ///     at matched Woschni h_c because Q_loss ∝ (T_b - T_wall)
+    ///     and T_b > T_avg. To match real IMEP, the Woschni c1
+    ///     coefficient typically needs a small downward retune
+    ///     when two-zone is enabled.
+    pub two_zone_enabled: bool,
 }
 
 impl Default for WiebeParams {
@@ -57,6 +79,7 @@ impl Default for WiebeParams {
             factor_hi: 1.00,
             afr_eta_enabled: false,
             tumble_burn_factor: 0.0,
+            two_zone_enabled: false,
         }
     }
 }
