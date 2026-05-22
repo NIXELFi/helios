@@ -4,4 +4,5 @@
 //! over `SDM26Engine`.
 
 pub mod bounds;
+pub mod objective;
 pub mod sampler;
