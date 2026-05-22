@@ -14,6 +14,7 @@
 
 use anyhow::{bail, Result};
 use clap::Args as ClapArgs;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -27,10 +28,36 @@ pub struct Args {
     pub checks: String,
 }
 
+/// Library-mode validate result: structured pass/fail + failure list.
+#[derive(Debug, Serialize)]
+pub struct ValidateSummary {
+    pub pass: bool,
+    pub n_trials: usize,
+    pub failures: Vec<String>,
+    pub skipped_checks: Vec<String>,
+}
+
 const MASS_REL_BAND: f64 = 1e-10;
 const EGT_FLOOR_K: f64 = 200.0;
 
 pub fn execute(args: Args) -> Result<()> {
+    let summary = execute_with(&args)?;
+    if !summary.pass {
+        eprintln!("VALIDATE FAIL ({} issues):", summary.failures.len());
+        for f in &summary.failures {
+            eprintln!("  - {f}");
+        }
+        bail!("validation failed");
+    }
+    println!("VALIDATE OK ({} trial(s))", summary.n_trials);
+    Ok(())
+}
+
+/// Library-mode validate. Does NOT print anything or fail-the-process on
+/// invariant violations — returns the structured summary instead. Only
+/// returns `Err` for I/O / parse errors that prevent validation from
+/// running at all.
+pub fn execute_with(args: &Args) -> Result<ValidateSummary> {
     let body = std::fs::read_to_string(&args.results)?;
     let mut env_line: Option<Value> = None;
     let mut trials: Vec<Value> = Vec::new();
@@ -52,6 +79,7 @@ pub fn execute(args: Args) -> Result<()> {
 
     let checks: HashSet<&str> = args.checks.split(',').map(str::trim).collect();
     let mut failures: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
 
     // Phase 0 instrumentation gap warnings.
     if checks.contains("energy") {
@@ -59,12 +87,14 @@ pub fn execute(args: Args) -> Result<()> {
             "WARNING: energy invariant check skipped — CycleStats has no \
              per-cycle energy residual field yet (Phase 0 gap)."
         );
+        skipped.push("energy".into());
     }
     if checks.contains("momentum") {
         eprintln!(
             "WARNING: momentum invariant check skipped — CycleStats has no \
              per-cycle momentum residual field yet (Phase 0 gap)."
         );
+        skipped.push("momentum".into());
     }
 
     for (idx, t) in trials.iter().enumerate() {
@@ -79,15 +109,12 @@ pub fn execute(args: Args) -> Result<()> {
         }
     }
 
-    if !failures.is_empty() {
-        eprintln!("VALIDATE FAIL ({} issues):", failures.len());
-        for f in &failures {
-            eprintln!("  - {f}");
-        }
-        bail!("validation failed");
-    }
-    println!("VALIDATE OK ({} trial(s))", trials.len());
-    Ok(())
+    Ok(ValidateSummary {
+        pass: failures.is_empty(),
+        n_trials: trials.len(),
+        failures,
+        skipped_checks: skipped,
+    })
 }
 
 fn check_positivity(idx: usize, t: &Value, failures: &mut Vec<String>) {

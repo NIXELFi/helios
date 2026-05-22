@@ -17,6 +17,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use engine_sim::config::loader::load_v1_json;
 use engine_sim::model::sdm26::{CycleStats, JunctionKind, RunResult, SDM26Engine};
+use serde::Serialize;
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -32,7 +33,22 @@ pub struct Args {
     pub commit: Option<String>,
 }
 
+/// Summary returned from library-mode `run`: enough for an agent to decide
+/// what to do next without re-parsing the NDJSON. CLI use discards it.
+#[derive(Debug, Serialize)]
+pub struct RunSummary {
+    pub out_path: PathBuf,
+    pub commit_hash: String,
+    pub seed: Option<u64>,
+    pub n_trials: usize,
+    pub rpms: Vec<f64>,
+}
+
 pub fn execute(args: Args) -> Result<()> {
+    execute_with(&args).map(|_| ())
+}
+
+pub fn execute_with(args: &Args) -> Result<RunSummary> {
     let txt = std::fs::read_to_string(&args.study)
         .with_context(|| format!("read {}", args.study.display()))?;
     let study: Study = toml::from_str(&txt).context("parse study.toml")?;
@@ -61,6 +77,7 @@ pub fn execute(args: Args) -> Result<()> {
 
     let junction_kind = parse_junction_kind(study.run.junction.as_deref())?;
 
+    let mut n_trials: usize = 0;
     for &rpm in &study.run.rpm {
         // Fresh engine per RPM keeps each operating point independent
         // (matches the parity-test convention).
@@ -110,10 +127,17 @@ pub fn execute(args: Args) -> Result<()> {
             "f_residual": stats.f_residual,
         });
         writer.write(&row)?;
+        n_trials += 1;
     }
 
     writer.finish()?;
-    Ok(())
+    Ok(RunSummary {
+        out_path: args.out.clone(),
+        commit_hash: commit,
+        seed: study.run.seed,
+        n_trials,
+        rpms: study.run.rpm.clone(),
+    })
 }
 
 fn parse_junction_kind(s: Option<&str>) -> Result<JunctionKind> {

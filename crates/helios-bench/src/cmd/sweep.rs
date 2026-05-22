@@ -26,6 +26,7 @@ use cfd_core::params::apply_override;
 use clap::Args as ClapArgs;
 use engine_sim::config::loader::load_v1_json;
 use engine_sim::model::sdm26::{CycleStats, JunctionKind, RunResult, SDM26Engine};
+use serde::Serialize;
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -41,7 +42,23 @@ pub struct Args {
     pub commit: Option<String>,
 }
 
+/// Summary returned from library-mode `sweep`.
+#[derive(Debug, Serialize)]
+pub struct SweepSummary {
+    pub out_path: PathBuf,
+    pub commit_hash: String,
+    pub seed: Option<u64>,
+    pub trials: usize,
+    pub rpms: Vec<f64>,
+    pub sampler: String,
+    pub parameters: Vec<String>,
+}
+
 pub fn execute(args: Args) -> Result<()> {
+    execute_with(&args).map(|_| ())
+}
+
+pub fn execute_with(args: &Args) -> Result<SweepSummary> {
     let txt = std::fs::read_to_string(&args.study)
         .with_context(|| format!("read {}", args.study.display()))?;
     let study: Study = toml::from_str(&txt).context("parse study.toml")?;
@@ -142,7 +159,15 @@ pub fn execute(args: Args) -> Result<()> {
     }
 
     writer.finish()?;
-    Ok(())
+    Ok(SweepSummary {
+        out_path: args.out.clone(),
+        commit_hash: commit,
+        seed: study.run.seed,
+        trials: sweep_spec.n_trials as usize,
+        rpms: study.run.rpm.clone(),
+        sampler: sweep_spec.sampler.clone(),
+        parameters: params.iter().map(|p| p.name.clone()).collect(),
+    })
 }
 
 fn parse_junction_kind(s: Option<&str>) -> Result<JunctionKind> {
