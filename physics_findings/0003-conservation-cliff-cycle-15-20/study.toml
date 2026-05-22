@@ -1,0 +1,36 @@
+# Finding 0003 — conservation-cliff-cycle-15-20 (SDM26 baseline)
+#
+# Reproduce + characterize the cycle-15→cycle-20 mass-conservation cliff
+# uncovered in finding 0002 at SDM26 / 10000 RPM. Finding 0002 ran 25
+# cycles and saw `nonconservation` jump from ~3.45e-17 at cycle 15 to
+# ~1.32e-7 at cycle 20 — a 10-order-of-magnitude leap that violates the
+# spec C9 ± 1e-10 per-cycle band by ~6 orders.
+#
+# This study runs 30 cycles (5 more than 0002) so we can see whether the
+# cliff is a one-cycle spike (e.g., a usize boundary) or a stable plateau
+# at a new conservation level. Cycles 26–30 differentiate those.
+#
+# Per-cycle nonconservation data is produced by the
+# `crates/helios-bench/examples/conservation_per_cycle.rs` binary
+# (created for this finding), which emits one NDJSON line per cycle.
+# Acceptance is per-cycle.
+
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [10000.0]
+cycles = 30
+recorded = true
+seed = 3000
+junction = "characteristic"
+
+[environment]
+target_triple = "x86_64-pc-windows-gnu"
+rustc_version = "rustc 1.95.0 (59807616e 2026-04-14)"
+rayon_threads = 1
+libm_source = "system"
+
+[[acceptance]]
+metric = "nonconservation"
+target = 0.0
+tolerance = "1e-10 abs"
+citation = "docs/superpowers/specs/2026-05-22-physics-agent-loop-design.md §C9 (mass conservation, ±1e-10 per cycle; existing validate uses absolute via crates/helios-bench/src/cmd/validate.rs::MASS_REL_BAND)"
