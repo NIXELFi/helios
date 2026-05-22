@@ -1,0 +1,9 @@
+# Per-finding artifacts that are intermediate (raw traces, scratch plots).
+# Final results.ndjson and finding.md are committed.
+*/raw_traces/
+*/scratch/
+*/.tmp/
+
+# Researcher pending-amend artifacts that don't belong here
+# (they live in `worktrees/agent-NNNN-slug/`, not in the registry).
+*/pending_amend.json

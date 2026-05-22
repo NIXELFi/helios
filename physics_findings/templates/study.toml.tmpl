@@ -1,0 +1,73 @@
+# study.toml — reproducibility unit (spec C4 + C6).
+#
+# Required sections: [run], [environment]. Optional: [sweep], [[acceptance]].
+#
+# Validation rules:
+#  - recorded = true   REQUIRES `seed` (no default; absent = error)
+#  - recorded = true   REQUIRES `rayon_threads = 1`
+#  - Each [[acceptance]] metric MUST have a non-empty `citation`
+#
+# A recorded run produces an NDJSON whose first line is the environment block;
+# the same `study.toml` + commit hash + matching `(target_triple, rustc_version,
+# libm_source)` reproduces bit-faithfully.
+
+[run]
+# Path to the engine config (V1 JSON loader). Relative to repo root.
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+
+# RPM list to sweep. Each RPM produces one trial row in the result NDJSON.
+rpm = [6000.0, 9000.0, 12000.0]
+
+# Cycles per RPM. 30 is enough to converge IMEP for typical investigations.
+cycles = 30
+
+# If true, this run is reproducibility-recorded — seed REQUIRED, threads = 1.
+# If false, this is exploratory and may parallelize.
+recorded = true
+
+# REQUIRED when recorded = true.
+seed = 42
+
+# Junction kind for the SDM26 engine model. Options match `engine_sim::model::sdm26::JunctionKind`.
+junction = "characteristic"
+
+[environment]
+# All fields below are filled by the orchestrator from `helios-bench --env-default`
+# at dispatch time. They cannot be defaulted because reproducibility requires the
+# exact values to be recorded in the NDJSON env block.
+target_triple = ""    # e.g., "x86_64-pc-windows-msvc"
+rustc_version = ""    # e.g., "rustc 1.78.0 (9b00956e5 2024-04-29)"
+rayon_threads = 1     # MUST be 1 when recorded = true
+libm_source   = ""    # "system" | "rust-builtin" | "musl" | "system-glibc"
+
+# Optional: parameter sweep (LHS / random sampler over named parameters).
+# Uncomment and customize as needed. `parameters.name` must match an entry in
+# `cfd_core::params::apply_override`'s allowlist.
+#
+# [sweep]
+# sampler = "lhs"      # "lhs" | "random"
+# n_trials = 32
+# parameters = [
+#   { name = "woschni_c1", min = 1.8,  max = 2.6  },
+#   { name = "woschni_c2", min = 0.0,  max = 0.005 },
+# ]
+
+# One or more acceptance bands. Each is a (metric, target, tolerance, citation)
+# tuple. Tolerance forms:
+#   "5%"      — bilateral ±5 %
+#   "±5%"     — bilateral ±5 % (same as above)
+#   ">= 0.95" — one-sided floor (95 % of target)
+#   "<= 1.05" — one-sided ceiling (105 % of target)
+# Citations MUST be specific — paper + equation, edition + page, or named CSV row.
+
+[[acceptance]]
+metric = "peak_power_kW"
+target = 50.0
+tolerance = "±5%"
+citation = "FSAE published team dynos — references/dyno/cbr600rr-fsae-restricted.csv (multi-source aggregate); Heywood Tab 5.1"
+
+[[acceptance]]
+metric = "bsfc_g_per_kWh"
+target = 290.0
+tolerance = "±10%"
+citation = "Heywood 2018 Tab 5.2 (spark-ignition gasoline, BSFC range 270-320 g/kWh)"

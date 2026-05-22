@@ -1,0 +1,126 @@
+---
+id: NNNN
+slug: <kebab-case>
+status: INVESTIGATING
+topic: <one-line topic>
+hypothesis: <one-paragraph hypothesis — what we expect to find and why>
+opened: YYYY-MM-DD
+closed: ~
+owner: physics-researcher
+spawned_by: manual       # or cron
+commit_hash: ~           # filled at terminal commit
+baseline_fingerprint: ~  # filled at terminal commit; SHA-256 of each transitively-touched file
+revalidation_count: 0
+acceptance_approved_at: ~  # ISO-8601 timestamp of skeptic pre-run ACK
+---
+
+## Hypothesis
+
+<one-paragraph expansion of the frontmatter hypothesis — what claim is being
+tested, what literature predicts, and what would falsify the hypothesis>
+
+## Study design
+
+The full reproducible inputs are in `study.toml`. Summary:
+
+- **Config baseline:** <e.g., `python_ref/configs/sdm26.json`>
+- **RPM sweep:** <e.g., 6000, 9000, 12000>
+- **Cycles per RPM:** <30 typical>
+- **Parameter sweep (if any):** <which params, what range, what sampler>
+- **Validation metrics:** see `[[acceptance]]` block in `study.toml`.
+
+## Literature
+
+See `literature.md`. Key references being tested here:
+
+- <author, year, equation>
+- <author, year, equation>
+
+## Results
+
+<filled by researcher after `helios-bench run` / `sweep`. Include:>
+
+- Raw metric values per trial (or summarized; full data in `results.ndjson`)
+- Conservation diagnostics (mass / energy / momentum residuals)
+- Any unexpected qualitative behavior
+
+## Comparison vs literature
+
+<filled by researcher. For each `[[acceptance]]` metric:>
+
+| Metric | Target (cite) | Tolerance | Measured | Pass? |
+|--------|---------------|-----------|----------|-------|
+|        |               |           |          |       |
+
+## Conclusion
+
+<filled by researcher; ONE of:>
+
+- **VALIDATED** — measured within `[acceptance]` band; no fix required.
+- **NEEDS-FIX** — measurement outside band; implementer to land fix +
+  regression test.
+- **CEILING-LIMIT** — solver class cannot reach the band without changes
+  forbidden by spec §2.
+- **LITERATURE-AMBIGUOUS** — sources cited disagree; finding closes with
+  documented ambiguity.
+- **SOLVER-CHANGE-REQUIRED** — fix requires a change to
+  `crates/engine-sim/src/solver/`; surfaced to user for explicit decision.
+- **ABANDONED** — investigation ceased without resolution; documented reason.
+
+Status flips to the matching terminal state when skeptic ACKs the conclusion.
+
+## Skeptic review
+
+### Pre-run (acceptance band)
+
+- Reviewer: physics-skeptic
+- Verdict: ACK | CHALLENGE
+- Round: 0/3
+- Notes:
+  <skeptic's check of literature justification for the `[acceptance]` band>
+
+### Post-run (conclusion)
+
+- Reviewer: physics-skeptic
+- Verdict: APPROVE | CHALLENGE
+- Round: 0/3
+- Notes:
+  <skeptic's check of comparison-class correctness, conservation, confirmation
+  bias, literature consistency>
+
+## Reproducibility
+
+```powershell
+git checkout <commit_hash>
+helios-bench run physics_findings/NNNN-<slug>/study.toml --out /tmp/r.ndjson
+helios-bench compare /tmp/r.ndjson physics_findings/NNNN-<slug>/results.ndjson
+```
+
+Expected: zero metric deltas above noise floor (1e-12 relative for any single
+metric on the same `target_triple` + `rustc_version` + `libm_source`).
+
+## Second-engine validation (C10 — tuning fixes only)
+
+If this finding tunes a coefficient (rather than fixing a wiring bug), the
+second-engine corpus check goes here:
+
+- Reference engine: <e.g., CRF250R from `references/dyno/`>
+- Metric pre-fix: <kW @ RPM>
+- Metric post-fix: <kW @ RPM>
+- Within band? <yes/no>
+- Citation: <source CSV row + provenance>
+
+Bug-fix findings are exempt from C10.
+
+## Revalidations
+
+<grows on STALE re-open — one subsection per pass. Original finding is
+preserved verbatim above; each subsection records what changed and the
+re-verdict.>
+
+### Revalidation 1 — YYYY-MM-DD
+
+- Trigger: <what merge / finding triggered staleness>
+- Files affected: <list>
+- Re-run study summary: <unchanged / changed / new>
+- New verdict: <terminal state>

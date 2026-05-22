@@ -1,0 +1,75 @@
+# Literature for finding NNNN-<slug>
+
+## Citations
+
+Every claim in `finding.md`'s "Comparison vs literature" section MUST resolve to
+a citation here. Each citation block records author, year, edition, ISBN (where
+applicable), and the specific page / equation / table being referenced.
+
+### Primary source
+
+- **Author, Year.** *Title*, Nth ed. Publisher. ISBN.
+  - Section X.Y, p. ZZZ: <one-line summary of the claim>
+  - Equation (X.Y): <restated equation>
+  - Table X.Y: <range or coefficient cited>
+
+### Secondary / corroborating
+
+- **Author, Year.** *Title*, Nth ed. Publisher. ISBN.
+  - Section X.Y, p. ZZZ: <one-line summary>
+
+### Disagreements / ambiguity
+
+If sources disagree, list each below with the disagreement. A persistent
+unresolved disagreement maps to a `LITERATURE-AMBIGUOUS` terminal status.
+
+- <citation A> says <claim>; <citation B> says <conflicting claim>.
+  Provisional resolution: <which side this finding chose, or note that the
+  disagreement is recorded but not adjudicated>.
+
+## Equations under test
+
+Each equation that this finding's `[acceptance]` block depends on, restated for
+clarity. Use the source's variable names; declare any rename you made.
+
+### Equation 1 — <name, e.g., Woschni convective coefficient>
+
+Source: <author, year, eq. N>.
+
+```
+h_c = a · B^(-0.2) · p^0.8 · T^(-0.53) · w^0.8
+```
+
+Where:
+
+| Symbol | Meaning           | Units    |
+|--------|-------------------|----------|
+| h_c    | convective coef.  | W/m²·K   |
+| a      | empirical const.  | —        |
+| B      | bore              | m        |
+| p      | cylinder pressure | Pa       |
+| T      | gas temperature   | K        |
+| w      | char. velocity    | m/s      |
+
+### Equation 2 — <name>
+
+...
+
+## Expected ranges (from literature)
+
+Each metric in `study.toml` `[[acceptance]]` should have a published expected
+range here. The acceptance target+tolerance must lie within (or be a defensible
+subset of) the published range.
+
+| Metric              | Range (literature)        | Source (cite above) |
+|---------------------|---------------------------|---------------------|
+| peak_power_kW       | 41-52 (FSAE-restricted)   | references/dyno/cbr600rr-fsae-restricted.csv; FSAE published team dynos |
+| bsfc_g_per_kWh      | 270-320                   | Heywood 2018 Tab 5.2 |
+| egt_mean_K          | 850-1100                  | Heywood Tab 6.2 / Lumley Ch 5 |
+| woschni_c1          | 2.28 (gas exchange) / 3.26 (combustion) | Woschni 1967 |
+
+## Known disagreements between sources
+
+(Move out of "Disagreements" above if persistent. This is for permanent record.)
+
+- ...
