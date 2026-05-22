@@ -82,17 +82,36 @@ export function savePersisted(p: Persisted): void {
           points: s.points.map((pt) => ({ ...pt, cycles: [] })),
         };
       }
+      if (s.kind === "optimization") {
+        return {
+          ...s,
+          trials: s.trials.map((t) => ({
+            ...t,
+            sweepPoints: t.sweepPoints?.map((pt) => ({ ...pt, cycles: [] })) ?? null,
+          })),
+        };
+      }
       return s;
     }),
     (xs) => xs.map((s) => {
       if (s.kind === "sweep") {
         return { ...s, points: s.points.map((pt) => ({ ...pt, cycles: [] })) };
       }
+      if (s.kind === "optimization") {
+        // Drop sweep points entirely on each trial; keep param values + objective.
+        return {
+          ...s,
+          trials: s.trials.map((t) => ({ ...t, sweepPoints: null })),
+        };
+      }
       return { ...s, cycles: [] };
     }),
     (xs) => xs.map((s) => {
       if (s.kind === "sweep") {
         return { ...s, points: [] };
+      }
+      if (s.kind === "optimization") {
+        return { ...s, trials: [] };
       }
       return { ...s, cycles: [] };
     }),
