@@ -32,9 +32,10 @@ fn help_lists_subcommands() {
 /// `plot` is picked here.
 #[test]
 fn stubbed_subcommand_bails_with_not_yet_implemented() {
-    // `compare` is the last subcommand still a stub at this milestone.
+    // `plot` is the last subcommand still a stub at this milestone
+    // (Task 14 implements it next).
     let out = bin()
-        .args(["compare", "no-such-a.ndjson", "no-such-b.ndjson"])
+        .args(["plot", "no-such.ndjson", "--out", "no-such.svg"])
         .output()
         .expect("spawn");
     assert!(!out.status.success(), "expected non-zero exit");
