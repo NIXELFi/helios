@@ -184,7 +184,7 @@ impl CylinderModel {
         );
         let d_q_ht_dt = h_c * a_surf * (self.state.t - self.woschni.t_wall);
 
-        let eta = self.wiebe.eta_comb_at_rpm(rpm);
+        let eta = self.wiebe.eta_at(rpm);
         let mut d_q_comb_dt = 0.0_f64;
         if is_combusting(theta_local, self.wiebe.theta_start(), self.wiebe.duration_deg)
             && self.state.m_fuel > 0.0

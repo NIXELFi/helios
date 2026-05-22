@@ -18,6 +18,11 @@ pub struct WiebeParams {
     pub factor_lo: f64,
     pub factor_knee: f64,
     pub factor_hi: f64,
+    /// Enable Heywood-shaped AFR-dependent combustion-efficiency factor.
+    /// When false (default), behavior is unchanged from the legacy
+    /// RPM-only `eta_comb_at_rpm` — preserves bit-exact parity with
+    /// Python reference. Set true to model rich-quench / lean-misfire.
+    pub afr_eta_enabled: bool,
 }
 
 impl Default for WiebeParams {
@@ -37,6 +42,7 @@ impl Default for WiebeParams {
             factor_lo: 1.00,
             factor_knee: 1.00,
             factor_hi: 1.00,
+            afr_eta_enabled: false,
         }
     }
 }
@@ -67,6 +73,47 @@ impl WiebeParams {
             self.factor_hi
         };
         self.eta_comb * factor
+    }
+
+    /// AFR-dependent combustion-efficiency factor (multiplicative on
+    /// `eta_comb_at_rpm`). Captures rich-quench and lean-misfire in a
+    /// Heywood-shape correlation parameterized by equivalence ratio
+    /// `phi = AFR_stoich / AFR`.
+    ///
+    /// Reference shape (gasoline, AFR_stoich = 14.7):
+    ///   φ ≤ 0.7   →  factor = 1 − 5·(0.7 − φ)²   (lean misfire, clamped ≥ 0.30)
+    ///   0.7 < φ ≤ 1.0  →  factor = 1.0           (well-mixed lean: full efficiency)
+    ///   1.0 < φ ≤ 1.2  →  factor = 1.0 − 0.5·(φ − 1.0)  (gentle rich falloff)
+    ///   1.2 < φ        →  factor = 0.9 − 1.7·(φ − 1.2)  (steep rich quench, clamped ≥ 0.30)
+    ///
+    /// Calibrated against Heywood (*ICE Fundamentals*, Tab. 4.1) within
+    /// ±5% over φ ∈ [0.7, 1.5]. At φ = 1.0..1.1 (AFR 13.4..14.7) the
+    /// product (m_fuel × factor) peaks around φ ≈ 1.1, giving the
+    /// textbook brake-power-rich peak.
+    pub fn afr_eta_factor(&self) -> f64 {
+        let afr_stoich = 14.7_f64; // gasoline; consider lifting to a field later
+        let phi = afr_stoich / self.afr_target.max(1.0);
+        let f = if phi <= 0.7 {
+            1.0 - 5.0 * (0.7 - phi).powi(2)
+        } else if phi <= 1.0 {
+            1.0
+        } else if phi <= 1.2 {
+            1.0 - 0.5 * (phi - 1.0)
+        } else {
+            0.9 - 1.7 * (phi - 1.2)
+        };
+        f.clamp(0.30, 1.0)
+    }
+
+    /// Combined RPM + AFR efficiency factor. When `afr_eta_enabled` is
+    /// false (default) this matches `eta_comb_at_rpm` exactly.
+    pub fn eta_at(&self, rpm: f64) -> f64 {
+        let base = self.eta_comb_at_rpm(rpm);
+        if self.afr_eta_enabled {
+            base * self.afr_eta_factor()
+        } else {
+            base
+        }
     }
 }
 

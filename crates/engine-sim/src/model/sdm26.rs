@@ -105,6 +105,10 @@ pub struct SDM26Config {
     pub eta_comb: f64,
     pub q_lhv: f64,
     pub afr_target: f64,
+    /// When true, multiply `eta_comb` by a Heywood-shape AFR factor that
+    /// models rich-quench and lean-misfire (φ = AFR_stoich / AFR).
+    /// Default false → bit-exact Python parity preserved.
+    pub afr_eta_enabled: bool,
     pub t_wall_cylinder: f64,
     // Woschni
     pub woschni_c1_gas_exchange: f64,
@@ -177,6 +181,7 @@ impl Default for SDM26Config {
             combustion_duration: 50.0, spark_advance: 25.0,
             ignition_delay: 7.0,
             eta_comb: 0.96, q_lhv: 44.0e6, afr_target: 13.1,
+            afr_eta_enabled: false,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
             woschni_c1_combustion: 2.28, woschni_c2_combustion: 3.24e-3,
@@ -486,6 +491,7 @@ impl SDM26Engine {
             ignition_delay_deg: cfg.ignition_delay,
             eta_comb: cfg.eta_comb,
             q_lhv: cfg.q_lhv, afr_target: cfg.afr_target,
+            afr_eta_enabled: cfg.afr_eta_enabled,
             ..WiebeParams::default()
         };
         let woschni = WoschniParams {
