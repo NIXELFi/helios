@@ -561,20 +561,28 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
 
 // ---------------- Optimization runner ----------------
 
-/// Run a single RPM inline (no emit events, no captures) and return the
-/// per-RPM SweepPoint or None if the trial was cancelled / diverged
-/// mid-run. Used by `run_optimization_job` — trials never write disk
-/// artifacts (capture flags are forced off).
-fn run_single_rpm_inline<P: DivergenceProbe>(
-    cfg: &engine_sim::model::sdm26::SDM26Config,
+/// Knobs for a single inline RPM run inside an optimization trial.
+/// Packaged into one struct so the helper signature stays under
+/// clippy's `too_many_arguments` threshold.
+struct InlineRpmSpec {
     junction: engine_sim::model::sdm26::JunctionKind,
     rpm: f64,
     n_cycles_max: u32,
     tol: f64,
     min_cycles: u32,
+}
+
+/// Run a single RPM inline (no emit events, no captures) and return the
+/// per-RPM SweepPoint or an error if the trial was cancelled / diverged
+/// mid-run. Used by `run_optimization_job` — trials never write disk
+/// artifacts (capture flags are forced off).
+fn run_single_rpm_inline<P: DivergenceProbe>(
+    cfg: &engine_sim::model::sdm26::SDM26Config,
+    spec: &InlineRpmSpec,
     probe: &P,
     cancel: &AtomicBool,
 ) -> Result<SweepPoint, String> {
+    let InlineRpmSpec { junction, rpm, n_cycles_max, tol, min_cycles } = *spec;
     let mut eng = SDM26Engine::new(cfg.clone(), junction);
     let mut loop_state = CycleLoopState::new(&mut eng);
     let mut accumulated: Vec<CycleStats> = Vec::with_capacity(n_cycles_max as usize);
@@ -784,16 +792,14 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
             // Run inline sweep over the objective's rpm_list.
             let mut points: Vec<SweepPoint> = Vec::with_capacity(params.objective.rpm_list.len());
             for &rpm in &params.objective.rpm_list {
-                match run_single_rpm_inline(
-                    &cfg,
+                let spec = InlineRpmSpec {
                     junction,
                     rpm,
-                    params.n_cycles_max,
-                    params.convergence_tol_imep,
-                    params.convergence_min_cycles,
-                    probe,
-                    &cancel,
-                ) {
+                    n_cycles_max: params.n_cycles_max,
+                    tol: params.convergence_tol_imep,
+                    min_cycles: params.convergence_min_cycles,
+                };
+                match run_single_rpm_inline(&cfg, &spec, probe, &cancel) {
                     Ok(pt) => points.push(pt),
                     Err(e) => {
                         results
