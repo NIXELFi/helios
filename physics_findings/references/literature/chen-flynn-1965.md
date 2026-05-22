@@ -95,75 +95,97 @@ for tuning sensitivity.
 | c     | 0 (dropped)    | typical practice               |
 | d     | 0.003          | squared piston-speed dominant  |
 
-### Helios PARITY_FLAGS.toml defaults
+### Helios actual implementation (sdm26.rs:145-148, 884-885)
 
-| Coef. | Helios value (bar) | Status            |
-|-------|--------------------|-------------------|
-| fmep_a| 0.5                | matches Heywood SI |
-| fmep_b| 0.1                | **10× larger** than Heywood — see "Known disagreements" |
-| fmep_c| 0.003              | matches Heywood SI |
+Engine-sim uses the *peak-pressure-free* reduced form (no `B · P_max` term):
+
+```
+fmep_bar = fmep_a + fmep_b · sp + fmep_c · sp²
+```
+
+with `sp = 2·stroke·N/60` (mean piston speed, m/s) and defaults:
+
+| Coef.   | Helios value           | Heywood Tab 13.3 typ. | Status        |
+|---------|------------------------|-----------------------|---------------|
+| fmep_a  | 0.5 bar                | 0.5 bar               | matches       |
+| fmep_b  | 0.1 bar·s/m            | 0.04-0.05 bar·s/m     | **~2× high**  |
+| fmep_c  | 0.003 bar·s²/m²        | 0.003 bar·s²/m²       | matches       |
+
+This is NOT a units mismatch (verified by finding 0002). `fmep_b · sp` gives
+the right magnitude FMEP — but the value of `fmep_b = 0.1` itself is high
+relative to Heywood-typical SI, most plausibly because it absorbs other
+model gaps (variable-γ chemistry, peak-pressure-driven friction not modeled
+explicitly).
 
 ## Expected ranges (what the solver should produce)
 
-At CBR600-class operating points (S_p̄ ≈ 22-26 m/s, P_max ≈ 85-95 bar):
+CBR600 stroke = 42.5 mm. At 10000-13000 RPM:
 
-Using Heywood SI coefficients (a=0.5, b=0.013, c=0, d=0.003):
+- S_p̄ = 2·0.0425·(10000/60) = **14.17 m/s @ 10000 RPM**
+- S_p̄ = 2·0.0425·(13000/60) = **18.42 m/s @ 13000 RPM**
 
-```
-FMEP @ S_p̄=22, P_max=85 = 0.5 + 0.013 · 85 + 0.003 · 484
-                        = 0.5 + 1.105 + 1.452
-                        = 3.06 bar
-```
+(Note: earlier versions of this file said S_p̄ ≈ 22-26 m/s — that was
+incorrect; off by a factor of ~1.5 because of an arithmetic slip on the
+stroke. The corrected values above are what the simulator computes at
+`sdm26.rs:884`.)
 
-```
-FMEP @ S_p̄=26, P_max=95 = 0.5 + 0.013 · 95 + 0.003 · 676
-                        = 0.5 + 1.235 + 2.028
-                        = 3.76 bar
-```
-
-For CBR600 race calibration with measured BMEP ≈ 8.5-10.5 bar and IMEP ≈
-10-12 bar, FMEP ≈ 1.5-3.0 bar is consistent — i.e., η_m ≈ 0.75-0.85.
-
-If `fmep_b = 0.1` is in use *literally* (not as a unit-misnamed 0.01):
+Using Heywood-typical coefficients (a=0.5, b=0.045, c=0.003):
 
 ```
-FMEP @ S_p̄=22, P_max=85 = 0.5 + 0.1 · 85 + 0.003 · 484 = 10.95 bar
+FMEP @ S_p̄=14.17 = 0.5 + 0.045 · 14.17 + 0.003 · 200.8
+                  = 0.5 + 0.638 + 0.602
+                  = 1.74 bar
 ```
 
-That's larger than measured IMEP, which is physically nonsense. So either:
-(a) the Helios code multiplies `fmep_b` by 0.01 internally (units mismatch
-between config and formula), or (b) `P_max` is fed in some other unit (MPa
-making the formula consistent: `0.1 · 8.5 + ... = 0.85 bar`), or (c) the
-implementation is buggy. **This must be resolved before any retune (finding
-#11).**
+```
+FMEP @ S_p̄=18.42 = 0.5 + 0.045 · 18.42 + 0.003 · 339.3
+                  = 0.5 + 0.829 + 1.018
+                  = 2.35 bar
+```
+
+Using Helios defaults (a=0.5, b=0.1, c=0.003):
+
+```
+FMEP @ S_p̄=14.17 = 0.5 + 0.1 · 14.17 + 0.003 · 200.8
+                  = 0.5 + 1.417 + 0.602
+                  = 2.52 bar
+```
+
+```
+FMEP @ S_p̄=18.42 = 0.5 + 0.1 · 18.42 + 0.003 · 339.3
+                  = 0.5 + 1.842 + 1.018
+                  = 3.36 bar
+```
+
+The ~0.8-1.0 bar gap between Helios and Heywood-typical is what finding 0002
+quantifies against the CBR600 dyno.
 
 ## Known disagreements
 
-- **`fmep_b = 0.1` in PARITY_FLAGS.toml vs Heywood 0.012-0.015** — Suspected
-  unit-system mismatch; see physics_synthesis.md and Heywood Ch 13 file.
-  Finding #11 will resolve.
-- **Linear S_p̄ term:** Chen-Flynn 1965 includes it (coefficient C); modern
-  practice (Heywood Ch 13) drops it. Both give acceptable fits; difference
-  is < 5 % FMEP at typical operating points.
-- **High-RPM extrapolation:** Chen-Flynn was calibrated 1500-3000 RPM (S_p̄ ≈
-  4-12 m/s). CBR600 operates at S_p̄ ≈ 22-26 m/s — *3-4× outside Chen-Flynn's
-  calibration range.* Sandoval-Heywood 2003 extends to S_p̄ = 18 m/s (still
-  below CBR600). Beyond ~20 m/s the FMEP-vs-S_p̄² fit is *extrapolated, not
-  validated.* This is a known limitation; finding #11 should flag.
+- **`fmep_b = 0.1` vs Heywood Tab 13.3 0.04-0.05** — Resolved as a real
+  (not units) disagreement by finding 0002. The implementation form is
+  `fmep_b · S_p̄` with consistent bar / (m/s) units; the value is
+  empirically elevated, plausibly to compensate for other model gaps.
+- **Reduced vs full Chen-Flynn form:** Original 1965 + Heywood Tab 13.6
+  include a `B · P_max` term. Helios uses the *reduced* (peak-pressure-free)
+  form with the load-dependent friction absorbed into the linear `S_p̄`
+  coefficient. Both fits are within ~5 % at full load per Heywood §13.4.4.
+- **High-RPM extrapolation:** Chen-Flynn was calibrated 1500-3000 RPM (S_p̄
+  ≈ 4-12 m/s). CBR600 at 10000-13000 RPM operates at S_p̄ ≈ 14-18 m/s — just
+  beyond the original calibration band but well within Sandoval-Heywood 2003
+  extension (S_p̄ up to 18 m/s).
 - **Diesel vs SI:** Original Chen-Flynn coefficients are for a diesel. SI
-  engines have less peak-pressure-driven friction (b is smaller). Don't
-  copy the 1965 paper's coefficients verbatim for SI.
+  engines have less peak-pressure-driven friction. Don't copy the 1965
+  paper's coefficients verbatim for SI.
 
 ## Solver implementation notes
 
-- Verify in `crates/engine-sim/src/cylinder/friction.rs` or similar — the
-  coefficient names in the SDM26 config may be `fmep_a`/`fmep_b`/`fmep_c`/
-  `fmep_d` (with optional linear term), or some subset. The PARITY_FLAGS.toml
-  lists `fmep_a`/`fmep_b`/`fmep_c` — implying the linear S_p̄ term is dropped
-  and `fmep_c` is the *squared* coefficient. Verify this is the case.
-- The race-calibration retune does NOT touch FMEP coefficients (per
-  physics_synthesis.md). So the current FMEP value is whatever Helios
-  produces at the PARITY_FLAGS defaults; finding #11 will validate.
+- Implementation: `crates/engine-sim/src/model/sdm26.rs:145-148` (config
+  fields) and `sdm26.rs:884-885` (FMEP computation per cycle).
+- Fields exposed in SDM26Config: `fmep_a`, `fmep_b`, `fmep_c`. No
+  P_max-dependent term.
+- As of finding 0002, `apply_override` supports `fmep_a`, `fmep_b`,
+  `fmep_c` for sweep studies.
 
 ## Cross-references
 
