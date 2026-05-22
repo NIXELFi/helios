@@ -1,0 +1,42 @@
+# Finding 0002 — fmep-b-vs-heywood-typical (SDM26 baseline)
+#
+# Sweep the Chen-Flynn linear-piston-speed coefficient `fmep_b` over the
+# Heywood-typical → current-default range and score predicted brake_power_kW
+# at 10000 RPM against the CBR600 FSAE-restricted dyno band.
+#
+# Form (engine-sim, sdm26.rs:884):
+#   fmep_bar = fmep_a + fmep_b * sp + fmep_c * sp^2, sp = 2 * stroke * N/60.
+#
+# Range covers the discrete points (0.04, 0.05, 0.06, 0.075, 0.1) called out
+# in the orchestrator brief — n_trials=5 with LHS jitters each point inside
+# its 1/5 stratum, which is sufficient to resolve the linear slope of
+# brake_power vs fmep_b. The CBR600 dyno band at 10000 RPM is 41-52 kW (lower
+# bound 41.0 kW per FSAE published team aggregate; lower-end probe range
+# 38-43 kW per orchestrator brief, capturing well-tuned-but-non-peak engines).
+
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [10000.0]
+cycles = 25
+recorded = true
+seed = 2000
+junction = "characteristic"
+
+[environment]
+target_triple = "x86_64-pc-windows-gnu"
+rustc_version = "rustc 1.95.0 (59807616e 2026-04-14)"
+rayon_threads = 1
+libm_source = "system"
+
+[sweep]
+sampler = "lhs"
+n_trials = 5
+parameters = [
+    { name = "fmep_b", min = 0.04, max = 0.10 },
+]
+
+[[acceptance]]
+metric = "brake_power_kW"
+target = 41.0
+tolerance = "±10%"
+citation = "physics_findings/references/dyno/cbr600rr-fsae-restricted.csv row rpm=10000 (FSAE published team aggregate, lower bound of 41-52 kW published range)"
