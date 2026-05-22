@@ -12,6 +12,10 @@ import type {
   JobProgressPayload,
   LoadedConfig,
   NavId,
+  OptimizationDoneSummary,
+  OptimizationParams,
+  OptimizationStudy,
+  OptimizationTrial,
   SingleRpmParams,
   SingleRpmStudy,
   Study,
@@ -21,7 +25,7 @@ import type {
   SweepStudy,
 } from "./types";
 
-interface State {
+export interface State {
   loadedConfig: LoadedConfig | null;
   studies: Record<string, Study>;
   activeStudyId: string | null;
@@ -29,7 +33,7 @@ interface State {
   hydrated: boolean;
 }
 
-const initialState: State = {
+export const initialState: State = {
   loadedConfig: null,
   studies: {},
   activeStudyId: null,
@@ -37,7 +41,7 @@ const initialState: State = {
   hydrated: false,
 };
 
-type Action =
+export type Action =
   | { type: "setLoadedConfig"; cfg: LoadedConfig | null }
   | { type: "setActiveScreen"; screen: NavId }
   | { type: "setActiveStudy"; id: string | null }
@@ -49,9 +53,34 @@ type Action =
   | { type: "sweepRpmDone"; id: string; point: Omit<SweepPoint, "cycles" | "captureDir">; captureDir?: string }
   | { type: "setSweepCompare"; id: string; compareWithStudyId?: string }
   | { type: "deleteStudy"; id: string }
-  | { type: "rehydrate"; studies: Study[]; lastConfigPath: string | null };
+  | { type: "rehydrate"; studies: Study[]; lastConfigPath: string | null }
+  // Optimization (Phase 5):
+  | {
+      type: "optimizationTrialStarted";
+      id: string;
+      trialIdx: number;
+      parameterValues: Record<string, number>;
+    }
+  | {
+      type: "optimizationTrialDone";
+      id: string;
+      trialIdx: number;
+      objectiveValue: number;
+      sweepPoints: Omit<SweepPoint, "cycles" | "captureDir">[];
+      wallTimeS: number;
+    }
+  | {
+      type: "optimizationFinished";
+      id: string;
+      bestTrialIdx: number | null;
+      bestObjectiveValue: number | null;
+      status: StudyStatus;
+      finishedAt: number;
+      summary?: OptimizationDoneSummary;
+      error?: string;
+    };
 
-function reducer(s: State, a: Action): State {
+export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "setLoadedConfig":
       return { ...s, loadedConfig: a.cfg };
@@ -157,6 +186,68 @@ function reducer(s: State, a: Action): State {
         activeStudyId: s.activeStudyId === a.id ? null : s.activeStudyId,
       };
     }
+    case "optimizationTrialStarted": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "optimization") return s;
+      const trials = existing.trials.slice();
+      const prior = trials[a.trialIdx];
+      trials[a.trialIdx] = {
+        trialIdx: a.trialIdx,
+        parameterValues: a.parameterValues,
+        status: "running",
+        objectiveValue: prior?.objectiveValue ?? null,
+        sweepPoints: prior?.sweepPoints ?? null,
+        wallTimeS: prior?.wallTimeS ?? null,
+      };
+      return {
+        ...s,
+        studies: { ...s.studies, [a.id]: { ...existing, trials } },
+      };
+    }
+    case "optimizationTrialDone": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "optimization") return s;
+      const trials = existing.trials.map((t) =>
+        t.trialIdx === a.trialIdx
+          ? {
+              ...t,
+              status: "done" as const,
+              objectiveValue: a.objectiveValue,
+              // Materialize SweepPoint entries with empty cycle arrays —
+              // optimization trials don't stream per-cycle data; we have
+              // the converged-cycle `lastCycle` from the backend.
+              sweepPoints: a.sweepPoints.map((p) => ({
+                ...p,
+                cycles: [],
+              })),
+              wallTimeS: a.wallTimeS,
+            }
+          : t,
+      );
+      return {
+        ...s,
+        studies: { ...s.studies, [a.id]: { ...existing, trials } },
+      };
+    }
+    case "optimizationFinished": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "optimization") return s;
+      return {
+        ...s,
+        studies: {
+          ...s.studies,
+          [a.id]: {
+            ...existing,
+            status: a.status,
+            bestTrialIdx: a.bestTrialIdx,
+            bestObjectiveValue: a.bestObjectiveValue,
+            finishedAt: a.finishedAt,
+            summary: a.summary ?? existing.summary,
+            error: a.error ?? existing.error,
+          },
+        },
+      };
+    }
     case "rehydrate":
       return {
         ...s,
@@ -175,6 +266,7 @@ export interface CfdContextValue {
   setActiveStudy: (id: string | null) => void;
   startSingleRpm: (configPath: string, params: SingleRpmParams) => Promise<string>;
   startSweep: (configPath: string, params: SweepParams) => Promise<string>;
+  startOptimization: (configPath: string, params: OptimizationParams) => Promise<string>;
   cancelStudy: (id: string) => Promise<void>;
   deleteStudy: (id: string) => void;
   setSweepCompare: (id: string, compareWithStudyId?: string) => void;
@@ -219,6 +311,24 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
           case "sweep-rpm-done":
             dispatch({ type: "sweepRpmDone", id: p.jobId, point: payload.point, captureDir: payload.captureDir });
             return;
+          case "optimization-trial-started":
+            dispatch({
+              type: "optimizationTrialStarted",
+              id: p.jobId,
+              trialIdx: payload.trialIdx,
+              parameterValues: payload.parameterValues,
+            });
+            return;
+          case "optimization-trial-done":
+            dispatch({
+              type: "optimizationTrialDone",
+              id: p.jobId,
+              trialIdx: payload.trialIdx,
+              objectiveValue: payload.objectiveValue,
+              sweepPoints: payload.sweepPoints,
+              wallTimeS: payload.wallTimeS,
+            });
+            return;
         }
         return;
       }
@@ -237,7 +347,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
               },
             } as Partial<SingleRpmStudy>,
           });
-        } else {
+        } else if (p.payload.kind === "sweep") {
           dispatch({
             type: "updateStudy", id: p.jobId,
             patch: {
@@ -249,6 +359,26 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
                 totalWallTimeS: p.payload.totalWallTimeS,
               },
             } as Partial<SweepStudy>,
+          });
+        } else {
+          // optimization
+          const summary: OptimizationDoneSummary = {
+            nTrialsRequested: p.payload.nTrialsRequested,
+            nTrialsRun: p.payload.nTrialsRun,
+            bestTrialIdx: p.payload.bestTrialIdx,
+            bestObjectiveValue: p.payload.bestObjectiveValue,
+            parameterPaths: p.payload.parameterPaths,
+            objectiveDirection: p.payload.objectiveDirection,
+            totalWallTimeS: p.payload.totalWallTimeS,
+          };
+          dispatch({
+            type: "optimizationFinished",
+            id: p.jobId,
+            bestTrialIdx: p.payload.bestTrialIdx,
+            bestObjectiveValue: p.payload.bestObjectiveValue,
+            status: "done",
+            finishedAt: Date.now(),
+            summary,
           });
         }
         return;
@@ -365,6 +495,36 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
             startedAt: Date.now(), params, points: [],
           },
         });
+        dispatch({ type: "setActiveScreen", screen: "results" });
+        return jobId;
+      },
+      startOptimization: async (configPath, params) => {
+        const { jobId } = await bridge.startJob({ kind: "optimization", configPath, params });
+        const trials: OptimizationTrial[] = Array.from(
+          { length: params.nTrials },
+          (_, i): OptimizationTrial => ({
+            trialIdx: i,
+            parameterValues: {},
+            status: "pending",
+            objectiveValue: null,
+            sweepPoints: null,
+            wallTimeS: null,
+          }),
+        );
+        const study: OptimizationStudy = {
+          id: jobId,
+          kind: "optimization",
+          status: "running",
+          configPath,
+          startedAt: Date.now(),
+          params,
+          trials,
+          bestTrialIdx: null,
+          bestObjectiveValue: null,
+          parameterPaths: params.tunables.map((t) => t.path),
+          objectiveDirection: params.objective.direction,
+        };
+        dispatch({ type: "addStudy", study });
         dispatch({ type: "setActiveScreen", screen: "results" });
         return jobId;
       },

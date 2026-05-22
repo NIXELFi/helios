@@ -139,19 +139,26 @@ function StudyRow({
   onDelete: () => void;
   onView: () => void;
 }) {
-  const isSingle = study.kind === "single-rpm";
-  const kindLabel = isSingle ? "Single-RPM" : "Sweep";
+  let kindLabel: string;
   let paramsText: string;
   let progressText: string;
   if (study.kind === "single-rpm") {
+    kindLabel = "Single-RPM";
     const p = study.params;
     paramsText = `${p.rpm.toFixed(0)} rpm · ${p.junctionKind} · ${p.nCyclesMax}c`;
     progressText = `${study.cycles.length} / ${p.nCyclesMax}`;
-  } else {
+  } else if (study.kind === "sweep") {
+    kindLabel = "Sweep";
     const p = study.params;
     const rpms = p.rpmList.length;
     paramsText = `${rpms} rpm · ${p.junctionKind} · ${p.nCyclesMax}c/rpm`;
     progressText = `${study.points.length} / ${rpms}`;
+  } else {
+    kindLabel = "Optimization";
+    const p = study.params;
+    paramsText = `${p.tunables.length} params · ${p.nTrials} trials · ${p.sampler}`;
+    const done = study.trials.filter((t) => t.status === "done").length;
+    progressText = `${done} / ${p.nTrials}`;
   }
   return (
     <tr className={"border-t border-[#16171B] " + (isActive ? "bg-[#16171B] text-[#D8DCE2]" : "text-[#9097A0] hover:bg-[#16171B]/50")}>
