@@ -1,0 +1,17 @@
+{
+    "id":  2,
+    "slug":  "fmep-b-vs-heywood-typical",
+    "worktree_path":  "worktrees/agent-0002-fmep-b-vs-heywood-typical",
+    "spawned_by":  "manual",
+    "spawned_at":  "2026-05-22T19:32:54Z",
+    "files":  [
+                  "crates/cfd-core/src/params.rs",
+                  "physics_findings/references/literature/heywood-friction-ch13.md",
+                  "physics_findings/references/literature/chen-flynn-1965.md",
+                  "physics_findings/0002-fmep-b-vs-heywood-typical/finding.md",
+                  "physics_findings/0002-fmep-b-vs-heywood-typical/study.toml",
+                  "physics_findings/0002-fmep-b-vs-heywood-typical/study_sdm25.toml",
+                  "physics_findings/0002-fmep-b-vs-heywood-typical/results_sdm26.ndjson",
+                  "physics_findings/0002-fmep-b-vs-heywood-typical/results_sdm25.ndjson"
+              ]
+}
