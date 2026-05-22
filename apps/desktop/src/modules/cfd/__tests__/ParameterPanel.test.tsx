@@ -41,7 +41,7 @@ describe("ParameterPanel", () => {
     render(<ParameterPanel schema={schema} bounds={[]} onChange={onChange} />);
     fireEvent.click(screen.getByLabelText("Enable restrictor_cd as tunable"));
     expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0] as ParameterBoundsUI[];
+    const next = onChange.mock.calls[0]?.[0] as ParameterBoundsUI[];
     const row = next.find((b) => b.path === "restrictor_cd");
     expect(row).toBeDefined();
     expect(row?.enabled).toBe(true);

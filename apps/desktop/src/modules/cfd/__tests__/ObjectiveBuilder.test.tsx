@@ -25,7 +25,7 @@ describe("ObjectiveBuilder", () => {
     const aggSelect = screen.getByDisplayValue("Max across RPM list");
     fireEvent.change(aggSelect, { target: { value: "at-rpm" } });
     expect(onChange).toHaveBeenCalled();
-    const next = onChange.mock.calls[0][0] as ObjectiveSpec;
+    const next = onChange.mock.calls[0]?.[0] as ObjectiveSpec;
     expect(next.aggregator.kind).toBe("at-rpm");
     if (next.aggregator.kind === "at-rpm") {
       expect(next.aggregator.rpmInt).toBe(6000);
@@ -56,7 +56,7 @@ describe("ObjectiveBuilder", () => {
     );
     fireEvent.click(screen.getByLabelText(/minimize/i));
     expect(onChange).toHaveBeenCalled();
-    const next = onChange.mock.calls[0][0] as ObjectiveSpec;
+    const next = onChange.mock.calls[0]?.[0] as ObjectiveSpec;
     expect(next.direction).toBe("minimize");
   });
 });

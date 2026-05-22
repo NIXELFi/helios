@@ -2,15 +2,17 @@ import { useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { OptimizationParamsModal } from "../components/optimization/OptimizationParamsModal";
 import { basename } from "../lib/cfdPath";
 import { parseRpmList } from "../lib/rpmList";
 import type { JunctionKind, SingleRpmParams, Study, SweepParams } from "../state/types";
 
 export function StudiesScreen() {
-  const { state, startSingleRpm, startSweep, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
+  const { state, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
+  const [optimizationOpen, setOptimizationOpen] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
   const studies = Object.values(state.studies).sort((a, b) => b.startedAt - a.startedAt);
@@ -27,6 +29,10 @@ export function StudiesScreen() {
   function pickSweep() {
     setPickerOpen(false);
     setSweepOpen(true);
+  }
+  function pickOptimization() {
+    setPickerOpen(false);
+    setOptimizationOpen(true);
   }
 
   return (
@@ -93,7 +99,26 @@ export function StudiesScreen() {
         onClose={() => setPickerOpen(false)}
         onPickSingleRpm={pickSingleRpm}
         onPickSweep={pickSweep}
+        onPickOptimization={pickOptimization}
       />
+
+      {state.loadedConfig && (
+        <OptimizationParamsModal
+          configPath={state.loadedConfig.path}
+          open={optimizationOpen}
+          onClose={() => setOptimizationOpen(false)}
+          onSubmit={async (params) => {
+            if (!state.loadedConfig) return;
+            try {
+              await startOptimization(state.loadedConfig.path, params);
+              setOptimizationOpen(false);
+            } catch (e) {
+              setStartError(e instanceof Error ? e.message : String(e));
+              setOptimizationOpen(false);
+            }
+          }}
+        />
+      )}
 
       <SingleRpmParamsModal
         open={paramsOpen}
@@ -200,12 +225,13 @@ function StatusBadge({ status }: { status: Study["status"] }) {
 }
 
 function KindPicker({
-  open, onClose, onPickSingleRpm, onPickSweep,
+  open, onClose, onPickSingleRpm, onPickSweep, onPickOptimization,
 }: {
   open: boolean;
   onClose: () => void;
   onPickSingleRpm: () => void;
   onPickSweep: () => void;
+  onPickOptimization: () => void;
 }) {
   if (!open) return null;
   return (
@@ -231,11 +257,10 @@ function KindPicker({
               <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">RPM sweep</div>
               <div className="mt-0.5 text-[10px] text-[#5A5F66]">Sweep RPM across a list or range; per-RPM convergence stopping.</div>
             </button>
-            <button type="button" disabled
-              title="Coming in Phase 5"
-              className="cursor-not-allowed rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-3 text-left opacity-50">
-              <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">Optimization <span className="ml-1 normal-case text-[#5A5F66]">(Phase 5)</span></div>
-              <div className="mt-0.5 text-[10px] text-[#5A5F66]">Search parameter space to optimize an objective.</div>
+            <button type="button" onClick={onPickOptimization}
+              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-3 text-left transition hover:border-[#FFC627]">
+              <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">Optimization</div>
+              <div className="mt-0.5 text-[10px] text-[#5A5F66]">Search parameter space (LHS / random) to optimize an objective metric across an RPM list.</div>
             </button>
           </div>
         </div>
