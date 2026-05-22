@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-import { CfdProvider, useCfd } from "../state/CfdContext";
+import { CfdProvider, useCfd, reducer, initialState } from "../state/CfdContext";
+import type { OptimizationParams, OptimizationStudy } from "../state/types";
 import { makeFakeBridge } from "./fakes/tauri";
 import { makeCycleStats, makeParams } from "./fakes/study";
 
@@ -155,6 +156,120 @@ describe("CfdContext state machine", () => {
     expect(s?.error).toContain("non-finite");
     if (s?.kind === "single-rpm") {
       expect(s.cycles).toHaveLength(2);
+    }
+  });
+});
+
+describe("optimization reducer", () => {
+  const baseParams: OptimizationParams = {
+    tunables: [
+      { path: "restrictor_cd", min: 0.7, max: 0.99, step: null },
+      { path: "plenum_volume", min: 0.0005, max: 0.005, step: null },
+    ],
+    objective: {
+      metric: "imep_bar",
+      aggregator: { kind: "max" },
+      rpmList: [6000, 8000, 10000],
+      direction: "maximize",
+    },
+    nTrials: 2,
+    sampler: "lhs",
+    seed: 42,
+    nCyclesMax: 4,
+    junctionKind: "characteristic",
+    convergenceTolImep: 5e-3,
+    convergenceMinCycles: 3,
+  };
+
+  const baseStudy = (overrides: Partial<OptimizationStudy> = {}): OptimizationStudy => ({
+    id: "opt-1",
+    kind: "optimization",
+    status: "running",
+    configPath: "/x.json",
+    startedAt: 1_700_000_000_000,
+    params: baseParams,
+    trials: [
+      { trialIdx: 0, parameterValues: {}, status: "pending", objectiveValue: null, sweepPoints: null, wallTimeS: null },
+      { trialIdx: 1, parameterValues: {}, status: "pending", objectiveValue: null, sweepPoints: null, wallTimeS: null },
+    ],
+    bestTrialIdx: null,
+    bestObjectiveValue: null,
+    parameterPaths: ["restrictor_cd", "plenum_volume"],
+    objectiveDirection: "maximize",
+    ...overrides,
+  });
+
+  it("addStudy puts an optimization study in the registry and activates it", () => {
+    const s = reducer(initialState, { type: "addStudy", study: baseStudy() });
+    expect(s.studies["opt-1"]).toBeDefined();
+    expect(s.studies["opt-1"]?.kind).toBe("optimization");
+    expect(s.activeStudyId).toBe("opt-1");
+  });
+
+  it("optimizationTrialStarted transitions pending -> running with parameterValues", () => {
+    const s0 = reducer(initialState, { type: "addStudy", study: baseStudy() });
+    const s1 = reducer(s0, {
+      type: "optimizationTrialStarted",
+      id: "opt-1",
+      trialIdx: 1,
+      parameterValues: { restrictor_cd: 0.88, plenum_volume: 0.0015 },
+    });
+    const study = s1.studies["opt-1"];
+    expect(study?.kind).toBe("optimization");
+    if (study?.kind === "optimization") {
+      expect(study.trials[1]?.status).toBe("running");
+      expect(study.trials[1]?.parameterValues.restrictor_cd).toBe(0.88);
+      // Other trial untouched.
+      expect(study.trials[0]?.status).toBe("pending");
+    }
+  });
+
+  it("optimizationTrialDone populates objective and sweep points", () => {
+    const s0 = reducer(initialState, { type: "addStudy", study: baseStudy() });
+    const s1 = reducer(s0, {
+      type: "optimizationTrialDone",
+      id: "opt-1",
+      trialIdx: 0,
+      objectiveValue: 9.4,
+      sweepPoints: [
+        {
+          rpm: 6000,
+          convergedCycle: 3,
+          nCyclesRun: 4,
+          lastCycle: makeCycleStats({ imepBar: 9.4 }),
+          nonconservationMax: 0,
+          wallTimeS: 0.5,
+          stepCount: 1000,
+        },
+      ],
+      wallTimeS: 1.23,
+    });
+    const study = s1.studies["opt-1"];
+    expect(study?.kind).toBe("optimization");
+    if (study?.kind === "optimization") {
+      expect(study.trials[0]?.status).toBe("done");
+      expect(study.trials[0]?.objectiveValue).toBe(9.4);
+      expect(study.trials[0]?.sweepPoints).toHaveLength(1);
+      expect(study.trials[0]?.sweepPoints?.[0]?.cycles).toEqual([]);
+    }
+  });
+
+  it("optimizationFinished sets bestTrialIdx, status, and finishedAt", () => {
+    const s0 = reducer(initialState, { type: "addStudy", study: baseStudy() });
+    const s1 = reducer(s0, {
+      type: "optimizationFinished",
+      id: "opt-1",
+      bestTrialIdx: 1,
+      bestObjectiveValue: 9.7,
+      status: "done",
+      finishedAt: 1_700_000_060_000,
+    });
+    const study = s1.studies["opt-1"];
+    expect(study?.status).toBe("done");
+    if (study?.kind === "optimization") {
+      expect(study.bestTrialIdx).toBe(1);
+      expect(study.bestObjectiveValue).toBe(9.7);
+      expect(study.finishedAt).toBe(1_700_000_060_000);
     }
   });
 });
