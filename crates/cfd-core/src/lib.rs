@@ -8,6 +8,7 @@
 pub mod capture;
 pub mod dto;
 pub mod load;
+pub mod optimization;
 pub mod params;
 pub mod runner;
 pub mod save;
