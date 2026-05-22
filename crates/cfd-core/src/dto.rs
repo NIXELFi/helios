@@ -105,6 +105,84 @@ pub struct SweepParams {
     pub capture_pipe_profiles: bool,
 }
 
+// ---------------- Optimization parameter / objective DTOs (Phase 5) ----------------
+
+/// How to reduce a per-RPM metric vector to a single scalar.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ObjectiveAggregator {
+    /// Maximum value of `metric` across the RPM list.
+    Max,
+    /// Minimum value of `metric` across the RPM list.
+    Min,
+    /// Arithmetic mean across the RPM list.
+    Mean,
+    /// Trapezoidal area-under-curve (metric vs. rpm).
+    Auc,
+    /// Value at a specific RPM (must exist in the RPM list).
+    AtRpm {
+        #[serde(rename = "rpmInt")]
+        rpm_int: u32,
+    },
+    /// Sum across the RPM list.
+    Sum,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ObjectiveDirection {
+    Maximize,
+    Minimize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveSpec {
+    /// One of the CycleStats field names in snake_case
+    /// (e.g. "imep_bar", "ve_atm", "indicated_power_k_w").
+    pub metric: String,
+    pub aggregator: ObjectiveAggregator,
+    pub rpm_list: Vec<f64>,
+    pub direction: ObjectiveDirection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParameterBounds {
+    /// Path into SDM26Config, e.g. "p_ambient", "restrictor_throat_diameter",
+    /// "runner_length", "runner_lengths[0]". Names are the flat SDM26Config
+    /// field names (see `crates/engine-sim/src/model/sdm26.rs`).
+    pub path: String,
+    pub min: f64,
+    pub max: f64,
+    /// Step size for snap-to-grid (None = continuous).
+    #[serde(default)]
+    pub step: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SamplerKind {
+    Lhs,
+    Random,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizationParams {
+    pub tunables: Vec<ParameterBounds>,
+    pub objective: ObjectiveSpec,
+    pub n_trials: u32,
+    pub sampler: SamplerKind,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    pub n_cycles_max: u32,
+    pub junction_kind: JunctionKindDto,
+    #[serde(rename = "convergenceTolImep")]
+    pub convergence_tol_imep: f64,
+    pub convergence_min_cycles: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum StartJobRequest {
@@ -118,7 +196,11 @@ pub enum StartJobRequest {
         config_path: String,
         params: SweepParams,
     },
-    // Optimization { ... }    // Phase 5
+    Optimization {
+        #[serde(rename = "configPath")]
+        config_path: String,
+        params: OptimizationParams,
+    },
 }
 
 impl StartJobRequest {
@@ -126,12 +208,14 @@ impl StartJobRequest {
         match self {
             StartJobRequest::SingleRpm { .. } => StudyKind::SingleRpm,
             StartJobRequest::Sweep { .. } => StudyKind::Sweep,
+            StartJobRequest::Optimization { .. } => StudyKind::Optimization,
         }
     }
     pub fn config_path(&self) -> &str {
         match self {
             StartJobRequest::SingleRpm { config_path, .. } => config_path,
             StartJobRequest::Sweep { config_path, .. } => config_path,
+            StartJobRequest::Optimization { config_path, .. } => config_path,
         }
     }
 }
@@ -149,6 +233,7 @@ pub struct StartJobResponse {
 pub enum StudyKind {
     SingleRpm,
     Sweep,
+    Optimization,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
