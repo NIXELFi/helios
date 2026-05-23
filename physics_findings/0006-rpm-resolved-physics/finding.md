@@ -378,6 +378,71 @@ proportion to its geometry.
 
 *(none yet)*
 
+## Post-finding correction: dyno-convention re-framing
+
+**Critical follow-up after user clarification + agent verification**: the
+`cbr600rr-fsae-restricted.csv` reports **wheel power** (chassis dyno output,
+not back-corrected to crank), not brake/crank power as the corpus README
+suggested. The simulator's `brake_power_kW` is at the **crankshaft**.
+
+Therefore the apples-to-apples comparison is `sim_brake × drivetrain_
+efficiency` (= sim_wheel, with `drivetrain_efficiency = 0.85` from the
+`sdm26.json` config) versus the FSAE CSV directly. **All §3-§6 numbers
+above are framed in wheel power** (regenerated via `plot_results.py`).
+
+Under wheel-power framing, the cumulative-fix results land much closer
+to reality:
+
+| Engine | Variant     | brake-vs-csv RMSE (old) | wheel-vs-csv RMSE | wheel-vs-csv bias |
+|--------|-------------|------------------------:|------------------:|------------------:|
+| SDM26  | baseline    | 15.00                   | **10.25**         | **+4.45**         |
+| SDM26  | v7 all 5    | 13.22                   | **10.04**         | **+1.94**         |
+| SDM25  | baseline    | 12.67                   | 8.45              | +2.88             |
+| SDM25  | v7 all 5    | 11.49                   | **9.05**          | **+0.71**         |
+
+At 10 000 RPM the SDM26 v7 wheel-power gap is **0.00 kW** — exact match.
+The bigger story isn't that the fixes closed +8.75 kW of bias; it's that
+they shifted the curve into the right shape, and the dyno comparison
+was previously biased by ~+6 kW pure drivetrain-loss offset.
+
+### Implied drivetrain efficiency as a diagnostic tool (`fig08`)
+
+Per-RPM, compute `η_implied(RPM) = dyno_wheel(RPM) / sim_brake(RPM)`.
+The SHAPE of this curve diagnoses where the simulator is right and where
+it's wrong:
+
+- **η ≈ 0.80-0.90** = physically plausible drivetrain (Cameron *Sport
+  Bike Performance Handbook*: ~10% gear + ~5% chain ≈ 15% loss).
+- **η << 0.80** = sim over-predicts BP; gap is real physics, not
+  drivetrain.
+- **η > 1.0** = sim under-predicts BP; unphysical (drivetrain can't
+  amplify) → strong evidence of missing power somewhere in the sim.
+
+For SDM26 v7 (ALL 5 fixes) the implied η curve is:
+
+| RPM   | η_implied | Diagnosis                                      |
+|-------|----------:|------------------------------------------------|
+|  6000 | **0.52**  | Sim over by ~64% → low-RPM port/wall loss gap  |
+|  8000 | 0.61      | Sim over by ~40% → same gap                    |
+|  9000 | 0.73      | In-band lower edge                             |
+| 10000 | **0.85**  | **EXACT match to literature** — model is right |
+| 11000 | 0.88      | In-band                                        |
+| 12000 | 1.01      | Boundary; small high-RPM deficit forming       |
+| 13000 | **1.28**  | **Unphysical** → -10 kW real physics deficit   |
+
+**Practical SDM27 design implication**: trust the simulator most at
+10-11 kRPM (the FSAE peak-power range, where implied η lands at the
+literature value). Treat low-RPM and high-RPM predictions as
+direction-correct but quantitatively suspect; the residual physics
+gaps documented in the Followup queue are what the implied-η deviations
+are diagnosing.
+
+The implied-η curve is itself a **production tool**: a designer iterating
+on SDM27 geometry can compute it against the published wheel-dyno data
+of their target benchmark engine; the deviations point at where the
+simulator's predictions deserve a guardband versus where they can be
+trusted directly.
+
 ## Followup queue
 
 - **0007 — Restrictor `loss_coef` half-pressure floor**: the
