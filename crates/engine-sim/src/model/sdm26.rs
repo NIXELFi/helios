@@ -6,7 +6,38 @@ use std::f64::consts::PI;
 use crate::bcs::junction_characteristic::{CharJunctionLeg, CharacteristicJunction, LossMode as CharLossMode};
 use crate::bcs::junction_cv::{JunctionCV, JunctionCVLeg, PipeEnd};
 use crate::cylinder::valve::LiftProfile;
-use crate::bcs::restrictor::fill_choked_restrictor_left;
+use crate::bcs::restrictor::{fill_choked_restrictor_left, fill_choked_restrictor_left_full};
+
+/// Idelchik diagram 5-2 piecewise approximation: conical-diffuser loss
+/// coefficient φ(α) as a function of half-angle α (deg) for a diffuser
+/// discharging into a much larger downstream area. The total loss
+/// referenced to upstream throat dynamic head is
+/// `K = φ(α) × (1 − A_throat/A_plenum)^2`. Pure geometry — no
+/// per-engine tuning. Used by `SDM26Engine::step` when
+/// `restrictor_loss_from_diffuser_geometry = true`.
+#[inline]
+fn idelchik_diffuser_phi(half_angle_deg: f64) -> f64 {
+    let a = half_angle_deg.max(0.0);
+    // Anchors from Idelchik 3rd ed Diagram 5-2 (interpolated):
+    //   α ≤ 5°:  φ = 0.10 (best-case diffuser)
+    //   α = 10°: φ = 0.27
+    //   α = 15°: φ = 0.50
+    //   α = 20°: φ = 0.80
+    //   α ≥ 30°: φ = 1.00 (≈ sudden expansion)
+    if a <= 5.0 {
+        0.10
+    } else if a <= 10.0 {
+        0.10 + (a - 5.0) / 5.0 * (0.27 - 0.10)
+    } else if a <= 15.0 {
+        0.27 + (a - 10.0) / 5.0 * (0.50 - 0.27)
+    } else if a <= 20.0 {
+        0.50 + (a - 15.0) / 5.0 * (0.80 - 0.50)
+    } else if a <= 30.0 {
+        0.80 + (a - 20.0) / 10.0 * (1.00 - 0.80)
+    } else {
+        1.00
+    }
+}
 use crate::bcs::simple::fill_transmissive_right;
 use crate::bcs::valve::{fill_valve_ghost_characteristic, PipeEndStr, ValveType};
 use crate::cylinder::combustion::WiebeParams;
@@ -89,6 +120,48 @@ pub struct SDM26Config {
     pub plenum_length: f64,
     pub plenum_n_cells: usize,
     pub plenum_wall_t: f64,
+    /// 0006: RPM-dependent spark advance slope (deg/krpm).
+    /// `spark_advance` is the value at `spark_advance_rpm_ref` (default
+    /// 10000); the effective advance is
+    ///   spark_advance + slope × (rpm − ref) / 1000
+    /// Default 0.0 → constant spark_advance, parity preserved.
+    /// Bonatesta-Waters-Shayler (IJER 2010) gives ~1.7 deg/krpm for
+    /// high-RPM SI engines.
+    pub spark_advance_rpm_slope_deg_per_krpm: f64,
+    /// Reference RPM for `spark_advance_rpm_slope_deg_per_krpm`. Default 10000.
+    pub spark_advance_rpm_ref: f64,
+
+    /// 0006: RPM-dependent burn-duration exponent (Bonatesta).
+    /// `combustion_duration` is the value at `duration_rpm_ref`; the
+    /// effective duration is `combustion_duration × (rpm/ref)^exp`.
+    /// Default 0.0 → constant duration, parity preserved.
+    pub duration_rpm_exp: f64,
+    pub duration_rpm_ref: f64,
+
+    /// 0006: optional geometry-derived restrictor diffuser loss.
+    /// When true, the BC's loss_coef is set from the diverging-cone
+    /// half-angle and the throat/plenum area ratio per Idelchik (3rd ed,
+    /// Diagram 5-2):
+    ///   K = φ(half_angle) × (1 − A_throat / A_plenum)^2
+    /// where φ(α): 0.10 (α≤5°), 0.27 (10°), 0.50 (15°), 0.80 (20°),
+    /// 1.0 (≥30°), linearly interpolated. Default `false` preserves the
+    /// legacy `restrictor_loss_coef`-driven behavior.
+    pub restrictor_loss_from_diffuser_geometry: bool,
+    /// Diffuser half-angle (deg) for the geometric loss formula above.
+    /// Read from the JSON `restrictor.diverging_half_angle` (which the
+    /// legacy loader silently ignored). Only used when
+    /// `restrictor_loss_from_diffuser_geometry = true`. Default 6.0
+    /// (SDM26 JSON value).
+    pub restrictor_diverging_half_angle_deg: f64,
+
+    /// 0006: Mach-dependent Cd correction strength for the restrictor.
+    /// Effective Cd = Cd · (1 − k · M_throat^2). Default 0.0 preserves
+    /// parity. NASA TM X-1570 / Cruz-Maya 2006 give k ≈ 0.30-0.40 for
+    /// subsonic venturi flow. Real Cd drops a few % as throat Mach
+    /// approaches 1.0; the simulator's previously-constant Cd over-
+    /// predicts mass flow at high-Mach (high-RPM, near-choke) regimes.
+    pub restrictor_cd_mach_k: f64,
+
     pub intake_junction_loss_coef: f64,
     /// When true, the intake junction uses per-leg Borda-Carnot loss
     /// K_leg = (1 − A_leg/A_max)^2 derived from junction geometry, scaled
@@ -213,6 +286,13 @@ impl Default for SDM26Config {
             collector_wall_t: 700.0,
             plenum_volume: 0.0015, plenum_length: 0.3, plenum_n_cells: 20,
             plenum_wall_t: 320.0,
+            spark_advance_rpm_slope_deg_per_krpm: 0.0,
+            spark_advance_rpm_ref: 10000.0,
+            duration_rpm_exp: 0.0,
+            duration_rpm_ref: 10000.0,
+            restrictor_loss_from_diffuser_geometry: false,
+            restrictor_diverging_half_angle_deg: 6.0,
+            restrictor_cd_mach_k: 0.0,
             intake_junction_loss_coef: 0.0,
             intake_junction_borda_carnot: false,
             exhaust_junction_loss_coef: 0.0,
@@ -568,6 +648,12 @@ impl SDM26Engine {
             q_lhv: cfg.q_lhv, afr_target: cfg.afr_target,
             afr_eta_enabled: cfg.afr_eta_enabled,
             tumble_burn_factor: cfg.tumble_burn_factor,
+            // 0006: RPM-dependent MBT map + Wiebe duration. Defaults
+            // (slope=0, exp=0) keep behavior bit-identical to legacy.
+            spark_advance_rpm_slope_deg_per_krpm: cfg.spark_advance_rpm_slope_deg_per_krpm,
+            spark_advance_rpm_ref: cfg.spark_advance_rpm_ref,
+            duration_rpm_exp: cfg.duration_rpm_exp,
+            duration_rpm_ref: cfg.duration_rpm_ref,
             two_zone_enabled: cfg.two_zone_enabled,
             ..WiebeParams::default()
         };
@@ -664,13 +750,46 @@ impl SDM26Engine {
         let gamma = 1.4_f64;
         let a_t = 0.25 * PI * cfg.restrictor_throat_diameter * cfg.restrictor_throat_diameter;
 
+        // 0006: derive restrictor loss-coef from diffuser geometry when
+        // `restrictor_loss_from_diffuser_geometry = true`. Idelchik (3rd
+        // ed) Diagram 5-2 for a conical diffuser of half-angle α
+        // discharging into a large downstream area gives K relative to
+        // throat dynamic head:
+        //   φ(α) × (1 − A_throat/A_plenum)^2
+        // φ(α) is approximated piecewise-linearly from the diagram.
+        // Default `false` keeps the legacy `restrictor_loss_coef` field
+        // as the source of truth — preserves bit-identical parity.
+        let restrictor_loss_coef = if cfg.restrictor_loss_from_diffuser_geometry {
+            // plenum cross-section area = volume / length
+            let a_plenum = cfg.plenum_volume / cfg.plenum_length.max(1e-6);
+            let area_ratio_sq = if a_plenum > a_t {
+                let ratio = a_t / a_plenum;
+                (1.0 - ratio).powi(2)
+            } else {
+                0.0
+            };
+            let phi = idelchik_diffuser_phi(cfg.restrictor_diverging_half_angle_deg);
+            (phi * area_ratio_sq).max(0.0)
+        } else {
+            cfg.restrictor_loss_coef
+        };
+
         // restrictor at plenum LEFT
         {
             let plenum = &mut self.pipes[self.plenum_idx];
-            fill_choked_restrictor_left(
-                plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,
-                cfg.restrictor_loss_coef,
-            );
+            if cfg.restrictor_cd_mach_k > 0.0 {
+                fill_choked_restrictor_left_full(
+                    plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,
+                    restrictor_loss_coef, cfg.restrictor_cd_mach_k,
+                );
+            } else {
+                // Use the legacy entry point to preserve bit-identical parity
+                // when no Mach-correction is requested.
+                fill_choked_restrictor_left(
+                    plenum, cfg.p_ambient, cfg.t_ambient, a_t, cfg.restrictor_cd,
+                    restrictor_loss_coef,
+                );
+            }
         }
 
         // junction ghosts

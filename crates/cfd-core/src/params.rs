@@ -112,6 +112,13 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_junction_borda_carnot", Scalar, 1, "bool", if cfg.intake_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
         m("exhaust_junction_loss_coef", Scalar, 1, "-", cfg.exhaust_junction_loss_coef, 0.0, 1.0, "Exhaust"),
         m("exhaust_junction_borda_carnot", Scalar, 1, "bool", if cfg.exhaust_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("spark_advance_rpm_slope_deg_per_krpm", Scalar, 1, "deg/krpm", cfg.spark_advance_rpm_slope_deg_per_krpm, 0.0, 3.0, "Combustion"),
+        m("spark_advance_rpm_ref", Scalar, 1, "RPM", cfg.spark_advance_rpm_ref, 4000.0, 13000.0, "Combustion"),
+        m("duration_rpm_exp", Scalar, 1, "-", cfg.duration_rpm_exp, 0.0, 0.8, "Combustion"),
+        m("duration_rpm_ref", Scalar, 1, "RPM", cfg.duration_rpm_ref, 4000.0, 13000.0, "Combustion"),
+        m("restrictor_loss_from_diffuser_geometry", Scalar, 1, "bool", if cfg.restrictor_loss_from_diffuser_geometry { 1.0 } else { 0.0 }, 0.0, 1.0, "Restrictor"),
+        m("restrictor_diverging_half_angle_deg", Scalar, 1, "deg", cfg.restrictor_diverging_half_angle_deg, 3.0, 30.0, "Restrictor"),
+        m("restrictor_cd_mach_k", Scalar, 1, "-", cfg.restrictor_cd_mach_k, 0.0, 0.6, "Restrictor"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -370,6 +377,13 @@ pub fn apply_override(
         "intake_junction_borda_carnot" => cfg.intake_junction_borda_carnot = value != 0.0,
         "exhaust_junction_loss_coef" => cfg.exhaust_junction_loss_coef = value,
         "exhaust_junction_borda_carnot" => cfg.exhaust_junction_borda_carnot = value != 0.0,
+        "spark_advance_rpm_slope_deg_per_krpm" => cfg.spark_advance_rpm_slope_deg_per_krpm = value,
+        "spark_advance_rpm_ref" => cfg.spark_advance_rpm_ref = value,
+        "duration_rpm_exp" => cfg.duration_rpm_exp = value,
+        "duration_rpm_ref" => cfg.duration_rpm_ref = value,
+        "restrictor_loss_from_diffuser_geometry" => cfg.restrictor_loss_from_diffuser_geometry = value != 0.0,
+        "restrictor_diverging_half_angle_deg" => cfg.restrictor_diverging_half_angle_deg = value,
+        "restrictor_cd_mach_k" => cfg.restrictor_cd_mach_k = value,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,

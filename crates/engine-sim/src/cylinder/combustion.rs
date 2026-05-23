@@ -36,6 +36,42 @@ pub struct WiebeParams {
     /// boost depending on RPM. Defaults to 0.0 (no enhancement, parity
     /// preserved).
     pub tumble_burn_factor: f64,
+    /// 0006: optional RPM-dependent spark advance ramp ("MBT map").
+    ///
+    /// Real spark-ignition engines have MBT shift toward more advance at
+    /// higher RPM because the burn occupies a larger crank-angle fraction
+    /// (constant turbulent flame speed; faster crank means burn finishes
+    /// later relative to TDC at fixed advance). Heywood Ch 9 Fig 9-26
+    /// and Bonatesta-Waters-Shayler (IJER 2010) document Δ(MBT) ≈
+    /// 1.5–2 °/krpm for high-revving SI engines.
+    ///
+    /// Effective spark advance at rpm:
+    ///   spark_advance_at(rpm) = spark_advance_deg
+    ///                         + spark_advance_rpm_slope_deg_per_krpm
+    ///                           × (rpm − spark_advance_rpm_ref) / 1000
+    ///
+    /// Default slope 0.0 → no scaling → bit-identical parity preserved.
+    /// `spark_advance_deg` then represents the advance at the reference
+    /// RPM. Recommended slope from Bonatesta 2010: ~1.7 °/krpm for
+    /// high-RPM motorcycle inline-4s, with reference RPM near the peak-
+    /// power point (~10000 for CBR600).
+    pub spark_advance_rpm_slope_deg_per_krpm: f64,
+    pub spark_advance_rpm_ref: f64,
+
+    /// 0006: optional RPM-dependent Wiebe burn duration.
+    ///
+    /// Bonatesta-Waters-Shayler 2010 / Lindström 2003 / Heywood Ch 9
+    /// give Δθ_burn ∝ N^p with p ≈ 0.3–0.5 for SI engines. Effective
+    /// duration at rpm:
+    ///   duration_at(rpm) = duration_deg × (rpm / duration_rpm_ref) ^
+    ///                      duration_rpm_exp
+    ///
+    /// Default exponent 0.0 → constant duration → parity preserved.
+    /// `duration_deg` then represents the duration at the reference
+    /// RPM. Recommended exponent: 0.4 (Bonatesta middle-of-band).
+    pub duration_rpm_exp: f64,
+    pub duration_rpm_ref: f64,
+
     /// Opt-in two-zone combustion model. When false (default), the
     /// cylinder integrates a single mass-averaged temperature. When
     /// true, the burned and unburned zones are tracked separately
@@ -79,6 +115,10 @@ impl Default for WiebeParams {
             factor_hi: 1.00,
             afr_eta_enabled: false,
             tumble_burn_factor: 0.0,
+            spark_advance_rpm_slope_deg_per_krpm: 0.0,
+            spark_advance_rpm_ref: 10000.0,
+            duration_rpm_exp: 0.0,
+            duration_rpm_ref: 10000.0,
             two_zone_enabled: false,
         }
     }
@@ -93,6 +133,41 @@ impl WiebeParams {
     #[inline]
     pub fn theta_end(&self) -> f64 {
         self.theta_start() + self.duration_deg
+    }
+
+    /// RPM-aware spark advance (deg BTDC). Falls back to the
+    /// RPM-invariant `spark_advance_deg` when the slope is zero.
+    #[inline]
+    pub fn spark_advance_at(&self, rpm: f64) -> f64 {
+        if self.spark_advance_rpm_slope_deg_per_krpm == 0.0 {
+            return self.spark_advance_deg;
+        }
+        let delta_krpm = (rpm - self.spark_advance_rpm_ref) / 1000.0;
+        self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
+    }
+
+    /// RPM-aware Wiebe burn duration (deg). Falls back to the
+    /// RPM-invariant `duration_deg` when the exponent is zero.
+    #[inline]
+    pub fn duration_at(&self, rpm: f64) -> f64 {
+        if self.duration_rpm_exp == 0.0 || rpm <= 0.0 {
+            return self.duration_deg;
+        }
+        let ratio = rpm / self.duration_rpm_ref.max(1.0);
+        self.duration_deg * ratio.powf(self.duration_rpm_exp)
+    }
+
+    /// RPM-aware theta_start. Used by `cylinder.advance()` per-step so
+    /// the MBT-map shifts the combustion window with RPM.
+    #[inline]
+    pub fn theta_start_at(&self, rpm: f64) -> f64 {
+        -self.spark_advance_at(rpm) + self.ignition_delay_deg
+    }
+
+    /// RPM-aware theta_end. Used by `cylinder.advance()` per-step.
+    #[inline]
+    pub fn theta_end_at(&self, rpm: f64) -> f64 {
+        self.theta_start_at(rpm) + self.duration_at(rpm)
     }
 
     pub fn eta_comb_at_rpm(&self, rpm: f64) -> f64 {

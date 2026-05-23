@@ -155,13 +155,17 @@ impl CylinderModel {
         self.state.t_at_evc = t;
     }
 
-    fn phase_code(&self, theta_local_deg: f64) -> i32 {
+    fn phase_code(&self, theta_local_deg: f64, rpm: f64) -> i32 {
         let iv_open = valve_is_open(theta_local_deg, &self.intake_valve);
         let ev_open = valve_is_open(theta_local_deg, &self.exhaust_valve);
         if iv_open || ev_open {
             return 0;
         }
-        if is_combusting(theta_local_deg, self.wiebe.theta_start(), self.wiebe.duration_deg) {
+        // 0006: RPM-aware combustion window so a non-zero spark-advance
+        // ramp or duration exponent shifts the burn phase code with RPM.
+        // Defaults (slope=0, exp=0) leave `theta_start_at` / `duration_at`
+        // identical to the legacy `theta_start` / `duration_deg`.
+        if is_combusting(theta_local_deg, self.wiebe.theta_start_at(rpm), self.wiebe.duration_at(rpm)) {
             return 2;
         }
         let ivc = self.intake_valve.close_angle_deg.rem_euclid(720.0);
@@ -184,7 +188,7 @@ impl CylinderModel {
         let v = self.volume(theta_local);
         let d_v_dt = self.d_v_dtheta(theta_local) * (180.0 / PI) * omega;
 
-        let phase = self.phase_code(theta_local);
+        let phase = self.phase_code(theta_local, rpm);
 
         let a_surf = cylinder_surface_area(
             theta_local, self.geom.bore, self.geom.stroke, self.geom.con_rod, self.geom.cr,
@@ -202,20 +206,25 @@ impl CylinderModel {
 
         let eta = self.wiebe.eta_at(rpm);
         let a_eff = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
-        let burning = is_combusting(theta_local, self.wiebe.theta_start(), self.wiebe.duration_deg)
+        // 0006: pull the RPM-aware combustion window. With default
+        // slope=0 + exp=0 these return the legacy constants; with
+        // non-zero slope / exp they shift the burn with RPM.
+        let theta_start_rpm = self.wiebe.theta_start_at(rpm);
+        let duration_rpm = self.wiebe.duration_at(rpm);
+        let burning = is_combusting(theta_local, theta_start_rpm, duration_rpm)
             && self.state.m_fuel > 0.0;
         let mut d_q_comb_dt = 0.0_f64;
         let mut dxb_dt = 0.0_f64;
         if burning {
             let dxb_dtheta = wiebe_burn_rate(
                 theta_local, a_eff, self.wiebe.m,
-                self.wiebe.theta_start(), self.wiebe.duration_deg,
+                theta_start_rpm, duration_rpm,
             );
             dxb_dt = dxb_dtheta * 180.0 / PI * omega;
             d_q_comb_dt = eta * self.state.m_fuel * self.wiebe.q_lhv * dxb_dt;
             self.state.x_b = wiebe_xb(
                 theta_local, a_eff, self.wiebe.m,
-                self.wiebe.theta_start(), self.wiebe.duration_deg,
+                theta_start_rpm, duration_rpm,
             );
         }
 
@@ -342,8 +351,9 @@ impl CylinderModel {
             let c2cb = self.woschni.c2_combustion;
             let wiebe_a = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
             let wiebe_m = self.wiebe.m;
-            let theta_start = self.wiebe.theta_start();
-            let duration = self.wiebe.duration_deg;
+            // 0006: RPM-aware burn window; defaults match legacy constants.
+            let theta_start = self.wiebe.theta_start_at(rpm);
+            let duration = self.wiebe.duration_at(rpm);
             let m_fuel = self.state.m_fuel;
             let q_lhv = self.wiebe.q_lhv;
             // Two-zone heat-loss override: if active, hold per-zone Q_ht
