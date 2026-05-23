@@ -263,8 +263,15 @@ impl CylinderModel {
                 self.state.t_u
             } else if burning && self.state.p_at_ivc > 0.0 {
                 let pr = (self.state.p / self.state.p_at_ivc).max(1.0);
-                // gamma ≈ 1.35 for unburned mixed gas at SI temperatures
-                let exp_gm1_over_g = 0.35 / 1.35;
+                // γ for unburned charge at SI temperatures: γ varies from
+                // 1.40 at cold (300 K, fresh air-fuel) to 1.30 at hot
+                // (~900 K end-gas). The mass-averaged value for the end-
+                // gas compression history is ~1.33 (Heywood Fig 4-9 for
+                // typical SI mixtures). Using 1.33 here is less aggressive
+                // than the 1.35 first attempt — produces I_LW values that
+                // are still direction-correct but better calibrated against
+                // real-engine knock-onset CR limits.
+                let exp_gm1_over_g = 0.33 / 1.33;
                 (self.state.t_at_ivc * pr.powf(exp_gm1_over_g)).max(200.0)
             } else {
                 self.state.t.max(200.0)
