@@ -122,6 +122,14 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("restrictor_loss_from_diffuser_geometry", Scalar, 1, "bool", if cfg.restrictor_loss_from_diffuser_geometry { 1.0 } else { 0.0 }, 0.0, 1.0, "Restrictor"),
         m("restrictor_diverging_half_angle_deg", Scalar, 1, "deg", cfg.restrictor_diverging_half_angle_deg, 3.0, 30.0, "Restrictor"),
         m("restrictor_cd_mach_k", Scalar, 1, "-", cfg.restrictor_cd_mach_k, 0.0, 0.6, "Restrictor"),
+        // Missing-from-overrides combustion flags, exposed for breakdown
+        // probing (0009 finding). All three are SDM26Config fields that
+        // existed but had no apply_override entry — sweep studies that
+        // tried to toggle them got "unknown parameter path" and silently
+        // ran with defaults (or errored).
+        m("afr_eta_enabled", Scalar, 1, "bool", if cfg.afr_eta_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("tumble_burn_factor", Scalar, 1, "-", cfg.tumble_burn_factor, 0.0, 1.0, "Combustion"),
+        m("two_zone_enabled", Scalar, 1, "bool", if cfg.two_zone_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -390,6 +398,9 @@ pub fn apply_override(
         "restrictor_loss_from_diffuser_geometry" => cfg.restrictor_loss_from_diffuser_geometry = value != 0.0,
         "restrictor_diverging_half_angle_deg" => cfg.restrictor_diverging_half_angle_deg = value,
         "restrictor_cd_mach_k" => cfg.restrictor_cd_mach_k = value,
+        "afr_eta_enabled" => cfg.afr_eta_enabled = value != 0.0,
+        "tumble_burn_factor" => cfg.tumble_burn_factor = value,
+        "two_zone_enabled" => cfg.two_zone_enabled = value != 0.0,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,
