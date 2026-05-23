@@ -1,0 +1,47 @@
+# 0004 — junction-kind IMEP sensitivity (SDM26 / characteristic / RPM sweep)
+#
+# Topic: at every cycle (including cycle 5, before the conservation cliff
+# fires) the characteristic junction produces 25-30% higher IMEP than the
+# stagnation junction on the same config. 0003's per-cycle data already
+# shows this on a single RPM (10000). This study sweeps RPM 6000-13000 to
+# measure whether the gap is uniform (suggesting a steady-state model
+# delta) or RPM/Mach-dependent (suggesting an acoustic-wave-physics delta
+# at the runner-pipe junction).
+#
+# Four study.tomls share the [run].cycles, seed, environment, and acceptance
+# blocks; they differ only in `config` (sdm25 vs sdm26) and `junction`
+# (characteristic vs stagnation). Compare the four resulting NDJSONs to
+# decompose the simulator-vs-dyno gap into (a) calibration component
+# (sdm25 vs sdm26 with same junction) and (b) junction-physics component
+# (char vs stag with same config).
+
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [6000.0, 7000.0, 8000.0, 9000.0, 10000.0, 11000.0, 12000.0, 13000.0]
+cycles = 30
+recorded = true
+seed = 4000
+junction = "characteristic"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+# Compare brake_power at cycle 30 (the parity-test convention, also
+# 0003-validated as the settled-plateau cycle) against the FSAE-restricted
+# CBR600 dyno band per references/dyno/cbr600rr-fsae-restricted.csv. The
+# tolerance is bilateral 15% because the published FSAE band itself spans
+# 41-52 kW at 10000 RPM (~13% spread vs midpoint).
+[[acceptance]]
+metric = "brake_power_kW@10000"
+target = 46.5
+tolerance = "±15%"
+citation = "references/dyno/cbr600rr-fsae-restricted.csv row rpm=10000 (range 41-52 kW, midpoint 46.5)"
+
+[[acceptance]]
+metric = "brake_power_kW@13000"
+target = 50.5
+tolerance = "±15%"
+citation = "references/dyno/cbr600rr-fsae-restricted.csv row rpm=13000 (near peak power for well-tuned restricted CBR600)"

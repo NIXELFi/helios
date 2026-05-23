@@ -1,0 +1,28 @@
+# 0004 — junction-kind IMEP sensitivity (SDM26 / stagnation / RPM sweep)
+# Companion to study_sdm26_char.toml — see that file for narrative.
+
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [6000.0, 7000.0, 8000.0, 9000.0, 10000.0, 11000.0, 12000.0, 13000.0]
+cycles = 30
+recorded = true
+seed = 4000
+junction = "stagnation"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+[[acceptance]]
+metric = "brake_power_kW@10000"
+target = 46.5
+tolerance = "±15%"
+citation = "references/dyno/cbr600rr-fsae-restricted.csv row rpm=10000 (range 41-52 kW, midpoint 46.5)"
+
+[[acceptance]]
+metric = "brake_power_kW@13000"
+target = 50.5
+tolerance = "±15%"
+citation = "references/dyno/cbr600rr-fsae-restricted.csv row rpm=13000"
