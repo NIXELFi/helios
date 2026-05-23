@@ -109,6 +109,9 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("plenum_n_cells", Scalar, 1, "-", cfg.plenum_n_cells as f64, 10.0, 60.0, "Intake"),
         m("plenum_wall_t", Scalar, 1, "K", cfg.plenum_wall_t, 280.0, 400.0, "Intake"),
         m("intake_junction_loss_coef", Scalar, 1, "-", cfg.intake_junction_loss_coef, 0.0, 1.0, "Intake"),
+        m("intake_junction_borda_carnot", Scalar, 1, "bool", if cfg.intake_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
+        m("exhaust_junction_loss_coef", Scalar, 1, "-", cfg.exhaust_junction_loss_coef, 0.0, 1.0, "Exhaust"),
+        m("exhaust_junction_borda_carnot", Scalar, 1, "bool", if cfg.exhaust_junction_borda_carnot { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -364,6 +367,9 @@ pub fn apply_override(
         "plenum_n_cells" => cfg.plenum_n_cells = to_usize(value),
         "plenum_wall_t" => cfg.plenum_wall_t = value,
         "intake_junction_loss_coef" => cfg.intake_junction_loss_coef = value,
+        "intake_junction_borda_carnot" => cfg.intake_junction_borda_carnot = value != 0.0,
+        "exhaust_junction_loss_coef" => cfg.exhaust_junction_loss_coef = value,
+        "exhaust_junction_borda_carnot" => cfg.exhaust_junction_borda_carnot = value != 0.0,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,

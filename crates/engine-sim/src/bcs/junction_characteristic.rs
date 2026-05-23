@@ -170,19 +170,114 @@ struct LegRef { rho: f64, u: f64, p: f64, c: f64 }
 #[derive(Debug, Clone, Copy)]
 struct FaceState { rho_f: f64, u_f: f64, p_f: f64, f_mass: f64 }
 
+/// Borda-Carnot sudden-expansion loss K_leg from junction geometry.
+///
+/// For an inflow leg (mass entering the pipe from the junction), the flow
+/// expands from an effective upstream area `A_max` (the largest pipe in the
+/// junction — the plenum, for an intake T-junction) into the leg area
+/// `A_leg`. The classical Borda-Carnot dump loss is
+///     K_leg = (1 − A_leg / A_max)^2
+/// with K = 0 when the leg equals the max (no expansion), approaching
+/// (1 − ε)² as A_leg → 0.
+///
+/// This makes the loss coefficient *geometry-derived* rather than tuned,
+/// so any new engine config (e.g. SDM27) inherits the right K without a
+/// per-engine fit. The scalar `multiplier` is the user-facing knob, which
+/// scales the geometric K (default 1.0 = pure Borda-Carnot, 0.0 = lossless).
+#[inline]
+fn borda_carnot_k(a_leg: f64, a_max: f64) -> f64 {
+    if a_max <= 0.0 || a_leg >= a_max {
+        return 0.0;
+    }
+    let ratio = a_leg / a_max;
+    (1.0 - ratio).powi(2)
+}
+
+/// Loss-mode encoding for `hllc_mass_residual`.
+///
+/// - `Off`: no loss; the residual sees lossless face states (legacy).
+/// - `Scalar(K)`: every inflow leg gets the same K (legacy scalar knob,
+///   used by existing tests and configs that set `intake_junction_loss_coef`).
+/// - `BordaCarnot { multiplier }`: per-leg K derived from area-ratio
+///   geometry, scaled by `multiplier` (the user-facing dial). The
+///   *physical* setting is multiplier = 1.0; smaller values are diagnostic
+///   under-dissipation; larger values cap above 1.0 are warned in the
+///   junction config layer.
+#[derive(Debug, Clone, Copy)]
+pub enum LossMode {
+    Off,
+    Scalar(f64),
+    BordaCarnot { multiplier: f64 },
+}
+
+impl LossMode {
+    /// Resolve the active K for a given leg.
+    #[inline]
+    fn k_for(self, a_leg: f64, a_max: f64) -> f64 {
+        match self {
+            LossMode::Off => 0.0,
+            LossMode::Scalar(k) => k,
+            LossMode::BordaCarnot { multiplier } => multiplier * borda_carnot_k(a_leg, a_max),
+        }
+    }
+
+    /// True if any non-zero loss is requested. Used to skip the
+    /// loss-application branch entirely when the answer must be the
+    /// lossless baseline (preserves parity-golden bit-equality).
+    #[inline]
+    fn is_active(self) -> bool {
+        match self {
+            LossMode::Off => false,
+            LossMode::Scalar(k) => k > 0.0,
+            LossMode::BordaCarnot { multiplier } => multiplier > 0.0,
+        }
+    }
+}
+
 fn hllc_mass_residual(
     legs: &[CharJunctionLeg], interiors: &[Interior], p_j: f64,
-    references: &[LegRef], dt: f64,
+    references: &[LegRef], dt: f64, loss: LossMode, a_max: f64,
 ) -> (f64, Vec<FaceState>) {
     let mut r = 0.0_f64;
     let mut face_states = Vec::with_capacity(legs.len());
+    let loss_active = loss.is_active();
     for ((leg, it), reff) in legs.iter().zip(interiors.iter()).zip(references.iter()) {
         let gamma_leg = it.gamma;
-        let (rho_g, u_g, c_g) = face_from_pj(
+        let (mut rho_g, u_g, c_g) = face_from_pj(
             reff.rho, reff.u, reff.p, reff.c, p_j, gamma_leg, leg.s_end(),
         );
-        let p_g = rho_g * c_g * c_g / gamma_leg;
+        let mut p_g = rho_g * c_g * c_g / gamma_leg;
         let y_g = it.y_i;
+
+        // In-residual Borda-Carnot dump loss (0005 fix).
+        //
+        // The legacy code applied this loss in `write_ghosts` AFTER the
+        // Newton residual converged — which breaks the residual's mass
+        // closure because the next MUSCL step sees lossy ghosts while
+        // the Newton "thinks" it emitted lossless flux. Finding 0004 §6
+        // measured that mismatch at >100× the C9 char band.
+        //
+        // Applying the loss BEFORE HLLC inside the residual makes the
+        // Newton's converged p_j account for the dump-loss directly:
+        // the residual goes to ~machine-eps even at large K, restoring
+        // C9 mass conservation while still capturing the physical
+        // dissipation.
+        //
+        // Direction test: `(leg.sign_into) * u_g < 0` means the junction
+        // is sending mass into the pipe (pipe inflow), matching the
+        // legacy write_ghosts condition `signed_into_hllc < 0`. We use
+        // the ghost u_g (face_from_pj output) as a proxy since `f_mass`
+        // is not yet known at this point.
+        if loss_active && (leg.sign_into as f64) * u_g < 0.0 {
+            let k_leg = loss.k_for(it.a_i, a_max);
+            if k_leg > 0.0 {
+                let dp_loss = k_leg * 0.5 * rho_g * u_g * u_g;
+                let p_g_new = (p_g - dp_loss).max(0.5 * p_g);
+                let rho_g_new = rho_g * (p_g_new / p_g.max(1.0)).powf(1.0 / gamma_leg);
+                p_g = p_g_new;
+                rho_g = rho_g_new;
+            }
+        }
         let rho_y_g = rho_g * y_g;
 
         let rho_y_i = it.rho_i * it.y_i;
@@ -223,6 +318,11 @@ pub struct CharacteristicJunction {
     pub choke_margin: f64,
     pub inflow_entropy_picard: bool,
     pub inflow_loss_coef: f64,
+    /// Loss-application mode. `Scalar` keeps legacy single-coefficient
+    /// behavior; `BordaCarnot { multiplier }` derives the per-leg K from
+    /// area-ratio geometry so a new engine config inherits the right K
+    /// without per-engine tuning. Default `Scalar(0.0)` = parity preserved.
+    pub loss_mode: LossMode,
     pub last_p_junction: f64,
     pub last_mass_residual: f64,
     pub last_energy_residual: f64,
@@ -240,6 +340,7 @@ impl CharacteristicJunction {
             choke_margin: 0.02,
             inflow_entropy_picard: true,
             inflow_loss_coef: 0.0,
+            loss_mode: LossMode::Scalar(0.0),
             last_p_junction: 101325.0,
             last_mass_residual: 0.0,
             last_energy_residual: 0.0,
@@ -249,16 +350,41 @@ impl CharacteristicJunction {
         }
     }
 
+    /// Resolve the effective loss mode for this junction.
+    ///
+    /// If `loss_mode` is the default `Scalar(0.0)` but the legacy
+    /// `inflow_loss_coef` field has been set to a positive value (the way
+    /// existing configs and tests poke the knob), promote it to
+    /// `Scalar(inflow_loss_coef)`. Otherwise use `loss_mode` as authoritative.
+    /// New callers should set `loss_mode = BordaCarnot { multiplier: 1.0 }`
+    /// directly for geometry-derived per-leg K with no per-engine tuning.
+    #[inline]
+    fn effective_loss(&self) -> LossMode {
+        match self.loss_mode {
+            LossMode::Scalar(0.0) if self.inflow_loss_coef > 0.0 => {
+                LossMode::Scalar(self.inflow_loss_coef)
+            }
+            other => other,
+        }
+    }
+
+    /// Largest leg cross-section area at this junction; the reference
+    /// "upstream" area for Borda-Carnot per-leg K computations.
+    #[inline]
+    fn max_leg_area(interiors: &[Interior]) -> f64 {
+        interiors.iter().map(|it| it.a_i).fold(0.0_f64, f64::max)
+    }
+
     /// Secant iteration on the HLLC-consistent mass residual.
     /// Returns (p_j, niter, face_states, converged).
     fn secant_mass_balance(
         &mut self, interiors: &[Interior], references: &[LegRef],
-        p_j_init: f64, dt: f64,
+        p_j_init: f64, dt: f64, loss: LossMode, a_max: f64,
     ) -> (f64, usize, Vec<FaceState>, bool) {
         let p_floor = 1000.0_f64;
         let dp_fd = 1.0_f64;
 
-        let (r0, fs0) = hllc_mass_residual(&self.legs, interiors, p_j_init, references, dt);
+        let (r0, fs0) = hllc_mass_residual(&self.legs, interiors, p_j_init, references, dt, loss, a_max);
         self.last_mass_residual = r0;
         if r0.abs() < self.newton_tol {
             return (p_j_init, 1, fs0, true);
@@ -267,7 +393,7 @@ impl CharacteristicJunction {
         let mut r_prev = r0;
         let mut p_curr = p_j_init + dp_fd;
         let (mut r_curr, mut fs_curr) = hllc_mass_residual(
-            &self.legs, interiors, p_curr, references, dt,
+            &self.legs, interiors, p_curr, references, dt, loss, a_max,
         );
         for it in 0..self.newton_max_iter {
             self.last_mass_residual = r_curr;
@@ -285,7 +411,7 @@ impl CharacteristicJunction {
             else if dp < -cap { dp = -cap; }
             let p_next = (p_curr + dp).max(p_floor);
             let (r_next, fs_next) = hllc_mass_residual(
-                &self.legs, interiors, p_next, references, dt,
+                &self.legs, interiors, p_next, references, dt, loss, a_max,
             );
             p_prev = p_curr;
             r_prev = r_curr;
@@ -313,7 +439,7 @@ impl CharacteristicJunction {
 
     fn solve_with_choked(
         &mut self, interiors: &[Interior], references: &[LegRef],
-        choked_indices: &[usize], dt: f64,
+        choked_indices: &[usize], dt: f64, loss: LossMode, a_max: f64,
     ) -> Result<(f64, usize, Vec<FaceState>), JunctionConvergenceError> {
         let total = self.legs.len();
         if choked_indices.len() == total {
@@ -363,7 +489,7 @@ impl CharacteristicJunction {
                         s_refs: &[LegRef]|
             -> (f64, Vec<FaceState>)
         {
-            let (r, fs) = hllc_mass_residual(s_legs, s_interiors, p_j, s_refs, dt);
+            let (r, fs) = hllc_mass_residual(s_legs, s_interiors, p_j, s_refs, dt, loss, a_max);
             (fixed_mdot_sum + r, fs)
         };
 
@@ -447,6 +573,7 @@ impl CharacteristicJunction {
         &mut self,
         interiors: &[Interior], face_states: &[FaceState],
         references: &[LegRef], p_j_current: f64, dt: f64,
+        loss: LossMode, a_max: f64,
     ) -> Option<(f64, Vec<FaceState>, Vec<LegRef>)> {
         let mut inflow_legs = Vec::new();
         let mut outflow_legs = Vec::new();
@@ -487,7 +614,7 @@ impl CharacteristicJunction {
             new_refs[i] = LegRef { rho: rho_mix, u: u_i, p: p_mix, c: c_mix };
         }
         let (p_j, _niter, fs_new, converged) =
-            self.secant_mass_balance(interiors, &new_refs, p_j_current, dt);
+            self.secant_mass_balance(interiors, &new_refs, p_j_current, dt, loss, a_max);
         if converged {
             Some((p_j, fs_new, new_refs))
         } else {
@@ -529,19 +656,18 @@ impl CharacteristicJunction {
         for ((leg, it), fs) in self.legs.iter().zip(interiors.iter()).zip(face_states.iter()) {
             let gamma_leg = it.gamma;
             let gm1 = gamma_leg - 1.0;
-            let mut rho_f = fs.rho_f;
+            let rho_f = fs.rho_f;
             let u_f = fs.u_f;
-            let mut p_f = fs.p_f;
+            let p_f = fs.p_f;
             let signed_into_hllc = (leg.sign_into as f64) * fs.f_mass;
             let y_ghost = if signed_into_hllc >= 0.0 { it.y_i } else { y_mixed };
 
-            if self.inflow_loss_coef > 0.0 && signed_into_hllc < 0.0 {
-                let dp_loss = self.inflow_loss_coef * 0.5 * rho_f * u_f * u_f;
-                let p_f_new = (p_f - dp_loss).max(0.5 * p_f);
-                let rho_f_new = rho_f * (p_f_new / p_f.max(1.0)).powf(1.0 / gamma_leg);
-                p_f = p_f_new;
-                rho_f = rho_f_new;
-            }
+            // NOTE (0005): the Borda-Carnot dump loss is now applied INSIDE
+            // `hllc_mass_residual` before HLLC is called, so `fs.rho_f` and
+            // `fs.p_f` here already carry the lossy state. The legacy
+            // post-correction block that lived here was double-counting the
+            // loss AND breaking mass conservation (finding 0004 §6). Do not
+            // re-apply it.
             let e_ghost = p_f / gm1 + 0.5 * rho_f * u_f * u_f;
             let pipe = &mut pipes[leg.pipe_idx];
             let ng = pipe.n_ghost;
@@ -581,8 +707,14 @@ impl CharacteristicJunction {
             rho: it.rho_i, u: it.u_i, p: it.p_i, c: it.c_i,
         }).collect();
 
+        // Resolve loss config once per fill_ghosts; the Newton residual and
+        // every Picard pass downstream see the same setting, so the converged
+        // face state is mass-conservation-consistent (0005 fix).
+        let loss = self.effective_loss();
+        let a_max = Self::max_leg_area(&interiors);
+
         let (mut p_j, mut niter, mut face_states, converged) =
-            self.secant_mass_balance(&interiors, &references, p_j_init, dt);
+            self.secant_mass_balance(&interiors, &references, p_j_init, dt, loss, a_max);
         if !converged {
             return Err(JunctionConvergenceError {
                 message: format!(
@@ -603,7 +735,7 @@ impl CharacteristicJunction {
 
         if !choked_legs.is_empty() {
             let (p_j_c, niter_c, fs_c) = self.solve_with_choked(
-                &interiors, &references, &choked_legs, dt,
+                &interiors, &references, &choked_legs, dt, loss, a_max,
             )?;
             p_j = p_j_c;
             niter += niter_c;
@@ -615,7 +747,7 @@ impl CharacteristicJunction {
 
         if self.inflow_entropy_picard && choked_legs.is_empty() {
             if let Some((p_j_corr, fs_corr, refs_corr)) =
-                self.inflow_entropy_pass(&interiors, &face_states, &references, p_j, dt)
+                self.inflow_entropy_pass(&interiors, &face_states, &references, p_j, dt, loss, a_max)
             {
                 p_j = p_j_corr;
                 face_states = fs_corr;

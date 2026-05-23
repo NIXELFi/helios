@@ -3,7 +3,7 @@
 
 use std::f64::consts::PI;
 
-use crate::bcs::junction_characteristic::{CharJunctionLeg, CharacteristicJunction};
+use crate::bcs::junction_characteristic::{CharJunctionLeg, CharacteristicJunction, LossMode as CharLossMode};
 use crate::bcs::junction_cv::{JunctionCV, JunctionCVLeg, PipeEnd};
 use crate::cylinder::valve::LiftProfile;
 use crate::bcs::restrictor::fill_choked_restrictor_left;
@@ -90,6 +90,23 @@ pub struct SDM26Config {
     pub plenum_n_cells: usize,
     pub plenum_wall_t: f64,
     pub intake_junction_loss_coef: f64,
+    /// When true, the intake junction uses per-leg Borda-Carnot loss
+    /// K_leg = (1 − A_leg/A_max)^2 derived from junction geometry, scaled
+    /// by `intake_junction_loss_coef` as a multiplier (default 1.0 if
+    /// coef is 0). When false (default), the legacy scalar-K behavior
+    /// applies the single `intake_junction_loss_coef` to every inflow
+    /// leg. Default `false` preserves bit-exact parity with K=0 configs.
+    ///
+    /// New configs (e.g. SDM27) should set this `true` so the loss
+    /// coefficient is geometry-derived, not per-engine tuned.
+    pub intake_junction_borda_carnot: bool,
+    /// Exhaust-side per-junction loss coefficient (default 0.0 for parity).
+    /// Active on Char and CV junctions for ALL exhaust junctions
+    /// (primaries→secondary, secondaries→collector, and the 4→1 case).
+    pub exhaust_junction_loss_coef: f64,
+    /// When true, exhaust junctions use per-leg Borda-Carnot K from
+    /// geometry, scaled by `exhaust_junction_loss_coef`. Default false.
+    pub exhaust_junction_borda_carnot: bool,
     // restrictor
     pub restrictor_throat_diameter: f64,
     pub restrictor_cd: f64,
@@ -197,6 +214,9 @@ impl Default for SDM26Config {
             plenum_volume: 0.0015, plenum_length: 0.3, plenum_n_cells: 20,
             plenum_wall_t: 320.0,
             intake_junction_loss_coef: 0.0,
+            intake_junction_borda_carnot: false,
+            exhaust_junction_loss_coef: 0.0,
+            exhaust_junction_borda_carnot: false,
             restrictor_throat_diameter: 0.020,
             restrictor_cd: 0.967,
             restrictor_loss_coef: 0.0,
@@ -454,9 +474,23 @@ impl SDM26Engine {
 
         // junctions
         let mut junctions = Vec::new();
+        // Resolve per-side loss mode once (cheap; same for every call).
+        let intake_loss_mode = if cfg.intake_junction_borda_carnot {
+            let m = if cfg.intake_junction_loss_coef == 0.0 { 1.0 } else { cfg.intake_junction_loss_coef };
+            CharLossMode::BordaCarnot { multiplier: m }
+        } else {
+            CharLossMode::Scalar(cfg.intake_junction_loss_coef)
+        };
+        let exhaust_loss_mode = if cfg.exhaust_junction_borda_carnot {
+            let m = if cfg.exhaust_junction_loss_coef == 0.0 { 1.0 } else { cfg.exhaust_junction_loss_coef };
+            CharLossMode::BordaCarnot { multiplier: m }
+        } else {
+            CharLossMode::Scalar(cfg.exhaust_junction_loss_coef)
+        };
         let make_junction = |leg_specs: Vec<(usize, PipeEnd)>,
                              pipes: &[PipeState],
-                             inflow_loss_coef: f64| -> Junction {
+                             scalar_loss: f64,
+                             loss_mode: CharLossMode| -> Junction {
             match junction_kind {
                 JunctionKind::Stagnation => {
                     let legs = leg_specs.into_iter()
@@ -466,14 +500,22 @@ impl SDM26Engine {
                         cfg.p_ambient, cfg.t_ambient, 0.0,
                         1.4, 287.0, 1.0,
                     );
-                    cv.inflow_loss_coef = inflow_loss_coef;
+                    // CV junction still uses the scalar coefficient — it does
+                    // not yet implement the geometric Borda-Carnot mode. For
+                    // physics parity between modes, callers should keep using
+                    // Characteristic for tuned acoustic studies.
+                    cv.inflow_loss_coef = scalar_loss;
                     Junction::Cv(cv)
                 }
                 JunctionKind::Characteristic => {
                     let legs = leg_specs.into_iter()
                         .map(|(idx, end)| CharJunctionLeg::new(idx, end)).collect();
                     let mut cj = CharacteristicJunction::new(legs, 1.4, 287.0);
-                    cj.inflow_loss_coef = inflow_loss_coef;
+                    // Keep the legacy scalar field populated for diagnostics +
+                    // any test that reads it back, and also set the canonical
+                    // loss_mode that the in-residual path actually consults.
+                    cj.inflow_loss_coef = scalar_loss;
+                    cj.loss_mode = loss_mode;
                     Junction::Char(cj)
                 }
             }
@@ -482,29 +524,31 @@ impl SDM26Engine {
         // intake junction: plenum + 4 runners
         let mut intake_specs = vec![(plenum_idx, PipeEnd::Right)];
         for &r in &runner_idx { intake_specs.push((r, PipeEnd::Left)); }
-        junctions.push(make_junction(intake_specs, &pipes, cfg.intake_junction_loss_coef));
+        junctions.push(make_junction(
+            intake_specs, &pipes, cfg.intake_junction_loss_coef, intake_loss_mode,
+        ));
 
         if cfg.exhaust_topology == ExhaustTopology::FourTwoOne {
             junctions.push(make_junction(vec![
                 (primary_idx[0], PipeEnd::Right),
                 (primary_idx[3], PipeEnd::Right),
                 (secondary_idx[0], PipeEnd::Left),
-            ], &pipes, 0.0));
+            ], &pipes, cfg.exhaust_junction_loss_coef, exhaust_loss_mode));
             junctions.push(make_junction(vec![
                 (primary_idx[1], PipeEnd::Right),
                 (primary_idx[2], PipeEnd::Right),
                 (secondary_idx[1], PipeEnd::Left),
-            ], &pipes, 0.0));
+            ], &pipes, cfg.exhaust_junction_loss_coef, exhaust_loss_mode));
             junctions.push(make_junction(vec![
                 (secondary_idx[0], PipeEnd::Right),
                 (secondary_idx[1], PipeEnd::Right),
                 (collector_idx, PipeEnd::Left),
-            ], &pipes, 0.0));
+            ], &pipes, cfg.exhaust_junction_loss_coef, exhaust_loss_mode));
         } else {
             let mut specs: Vec<(usize, PipeEnd)> = primary_idx.iter()
                 .map(|&p| (p, PipeEnd::Right)).collect();
             specs.push((collector_idx, PipeEnd::Left));
-            junctions.push(make_junction(specs, &pipes, 0.0));
+            junctions.push(make_junction(specs, &pipes, cfg.exhaust_junction_loss_coef, exhaust_loss_mode));
         }
 
         // cylinders
