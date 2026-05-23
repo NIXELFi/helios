@@ -1,7 +1,7 @@
 # Physics Agent Loop — Session Handoff (paused 2026-05-23)
 
 Continuation of the prior session (paused 2026-05-22 at finding 0003). This
-session shipped findings 0004 through 0012 plus 10 bugfixes, all on
+session shipped findings 0004 through 0014 plus 12 bugfixes, all on
 `physics-fixes/math-corrections`. Nothing pushed; main untouched; all 20
 parity-test scenarios still bit-exact.
 
@@ -12,9 +12,9 @@ If you're picking up the work, **read these four sections in order**.
 ## 1. State of the branch
 
 - **Branch:** `physics-fixes/math-corrections`
-- **Tip:** commit `6625175` (0012 limiter+n_cells sensitivity + B9/B10 fixes)
+- **Tip:** commit `e2d59c1` (0014 SDM27 + knock-margin design table)
 - **Working tree:** clean
-- **Total commits this session:** 17 (8 source + 9 finding/doc)
+- **Total commits this session:** 24 (11 source + 13 finding/doc)
 - **Parity:** 20/20 SDM25+SDM26 scenarios still bit-exact at all opt-in
   defaults.
 
@@ -139,6 +139,8 @@ matters most for design.
 | 0010 | two-zone characterization | NEGATIVE | `two_zone_enabled` shifts BP up uniformly; worsens fit. Don't add to production knob set without joint Woschni re-calibration |
 | 0011 | Woschni × two-zone joint | NEGATIVE | Even with optimal Woschni in Heywood range, two-zone+joint loses to single-zone+default. Need variable γ(T) per zone to make two-zone work |
 | 0012 | limiter + CFL + n_cells sensitivity | VALIDATED + 2 BUGS FIXED | Limiter doesn't matter; CFL mild; n_cells = 30 is ~1 kW under-resolved (use 60 for final). B9/B10 (apply_override missing for `limiter` + `cfl`) FIXED |
+| 0013 | knock prediction (Livengood-Wu) | **FIXED** + 2 BUGS FIXED | Closes 0009 G4 — knock model with Douaud-Eyzat τ + polytropic T_unb (γ=1.33). All 6 well-known engineering rules predicted correctly. B11/B12 (apply_override missing for intake/exhaust `lift_flat_top_ramp`) FIXED. Apply_override completeness audit: 78/80 sweep-relevant fields exposed |
+| 0014 | SDM27 + knock-margin design table | VALIDATED | First design-decision-grade SDM27 output including knock. C4 (75mm-bore oversquare) safe CR × octane envelope: CR=12 + 110-oct → 45.1 kW peak BP (RECOMMENDED). CR=10 + 95-oct → 43.3 kW (pump-gas backstop). CR=12 + 95-oct knocks — needs active control |
 
 ### Bugs fixed this session
 
@@ -154,8 +156,10 @@ matters most for design.
 | B8 | `two_zone_enabled` missing from `apply_override` | 0009 |
 | B9 | `limiter` missing from `apply_override` | 0012 |
 | B10 | `cfl` missing from `apply_override` | 0012 |
+| B11 | `intake_lift_flat_top_ramp` missing from `apply_override` | 0013 |
+| B12 | `exhaust_lift_flat_top_ramp` missing from `apply_override` | 0013 |
 
-**Pattern observation**: 5 of these (B6-B10) are the same class of bug
+**Pattern observation**: 7 of these 12 bugs (B6-B12) are the same class
 — SDM26Config fields that exist and work internally but aren't exposed
 via `apply_override`, so study TOMLs that try to vary them get
 "unknown parameter path" warnings and silently no-op. Worth a follow-
