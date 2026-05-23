@@ -130,6 +130,11 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("afr_eta_enabled", Scalar, 1, "bool", if cfg.afr_eta_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
         m("tumble_burn_factor", Scalar, 1, "-", cfg.tumble_burn_factor, 0.0, 1.0, "Combustion"),
         m("two_zone_enabled", Scalar, 1, "bool", if cfg.two_zone_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        // B9 fix (found via 0012 limiter sweep): `limiter` was an
+        // SDM26Config field but missing from apply_override. Same pattern
+        // as B6/B7/B8 in 0009. CFL is similarly exposed for grid-conv work.
+        m("limiter", Scalar, 1, "enum", cfg.limiter as f64, 0.0, 2.0, "Numerics"),
+        m("cfl", Scalar, 1, "-", cfg.cfl, 0.1, 0.95, "Numerics"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -401,6 +406,8 @@ pub fn apply_override(
         "afr_eta_enabled" => cfg.afr_eta_enabled = value != 0.0,
         "tumble_burn_factor" => cfg.tumble_burn_factor = value,
         "two_zone_enabled" => cfg.two_zone_enabled = value != 0.0,
+        "limiter" => cfg.limiter = value.round() as i32,
+        "cfl" => cfg.cfl = value,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,
