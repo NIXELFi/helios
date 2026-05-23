@@ -118,13 +118,13 @@ fn r0004_k_loss_attenuates_char_selectively() {
 }
 
 #[test]
-fn r0004_k_loss_breaks_c9_mass_conservation() {
-    // 0004 §6: the existing wiring applies inflow_loss_coef as a ghost-write
-    // post-correction OUTSIDE the inter-leg Newton residual. As a result, any
-    // non-zero K breaks the residual's mass closure. K=0.1 trips C9 char band
-    // (5e-4 relative) by ~2.7×; K=5 trips it by ~100×. This is the spec-C9
-    // "physical-vs-numerical precedence" landmark: until the loss term is
-    // moved into the residual (0005 candidate), the K-fix cannot ship.
+fn r0004_k_loss_preserves_c9_after_0005() {
+    // INVERTED after 0005 shipped: the loss term is now applied INSIDE the
+    // inter-leg Newton residual (junction_characteristic.rs hllc_mass_residual
+    // applies Borda-Carnot loss to the ghost state BEFORE HLLC), so any K
+    // value preserves mass conservation. Pre-0005 the same K=5 test broke
+    // C9 by ~100×; pin the post-fix behavior here so a regression that
+    // moves the loss back to ghost-write post-correction trips loudly.
     let c0 = run_to_settle(JunctionKind::Characteristic, 10000.0, 0.0);
     let c5 = run_to_settle(JunctionKind::Characteristic, 10000.0, 5.0);
     assert!(
@@ -135,11 +135,11 @@ fn r0004_k_loss_breaks_c9_mass_conservation() {
         c0.nonconservation_rel
     );
     assert!(
-        c5.nonconservation_rel.abs() > 1e-2,
-        "K=5 currently breaks C9 char band by ~100×. nc_rel = {:.3e}. If \
-         this assertion fails, the loss term may have been moved into the \
-         residual (great news — 0005 has shipped). When that happens, this \
-         test should be inverted: assert that the K=5 case still passes C9.",
+        c5.nonconservation_rel.abs() < 5e-4,
+        "K=5 must now pass C9 char band (5e-4 rel) — 0005 moved the loss \
+         into the residual. nc_rel = {:.3e}. If this fails, the loss \
+         application path has regressed (likely back to write_ghosts \
+         post-correction).",
         c5.nonconservation_rel
     );
 }
