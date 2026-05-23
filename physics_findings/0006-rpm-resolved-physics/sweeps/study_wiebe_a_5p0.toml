@@ -1,0 +1,26 @@
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [6000.0, 8000.0, 10000.0, 12000.0, 13000.0]
+cycles = 30
+recorded = true
+seed = 6000
+junction = "characteristic"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+[sweep]
+sampler = "lhs"
+n_trials = 1
+parameters = [
+  { name = "wiebe_a", min = 5.0, max = 5.0 },
+]
+
+[[acceptance]]
+metric = "brake_power_kW"
+target = 46.5
+tolerance = "±20%"
+citation = "sensitivity probe"

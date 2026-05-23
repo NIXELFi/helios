@@ -133,6 +133,12 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.plenum_volume = req_f64(plen, "volume")?;
     cfg.restrictor_throat_diameter = req_f64(restr, "throat_diameter")?;
     cfg.restrictor_cd = req_f64(restr, "discharge_coefficient")?;
+    // 0006: pick up the diffuser half-angle if present (was silently dropped).
+    // Default 6.0 if not in JSON — preserves behavior for older configs
+    // that omit the field, and provides a sensible value for SDM26.
+    if let Some(angle) = restr.get("diverging_half_angle").and_then(|x| x.as_f64()) {
+        cfg.restrictor_diverging_half_angle_deg = angle;
+    }
     cfg.p_ambient = req_f64(&data, "p_ambient")?;
     cfg.t_ambient = req_f64(&data, "T_ambient")?;
 
