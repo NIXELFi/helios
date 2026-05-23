@@ -38,7 +38,7 @@ fn idelchik_diffuser_phi(half_angle_deg: f64) -> f64 {
         1.00
     }
 }
-use crate::bcs::simple::fill_transmissive_right;
+use crate::bcs::simple::{fill_open_end_right, fill_transmissive_right};
 use crate::bcs::valve::{fill_valve_ghost_characteristic, PipeEndStr, ValveType};
 use crate::cylinder::combustion::WiebeParams;
 use crate::cylinder::cylinder::{CylinderGeom, CylinderModel};
@@ -137,6 +137,24 @@ pub struct SDM26Config {
     /// Default 0.0 → constant duration, parity preserved.
     pub duration_rpm_exp: f64,
     pub duration_rpm_ref: f64,
+
+    /// 0007: RPM-dependent Wiebe a (turbulent flame speed scaling).
+    /// Default 0.0 → no scaling, parity preserved. Bonatesta/Heywood:
+    /// flame speed ∝ mean piston speed ∝ RPM; a_eff(rpm) = a × (rpm/ref)^exp
+    /// with exp ≈ 0.3-0.5.
+    pub wiebe_a_rpm_exp: f64,
+    pub wiebe_a_rpm_ref: f64,
+
+    /// 0007: open-end reflection coefficient at the exhaust collector
+    /// outlet. Default 0.0 = legacy transmissive BC (no reflection,
+    /// zero scavenging benefit; preserves parity). For a real open-end
+    /// pipe well below cutoff frequency (`ka << 1`) the linear-acoustics
+    /// limit is r ≈ 1 (full pressure-release inversion). SDM26 collector
+    /// d = 50 mm; exhaust pulse fundamental at peak RPM ~ 430 Hz; ka ≈
+    /// 0.097 → r ≈ 1 from Munjal §2.7. Set to 1.0 for the physically
+    /// correct open-end behavior. Intermediate values model the partial
+    /// radiation transition (ka approaching unity → r → 0).
+    pub exhaust_collector_reflection_coef: f64,
 
     /// 0006: optional geometry-derived restrictor diffuser loss.
     /// When true, the BC's loss_coef is set from the diverging-cone
@@ -290,6 +308,9 @@ impl Default for SDM26Config {
             spark_advance_rpm_ref: 10000.0,
             duration_rpm_exp: 0.0,
             duration_rpm_ref: 10000.0,
+            wiebe_a_rpm_exp: 0.0,
+            wiebe_a_rpm_ref: 10000.0,
+            exhaust_collector_reflection_coef: 0.0,
             restrictor_loss_from_diffuser_geometry: false,
             restrictor_diverging_half_angle_deg: 6.0,
             restrictor_cd_mach_k: 0.0,
@@ -654,6 +675,8 @@ impl SDM26Engine {
             spark_advance_rpm_ref: cfg.spark_advance_rpm_ref,
             duration_rpm_exp: cfg.duration_rpm_exp,
             duration_rpm_ref: cfg.duration_rpm_ref,
+            wiebe_a_rpm_exp: cfg.wiebe_a_rpm_exp,
+            wiebe_a_rpm_ref: cfg.wiebe_a_rpm_ref,
             two_zone_enabled: cfg.two_zone_enabled,
             ..WiebeParams::default()
         };
@@ -820,10 +843,22 @@ impl SDM26Engine {
             }
         }
 
-        // collector right is transmissive
+        // 0007: collector right BC.
+        // Default (`exhaust_collector_reflection_coef = 0.0`) preserves
+        // the legacy transmissive behavior bit-exactly for parity. Setting
+        // a non-zero reflection coefficient (1.0 ≈ low-ka open end per
+        // Munjal/Levine-Schwinger) enables exhaust pulse reflection and
+        // the associated scavenging benefit at high RPM. Real CBR600 4-2-1
+        // exhausts get 10-20% peak-power boost from this physics; the
+        // legacy r=0 BC zeros it out.
         {
             let collector = &mut self.pipes[self.collector_idx];
-            fill_transmissive_right(collector);
+            if cfg.exhaust_collector_reflection_coef > 0.0 {
+                fill_open_end_right(collector, cfg.p_ambient,
+                                    cfg.exhaust_collector_reflection_coef);
+            } else {
+                fill_transmissive_right(collector);
+            }
         }
 
         // MUSCL step on every pipe

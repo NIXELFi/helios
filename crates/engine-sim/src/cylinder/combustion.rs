@@ -58,6 +58,19 @@ pub struct WiebeParams {
     pub spark_advance_rpm_slope_deg_per_krpm: f64,
     pub spark_advance_rpm_ref: f64,
 
+    /// 0007: optional RPM-dependent Wiebe shape parameter `a` (turbulent
+    /// flame speed scaling). Real engines have flame speed proportional
+    /// to mean piston speed (Heywood Ch 9, Eq 9.50: u'_turb ≈ 0.5·S_p),
+    /// so the effective Wiebe `a` should grow with RPM. At fixed crank-
+    /// angle duration this makes the burn finish closer to TDC at high
+    /// RPM (more heat released in early expansion → more work extracted).
+    ///
+    /// Effective: `a_at(rpm) = a × (rpm / wiebe_a_rpm_ref) ^ wiebe_a_rpm_exp`.
+    /// Default 0.0 → constant a → parity preserved. Bonatesta-style
+    /// recommended exponent: 0.3-0.5.
+    pub wiebe_a_rpm_exp: f64,
+    pub wiebe_a_rpm_ref: f64,
+
     /// 0006: optional RPM-dependent Wiebe burn duration.
     ///
     /// Bonatesta-Waters-Shayler 2010 / Lindström 2003 / Heywood Ch 9
@@ -119,6 +132,8 @@ impl Default for WiebeParams {
             spark_advance_rpm_ref: 10000.0,
             duration_rpm_exp: 0.0,
             duration_rpm_ref: 10000.0,
+            wiebe_a_rpm_exp: 0.0,
+            wiebe_a_rpm_ref: 10000.0,
             two_zone_enabled: false,
         }
     }
@@ -155,6 +170,17 @@ impl WiebeParams {
         }
         let ratio = rpm / self.duration_rpm_ref.max(1.0);
         self.duration_deg * ratio.powf(self.duration_rpm_exp)
+    }
+
+    /// RPM-aware Wiebe `a` (turbulent flame-speed scaling).
+    /// Falls back to the constant `a` when exponent is zero.
+    #[inline]
+    pub fn a_at(&self, rpm: f64) -> f64 {
+        if self.wiebe_a_rpm_exp == 0.0 || rpm <= 0.0 {
+            return self.a;
+        }
+        let ratio = rpm / self.wiebe_a_rpm_ref.max(1.0);
+        self.a * ratio.powf(self.wiebe_a_rpm_exp)
     }
 
     /// RPM-aware theta_start. Used by `cylinder.advance()` per-step so

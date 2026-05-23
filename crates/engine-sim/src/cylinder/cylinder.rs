@@ -205,7 +205,9 @@ impl CylinderModel {
         );
 
         let eta = self.wiebe.eta_at(rpm);
-        let a_eff = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
+        // 0007: RPM-scaled Wiebe a (turbulent flame speed). Defaults to
+        // RPM-invariant `self.wiebe.a` when wiebe_a_rpm_exp = 0.
+        let a_eff = self.wiebe.a_at(rpm) * (1.0 + self.wiebe.tumble_burn_factor);
         // 0006: pull the RPM-aware combustion window. With default
         // slope=0 + exp=0 these return the legacy constants; with
         // non-zero slope / exp they shift the burn with RPM.
@@ -349,7 +351,7 @@ impl CylinderModel {
             let c1co = self.woschni.c1_compression;
             let c1cb = self.woschni.c1_combustion;
             let c2cb = self.woschni.c2_combustion;
-            let wiebe_a = self.wiebe.a * (1.0 + self.wiebe.tumble_burn_factor);
+            let wiebe_a = self.wiebe.a_at(rpm) * (1.0 + self.wiebe.tumble_burn_factor);
             let wiebe_m = self.wiebe.m;
             // 0006: RPM-aware burn window; defaults match legacy constants.
             let theta_start = self.wiebe.theta_start_at(rpm);

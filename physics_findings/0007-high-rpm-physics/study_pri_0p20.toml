@@ -1,0 +1,30 @@
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [8000.0, 10000.0, 11000.0, 12000.0, 13000.0]
+cycles = 30
+recorded = true
+seed = 7100
+junction = "characteristic"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+[sweep]
+sampler = "lhs"
+n_trials = 1
+parameters = [
+  { name = "intake_junction_borda_carnot", min = 1.0, max = 1.0 },
+  { name = "intake_junction_loss_coef", min = 1.0, max = 1.0 },
+  { name = "restrictor_loss_from_diffuser_geometry", min = 1.0, max = 1.0 },
+  { name = "restrictor_cd_mach_k", min = 0.3, max = 0.3 },
+  { name = "primary_length", min = 0.20, max = 0.20 },
+]
+
+[[acceptance]]
+metric = "brake_power_kW@13000"
+target = 59.0
+tolerance = "±25%"
+citation = "primary+secondary tuning"
