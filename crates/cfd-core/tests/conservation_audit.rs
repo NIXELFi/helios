@@ -177,6 +177,19 @@ fn eta_otto(cr: f64, gamma: f64) -> f64 {
 }
 
 fn run_scenario(name: &str, cfg: SDM26Config, rpm: f64, n_cycles: usize, notes: &str) -> ScenarioResult {
+    // Default callers stay on Stagnation — the original 16-scenario audit
+    // was Stagnation-only (finding 0003 documented this coverage gap).
+    run_scenario_with_junction(name, cfg, rpm, n_cycles, notes, JunctionKind::Stagnation)
+}
+
+fn run_scenario_with_junction(
+    name: &str,
+    cfg: SDM26Config,
+    rpm: f64,
+    n_cycles: usize,
+    notes: &str,
+    junction: JunctionKind,
+) -> ScenarioResult {
     let cr = cfg.cr;
     let limiter = cfg.limiter;
     let cfl = cfg.cfl;
@@ -184,7 +197,7 @@ fn run_scenario(name: &str, cfg: SDM26Config, rpm: f64, n_cycles: usize, notes: 
     let afr_target = cfg.afr_target;
 
     let t0 = Instant::now();
-    let mut eng = SDM26Engine::new(cfg, JunctionKind::Stagnation);
+    let mut eng = SDM26Engine::new(cfg, junction);
     let r: RunResult = eng.run_single_rpm(rpm, n_cycles, false, 0.0, 0, false);
     let walltime_s = t0.elapsed().as_secs_f64();
 
@@ -442,4 +455,69 @@ fn audit_12c_limiter_superbee() {
     cfg.limiter = LIMITER_SUPERBEE;
     run_scenario("12c_limiter_superbee", cfg, RPM_DEFAULT, N_CYCLES_SHORT,
                  "Limiter = superbee (2).");
+}
+
+// --------- Characteristic-junction parallel scenarios --------------------
+//
+// Finding 0003 (B2 follow-up): the audit above was Stagnation-only. Every
+// production calibration, every parity test, and every finding so far runs
+// `JunctionKind::Characteristic`, where the per-cycle nonconservation has an
+// algorithmic precision floor at ~1e-4 relative (cliff onset cycle 18 at
+// 10000 RPM, cycle 13 at 6000 RPM). These scenarios extend the audit so its
+// JSON sidecars cover both junction kinds; the strict regression assertions
+// live in `regressions_0003_conservation_cliff.rs`. Names mirror the
+// corresponding stagnation scenarios with a `_char` suffix.
+
+const N_CYCLES_CHAR_LONG: usize = 30;
+
+#[test]
+#[ignore]
+fn audit_01_default_baseline_char() {
+    ensure_clean_log();
+    let cfg = base_cfg();
+    run_scenario_with_junction(
+        "01_default_baseline_char",
+        cfg,
+        10_000.0,
+        N_CYCLES_CHAR_LONG,
+        "Default config, Characteristic junction, 10000 RPM, 30 cycles. \
+         Parallels audit_01 (Stagnation). Reproduces 0003's primary case: \
+         cliff onset cycle 18, plateau ~4e-7 kg by cycle 30.",
+        JunctionKind::Characteristic,
+    );
+}
+
+#[test]
+#[ignore]
+fn audit_09_high_rpm_13000_char() {
+    ensure_clean_log();
+    let cfg = base_cfg();
+    run_scenario_with_junction(
+        "09_high_rpm_13000_char",
+        cfg,
+        13_000.0,
+        N_CYCLES_CHAR_LONG,
+        "13000 RPM, Characteristic junction. New datapoint beyond 0003 — \
+         higher RPM means fewer steps per cycle, so cliff onset should be \
+         later than the 10000-RPM cycle-18 mark.",
+        JunctionKind::Characteristic,
+    );
+}
+
+#[test]
+#[ignore]
+fn audit_10_low_rpm_6000_char() {
+    ensure_clean_log();
+    let cfg = base_cfg();
+    run_scenario_with_junction(
+        "10_low_rpm_6000_char",
+        cfg,
+        6_000.0,
+        N_CYCLES_CHAR_LONG,
+        "6000 RPM, Characteristic junction. Reproduces 0003's RPM-dependence \
+         observation: cliff onset moves earlier (cycle 13) when steps/cycle \
+         grows. If the cliff now appears later than cycle 16 the secant-Newton \
+         tolerance budget has changed; re-validate 0003.",
+        JunctionKind::Characteristic,
+    );
 }
