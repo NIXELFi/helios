@@ -147,6 +147,125 @@ fn validate_fails_on_egt_below_floor() {
 }
 
 #[test]
+fn validate_passes_when_nonconservation_above_absolute_but_below_relative_band() {
+    // B1 (finding 0003 follow-up): the old check compared `nc.abs()` (kg) to
+    // the 1e-10 band documented as relative. A run with nc = 1e-9 kg and
+    // mass_total = 100 kg has relative drift 1e-11 — passes the proper
+    // relative C9 band, but failed the old absolute check. Pin the corrected
+    // behavior.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","rpm":9000,"imep_bar":9.0,"brake_power_kW":40.0,"ve_atm":0.85,"egt_mean_K":900.0,"mass_drift_kg":0.0,"mass_total_kg":100.0,"nonconservation":1e-9}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        r.status.success(),
+        "validate should PASS — nc/m_total = 1e-11 is below the 1e-10 relative band: stderr={} stdout={}",
+        String::from_utf8_lossy(&r.stderr),
+        String::from_utf8_lossy(&r.stdout)
+    );
+}
+
+#[test]
+fn validate_characteristic_junction_uses_relaxed_band() {
+    // C9 amendment (finding 0003): the characteristic junction has an
+    // algorithmic precision floor at ~1e-4 relative; the band is 5e-4.
+    // A trial at relative 2e-4 (worse than CV band 1e-10, better than
+    // CHAR band 5e-4) must PASS when junction='characteristic'.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","junction":"characteristic","rpm":10000,"imep_bar":12.7,"brake_power_kW":52.0,"ve_atm":0.76,"egt_mean_K":1100.0,"mass_drift_kg":0.0,"mass_total_kg":3.5e-3,"nonconservation":7e-7}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        r.status.success(),
+        "validate should PASS on characteristic-junction trial within 5e-4 band: stderr={}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+}
+
+#[test]
+fn validate_stagnation_junction_uses_strict_band() {
+    // Same magnitude trial, but junction='stagnation' should FAIL —
+    // stagnation must hold machine-epsilon (~1e-15 relative); 2e-4 is six
+    // orders above the 1e-10 CV band and indicates a real numerical bug.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","junction":"stagnation","rpm":10000,"imep_bar":12.7,"brake_power_kW":52.0,"ve_atm":0.76,"egt_mean_K":1100.0,"mass_drift_kg":0.0,"mass_total_kg":3.5e-3,"nonconservation":7e-7}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        !r.status.success(),
+        "validate should FAIL on stagnation-junction trial above 1e-10 band"
+    );
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("stagnation"),
+        "failure message should name the stagnation band: stderr={stderr}"
+    );
+}
+
+#[test]
+fn validate_unknown_junction_label_fails() {
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","junction":"bogus","rpm":10000,"imep_bar":12.7,"brake_power_kW":52.0,"ve_atm":0.76,"egt_mean_K":1100.0,"mass_drift_kg":0.0,"mass_total_kg":3.5e-3,"nonconservation":1e-18}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(!r.status.success(), "validate should FAIL on unknown junction label");
+}
+
+#[test]
+fn validate_legacy_ndjson_without_junction_uses_strict_default() {
+    // Legacy trials produced before the `junction` field was emitted must
+    // still validate, but err strict — same as CV. A spec-correct legacy
+    // trial (machine-eps nonconservation) passes.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","rpm":9000,"imep_bar":9.5,"brake_power_kW":40.0,"ve_atm":0.85,"egt_mean_K":900.0,"mass_drift_kg":1e-15,"mass_total_kg":0.005,"nonconservation":1e-18}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        r.status.success(),
+        "validate should PASS on a legacy spec-correct trial: stderr={}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+}
+
+#[test]
+fn validate_fails_when_mass_total_field_is_missing() {
+    // The relative check needs `mass_total_kg` to normalize. If absent we
+    // cannot compute the relative residual — surface that as a failure with
+    // a specific message rather than silently passing.
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("r.ndjson");
+    write_ndjson(
+        &p,
+        r#"{"kind":"trial","rpm":9000,"imep_bar":9.0,"brake_power_kW":40.0,"ve_atm":0.85,"egt_mean_K":900.0,"mass_drift_kg":0.0,"nonconservation":1e-18}"#,
+    );
+    let r = bin().args(["validate", p.to_str().unwrap()]).output().unwrap();
+    assert!(
+        !r.status.success(),
+        "validate should FAIL when mass_total_kg is absent — cannot normalize nonconservation"
+    );
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("mass_total_kg"),
+        "failure should mention missing mass_total_kg: stderr={stderr}"
+    );
+}
+
+#[test]
 fn validate_fails_on_missing_environment_block() {
     let dir = tempdir().unwrap();
     let p = dir.path().join("r.ndjson");

@@ -37,7 +37,14 @@ pub struct ValidateSummary {
     pub skipped_checks: Vec<String>,
 }
 
-const MASS_REL_BAND: f64 = 1e-10;
+/// Spec C9 mass-conservation bands, junction-kind-aware (amended after
+/// finding 0003 diagnosed a characteristic-junction precision floor).
+const MASS_REL_BAND_CV: f64 = 1e-10;
+const MASS_REL_BAND_CHAR: f64 = 5e-4;
+/// Strict default for trials missing the `junction` field (legacy NDJSON).
+/// Erring strict keeps spec-correct trials passing and surfaces ambiguous
+/// records as failures rather than silently relaxing the gate.
+const MASS_REL_BAND_DEFAULT: f64 = MASS_REL_BAND_CV;
 const EGT_FLOOR_K: f64 = 200.0;
 
 pub fn execute(args: Args) -> Result<()> {
@@ -136,18 +143,56 @@ fn check_positivity(idx: usize, t: &Value, failures: &mut Vec<String>) {
 
 fn check_mass(idx: usize, t: &Value, failures: &mut Vec<String>) {
     // Spec C9 mass conservation: the per-cycle FP roundoff residual must
-    // be at or below `MASS_REL_BAND`. The correct field is `nonconservation`
-    // (computed by engine-sim as the floating-point closure error of the
-    // mass-balance equation). `mass_drift_kg` is NOT a conservation residual
-    // — it's the cycle-to-cycle convergence delta (intake mass minus exhaust
-    // mass minus stored mass change), which is expected to be nonzero until
-    // the engine reaches steady state. Treating mass_drift as a conservation
-    // failure is wrong (caught while running the 0001-limiter-revalidation
-    // finding on commit ac4a6fa).
+    // be at or below the junction-kind-aware band *relative to total mass*.
+    // The correct field is `nonconservation` (kg) — engine-sim's
+    // floating-point closure error of the mass-balance equation.
+    // `mass_drift_kg` is NOT a conservation residual; it's the cycle-to-
+    // cycle convergence delta (intake minus exhaust minus stored), expected
+    // nonzero until steady state. Caught while running 0001-limiter-
+    // revalidation (commit ac4a6fa).
+    //
+    // B1 (finding 0003): the original check compared the absolute kg value
+    // to a band documented as relative — wrong units. For SDM26 (m_total ≈
+    // 3.5e-3 kg) the absolute 1e-10 kg band corresponds to ~3e-8 relative,
+    // looser than the intended 1e-10 relative. We now normalize by
+    // mass_total_kg (required field) before comparing.
+    //
+    // Band selection (C9 amendment, finding 0003): CV / Stagnation
+    // junctions hold machine-epsilon conservation (~1e-15 relative); the
+    // characteristic junction has an algorithmic precision floor at ~1e-4
+    // relative on SDM-class engines. The trial row carries a `junction`
+    // string; absent it (legacy NDJSON) we default to the strict CV band so
+    // missing metadata surfaces rather than silently relaxes the gate.
     if let Some(nc) = t.get("nonconservation").and_then(Value::as_f64) {
-        if nc.abs() > MASS_REL_BAND {
+        let Some(m_total) = t.get("mass_total_kg").and_then(Value::as_f64) else {
             failures.push(format!(
-                "trial {idx}: nonconservation={nc:.3e} exceeds C9 band {MASS_REL_BAND:.0e}"
+                "trial {idx}: missing `mass_total_kg` field — cannot normalize nonconservation"
+            ));
+            return;
+        };
+        if !(m_total > 0.0) {
+            failures.push(format!(
+                "trial {idx}: mass_total_kg={m_total} is non-positive — cannot normalize"
+            ));
+            return;
+        }
+        let (band, junction_label) = match t.get("junction").and_then(Value::as_str) {
+            Some("characteristic") => (MASS_REL_BAND_CHAR, "characteristic"),
+            Some("stagnation") => (MASS_REL_BAND_CV, "stagnation"),
+            Some(other) => {
+                failures.push(format!(
+                    "trial {idx}: unknown junction kind {other:?} — \
+                     expected 'characteristic' or 'stagnation'"
+                ));
+                return;
+            }
+            None => (MASS_REL_BAND_DEFAULT, "unspecified(default=CV)"),
+        };
+        let nc_rel = nc / m_total;
+        if nc_rel.abs() > band {
+            failures.push(format!(
+                "trial {idx}: nonconservation={nc:.3e} kg / mass_total={m_total:.3e} kg \
+                 = {nc_rel:.3e} relative exceeds C9 {junction_label} band {band:.0e}"
             ));
         }
         return;

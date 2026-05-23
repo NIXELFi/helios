@@ -76,6 +76,15 @@ pub fn execute_with(args: &Args) -> Result<RunSummary> {
         .with_context(|| format!("load engine config {}", study.run.config))?;
 
     let junction_kind = parse_junction_kind(study.run.junction.as_deref())?;
+    // Stable string label for serialization. `Characteristic` is the V1 default
+    // when no junction is provided in study.toml (matches the parity-test
+    // convention at crates/engine-sim/tests/parity_engine.rs). The label is
+    // emitted on every trial row so `helios-bench validate` can apply the
+    // junction-kind-aware C9 mass band (spec amended after finding 0003).
+    let junction_label = match junction_kind {
+        JunctionKind::Characteristic => "characteristic",
+        JunctionKind::Stagnation => "stagnation",
+    };
 
     let mut n_trials: usize = 0;
     for &rpm in &study.run.rpm {
@@ -103,6 +112,7 @@ pub fn execute_with(args: &Args) -> Result<RunSummary> {
 
         let row = json!({
             "kind": "trial",
+            "junction": junction_label,
             "rpm": result.rpm,
             "n_cycles_requested": result.n_cycles_requested,
             "n_cycles_run": result.n_cycles_run,
