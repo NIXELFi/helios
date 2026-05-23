@@ -94,6 +94,13 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
     let base_cfg = load_v1_json(&study.run.config)
         .with_context(|| format!("load engine config {}", study.run.config))?;
     let junction_kind = parse_junction_kind(study.run.junction.as_deref())?;
+    // Same junction-label emission as `run.rs`. Lets `helios-bench validate`
+    // pick the right C9 band per trial and keeps sweep / run NDJSONs schema-
+    // consistent. See validate.rs for band selection logic.
+    let junction_label = match junction_kind {
+        JunctionKind::Characteristic => "characteristic",
+        JunctionKind::Stagnation => "stagnation",
+    };
 
     let samples = sample(kind, sweep_spec.n_trials as usize, params.len(), study.run.seed);
 
@@ -124,6 +131,7 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
                     .ok_or_else(|| anyhow::anyhow!("trial {trial_id} rpm={rpm}: no cycle_stats"))?;
                 writer.write(&json!({
                     "kind": "trial",
+                    "junction": junction_label,
                     "trial_id": trial_id,
                     "rpm": result.rpm,
                     "cycles": result.n_cycles_run,
