@@ -214,6 +214,13 @@ pub struct SDM26Config {
     pub eta_comb: f64,
     pub q_lhv: f64,
     pub afr_target: f64,
+    /// 0013: fuel octane number for the Livengood-Wu knock integral
+    /// (Douaud-Eyzat 1978 auto-ignition delay). Default 95 (race/premium).
+    /// Pump gas ~91. Lower octane → faster auto-ignition → higher knock
+    /// integral at same P, T. Diagnostic only — the simulator does NOT
+    /// derate combustion when knock is predicted; the integral is
+    /// reported per cycle for designers to gate.
+    pub octane_number: f64,
     /// When true, multiply `eta_comb` by a Heywood-shape AFR factor that
     /// models rich-quench and lean-misfire (φ = AFR_stoich / AFR).
     /// Default false → bit-exact Python parity preserved.
@@ -326,6 +333,7 @@ impl Default for SDM26Config {
             combustion_duration: 50.0, spark_advance: 25.0,
             ignition_delay: 7.0,
             eta_comb: 0.96, q_lhv: 44.0e6, afr_target: 13.1,
+            octane_number: 95.0,
             afr_eta_enabled: false,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
@@ -469,6 +477,12 @@ pub struct CycleStats {
     pub wheel_torque_nm: f64,
     #[serde(rename = "egtMean")]
     pub egt_mean: f64,
+    /// 0013: Livengood-Wu knock integral at start of combustion.
+    /// > 1.0 = end-gas auto-ignites before flame arrives → knock predicted.
+    /// Diagnostic only — does NOT feed back into combustion model.
+    /// Designers should treat I > 1.0 as a hard no-go for SDM27 designs.
+    #[serde(rename = "knockIntegral")]
+    pub knock_integral: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -728,6 +742,7 @@ impl SDM26Engine {
                 intake_valve.clone(), exhaust_valve.clone(),
                 phase_offset, cfg.enable_residual_tracking,
             );
+            cyl.octane_number = cfg.octane_number;
             cyl.initialize(cfg.p_ambient, cfg.t_ambient, 0.0);
             cylinders.push(cyl);
         }
@@ -1124,6 +1139,12 @@ impl SDM26Engine {
                     brake_torque_nm,
                     wheel_torque_nm,
                     egt_mean,
+                    // 0013: max knock integral across cylinders. A SDM27 design
+                    // is knock-prone if ANY cylinder trips it, so the max
+                    // is the appropriate per-cycle reporting metric.
+                    knock_integral: self.cylinders.iter()
+                        .map(|c| c.state.knock_integral_at_spark)
+                        .fold(0.0_f64, f64::max),
                 };
                 state.last_mass_total = m_now;
                 for c in self.cylinders.iter_mut() {

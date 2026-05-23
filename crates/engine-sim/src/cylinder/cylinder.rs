@@ -65,6 +65,17 @@ pub struct CylinderState {
     /// Flag: are we currently inside a two-zone combustion window?
     /// When false, m_b/m_u/t_b/t_u are not maintained.
     pub two_zone_active: bool,
+    /// 0013: Livengood-Wu knock integral, accumulated from IVC over the
+    /// compression stroke. Reset to 0 at IVC. Integration formula:
+    ///   I = ∫_IVC^t (1 / τ(P, T)) dt
+    /// with τ from Douaud-Eyzat 1978:
+    ///   τ_ms = 17.68 · (ON/100)^3.402 · P_atm^(-1.7) · exp(3800 / T_unb)
+    /// `knock_integral_at_spark` is the snapshot at the first step of
+    /// combustion — that's the physically-relevant value (the end-gas
+    /// auto-ignition threshold). I > 1.0 → end-gas auto-ignites before
+    /// the flame front arrives → knock predicted.
+    pub knock_integral_accum: f64,
+    pub knock_integral_at_spark: f64,
 }
 
 impl Default for CylinderState {
@@ -80,6 +91,8 @@ impl Default for CylinderState {
             phase_offset_deg: 0.0,
             m_b: 0.0, m_u: 0.0, t_b: 0.0, t_u: 0.0,
             two_zone_active: false,
+            knock_integral_accum: 0.0,
+            knock_integral_at_spark: 0.0,
         }
     }
 }
@@ -93,6 +106,13 @@ pub struct CylinderModel {
     pub exhaust_valve: ValveParams,
     pub state: CylinderState,
     pub enable_residual_tracking: bool,
+    /// 0013: Fuel octane number for the Livengood-Wu knock integral.
+    /// Default 95 (race gas / premium pump). Pump gas ~91. Default
+    /// behavior at any reasonable octane is a no-op diagnostic that
+    /// just reports `knock_integral_at_spark` — it does NOT feed back
+    /// into combustion. Designers should treat I > 1.0 as a hard
+    /// no-go for SDM27 architectures.
+    pub octane_number: f64,
 }
 
 #[inline]
@@ -115,6 +135,7 @@ impl CylinderModel {
         Self {
             geom, wiebe, woschni, intake_valve, exhaust_valve,
             state, enable_residual_tracking,
+            octane_number: 95.0,
         }
     }
 
@@ -208,6 +229,14 @@ impl CylinderModel {
         // 0007: RPM-scaled Wiebe a (turbulent flame speed). Defaults to
         // RPM-invariant `self.wiebe.a` when wiebe_a_rpm_exp = 0.
         let a_eff = self.wiebe.a_at(rpm) * (1.0 + self.wiebe.tumble_burn_factor);
+
+        // 0013: Livengood-Wu knock integral. Accumulate during
+        // compression (valves closed, NOT yet combusting), reset at IVC
+        // (handled in the IVC block below), snapshot at combustion start.
+        // Diagnostic only — does not affect combustion model.
+        let iv_open = valve_is_open(theta_local, &self.intake_valve);
+        let ev_open = valve_is_open(theta_local, &self.exhaust_valve);
+        let in_compression = !iv_open && !ev_open;
         // 0006: pull the RPM-aware combustion window. With default
         // slope=0 + exp=0 these return the legacy constants; with
         // non-zero slope / exp they shift the burn with RPM.
@@ -215,6 +244,50 @@ impl CylinderModel {
         let duration_rpm = self.wiebe.duration_at(rpm);
         let burning = is_combusting(theta_local, theta_start_rpm, duration_rpm)
             && self.state.m_fuel > 0.0;
+
+        // Integrate LW knock measure: from IVC through end of combustion.
+        // The "snapshot" happens at end of combustion (when burning goes
+        // back to false), capturing the full end-gas exposure history.
+        if in_compression && self.state.knock_integral_at_spark == 0.0 {
+            // Douaud-Eyzat 1978 auto-ignition delay τ_ms:
+            //   τ_ms = 17.68 · (ON/100)^3.402 · P_atm^(-1.7) · exp(3800/T_unb)
+            //
+            // T_unburned choice:
+            //   * Pre-burn (in_compression && !burning): bulk T is correct.
+            //   * Two-zone active: explicit t_u.
+            //   * Single-zone during burn: polytropic compression estimate
+            //     from IVC, T_u(P) = T_IVC × (P/P_IVC)^((γ−1)/γ). This is the
+            //     textbook end-gas T model (Heywood §9.6) and avoids the
+            //     burned-gas heating bias of using bulk T during burn.
+            let t_unb = if self.state.two_zone_active && self.state.t_u > 0.0 {
+                self.state.t_u
+            } else if burning && self.state.p_at_ivc > 0.0 {
+                let pr = (self.state.p / self.state.p_at_ivc).max(1.0);
+                // gamma ≈ 1.35 for unburned mixed gas at SI temperatures
+                let exp_gm1_over_g = 0.35 / 1.35;
+                (self.state.t_at_ivc * pr.powf(exp_gm1_over_g)).max(200.0)
+            } else {
+                self.state.t.max(200.0)
+            };
+            let p_atm = (self.state.p / 101325.0).max(0.1);
+            let on_factor = (self.octane_number / 100.0).powf(3.402);
+            let tau_ms = 17.68 * on_factor * p_atm.powf(-1.7) * (3800.0 / t_unb).exp();
+            if tau_ms > 1e-12 {
+                let di = (dt * 1000.0) / tau_ms; // dt in s, tau in ms → dimensionless
+                self.state.knock_integral_accum += di;
+            }
+        }
+        // Snapshot at END of combustion (first step where burning goes
+        // back to false after having been true). This captures the full
+        // end-gas auto-ignition exposure including the burn-phase
+        // compression by the flame front — the physically-relevant
+        // knock criterion.
+        if !burning && self.state.knock_integral_accum > 0.0
+           && self.state.x_b > 0.5  // proxy: combustion has happened this cycle
+           && self.state.knock_integral_at_spark == 0.0
+        {
+            self.state.knock_integral_at_spark = self.state.knock_integral_accum;
+        }
         let mut d_q_comb_dt = 0.0_f64;
         let mut dxb_dt = 0.0_f64;
         if burning {
@@ -513,6 +586,10 @@ impl CylinderModel {
             self.state.m_u = self.state.m;
             self.state.t_b = self.state.t;
             self.state.t_u = self.state.t;
+            // 0013: reset knock integral at IVC so each cycle gets a
+            // fresh measurement.
+            self.state.knock_integral_accum = 0.0;
+            self.state.knock_integral_at_spark = 0.0;
         }
     }
 }

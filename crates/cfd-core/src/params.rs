@@ -135,6 +135,10 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         // as B6/B7/B8 in 0009. CFL is similarly exposed for grid-conv work.
         m("limiter", Scalar, 1, "enum", cfg.limiter as f64, 0.0, 2.0, "Numerics"),
         m("cfl", Scalar, 1, "-", cfg.cfl, 0.1, 0.95, "Numerics"),
+        // B11/B12 — flat-top lift ramp flags found missing via apply_override audit
+        m("intake_lift_flat_top_ramp", Scalar, 1, "-", cfg.intake_lift_flat_top_ramp, 0.0, 0.5, "Intake"),
+        m("exhaust_lift_flat_top_ramp", Scalar, 1, "-", cfg.exhaust_lift_flat_top_ramp, 0.0, 0.5, "Exhaust"),
+        m("octane_number", Scalar, 1, "-", cfg.octane_number, 80.0, 110.0, "Combustion"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -407,7 +411,9 @@ pub fn apply_override(
         "tumble_burn_factor" => cfg.tumble_burn_factor = value,
         "two_zone_enabled" => cfg.two_zone_enabled = value != 0.0,
         "limiter" => cfg.limiter = value.round() as i32,
-        "cfl" => cfg.cfl = value,
+        "intake_lift_flat_top_ramp" => cfg.intake_lift_flat_top_ramp = value,
+        "exhaust_lift_flat_top_ramp" => cfg.exhaust_lift_flat_top_ramp = value,
+        "octane_number" => cfg.octane_number = value,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,

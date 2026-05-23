@@ -134,6 +134,7 @@ pub fn execute_with(args: &Args) -> Result<RunSummary> {
             "mass_total_kg": stats.mass_total,
             "nonconservation": stats.nonconservation,
             "intake_mass_per_cycle_g": stats.intake_mass_per_cycle_g,
+            "knock_integral": stats.knock_integral,
             "f_residual": stats.f_residual,
         });
         writer.write(&row)?;
