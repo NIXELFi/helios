@@ -5,7 +5,9 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { OptimizationParamsModal } from "../components/optimization/OptimizationParamsModal";
 import { basename } from "../lib/cfdPath";
 import { parseRpmList } from "../lib/rpmList";
-import type { JunctionKind, SingleRpmParams, Study, SweepParams } from "../state/types";
+import type { JunctionKind, ParameterOverride, SingleRpmParams, Study, SweepParams } from "../state/types";
+import { PresetPicker } from "../components/PresetPicker";
+import { DEFAULT_PRESET_ID, findPreset } from "../lib/presets";
 
 export function StudiesScreen() {
   const { state, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
@@ -313,10 +315,19 @@ function SingleRpmParamsModal({
   const [nCycles, setNCycles] = useState<number>(40);
   const [junction, setJunction] = useState<JunctionKind>("characteristic");
   const [tol, setTol] = useState<number>(5e-3);
-  const [minCycles, setMinCycles] = useState<number>(8);
+  // Default min-cycles bumped from 8 → 30 (2026-05-23) after per-cycle
+  // IMEP probe (test crates/cfd-core/tests/imep_convergence_probe.rs)
+  // showed SDM26 @ 10k drifts +9% from cycle 8 → final, +2.6% from
+  // cycle 20 → final, settling within 0.5% only by cycle 25-30. Classic
+  // Ricardo-WAVE-style false-convergence trap if min is too low.
+  const [minCycles, setMinCycles] = useState<number>(30);
   const [capPv, setCapPv] = useState<boolean>(true);
   const [capProfiles, setCapProfiles] = useState<boolean>(true);
   const [capWaves, setCapWaves] = useState<boolean>(false);
+  const [presetId, setPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [overrides, setOverrides] = useState<ParameterOverride[]>(
+    () => findPreset(DEFAULT_PRESET_ID).overrides,
+  );
 
   if (!open) return null;
   return (
@@ -330,6 +341,10 @@ function SingleRpmParamsModal({
           <span className="text-[10px] text-[#5A5F66]" title={defaultPath}>{basename(defaultPath)}</span>
         </div>
         <div className="p-3">
+          <PresetPicker
+            selectedId={presetId}
+            onChange={(ov, p) => { setPresetId(p.id); setOverrides(ov); }}
+          />
           <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-[11px]">
             <label htmlFor="cfd-rpm" className="uppercase tracking-wider text-[#5A5F66]">RPM</label>
             <input id="cfd-rpm" type="number" min={500} max={20000} step={100}
@@ -374,6 +389,7 @@ function SingleRpmParamsModal({
                 captureWaves: capWaves,
                 capturePvLoops: capPv,
                 capturePipeProfiles: capProfiles,
+                overrides,
               })}>
               Start
             </button>
@@ -406,10 +422,19 @@ function SweepParamsModal({
   const [nCycles, setNCycles] = useState<number>(40);
   const [junction, setJunction] = useState<JunctionKind>("characteristic");
   const [tol, setTol] = useState<number>(5e-3);
-  const [minCycles, setMinCycles] = useState<number>(8);
+  // Default min-cycles bumped from 8 → 30 (2026-05-23) after per-cycle
+  // IMEP probe (test crates/cfd-core/tests/imep_convergence_probe.rs)
+  // showed SDM26 @ 10k drifts +9% from cycle 8 → final, +2.6% from
+  // cycle 20 → final, settling within 0.5% only by cycle 25-30. Classic
+  // Ricardo-WAVE-style false-convergence trap if min is too low.
+  const [minCycles, setMinCycles] = useState<number>(30);
   const [capPv, setCapPv] = useState<boolean>(true);
   const [capProfiles, setCapProfiles] = useState<boolean>(true);
   const [capWaves, setCapWaves] = useState<boolean>(false);
+  const [presetId, setPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [overrides, setOverrides] = useState<ParameterOverride[]>(
+    () => findPreset(DEFAULT_PRESET_ID).overrides,
+  );
 
   if (!open) return null;
 
@@ -431,6 +456,10 @@ function SweepParamsModal({
           <span className="text-[10px] text-[#5A5F66]" title={defaultPath}>{basename(defaultPath)}</span>
         </div>
         <div className="p-3">
+          <PresetPicker
+            selectedId={presetId}
+            onChange={(ov, p) => { setPresetId(p.id); setOverrides(ov); }}
+          />
           {!useAdvanced && (
             <>
               <div className="mb-1 text-[10px] uppercase tracking-wider text-[#5A5F66]">RPM range</div>
@@ -547,6 +576,7 @@ function SweepParamsModal({
                   captureWaves: capWaves,
                   capturePvLoops: capPv,
                   capturePipeProfiles: capProfiles,
+                  overrides,
                 });
               }}>
               Start sweep

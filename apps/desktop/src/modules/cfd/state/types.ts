@@ -67,6 +67,15 @@ export interface ExampleConfig {
   path: string;
 }
 
+/** Single SDM26Config override applied before the engine runs.
+ *  Path matches backend `apply_override` (e.g. "fmep_c",
+ *  "restrictor_cd_mach_k", "runner_length[2]"). Used by UI presets like
+ *  the Option B production knob set. */
+export interface ParameterOverride {
+  path: string;
+  value: number;
+}
+
 export interface SingleRpmParams {
   rpm: number;
   nCyclesMax: number;
@@ -76,6 +85,8 @@ export interface SingleRpmParams {
   captureWaves: boolean;
   capturePvLoops: boolean;
   capturePipeProfiles: boolean;
+  /** Optional config overrides (production knob set preset etc.) */
+  overrides?: ParameterOverride[];
 }
 
 export interface SweepParams {
@@ -87,6 +98,8 @@ export interface SweepParams {
   captureWaves: boolean;
   capturePvLoops: boolean;
   capturePipeProfiles: boolean;
+  /** Optional config overrides (production knob set preset etc.) */
+  overrides?: ParameterOverride[];
 }
 
 // ---- Optimization (Phase 5) ----

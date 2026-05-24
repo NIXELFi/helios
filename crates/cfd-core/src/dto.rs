@@ -84,6 +84,10 @@ pub struct SingleRpmParams {
     pub capture_pv_loops: bool,
     #[serde(default = "default_capture_pv")]
     pub capture_pipe_profiles: bool,
+    /// Optional SDM26Config overrides applied via `apply_override` before
+    /// the engine is built. Used by UI presets (Option B production knob set).
+    #[serde(default)]
+    pub overrides: Vec<ParameterOverride>,
 }
 
 fn default_capture_pv() -> bool { true }
@@ -103,6 +107,10 @@ pub struct SweepParams {
     pub capture_pv_loops: bool,
     #[serde(default = "default_capture_pv")]
     pub capture_pipe_profiles: bool,
+    /// Optional SDM26Config overrides applied via `apply_override` before
+    /// the engine is built. Same semantics as `SingleRpmParams.overrides`.
+    #[serde(default)]
+    pub overrides: Vec<ParameterOverride>,
 }
 
 // ---------------- Optimization parameter / objective DTOs (Phase 5) ----------------
@@ -144,6 +152,18 @@ pub struct ObjectiveSpec {
     pub aggregator: ObjectiveAggregator,
     pub rpm_list: Vec<f64>,
     pub direction: ObjectiveDirection,
+}
+
+/// A single-value override applied to SDM26Config before the engine runs.
+/// Used by Single-RPM + Sweep flows to apply preset knob values (e.g.
+/// the Option B production knob set from SESSION_HANDOFF.md §2) without
+/// editing the JSON config file. `path` follows the same flat naming as
+/// `ParameterBounds` (e.g. "fmep_c", "restrictor_cd_mach_k", "runner_length[2]").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ParameterOverride {
+    pub path: String,
+    pub value: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -507,6 +527,7 @@ mod tests {
                 capture_waves: false,
                 capture_pv_loops: true,
                 capture_pipe_profiles: true,
+                overrides: vec![],
             },
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -543,6 +564,7 @@ mod tests {
                 capture_waves: true,
                 capture_pv_loops: true,
                 capture_pipe_profiles: false,
+                overrides: vec![],
             },
         };
         let json = serde_json::to_string(&req).unwrap();

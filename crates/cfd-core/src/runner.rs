@@ -234,7 +234,7 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
         started_at,
     });
 
-    let cfg = match load_v1_json(&config_path) {
+    let mut cfg = match load_v1_json(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -248,6 +248,23 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
             return RunOutcome::Errored;
         }
     };
+
+    // Apply any UI-specified parameter overrides (e.g. Option B production
+    // knob set preset). Each override is a single `apply_override` call;
+    // unknown paths surface as ConfigLoad errors.
+    for ov in &params.overrides {
+        if let Err(e) = crate::params::apply_override(&mut cfg, &ov.path, ov.value) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::SingleRpm,
+                reason: ErrorReason::ConfigLoad,
+                message: format!("apply_override({}): {}", ov.path, e),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    }
 
     let mut eng = SDM26Engine::new(cfg, params.junction_kind.into());
     let mut loop_state = CycleLoopState::new(&mut eng);
@@ -348,7 +365,7 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
         kind: StudyKind::Sweep,
         started_at,
     });
-    let cfg = match load_v1_json(&config_path) {
+    let mut cfg = match load_v1_json(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -362,6 +379,22 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
             return RunOutcome::Errored;
         }
     };
+
+    // Apply any UI-specified parameter overrides (preset support).
+    for ov in &params.overrides {
+        if let Err(e) = crate::params::apply_override(&mut cfg, &ov.path, ov.value) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Sweep,
+                reason: ErrorReason::ConfigLoad,
+                message: format!("apply_override({}): {}", ov.path, e),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    }
+    let cfg = cfg; // re-bind to immutable for the rest of the function
 
     let flags = CaptureFlags {
         waves: params.capture_waves,
@@ -1003,6 +1036,7 @@ mod tests {
             capture_waves: false,
             capture_pv_loops: false,
             capture_pipe_profiles: false,
+            overrides: vec![],
         }
     }
 
@@ -1145,6 +1179,7 @@ mod tests {
             capture_waves: false,
             capture_pv_loops: false,
             capture_pipe_profiles: false,
+            overrides: vec![],
         }
     }
 
@@ -1256,6 +1291,7 @@ mod tests {
             capture_waves: false,
             capture_pv_loops: false,
             capture_pipe_profiles: false,
+            overrides: vec![],
         };
         let emitter = VecEmitter::default();
         let outcome = run_sweep_job(
