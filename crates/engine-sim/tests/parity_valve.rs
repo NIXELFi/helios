@@ -32,6 +32,7 @@ fn intake_params() -> ValveParams {
         seat_angle_deg: 45.0, n_valves: 2,
         ld_table: INTAKE_LD_TABLE.to_vec(),
         cd_table: INTAKE_CD_TABLE.to_vec(), profile: engine_sim::cylinder::valve::LiftProfile::Sin2,
+        re_correction_enabled: false, re_cd_min: 1.0, re_crit: 1.0,
     }
 }
 
@@ -42,6 +43,7 @@ fn exhaust_params() -> ValveParams {
         seat_angle_deg: 45.0, n_valves: 2,
         ld_table: EXHAUST_LD_TABLE.to_vec(),
         cd_table: EXHAUST_CD_TABLE.to_vec(), profile: engine_sim::cylinder::valve::LiftProfile::Sin2,
+        re_correction_enabled: false, re_cd_min: 1.0, re_crit: 1.0,
     }
 }
 

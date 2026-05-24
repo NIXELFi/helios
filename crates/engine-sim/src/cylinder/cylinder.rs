@@ -362,22 +362,65 @@ impl CylinderModel {
             let m_u = self.state.m_u.max(0.0);
             let t_b = self.state.t_b.max(100.0);
             let t_u = self.state.t_u.max(100.0);
-            // Pressure-equilibrium volume fractions: V_z/V = m_z·T_z / Σ(m_i·T_i)
-            // (assuming R_b ≈ R_u; the small difference is absorbed into
-            //  the mass-averaged R that's already used in the pressure ODE).
-            let mt_b = m_b * t_b;
-            let mt_u = m_u * t_u;
-            let mt_sum = (mt_b + mt_u).max(1e-12);
-            let v_frac_b = (mt_b / mt_sum).clamp(0.0, 1.0);
-            let v_frac_u = 1.0 - v_frac_b;
+            // Pressure-equilibrium volume fractions.
+            //   Legacy (parity-preserving):
+            //     V_z/V = m_z·T_z / Σ(m_i·T_i)   (assumes R_b = R_u)
+            //   R-weighted (correct EOS):
+            //     V_z/V = m_z·R_z·T_z / Σ(m_i·R_i·T_i)
+            // With R_b = 295 J/(kg·K), R_u = 287 J/(kg·K) the burned-zone
+            // volume share is ~3% higher under the R-weighted form, which
+            // moves part of the wall-area Q_loss budget toward the hotter
+            // zone — a real first-law correction.
+            // Bundled under `two_zone_gamma_cv_weighted` because it's part
+            // of the same thermodynamically-consistent two-zone fix-up
+            // (finding 0016 § followup 0021).
+            let (v_frac_b, v_frac_u) = if self.wiebe.two_zone_gamma_cv_weighted {
+                let r_b = r_mixture(1.0);
+                let r_u = r_mixture(0.0);
+                let mrt_b = m_b * r_b * t_b;
+                let mrt_u = m_u * r_u * t_u;
+                let mrt_sum = (mrt_b + mrt_u).max(1e-12);
+                let vb = (mrt_b / mrt_sum).clamp(0.0, 1.0);
+                (vb, 1.0 - vb)
+            } else {
+                let mt_b = m_b * t_b;
+                let mt_u = m_u * t_u;
+                let mt_sum = (mt_b + mt_u).max(1e-12);
+                let vb = (mt_b / mt_sum).clamp(0.0, 1.0);
+                (vb, 1.0 - vb)
+            };
             let a_b = a_surf * v_frac_b;
             let a_u = a_surf * v_frac_u;
             let q_ht = h_c * (a_b * (t_b - self.woschni.t_wall)
                             + a_u * (t_u - self.woschni.t_wall));
-            // Mass-averaged γ (zone-specific).
+            // Per-zone γ.
             let g_b = gamma_burned(t_b);
             let g_u = gamma_unburned(t_u);
-            let g = (m_b * g_b + m_u * g_u) / m_total;
+            // Finding 0016: effective γ for the bulk pressure ODE.
+            //   mass-averaged form (legacy, parity-preserving):
+            //     γ_eff = (m_b·γ_b + m_u·γ_u) / m_total
+            //   c_v-weighted form (thermodynamically correct for a true
+            //   two-zone first law at common pressure):
+            //     γ_eff = (m_b·c_p_b + m_u·c_p_u) / (m_b·c_v_b + m_u·c_v_u)
+            // With c_p = γ·c_v and c_v = R/(γ−1), the c_v-weighted γ collapses
+            // to γ(T) when T_b = T_u and to γ_z when only one zone exists. The
+            // mass-averaged form does not satisfy the second limit cleanly
+            // when R differs between zones, and biases the expansion-stroke
+            // work because it weights γ_b (low) at the wrong "thermodynamic
+            // weight." See finding 0016.
+            let g = if self.wiebe.two_zone_gamma_cv_weighted {
+                let r_b = r_mixture(1.0);
+                let r_u = r_mixture(0.0);
+                let cv_b = r_b / (g_b - 1.0);
+                let cv_u = r_u / (g_u - 1.0);
+                let cp_b = g_b * cv_b;
+                let cp_u = g_u * cv_u;
+                let num = m_b * cp_b + m_u * cp_u;
+                let den = (m_b * cv_b + m_u * cv_u).max(1e-20);
+                num / den
+            } else {
+                (m_b * g_b + m_u * g_u) / m_total
+            };
             (g, q_ht)
         } else {
             // Single-zone (parity branch): γ uses the PRE-update x_b
@@ -536,7 +579,20 @@ impl CylinderModel {
                 let g_b = gamma_burned(self.state.t_b.max(300.0));
                 let r_b = r_mixture(1.0);
                 let c_v_b = r_b / (g_b - 1.0);
-                let g_eff = (m_b * g_b + m_u * g_u) / m_total;
+                // Finding 0016: when c_v-weighted γ is active for the bulk
+                // pressure ODE, also use it here for self-consistency. Both
+                // forms collapse to γ(T) when T_b = T_u so this only matters
+                // during the burn.
+                let g_eff = if self.wiebe.two_zone_gamma_cv_weighted {
+                    let cv_u_loc = r_u / (g_u - 1.0);
+                    let cp_b_loc = g_b * c_v_b;
+                    let cp_u_loc = g_u * cv_u_loc;
+                    let num = m_b * cp_b_loc + m_u * cp_u_loc;
+                    let den = (m_b * c_v_b + m_u * cv_u_loc).max(1e-20);
+                    num / den
+                } else {
+                    (m_b * g_b + m_u * g_u) / m_total
+                };
                 let c_v_eff = r_gas / (g_eff - 1.0);
                 let total_u = m_total * c_v_eff * self.state.t;
                 let u_unburned = m_u * c_v_u * t_u_new;

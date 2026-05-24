@@ -107,6 +107,19 @@ pub struct WiebeParams {
     ///     coefficient typically needs a small downward retune
     ///     when two-zone is enabled.
     pub two_zone_enabled: bool,
+
+    /// Finding 0016 — effective-γ formulation for two-zone bulk pressure ODE.
+    /// When `two_zone_enabled` is also true:
+    ///   false (default, parity)  → mass-averaged γ:
+    ///     γ_eff = (m_b·γ_b + m_u·γ_u) / m_total
+    ///   true                     → c_v-weighted γ (thermodynamically correct):
+    ///     γ_eff = (m_b·c_p_b + m_u·c_p_u) / (m_b·c_v_b + m_u·c_v_u)
+    /// The c_v-weighted form is the effective γ that emerges from a proper
+    /// two-zone first-law derivation at common pressure with separate T_b,
+    /// T_u. In the limit of identical zone temperatures both forms collapse
+    /// to γ(T), but during the burn they differ by ~0.01–0.02, biasing
+    /// expansion-stroke work in the mass-averaged form. See finding 0016.
+    pub two_zone_gamma_cv_weighted: bool,
 }
 
 impl Default for WiebeParams {
@@ -135,6 +148,7 @@ impl Default for WiebeParams {
             wiebe_a_rpm_exp: 0.0,
             wiebe_a_rpm_ref: 10000.0,
             two_zone_enabled: false,
+            two_zone_gamma_cv_weighted: false,
         }
     }
 }

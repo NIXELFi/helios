@@ -122,6 +122,7 @@ mod tests {
             brake_torque_nm: 0.0,
             wheel_torque_nm: 0.0,
             egt_mean: 0.0,
+            knock_integral: 0.0,
         }
     }
 

@@ -39,7 +39,12 @@ fn idelchik_diffuser_phi(half_angle_deg: f64) -> f64 {
     }
 }
 use crate::bcs::simple::{fill_open_end_right, fill_transmissive_right};
-use crate::bcs::valve::{fill_valve_ghost_characteristic, PipeEndStr, ValveType};
+use crate::bcs::valve::{
+    fill_valve_ghost_characteristic, fill_valve_ghost_characteristic_with_cd_mult,
+    PipeEndStr, ValveType,
+};
+use crate::cylinder::gas_properties::R_AIR;
+use crate::cylinder::valve::{air_viscosity, re_cd_multiplier};
 use crate::cylinder::combustion::WiebeParams;
 use crate::cylinder::cylinder::{CylinderGeom, CylinderModel};
 use crate::cylinder::heat_transfer::WoschniParams;
@@ -49,6 +54,7 @@ use crate::cylinder::valve::{
     INTAKE_CD_TABLE, INTAKE_LD_TABLE,
 };
 use crate::solver::muscl::{cfl_dt, muscl_hancock_step, LIMITER_MINMOD};
+use crate::solver::weno::weno5_ssprk2_step;
 use crate::solver::sources::apply_sources;
 use crate::solver::state::{
     make_pipe_state, set_uniform, PipeState, ScratchBuffers,
@@ -273,6 +279,35 @@ pub struct SDM26Config {
     /// mass-averaged γ across the two zones. Default false → behaviour
     /// (and parity tests) match the legacy single-zone model exactly.
     pub two_zone_enabled: bool,
+    /// Finding 0023 — opt-in WENO5 + SSP-RK2 solver for pipes (replaces
+    /// MUSCL-Hancock + HLLC). 5th-order spatial reconstruction reduces
+    /// wave damping at sharp pressure fronts (especially exhaust blowdown
+    /// pulses, per finding 0007). Costs ≈ 2× more per step. Default false
+    /// preserves parity goldens. When true, all pipes (intake + exhaust)
+    /// use WENO5; intake-side benefits are typically small but cost is
+    /// uniform.
+    pub use_weno5_in_pipes: bool,
+    /// Finding 0016 — c_v-weighted γ_eff in the two-zone bulk pressure ODE.
+    /// Only meaningful when `two_zone_enabled = true`. When this flag is
+    /// false (default), two-zone uses the legacy mass-averaged γ form
+    /// (parity-preserving). When true, γ_eff = (Σ m·c_p)/(Σ m·c_v), which is
+    /// the thermodynamically correct effective γ for two zones at common
+    /// pressure with separate T_b, T_u.
+    pub two_zone_gamma_cv_weighted: bool,
+    /// Opt-in low-Reynolds intake-valve Cd correction (finding 0015).
+    /// When true, the intake Cd table is multiplied by a Reynolds-dependent
+    /// factor that drops from 1.0 at Re ≥ `intake_valve_re_crit` toward
+    /// `intake_valve_re_cd_min` at Re ≤ 1000. The reference Reynolds is
+    /// computed from the engine mean piston speed and intake valve
+    /// diameter, evaluated at ambient conditions (one scalar per RPM).
+    /// Default false → bit-exact parity with legacy behaviour.
+    pub intake_valve_re_correction_enabled: bool,
+    /// Minimum Cd multiplier at very low engine Re (Re ≤ 1000).
+    /// Literature midpoint 0.70 (Heywood §6.2, range 0.65–0.80).
+    pub intake_valve_re_cd_min: f64,
+    /// Critical Reynolds above which the Cd correction is fully off.
+    /// Literature midpoint 10,000 (Heywood Fig 6.16, range 8,000–15,000).
+    pub intake_valve_re_crit: f64,
     pub exhaust_topology: ExhaustTopology,
     pub drivetrain_efficiency: f64,
     // residual-gas
@@ -355,6 +390,11 @@ impl Default for SDM26Config {
             fmep_c: 0.003,
             tumble_burn_factor: 0.0,
             two_zone_enabled: false,
+            use_weno5_in_pipes: false,
+            two_zone_gamma_cv_weighted: false,
+            intake_valve_re_correction_enabled: false,
+            intake_valve_re_cd_min: 0.70,
+            intake_valve_re_crit: 10000.0,
             exhaust_topology: ExhaustTopology::FourTwoOne,
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
@@ -692,6 +732,7 @@ impl SDM26Engine {
             wiebe_a_rpm_exp: cfg.wiebe_a_rpm_exp,
             wiebe_a_rpm_ref: cfg.wiebe_a_rpm_ref,
             two_zone_enabled: cfg.two_zone_enabled,
+            two_zone_gamma_cv_weighted: cfg.two_zone_gamma_cv_weighted,
             ..WiebeParams::default()
         };
         let woschni = WoschniParams {
@@ -721,6 +762,9 @@ impl SDM26Engine {
             ld_table: cfg.intake_ld_table.clone(),
             cd_table: cfg.intake_cd_table.clone(),
             profile: intake_profile,
+            re_correction_enabled: cfg.intake_valve_re_correction_enabled,
+            re_cd_min: cfg.intake_valve_re_cd_min,
+            re_crit: cfg.intake_valve_re_crit,
         };
         let exhaust_valve = ValveParams {
             diameter: cfg.exhaust_valve_diameter,
@@ -732,6 +776,9 @@ impl SDM26Engine {
             ld_table: cfg.exhaust_ld_table.clone(),
             cd_table: cfg.exhaust_cd_table.clone(),
             profile: exhaust_profile,
+            re_correction_enabled: false,
+            re_cd_min: 1.0,
+            re_crit: 1.0,
         };
         let mut cylinders = Vec::with_capacity(n_cyl);
         for i in 0..n_cyl {
@@ -783,10 +830,23 @@ impl SDM26Engine {
         p / (rho * 287.0)
     }
 
-    pub fn step(&mut self, theta_deg: f64, dt: f64, _rpm: f64) {
+    pub fn step(&mut self, theta_deg: f64, dt: f64, rpm: f64) {
         let cfg = &self.cfg;
         let gamma = 1.4_f64;
         let a_t = 0.25 * PI * cfg.restrictor_throat_diameter * cfg.restrictor_throat_diameter;
+
+        // 0015: low-Re intake-valve Cd correction (opt-in). Reference Reynolds
+        // uses engine mean piston speed and intake valve diameter at ambient
+        // conditions, per Heywood §6.2 normalization. One scalar per RPM.
+        let intake_cd_mult = if cfg.intake_valve_re_correction_enabled && rpm > 0.0 {
+            let mean_piston_speed = 2.0 * cfg.stroke * rpm / 60.0;
+            let mu_amb = air_viscosity(cfg.t_ambient);
+            let rho_amb = cfg.p_ambient / (R_AIR * cfg.t_ambient.max(100.0));
+            let re_ref = rho_amb * mean_piston_speed * cfg.intake_valve_diameter / mu_amb.max(1e-12);
+            re_cd_multiplier(re_ref, cfg.intake_valve_re_crit, cfg.intake_valve_re_cd_min)
+        } else {
+            1.0
+        };
 
         // 0006: derive restrictor loss-coef from diffuser geometry when
         // `restrictor_loss_from_diffuser_geometry = true`. Idelchik (3rd
@@ -844,9 +904,10 @@ impl SDM26Engine {
             let xb = cyl.state.x_b;
             {
                 let runner = &mut self.pipes[self.runner_idx[i]];
-                fill_valve_ghost_characteristic(
+                fill_valve_ghost_characteristic_with_cd_mult(
                     runner, PipeEndStr::Right, ValveType::Intake,
                     &cyl.intake_valve, theta_local, p_cyl, t_cyl, xb,
+                    intake_cd_mult,
                 );
             }
             {
@@ -876,16 +937,28 @@ impl SDM26Engine {
             }
         }
 
-        // MUSCL step on every pipe
+        // Pipe transport step — MUSCL-Hancock by default (parity-preserving),
+        // or WENO5 + SSP-RK2 when `use_weno5_in_pipes` is enabled (finding 0023).
         for k in 0..self.pipes.len() {
             let pipe = &mut self.pipes[k];
             let sc = &mut self.scratches[k];
-            muscl_hancock_step(
-                &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
-                gamma, pipe.n_ghost, cfg.limiter,
-                &mut sc.w, &mut sc.slopes, &mut sc.w_pred_l, &mut sc.w_pred_r,
-                &mut sc.flux,
-            );
+            if cfg.use_weno5_in_pipes {
+                sc.ensure_weno5_buffers(pipe.n_total());
+                weno5_ssprk2_step(
+                    &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
+                    gamma, pipe.n_ghost,
+                    &mut sc.q_temp, &mut sc.dqdt, &mut sc.flux_accum,
+                    &mut sc.w, &mut sc.w_pred_l, &mut sc.w_pred_r,
+                    &mut sc.flux,
+                );
+            } else {
+                muscl_hancock_step(
+                    &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
+                    gamma, pipe.n_ghost, cfg.limiter,
+                    &mut sc.w, &mut sc.slopes, &mut sc.w_pred_l, &mut sc.w_pred_r,
+                    &mut sc.flux,
+                );
+            }
         }
 
         // collect intake / exhaust flux at the valve faces
@@ -953,14 +1026,14 @@ impl SDM26Engine {
             );
         }
 
-        let dtheta = dt * (180.0 / PI) * omega_from_rpm(_rpm);
+        let dtheta = dt * (180.0 / PI) * omega_from_rpm(rpm);
         for i in 0..n_cyl {
             let cyl = &mut self.cylinders[i];
             cyl.state.mdot_intake = intake_flux[i];
             cyl.state.mdot_exhaust = exhaust_flux[i];
             cyl.state.t_intake = intake_flux_t[i];
             cyl.state.t_exhaust = exhaust_flux_t[i];
-            cyl.advance(theta_deg, dtheta, _rpm, dt);
+            cyl.advance(theta_deg, dtheta, rpm, dt);
         }
     }
 

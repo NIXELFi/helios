@@ -1,0 +1,11 @@
+rpm,brake_power_kW,brake_torque_Nm,bsfc_g_per_kWh,egt_K,source,notes
+6000,18.5,29.4,,,physics_synthesis.md+FSAE published team aggregate,Aggregated low-RPM band; teams rarely publish below 6k for restricted CBR600
+7000,24.5,33.4,,,physics_synthesis.md+FSAE published team aggregate,
+8000,30.5,36.4,,,physics_synthesis.md+FSAE published team aggregate,
+9000,36.0,38.2,,,physics_synthesis.md+FSAE published team aggregate,Multi-source aggregate; spread 33-39 kW typical
+10000,41.0,39.1,,,FSAE published team aggregate (FSAE.com archive t-1508),Lower bound of published 41-52 kW range
+11000,44.5,38.6,,,FSAE published team aggregate,
+12000,48.0,38.2,,,FSAE published team aggregate,Mid of 41-52 kW range; Honda 600RR dyno-chart-thread reports similar
+13000,50.5,37.1,,,FSAE published team aggregate,Near peak power for well-tuned restricted CBR600
+13500,51.5,36.4,,,FSAE published team aggregate,Peak power region 41-52 kW upper bound
+14000,49.0,33.4,,,FSAE published team aggregate,Top end falls off as restrictor saturates

@@ -1,0 +1,19 @@
+rpm,brake_power_kW,brake_torque_Nm,bsfc_g_per_kWh,egt_K,source,notes
+4000,6.303,15.085,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),Below stable operating range
+4500,16.365,35.405,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+5000,19.106,37.433,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+5500,17.783,30.976,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+6000,17.593,28.091,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),Dyno shows low-RPM dip; ECU/tune artifact
+6500,21.447,31.558,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+7000,30.194,41.401,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+7500,36.305,46.781,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+8000,38.280,46.217,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+8500,39.212,44.120,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+9000,41.171,43.823,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+9500,43.531,43.937,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+10000,48.003,46.111,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+10500,50.949,46.640,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+11000,50.752,44.118,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+11500,50.498,42.001,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+12000,49.154,39.223,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),
+12500,47.672,36.523,,,Team chassis dyno run RunFile_11 (Dynojet/DWRT),

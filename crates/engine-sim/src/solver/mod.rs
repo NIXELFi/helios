@@ -4,4 +4,5 @@
 pub mod state;
 pub mod hllc;
 pub mod muscl;
+pub mod weno;
 pub mod sources;

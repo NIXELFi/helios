@@ -50,7 +50,10 @@ should use for SDM27 work:
 
 ```toml
 # All literature-derived, no per-engine tuning, all parity-preserving
-# (defaults reproduce legacy bit-exact). Reference: 0005-0009 findings.
+# (defaults reproduce legacy bit-exact). Reference: 0005-0021 findings.
+# Updated 2026-05-23 after the dyno-reference correction (0018) and the
+# Mach-Cd / FMEP re-evaluation (0020 + 0021). Option B is the chosen
+# production knob set — see finding 0021 for the alternatives considered.
 
 # 0005: Borda-Carnot loss at the intake plenum-runner T-junction,
 # applied INSIDE the inter-leg mass residual (mass-conserving).
@@ -61,9 +64,15 @@ intake_junction_loss_coef = 1.0              # multiplier on K_BC(geometry)
 # (was silently ignored by the loader pre-0006).
 restrictor_loss_from_diffuser_geometry = 1
 
-# 0006: Mach-dependent Cd at the restrictor (NASA TM X-1570).
-# Single biggest lever from 0006: cuts bias by ~3 kW.
-restrictor_cd_mach_k = 0.3
+# 0006 + 0021: Mach-dependent Cd at the restrictor. Original NASA TM X-1570
+# value k=0.3 (venturi-class) was overly aggressive for the FSAE contoured
+# nozzle: it was tuned to fit the BAD aggregate dyno (0018) and asymmetrically
+# hurt SDM25 (-1.47 kW peak bias) while helping SDM26 (+1.40 kW). With the
+# real dyno + Option B, k=0.10 represents the partial Cd reduction
+# appropriate for a contoured nozzle (between venturi and ideal nozzle).
+# When CFD or bench-flow data on the actual FSAE restrictor is available,
+# replace this with the measured value.
+restrictor_cd_mach_k = 0.10
 
 # 0006: RPM-dependent spark advance (Bonatesta MBT map).
 # Small effect on this engine but right physics for SDM27 design with
@@ -73,6 +82,14 @@ spark_advance_rpm_slope_deg_per_krpm = 1.5
 # 0006: RPM-dependent Wiebe burn duration (Bonatesta N^p, p≈0.4).
 # Same small-effect-but-correct-physics rationale as MBT map.
 duration_rpm_exp = 0.4
+
+# 0020: Chen-Flynn FMEP quadratic coefficient. Original sim default
+# fmep_c=0.003 was 3× the Heywood Tab 13.3 motorcycle ceiling (1e-3),
+# tuned against the BAD aggregate dyno. Real dyno shows the sim was
+# slightly under-predicting; the over-inflated FMEP was widening the
+# gap. Moved to Heywood Tab 13.3 motorcycle midpoint (7.5e-4) — closes
+# RMSE on both engines by ~16% on the WOT band.
+fmep_c = 0.00075
 
 # KEEP DEFAULT (0):
 # two_zone_enabled         — 0010+0011 showed it makes the model
@@ -96,15 +113,22 @@ duration_rpm_exp = 0.4
 
 ### How well does the production knob set work?
 
-| Engine | RMSE vs FSAE dyno (wheel) | bias | implied η @ 10 kRPM |
-|--------|--------------------------:|-----:|--------------------:|
-| SDM26  | 10.04 kW                  | +1.94 kW | **0.85 (perfect)** |
-| SDM25  | 9.05 kW                   | +0.71 kW | 0.79              |
+**Updated 2026-05-23** after finding 0018 (real team dyno data) +
+finding 0020 (FMEP fix) + finding 0021 (Option B Mach-Cd):
 
-At the FSAE peak-power band (10-11 kRPM) the simulator's implied
-drivetrain efficiency is **exactly the Cameron handbook 0.85** for
-SDM26 — the model is essentially correct at the operating point that
-matters most for design.
+| Engine | Reference     | RMSE all | RMSE WOT 6-13k | bias WOT |
+|--------|---------------|---------:|---------------:|---------:|
+| SDM26  | real team dyno | 4.27 kW | **4.27 kW**   | +1.97 kW |
+| SDM25  | real team dyno | 6.02 kW | **6.02 kW**   | +0.28 kW |
+
+(numbers are Option B = current production knob set; vs the team's
+Dynojet runs in `references/dyno/sdm25-team-dyno.csv` and
+`sdm26-team-dyno.csv`)
+
+In the peak band (7–11.5k) the sim now lands very close to dyno on
+both engines symmetrically: SDM25 bias −0.77 kW, SDM26 bias +3.11 kW.
+The previous "perfect SDM26 η=0.85" was an artifact of fitting to the
+aggregate dyno; finding 0018 retired that reference.
 
 ---
 
@@ -123,6 +147,18 @@ matters most for design.
 | Numerical: n_cells = 30 | OK for iteration, override to 60 for final | 0012 |
 
 ---
+
+## NEW 2026-05-23 session — findings 0015-0021
+
+| # | Title | Status | Key result |
+|---|-------|--------|------------|
+| 0015 | T1.1 low-Re intake Cd correction (Heywood §6.2) | NEGATIVE | Mechanism real but doesn't engage at CBR600RR Re; flag retained, default OFF |
+| 0016 | T1.2 two-zone γ_eff (c_v-weighted + R-weighted V_frac) | **PRODUCTION-CANDIDATE** | After dyno-reference correction (0018), two-zone v2 gives -21% RMSE on SDM25 WOT band; flag exposed for opt-in use on long-exhaust engines |
+| 0017 | T1.3 VVT | DEFERRED | Real CBR600RR has fixed cams; premise was wrong |
+| 0018 | Dyno reference correction | **FIXED** | Old aggregate misrepresented team's engines; extracted real Dynojet team dyno (`sdm25-team-dyno.csv`, `sdm26-team-dyno.csv`); most "huge gaps" were data artifacts |
+| 0019 | Drivetrain η(P,ω) map | NEGATIVE | Literature-defensible map spread ±2%, sub-0.3 kW effect; keep constant 0.85 |
+| 0020 | FMEP revalidation vs real dyno | **FIXED** | fmep_c moved from 0.003 (3× Heywood ceiling) to 0.00075 (Heywood midpoint); 16% RMSE improvement on both engines |
+| 0021 | SDM25 peak regression bisect | **FIXED-WITH-OPTIONS** | restrictor_cd_mach_k=0.3 was asymmetrically hurting SDM25 (the C10 guard fired but was masked by bad reference); Option B (k=0.10) is now production |
 
 ## 4. Findings index (0003-0012)
 

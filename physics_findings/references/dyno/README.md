@@ -19,7 +19,41 @@ crank or with a documented driveline-loss correction; `bsfc` and `egt_K` are
 typically only available when an instrumented engine dyno (not a chassis dyno)
 was used.
 
-## CBR600RR dyno corpus
+## Team-specific dyno (2026-05-23 — canonical going forward)
+
+The two CSVs below are extracted directly from the team's chassis-dyno
+runs and are the **canonical reference** for SDM25/SDM26 calibration
+work going forward. The earlier multi-source-aggregate CSV
+(`cbr600rr-fsae-restricted.csv`) was found to under-state low-RPM and
+over-state high-RPM power for the team's specific engine builds — it
+is retained for historical reference but new analysis should use the
+team-specific files below.
+
+### `sdm26-team-dyno.csv`
+
+- **Engine:** SDM26 build (Honda CBR600RR, 20 mm FSAE restrictor,
+  4-2-1 exhaust, 0.245 m runners, 0.31 m primaries — matches
+  `crates/engine-sim/python_ref/configs/sdm26.json`).
+- **Source:** `~/Downloads/SDM (1).CSV` (Dynojet chassis dyno).
+- **Units conversion:** raw file is HP / lbft / RPM; this CSV is
+  kW / N·m / RPM, interpolated to the simulator's 500-RPM grid.
+- **Provenance class:** team-measured WOT chassis dyno; **wheel power**.
+- **Notable:** has a clear double-peak (resonance at 9.5 k and 12.5 k)
+  characteristic of wave-tuning in real engines.
+
+### `sdm25-team-dyno.csv`
+
+- **Engine:** SDM25 build (Honda CBR600RR, 20 mm FSAE restrictor,
+  4-1 exhaust, 0.66 m primary, 3 L plenum — matches
+  `crates/engine-sim/python_ref/configs/sdm25.json`).
+- **Source:** `~/Downloads/RunFile_11.csv` (Dynojet/DWRT chassis dyno;
+  RPM in thousands in raw file).
+- **Notable:** dyno shows a dip at 5.5–6.5 kRPM (ECU / tune artifact,
+  not engine physics). The sub-7000 RPM band is likely in the dyno
+  operator's part-throttle ramp-up region and not directly comparable
+  to WOT simulator output.
+
+## CBR600RR dyno corpus (legacy aggregate — kept for historical findings)
 
 Both SDM25 and SDM26 configurations target this corpus. A tuning fix that
 helps SDM26 land on the CBR600 envelope but moves SDM25 *off* it reveals

@@ -1,0 +1,35 @@
+[run]
+config = "crates/engine-sim/python_ref/configs/sdm26.json"
+rpm = [4000.0, 4500.0, 5000.0, 5500.0, 6000.0, 6500.0, 7000.0, 7500.0, 8000.0, 8500.0, 9000.0, 9500.0, 10000.0, 10500.0, 11000.0, 11500.0, 12000.0, 12500.0, 13000.0]
+cycles = 30
+recorded = true
+seed = 8000
+junction = "characteristic"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+[sweep]
+sampler = "lhs"
+n_trials = 1
+parameters = [
+  { name = "intake_junction_borda_carnot", min = 1.0, max = 1.0 },
+  { name = "intake_junction_loss_coef", min = 1.0, max = 1.0 },
+  { name = "restrictor_loss_from_diffuser_geometry", min = 1.0, max = 1.0 },
+  { name = "restrictor_cd_mach_k", min = 0.3, max = 0.3 },
+  { name = "spark_advance_rpm_slope_deg_per_krpm", min = 1.5, max = 1.5 },
+  { name = "duration_rpm_exp", min = 0.4, max = 0.4 },
+  # T1.1 — literature midpoint values (Heywood §6.2, Fig 6.16)
+  { name = "intake_valve_re_correction_enabled", min = 1.0, max = 1.0 },
+  { name = "intake_valve_re_cd_min", min = 0.65, max = 0.65 },
+  { name = "intake_valve_re_crit", min = 15000.0, max = 15000.0 },
+]
+
+[[acceptance]]
+metric = "brake_power_kW@10000"
+target = 46.5
+tolerance = "±15%"
+citation = "FSAE-restricted CBR600 dyno midpoint"

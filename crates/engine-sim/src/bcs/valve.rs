@@ -349,17 +349,41 @@ pub fn fill_valve_ghost_characteristic(
     theta_local_deg: f64,
     p_cyl: f64, t_cyl: f64, xb_cyl: f64,
 ) -> f64 {
+    fill_valve_ghost_characteristic_with_cd_mult(
+        state, pipe_end, _valve_type, vp, theta_local_deg, p_cyl, t_cyl, xb_cyl, 1.0,
+    )
+}
+
+/// Same as `fill_valve_ghost_characteristic`, but multiplies the effective
+/// flow area (= n_valves · Cd · A_ref) by `cd_multiplier`. Multiplying a_eff
+/// is equivalent to multiplying Cd by the same factor, since A_ref does not
+/// depend on flow conditions. With `cd_multiplier = 1.0` the result is
+/// bit-identical to the legacy function (parity-preserving).
+///
+/// Finding 0015 (low-Re intake Cd correction) uses this with `cd_multiplier`
+/// computed once per cycle from the engine mean-piston-speed Reynolds.
+#[allow(clippy::too_many_arguments)]
+pub fn fill_valve_ghost_characteristic_with_cd_mult(
+    state: &mut PipeState,
+    pipe_end: PipeEndStr,
+    _valve_type: ValveType,
+    vp: &ValveParams,
+    theta_local_deg: f64,
+    p_cyl: f64, t_cyl: f64, xb_cyl: f64,
+    cd_multiplier: f64,
+) -> f64 {
     let ng = state.n_ghost;
     let n_total = state.n_total();
     let gamma = state.gamma;
     let gm1 = gamma - 1.0;
 
     let seat_rad = vp.seat_angle_deg.to_radians();
-    let a_eff = valve_effective_area_profile(
+    let a_eff_base = valve_effective_area_profile(
         theta_local_deg, vp.open_angle_deg, vp.close_angle_deg, vp.max_lift,
         vp.diameter, seat_rad, vp.n_valves,
         &vp.ld_table, &vp.cd_table, vp.profile,
     );
+    let a_eff = a_eff_base * cd_multiplier;
     if a_eff < A_EFF_CLOSED_M2 {
         fill_reflective_at_end(state, pipe_end);
         return 0.0;

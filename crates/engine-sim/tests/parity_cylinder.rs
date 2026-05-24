@@ -26,6 +26,7 @@ fn build_model(phase_offset: f64) -> CylinderModel {
         seat_angle_deg: 45.0, n_valves: 2,
         ld_table: INTAKE_LD_TABLE.to_vec(),
         cd_table: INTAKE_CD_TABLE.to_vec(), profile: engine_sim::cylinder::valve::LiftProfile::Sin2,
+        re_correction_enabled: false, re_cd_min: 1.0, re_crit: 1.0,
     };
     let exhaust = ValveParams {
         diameter: 0.023, max_lift: 0.00735,
@@ -33,6 +34,7 @@ fn build_model(phase_offset: f64) -> CylinderModel {
         seat_angle_deg: 45.0, n_valves: 2,
         ld_table: EXHAUST_LD_TABLE.to_vec(),
         cd_table: EXHAUST_CD_TABLE.to_vec(), profile: engine_sim::cylinder::valve::LiftProfile::Sin2,
+        re_correction_enabled: false, re_cd_min: 1.0, re_crit: 1.0,
     };
     CylinderModel::new(geom, wiebe, woschni, intake, exhaust, phase_offset, false)
 }

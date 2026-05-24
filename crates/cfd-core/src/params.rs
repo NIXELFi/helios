@@ -130,6 +130,15 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("afr_eta_enabled", Scalar, 1, "bool", if cfg.afr_eta_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
         m("tumble_burn_factor", Scalar, 1, "-", cfg.tumble_burn_factor, 0.0, 1.0, "Combustion"),
         m("two_zone_enabled", Scalar, 1, "bool", if cfg.two_zone_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        // 0016 — c_v-weighted γ_eff in two-zone bulk pressure ODE
+        m("two_zone_gamma_cv_weighted", Scalar, 1, "bool",
+          if cfg.two_zone_gamma_cv_weighted { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        // 0023 — WENO5 + SSP-RK2 pipe solver
+        m("use_weno5_in_pipes", Scalar, 1, "bool",
+          if cfg.use_weno5_in_pipes { 1.0 } else { 0.0 }, 0.0, 1.0, "Numerics"),
+        // residual gas tracking — track trapped residuals through IVC for next cycle
+        m("enable_residual_tracking", Scalar, 1, "bool",
+          if cfg.enable_residual_tracking { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
         // B9 fix (found via 0012 limiter sweep): `limiter` was an
         // SDM26Config field but missing from apply_override. Same pattern
         // as B6/B7/B8 in 0009. CFL is similarly exposed for grid-conv work.
@@ -226,6 +235,11 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_valve_open_angle", Scalar, 1, "deg", cfg.intake_valve_open_angle, 300.0, 380.0, "Valves"),
         m("intake_valve_close_angle", Scalar, 1, "deg", cfg.intake_valve_close_angle, 540.0, 620.0, "Valves"),
         m("intake_valve_seat_angle", Scalar, 1, "deg", cfg.intake_valve_seat_angle, 30.0, 60.0, "Valves"),
+        // 0015 — low-Re intake Cd correction (Heywood §6.2)
+        m("intake_valve_re_correction_enabled", Scalar, 1, "bool",
+          if cfg.intake_valve_re_correction_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Valves"),
+        m("intake_valve_re_cd_min", Scalar, 1, "-", cfg.intake_valve_re_cd_min, 0.60, 0.90, "Valves"),
+        m("intake_valve_re_crit", Scalar, 1, "Re", cfg.intake_valve_re_crit, 5000.0, 20000.0, "Valves"),
         m("exhaust_valve_diameter", Scalar, 1, "m", cfg.exhaust_valve_diameter, 0.015, 0.035, "Valves"),
         m("exhaust_valve_max_lift", Scalar, 1, "m", cfg.exhaust_valve_max_lift, 0.005, 0.014, "Valves"),
         m("exhaust_valve_open_angle", Scalar, 1, "deg", cfg.exhaust_valve_open_angle, 100.0, 180.0, "Valves"),
@@ -234,9 +248,6 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
 
         // --- Drivetrain ---
         m("drivetrain_efficiency", Scalar, 1, "-", cfg.drivetrain_efficiency, 0.80, 0.95, "Drivetrain"),
-
-        // --- Numerics ---
-        m("cfl", Scalar, 1, "-", cfg.cfl, 0.30, 0.95, "Numerics"),
     ]
 }
 
@@ -410,10 +421,17 @@ pub fn apply_override(
         "afr_eta_enabled" => cfg.afr_eta_enabled = value != 0.0,
         "tumble_burn_factor" => cfg.tumble_burn_factor = value,
         "two_zone_enabled" => cfg.two_zone_enabled = value != 0.0,
+        "two_zone_gamma_cv_weighted" => cfg.two_zone_gamma_cv_weighted = value != 0.0,
+        "use_weno5_in_pipes" => cfg.use_weno5_in_pipes = value != 0.0,
+        "enable_residual_tracking" => cfg.enable_residual_tracking = value != 0.0,
         "limiter" => cfg.limiter = value.round() as i32,
         "intake_lift_flat_top_ramp" => cfg.intake_lift_flat_top_ramp = value,
         "exhaust_lift_flat_top_ramp" => cfg.exhaust_lift_flat_top_ramp = value,
         "octane_number" => cfg.octane_number = value,
+        // 0015 — low-Re intake Cd correction
+        "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = value != 0.0,
+        "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = value,
+        "intake_valve_re_crit" => cfg.intake_valve_re_crit = value,
 
         // Restrictor
         "restrictor_throat_diameter" => cfg.restrictor_throat_diameter = value,

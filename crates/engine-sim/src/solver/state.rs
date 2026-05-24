@@ -36,6 +36,11 @@ pub struct ScratchBuffers {
     pub w_pred_l: Vec<f64>,
     pub w_pred_r: Vec<f64>,
     pub flux:     Vec<f64>,   // ((n_total + 1) * N_VARS)
+    // Extra scratch for WENO5 + SSP-RK2 (finding 0023). Default-empty;
+    // grown lazily by `weno5_buffers()` when the WENO solver is enabled.
+    pub q_temp:     Vec<f64>,
+    pub dqdt:       Vec<f64>,
+    pub flux_accum: Vec<f64>,
 }
 
 impl ScratchBuffers {
@@ -47,6 +52,22 @@ impl ScratchBuffers {
             w_pred_l: vec![0.0; n * N_VARS],
             w_pred_r: vec![0.0; n * N_VARS],
             flux:     vec![0.0; (n + 1) * N_VARS],
+            q_temp:     Vec::new(),
+            dqdt:       Vec::new(),
+            flux_accum: Vec::new(),
+        }
+    }
+
+    /// Lazily allocate WENO5 scratch buffers if not yet sized.
+    pub fn ensure_weno5_buffers(&mut self, n_total: usize) {
+        let q_size = n_total * N_VARS;
+        let f_size = (n_total + 1) * N_VARS;
+        if self.q_temp.len() != q_size {
+            self.q_temp = vec![0.0; q_size];
+            self.dqdt   = vec![0.0; q_size];
+        }
+        if self.flux_accum.len() != f_size {
+            self.flux_accum = vec![0.0; f_size];
         }
     }
 }

@@ -47,6 +47,17 @@ pub struct ValveParams {
     pub cd_table: Vec<f64>,
     /// Lift-profile shape. Default `Sin2` preserves Python parity.
     pub profile: LiftProfile,
+    /// Opt-in low-Reynolds Cd correction (finding 0015 / Heywood §6.2,
+    /// Annand-Roe 1974). When false, Cd is the bench-table value
+    /// (parity-preserving). When true, Cd is multiplied by a linear
+    /// ramp f_Re(Re) ∈ [re_cd_min, 1.0] over Re ∈ [1000, re_crit].
+    pub re_correction_enabled: bool,
+    /// Minimum Cd multiplier at very low Re (Re ≤ 1000).
+    /// Literature midpoint 0.70 (Heywood §6.2).
+    pub re_cd_min: f64,
+    /// Critical Reynolds above which Cd is full-table (no correction).
+    /// Literature midpoint 10,000 (Heywood Fig 6.16).
+    pub re_crit: f64,
 }
 
 impl ValveParams {
@@ -110,6 +121,41 @@ pub fn valve_lift_profile(theta_local_deg: f64,
             }
         }
     }
+}
+
+/// Dynamic viscosity of air at temperature `t_kelvin`, Sutherland's formula.
+/// μ = μ_ref · (T/T_ref)^1.5 · (T_ref + S) / (T + S)
+/// Constants from White, *Viscous Fluid Flow* (Tab 1.2):
+///   μ_ref = 1.716e-5 Pa·s, T_ref = 273.15 K, S = 110.4 K.
+/// Valid 100 K ≤ T ≤ 2000 K.
+#[inline]
+pub fn air_viscosity(t_kelvin: f64) -> f64 {
+    const MU_REF: f64 = 1.716e-5;
+    const T_REF: f64 = 273.15;
+    const S: f64 = 110.4;
+    let t = t_kelvin.max(100.0);
+    MU_REF * (t / T_REF).powf(1.5) * (T_REF + S) / (t + S)
+}
+
+/// Low-Reynolds Cd multiplier (finding 0015).
+///   f_Re = re_cd_min                       for Re ≤ 1000
+///   f_Re = re_cd_min + (1 − re_cd_min) · (Re − 1000)/(re_crit − 1000)   linear interp
+///   f_Re = 1.0                              for Re ≥ re_crit
+/// Returns 1.0 if re_crit ≤ 1000 (degenerate) so this is safe to multiply by.
+#[inline]
+pub fn re_cd_multiplier(reynolds: f64, re_crit: f64, re_cd_min: f64) -> f64 {
+    if re_crit <= 1000.0 {
+        return 1.0;
+    }
+    let re = reynolds.abs();
+    if re >= re_crit {
+        return 1.0;
+    }
+    if re <= 1000.0 {
+        return re_cd_min;
+    }
+    let frac = (re - 1000.0) / (re_crit - 1000.0);
+    re_cd_min + frac * (1.0 - re_cd_min)
 }
 
 /// Linear interpolation on the Cd(L/D) table; below table[0] linear to 0.
