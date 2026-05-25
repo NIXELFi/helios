@@ -44,9 +44,16 @@ export function DownloadModeWelcome() {
 
   const [choices, setChoices] = useState<Map>(initial);
   useEffect(() => setChoices(initial), [initial]);
+  // We can't read welcomed reactively (it's just a string in localStorage),
+  // so after Save we toggle local state to unmount the modal until next reload.
+  // This hook MUST come before any conditional returns to satisfy the
+  // Rules of Hooks — putting it after the early returns crashed the whole
+  // Vault screen to a black render on first mount.
+  const [forceHide, setForceHide] = useState(false);
 
   if (loading || welcomed) return null;
   if (vaults.length === 0) return null;
+  if (forceHide) return null;
 
   function save() {
     try {
@@ -60,11 +67,6 @@ export function DownloadModeWelcome() {
     } catch { /* private mode */ }
     setForceHide(true);
   }
-
-  // We can't read welcomed reactively (it's just a string in localStorage),
-  // so after Save we toggle local state to unmount the modal until next reload.
-  const [forceHide, setForceHide] = useState(false);
-  if (forceHide) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
