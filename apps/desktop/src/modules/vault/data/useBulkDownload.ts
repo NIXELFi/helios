@@ -27,13 +27,14 @@ export interface BulkDownloadAPI extends BulkDownloadState {
 
 /**
  * Worker count for parallel downloads. Each worker does fetch + arrayBuffer
- * + gunzip + Tauri writeFile. Pushing too many at once saturates the webview
- * IPC bridge and freezes the UI; the auto-sync path uses 2 conservatively.
- * Manual bulk downloads can be a bit more aggressive since the user opted in
- * and is waiting on a progress modal — they want it fast. 4 is the sweet
- * spot in testing for our network + Mac-class hardware.
+ * + gunzip + Tauri writeFile. Pushing too many saturates the webview IPC
+ * bridge and can stutter the UI; manual bulk downloads run with a progress
+ * modal that consumes most paint frames anyway, so we push harder than the
+ * auto-sync default. 8 saturates typical residential upstream + the Tauri
+ * fs plugin without obvious jank on Apple-Silicon laptops; if a slower
+ * machine struggles we'll dial back.
  */
-const WORKERS = 4;
+const WORKERS = 8;
 
 /**
  * Headless bulk-download driver with a worker pool. Caller picks the

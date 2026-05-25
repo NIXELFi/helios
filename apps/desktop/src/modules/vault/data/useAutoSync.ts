@@ -158,12 +158,15 @@ export function useAutoSync(input: {
     // to the right entry; we render `t.name` but key on `t.id`.
     const activeTaskIds = new Map<number, string>();
 
-    // Worker pool: N workers pull from a shared queue. Cap at 2 because
-    // each "download" is fetch + ~100 MB ArrayBuffer through gunzip + Tauri
-    // writeFile IPC — pushing 6 of those at once saturates the webview
-    // bridge and freezes the UI even with native DecompressionStream off-
-    // thread. 2 keeps the CDN warm while leaving headroom for paint frames.
-    const CONCURRENCY = 2;
+    // Worker pool: N workers pull from a shared queue. Each "download" is
+    // fetch + ArrayBuffer through gunzip + Tauri writeFile IPC. The cap
+    // used to be 2 — that was conservative for paint-frame headroom while
+    // the user was actively browsing. With v3.5.10's inline sync status
+    // (the user can see what's downloading without the popover open), the
+    // throughput trade-off is worth it. 4 is steady on Apple-Silicon
+    // laptops and finishes typical syncs noticeably faster; can be dialed
+    // back if older hardware shows UI jank.
+    const CONCURRENCY = 4;
     let cursor = 0;
     async function worker() {
       while (true) {
