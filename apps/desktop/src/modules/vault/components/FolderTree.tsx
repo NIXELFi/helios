@@ -1,5 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FileId, Folder, FolderId, Lock, UserId, VaultFile } from "../data/types";
+
+/**
+ * Target of a right-click in the tree. Either a single folder (with all its
+ * descendant files), or a set of files (the current multi-selection).
+ */
+export type TreeContextTarget =
+  | { kind: "folder"; folder: Folder; descendantFiles: VaultFile[] }
+  | { kind: "files"; files: VaultFile[] };
 
 interface Props {
   folders: Folder[];
@@ -13,6 +21,18 @@ interface Props {
   // Optional: lock state used to color-code file leaves' status dots.
   locks?: Lock[];
   currentUserId?: UserId;
+  /**
+   * Multi-select state for files in the tree. Hold shift to range-select
+   * along the visible order; hold cmd/ctrl to toggle individual files.
+   * Pass-through so the parent (BrowseScreen) can render bulk actions.
+   */
+  multiSelectedFiles?: Set<FileId>;
+  onMultiSelectChange?: (next: Set<FileId>) => void;
+  /**
+   * Right-click handler — fires with screen coords + a structured target.
+   * Parent renders a context menu (e.g. TreeContextMenu) at the coords.
+   */
+  onContextMenu?: (target: TreeContextTarget, x: number, y: number) => void;
 }
 
 interface FolderNode {
@@ -117,9 +137,46 @@ export function FolderTree({
   onSelectFile,
   locks = [],
   currentUserId,
+  multiSelectedFiles,
+  onMultiSelectChange,
+  onContextMenu,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const tree = buildTree(folders);
+  const anchorRef = useRef<FileId | null>(null);
+
+  // Build a stable visible order of files for shift-range selection. We
+  // descend the tree in render order and emit only files whose ancestor
+  // chain is fully expanded — those are the rows the user can actually see.
+  function visibleFilesInOrder(): VaultFile[] {
+    const out: VaultFile[] = [];
+    const rootFiles = (filesByFolder.get(null) ?? []);
+    out.push(...rootFiles);
+    function walk(parentId: string | null) {
+      const here = (folders.filter((f) => f.parent_id === parentId)
+        .sort((a, b) => a.name.localeCompare(b.name)));
+      for (const folder of here) {
+        if (!expanded.has(folder.id)) continue;
+        out.push(...(filesByFolder.get(folder.id) ?? []));
+        walk(folder.id);
+      }
+    }
+    walk(null);
+    return out;
+  }
+
+  // Files reachable under a folder (recursive). Used by right-click on a
+  // folder to download "everything inside".
+  function filesUnder(folderId: FolderId): VaultFile[] {
+    const out: VaultFile[] = [];
+    const stack: string[] = [folderId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      out.push(...(filesByFolder.get(id) ?? []));
+      for (const f of folders) if (f.parent_id === id) stack.push(f.id);
+    }
+    return out;
+  }
 
   // Pre-bucket files by folder_id for O(1) lookup during render.
   const filesByFolder = new Map<string | null, VaultFile[]>();
@@ -169,8 +226,45 @@ export function FolderTree({
     return lock.user_id === currentUserId ? "me" : "other";
   }
 
+  function applyFileClick(file: VaultFile, e: React.MouseEvent | React.KeyboardEvent) {
+    const isShift = "shiftKey" in e && e.shiftKey;
+    const isMeta = "metaKey" in e && (e.metaKey || (e as any).ctrlKey);
+
+    if ((isShift || isMeta) && onMultiSelectChange) {
+      const current = multiSelectedFiles ?? new Set<FileId>();
+      const next = new Set(current);
+      if (isShift && anchorRef.current) {
+        const order = visibleFilesInOrder().map((f) => f.id);
+        const a = order.indexOf(anchorRef.current);
+        const b = order.indexOf(file.id);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          for (let i = lo; i <= hi; i++) {
+            const id = order[i];
+            if (id) next.add(id);
+          }
+        } else {
+          next.add(file.id);
+        }
+      } else {
+        // cmd/ctrl: toggle
+        if (next.has(file.id)) next.delete(file.id);
+        else next.add(file.id);
+        anchorRef.current = file.id;
+      }
+      onMultiSelectChange(next);
+      return;
+    }
+    // Plain click: collapse multi-selection to just this file, also navigate.
+    if (onMultiSelectChange) onMultiSelectChange(new Set([file.id]));
+    anchorRef.current = file.id;
+    onSelect(file.folder_id);
+    onSelectFile?.(file.id);
+  }
+
   function renderFileLeaf(file: VaultFile, depth: number): React.ReactNode {
     const isSelectedFile = selectedFile === file.id;
+    const isMulti = multiSelectedFiles?.has(file.id) ?? false;
     const lockKind = lockKindFor(file.id);
     return (
       <div
@@ -178,27 +272,35 @@ export function FolderTree({
         role="button"
         tabIndex={0}
         aria-current={isSelectedFile ? "page" : undefined}
-        onClick={(e) => {
+        onClick={(e) => { e.stopPropagation(); applyFileClick(file, e); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
           e.stopPropagation();
-          // Select the file's containing folder (null = vault root) so the
-          // right-side file table jumps to it, then mark the file as selected
-          // for the detail panel.
-          onSelect(file.folder_id);
-          onSelectFile?.(file.id);
+          // If the right-clicked file isn't in the current multi-set,
+          // collapse to just this file (so single right-click on an
+          // unrelated file doesn't act on the unrelated old selection).
+          let working = multiSelectedFiles;
+          if (!working || !working.has(file.id)) {
+            working = new Set([file.id]);
+            onMultiSelectChange?.(working);
+          }
+          const targetFiles = files.filter((f) => working!.has(f.id));
+          onContextMenu?.({ kind: "files", files: targetFiles }, e.clientX, e.clientY);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onSelect(file.folder_id);
-            onSelectFile?.(file.id);
+            applyFileClick(file, e);
           }
         }}
         className={
           "flex cursor-pointer items-center gap-1.5 border-l-2 py-0.5 pr-2 text-[13px] outline-none transition-colors " +
           "focus-visible:ring-1 focus-visible:ring-asu-gold " +
-          (isSelectedFile
-            ? "border-asu-gold bg-helios-line/80 text-helios-text"
-            : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
+          (isMulti
+            ? "border-asu-gold/70 bg-asu-gold/10 text-helios-text"
+            : isSelectedFile
+              ? "border-asu-gold bg-helios-line/80 text-helios-text"
+              : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
         }
         style={{ paddingLeft: 6 + depth * 14 }}
       >
@@ -224,6 +326,15 @@ export function FolderTree({
           tabIndex={0}
           aria-current={isSelected ? "page" : undefined}
           onClick={() => handleRowClick(node)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onContextMenu?.(
+              { kind: "folder", folder: node.folder, descendantFiles: filesUnder(node.folder.id) },
+              e.clientX,
+              e.clientY,
+            );
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
@@ -286,6 +397,15 @@ export function FolderTree({
         tabIndex={0}
         aria-current={selected === null ? "page" : undefined}
         onClick={() => onSelect(null)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onContextMenu?.(
+            { kind: "files", files: rootFiles },
+            e.clientX,
+            e.clientY,
+          );
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

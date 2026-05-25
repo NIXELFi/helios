@@ -1,69 +1,65 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useVaultFolder } from "../../src/modules/vault/data/useVaultFolder";
-
-const V1 = "00000000-0000-0000-0000-000000000001";
-const V2 = "00000000-0000-0000-0000-000000000002";
+import { useVaultFolder, sanitizeVaultName } from "../../src/modules/vault/data/useVaultFolder";
 
 describe("useVaultFolder", () => {
   beforeEach(() => localStorage.clear());
 
-  it("starts null when nothing is stored", () => {
-    const { result } = renderHook(() => useVaultFolder(V1));
+  it("starts with null root + null path when nothing is stored", () => {
+    const { result } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
+    expect(result.current.root).toBeNull();
     expect(result.current.path).toBeNull();
   });
 
-  it("persists a path scoped to the vault id", () => {
-    const { result } = renderHook(() => useVaultFolder(V1));
-    act(() => { result.current.setPath("/Users/me/V1"); });
-    expect(result.current.path).toBe("/Users/me/V1");
-    // Storage is a JSON map keyed by vault id.
-    const raw = localStorage.getItem("helios.vault.localFolder");
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!);
-    expect(parsed[V1]).toBe("/Users/me/V1");
-    expect(parsed[V2]).toBeUndefined();
+  it("setRoot persists and derives per-vault paths", () => {
+    const { result } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
+    act(() => { result.current.setRoot("/Users/me/Helios"); });
+    expect(result.current.root).toBe("/Users/me/Helios");
+    expect(result.current.path).toBe("/Users/me/Helios/SDM26");
+    expect(localStorage.getItem("helios.vault.localFolder")).toBe("/Users/me/Helios");
   });
 
-  it("keeps per-vault paths separate", () => {
-    const { result: r1 } = renderHook(() => useVaultFolder(V1));
-    const { result: r2 } = renderHook(() => useVaultFolder(V2));
-    act(() => { r1.current.setPath("/v1"); });
-    act(() => { r2.current.setPath("/v2"); });
-    expect(r1.current.path).toBe("/v1");
-    expect(r2.current.path).toBe("/v2");
+  it("returns different paths for different vault names off the same root", () => {
+    const { result: r1 } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
+    const { result: r2 } = renderHook(() => useVaultFolder({ vaultName: "SDM27" }));
+    act(() => { r1.current.setRoot("/Users/me/Helios"); });
+    // Both hooks should see the same root after the broadcast.
+    expect(r1.current.root).toBe("/Users/me/Helios");
+    expect(r2.current.root).toBe("/Users/me/Helios");
+    expect(r1.current.path).toBe("/Users/me/Helios/SDM26");
+    expect(r2.current.path).toBe("/Users/me/Helios/SDM27");
   });
 
-  it("clear() removes only this vault's entry", () => {
-    localStorage.setItem(
-      "helios.vault.localFolder",
-      JSON.stringify({ [V1]: "/v1", [V2]: "/v2" }),
-    );
-    const { result } = renderHook(() => useVaultFolder(V1));
-    expect(result.current.path).toBe("/v1");
+  it("clear() removes the root + nulls every derived path", () => {
+    localStorage.setItem("helios.vault.localFolder", "/Users/me/Helios");
+    const { result } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
+    expect(result.current.path).toBe("/Users/me/Helios/SDM26");
     act(() => { result.current.clear(); });
+    expect(result.current.root).toBeNull();
     expect(result.current.path).toBeNull();
-    const parsed = JSON.parse(localStorage.getItem("helios.vault.localFolder")!);
-    expect(parsed[V1]).toBeUndefined();
-    expect(parsed[V2]).toBe("/v2");
+    expect(localStorage.getItem("helios.vault.localFolder")).toBeNull();
   });
 
-  it("migrates a legacy bare-string value to the calling vault id", () => {
-    // Previous versions stored a single global path here.
-    localStorage.setItem("helios.vault.localFolder", "/legacy/path");
-    const { result } = renderHook(() => useVaultFolder(V1));
-    expect(result.current.path).toBe("/legacy/path");
-    // The stored value is rewritten as a JSON map.
-    const parsed = JSON.parse(localStorage.getItem("helios.vault.localFolder")!);
-    expect(parsed[V1]).toBe("/legacy/path");
-  });
-
-  it("returns null when called with vaultId=null", () => {
+  it("recovers a root from a legacy JSON map by taking the parent of one entry", () => {
     localStorage.setItem(
       "helios.vault.localFolder",
-      JSON.stringify({ [V1]: "/v1" }),
+      JSON.stringify({ "v1": "/Users/me/Helios/Vault" }),
     );
-    const { result } = renderHook(() => useVaultFolder(null));
+    const { result } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
+    expect(result.current.root).toBe("/Users/me/Helios");
+    expect(result.current.path).toBe("/Users/me/Helios/SDM26");
+  });
+
+  it("returns null path when vault name is null", () => {
+    localStorage.setItem("helios.vault.localFolder", "/Users/me/Helios");
+    const { result } = renderHook(() => useVaultFolder({ vaultName: null }));
+    expect(result.current.root).toBe("/Users/me/Helios");
     expect(result.current.path).toBeNull();
+  });
+
+  it("sanitizes vault names with filesystem-unsafe characters", () => {
+    expect(sanitizeVaultName("SDM26")).toBe("SDM26");
+    expect(sanitizeVaultName("a/b")).toBe("a_b");
+    expect(sanitizeVaultName("foo:bar?")).toBe("foo_bar_");
   });
 });

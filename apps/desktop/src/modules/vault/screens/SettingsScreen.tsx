@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useMyRole } from "../data/useMyRole";
-import { useVaultFolder } from "../data/useVaultFolder";
+import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 
@@ -10,8 +10,11 @@ export function SettingsScreen() {
   const user = useUser();
   const role = useMyRole();
   const client = useSupabaseClient();
-  const { activeVault, activeVaultId } = useActiveVault();
-  const { path: vaultFolder, setPath, clear } = useVaultFolder(activeVaultId);
+  const { activeVault, activeVaultId, vaults } = useActiveVault();
+  // Folder is now a single shared root; per-vault paths are derived as
+  // `<root>/<sanitize(vault.name)>`. The active vault's effective path is
+  // returned as `path` for the auto-sync / download-target convenience.
+  const { root, setRoot, clear } = useVaultFolder({ vaultName: activeVault?.name ?? null });
   const { mode, setMode } = useDownloadMode(activeVaultId);
   const [pickError, setPickError] = useState<string | null>(null);
 
@@ -19,7 +22,7 @@ export function SettingsScreen() {
     setPickError(null);
     try {
       const result = await openDirDialog({ directory: true, multiple: false });
-      if (typeof result === "string") setPath(result);
+      if (typeof result === "string") setRoot(result);
     } catch (e) {
       setPickError(e instanceof Error ? e.message : String(e));
     }
@@ -56,19 +59,32 @@ export function SettingsScreen() {
       </section>
 
       <section className="mb-8 max-w-xl space-y-3">
-        <h2 className="text-sm uppercase tracking-wider text-helios-dim">
-          Local folder for {vaultLabel}
-        </h2>
+        <h2 className="text-sm uppercase tracking-wider text-helios-dim">Helios folder</h2>
         <p className="text-xs text-helios-dim">
-          Helios syncs this vault's files into and out of this folder. Each vault has its own
-          working directory — pick one per vault you sync.
+          Pick one folder on this machine — Helios will create a subfolder named after
+          each vault inside it (e.g. <code className="font-mono-num">SDM26/</code>,{" "}
+          <code className="font-mono-num">SDM27/</code>) and sync each vault into its own
+          subfolder. The vaults stay isolated; you keep one tidy parent directory.
         </p>
         <div className="rounded border border-helios-line bg-helios-base p-4 text-sm">
-          {!activeVaultId ? (
-            <div className="text-helios-dim">Select a vault to configure its local folder.</div>
-          ) : vaultFolder ? (
+          {root ? (
             <>
-              <div className="mb-3 break-all font-mono-num text-xs text-helios-text">{vaultFolder}</div>
+              <div className="mb-2 break-all font-mono-num text-xs text-helios-text">{root}</div>
+              {vaults.length > 0 && (
+                <div className="mb-3 space-y-1 rounded border border-helios-line bg-helios-panel/40 p-2">
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-helios-dim">
+                    Each vault syncs into
+                  </div>
+                  {vaults.map((v) => (
+                    <div key={v.id} className="flex items-baseline gap-2 text-[11px]">
+                      <span className="w-16 shrink-0 truncate text-helios-text">{v.name}</span>
+                      <span className="truncate font-mono-num text-helios-dim">
+                        {root.replace(/\/+$/, "")}/{sanitizeVaultName(v.name)}/
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handlePickFolder}
@@ -89,7 +105,7 @@ export function SettingsScreen() {
               onClick={handlePickFolder}
               className="rounded bg-asu-gold px-3 py-1.5 text-xs text-white hover:bg-asu-gold"
             >
-              Pick vault folder
+              Pick Helios folder
             </button>
           )}
           {pickError && <p className="mt-2 text-xs text-[#EF5350]">{pickError}</p>}

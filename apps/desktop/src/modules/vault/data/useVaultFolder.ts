@@ -1,117 +1,116 @@
 import { useCallback, useEffect, useState } from "react";
-import type { VaultId } from "./types";
 
+// The user picks ONE root directory ("Helios folder"); each vault then
+// transparently syncs into a `<root>/<vault.name>` subfolder. SDM26 and
+// SDM27 stay isolated on disk while sharing the same parent, so a single
+// pick covers every vault the user has access to.
+//
+// Storage: a single string at this key.
+//
+// Legacy: prior versions stored either a bare string (vN.x) or a JSON map
+// `{ [vaultId]: path }` (v3.5.x). When we encounter either of those at
+// startup we extract a likely root by taking the common parent of the
+// stored paths, or — for a single entry — using that entry's parent.
 const STORAGE_KEY = "helios.vault.localFolder";
 
-// The stored value is a JSON object: { [vaultId]: path }. Each vault gets
-// its own working directory so SDM26 and SDM27 can sync to different folders.
-//
-// Legacy: prior versions stored a bare string here (one global folder). On
-// first read with a known vaultId, we migrate that string under that vault's
-// id so existing users don't lose their working directory.
-type Map = Record<string, string>;
-
-function parse(raw: string | null, migrationVaultId: VaultId | null): Map {
-  if (!raw) return {};
-  if (raw.startsWith("{")) {
-    try {
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj as Map;
-    } catch { /* fall through */ }
-  }
-  // Legacy bare-string. Adopt into the currently active vault, if known.
-  // NOTE: this is a pure transform — the localStorage write that persists
-  // the migration happens in useVaultFolder's useEffect, not here, so this
-  // function is safe to call during render.
-  if (migrationVaultId) {
-    return { [migrationVaultId]: raw };
-  }
-  return {};
-}
-
-function readMap(migrationVaultId: VaultId | null): Map {
-  try { return parse(localStorage.getItem(STORAGE_KEY), migrationVaultId); }
-  catch { return {}; }
-}
-
-function writeMap(map: Map) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); } catch { /* ignore */ }
-}
-
-// True if the stored value is a legacy bare-string (i.e. not JSON-object).
-function isLegacyBareString(): boolean {
+function readRoot(): string | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return !!raw && !raw.startsWith("{");
-  } catch { return false; }
+    if (!raw) return null;
+    // New shape: a bare string IS the root. The legacy bare-string from
+    // v2.x also looks like this — we treat it as the root directly (the
+    // user can re-pick if it's wrong).
+    if (!raw.startsWith("{")) return raw;
+    // Legacy v3.5.x shape: JSON map { [vaultId]: path }. Best-effort
+    // recovery: take the parent directory of any one path. Users were
+    // expected to pick the same parent for both vaults anyway.
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        const first = Object.values(obj).find((v) => typeof v === "string") as string | undefined;
+        if (first) {
+          const idx = first.lastIndexOf("/");
+          return idx > 0 ? first.slice(0, idx) : first;
+        }
+      }
+    } catch { /* fall through */ }
+    return null;
+  } catch { return null; }
 }
 
-// Same-window subscriber set so setPath in one component is visible to
-// useVaultFolder consumers in sibling components without remounting. The
-// cross-window `storage` event only fires for OTHER windows.
-type MapSub = (next: Map) => void;
-const folderSubs = new Set<MapSub>();
-function broadcastFolders(next: Map) {
-  for (const s of folderSubs) s(next);
+function writeRoot(value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, value);
+  } catch { /* private mode etc. */ }
 }
 
-export function useVaultFolder(vaultId: VaultId | null): {
+// Filesystem-safe vault-name → subfolder. The team's vault names today
+// (SDM25/26/27) are all already safe; this is defensive for future names.
+export function sanitizeVaultName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "vault";
+}
+
+function joinPath(root: string, sub: string): string {
+  const trimmed = root.replace(/\/+$/, "");
+  return `${trimmed}/${sub}`;
+}
+
+// Same-window subscriber set so setRoot in one component is visible to
+// useVaultFolder consumers in sibling components without remounting.
+type Sub = (next: string | null) => void;
+const subs = new Set<Sub>();
+function broadcast(next: string | null) {
+  for (const s of subs) s(next);
+}
+
+/**
+ * Resolves the per-vault working directory.
+ *
+ * The user picks ONE root via `setRoot`. The hook returns the effective
+ * path for the given vault as `<root>/<sanitize(vaultName)>`. If the root
+ * isn't set or the vault name is unknown, `path` is null and callers
+ * (e.g. `useLocalFolderScan`) skip work.
+ *
+ * The `root` value is shared across every useVaultFolder instance in the
+ * window via a module-level subscriber set, so picking a folder in
+ * Settings updates BrowseScreen / auto-sync immediately.
+ */
+export function useVaultFolder(arg: { vaultName: string | null } | null): {
+  /** Shared root directory the user picked. */
+  root: string | null;
+  /** Effective per-vault path (`<root>/<sanitize(vaultName)>`), or null. */
   path: string | null;
-  setPath: (next: string | null) => void;
+  /** Updates the shared root. */
+  setRoot: (next: string | null) => void;
+  /** Clears the shared root. */
   clear: () => void;
 } {
-  const [map, setMap] = useState<Map>(() => readMap(vaultId));
+  const [root, setRootState] = useState<string | null>(() => readRoot());
 
-  // If vaultId changes after mount, re-read (and re-attempt legacy migration).
-  useEffect(() => {
-    setMap(readMap(vaultId));
-  }, [vaultId]);
-
-  // Persist the legacy bare-string migration. Pulled out of `parse` so that
-  // render stays side-effect-free (parse is called from useState init and
-  // from the [vaultId] effect's setMap). Once the stored value has been
-  // upgraded to a JSON object, this effect is a no-op on subsequent runs.
-  useEffect(() => {
-    if (!vaultId) return;
-    if (!isLegacyBareString()) return;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw && !raw.startsWith("{")) {
-        writeMap({ [vaultId]: raw });
-      }
-    } catch { /* ignore */ }
-  }, [vaultId]);
-
-  // Cross-window sync via storage event + same-window sync via module subs.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) setMap(parse(e.newValue, vaultId));
+      if (e.key === STORAGE_KEY) setRootState(readRoot());
     };
-    const sub: MapSub = (next) => setMap(next);
+    const sub: Sub = (next) => setRootState(next);
     window.addEventListener("storage", onStorage);
-    folderSubs.add(sub);
+    subs.add(sub);
     return () => {
       window.removeEventListener("storage", onStorage);
-      folderSubs.delete(sub);
+      subs.delete(sub);
     };
-  }, [vaultId]);
+  }, []);
 
-  const path = vaultId ? map[vaultId] ?? null : null;
+  const vaultName = arg?.vaultName ?? null;
+  const path = root && vaultName ? joinPath(root, sanitizeVaultName(vaultName)) : null;
 
-  const setPath = useCallback((next: string | null) => {
-    if (!vaultId) return;
-    setMap((prev) => {
-      const updated: Map = { ...prev };
-      if (next === null) delete updated[vaultId];
-      else updated[vaultId] = next;
-      writeMap(updated);
-      // Notify other useVaultFolder instances in this window.
-      broadcastFolders(updated);
-      return updated;
-    });
-  }, [vaultId]);
+  const setRoot = useCallback((next: string | null) => {
+    writeRoot(next);
+    setRootState(next);
+    broadcast(next);
+  }, []);
 
-  const clear = useCallback(() => setPath(null), [setPath]);
+  const clear = useCallback(() => setRoot(null), [setRoot]);
 
-  return { path, setPath, clear };
+  return { root, path, setRoot, clear };
 }

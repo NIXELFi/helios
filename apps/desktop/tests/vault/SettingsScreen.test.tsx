@@ -82,19 +82,17 @@ describe("<SettingsScreen>", () => {
     expect(c.auth.signOut).toHaveBeenCalled();
   });
 
-  it("pick vault folder button stores path in localStorage scoped to the active vault", async () => {
+  it("pick Helios folder button stores a single root in localStorage", async () => {
     render(
       <SupabaseAuthProvider client={mockClient()}>
         <SettingsScreen />
       </SupabaseAuthProvider>,
     );
-    const pickBtn = await screen.findByRole("button", { name: /pick vault folder/i });
+    const pickBtn = await screen.findByRole("button", { name: /pick helios folder/i });
     await act(async () => { fireEvent.click(pickBtn); });
     await waitFor(() => {
-      const raw = localStorage.getItem("helios.vault.localFolder");
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
-      expect(parsed["v1"]).toBe("/Users/me/SDM26-Vault");
+      // Shared-root model: a single string at this key, not a JSON map.
+      expect(localStorage.getItem("helios.vault.localFolder")).toBe("/Users/me/SDM26-Vault");
     });
     expect(await screen.findByText("/Users/me/SDM26-Vault")).toBeInTheDocument();
   });

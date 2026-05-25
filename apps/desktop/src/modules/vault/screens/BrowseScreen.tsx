@@ -11,6 +11,10 @@ import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
 import { ManualDownloadAll } from "../components/ManualDownloadAll";
+import { useBulkDownload } from "../data/useBulkDownload";
+import { BulkDownloadModal } from "../components/BulkDownloadModal";
+import { TreeContextMenu, type MenuAction } from "../components/TreeContextMenu";
+import type { TreeContextTarget } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
@@ -59,7 +63,10 @@ export function BrowseScreen() {
   // native filesystem watcher so the synced/modified state stays live without
   // the user touching a button. The folder is per-vault: SDM26 and SDM27 each
   // remember their own working directory.
-  const { path: vaultFolderPath } = useVaultFolder(vaultId);
+  // Shared-root model: user picks ONE root in Settings, each vault syncs
+  // into `<root>/<vault.name>/`. The hook computes the effective path for
+  // the active vault from its name.
+  const { path: vaultFolderPath } = useVaultFolder({ vaultName: vault?.name ?? null });
   const { mode: downloadMode } = useDownloadMode(vaultId);
   const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
@@ -119,6 +126,22 @@ export function BrowseScreen() {
   // refetch wiring.
   const onAutoSyncComplete = useCallback(() => { rescan(); }, [rescan]);
   const onAutoSyncBusy = useCallback((b: boolean) => setSyncBusy(b), []);
+
+  // Multi-select in the tree (shift / cmd click) + right-click context menu.
+  // The bulk-download hook is shared with ManualDownloadAll's button so the
+  // progress UI is identical regardless of how the action was triggered.
+  const [treeSelection, setTreeSelection] = useState<Set<FileId>>(new Set());
+  useEffect(() => { setTreeSelection(new Set()); }, [vaultId]);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
+  const bulk = useBulkDownload({
+    vaultRoot: vaultFolderPath,
+    folders: folders ?? [],
+    versionsByFileId,
+    onDone: () => { refetchFiles(); rescan(); },
+  });
+  function handleTreeContextMenu(target: TreeContextTarget, x: number, y: number) {
+    setCtxMenu({ x, y, target });
+  }
 
   function toggleOne(id: FileId) {
     setSelected((prev) => {
@@ -245,6 +268,9 @@ export function BrowseScreen() {
               onSelectFile={setSelectedFile}
               locks={locks ?? []}
               currentUserId={user?.id ?? ""}
+              multiSelectedFiles={treeSelection}
+              onMultiSelectChange={setTreeSelection}
+              onContextMenu={handleTreeContextMenu}
             />
           ) : (
             <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
@@ -338,6 +364,37 @@ export function BrowseScreen() {
       </div>
       <FileDetailPanel fileId={selectedFile} />
       </div>
+      {/* Bulk-download progress modal shared by ManualDownloadAll and the
+          right-click context menu. */}
+      <BulkDownloadModal api={bulk} />
+      {/* Right-click context menu on tree rows. Folder → download every file
+          under it; files → download the current multi-selection. */}
+      {ctxMenu && (() => {
+        const actions: MenuAction[] = [];
+        if (ctxMenu.target.kind === "folder") {
+          const n = ctxMenu.target.descendantFiles.length;
+          actions.push({
+            label: `Download ${n} file${n === 1 ? "" : "s"} in ${ctxMenu.target.folder.name}`,
+            disabledReason: n === 0 ? "Folder has no files" : undefined,
+            onClick: () => bulk.start(ctxMenu.target.kind === "folder" ? ctxMenu.target.descendantFiles : []),
+          });
+        } else {
+          const n = ctxMenu.target.files.length;
+          actions.push({
+            label: `Download ${n} selected file${n === 1 ? "" : "s"}`,
+            disabledReason: n === 0 ? "Nothing selected" : undefined,
+            onClick: () => bulk.start(ctxMenu.target.kind === "files" ? ctxMenu.target.files : []),
+          });
+        }
+        return (
+          <TreeContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            actions={actions}
+            onClose={() => setCtxMenu(null)}
+          />
+        );
+      })()}
       {prompt && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
