@@ -26,32 +26,55 @@ function parentDir(path: string): string {
  * need parallel downloads. Returns the error message on failure (instead of
  * setting hook state) so the caller can aggregate.
  *
- * The hook below wraps this for the common single-download UI cases.
+ * Retries up to 3 times with exponential backoff on transient errors:
+ *  - 5xx responses from Supabase Storage (esp. 504 gateway timeouts when
+ *    the proxy gives up waiting on the backend during heavy load)
+ *  - Network errors (TypeError on fetch failure, AbortError, etc.)
+ * Permanent errors (404, 403) bail immediately — no point retrying.
  */
 export async function downloadVersionOnce(
   client: SupabaseClient,
   sha: string,
   destPath: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const { data, error: dlErr } = await client.storage
-      .from(BUCKET)
-      .download(storagePath(String(sha)));
-    if (dlErr || !data) {
-      return { ok: false, error: dlErr?.message ?? "download failed" };
+  let lastError = "download failed";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { data, error: dlErr } = await client.storage
+        .from(BUCKET)
+        .download(storagePath(String(sha)));
+      if (dlErr || !data) {
+        const msg = dlErr?.message ?? "download failed";
+        // Retry only on transient signals — 5xx, network/abort, generic
+        // "fetch failed". Anything that looks like 4xx is permanent.
+        const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+        if (!transient || attempt === 2) {
+          return { ok: false, error: msg };
+        }
+        lastError = msg;
+        await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+        continue;
+      }
+      const raw = new Uint8Array(await data.arrayBuffer());
+      const arr = await gunzipIfNeeded(raw);
+      const dir = parentDir(destPath);
+      if (dir) {
+        try { await mkdir(dir, { recursive: true }); }
+        catch { /* mkdir errors when the dir exists in some Tauri versions */ }
+      }
+      await writeFile(destPath, arr);
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+      if (!transient || attempt === 2) {
+        return { ok: false, error: msg };
+      }
+      lastError = msg;
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
     }
-    const raw = new Uint8Array(await data.arrayBuffer());
-    const arr = await gunzipIfNeeded(raw);
-    const dir = parentDir(destPath);
-    if (dir) {
-      try { await mkdir(dir, { recursive: true }); }
-      catch { /* mkdir errors when the dir exists in some Tauri versions */ }
-    }
-    await writeFile(destPath, arr);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+  return { ok: false, error: lastError };
 }
 
 export function useDownloadVersion() {
