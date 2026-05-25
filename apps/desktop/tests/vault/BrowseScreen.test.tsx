@@ -28,17 +28,21 @@ function buildMockClient(isAdmin = false): SupabaseClient {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [{ id: "v1", name: "sdm26", created_at: "x", created_by: "u1" }], error: null }) };
       if (table === "folders") return {
         select: () => ({
-          eq: () => Promise.resolve({
-            data: [{ id: "f1", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" }],
-            error: null,
+          eq: () => ({
+            range: () => Promise.resolve({
+              data: [{ id: "f1", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" }],
+              error: null,
+            }),
           }),
         }),
       };
       if (table === "files") return {
         select: () => ({
-          eq: () => Promise.resolve({
-            data: [{ id: "fi1", vault_id: "v1", folder_id: "f1", name: "frame.sldprt", latest_version_id: null, created_at: "x" }],
-            error: null,
+          eq: () => ({
+            range: () => Promise.resolve({
+              data: [{ id: "fi1", vault_id: "v1", folder_id: "f1", name: "frame.sldprt", latest_version_id: null, created_at: "x" }],
+              error: null,
+            }),
           }),
         }),
       };
@@ -49,7 +53,11 @@ function buildMockClient(isAdmin = false): SupabaseClient {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
       };
       if (table === "versions") return {
-        select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+        select: () => ({
+          in: () => ({
+            order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
+          }),
+        }),
       };
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),
@@ -72,13 +80,21 @@ function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
     },
     from: vi.fn().mockImplementation((table: string) => {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [], error: null }) };
-      if (table === "folders") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
+      if (table === "folders" || table === "files") return {
+        select: () => ({
+          eq: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
+        }),
+      };
       if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
       if (table === "user_roles") return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
       };
       if (table === "versions") return {
-        select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+        select: () => ({
+          in: () => ({
+            order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
+          }),
+        }),
       };
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),

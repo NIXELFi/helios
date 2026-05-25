@@ -19,7 +19,12 @@ function makeClient(rows: any[]): SupabaseClient {
         return {
           select: () => ({
             in: () => ({
-              order: () => Promise.resolve({ data: rows, error: null }),
+              order: () => ({
+                // The hook chunks ids into batches and paginates each batch.
+                // Returning all rows on the first .range() exits the loop.
+                range: (_from: number, _to: number) =>
+                  Promise.resolve({ data: rows, error: null }),
+              }),
             }),
           }),
         };

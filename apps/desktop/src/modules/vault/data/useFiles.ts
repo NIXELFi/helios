@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FolderId, QueryResult, VaultFile } from "./types";
+import { fetchAllRows } from "./paginate";
 
 export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile[]> {
   const client = useSupabaseClient();
@@ -20,15 +21,15 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
     setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await (client.from("files") as any)
-        .select("*")
-        .eq("folder_id", folder_id);
+      const { rows, error: err } = await fetchAllRows<VaultFile>(
+        () => (client.from("files") as any).select("*").eq("folder_id", folder_id),
+      );
       if (!mounted) return;
       if (err) {
-        setError(err instanceof Error ? err : new Error(String(err.message ?? err)));
+        setError(err);
         setData(null);
       } else {
-        setData(rows ?? []);
+        setData(rows);
       }
       setLoading(false);
     })();
