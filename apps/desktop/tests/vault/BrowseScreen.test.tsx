@@ -109,7 +109,9 @@ describe("<BrowseScreen>", () => {
     await waitFor(() => expect(screen.getByText(/select a file/i)).toBeInTheDocument());
   });
 
-  it("empty-vault state shows 'Create vault' form when admin", async () => {
+  it("empty-vault state points an admin to the NavRail switcher", async () => {
+    // Vault creation moved out of BrowseScreen — the switcher in the NavRail
+    // owns it now. BrowseScreen just shows a hint when there's no active vault.
     const c = buildEmptyVaultClient(true);
     render(
       <SupabaseAuthProvider client={c}>
@@ -117,20 +119,18 @@ describe("<BrowseScreen>", () => {
       </SupabaseAuthProvider>,
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /create vault/i })).toBeInTheDocument(),
+      expect(screen.getByText(/vault switcher in the top-left/i)).toBeInTheDocument(),
     );
-    expect(screen.getByPlaceholderText(/vault name/i)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/vault name/i)).toBeNull();
   });
 
-  it("empty-vault state shows nothing special when not admin", async () => {
+  it("empty-vault state for a non-admin points to contact an admin", async () => {
     const c = buildEmptyVaultClient(false);
     render(
       <SupabaseAuthProvider client={c}>
         <BrowseScreen />
       </SupabaseAuthProvider>,
     );
-    // Should NOT show the create-vault form; the normal layout renders instead
-    await waitFor(() => expect(screen.getByText(/no vault/i)).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: /create vault/i })).toBeNull();
+    await waitFor(() => expect(screen.getByText(/contact an admin/i)).toBeInTheDocument());
   });
 });

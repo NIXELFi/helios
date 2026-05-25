@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@helios/auth";
-import { useVaults } from "../data/useVaults";
+import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useMyRole } from "../data/useMyRole";
-import { useCreateVault } from "../data/useCreateVault";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
+import { useDownloadMode } from "../data/useDownloadMode";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
@@ -36,11 +36,9 @@ export function BrowseScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
 
-  const { data: vaults, refetch: refetchVaults } = useVaults();
-  const vault = vaults?.[0];
-  const vaultId = vault?.id;
+  const { activeVault: vault, activeVaultId: vaultId, vaults, loading: vaultsLoading } = useActiveVault();
 
-  const { data: folders, refetch: refetchFolders } = useFolders(vaultId);
+  const { data: folders, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
   const { data: files, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
@@ -48,10 +46,21 @@ export function BrowseScreen() {
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
 
+  // Reset folder/file selection on vault switch so we don't show a SDM27 folder
+  // tree but a SDM26 file open in the side panel.
+  useEffect(() => {
+    setSelectedFolder(null);
+    setSelectedFile(null);
+    setSelected(new Set());
+  }, [vaultId]);
+
   // Local vault folder scan — auto-rescan on window focus + 30s interval +
   // native filesystem watcher so the synced/modified state stays live without
-  // the user touching a button.
-  const { path: vaultFolderPath } = useVaultFolder();
+  // the user touching a button. The folder is per-vault: SDM26 and SDM27 each
+  // remember their own working directory.
+  const { path: vaultFolderPath } = useVaultFolder(vaultId);
+  const { mode: downloadMode } = useDownloadMode(vaultId);
+  const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
   // While a sync pass is writing files we suppress automatic rescans so the
   // file table doesn't flicker between modified/synced as bytes land; the
@@ -66,7 +75,7 @@ export function BrowseScreen() {
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
-  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId);
+  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
   const unmatched =
     allFiles && localFiles && folders
       ? findUnmatchedLocal(allFiles, localFiles, folders)
@@ -90,7 +99,7 @@ export function BrowseScreen() {
   const onVersion = useCallback(() => { refetchLatest(); refetchAllFiles(); }, [refetchLatest, refetchAllFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
   const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
-  useVaultRealtime(vaultId, { onVersion, onLock, onFile });
+  useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
   // updates (one per file start + one per file end) re-render only that
@@ -120,27 +129,13 @@ export function BrowseScreen() {
     setSelected(new Set());
   }
 
-  const createVault = useCreateVault();
   const createFolder = useCreateFolder();
   const createFile = useCreateFile();
-
-  const [vaultNameInput, setVaultNameInput] = useState("");
 
   // Tauri's webview doesn't render window.prompt(), so we use an in-app modal.
   const [prompt, setPrompt] = useState<{ kind: "folder" | "file" } | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
-
-  async function handleCreateVault(e: React.FormEvent) {
-    e.preventDefault();
-    const name = vaultNameInput.trim();
-    if (!name) return;
-    const result = await createVault.run(name);
-    if (result) {
-      setVaultNameInput("");
-      refetchVaults();
-    }
-  }
 
   async function handlePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -182,30 +177,19 @@ export function BrowseScreen() {
     bump();
   }
 
-  // Empty-vault state for admins
-  if (isAdmin && (!vaults || vaults.length === 0)) {
+  // No active vault — either the user has no vaults at all, or vaults are
+  // still loading. Vault creation now lives in the NavRail switcher, so
+  // empty-state copy points there.
+  if (!vaultsLoading && !vaultId) {
     return (
       <div className="flex h-full items-center justify-center bg-helios-base">
-        <form onSubmit={handleCreateVault} className="flex flex-col items-center gap-3">
-          <p className="text-sm text-helios-dim">No vault exists yet. Create one to get started.</p>
-          <input
-            type="text"
-            placeholder="Vault name"
-            value={vaultNameInput}
-            onChange={(e) => setVaultNameInput(e.target.value)}
-            className="rounded border border-helios-line bg-helios-panel px-3 py-1.5 text-sm text-helios-text placeholder-helios-dim focus:outline-none focus:ring-1 focus:ring-asu-gold"
-          />
-          <button
-            type="submit"
-            disabled={createVault.loading || !vaultNameInput.trim()}
-            className="rounded bg-asu-gold px-4 py-1.5 text-sm text-white hover:bg-asu-gold disabled:opacity-50"
-          >
-            Create vault
-          </button>
-          {createVault.error && (
-            <p className="text-xs text-[#EF5350]">{createVault.error.message}</p>
-          )}
-        </form>
+        <p className="text-sm text-helios-dim">
+          {vaults.length === 0
+            ? (isAdmin
+                ? "No vaults yet. Use the vault switcher in the top-left to create one."
+                : "You don't have access to any vault yet — contact an admin.")
+            : "Choose a vault from the switcher in the top-left."}
+        </p>
       </div>
     );
   }
@@ -213,7 +197,7 @@ export function BrowseScreen() {
   return (
     <div className="flex h-full flex-col">
       <UnmatchedFilesBanner
-        vaultId={vaultId}
+        vaultId={vaultId ?? undefined}
         unmatched={unmatched}
         onDone={() => {
           refetchAllFiles();
@@ -260,7 +244,7 @@ export function BrowseScreen() {
         {selectedFolder ? (
           <>
             <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
-              {vaultFolderPath && (
+              {vaultFolderPath && autoSyncEnabled && (
                 <VaultSyncSection
                   enabled
                   files={allFiles}
@@ -274,6 +258,15 @@ export function BrowseScreen() {
                   onBusyChange={onAutoSyncBusy}
                   onRescan={rescan}
                 />
+              )}
+              {!autoSyncEnabled && (
+                <span
+                  className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
+                  title="Auto-sync is off for this vault. Click Get Latest on a row to download. Change in Settings."
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
+                  Manual mode
+                </span>
               )}
               {isAdmin && (
                 <button

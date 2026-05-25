@@ -1,3 +1,5 @@
+import { VaultSwitcher } from "./VaultSwitcher";
+
 export type VaultScreenId = "browse" | "history" | "who" | "settings";
 
 const ENTRIES: { id: VaultScreenId; label: string }[] = [
@@ -10,21 +12,26 @@ const ENTRIES: { id: VaultScreenId; label: string }[] = [
 export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScreenId) => void }) {
   const { active, onSelect } = props;
   return (
-    <nav className="flex w-40 flex-col gap-1 border-r border-helios-line bg-helios-base p-2">
-      {ENTRIES.map((e) => (
-        <button
-          key={e.id}
-          type="button"
-          aria-current={active === e.id ? "page" : undefined}
-          onClick={() => onSelect(e.id)}
-          className={
-            "rounded px-3 py-2 text-left text-sm " +
-            (active === e.id ? "bg-helios-line text-helios-text" : "text-helios-dim hover:bg-helios-panel")
-          }
-        >
-          {e.label}
-        </button>
-      ))}
+    <nav className="flex w-44 flex-col border-r border-helios-line bg-helios-base p-2">
+      <div className="mb-2">
+        <VaultSwitcher />
+      </div>
+      <div className="flex flex-col gap-1">
+        {ENTRIES.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            aria-current={active === e.id ? "page" : undefined}
+            onClick={() => onSelect(e.id)}
+            className={
+              "rounded px-3 py-2 text-left text-sm " +
+              (active === e.id ? "bg-helios-line text-helios-text" : "text-helios-dim hover:bg-helios-panel")
+            }
+          >
+            {e.label}
+          </button>
+        ))}
+      </div>
     </nav>
   );
 }

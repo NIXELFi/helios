@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useUser } from "@helios/auth";
-import { useVaults } from "../data/useVaults";
+import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useVersions } from "../data/useVersions";
@@ -11,9 +11,8 @@ import type { FileId, FolderId } from "../data/types";
 
 export function HistoryScreen() {
   const user = useUser();
-  const { data: vaults } = useVaults();
-  const vaultId = vaults?.[0]?.id;
-  const { data: folders } = useFolders(vaultId);
+  const { activeVaultId: vaultId } = useActiveVault();
+  const { data: folders } = useFolders(vaultId ?? undefined);
   const [folderId, setFolderId] = useState<FolderId | null>(null);
   const { data: files } = useFiles(folderId ?? undefined);
   const [fileId, setFileId] = useState<FileId | null>(null);

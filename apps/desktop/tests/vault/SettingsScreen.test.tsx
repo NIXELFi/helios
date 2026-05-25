@@ -38,6 +38,20 @@ function mockClient(role: string | null = "editor", isAdmin = false): SupabaseCl
           }),
         };
       }
+      if (table === "vaults") {
+        // Settings shows a per-vault local-folder picker, so a vault must exist
+        // for the picker to be enabled.
+        return {
+          select: () => Promise.resolve({
+            data: [{
+              id: "v1", name: "SDM26",
+              created_at: "2026-05-11T18:32:17.728358+00:00",
+              created_by: "u1",
+            }],
+            error: null,
+          }),
+        };
+      }
       return { select: () => Promise.resolve({ data: [], error: null }) };
     },
   } as any;
@@ -68,7 +82,7 @@ describe("<SettingsScreen>", () => {
     expect(c.auth.signOut).toHaveBeenCalled();
   });
 
-  it("pick vault folder button stores path in localStorage", async () => {
+  it("pick vault folder button stores path in localStorage scoped to the active vault", async () => {
     render(
       <SupabaseAuthProvider client={mockClient()}>
         <SettingsScreen />
@@ -76,9 +90,12 @@ describe("<SettingsScreen>", () => {
     );
     const pickBtn = await screen.findByRole("button", { name: /pick vault folder/i });
     await act(async () => { fireEvent.click(pickBtn); });
-    await waitFor(() =>
-      expect(localStorage.getItem("helios.vault.localFolder")).toBe("/Users/me/SDM26-Vault"),
-    );
+    await waitFor(() => {
+      const raw = localStorage.getItem("helios.vault.localFolder");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed["v1"]).toBe("/Users/me/SDM26-Vault");
+    });
     expect(await screen.findByText("/Users/me/SDM26-Vault")).toBeInTheDocument();
   });
 });
