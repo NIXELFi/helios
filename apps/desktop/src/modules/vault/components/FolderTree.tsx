@@ -505,44 +505,41 @@ export function FolderTree({
   // user has selected the root view.
   const rootFiles = filesByFolder.get(null) ?? [];
 
-  // Drag-marquee — mousedown on whitespace (not on a row) starts a lasso.
-  // We use a >4px move threshold before treating as a drag so plain clicks
-  // on whitespace still get through as "clear selection".
+  // Drag-marquee — mousedown anywhere starts a potential lasso. A >4px move
+  // threshold separates a drag from a plain click; a plain mousedown on a
+  // row falls through to the row's onClick. On a plain click that NEVER
+  // exceeds the threshold and lands outside a row, we clear the selection.
+  // Coords are viewport-fixed (clientX/clientY) so the math survives any
+  // scrolling without translation.
   function onContainerMouseDown(e: React.MouseEvent) {
     if (e.button !== 0) return; // left button only
-    // Bail if the press started on an actual row — let the row handler win.
     const target = e.target as HTMLElement;
-    if (target.closest("[data-row-kind]")) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const onRow = !!target.closest("[data-row-kind]");
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    const startX = e.clientX - rect.left + (containerRef.current?.scrollLeft ?? 0);
-    const startY = e.clientY - rect.top + (containerRef.current?.scrollTop ?? 0);
     const baseline = additive
       ? cloneSelection(treeSelection ?? emptyTreeSelection())
       : emptyTreeSelection();
 
+    const startX = e.clientX;
+    const startY = e.clientY;
     let started = false;
     let curX = startX, curY = startY;
     function onMove(ev: MouseEvent) {
-      const r = containerRef.current?.getBoundingClientRect();
-      if (!r) return;
-      curX = ev.clientX - r.left + (containerRef.current?.scrollLeft ?? 0);
-      curY = ev.clientY - r.top + (containerRef.current?.scrollTop ?? 0);
+      curX = ev.clientX;
+      curY = ev.clientY;
       if (!started) {
         if (Math.hypot(curX - startX, curY - startY) < 4) return;
         started = true;
       }
       setMarquee({ x0: startX, y0: startY, x1: curX, y1: curY, baseline, additive });
-      // Live-update selection as we drag.
       onTreeSelectionChange?.(computeMarqueeSelection(startX, startY, curX, curY, baseline));
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      if (!started) {
-        // Plain click on whitespace, no modifier → clear selection.
-        if (!additive) onTreeSelectionChange?.(emptyTreeSelection());
+      if (!started && !onRow && !additive) {
+        // Plain click on whitespace → clear the multi-selection.
+        onTreeSelectionChange?.(emptyTreeSelection());
       }
       setMarquee(null);
     }
@@ -557,18 +554,11 @@ export function FolderTree({
     const next = cloneSelection(baseline);
     const lx = Math.min(x0, x1), rx = Math.max(x0, x1);
     const ty = Math.min(y0, y1), by = Math.max(y0, y1);
-    const root = containerRef.current;
-    if (!root) return next;
-    const rootRect = root.getBoundingClientRect();
-    const rows = root.querySelectorAll<HTMLElement>("[data-row-kind]");
+    // Use viewport coords directly (the marquee is fixed-positioned too).
+    const rows = document.querySelectorAll<HTMLElement>("[data-row-kind]");
     rows.forEach((row) => {
       const r = row.getBoundingClientRect();
-      const rxL = r.left - rootRect.left + root.scrollLeft;
-      const rxR = r.right - rootRect.left + root.scrollLeft;
-      const ryT = r.top - rootRect.top + root.scrollTop;
-      const ryB = r.bottom - rootRect.top + root.scrollTop;
-      // Intersect test
-      const intersects = !(rxR < lx || rxL > rx || ryB < ty || ryT > by);
+      const intersects = !(r.right < lx || r.left > rx || r.bottom < ty || r.top > by);
       if (!intersects) return;
       const kind = row.getAttribute("data-row-kind");
       const id = row.getAttribute("data-row-id");
@@ -587,7 +577,10 @@ export function FolderTree({
     >
       {marquee && (
         <div
-          className="pointer-events-none absolute z-10 rounded border border-asu-gold/80 bg-asu-gold/10"
+          // Fixed-positioned in viewport coords — matches the row hit-test
+          // math in computeMarqueeSelection so the visible lasso and the
+          // intersection logic stay in sync as the tree scrolls.
+          className="pointer-events-none fixed z-[60] rounded border border-asu-gold/80 bg-asu-gold/10"
           style={{
             left: Math.min(marquee.x0, marquee.x1),
             top: Math.min(marquee.y0, marquee.y1),

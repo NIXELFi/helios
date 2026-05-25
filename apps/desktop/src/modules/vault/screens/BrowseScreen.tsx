@@ -133,6 +133,41 @@ export function BrowseScreen() {
   // button so the progress UI is identical regardless of trigger.
   const [treeSelection, setTreeSelection] = useState<TreeSelection>(emptyTreeSelection());
   useEffect(() => { setTreeSelection(emptyTreeSelection()); }, [vaultId]);
+  // Escape clears the tree selection from anywhere in the Vault module.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTreeSelection(emptyTreeSelection());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Flatten tree selection to a concrete file list — folders contribute
+  // every descendant file recursively, de-duped with directly-selected files.
+  const selectedFiles = useMemo(() => {
+    const all = allFiles ?? [];
+    if (treeSelection.files.size === 0 && treeSelection.folders.size === 0) return [];
+    const out = new Map<FileId, VaultFile>();
+    for (const fid of treeSelection.files) {
+      const f = all.find((x) => x.id === fid);
+      if (f) out.set(fid, f);
+    }
+    if (treeSelection.folders.size > 0) {
+      // Recursive descent — files under folder X plus every descendant folder.
+      const wanted = new Set<string>();
+      const stack = Array.from(treeSelection.folders);
+      while (stack.length > 0) {
+        const id = stack.pop()!;
+        wanted.add(id);
+        for (const f of (folders ?? [])) if (f.parent_id === id) stack.push(f.id);
+      }
+      for (const f of all) {
+        if (f.folder_id && wanted.has(f.folder_id)) out.set(f.id, f);
+      }
+    }
+    return Array.from(out.values());
+  }, [treeSelection, allFiles, folders]);
+
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
   const bulk = useBulkDownload({
     vaultRoot: vaultFolderPath,
@@ -305,18 +340,30 @@ export function BrowseScreen() {
                 <>
                   <span
                     className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
-                    title="Auto-sync is off for this vault. Click Download on a row to pull bytes, or use Download all. Change in Settings."
+                    title="Auto-sync is off for this vault. Click Download on a row, shift-click rows to multi-select, or use Download all. Change in Settings."
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
                     Manual mode
                   </span>
-                  <ManualDownloadAll
-                    files={files ?? []}
-                    versionsByFileId={versionsByFileId}
-                    vaultRoot={vaultFolderPath}
-                    folders={folders ?? []}
-                    onDone={() => { refetchFiles(); rescan(); }}
-                  />
+                  {selectedFiles.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => bulk.start(selectedFiles)}
+                      disabled={bulk.running}
+                      className="rounded border border-asu-gold/70 bg-asu-gold/15 px-2 py-0.5 text-xs text-helios-text hover:bg-asu-gold/25 disabled:opacity-50"
+                      title={`Download ${selectedFiles.length} selected file${selectedFiles.length === 1 ? "" : "s"}`}
+                    >
+                      Download {selectedFiles.length} selected
+                    </button>
+                  ) : (
+                    <ManualDownloadAll
+                      files={files ?? []}
+                      versionsByFileId={versionsByFileId}
+                      vaultRoot={vaultFolderPath}
+                      folders={folders ?? []}
+                      onDone={() => { refetchFiles(); rescan(); }}
+                    />
+                  )}
                 </>
               )}
               {isAdmin && (
