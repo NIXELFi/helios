@@ -14,7 +14,8 @@ import { ManualDownloadAll } from "../components/ManualDownloadAll";
 import { useBulkDownload } from "../data/useBulkDownload";
 import { BulkDownloadModal } from "../components/BulkDownloadModal";
 import { TreeContextMenu, type MenuAction } from "../components/TreeContextMenu";
-import type { TreeContextTarget } from "../components/FolderTree";
+import type { TreeContextTarget, TreeSelection } from "../components/FolderTree";
+import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
@@ -127,11 +128,11 @@ export function BrowseScreen() {
   const onAutoSyncComplete = useCallback(() => { rescan(); }, [rescan]);
   const onAutoSyncBusy = useCallback((b: boolean) => setSyncBusy(b), []);
 
-  // Multi-select in the tree (shift / cmd click) + right-click context menu.
-  // The bulk-download hook is shared with ManualDownloadAll's button so the
-  // progress UI is identical regardless of how the action was triggered.
-  const [treeSelection, setTreeSelection] = useState<Set<FileId>>(new Set());
-  useEffect(() => { setTreeSelection(new Set()); }, [vaultId]);
+  // Multi-select in the tree (shift / cmd click + drag marquee) + right-click
+  // context menu. The bulk-download hook is shared with ManualDownloadAll's
+  // button so the progress UI is identical regardless of trigger.
+  const [treeSelection, setTreeSelection] = useState<TreeSelection>(emptyTreeSelection());
+  useEffect(() => { setTreeSelection(emptyTreeSelection()); }, [vaultId]);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
   const bulk = useBulkDownload({
     vaultRoot: vaultFolderPath,
@@ -268,8 +269,8 @@ export function BrowseScreen() {
               onSelectFile={setSelectedFile}
               locks={locks ?? []}
               currentUserId={user?.id ?? ""}
-              multiSelectedFiles={treeSelection}
-              onMultiSelectChange={setTreeSelection}
+              treeSelection={treeSelection}
+              onTreeSelectionChange={setTreeSelection}
               onContextMenu={handleTreeContextMenu}
             />
           ) : (

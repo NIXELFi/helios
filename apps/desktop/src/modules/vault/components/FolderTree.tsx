@@ -1,5 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FileId, Folder, FolderId, Lock, UserId, VaultFile } from "../data/types";
+
+/**
+ * Tree multi-selection covers BOTH files and folders. A selected folder
+ * means "every file recursively under it" at action time, which is what
+ * users want from drag/shift-select across mixed rows.
+ */
+export interface TreeSelection {
+  files: Set<FileId>;
+  folders: Set<FolderId>;
+}
+
+export function emptyTreeSelection(): TreeSelection {
+  return { files: new Set(), folders: new Set() };
+}
 
 /**
  * Target of a right-click in the tree. Either a single folder (with all its
@@ -22,12 +36,14 @@ interface Props {
   locks?: Lock[];
   currentUserId?: UserId;
   /**
-   * Multi-select state for files in the tree. Hold shift to range-select
-   * along the visible order; hold cmd/ctrl to toggle individual files.
-   * Pass-through so the parent (BrowseScreen) can render bulk actions.
+   * Multi-select state for the tree. Hold shift to range-select along the
+   * visible row order; hold cmd/ctrl to toggle individual rows. Click-drag
+   * on empty space draws a marquee that selects every row it crosses.
+   * Folders included in the selection are expanded at action time to all
+   * their descendant files.
    */
-  multiSelectedFiles?: Set<FileId>;
-  onMultiSelectChange?: (next: Set<FileId>) => void;
+  treeSelection?: TreeSelection;
+  onTreeSelectionChange?: (next: TreeSelection) => void;
   /**
    * Right-click handler — fires with screen coords + a structured target.
    * Parent renders a context menu (e.g. TreeContextMenu) at the coords.
@@ -128,6 +144,10 @@ function LockDot({ kind }: { kind: "none" | "me" | "other" }) {
   return <span className={"inline-block h-2 w-2 shrink-0 rounded-full " + color} />;
 }
 
+type RowItem =
+  | { kind: "file"; id: FileId }
+  | { kind: "folder"; id: FolderId };
+
 export function FolderTree({
   folders,
   selected,
@@ -137,33 +157,26 @@ export function FolderTree({
   onSelectFile,
   locks = [],
   currentUserId,
-  multiSelectedFiles,
-  onMultiSelectChange,
+  treeSelection,
+  onTreeSelectionChange,
   onContextMenu,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const tree = buildTree(folders);
-  const anchorRef = useRef<FileId | null>(null);
+  const anchorRef = useRef<RowItem | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Build a stable visible order of files for shift-range selection. We
-  // descend the tree in render order and emit only files whose ancestor
-  // chain is fully expanded — those are the rows the user can actually see.
-  function visibleFilesInOrder(): VaultFile[] {
-    const out: VaultFile[] = [];
-    const rootFiles = (filesByFolder.get(null) ?? []);
-    out.push(...rootFiles);
-    function walk(parentId: string | null) {
-      const here = (folders.filter((f) => f.parent_id === parentId)
-        .sort((a, b) => a.name.localeCompare(b.name)));
-      for (const folder of here) {
-        if (!expanded.has(folder.id)) continue;
-        out.push(...(filesByFolder.get(folder.id) ?? []));
-        walk(folder.id);
-      }
-    }
-    walk(null);
-    return out;
-  }
+  // Drag-marquee state: while running, all rows whose center falls inside
+  // the rectangle (in container coords) get added to the selection on
+  // mouseup. We capture mousedown on whitespace only, and require >4px move
+  // before treating it as a marquee (so plain clicks still work).
+  const [marquee, setMarquee] = useState<null | {
+    x0: number; y0: number; x1: number; y1: number;
+    /** Snapshot of selection at drag-start so the lasso operates additively
+        when shift/cmd is held, or replaces it on a plain drag. */
+    baseline: TreeSelection;
+    additive: boolean;
+  }>(null);
 
   // Files reachable under a folder (recursive). Used by right-click on a
   // folder to download "everything inside".
@@ -226,45 +239,120 @@ export function FolderTree({
     return lock.user_id === currentUserId ? "me" : "other";
   }
 
-  function applyFileClick(file: VaultFile, e: React.MouseEvent | React.KeyboardEvent) {
+  // Build a stable visible-order list of EVERY row the user can see —
+  // root files, then each folder + its expanded children (recursively).
+  // Used by shift-range selection across mixed file/folder rows.
+  function visibleItemsInOrder(): RowItem[] {
+    const out: RowItem[] = [];
+    for (const f of filesByFolder.get(null) ?? []) {
+      out.push({ kind: "file", id: f.id });
+    }
+    function walk(parentId: string | null) {
+      const here = folders.filter((f) => f.parent_id === parentId)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      for (const folder of here) {
+        out.push({ kind: "folder", id: folder.id });
+        if (!expanded.has(folder.id)) continue;
+        for (const f of filesByFolder.get(folder.id) ?? []) {
+          out.push({ kind: "file", id: f.id });
+        }
+        walk(folder.id);
+      }
+    }
+    walk(null);
+    return out;
+  }
+
+  function cloneSelection(sel: TreeSelection): TreeSelection {
+    return { files: new Set(sel.files), folders: new Set(sel.folders) };
+  }
+
+  function addItemToSelection(sel: TreeSelection, item: RowItem): void {
+    if (item.kind === "file") sel.files.add(item.id);
+    else sel.folders.add(item.id);
+  }
+
+  function toggleItemInSelection(sel: TreeSelection, item: RowItem): void {
+    if (item.kind === "file") {
+      if (sel.files.has(item.id)) sel.files.delete(item.id);
+      else sel.files.add(item.id);
+    } else {
+      if (sel.folders.has(item.id)) sel.folders.delete(item.id);
+      else sel.folders.add(item.id);
+    }
+  }
+
+  function applyRowClick(item: RowItem, e: React.MouseEvent | React.KeyboardEvent) {
     const isShift = "shiftKey" in e && e.shiftKey;
     const isMeta = "metaKey" in e && (e.metaKey || (e as any).ctrlKey);
 
-    if ((isShift || isMeta) && onMultiSelectChange) {
-      const current = multiSelectedFiles ?? new Set<FileId>();
-      const next = new Set(current);
+    if ((isShift || isMeta) && onTreeSelectionChange) {
+      const next = cloneSelection(treeSelection ?? emptyTreeSelection());
       if (isShift && anchorRef.current) {
-        const order = visibleFilesInOrder().map((f) => f.id);
-        const a = order.indexOf(anchorRef.current);
-        const b = order.indexOf(file.id);
+        const order = visibleItemsInOrder();
+        const idOf = (it: RowItem) => `${it.kind}:${it.id}`;
+        const a = order.findIndex((o) => idOf(o) === idOf(anchorRef.current!));
+        const b = order.findIndex((o) => idOf(o) === idOf(item));
         if (a >= 0 && b >= 0) {
           const [lo, hi] = a < b ? [a, b] : [b, a];
           for (let i = lo; i <= hi; i++) {
-            const id = order[i];
-            if (id) next.add(id);
+            const it = order[i];
+            if (it) addItemToSelection(next, it);
           }
         } else {
-          next.add(file.id);
+          addItemToSelection(next, item);
         }
       } else {
-        // cmd/ctrl: toggle
-        if (next.has(file.id)) next.delete(file.id);
-        else next.add(file.id);
-        anchorRef.current = file.id;
+        // cmd/ctrl: toggle this row; move the anchor here.
+        toggleItemInSelection(next, item);
+        anchorRef.current = item;
       }
-      onMultiSelectChange(next);
+      onTreeSelectionChange(next);
       return;
     }
-    // Plain click: collapse multi-selection to just this file, also navigate.
-    if (onMultiSelectChange) onMultiSelectChange(new Set([file.id]));
-    anchorRef.current = file.id;
-    onSelect(file.folder_id);
-    onSelectFile?.(file.id);
+    // Plain click: collapse multi-selection to just this row, and navigate.
+    if (onTreeSelectionChange) {
+      const next = emptyTreeSelection();
+      addItemToSelection(next, item);
+      onTreeSelectionChange(next);
+    }
+    anchorRef.current = item;
+    if (item.kind === "file") {
+      const file = files.find((f) => f.id === item.id);
+      if (file) {
+        onSelect(file.folder_id);
+        onSelectFile?.(file.id);
+      }
+    }
+    // Folder-click navigation is handled by handleRowClick (which also
+    // expands the folder). We don't call onSelect here for folders so we
+    // don't double-fire.
+  }
+
+  // Compatibility wrapper for the existing file-leaf click site.
+  function applyFileClick(file: VaultFile, e: React.MouseEvent | React.KeyboardEvent) {
+    applyRowClick({ kind: "file", id: file.id }, e);
+  }
+
+  // Flatten a selection (files + folders) into the concrete list of files
+  // an action (download, etc.) should operate on. Folders contribute every
+  // descendant file recursively; the union is de-duped so a file caught
+  // both directly and via its parent folder counts once.
+  function resolveSelectionToFiles(sel: TreeSelection): VaultFile[] {
+    const out = new Map<FileId, VaultFile>();
+    for (const fid of sel.files) {
+      const f = files.find((x) => x.id === fid);
+      if (f) out.set(fid, f);
+    }
+    for (const folderId of sel.folders) {
+      for (const f of filesUnder(folderId)) out.set(f.id, f);
+    }
+    return Array.from(out.values());
   }
 
   function renderFileLeaf(file: VaultFile, depth: number): React.ReactNode {
     const isSelectedFile = selectedFile === file.id;
-    const isMulti = multiSelectedFiles?.has(file.id) ?? false;
+    const isMulti = treeSelection?.files.has(file.id) ?? false;
     const lockKind = lockKindFor(file.id);
     return (
       <div
@@ -272,19 +360,20 @@ export function FolderTree({
         role="button"
         tabIndex={0}
         aria-current={isSelectedFile ? "page" : undefined}
+        data-row-kind="file"
+        data-row-id={file.id}
         onClick={(e) => { e.stopPropagation(); applyFileClick(file, e); }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
           // If the right-clicked file isn't in the current multi-set,
-          // collapse to just this file (so single right-click on an
-          // unrelated file doesn't act on the unrelated old selection).
-          let working = multiSelectedFiles;
-          if (!working || !working.has(file.id)) {
-            working = new Set([file.id]);
-            onMultiSelectChange?.(working);
+          // collapse to just this file.
+          let working = treeSelection;
+          if (!working || !working.files.has(file.id)) {
+            working = { files: new Set([file.id]), folders: new Set() };
+            onTreeSelectionChange?.(working);
           }
-          const targetFiles = files.filter((f) => working!.has(f.id));
+          const targetFiles = resolveSelectionToFiles(working);
           onContextMenu?.({ kind: "files", files: targetFiles }, e.clientX, e.clientY);
         }}
         onKeyDown={(e) => {
@@ -319,21 +408,45 @@ export function FolderTree({
     const folderFiles = filesByFolder.get(node.folder.id) ?? [];
     const hasContents = hasChildren || folderFiles.length > 0;
 
+    const isMultiFolder = treeSelection?.folders.has(node.folder.id) ?? false;
     return (
       <div key={node.folder.id}>
         <div
           role="button"
           tabIndex={0}
           aria-current={isSelected ? "page" : undefined}
-          onClick={() => handleRowClick(node)}
+          data-row-kind="folder"
+          data-row-id={node.folder.id}
+          onClick={(e) => {
+            const isShift = e.shiftKey;
+            const isMeta = e.metaKey || e.ctrlKey;
+            if (isShift || isMeta) {
+              // Modifier click: contribute the folder to the multi-selection.
+              // Do NOT navigate or expand — the user is collecting rows for
+              // a batch action.
+              e.stopPropagation();
+              applyRowClick({ kind: "folder", id: node.folder.id }, e);
+              return;
+            }
+            handleRowClick(node);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onContextMenu?.(
-              { kind: "folder", folder: node.folder, descendantFiles: filesUnder(node.folder.id) },
-              e.clientX,
-              e.clientY,
-            );
+            // If this folder isn't in the multi-selection, OR there's no
+            // multi-selection yet, act on just this folder. Otherwise act on
+            // the entire current selection (folder + file mix).
+            const sel = treeSelection;
+            if (sel && (sel.folders.has(node.folder.id) || sel.files.size > 0 || sel.folders.size > 0)) {
+              const files = resolveSelectionToFiles(sel);
+              onContextMenu?.({ kind: "files", files }, e.clientX, e.clientY);
+            } else {
+              onContextMenu?.(
+                { kind: "folder", folder: node.folder, descendantFiles: filesUnder(node.folder.id) },
+                e.clientX,
+                e.clientY,
+              );
+            }
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -344,9 +457,11 @@ export function FolderTree({
           className={
             "group flex cursor-pointer items-center gap-1.5 border-l-2 py-1 pr-2 text-sm outline-none transition-colors " +
             "focus-visible:ring-1 focus-visible:ring-asu-gold " +
-            (isSelected
-              ? "border-asu-gold bg-helios-line text-helios-text"
-              : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text")
+            (isMultiFolder
+              ? "border-asu-gold/70 bg-asu-gold/10 text-helios-text"
+              : isSelected
+                ? "border-asu-gold bg-helios-line text-helios-text"
+                : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text")
           }
           style={{ paddingLeft: 6 + depth * 14 }}
         >
@@ -390,12 +505,102 @@ export function FolderTree({
   // user has selected the root view.
   const rootFiles = filesByFolder.get(null) ?? [];
 
+  // Drag-marquee — mousedown on whitespace (not on a row) starts a lasso.
+  // We use a >4px move threshold before treating as a drag so plain clicks
+  // on whitespace still get through as "clear selection".
+  function onContainerMouseDown(e: React.MouseEvent) {
+    if (e.button !== 0) return; // left button only
+    // Bail if the press started on an actual row — let the row handler win.
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-row-kind]")) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const startX = e.clientX - rect.left + (containerRef.current?.scrollLeft ?? 0);
+    const startY = e.clientY - rect.top + (containerRef.current?.scrollTop ?? 0);
+    const baseline = additive
+      ? cloneSelection(treeSelection ?? emptyTreeSelection())
+      : emptyTreeSelection();
+
+    let started = false;
+    let curX = startX, curY = startY;
+    function onMove(ev: MouseEvent) {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      curX = ev.clientX - r.left + (containerRef.current?.scrollLeft ?? 0);
+      curY = ev.clientY - r.top + (containerRef.current?.scrollTop ?? 0);
+      if (!started) {
+        if (Math.hypot(curX - startX, curY - startY) < 4) return;
+        started = true;
+      }
+      setMarquee({ x0: startX, y0: startY, x1: curX, y1: curY, baseline, additive });
+      // Live-update selection as we drag.
+      onTreeSelectionChange?.(computeMarqueeSelection(startX, startY, curX, curY, baseline));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (!started) {
+        // Plain click on whitespace, no modifier → clear selection.
+        if (!additive) onTreeSelectionChange?.(emptyTreeSelection());
+      }
+      setMarquee(null);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function computeMarqueeSelection(
+    x0: number, y0: number, x1: number, y1: number,
+    baseline: TreeSelection,
+  ): TreeSelection {
+    const next = cloneSelection(baseline);
+    const lx = Math.min(x0, x1), rx = Math.max(x0, x1);
+    const ty = Math.min(y0, y1), by = Math.max(y0, y1);
+    const root = containerRef.current;
+    if (!root) return next;
+    const rootRect = root.getBoundingClientRect();
+    const rows = root.querySelectorAll<HTMLElement>("[data-row-kind]");
+    rows.forEach((row) => {
+      const r = row.getBoundingClientRect();
+      const rxL = r.left - rootRect.left + root.scrollLeft;
+      const rxR = r.right - rootRect.left + root.scrollLeft;
+      const ryT = r.top - rootRect.top + root.scrollTop;
+      const ryB = r.bottom - rootRect.top + root.scrollTop;
+      // Intersect test
+      const intersects = !(rxR < lx || rxL > rx || ryB < ty || ryT > by);
+      if (!intersects) return;
+      const kind = row.getAttribute("data-row-kind");
+      const id = row.getAttribute("data-row-id");
+      if (!id) return;
+      if (kind === "file") next.files.add(id);
+      else if (kind === "folder") next.folders.add(id);
+    });
+    return next;
+  }
+
   return (
-    <div className="flex select-none flex-col gap-0.5 py-2">
+    <div
+      ref={containerRef}
+      className="relative flex select-none flex-col gap-0.5 py-2"
+      onMouseDown={onContainerMouseDown}
+    >
+      {marquee && (
+        <div
+          className="pointer-events-none absolute z-10 rounded border border-asu-gold/80 bg-asu-gold/10"
+          style={{
+            left: Math.min(marquee.x0, marquee.x1),
+            top: Math.min(marquee.y0, marquee.y1),
+            width: Math.abs(marquee.x1 - marquee.x0),
+            height: Math.abs(marquee.y1 - marquee.y0),
+          }}
+        />
+      )}
       <div
         role="button"
         tabIndex={0}
         aria-current={selected === null ? "page" : undefined}
+        data-row-kind="root"
         onClick={() => onSelect(null)}
         onContextMenu={(e) => {
           e.preventDefault();
