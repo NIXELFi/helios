@@ -4,7 +4,12 @@ import { stat } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { localDestPath } from "./folder-paths";
+import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
+
+function joinDir(a: string, b: string): string {
+  return `${a.replace(/\/+$/, "")}/${b}`;
+}
 
 export interface BulkDownloadState {
   running: boolean;
@@ -47,12 +52,20 @@ const WORKERS = 8;
  * is prompted once per run for a destination directory.
  */
 export function useBulkDownload(opts: {
-  vaultRoot: string | null;
+  /** Shared "Helios folder" the user picked in Settings, or null. */
+  heliosRoot: string | null;
+  /** Active vault's display name — used to nest each vault into its own
+   *  subfolder under heliosRoot. If null, no vault subfolder is applied. */
+  vaultName: string | null;
   folders: Folder[];
   versionsByFileId: Map<FileId, Version[]>;
+  /** If we have to prompt the user for a destination (heliosRoot was null),
+   *  optionally save the chosen parent as the Helios root so future runs
+   *  don't re-prompt. Falsy → just use the picked path for this run only. */
+  onPickedRoot?: (root: string) => void;
   onDone?: () => void;
 }): BulkDownloadAPI {
-  const { vaultRoot, folders, versionsByFileId, onDone } = opts;
+  const { heliosRoot, vaultName, folders, versionsByFileId, onPickedRoot, onDone } = opts;
   const client = useSupabaseClient();
   const [running, setRunning] = useState(false);
   const [open, setOpen] = useState(false);
@@ -93,16 +106,26 @@ export function useBulkDownload(opts: {
     cancelRef.current = false;
     startedAtRef.current = Date.now();
 
-    let root = vaultRoot;
-    if (!root) {
+    // Build the effective destination directory:
+    //   <heliosRoot>/<sanitized vault name>/
+    // If heliosRoot isn't set yet, prompt the user for a PARENT folder and
+    // optionally persist it via onPickedRoot. Even when prompted, we always
+    // append the vault-name subfolder so SDM26 and SDM27 stay separate on
+    // disk. Previously the prompted path was used as-is, which dumped
+    // SDM27's files into the SDM26 root — the user reported "loading SDM27
+    // into the 5.3 folders root".
+    let parent = heliosRoot;
+    if (!parent) {
       const picked = await openDirDialog({ directory: true, multiple: false });
       if (!picked || Array.isArray(picked)) {
         setRunning(false);
         setOpen(false);
         return;
       }
-      root = picked;
+      parent = picked;
+      onPickedRoot?.(parent);
     }
+    const root = vaultName ? joinDir(parent, sanitizeVaultName(vaultName)) : parent;
 
     // Worker pool — N parallel workers pull from a shared cursor. The
     // active set is keyed by file id (unique) so two files in different
@@ -163,7 +186,7 @@ export function useBulkDownload(opts: {
     setRunning(false);
     setActive([]);
     onDone?.();
-  }, [vaultRoot, folders, versionsByFileId, client, onDone]);
+  }, [heliosRoot, vaultName, folders, versionsByFileId, client, onPickedRoot, onDone]);
 
   const cancel = useCallback(() => { cancelRef.current = true; }, []);
   const close = useCallback(() => { if (!running) setOpen(false); }, [running]);

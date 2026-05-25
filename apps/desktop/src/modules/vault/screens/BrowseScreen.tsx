@@ -66,8 +66,11 @@ export function BrowseScreen() {
   // remember their own working directory.
   // Shared-root model: user picks ONE root in Settings, each vault syncs
   // into `<root>/<vault.name>/`. The hook computes the effective path for
-  // the active vault from its name.
-  const { path: vaultFolderPath } = useVaultFolder({ vaultName: vault?.name ?? null });
+  // the active vault from its name. We thread BOTH the root and the vault
+  // name into useBulkDownload so a prompt-for-destination flow still nests
+  // the files under the vault name correctly.
+  const { root: heliosRoot, path: vaultFolderPath, setRoot: setHeliosRoot } =
+    useVaultFolder({ vaultName: vault?.name ?? null });
   const { mode: downloadMode } = useDownloadMode(vaultId);
   const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
@@ -191,9 +194,11 @@ export function BrowseScreen() {
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
   const bulk = useBulkDownload({
-    vaultRoot: vaultFolderPath,
+    heliosRoot,
+    vaultName: vault?.name ?? null,
     folders: folders ?? [],
     versionsByFileId,
+    onPickedRoot: setHeliosRoot,
     onDone: () => { refetchFiles(); rescan(); },
   });
   function handleTreeContextMenu(target: TreeContextTarget, x: number, y: number) {
@@ -385,8 +390,10 @@ export function BrowseScreen() {
                     <ManualDownloadAll
                       files={filesToDownloadAll}
                       versionsByFileId={versionsByFileId}
-                      vaultRoot={vaultFolderPath}
+                      heliosRoot={heliosRoot}
+                      vaultName={vault?.name ?? null}
                       folders={folders ?? []}
+                      onPickedRoot={setHeliosRoot}
                       onDone={() => { refetchFiles(); rescan(); }}
                     />
                   )}
