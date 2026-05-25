@@ -6,9 +6,11 @@ const STORAGE_KEY = "helios.vault.downloadMode";
 export type DownloadMode = "auto" | "manual";
 
 // Per-vault setting. JSON map { [vaultId]: 'auto' | 'manual' } in localStorage.
-// Default for any unset vault is 'auto' (today's behavior). 'manual' keeps the
-// file listing live but suppresses background blob downloads — the user
-// clicks "Download" per row when they want bytes on disk.
+// Default for any unset vault is 'manual' — most users on a Mac can't open
+// SolidWorks parts locally and don't want gigabytes of CAD files syncing
+// behind their back. The DownloadModeWelcome modal asks the user once per
+// device before any download work runs, so this default only kicks in for
+// vaults the user never explicitly chose for.
 type Map = Record<string, DownloadMode>;
 
 function readMap(): Map {
@@ -24,6 +26,19 @@ function writeMap(map: Map) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); } catch { /* ignore */ }
 }
 
+// Same-window subscriber set. setMode in one component broadcasts to every
+// useDownloadMode instance in the same window so the UI updates instantly
+// without remounting. Cross-window sync still rides the storage event.
+//
+// A previous version dispatched a synthetic StorageEvent without newValue,
+// which the listener interpreted as "key cleared" — wiping the map for
+// sibling instances.
+type ModeSub = (next: Map) => void;
+const modeSubs = new Set<ModeSub>();
+function broadcastMode(next: Map) {
+  for (const s of modeSubs) s(next);
+}
+
 export function useDownloadMode(vaultId: VaultId | null): {
   mode: DownloadMode;
   setMode: (next: DownloadMode) => void;
@@ -37,23 +52,23 @@ export function useDownloadMode(vaultId: VaultId | null): {
         catch { setMap({}); }
       }
     };
+    const sub: ModeSub = (next) => setMap(next);
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    modeSubs.add(sub);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      modeSubs.delete(sub);
+    };
   }, []);
 
-  const mode: DownloadMode = vaultId ? (map[vaultId] ?? "auto") : "auto";
+  const mode: DownloadMode = vaultId ? (map[vaultId] ?? "manual") : "manual";
 
   const setMode = useCallback((next: DownloadMode) => {
     if (!vaultId) return;
     setMap((prev) => {
       const updated: Map = { ...prev, [vaultId]: next };
       writeMap(updated);
-      // Same-window writes don't fire a native `storage` event, so other
-      // `useDownloadMode` instances mounted in this window wouldn't see the
-      // change. Dispatch one manually to drive the existing listener.
-      try {
-        window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
-      } catch { /* ignore */ }
+      broadcastMode(updated);
       return updated;
     });
   }, [vaultId]);

@@ -10,6 +10,7 @@ import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
+import { ManualDownloadAll } from "../components/ManualDownloadAll";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
@@ -274,13 +275,22 @@ export function BrowseScreen() {
                 />
               )}
               {!autoSyncEnabled && (
-                <span
-                  className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
-                  title="Auto-sync is off for this vault. Click Download on a row to pull bytes. Change in Settings."
-                >
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
-                  Manual mode
-                </span>
+                <>
+                  <span
+                    className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
+                    title="Auto-sync is off for this vault. Click Download on a row to pull bytes, or use Download all. Change in Settings."
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
+                    Manual mode
+                  </span>
+                  <ManualDownloadAll
+                    files={files ?? []}
+                    versionsByFileId={versionsByFileId}
+                    vaultRoot={vaultFolderPath}
+                    folders={folders ?? []}
+                    onDone={() => { refetchFiles(); rescan(); }}
+                  />
+                </>
               )}
               {isAdmin && (
                 <button

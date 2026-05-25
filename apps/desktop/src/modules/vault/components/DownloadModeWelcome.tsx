@@ -32,27 +32,29 @@ export function DownloadModeWelcome() {
   })();
 
   // Local pending choices keyed by vault id. Initialized once from stored map
-  // + 'auto' default for vaults present on first mount. We must NOT clobber
+  // + 'manual' default for vaults present on first mount. We must NOT clobber
   // user picks on every `vaults` identity change (refetch / realtime tick
-  // produces a new array reference but the same vault ids).
+  // produces a new array reference but the same vault ids). Default is
+  // manual to match useDownloadMode — on a Mac with SolidWorks-heavy vaults
+  // pulling everything is rarely what the user wants.
   const [choices, setChoices] = useState<Map>(() => {
     const stored = readMap();
     const next: Map = { ...stored };
     for (const v of vaults) {
-      if (!(v.id in next)) next[v.id] = "auto";
+      if (!(v.id in next)) next[v.id] = "manual";
     }
     return next;
   });
 
   // When the vault list grows (new vault becomes accessible mid-session),
-  // add an 'auto' default for each new id but leave existing picks alone.
+  // add a 'manual' default for each new id but leave existing picks alone.
   useEffect(() => {
     setChoices((prev) => {
       let changed = false;
       const next: Map = { ...prev };
       for (const v of vaults) {
         if (!(v.id in next)) {
-          next[v.id] = "auto";
+          next[v.id] = "manual";
           changed = true;
         }
       }

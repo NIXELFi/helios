@@ -46,6 +46,15 @@ function isLegacyBareString(): boolean {
   } catch { return false; }
 }
 
+// Same-window subscriber set so setPath in one component is visible to
+// useVaultFolder consumers in sibling components without remounting. The
+// cross-window `storage` event only fires for OTHER windows.
+type MapSub = (next: Map) => void;
+const folderSubs = new Set<MapSub>();
+function broadcastFolders(next: Map) {
+  for (const s of folderSubs) s(next);
+}
+
 export function useVaultFolder(vaultId: VaultId | null): {
   path: string | null;
   setPath: (next: string | null) => void;
@@ -73,13 +82,18 @@ export function useVaultFolder(vaultId: VaultId | null): {
     } catch { /* ignore */ }
   }, [vaultId]);
 
-  // Cross-window sync.
+  // Cross-window sync via storage event + same-window sync via module subs.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY) setMap(parse(e.newValue, vaultId));
     };
+    const sub: MapSub = (next) => setMap(next);
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    folderSubs.add(sub);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      folderSubs.delete(sub);
+    };
   }, [vaultId]);
 
   const path = vaultId ? map[vaultId] ?? null : null;
@@ -91,6 +105,8 @@ export function useVaultFolder(vaultId: VaultId | null): {
       if (next === null) delete updated[vaultId];
       else updated[vaultId] = next;
       writeMap(updated);
+      // Notify other useVaultFolder instances in this window.
+      broadcastFolders(updated);
       return updated;
     });
   }, [vaultId]);

@@ -15,6 +15,20 @@ function writeStored(id: VaultId | null) {
   } catch { /* private mode etc. */ }
 }
 
+// Module-level subscriber set. Each useActiveVault() instance registers a
+// notify callback on mount; setActiveVaultId broadcasts to every instance in
+// the same window so the UI updates immediately without remounting.
+//
+// Previously we relied on the cross-window `storage` event, which does NOT
+// fire in the same window — so the switcher updated its own state but
+// BrowseScreen / HistoryScreen / Settings kept rendering the old vault until
+// they got remounted by a tab switch.
+type Subscriber = (next: VaultId | null) => void;
+const subscribers = new Set<Subscriber>();
+function broadcast(next: VaultId | null) {
+  for (const s of subscribers) s(next);
+}
+
 /**
  * Resolves which vault is "active" for the current user.
  *
@@ -39,11 +53,19 @@ export function useActiveVault(): {
   const [stored, setStored] = useState<VaultId | null>(() => readStored());
 
   useEffect(() => {
+    // Cross-window sync (different Helios windows on the same machine).
     const onStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY) setStored(e.newValue);
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    // Same-window sync (this is the one the UI relies on for instant updates
+    // when the switcher's setActiveVaultId fires).
+    const sub: Subscriber = (next) => setStored(next);
+    subscribers.add(sub);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      subscribers.delete(sub);
+    };
   }, []);
 
   // Resolution: stored id (if valid) → most-recently-created → null.
@@ -69,7 +91,9 @@ export function useActiveVault(): {
 
   const setActiveVaultId = useCallback((id: VaultId) => {
     writeStored(id);
-    setStored(id);
+    // Broadcast to every hook instance in this window (incl. self) so all
+    // consumers re-render with the new vault id immediately.
+    broadcast(id);
   }, []);
 
   return {
