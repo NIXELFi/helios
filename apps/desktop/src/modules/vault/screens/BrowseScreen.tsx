@@ -100,6 +100,27 @@ export function BrowseScreen() {
   );
   const files = selectedFolder === null ? rootFiles : filesInFolder;
 
+  // The "Download all" button operates on every file underneath the current
+  // view recursively — i.e. picking Brakes downloads every file in Brakes
+  // and every subfolder of Brakes, not just the 4 SLDPRTs directly inside.
+  // At the vault root this expands to every file in the whole vault.
+  const filesToDownloadAll = useMemo(() => {
+    const all = allFiles ?? [];
+    if (selectedFolder === null) return all;
+    const wanted = new Set<string>([selectedFolder]);
+    const stack = [selectedFolder];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      for (const f of (folders ?? [])) {
+        if (f.parent_id === id && !wanted.has(f.id)) {
+          wanted.add(f.id);
+          stack.push(f.id);
+        }
+      }
+    }
+    return all.filter((f) => f.folder_id && wanted.has(f.folder_id));
+  }, [selectedFolder, allFiles, folders]);
+
   // Latest versions across the entire vault. The current-folder file table
   // and the background auto-sync both read from this single source so we
   // don't duplicate the round-trip.
@@ -340,12 +361,12 @@ export function BrowseScreen() {
                 <>
                   <span
                     className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
-                    title="Auto-sync is off for this vault. Click Download on a row, shift-click rows to multi-select, or use Download all. Change in Settings."
+                    title="Auto-sync is off for this vault. Click Download on a row, shift-click to multi-select, or use the bulk buttons. Change in Settings."
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
                     Manual mode
                   </span>
-                  {selectedFiles.length > 0 ? (
+                  {selectedFiles.length > 0 && (
                     <button
                       type="button"
                       onClick={() => bulk.start(selectedFiles)}
@@ -355,14 +376,34 @@ export function BrowseScreen() {
                     >
                       Download {selectedFiles.length} selected
                     </button>
-                  ) : (
+                  )}
+                  {/* Context button: recursive descent of current folder view
+                      (or whole vault when at root). Distinct from the master
+                      vault button below — at root they're identical and the
+                      master one wins for clarity. */}
+                  {selectedFiles.length === 0 && selectedFolder !== null && (
                     <ManualDownloadAll
-                      files={files ?? []}
+                      files={filesToDownloadAll}
                       versionsByFileId={versionsByFileId}
                       vaultRoot={vaultFolderPath}
                       folders={folders ?? []}
                       onDone={() => { refetchFiles(); rescan(); }}
                     />
+                  )}
+                  {/* Master vault button — always visible, never about the
+                      current folder, always grabs the entire active vault.
+                      Lives outside the row-selection logic on purpose so
+                      "download the whole thing" is one click from any view. */}
+                  {(allFiles?.length ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => bulk.start(allFiles ?? [])}
+                      disabled={bulk.running}
+                      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
+                      title={`Download every file in ${vault?.name ?? "the active vault"} (${allFiles?.length ?? 0} files)`}
+                    >
+                      Download {vault?.name ?? "vault"} ({allFiles?.length ?? 0})
+                    </button>
                   )}
                 </>
               )}
@@ -566,7 +607,12 @@ function SyncStatusPill({ status, onRescan }: {
   let tone: string;
   let dot: string;
   if (busy) {
-    label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
+    // Always show what's in-flight inline so the user doesn't have to click
+    // the pill to find out. Up to two filenames; truncates per-name so the
+    // pill doesn't blow out the toolbar.
+    const inFlight = activeFiles.slice(0, 2).join(", ");
+    const base = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
+    label = inFlight ? `${base} · ${inFlight}` : base;
     tone = "text-asu-gold";
     dot = "bg-yellow-400 animate-pulse";
   } else if (lastFailed > 0) {
