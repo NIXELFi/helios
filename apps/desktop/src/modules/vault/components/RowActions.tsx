@@ -105,15 +105,24 @@ export function GetLatestButton({
     if (ok) onDone?.();
   }
 
+  // Failures used to be silent — click, "…" flash, nothing. Surface the
+  // error message via title so a hover tells the user what went wrong;
+  // also tint the button red so it's obvious the action didn't take.
+  const err = download.error?.message ?? null;
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={download.loading}
-      className="rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line disabled:opacity-50"
-      title="Download latest version to local vault folder"
+      className={
+        "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+        (err
+          ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+          : "border-helios-line text-helios-text hover:bg-helios-line")
+      }
+      title={err ? `Download failed: ${err}` : "Download latest version to local vault folder"}
     >
-      {download.loading ? "…" : "Get Latest"}
+      {download.loading ? "…" : err ? "Retry" : "Get Latest"}
     </button>
   );
 }
