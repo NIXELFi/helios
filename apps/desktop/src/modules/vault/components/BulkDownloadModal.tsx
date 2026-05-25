@@ -38,12 +38,26 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
             {mb.toFixed(1)} MB · {rate.toFixed(1)} MB/s
           </span>
         </div>
-        <div
-          className="mb-3 truncate font-mono-num text-[11px] text-helios-text"
-          title={api.current ?? ""}
-        >
-          {api.current ?? (api.running ? "Starting…" : "Done")}
-        </div>
+        {api.active.length > 0 ? (
+          <div className="mb-3 space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wider text-helios-dim">
+              In flight ({api.active.length})
+            </div>
+            {api.active.map((name) => (
+              <div
+                key={name}
+                className="truncate font-mono-num text-[11px] text-helios-text"
+                title={name}
+              >
+                {name}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-3 truncate font-mono-num text-[11px] text-helios-dim">
+            {api.running ? "Starting…" : "Done"}
+          </div>
+        )}
         {api.lastError && (
           <div className="mb-3 text-[11px] text-[#EF5350]">
             Last error: {api.lastError}

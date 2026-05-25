@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
-import { useDownloadVersion } from "./useDownloadVersion";
+import { useSupabaseClient } from "@helios/auth";
+import { downloadVersionOnce } from "./useDownloadVersion";
 import { localDestPath } from "./folder-paths";
 import type { FileId, Folder, VaultFile, Version } from "./types";
 
@@ -14,26 +15,31 @@ export interface BulkDownloadState {
   current: string | null;
   lastError: string | null;
   startedAt: number | null;
+  /** Names of files currently in flight in the worker pool. */
+  active: string[];
 }
 
 export interface BulkDownloadAPI extends BulkDownloadState {
-  /** Kick off a bulk download. Opens the progress modal automatically. */
   start: (files: VaultFile[]) => void;
-  /** User cancels the in-progress run. */
   cancel: () => void;
-  /** Close the modal once finished. No-op while running. */
   close: () => void;
 }
 
 /**
- * Headless bulk-download driver: one file at a time, sequential. Caller
- * picks the destination model — either supplies `vaultRoot` (auto-derived
- * per-vault subfolder under the user's Helios folder) or null, in which
- * case the user is prompted once per run for a destination directory.
- *
- * The hook exposes both the in-flight state (rendered by a modal) and the
- * `start(files)` trigger. ManualDownloadAll and the FolderTree context
- * menu both use this so behavior + UI stay consistent.
+ * Worker count for parallel downloads. Each worker does fetch + arrayBuffer
+ * + gunzip + Tauri writeFile. Pushing too many at once saturates the webview
+ * IPC bridge and freezes the UI; the auto-sync path uses 2 conservatively.
+ * Manual bulk downloads can be a bit more aggressive since the user opted in
+ * and is waiting on a progress modal — they want it fast. 4 is the sweet
+ * spot in testing for our network + Mac-class hardware.
+ */
+const WORKERS = 4;
+
+/**
+ * Headless bulk-download driver with a worker pool. Caller picks the
+ * destination model — either supplies `vaultRoot` (auto-derived per-vault
+ * subfolder under the user's Helios folder) or null, in which case the user
+ * is prompted once per run for a destination directory.
  */
 export function useBulkDownload(opts: {
   vaultRoot: string | null;
@@ -42,21 +48,20 @@ export function useBulkDownload(opts: {
   onDone?: () => void;
 }): BulkDownloadAPI {
   const { vaultRoot, folders, versionsByFileId, onDone } = opts;
-  const download = useDownloadVersion();
+  const client = useSupabaseClient();
   const [running, setRunning] = useState(false);
   const [open, setOpen] = useState(false);
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
   const [errs, setErrs] = useState(0);
-  const [current, setCurrent] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [active, setActive] = useState<string[]>([]);
   const cancelRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
   const bytesDoneRef = useRef(0);
   const [, setRateTick] = useState(0);
 
-  // Force re-render every 500ms while running so the rate/elapsed labels
-  // refresh without leaking ticks when idle.
+  // Force re-render every 500ms while running so rate/elapsed labels refresh.
   useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => setRateTick((t) => t + 1), 500);
@@ -76,12 +81,11 @@ export function useBulkDownload(opts: {
     setDone(0);
     setErrs(0);
     setLastError(null);
-    setCurrent(null);
+    setActive([]);
     bytesDoneRef.current = 0;
     cancelRef.current = false;
     startedAtRef.current = Date.now();
 
-    // Destination: configured vault root, else prompt the user once.
     let root = vaultRoot;
     if (!root) {
       const picked = await openDirDialog({ directory: true, multiple: false });
@@ -93,25 +97,39 @@ export function useBulkDownload(opts: {
       root = picked;
     }
 
-    for (const file of downloadable) {
-      if (cancelRef.current) break;
-      const version = versionsByFileId.get(file.id)?.[0];
-      if (!version) continue;
-      setCurrent(file.name);
-      const dest = localDestPath(root!, file.folder_id, file.name, folders);
-      const ok = await download.run(version.sha256, dest);
-      if (ok) {
-        bytesDoneRef.current += version.size_bytes ?? 0;
-        setDone((d) => d + 1);
-      } else {
-        setErrs((e) => e + 1);
-        setLastError(download.error?.message ?? "download failed");
+    // Worker pool — N parallel workers pull from a shared cursor. activeIds
+    // tracks "in-flight" so the modal can show concurrent filenames.
+    const activeMap = new Map<FileId, string>();
+    let cursor = 0;
+    const refreshActive = () => setActive(Array.from(activeMap.values()));
+    async function worker() {
+      while (!cancelRef.current) {
+        const i = cursor++;
+        if (i >= downloadable.length) return;
+        const file = downloadable[i]!;
+        const version = versionsByFileId.get(file.id)?.[0];
+        if (!version) continue;
+        activeMap.set(file.id, file.name);
+        refreshActive();
+        const dest = localDestPath(root!, file.folder_id, file.name, folders);
+        const result = await downloadVersionOnce(client, version.sha256, dest);
+        activeMap.delete(file.id);
+        refreshActive();
+        if (result.ok) {
+          bytesDoneRef.current += version.size_bytes ?? 0;
+          setDone((d) => d + 1);
+        } else {
+          setErrs((e) => e + 1);
+          setLastError(result.error);
+        }
       }
     }
+    const workerCount = Math.min(WORKERS, downloadable.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
     setRunning(false);
-    setCurrent(null);
+    setActive([]);
     onDone?.();
-  }, [vaultRoot, folders, versionsByFileId, download, onDone]);
+  }, [vaultRoot, folders, versionsByFileId, client, onDone]);
 
   const cancel = useCallback(() => { cancelRef.current = true; }, []);
   const close = useCallback(() => { if (!running) setOpen(false); }, [running]);
@@ -119,7 +137,11 @@ export function useBulkDownload(opts: {
   return {
     running, open, total, done, errs,
     bytesDone: bytesDoneRef.current,
-    current, lastError,
+    // For backwards-compat the legacy modal reads `current` (single name);
+    // populate it from the active list's first entry.
+    current: active[0] ?? null,
+    active,
+    lastError,
     startedAt: startedAtRef.current,
     start, cancel, close,
   };

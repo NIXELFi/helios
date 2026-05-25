@@ -3,6 +3,11 @@ import { useSupabaseClient } from "@helios/auth";
 import { writeFile, mkdir } from "@tauri-apps/plugin-fs";
 import { gunzipIfNeeded } from "./compression";
 
+// The `client` arg is whatever `useSupabaseClient()` returns; we accept it
+// as `any` to avoid pulling @supabase/supabase-js into this leaf module's
+// dep tree (the package isn't currently listed in apps/desktop's package.json).
+type SupabaseClient = ReturnType<typeof useSupabaseClient>;
+
 const BUCKET = "vault-objects";
 
 /** Compute storage path from a sha256 string. */
@@ -14,6 +19,39 @@ function storagePath(sha: string): string {
 function parentDir(path: string): string {
   const i = path.lastIndexOf("/");
   return i >= 0 ? path.substring(0, i) : "";
+}
+
+/**
+ * Pure-async download primitive — call directly from a worker pool when you
+ * need parallel downloads. Returns the error message on failure (instead of
+ * setting hook state) so the caller can aggregate.
+ *
+ * The hook below wraps this for the common single-download UI cases.
+ */
+export async function downloadVersionOnce(
+  client: SupabaseClient,
+  sha: string,
+  destPath: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { data, error: dlErr } = await client.storage
+      .from(BUCKET)
+      .download(storagePath(String(sha)));
+    if (dlErr || !data) {
+      return { ok: false, error: dlErr?.message ?? "download failed" };
+    }
+    const raw = new Uint8Array(await data.arrayBuffer());
+    const arr = await gunzipIfNeeded(raw);
+    const dir = parentDir(destPath);
+    if (dir) {
+      try { await mkdir(dir, { recursive: true }); }
+      catch { /* mkdir errors when the dir exists in some Tauri versions */ }
+    }
+    await writeFile(destPath, arr);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export function useDownloadVersion() {
@@ -29,38 +67,14 @@ export function useDownloadVersion() {
     async (sha: string, destPath: string): Promise<boolean> => {
       setLoading(true);
       setError(null);
-      try {
-        const { data, error: dlErr } = await client.storage
-          .from(BUCKET)
-          .download(storagePath(String(sha)));
-        if (dlErr || !data) {
-          throw new Error(dlErr?.message ?? "download failed");
-        }
-        // New uploads are gzipped before storage to fit Supabase's 50 MiB
-        // free-tier cap; legacy uncompressed objects pass through unchanged.
-        // Detection is via gzip magic bytes (1f 8b) — see compression.ts.
-        const raw = new Uint8Array(await data.arrayBuffer());
-        const arr = await gunzipIfNeeded(raw);
-
-        // Create the parent directory tree if needed.
-        const dir = parentDir(destPath);
-        if (dir) {
-          try {
-            await mkdir(dir, { recursive: true });
-          } catch {
-            // mkdir errors when the dir already exists in some Tauri versions;
-            // ignore — writeFile will fail later if it's actually a problem.
-          }
-        }
-
-        await writeFile(destPath, arr);
+      const result = await downloadVersionOnce(client, sha, destPath);
+      if (result.ok) {
         setLoading(false);
         return true;
-      } catch (e) {
-        setError(e instanceof Error ? e : new Error(String(e)));
-        setLoading(false);
-        return false;
       }
+      setError(new Error(result.error));
+      setLoading(false);
+      return false;
     },
     [client],
   );

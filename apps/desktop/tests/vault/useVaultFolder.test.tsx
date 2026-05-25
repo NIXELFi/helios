@@ -40,14 +40,17 @@ describe("useVaultFolder", () => {
     expect(localStorage.getItem("helios.vault.localFolder")).toBeNull();
   });
 
-  it("recovers a root from a legacy JSON map by taking the parent of one entry", () => {
+  it("recovers a root from a legacy JSON map by using a stored path as-is", () => {
+    // A previous build stripped one path level here, which on /Users/me/Vault
+    // gave a root of /Users/me and put SDM26 sync output outside the user's
+    // chosen folder. The migration now uses the stored path AS the root.
     localStorage.setItem(
       "helios.vault.localFolder",
       JSON.stringify({ "v1": "/Users/me/Helios/Vault" }),
     );
     const { result } = renderHook(() => useVaultFolder({ vaultName: "SDM26" }));
-    expect(result.current.root).toBe("/Users/me/Helios");
-    expect(result.current.path).toBe("/Users/me/Helios/SDM26");
+    expect(result.current.root).toBe("/Users/me/Helios/Vault");
+    expect(result.current.path).toBe("/Users/me/Helios/Vault/SDM26");
   });
 
   it("returns null path when vault name is null", () => {

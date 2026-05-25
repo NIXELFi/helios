@@ -17,21 +17,18 @@ function readRoot(): string | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    // New shape: a bare string IS the root. The legacy bare-string from
-    // v2.x also looks like this — we treat it as the root directly (the
-    // user can re-pick if it's wrong).
+    // New shape: a bare string IS the root. The legacy v2.x bare-string
+    // also looks like this — we treat it as the root directly.
     if (!raw.startsWith("{")) return raw;
-    // Legacy v3.5.x shape: JSON map { [vaultId]: path }. Best-effort
-    // recovery: take the parent directory of any one path. Users were
-    // expected to pick the same parent for both vaults anyway.
+    // Legacy v3.5.x shape: JSON map { [vaultId]: path }. Use any one
+    // stored path AS the new root (NOT its parent — earlier code stripped
+    // one path level which put `Downloads/5.3/SDM26/...` outside the user's
+    // `5.3` folder). Worst case the user re-picks in Settings.
     try {
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object" && !Array.isArray(obj)) {
         const first = Object.values(obj).find((v) => typeof v === "string") as string | undefined;
-        if (first) {
-          const idx = first.lastIndexOf("/");
-          return idx > 0 ? first.slice(0, idx) : first;
-        }
+        if (first) return first;
       }
     } catch { /* fall through */ }
     return null;
