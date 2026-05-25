@@ -129,6 +129,11 @@ export interface ParameterBoundsUI {
   min: number;
   max: number;
   step: number | null;
+  /** When this row is the LEADER of a registered in/out diameter pair,
+   *  setting this true tells the backend to lock its follower path to
+   *  the same sampled value. The follower row's `enabled` is forced off
+   *  and its inputs are read-only in the UI. */
+  lockToFollower?: boolean;
 }
 
 /** Backend ParameterBounds — what we serialize over the wire. */
@@ -170,6 +175,15 @@ export interface OptimizationParams {
   junctionKind: JunctionKind;
   convergenceTolImep: number;
   convergenceMinCycles: number;
+  /** In/out diameter pairs that share one sampled value (leader). The
+   *  follower path is NOT sent in `tunables`; the runner copies the
+   *  leader's per-trial value into it. */
+  lockedPairs: LockedPair[];
+}
+
+export interface LockedPair {
+  leader: string;
+  follower: string;
 }
 
 export type StartJobRequest =

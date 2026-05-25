@@ -201,6 +201,21 @@ pub struct OptimizationParams {
     #[serde(rename = "convergenceTolImep")]
     pub convergence_tol_imep: f64,
     pub convergence_min_cycles: u32,
+    /// Pairs of paths that share a single sampled value. The leader is
+    /// sampled as a normal tunable; at trial apply time the runner also
+    /// writes the leader's value to the follower path. The follower MUST
+    /// NOT appear in `tunables`. Both paths may carry an `[N]` per-element
+    /// suffix; if present, the indices must match. Only the registry of
+    /// known in/out diameter pairs is accepted (see `params::is_locked_pair`).
+    #[serde(default)]
+    pub locked_pairs: Vec<LockedPair>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct LockedPair {
+    pub leader: String,
+    pub follower: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

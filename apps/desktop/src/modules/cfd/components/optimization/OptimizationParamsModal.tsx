@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import type {
   JunctionKind,
+  LockedPair,
   ObjectiveSpec,
   OptimizationParams,
   ParameterBounds,
@@ -13,6 +14,7 @@ import type {
   SamplerKind,
 } from "../../state/types";
 import { parseRpmList } from "../../lib/rpmList";
+import { followerOf, withPerElement } from "../../lib/lockedPairs";
 import { useParameterSchema } from "../../lib/useParameterSchema";
 import { ParameterPanel } from "./ParameterPanel";
 import { ObjectiveBuilder } from "./ObjectiveBuilder";
@@ -84,11 +86,24 @@ export function OptimizationParamsModal({
     if (validationErrors.length > 0) return;
     if (!rpmParse.ok) return;
     const tunables: ParameterBounds[] = enabled.map((b) => ({
-      path: b.perElement !== null ? `${b.path}[${b.perElement}]` : b.path,
+      path: withPerElement(b.path, b.perElement),
       min: b.min,
       max: b.max,
       step: b.step,
     }));
+    // Emit lockedPairs for every enabled leader row that has the lock
+    // toggle on. The follower path mirrors the leader's perElement so
+    // per-cyl locks stay coherent across the in/out pair.
+    const lockedPairs: LockedPair[] = [];
+    for (const b of enabled) {
+      if (!b.lockToFollower) continue;
+      const followerBase = followerOf(b.path);
+      if (!followerBase) continue;
+      lockedPairs.push({
+        leader: withPerElement(b.path, b.perElement),
+        follower: withPerElement(followerBase, b.perElement),
+      });
+    }
     const seedTrim = seedText.trim();
     const params: OptimizationParams = {
       tunables,
@@ -100,6 +115,7 @@ export function OptimizationParamsModal({
       junctionKind: junction,
       convergenceTolImep: tol,
       convergenceMinCycles: minCycles,
+      lockedPairs,
     };
     onSubmit(params);
   }

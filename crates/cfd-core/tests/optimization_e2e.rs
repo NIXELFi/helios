@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use cfd_core::dto::{
     JobCancelledEvent, JobDoneEvent, JobDoneSummary, JobErrorEvent, JobProgressEvent,
-    JobProgressPayload, JobStartedEvent, JunctionKindDto, ObjectiveAggregator, ObjectiveDirection,
-    ObjectiveSpec, OptimizationParams, ParameterBounds, SamplerKind,
+    JobProgressPayload, JobStartedEvent, JunctionKindDto, LockedPair, ObjectiveAggregator,
+    ObjectiveDirection, ObjectiveSpec, OptimizationParams, ParameterBounds, SamplerKind,
 };
 use cfd_core::runner::{
     run_optimization_job, DefaultDivergenceProbe, JobEmitter, RunOutcome,
@@ -93,6 +93,7 @@ fn small_params(
         junction_kind: JunctionKindDto::Stagnation,
         convergence_tol_imep: 0.01,
         convergence_min_cycles: 2,
+        locked_pairs: vec![],
     }
 }
 
@@ -288,6 +289,253 @@ fn optimization_pre_cancelled_short_circuits() {
     // Started first, Cancelled last.
     assert!(matches!(events.first(), Some(Event::Started(_))));
     assert!(matches!(events.last(), Some(Event::Cancelled(_))));
+}
+
+/// Locking primary_diameter_in to primary_diameter_out must:
+///   - leave the follower out of `parameter_paths` (it is not a tunable),
+///   - emit both leader and follower in each trial's `parameter_values`,
+///   - apply equal values for both at trial time.
+#[test]
+fn optimization_locked_pair_primary_in_to_out() {
+    let emitter = CollectEmitter::default();
+    let probe = DefaultDivergenceProbe;
+    let mut params = small_params(
+        vec![ParameterBounds {
+            path: "primary_diameter_in".into(),
+            min: 0.030,
+            max: 0.045,
+            step: None,
+        }],
+        vec![6000.0],
+        3,
+        Some(99),
+    );
+    params.locked_pairs = vec![LockedPair {
+        leader: "primary_diameter_in".into(),
+        follower: "primary_diameter_out".into(),
+    }];
+
+    let outcome = run_optimization_job(
+        &emitter,
+        &probe,
+        "test-opt-locked".into(),
+        sdm26_config_path(),
+        params,
+        Arc::new(AtomicBool::new(false)),
+        100,
+    );
+    assert!(matches!(outcome, RunOutcome::CompletedOptimization));
+
+    let events = emitter.events.lock().unwrap().clone();
+
+    // Each trial-started event must emit both keys with equal values.
+    let mut trials_seen = 0;
+    for e in &events {
+        if let Event::Progress(p) = e {
+            if let JobProgressPayload::OptimizationTrialStarted {
+                parameter_values, ..
+            } = &p.payload
+            {
+                trials_seen += 1;
+                let leader = parameter_values.get("primary_diameter_in").copied();
+                let follower = parameter_values.get("primary_diameter_out").copied();
+                assert!(leader.is_some(), "leader missing in trial_values");
+                assert!(follower.is_some(), "follower missing in trial_values");
+                assert!(
+                    (leader.unwrap() - follower.unwrap()).abs() < 1e-15,
+                    "leader/follower diverged: {:?} vs {:?}",
+                    leader,
+                    follower
+                );
+            }
+        }
+    }
+    assert_eq!(trials_seen, 3);
+
+    // parameter_paths in the summary contains only the tunable (leader),
+    // not the follower — the follower is a derived value.
+    let summary = match events.last().unwrap() {
+        Event::Done(d) => d.payload.clone(),
+        _ => panic!("expected Done last"),
+    };
+    if let JobDoneSummary::Optimization(s) = summary {
+        assert_eq!(s.parameter_paths, vec!["primary_diameter_in".to_string()]);
+    } else {
+        panic!("expected OptimizationDoneSummary");
+    }
+}
+
+#[test]
+fn optimization_rejects_unregistered_locked_pair() {
+    let emitter = CollectEmitter::default();
+    let probe = DefaultDivergenceProbe;
+    let mut params = small_params(
+        vec![ParameterBounds {
+            path: "restrictor_cd".into(),
+            min: 0.80,
+            max: 0.95,
+            step: None,
+        }],
+        vec![6000.0],
+        2,
+        Some(1),
+    );
+    // bore -> stroke is not a registered diameter pair.
+    params.locked_pairs = vec![LockedPair {
+        leader: "bore".into(),
+        follower: "stroke".into(),
+    }];
+
+    let outcome = run_optimization_job(
+        &emitter,
+        &probe,
+        "test-opt-bad-pair".into(),
+        sdm26_config_path(),
+        params,
+        Arc::new(AtomicBool::new(false)),
+        100,
+    );
+    assert!(matches!(outcome, RunOutcome::Errored));
+    let events = emitter.events.lock().unwrap().clone();
+    match events.last().unwrap() {
+        Event::Error(e) => {
+            assert!(e.message.contains("not a registered"));
+            assert!(e.message.contains("bore"));
+        }
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+#[test]
+fn optimization_rejects_follower_also_as_tunable() {
+    let emitter = CollectEmitter::default();
+    let probe = DefaultDivergenceProbe;
+    let mut params = small_params(
+        vec![
+            ParameterBounds {
+                path: "primary_diameter_in".into(),
+                min: 0.030,
+                max: 0.045,
+                step: None,
+            },
+            ParameterBounds {
+                path: "primary_diameter_out".into(),
+                min: 0.030,
+                max: 0.045,
+                step: None,
+            },
+        ],
+        vec![6000.0],
+        2,
+        Some(1),
+    );
+    params.locked_pairs = vec![LockedPair {
+        leader: "primary_diameter_in".into(),
+        follower: "primary_diameter_out".into(),
+    }];
+
+    let outcome = run_optimization_job(
+        &emitter,
+        &probe,
+        "test-opt-dup-follower".into(),
+        sdm26_config_path(),
+        params,
+        Arc::new(AtomicBool::new(false)),
+        100,
+    );
+    assert!(matches!(outcome, RunOutcome::Errored));
+    let events = emitter.events.lock().unwrap().clone();
+    match events.last().unwrap() {
+        Event::Error(e) => assert!(e.message.contains("must NOT appear in tunables")),
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+#[test]
+fn optimization_rejects_leader_missing_from_tunables() {
+    let emitter = CollectEmitter::default();
+    let probe = DefaultDivergenceProbe;
+    let mut params = small_params(
+        vec![ParameterBounds {
+            path: "restrictor_cd".into(),
+            min: 0.80,
+            max: 0.95,
+            step: None,
+        }],
+        vec![6000.0],
+        2,
+        Some(1),
+    );
+    // leader is not in tunables — nothing to copy from.
+    params.locked_pairs = vec![LockedPair {
+        leader: "primary_diameter_in".into(),
+        follower: "primary_diameter_out".into(),
+    }];
+
+    let outcome = run_optimization_job(
+        &emitter,
+        &probe,
+        "test-opt-leader-missing".into(),
+        sdm26_config_path(),
+        params,
+        Arc::new(AtomicBool::new(false)),
+        100,
+    );
+    assert!(matches!(outcome, RunOutcome::Errored));
+    let events = emitter.events.lock().unwrap().clone();
+    match events.last().unwrap() {
+        Event::Error(e) => assert!(e.message.contains("must also appear in tunables")),
+        other => panic!("expected Error, got {other:?}"),
+    }
+}
+
+/// Per-element lock: leader `primary_diameter_in[1]` drives
+/// follower `primary_diameter_out[1]` for the same cylinder index.
+#[test]
+fn optimization_locked_pair_per_element_index() {
+    let emitter = CollectEmitter::default();
+    let probe = DefaultDivergenceProbe;
+    let mut params = small_params(
+        vec![ParameterBounds {
+            path: "primary_diameter_in[1]".into(),
+            min: 0.030,
+            max: 0.045,
+            step: None,
+        }],
+        vec![6000.0],
+        2,
+        Some(123),
+    );
+    params.locked_pairs = vec![LockedPair {
+        leader: "primary_diameter_in[1]".into(),
+        follower: "primary_diameter_out[1]".into(),
+    }];
+
+    let outcome = run_optimization_job(
+        &emitter,
+        &probe,
+        "test-opt-locked-elem".into(),
+        sdm26_config_path(),
+        params,
+        Arc::new(AtomicBool::new(false)),
+        100,
+    );
+    assert!(matches!(outcome, RunOutcome::CompletedOptimization));
+
+    let events = emitter.events.lock().unwrap().clone();
+    for e in &events {
+        if let Event::Progress(p) = e {
+            if let JobProgressPayload::OptimizationTrialStarted {
+                parameter_values, ..
+            } = &p.payload
+            {
+                let l = parameter_values.get("primary_diameter_in[1]").copied();
+                let f = parameter_values.get("primary_diameter_out[1]").copied();
+                assert!(l.is_some() && f.is_some());
+                assert!((l.unwrap() - f.unwrap()).abs() < 1e-15);
+            }
+        }
+    }
 }
 
 #[test]

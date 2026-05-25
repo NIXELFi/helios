@@ -739,6 +739,86 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
         return RunOutcome::Errored;
     }
 
+    // 2b. Validate locked_pairs:
+    //   - leader+follower must be a registered in/out diameter pair
+    //     (matching [N] suffix on both, or scalar on both);
+    //   - leader must appear in `tunables` (it carries the sampled value);
+    //   - follower must NOT appear in `tunables` (the lock provides its value);
+    //   - no duplicate leaders or followers across pairs.
+    let tunable_paths: std::collections::HashSet<&str> =
+        params.tunables.iter().map(|b| b.path.as_str()).collect();
+    let mut seen_leaders: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen_followers: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for pair in &params.locked_pairs {
+        if !crate::params::is_locked_pair(&pair.leader, &pair.follower) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!(
+                    "locked_pair leader={} follower={} is not a registered in/out diameter pair",
+                    pair.leader, pair.follower
+                ),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+        if !tunable_paths.contains(pair.leader.as_str()) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!(
+                    "locked_pair leader={} must also appear in tunables",
+                    pair.leader
+                ),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+        if tunable_paths.contains(pair.follower.as_str()) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!(
+                    "locked_pair follower={} must NOT appear in tunables (the lock supplies its value)",
+                    pair.follower
+                ),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+        if !seen_leaders.insert(pair.leader.as_str()) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!("locked_pair leader={} appears in more than one pair", pair.leader),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+        if !seen_followers.insert(pair.follower.as_str()) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::Other,
+                message: format!(
+                    "locked_pair follower={} appears in more than one pair",
+                    pair.follower
+                ),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    }
+
     // 3. Sample N normalized rows + map to physical overrides.
     let normalized = sampler::sample(
         params.sampler,
@@ -750,12 +830,21 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     let trials_input: Vec<std::collections::BTreeMap<String, f64>> = normalized
         .iter()
         .map(|row| {
-            params
+            let mut map: std::collections::BTreeMap<String, f64> = params
                 .tunables
                 .iter()
                 .zip(row.iter())
                 .map(|(b, n)| (b.path.clone(), bounds::map_to_physical(b, *n)))
-                .collect()
+                .collect();
+            // Fan-out: for each locked pair, copy the leader's sampled
+            // value into the follower path. Validated above to guarantee
+            // the leader is present and the follower is not.
+            for pair in &params.locked_pairs {
+                if let Some(v) = map.get(&pair.leader).copied() {
+                    map.insert(pair.follower.clone(), v);
+                }
+            }
+            map
         })
         .collect();
 

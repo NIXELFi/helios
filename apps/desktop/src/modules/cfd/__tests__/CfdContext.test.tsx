@@ -179,6 +179,7 @@ describe("optimization reducer", () => {
     junctionKind: "characteristic",
     convergenceTolImep: 5e-3,
     convergenceMinCycles: 3,
+    lockedPairs: [],
   };
 
   const baseStudy = (overrides: Partial<OptimizationStudy> = {}): OptimizationStudy => ({

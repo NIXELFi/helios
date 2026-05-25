@@ -253,6 +253,46 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
 
 // ---------------- apply_override ----------------
 
+/// Registered in/out diameter pairs. Optimization studies may "lock"
+/// any of these so the leader and follower share one sampled value;
+/// see `dto::LockedPair` and `runner::run_optimization`.
+///
+/// Order: (leader, follower). Convention: inlet is the leader.
+pub const LOCKABLE_DIAMETER_PAIRS: &[(&str, &str)] = &[
+    ("runner_diameter_in", "runner_diameter_out"),
+    ("primary_diameter_in", "primary_diameter_out"),
+    ("secondary_diameter_in", "secondary_diameter_out"),
+    ("collector_diameter_in", "collector_diameter_out"),
+];
+
+/// True if the (base leader path, base follower path) pair is in the
+/// registry. Array-index suffixes (`[N]`) are stripped before lookup.
+pub fn is_locked_pair(leader_path: &str, follower_path: &str) -> bool {
+    let (lb, _) = parse_array_index(leader_path);
+    let (fb, _) = parse_array_index(follower_path);
+    LOCKABLE_DIAMETER_PAIRS.iter().any(|(l, f)| *l == lb && *f == fb)
+}
+
+/// Given a leader path (possibly with `[N]` suffix), return the
+/// registered follower path with the same array-index suffix, if any.
+///
+/// Examples:
+///   `"primary_diameter_in"`     -> `Some("primary_diameter_out")`
+///   `"primary_diameter_in[2]"`  -> `Some("primary_diameter_out[2]")`
+///   `"primary_diameter_out"`    -> `None` (follower paths aren't leaders)
+///   `"bore"`                    -> `None`
+pub fn follower_for(leader_path: &str) -> Option<String> {
+    let (base, idx) = parse_array_index(leader_path);
+    let follower_base = LOCKABLE_DIAMETER_PAIRS
+        .iter()
+        .find(|(l, _)| *l == base)
+        .map(|(_, f)| *f)?;
+    Some(match idx {
+        Some(i) => format!("{follower_base}[{i}]"),
+        None => follower_base.to_string(),
+    })
+}
+
 /// Parse an optional `[N]` index suffix. Returns (base_path, index).
 fn parse_array_index(path: &str) -> (&str, Option<usize>) {
     if let Some(open) = path.rfind('[') {
@@ -835,6 +875,56 @@ mod tests {
         assert!((cfg.fmep_a - 0.5).abs() < 1e-15);
         assert!((cfg.fmep_b - 0.1).abs() < 1e-15);
         assert!((cfg.fmep_c - 0.003).abs() < 1e-15);
+    }
+
+    // ---------------- Locked-pair registry ----------------
+
+    #[test]
+    fn locked_pair_registry_covers_all_four_pipes() {
+        assert!(is_locked_pair("runner_diameter_in", "runner_diameter_out"));
+        assert!(is_locked_pair("primary_diameter_in", "primary_diameter_out"));
+        assert!(is_locked_pair("secondary_diameter_in", "secondary_diameter_out"));
+        assert!(is_locked_pair("collector_diameter_in", "collector_diameter_out"));
+    }
+
+    #[test]
+    fn locked_pair_rejects_reversed_or_unrelated() {
+        // Reversed (out -> in) is not registered.
+        assert!(!is_locked_pair("primary_diameter_out", "primary_diameter_in"));
+        // Cross-pipe leader/follower is not registered.
+        assert!(!is_locked_pair("primary_diameter_in", "secondary_diameter_out"));
+        // Non-diameter paths are not registered.
+        assert!(!is_locked_pair("bore", "stroke"));
+    }
+
+    #[test]
+    fn locked_pair_respects_array_index_suffix() {
+        assert!(is_locked_pair(
+            "primary_diameter_in[2]",
+            "primary_diameter_out[2]"
+        ));
+        // We don't enforce matching indices at the registry layer; the
+        // runner emits both as separate apply_override calls. So this
+        // is also "registered" by base — runner-level validation owns
+        // any cross-index policy.
+        assert!(is_locked_pair(
+            "primary_diameter_in[0]",
+            "primary_diameter_out[3]"
+        ));
+    }
+
+    #[test]
+    fn follower_for_propagates_array_index() {
+        assert_eq!(
+            follower_for("primary_diameter_in").as_deref(),
+            Some("primary_diameter_out")
+        );
+        assert_eq!(
+            follower_for("primary_diameter_in[2]").as_deref(),
+            Some("primary_diameter_out[2]")
+        );
+        assert_eq!(follower_for("primary_diameter_out"), None);
+        assert_eq!(follower_for("bore"), None);
     }
 
     /// FMEP coefficients are present in the optimization schema (Friction
