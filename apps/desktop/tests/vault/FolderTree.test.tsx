@@ -35,10 +35,10 @@ describe("<FolderTree>", () => {
     expect(onSelect).toHaveBeenCalledWith("f1");
   });
 
-  it("renders an 'All folders' entry that calls onSelect(null)", () => {
+  it("renders a 'Vault root' entry that calls onSelect(null)", () => {
     const onSelect = vi.fn();
     render(<FolderTree folders={folders} selected="f1" onSelect={onSelect} />);
-    const all = screen.getByRole("button", { name: /all folders/i });
+    const all = screen.getByRole("button", { name: /vault root/i });
     expect(all).toBeInTheDocument();
     fireEvent.click(all);
     expect(onSelect).toHaveBeenCalledWith(null);

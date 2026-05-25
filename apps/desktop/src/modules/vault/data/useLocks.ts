@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { Lock, QueryResult } from "./types";
+import { fetchAllRows } from "./paginate";
 
 export function useLocks(): QueryResult<Lock[]> {
   const client = useSupabaseClient();
@@ -14,15 +15,19 @@ export function useLocks(): QueryResult<Lock[]> {
     setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await (client.from("locks") as any)
-        .select("*")
-        .is("released_at", null);
+      // Paginated — locks is cross-vault and once total active locks
+      // crossed PostgREST's 1,000-row default it would silently truncate,
+      // which is how auto-sync could clobber a user holding a lock that
+      // fell off the response window.
+      const { rows, error: err } = await fetchAllRows<Lock>(
+        () => (client.from("locks") as any).select("*").is("released_at", null),
+      );
       if (!mounted) return;
       if (err) {
-        setError(err instanceof Error ? err : new Error(String(err.message ?? err)));
+        setError(err);
         setData(null);
       } else {
-        setData(rows ?? []);
+        setData(rows);
       }
       setLoading(false);
     })();

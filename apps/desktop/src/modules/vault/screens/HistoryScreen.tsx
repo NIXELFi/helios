@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useUser } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
@@ -17,6 +17,14 @@ export function HistoryScreen() {
   const { data: files } = useFiles(folderId ?? undefined);
   const [fileId, setFileId] = useState<FileId | null>(null);
   const { data: versions } = useVersions(fileId ?? undefined);
+
+  // Reset selection when the active vault changes — otherwise switching
+  // from SDM26 to SDM27 keeps the SDM26 folder/file ids selected and
+  // the version list silently shows wrong-vault rows (or empty under RLS).
+  useEffect(() => {
+    setFolderId(null);
+    setFileId(null);
+  }, [vaultId]);
 
   return (
     <div className="flex h-full">

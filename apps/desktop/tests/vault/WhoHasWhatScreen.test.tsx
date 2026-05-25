@@ -11,7 +11,11 @@ function mockClient(rows: any[], isAdmin = false): SupabaseClient {
       getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
-    from: () => ({ select: () => ({ is: () => Promise.resolve({ data: rows, error: null }) }) }),
+    from: () => ({
+      select: () => ({
+        is: () => ({ range: () => Promise.resolve({ data: rows, error: null }) }),
+      }),
+    }),
     rpc: (name: string) => {
       if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
       return Promise.resolve({ data: null, error: null });

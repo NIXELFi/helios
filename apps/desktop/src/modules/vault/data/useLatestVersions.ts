@@ -48,6 +48,9 @@ export function useLatestVersions(fileIds: FileId[]) {
         if (!mounted) return;
         if (err) {
           setError(err);
+          // Drop any partially-populated map so consumers don't render
+          // half-stale data alongside the error.
+          setData(new Map());
           setLoading(false);
           return;
         }

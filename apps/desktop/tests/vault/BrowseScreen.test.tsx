@@ -47,7 +47,7 @@ function buildMockClient(isAdmin = false): SupabaseClient {
         }),
       };
       if (table === "locks") return {
-        select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }),
+        select: () => ({ is: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }),
       };
       if (table === "user_roles") return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
@@ -85,7 +85,7 @@ function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
           eq: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
         }),
       };
-      if (table === "locks") return { select: () => ({ is: () => Promise.resolve({ data: [], error: null }) }) };
+      if (table === "locks") return { select: () => ({ is: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }) };
       if (table === "user_roles") return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
       };

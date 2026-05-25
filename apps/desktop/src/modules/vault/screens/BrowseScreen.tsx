@@ -41,7 +41,7 @@ export function BrowseScreen() {
   const { data: folders, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
-  const { data: files, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
+  const { data: filesInFolder, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
   const { data: locks, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
@@ -80,6 +80,16 @@ export function BrowseScreen() {
     allFiles && localFiles && folders
       ? findUnmatchedLocal(allFiles, localFiles, folders)
       : [];
+
+  // When the user has the vault root selected (selectedFolder === null) we
+  // derive the file list from the vault-wide query instead of asking the
+  // server for "files where folder_id IS NULL" — keeps the wiring simple and
+  // avoids a second query. allFiles paginates, so this is correct at scale.
+  const rootFiles = useMemo(
+    () => (allFiles ?? []).filter((f) => f.folder_id === null),
+    [allFiles],
+  );
+  const files = selectedFolder === null ? rootFiles : filesInFolder;
 
   // Latest versions across the entire vault. The current-folder file table
   // and the background auto-sync both read from this single source so we
@@ -241,9 +251,13 @@ export function BrowseScreen() {
         </div>
       </div>
       <div className="flex-1 overflow-auto">
-        {selectedFolder ? (
-          <>
-            <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
+        {/* selectedFolder === null means "vault root view", not "nothing
+            selected" — files at the vault root were previously unreachable
+            because the FileTable was gated behind this check. Now we always
+            render the table; the `files` variable above derives root files
+            from allFiles when selectedFolder is null. */}
+        <>
+          <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
               {vaultFolderPath && autoSyncEnabled && (
                 <VaultSyncSection
                   enabled
@@ -262,7 +276,7 @@ export function BrowseScreen() {
               {!autoSyncEnabled && (
                 <span
                   className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
-                  title="Auto-sync is off for this vault. Click Get Latest on a row to download. Change in Settings."
+                  title="Auto-sync is off for this vault. Click Download on a row to pull bytes. Change in Settings."
                 >
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
                   Manual mode
@@ -308,11 +322,9 @@ export function BrowseScreen() {
               versionsByFileId={versionsByFileId}
               vaultRoot={vaultFolderPath}
               folders={folders ?? []}
+              downloadMode={downloadMode}
             />
-          </>
-        ) : (
-          <div className="p-6 text-sm text-helios-dim">Select a folder to see its files.</div>
-        )}
+        </>
       </div>
       <FileDetailPanel fileId={selectedFile} />
       </div>

@@ -180,15 +180,16 @@ export function FolderTree({
         aria-current={isSelectedFile ? "page" : undefined}
         onClick={(e) => {
           e.stopPropagation();
-          // Select the file's folder so the right-side file table updates,
-          // AND signal the file selection for the detail panel.
-          if (file.folder_id) onSelect(file.folder_id);
+          // Select the file's containing folder (null = vault root) so the
+          // right-side file table jumps to it, then mark the file as selected
+          // for the detail panel.
+          onSelect(file.folder_id);
           onSelectFile?.(file.id);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            if (file.folder_id) onSelect(file.folder_id);
+            onSelect(file.folder_id);
             onSelectFile?.(file.id);
           }
         }}
@@ -273,6 +274,11 @@ export function FolderTree({
     );
   }
 
+  // Files at the vault root (folder_id === null). They live under the
+  // "All folders" row in the tree and the FileTable renders them when the
+  // user has selected the root view.
+  const rootFiles = filesByFolder.get(null) ?? [];
+
   return (
     <div className="flex select-none flex-col gap-0.5 py-2">
       <div
@@ -295,9 +301,15 @@ export function FolderTree({
         }
       >
         <span className="inline-block w-4 shrink-0" />
-        <span>All folders</span>
+        <span>Vault root</span>
+        {rootFiles.length > 0 && (
+          <span className="ml-auto shrink-0 rounded bg-helios-line px-1.5 py-0.5 text-[10px] font-mono-num text-helios-dim">
+            {rootFiles.length}
+          </span>
+        )}
       </div>
-      {tree.length === 0 ? (
+      {rootFiles.map((f) => renderFileLeaf(f, 0))}
+      {tree.length === 0 && rootFiles.length === 0 ? (
         <div className="px-3 py-3 text-xs italic text-helios-dim">No folders yet.</div>
       ) : (
         tree.map((n) => renderFolderNode(n, 0))

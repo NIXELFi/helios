@@ -17,7 +17,12 @@ function mockClient(rows: any[], error: any = null): SupabaseClient {
       select: () => ({
         is: (col: string, val: any) => {
           observed = { col, val };
-          return Promise.resolve({ data: rows, error });
+          return {
+            // Pagination via .range() — return all rows once; fetchAllRows
+            // exits when the page is smaller than its cap.
+            range: (_from: number, _to: number) =>
+              Promise.resolve({ data: rows, error }),
+          };
         },
       }),
     }),

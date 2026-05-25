@@ -48,6 +48,12 @@ export function useDownloadMode(vaultId: VaultId | null): {
     setMap((prev) => {
       const updated: Map = { ...prev, [vaultId]: next };
       writeMap(updated);
+      // Same-window writes don't fire a native `storage` event, so other
+      // `useDownloadMode` instances mounted in this window wouldn't see the
+      // change. Dispatch one manually to drive the existing listener.
+      try {
+        window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+      } catch { /* ignore */ }
       return updated;
     });
   }, [vaultId]);

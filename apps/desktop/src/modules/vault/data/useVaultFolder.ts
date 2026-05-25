@@ -20,10 +20,11 @@ function parse(raw: string | null, migrationVaultId: VaultId | null): Map {
     } catch { /* fall through */ }
   }
   // Legacy bare-string. Adopt into the currently active vault, if known.
+  // NOTE: this is a pure transform — the localStorage write that persists
+  // the migration happens in useVaultFolder's useEffect, not here, so this
+  // function is safe to call during render.
   if (migrationVaultId) {
-    const map: Map = { [migrationVaultId]: raw };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); } catch { /* ignore */ }
-    return map;
+    return { [migrationVaultId]: raw };
   }
   return {};
 }
@@ -37,6 +38,14 @@ function writeMap(map: Map) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(map)); } catch { /* ignore */ }
 }
 
+// True if the stored value is a legacy bare-string (i.e. not JSON-object).
+function isLegacyBareString(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return !!raw && !raw.startsWith("{");
+  } catch { return false; }
+}
+
 export function useVaultFolder(vaultId: VaultId | null): {
   path: string | null;
   setPath: (next: string | null) => void;
@@ -47,6 +56,21 @@ export function useVaultFolder(vaultId: VaultId | null): {
   // If vaultId changes after mount, re-read (and re-attempt legacy migration).
   useEffect(() => {
     setMap(readMap(vaultId));
+  }, [vaultId]);
+
+  // Persist the legacy bare-string migration. Pulled out of `parse` so that
+  // render stays side-effect-free (parse is called from useState init and
+  // from the [vaultId] effect's setMap). Once the stored value has been
+  // upgraded to a JSON object, this effect is a no-op on subsequent runs.
+  useEffect(() => {
+    if (!vaultId) return;
+    if (!isLegacyBareString()) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw && !raw.startsWith("{")) {
+        writeMap({ [vaultId]: raw });
+      }
+    } catch { /* ignore */ }
   }, [vaultId]);
 
   // Cross-window sync.

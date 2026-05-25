@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useActiveVault } from "../data/useActiveVault";
 import type { DownloadMode } from "../data/useDownloadMode";
 import type { Vault } from "../data/types";
@@ -31,19 +31,34 @@ export function DownloadModeWelcome() {
     try { return localStorage.getItem(WELCOMED_KEY) === "true"; } catch { return false; }
   })();
 
-  // Local pending choices keyed by vault id. Initialized from stored map +
-  // 'auto' default for any vault without an entry.
-  const initial = useMemo<Map>(() => {
+  // Local pending choices keyed by vault id. Initialized once from stored map
+  // + 'auto' default for vaults present on first mount. We must NOT clobber
+  // user picks on every `vaults` identity change (refetch / realtime tick
+  // produces a new array reference but the same vault ids).
+  const [choices, setChoices] = useState<Map>(() => {
     const stored = readMap();
     const next: Map = { ...stored };
     for (const v of vaults) {
       if (!(v.id in next)) next[v.id] = "auto";
     }
     return next;
-  }, [vaults]);
+  });
 
-  const [choices, setChoices] = useState<Map>(initial);
-  useEffect(() => setChoices(initial), [initial]);
+  // When the vault list grows (new vault becomes accessible mid-session),
+  // add an 'auto' default for each new id but leave existing picks alone.
+  useEffect(() => {
+    setChoices((prev) => {
+      let changed = false;
+      const next: Map = { ...prev };
+      for (const v of vaults) {
+        if (!(v.id in next)) {
+          next[v.id] = "auto";
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [vaults]);
   // We can't read welcomed reactively (it's just a string in localStorage),
   // so after Save we toggle local state to unmount the modal until next reload.
   // This hook MUST come before any conditional returns to satisfy the
