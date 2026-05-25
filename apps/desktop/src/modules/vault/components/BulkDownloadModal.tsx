@@ -32,6 +32,7 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
         <div className="mb-3 flex justify-between text-xs text-helios-dim">
           <span>
             {api.done}/{api.total} done
+            {api.skipped > 0 && <span> · {api.skipped} already had</span>}
             {api.errs > 0 && <span className="text-[#EF5350]"> · {api.errs} failed</span>}
           </span>
           <span className="font-mono-num">
@@ -43,13 +44,13 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
             <div className="text-[10px] uppercase tracking-wider text-helios-dim">
               In flight ({api.active.length})
             </div>
-            {api.active.map((name) => (
+            {api.active.map((entry) => (
               <div
-                key={name}
+                key={entry.id}
                 className="truncate font-mono-num text-[11px] text-helios-text"
-                title={name}
+                title={entry.name}
               >
-                {name}
+                {entry.name}
               </div>
             ))}
           </div>

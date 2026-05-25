@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
+import { stat } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { localDestPath } from "./folder-paths";
@@ -11,12 +12,15 @@ export interface BulkDownloadState {
   total: number;
   done: number;
   errs: number;
+  /** Files we skipped because the local copy was already up-to-date by size. */
+  skipped: number;
   bytesDone: number;
   current: string | null;
   lastError: string | null;
   startedAt: number | null;
-  /** Names of files currently in flight in the worker pool. */
-  active: string[];
+  /** Files currently in flight — `{ id, name }` so React keys don't collide
+      when two files in different folders happen to share a filename. */
+  active: Array<{ id: FileId; name: string }>;
 }
 
 export interface BulkDownloadAPI extends BulkDownloadState {
@@ -55,8 +59,9 @@ export function useBulkDownload(opts: {
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
   const [errs, setErrs] = useState(0);
+  const [skipped, setSkipped] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [active, setActive] = useState<string[]>([]);
+  const [active, setActive] = useState<Array<{ id: FileId; name: string }>>([]);
   const cancelRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
   const bytesDoneRef = useRef(0);
@@ -81,6 +86,7 @@ export function useBulkDownload(opts: {
     setTotal(downloadable.length);
     setDone(0);
     setErrs(0);
+    setSkipped(0);
     setLastError(null);
     setActive([]);
     bytesDoneRef.current = 0;
@@ -98,11 +104,14 @@ export function useBulkDownload(opts: {
       root = picked;
     }
 
-    // Worker pool — N parallel workers pull from a shared cursor. activeIds
-    // tracks "in-flight" so the modal can show concurrent filenames.
+    // Worker pool — N parallel workers pull from a shared cursor. The
+    // active set is keyed by file id (unique) so two files in different
+    // folders with the same name don't collide on the React render key.
     const activeMap = new Map<FileId, string>();
     let cursor = 0;
-    const refreshActive = () => setActive(Array.from(activeMap.values()));
+    const refreshActive = () => {
+      setActive(Array.from(activeMap.entries()).map(([id, name]) => ({ id, name })));
+    };
     async function worker() {
       while (!cancelRef.current) {
         const i = cursor++;
@@ -110,9 +119,33 @@ export function useBulkDownload(opts: {
         const file = downloadable[i]!;
         const version = versionsByFileId.get(file.id)?.[0];
         if (!version) continue;
+        const dest = localDestPath(root!, file.folder_id, file.name, folders);
+
+        // Skip-if-already-synced: if the local file exists AND its size
+        // matches the server version's size_bytes, assume the contents
+        // match. This is a cheap heuristic — a SHA check would be safer
+        // but means reading every file. If the user has locally modified
+        // the file (different size), we ALSO skip it instead of clobbering
+        // their edit; the bulk pull is not the right tool to "fix" diffs.
+        try {
+          const info = await stat(dest);
+          if (info.isFile) {
+            if (info.size === version.size_bytes) {
+              setSkipped((s) => s + 1);
+              continue;
+            }
+            // Size mismatch — preserve the user's local copy rather than
+            // overwriting. Counted as skipped, not errored, so the run
+            // shows green for the cases that worked.
+            setSkipped((s) => s + 1);
+            continue;
+          }
+        } catch {
+          // File doesn't exist — fall through to download.
+        }
+
         activeMap.set(file.id, file.name);
         refreshActive();
-        const dest = localDestPath(root!, file.folder_id, file.name, folders);
         const result = await downloadVersionOnce(client, version.sha256, dest);
         activeMap.delete(file.id);
         refreshActive();
@@ -136,11 +169,11 @@ export function useBulkDownload(opts: {
   const close = useCallback(() => { if (!running) setOpen(false); }, [running]);
 
   return {
-    running, open, total, done, errs,
+    running, open, total, done, errs, skipped,
     bytesDone: bytesDoneRef.current,
     // For backwards-compat the legacy modal reads `current` (single name);
     // populate it from the active list's first entry.
-    current: active[0] ?? null,
+    current: active[0]?.name ?? null,
     active,
     lastError,
     startedAt: startedAtRef.current,

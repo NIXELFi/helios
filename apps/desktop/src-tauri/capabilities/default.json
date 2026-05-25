@@ -21,6 +21,14 @@
     "fs:allow-watch",
     "fs:allow-unwatch",
     "fs:allow-stat",
-    { "identifier": "fs:scope", "allow": [{ "path": "**" }] }
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "**" },
+        { "path": "**/*" },
+        { "path": "**/.*" },
+        { "path": "**/.*/**" }
+      ]
+    }
   ]
 }
