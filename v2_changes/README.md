@@ -42,6 +42,9 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 34 | 3.2.2 — full user + developer wiki under `docs/wiki/` and in-app Help & Wiki modal (F1, ⌘K, header) | [34-wiki-and-in-app-help.md](34-wiki-and-in-app-help.md) |
 | 35 | CFD tab Phases 1+2 — engine-sim Rust port + tab scaffold + 27 new parity fixtures + full SDM26 config editor (save/save-as, validation, Cd-table + pipe-array editors, topology switch, templates, side-by-side diff) | [35-cfd-tab-phases-1-2.md](35-cfd-tab-phases-1-2.md) |
 | 36 | CFD tab Phase 3 — multi-RPM sweeps with curve plots, per-cylinder P-V loops + crank-angle traces, end-of-cycle pipe profiles, sweep-vs-sweep comparison, per-step wave-capture writer (Phase-4 viewer pending) | [36-cfd-phase-3-sweeps-postcycle-viz.md](36-cfd-phase-3-sweeps-postcycle-viz.md) |
+| 37 | CFD Phase 5 — DOE optimization runs: opt-in tunable numeric leaves with min/max/step, flexible objective (metric × aggregator × RPM × min/max), parallel LHS trials, brushable parallel-coordinates results plot with click-to-drill trial inspection | [37-cfd-phase-5-optimization.md](37-cfd-phase-5-optimization.md) |
+| 38 | v3.4.1 — cancel-aware engine step loop so pathological optimization trials cancel mid-cycle instead of waiting for the in-flight `advance_one_cycle` to finish | [38-v3.4.1-cancel-granularity.md](38-v3.4.1-cancel-granularity.md) |
+| 39 | CFD tab Phase 4 — animated wave-frame viewer (schematic + per-pipe waterfall), selectable field/size/cyl-field, 0.25–8× playback, sweep RPM switcher; `cfd_load_waves` Tauri command reads JSONL captures | [39-cfd-phase-4-wave-viewer.md](39-cfd-phase-4-wave-viewer.md) |
 
 > **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 
