@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { COLORMAPS } from "./colormaps";
-import { computeMach, fieldRange, WAVE_FIELD_META } from "./fields";
+import { computeMach, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
 import type {
   WaveCapturePacked,
   WaveField,
@@ -17,8 +17,6 @@ interface Props {
   frameIdx: number;
   onScrub(newFrameIdx: number): void;
 }
-
-const FIELD_IDX = { rho: 0, u: 1, p: 2, T: 3 } as const;
 
 export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -52,8 +50,8 @@ export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Pro
     let valueAt: (f: number, c: number) => number;
     let range: { vmin: number; vmax: number };
     if (field === "Mach") {
-      const u = packed.pipeArr[pipeIdx]![FIELD_IDX.u]!;
-      const T = packed.pipeArr[pipeIdx]![FIELD_IDX.T]!;
+      const u = packed.pipeArr[pipeIdx]![PIPE_FIELD_IDX.u]!;
+      const T = packed.pipeArr[pipeIdx]![PIPE_FIELD_IDX.T]!;
       let mn = Infinity, mx = -Infinity;
       for (let i = 0; i < u.length; i++) {
         const m = computeMach(u[i]!, T[i]!);
@@ -65,7 +63,7 @@ export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Pro
       range = fieldRange("Mach", { min: mn, max: mx });
       valueAt = (f, c) => computeMach(u[f * nCells + c]!, T[f * nCells + c]!);
     } else {
-      const idx = FIELD_IDX[field as Exclude<WaveField, "Mach">];
+      const idx = PIPE_FIELD_IDX[field as Exclude<WaveField, "Mach">];
       const arr = packed.pipeArr[pipeIdx]![idx]!;
       range = fieldRange(field, packed.pipeRange[pipeIdx]![idx]!);
       valueAt = (f, c) => arr[f * nCells + c]!;

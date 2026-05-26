@@ -1,9 +1,9 @@
 // SchematicView.tsx
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { sampleColormap } from "./colormaps";
-import { computeMach, fieldRange, WAVE_FIELD_META } from "./fields";
+import { computeMach, CYL_FIELD_IDX, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
 import { layoutSchematic, type SchematicLayout } from "./layout";
 import type {
   WaveCapturePacked,
@@ -20,12 +20,9 @@ interface Props {
   cylField: WaveCylField;
 }
 
-const FIELD_IDX = { rho: 0, u: 1, p: 2, T: 3 } as const;
-const CYL_FIELD_IDX = { V: 0, p: 1, T: 2, x_b: 3 } as const;
-
 export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const layoutRef = useRef<SchematicLayout | null>(null);
+  const [layout, setLayout] = useState<SchematicLayout | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,8 +38,11 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
       const ctx = canvas.getContext("2d");
-      ctx?.scale(dpr, dpr);
-      layoutRef.current = layoutSchematic(packed.manifest, w, h);
+      // setTransform is idempotent; scale() is cumulative. Use setTransform so
+      // any future code that doesn't reassign canvas.width can't accidentally
+      // double-scale.
+      ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+      setLayout(layoutSchematic(packed.manifest, w, h));
     };
     resize();
     const parent = canvas.parentElement;
@@ -54,12 +54,11 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const layout = layoutRef.current;
     if (!canvas || !layout) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     draw(ctx, layout, packed, frameIdx, field, sizeField, cylField);
-  }, [packed, frameIdx, field, sizeField, cylField]);
+  }, [packed, frameIdx, field, sizeField, cylField, layout]);
 
   return (
     <div className="h-full w-full bg-[#0E0E10]">
@@ -104,8 +103,8 @@ function fieldArr(packed: WaveCapturePacked, pipeIdx: number, field: WaveField):
 } {
   const nCells = packed.manifest.pipes[pipeIdx]!.nCells;
   if (field === "Mach") {
-    const u = packed.pipeArr[pipeIdx]![FIELD_IDX.u]!;
-    const T = packed.pipeArr[pipeIdx]![FIELD_IDX.T]!;
+    const u = packed.pipeArr[pipeIdx]![PIPE_FIELD_IDX.u]!;
+    const T = packed.pipeArr[pipeIdx]![PIPE_FIELD_IDX.T]!;
     let mn = Infinity, mx = -Infinity;
     for (let i = 0; i < u.length; i++) {
       const m = computeMach(u[i]!, T[i]!);
@@ -120,7 +119,7 @@ function fieldArr(packed: WaveCapturePacked, pipeIdx: number, field: WaveField):
       nCells,
     };
   }
-  const idx = FIELD_IDX[field as Exclude<WaveField, "Mach">];
+  const idx = PIPE_FIELD_IDX[field as Exclude<WaveField, "Mach">];
   const arr = packed.pipeArr[pipeIdx]![idx]!;
   return {
     read: (f, c) => arr[f * nCells + c]!,

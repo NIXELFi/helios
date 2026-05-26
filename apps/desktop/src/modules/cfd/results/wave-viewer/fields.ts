@@ -51,3 +51,15 @@ export function fieldRange(
   }
   return { vmin: observed.min, vmax: observed.max };
 }
+
+/**
+ * Index map for pipe fields as stored in `WaveCapturePacked.pipeArr[pipeIdx][fieldIdx]`.
+ * Must agree with `WaveFrameManifest.fields` order: ["rho", "u", "p", "T"].
+ */
+export const PIPE_FIELD_IDX = { rho: 0, u: 1, p: 2, T: 3 } as const;
+
+/**
+ * Index map for cylinder fields as stored in `WaveCapturePacked.cylArr[cylIdx][fieldIdx]`.
+ * Must agree with the packer in `useWaveCapture.ts`: [V, p, T, xB].
+ */
+export const CYL_FIELD_IDX = { V: 0, p: 1, T: 2, x_b: 3 } as const;

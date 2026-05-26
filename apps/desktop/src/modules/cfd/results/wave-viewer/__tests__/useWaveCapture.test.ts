@@ -95,4 +95,17 @@ describe("useWaveCapture", () => {
     await waitFor(() => expect(result.current.state).toBe("ready"));
     expect(result.current.data?.manifest.rpm).toBe(8000);
   });
+
+  it("transitions to error state when the bridge returns a malformed payload (frame count mismatch)", async () => {
+    const malformed = {
+      manifest: { ...makeRawResponse().manifest, frameCount: 10 },
+      frames: makeRawResponse().frames, // only 2 frames, but manifest says 10
+    };
+    const bridge = {
+      loadWaves: vi.fn().mockResolvedValue(malformed),
+    } as any;
+    const { result } = renderHook(() => useWaveCapture(bridge, "test", "single-rpm", 8000));
+    await waitFor(() => expect(result.current.state).toBe("error"));
+    expect(result.current.error).toContain("frame count mismatch");
+  });
 });
