@@ -3,6 +3,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LinePlot } from "../components/charts/LinePlot";
 import { PvLoopView } from "./PvLoopView";
 import { PipeProfileView } from "./PipeProfileView";
+import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
 import type { SweepStudy } from "../state/types";
@@ -12,8 +13,17 @@ interface Props {
 }
 
 export function SweepResults({ study }: Props) {
-  const { state, cancelStudy, setSweepCompare } = useCfd();
+  const { state, cancelStudy, setSweepCompare, bridge } = useCfd();
   const [expandedRpm, setExpandedRpm] = useState<number | null>(null);
+  const [waveViewerRpm, setWaveViewerRpm] = useState<number | null>(null);
+
+  const sweepCapturedRpms = useMemo(
+    () =>
+      (study.points ?? [])
+        .filter((p) => p.captureDir != null)
+        .map((p) => Math.round(p.rpm)),
+    [study.points],
+  );
 
   const compare = useMemo(() => {
     if (!study.compareWithStudyId) return null;
@@ -252,6 +262,17 @@ export function SweepResults({ study }: Props) {
                                 {p.captureDir && study.params.capturePipeProfiles && (
                                   <PipeProfileView jobId={study.id} studyKind="sweep" rpmInt={Math.round(p.rpm)} />
                                 )}
+                                {p.captureDir && study.params.captureWaves && (
+                                  <div className="mt-2">
+                                    <button
+                                      type="button"
+                                      className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
+                                      onClick={() => setWaveViewerRpm(Math.round(p.rpm))}
+                                    >
+                                      Open wave viewer ↗
+                                    </button>
+                                  </div>
+                                )}
                                 {!p.captureDir && (
                                   <div className="text-[11px] text-[#5A5F66]">
                                     No captures for this RPM. Re-run sweep with P-V / profile capture enabled to view this view.
@@ -270,6 +291,17 @@ export function SweepResults({ study }: Props) {
           </>
         )}
       </div>
+      {study.params.captureWaves && waveViewerRpm != null && (
+        <WaveViewerModal
+          open
+          bridge={bridge}
+          jobId={study.id}
+          studyKind="sweep"
+          rpmInt={waveViewerRpm}
+          sweepCapturedRpms={sweepCapturedRpms}
+          onClose={() => setWaveViewerRpm(null)}
+        />
+      )}
     </div>
   );
 }
