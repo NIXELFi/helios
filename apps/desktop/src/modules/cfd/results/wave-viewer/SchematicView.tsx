@@ -402,21 +402,37 @@ function drawCylinder(
   }
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
 
-  // Stroke detection: V direction × x_b state.
-  //  intake:     piston down (V rising), x_b ≈ 0   (fresh charge)
-  //  compression:piston up   (V falling), x_b ≈ 0   (unburned)
-  //  power:      piston down (V rising), x_b > 0.5 (burned)
-  //  exhaust:    piston up   (V falling), x_b > 0.5 (still burned)
-  // Look back ~5 frames for the V-direction sign so it isn't noisy
-  // near TDC/BDC where dV/dt → 0.
+  // Stroke detection. Key insight: x_b absolute value is misleading at
+  // stroke boundaries because residual burned gas stays at x_b ≈ 1
+  // through the entire exhaust stroke AND into the start of intake
+  // (until fresh air dilutes it). So "x_b > 0.5 + V rising" is NOT
+  // power — it's frequently early intake.
+  //
+  // Reliable approach: use d(x_b)/dt as the primary signal.
+  //   d(x_b)/dt > +eps  → combustion in progress  → POWER
+  //   d(x_b)/dt < -eps  → fresh-charge refill     → INTAKE
+  // When |d(x_b)/dt| is small (x_b stable), fall back to V-direction +
+  // x_b magnitude:
+  //   V rising  + x_b high → POWER (after combustion peak)
+  //   V rising  + x_b low  → INTAKE (after refill completed)
+  //   V falling + x_b high → EXHAUST
+  //   V falling + x_b low  → COMPRESSION
   const xbArr = packed.cylArr[ci]![CYL_FIELD_IDX.x_b]!;
   const xbNow = xbArr[frameIdx]!;
-  const back = Math.max(0, frameIdx - 5);
+  const back = Math.max(0, frameIdx - 10);
   const dV = V - vArr[back]!;
-  const burned = xbNow > 0.5;
-  const stroke = burned
-    ? (dV >= 0 ? "POWER"   : "EXHAUST")
-    : (dV >= 0 ? "INTAKE"  : "COMPRESSION");
+  const dxb = xbNow - xbArr[back]!;
+  const dxbEps = 0.02;
+  let stroke: "INTAKE" | "COMPRESSION" | "POWER" | "EXHAUST";
+  if (dxb > dxbEps) {
+    stroke = "POWER";
+  } else if (dxb < -dxbEps) {
+    stroke = "INTAKE";
+  } else if (dV >= 0) {
+    stroke = xbNow > 0.5 ? "POWER" : "INTAKE";
+  } else {
+    stroke = xbNow > 0.5 ? "EXHAUST" : "COMPRESSION";
+  }
   const strokeColor =
     stroke === "INTAKE"      ? "#4FC3F7" :
     stroke === "COMPRESSION" ? "#9097A0" :
