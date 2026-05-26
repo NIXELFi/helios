@@ -1,6 +1,6 @@
 // SchematicView.tsx
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { sampleColormap } from "./colormaps";
 import { computeMach, CYL_FIELD_IDX, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -25,6 +25,14 @@ interface Props {
 export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [layout, setLayout] = useState<SchematicLayout | null>(null);
+
+  // Precompute stroke-per-frame per cylinder from V curve + x_b combustion
+  // marker. The simulator does not reset x_b during intake — it stays at
+  // ~1 through exhaust and intake, only dropping when the next Wiebe burn
+  // starts. So x_b alone cannot distinguish strokes. We use V-curve
+  // geometry (local min = TDC, local max = BDC) and identify which TDC
+  // starts the combustion via the x_b transition that follows it.
+  const strokesByCyl = useMemo(() => computeStrokesByCyl(packed), [packed]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -59,8 +67,8 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
     if (!canvas || !layout) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    draw(ctx, layout, packed, frameIdx, field, sizeField, cylField);
-  }, [packed, frameIdx, field, sizeField, cylField, layout]);
+    draw(ctx, layout, packed, frameIdx, field, sizeField, cylField, strokesByCyl);
+  }, [packed, frameIdx, field, sizeField, cylField, layout, strokesByCyl]);
 
   return (
     <div className="h-full w-full bg-[#0E0E10]">
@@ -68,6 +76,8 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
     </div>
   );
 }
+
+type Stroke = "INTAKE" | "COMPRESSION" | "POWER" | "EXHAUST";
 
 function draw(
   ctx: CanvasRenderingContext2D,
@@ -77,6 +87,7 @@ function draw(
   field: WaveField,
   sizeField: WaveSizeField,
   cylField: WaveCylField,
+  strokesByCyl: Stroke[][],
 ) {
   const { width, height, tiers, cylinderCenters, cylinderColumnX, cylinderBaseR } = layout;
   ctx.clearRect(0, 0, width, height);
@@ -97,7 +108,7 @@ function draw(
   }
 
   for (let ci = 0; ci < packed.manifest.nCylinders; ci++) {
-    drawCylinder(ctx, packed, frameIdx, ci, cylField, cylinderColumnX, cylinderCenters[ci]!, cylinderBaseR);
+    drawCylinder(ctx, packed, frameIdx, ci, cylField, cylinderColumnX, cylinderCenters[ci]!, cylinderBaseR, strokesByCyl[ci]?.[frameIdx] ?? "COMPRESSION");
   }
 
   // INTAKE on left side (vertical text), EXHAUST on right side.
@@ -355,6 +366,7 @@ function drawCylinder(
   cx: number,
   cy: number,
   baseR: number,
+  stroke: Stroke,
 ) {
   const boreSide = baseR * 2;
   const boreX = cx - boreSide / 2;
@@ -402,37 +414,7 @@ function drawCylinder(
   }
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
 
-  // Stroke detection. Key insight: x_b absolute value is misleading at
-  // stroke boundaries because residual burned gas stays at x_b ≈ 1
-  // through the entire exhaust stroke AND into the start of intake
-  // (until fresh air dilutes it). So "x_b > 0.5 + V rising" is NOT
-  // power — it's frequently early intake.
-  //
-  // Reliable approach: use d(x_b)/dt as the primary signal.
-  //   d(x_b)/dt > +eps  → combustion in progress  → POWER
-  //   d(x_b)/dt < -eps  → fresh-charge refill     → INTAKE
-  // When |d(x_b)/dt| is small (x_b stable), fall back to V-direction +
-  // x_b magnitude:
-  //   V rising  + x_b high → POWER (after combustion peak)
-  //   V rising  + x_b low  → INTAKE (after refill completed)
-  //   V falling + x_b high → EXHAUST
-  //   V falling + x_b low  → COMPRESSION
-  const xbArr = packed.cylArr[ci]![CYL_FIELD_IDX.x_b]!;
-  const xbNow = xbArr[frameIdx]!;
-  const back = Math.max(0, frameIdx - 10);
-  const dV = V - vArr[back]!;
-  const dxb = xbNow - xbArr[back]!;
-  const dxbEps = 0.02;
-  let stroke: "INTAKE" | "COMPRESSION" | "POWER" | "EXHAUST";
-  if (dxb > dxbEps) {
-    stroke = "POWER";
-  } else if (dxb < -dxbEps) {
-    stroke = "INTAKE";
-  } else if (dV >= 0) {
-    stroke = xbNow > 0.5 ? "POWER" : "INTAKE";
-  } else {
-    stroke = xbNow > 0.5 ? "EXHAUST" : "COMPRESSION";
-  }
+  // Stroke is precomputed from V-curve analysis (see computeStrokesByCyl).
   const strokeColor =
     stroke === "INTAKE"      ? "#4FC3F7" :
     stroke === "COMPRESSION" ? "#9097A0" :
@@ -477,4 +459,177 @@ function drawCylinder(
 function clamp01(x: number): number {
   if (Number.isNaN(x)) return 0;
   return Math.max(0, Math.min(1, x));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stroke detection — precomputed per cylinder
+//
+// The simulator's x_b never resets during intake (residual gas stays at ~1
+// through exhaust AND intake until the next combustion event). So x_b alone
+// can't distinguish intake from exhaust. We use V-curve geometry instead:
+//
+//   1. Find all TDCs (local minima in V over a sliding window).
+//   2. Find all BDCs (local maxima in V).
+//   3. For each TDC, look ahead one quarter-cycle in x_b. If x_b rises
+//      significantly, that TDC starts the POWER stroke (combustion fires
+//      just after TDC of compression). Otherwise it's the OVERLAP TDC
+//      (end of exhaust / start of intake).
+//   4. Walk frames forward, tracking the most recent extremum and which
+//      "half" of the cycle we're in. Each (TDC, BDC) interval is one
+//      stroke; the stroke type follows from the TDC's classification.
+// ────────────────────────────────────────────────────────────────────────────
+
+type ExtremumKind = "TDC" | "BDC";
+
+function computeStrokesByCyl(packed: WaveCapturePacked): Stroke[][] {
+  const nCyl = packed.manifest.nCylinders;
+  const out: Stroke[][] = [];
+  for (let ci = 0; ci < nCyl; ci++) {
+    const V = packed.cylArr[ci]?.[CYL_FIELD_IDX.V];
+    const xb = packed.cylArr[ci]?.[CYL_FIELD_IDX.x_b];
+    if (!V || !xb) {
+      out.push([]);
+      continue;
+    }
+    out.push(computeStrokes(V, xb, packed.manifest.frameCount));
+  }
+  return out;
+}
+
+function computeStrokes(V: Float32Array, xb: Float32Array, nFrames: number): Stroke[] {
+  const strokes: Stroke[] = new Array(nFrames).fill("COMPRESSION" as Stroke);
+  if (nFrames < 10) return strokes;
+
+  // Half-window for peak detection. Captured cycle is ~720° in nFrames frames,
+  // so a quarter cycle is roughly nFrames/4. Use ~5% of nFrames as window so
+  // peaks are robust to numerical noise but still capture the four extrema
+  // per cycle.
+  const W = Math.max(5, Math.floor(nFrames * 0.05));
+
+  // Find extrema. To avoid duplicates on plateaus, only accept a new
+  // extremum of opposite kind to the previous.
+  type Extremum = { f: number; kind: ExtremumKind };
+  const extrema: Extremum[] = [];
+  let lastKind: ExtremumKind | null = null;
+  for (let f = W; f < nFrames - W; f++) {
+    let isMin = true;
+    let isMax = true;
+    const Vf = V[f]!;
+    for (let g = f - W; g <= f + W; g++) {
+      if (g === f) continue;
+      const Vg = V[g]!;
+      if (Vg < Vf) isMin = false;
+      if (Vg > Vf) isMax = false;
+      if (!isMin && !isMax) break;
+    }
+    if (isMin && lastKind !== "TDC") {
+      extrema.push({ f, kind: "TDC" });
+      lastKind = "TDC";
+    } else if (isMax && lastKind !== "BDC") {
+      extrema.push({ f, kind: "BDC" });
+      lastKind = "BDC";
+    }
+  }
+
+  if (extrema.length === 0) return strokes;
+
+  // Classify each TDC. Combustion typically completes in ~20-50° of crank.
+  // Look ahead a quarter cycle (~180°, or nFrames/4 frames) and check if
+  // x_b rises by > 0.3 vs the TDC frame.
+  const lookahead = Math.max(W, Math.floor(nFrames / 4));
+  const isCombustionTdc = new Map<number, boolean>();
+  for (const e of extrema) {
+    if (e.kind !== "TDC") continue;
+    const endF = Math.min(nFrames - 1, e.f + lookahead);
+    const xbAtTdc = xb[e.f]!;
+    let xbMax = xbAtTdc;
+    for (let g = e.f; g <= endF; g++) {
+      const v = xb[g]!;
+      if (v > xbMax) xbMax = v;
+    }
+    isCombustionTdc.set(e.f, xbMax - xbAtTdc > 0.3);
+  }
+
+  // Walk forward. Between any two adjacent extrema, the stroke is determined
+  // by what came first:
+  //   TDC(combustion) → BDC : POWER
+  //   BDC             → TDC(overlap) : EXHAUST
+  //   TDC(overlap)    → BDC : INTAKE
+  //   BDC             → TDC(combustion) : COMPRESSION
+  for (let i = 0; i < extrema.length - 1; i++) {
+    const a = extrema[i]!;
+    const b = extrema[i + 1]!;
+    let segStroke: Stroke;
+    if (a.kind === "TDC") {
+      const isComb = isCombustionTdc.get(a.f) === true;
+      segStroke = isComb ? "POWER" : "INTAKE";
+    } else {
+      // a is BDC, b is TDC
+      const isComb = isCombustionTdc.get(b.f) === true;
+      segStroke = isComb ? "COMPRESSION" : "EXHAUST";
+    }
+    for (let f = a.f; f < b.f; f++) {
+      strokes[f] = segStroke;
+    }
+  }
+
+  // Frames AFTER the last extremum: continue the stroke from the segment
+  // ending at the last extremum, since the cycle continues into the next
+  // stroke type.
+  const last = extrema[extrema.length - 1]!;
+  let tailStroke: Stroke;
+  if (last.kind === "TDC") {
+    tailStroke = isCombustionTdc.get(last.f) === true ? "POWER" : "INTAKE";
+  } else {
+    // The BDC ends either INTAKE or POWER; we don't know the next TDC's
+    // kind, so guess from the segment BEFORE this BDC.
+    if (extrema.length >= 2) {
+      const prev = extrema[extrema.length - 2]!;
+      if (prev.kind === "TDC") {
+        const wasComb = isCombustionTdc.get(prev.f) === true;
+        tailStroke = wasComb ? "EXHAUST" : "COMPRESSION";
+      } else {
+        tailStroke = "COMPRESSION";
+      }
+    } else {
+      tailStroke = "COMPRESSION";
+    }
+  }
+  for (let f = last.f; f < nFrames; f++) {
+    strokes[f] = tailStroke;
+  }
+
+  // Frames BEFORE the first extremum: back-fill with the stroke that
+  // PRECEDES the first segment in cycle order.
+  // Cycle order: INTAKE → COMPRESSION → POWER → EXHAUST → INTAKE → …
+  const first = extrema[0]!;
+  let prevStroke: Stroke;
+  if (first.kind === "TDC") {
+    // First segment AFTER this TDC is POWER (if combustion) or INTAKE (if overlap).
+    // The stroke BEFORE the TDC is the one that ends at TDC:
+    //   COMPRESSION ends at combustion TDC.
+    //   EXHAUST     ends at overlap TDC.
+    prevStroke = isCombustionTdc.get(first.f) === true ? "COMPRESSION" : "EXHAUST";
+  } else {
+    // First segment AFTER this BDC is COMPRESSION (going to combustion TDC) or
+    // EXHAUST (going to overlap TDC). The stroke BEFORE the BDC ends at BDC:
+    //   INTAKE ends at the BDC before COMPRESSION.
+    //   POWER  ends at the BDC before EXHAUST.
+    if (extrema.length >= 2) {
+      const next = extrema[1]!;
+      if (next.kind === "TDC") {
+        const nextIsComb = isCombustionTdc.get(next.f) === true;
+        prevStroke = nextIsComb ? "INTAKE" : "POWER";
+      } else {
+        prevStroke = "INTAKE";
+      }
+    } else {
+      prevStroke = "INTAKE";
+    }
+  }
+  for (let f = 0; f < first.f; f++) {
+    strokes[f] = prevStroke;
+  }
+
+  return strokes;
 }
