@@ -107,20 +107,28 @@ describe("useAddLocalFile", () => {
 
   it("happy path (root file): uploads then atomically calls pdm_add_and_lock", async () => {
     const c = buildHappyClient();
+    // Default mock returns `{}` — make it return a realistic shape with a lock id.
+    (c.rpc as any) = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      return Promise.resolve({
+        data: { file_id: "fi1", version_id: "ve1", lock_id: "lo1", created: true },
+        error: null,
+      });
+    };
     const { result } = renderHook(
       () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
       { wrapper: wrap(c) },
     );
     await waitFor(() => expect(result.current.authLoading).toBe(false));
 
-    let returned: boolean | undefined;
+    let returned: any;
     await act(async () => {
       returned = await result.current.hook.run("v1", localFileRoot);
     });
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
     expect(result.current.hook.error?.message ?? null).toBeNull();
-    expect(returned).toBe(true);
+    expect(returned).toEqual({ ok: true, lockAcquired: true, alreadyExisted: false });
 
     // Root file means no folder lookups/creates. Steps in order:
     //   upload bytes → single RPC that creates file + version + lock atomically.
@@ -128,6 +136,36 @@ describe("useAddLocalFile", () => {
       "storage.upload",
       "rpc:pdm_add_and_lock",
     ]);
+  });
+
+  it("surfaces lock_id=null as ok:true but lockAcquired:false", async () => {
+    // Repro of the 2026-05-25 audit finding: pdm_add_and_lock returns
+    // {lock_id: null, created: false} when the file already exists and
+    // another user holds the lock. The previous implementation swallowed
+    // the lock_id and returned `true`, so the UI showed a green tick and
+    // the user only discovered the conflict at check-in time.
+    const c = buildHappyClient();
+    (c.rpc as any) = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      return Promise.resolve({
+        data: { file_id: "fi1", version_id: "ve1", lock_id: null, created: false },
+        error: null,
+      });
+    };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    let returned: any;
+    await act(async () => {
+      returned = await result.current.hook.run("v1", localFileRoot);
+    });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(returned).toEqual({ ok: true, lockAcquired: false, alreadyExisted: true });
+    expect(result.current.hook.error).toBeNull();
   });
 
   it("forwards correct args to pdm_add_and_lock", async () => {
@@ -168,7 +206,7 @@ describe("useAddLocalFile", () => {
     expect(typeof rpcCalls[0].args.p_comment).toBe("string");
   });
 
-  it("surfaces RPC error and returns false", async () => {
+  it("surfaces RPC error and returns ok:false", async () => {
     const c = buildHappyClient();
     (c.rpc as any) = (name: string, _args: any) => {
       callLog.push(`rpc:${name}`);
@@ -181,13 +219,14 @@ describe("useAddLocalFile", () => {
     );
     await waitFor(() => expect(result.current.authLoading).toBe(false));
 
-    let returned: boolean | undefined;
+    let returned: any;
     await act(async () => {
       returned = await result.current.hook.run("v1", localFileRoot);
     });
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
-    expect(returned).toBe(false);
+    expect(returned.ok).toBe(false);
+    expect(returned.error).toMatch(/add_and_lock.*race: file exists/);
     expect(result.current.hook.error?.message).toMatch(/add_and_lock.*race: file exists/);
   });
 
@@ -275,6 +314,135 @@ describe("useAddLocalFile", () => {
     expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(1);
   });
 
+  it("retries by re-query when folder INSERT races against another caller", async () => {
+    // Regression guard for the 2026-05-25 audit: useAddLocalFile.ts's
+    // ensureFolderHierarchy has a critical retry-by-query path for "two
+    // bulk-adds collide on the same brand-new deep folder". The first
+    // lookup returns no row; the INSERT fails with a unique_violation;
+    // the post-failure re-query finds the row another caller just inserted
+    // and we reuse it. Without this branch, bulk-adds with deep paths
+    // would fail half-the-time on the second-and-later items.
+    const c = buildHappyClient();
+    let lookupRound = 0;
+    (c.from as any).mockImplementation((table: string) => {
+      if (table === "files") {
+        return {
+          insert: () => ({
+            select: () => ({
+              single: () => { callLog.push("files.insert"); return Promise.resolve({ data: FILE_ROW, error: null }); },
+            }),
+          }),
+        };
+      }
+      if (table === "locks") {
+        return { insert: () => { callLog.push("locks.insert"); return Promise.resolve({ data: { id: "l1" }, error: null }); } };
+      }
+      if (table === "folders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                is: () => {
+                  callLog.push("folders.lookup");
+                  // 1st call: initial lookup — folder doesn't exist yet → []
+                  // 2nd call: post-INSERT retry — another caller created it,
+                  //           so it now exists.
+                  lookupRound++;
+                  if (lookupRound === 1) return Promise.resolve({ data: [], error: null });
+                  return Promise.resolve({ data: [{ id: "race-created" }], error: null });
+                },
+                // Same as above for non-null parent — unused in this test
+                // because we use a single-segment relative path.
+                eq: () => Promise.resolve({ data: [], error: null }),
+              }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              single: () => {
+                callLog.push("folders.insert");
+                // Simulate a unique_violation as if another caller already
+                // inserted this folder between our lookup and our INSERT.
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    code: "23505",
+                    message: 'duplicate key value violates unique constraint "folders_vault_parent_name_key"',
+                  },
+                });
+              },
+            }),
+          }),
+        };
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    });
+
+    const oneLevelDeep = { ...localFileRoot, relativePath: "Engine/cylinder.sldprt", basename: "cylinder.sldprt" };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    let returned: any;
+    await act(async () => { returned = await result.current.hook.run("v1", oneLevelDeep); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    // The hook recovered: it did one INSERT (which failed) but then
+    // re-queried, found the racing row, and proceeded with the file flow.
+    expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
+    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(1);
+    expect(callLog).toContain("storage.upload");
+    expect(callLog).toContain("rpc:pdm_add_and_lock");
+    expect(returned.ok).toBe(true);
+    expect(result.current.hook.error?.message ?? null).toBeNull();
+  });
+
+  it("throws when folder INSERT fails AND the post-INSERT re-query also finds nothing", async () => {
+    // The audit's other half: only the retry-by-query path is forgiving;
+    // a true RLS denial (not a race) must still propagate, otherwise the
+    // user would think their file was added when it wasn't.
+    const c = buildHappyClient();
+    (c.from as any).mockImplementation((table: string) => {
+      if (table === "folders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                is: () => Promise.resolve({ data: [], error: null }),
+                eq: () => Promise.resolve({ data: [], error: null }),
+              }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              single: () => Promise.resolve({
+                data: null,
+                error: { code: "42501", message: "permission denied for table folders" },
+              }),
+            }),
+          }),
+        };
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    });
+
+    const oneLevelDeep = { ...localFileRoot, relativePath: "Engine/cylinder.sldprt", basename: "cylinder.sldprt" };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    let returned: any;
+    await act(async () => { returned = await result.current.hook.run("v1", oneLevelDeep); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    expect(returned.ok).toBe(false);
+    expect(returned.error).toMatch(/permission denied/i);
+  });
+
   it("returns false and sets error when not authenticated", async () => {
     const c: any = {
       auth: {
@@ -289,11 +457,12 @@ describe("useAddLocalFile", () => {
     );
     await waitFor(() => expect(result.current.authLoading).toBe(false));
 
-    let returned: boolean | undefined;
+    let returned: any;
     await act(async () => {
       returned = await result.current.hook.run("v1", localFileRoot);
     });
-    expect(returned).toBe(false);
+    expect(returned.ok).toBe(false);
+    expect(returned.error).toMatch(/not authenticated/i);
     expect(result.current.hook.error?.message).toMatch(/not authenticated/i);
   });
 });

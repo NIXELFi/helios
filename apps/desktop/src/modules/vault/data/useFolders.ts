@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { Folder, QueryResult, VaultId } from "./types";
+import { fetchAllRows } from "./paginate";
 
 export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]> {
   const client = useSupabaseClient();
@@ -20,15 +21,22 @@ export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]>
     setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await (client.from("folders") as any)
-        .select("*")
-        .eq("vault_id", vault_id);
+      const { rows, error: err } = await fetchAllRows<Folder>(
+        // Explicit stable order: PostgREST does not guarantee a stable order
+        // across .range() pages without an ORDER BY, so chunks of a paginated
+        // response could duplicate or skip rows. Sorting by name also gives
+        // the FolderTree a predictable initial order.
+        () => (client.from("folders") as any)
+          .select("*")
+          .eq("vault_id", vault_id)
+          .order("name", { ascending: true }),
+      );
       if (!mounted) return;
       if (err) {
-        setError(err instanceof Error ? err : new Error(String(err.message ?? err)));
+        setError(err);
         setData(null);
       } else {
-        setData(rows ?? []);
+        setData(rows);
       }
       setLoading(false);
     })();

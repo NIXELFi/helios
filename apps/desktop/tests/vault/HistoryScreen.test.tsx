@@ -13,8 +13,16 @@ function mockClient(): SupabaseClient {
     },
     from: vi.fn().mockImplementation((table: string) => {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [{ id: "v1", name: "v", created_at: "x", created_by: "u1" }], error: null }) };
-      if (table === "folders") return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
-      return { select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
+      if (table === "folders") return {
+        select: () => ({
+          eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }),
+        }),
+      };
+      return {
+        select: () => ({
+          eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }),
+        }),
+      };
     }),
     rpc: (_name: string) => Promise.resolve({ data: false, error: null }),
   } as any;

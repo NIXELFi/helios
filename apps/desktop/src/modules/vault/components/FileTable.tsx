@@ -22,6 +22,14 @@ interface Props {
   // Download support
   vaultRoot?: string | null;
   folders?: Folder[];
+  /**
+   * Per-vault download mode. In "manual" mode every server file with a known
+   * latest version shows a "Download" action regardless of localMatch status,
+   * because the user has opted out of background syncing and the row action
+   * is their only way to pull bytes. Defaults to "auto" so callers that don't
+   * pass this prop see the legacy behavior.
+   */
+  downloadMode?: "auto" | "manual";
 }
 
 /**
@@ -113,7 +121,7 @@ function deriveRowState(
     return {
       state: "synced",
       stripe: "border-[#66BB6A]",
-      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/40/60",
+      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/60",
       label: "Synced",
       glyph: "✓",
     };
@@ -184,6 +192,7 @@ export function FileTable({
   versionsByFileId,
   vaultRoot,
   folders = [],
+  downloadMode = "auto",
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
@@ -236,12 +245,24 @@ export function FileTable({
               }
             >
               {hasMultiSelect && (
-                <td className="w-10 px-3 py-2">
+                <td
+                  // Stop propagation on the whole cell so clicks in the
+                  // cell padding (around the small checkbox itself) toggle
+                  // selection instead of falling through to the <tr>
+                  // onClick which would open the file detail panel.
+                  className="w-10 px-3 py-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect!(f.id);
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={selectedIds!.has(f.id)}
-                    onChange={(e) => { e.stopPropagation(); onToggleSelect!(f.id); }}
-                    onClick={(e) => e.stopPropagation()}
+                    // onChange still has stopPropagation as a backup —
+                    // some browsers fire change before the cell's click
+                    // handler reaches stopPropagation.
+                    onChange={(e) => e.stopPropagation()}
                     aria-label={`Select ${f.name}`}
                     className="accent-asu-gold"
                   />
@@ -275,18 +296,34 @@ export function FileTable({
                       <CancelButton fileId={f.id} onDone={onActionComplete} />
                     </>
                   )}
-                  {(localMatch?.status === "vault-only" || localMatch?.status === "modified") &&
-                    vaultRoot && (
+                  {(() => {
+                    // Manual mode: surface a Download action on every file that
+                    // has a latest version, regardless of localMatch — including
+                    // "synced" (user may want to re-pull after a local edit) and
+                    // "no-folder" (vaultRoot is unset → button uses a save
+                    // dialog so the user can still get the bytes).
+                    //
+                    // Auto mode: keep the original gate — button only shows for
+                    // "vault-only" or "modified" rows that have a vault folder,
+                    // because background sync already handles the rest.
+                    const showButton =
+                      downloadMode === "manual"
+                        ? true
+                        : (localMatch?.status === "vault-only" || localMatch?.status === "modified") && !!vaultRoot;
+                    if (!showButton) return null;
+                    return (
                       <GetLatestButton
                         fileId={f.id}
                         fileName={f.name}
                         folderId={f.folder_id}
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
-                        vaultRoot={vaultRoot}
+                        vaultRoot={vaultRoot ?? null}
                         folders={folders}
                         onDone={onActionComplete}
+                        variant={downloadMode}
                       />
-                    )}
+                    );
+                  })()}
                 </div>
               </td>
             </tr>

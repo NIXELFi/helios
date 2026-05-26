@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import type { Vault } from "./types";
+import { friendlyPgError } from "./pg-errors";
 
 export function useCreateVault() {
   const client = useSupabaseClient();
@@ -11,7 +12,7 @@ export function useCreateVault() {
   const run = useCallback(
     async (name: string): Promise<Vault | null> => {
       if (!user) {
-        setError(new Error("not authenticated"));
+        setError(new Error("Your session has expired — please sign in again."));
         return null;
       }
       setLoading(true);
@@ -22,7 +23,7 @@ export function useCreateVault() {
         .single();
       setLoading(false);
       if (err) {
-        setError(new Error(err.message ?? String(err)));
+        setError(new Error(friendlyPgError(err, "vault").message));
         return null;
       }
       return data as Vault;

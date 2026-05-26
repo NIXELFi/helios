@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { VaultId } from "./types";
 
@@ -21,6 +21,15 @@ export function useVaultRealtime(
 ) {
   const client = useSupabaseClient();
 
+  // Keep the callbacks in a ref so inline arrow functions from callers
+  // don't tear down + recreate the realtime channel on every render. The
+  // subscription only needs to be (re)built when client or vaultId change.
+  // The ref must be updated in an effect, not during render — mutating a ref
+  // during render violates React's purity model and can land an intermediate
+  // value into the ref if a render is discarded (concurrent rendering).
+  const cbRef = useRef(cb);
+  useEffect(() => { cbRef.current = cb; });
+
   useEffect(() => {
     if (!vaultId) return;
     // Some test mocks omit the realtime API; bail quietly so the surrounding
@@ -28,12 +37,12 @@ export function useVaultRealtime(
     if (typeof (client as { channel?: unknown }).channel !== "function") return;
     const channel = client
       .channel(`vault:${vaultId}`)
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, () => cb.onVersion?.())
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, () => cb.onLock?.())
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, () => cb.onFile?.())
+      .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, () => cbRef.current.onVersion?.())
+      .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, () => cbRef.current.onLock?.())
+      .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, () => cbRef.current.onFile?.())
       .subscribe();
     return () => {
       client.removeChannel(channel);
     };
-  }, [client, vaultId, cb.onVersion, cb.onLock, cb.onFile]);
+  }, [client, vaultId]);
 }

@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@helios/auth";
-import { useVaults } from "../data/useVaults";
+import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useMyRole } from "../data/useMyRole";
-import { useCreateVault } from "../data/useCreateVault";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
+import { useDownloadMode } from "../data/useDownloadMode";
+import { ManualDownloadAll } from "../components/ManualDownloadAll";
+import { useBulkDownload } from "../data/useBulkDownload";
+import { BulkDownloadModal } from "../components/BulkDownloadModal";
+import { TreeContextMenu, type MenuAction } from "../components/TreeContextMenu";
+import type { TreeContextTarget, TreeSelection } from "../components/FolderTree";
+import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
@@ -36,22 +42,37 @@ export function BrowseScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
 
-  const { data: vaults, refetch: refetchVaults } = useVaults();
-  const vault = vaults?.[0];
-  const vaultId = vault?.id;
+  const { activeVault: vault, activeVaultId: vaultId, vaults, loading: vaultsLoading } = useActiveVault();
 
-  const { data: folders, refetch: refetchFolders } = useFolders(vaultId);
+  const { data: folders, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
-  const { data: files, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
+  const { data: filesInFolder, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
   const { data: locks, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
 
+  // Reset folder/file selection on vault switch so we don't show a SDM27 folder
+  // tree but a SDM26 file open in the side panel.
+  useEffect(() => {
+    setSelectedFolder(null);
+    setSelectedFile(null);
+    setSelected(new Set());
+  }, [vaultId]);
+
   // Local vault folder scan — auto-rescan on window focus + 30s interval +
   // native filesystem watcher so the synced/modified state stays live without
-  // the user touching a button.
-  const { path: vaultFolderPath } = useVaultFolder();
+  // the user touching a button. The folder is per-vault: SDM26 and SDM27 each
+  // remember their own working directory.
+  // Shared-root model: user picks ONE root in Settings, each vault syncs
+  // into `<root>/<vault.name>/`. The hook computes the effective path for
+  // the active vault from its name. We thread BOTH the root and the vault
+  // name into useBulkDownload so a prompt-for-destination flow still nests
+  // the files under the vault name correctly.
+  const { root: heliosRoot, path: vaultFolderPath, setRoot: setHeliosRoot } =
+    useVaultFolder({ vaultName: vault?.name ?? null });
+  const { mode: downloadMode } = useDownloadMode(vaultId);
+  const autoSyncEnabled = downloadMode === "auto";
   // useAutoSync (declared below) → setSyncBusy → useLocalFolderScan paused.
   // While a sync pass is writing files we suppress automatic rescans so the
   // file table doesn't flicker between modified/synced as bytes land; the
@@ -66,11 +87,42 @@ export function BrowseScreen() {
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
-  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId);
+  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
   const unmatched =
     allFiles && localFiles && folders
       ? findUnmatchedLocal(allFiles, localFiles, folders)
       : [];
+
+  // When the user has the vault root selected (selectedFolder === null) we
+  // derive the file list from the vault-wide query instead of asking the
+  // server for "files where folder_id IS NULL" — keeps the wiring simple and
+  // avoids a second query. allFiles paginates, so this is correct at scale.
+  const rootFiles = useMemo(
+    () => (allFiles ?? []).filter((f) => f.folder_id === null),
+    [allFiles],
+  );
+  const files = selectedFolder === null ? rootFiles : filesInFolder;
+
+  // The "Download all" button operates on every file underneath the current
+  // view recursively — i.e. picking Brakes downloads every file in Brakes
+  // and every subfolder of Brakes, not just the 4 SLDPRTs directly inside.
+  // At the vault root this expands to every file in the whole vault.
+  const filesToDownloadAll = useMemo(() => {
+    const all = allFiles ?? [];
+    if (selectedFolder === null) return all;
+    const wanted = new Set<string>([selectedFolder]);
+    const stack = [selectedFolder];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      for (const f of (folders ?? [])) {
+        if (f.parent_id === id && !wanted.has(f.id)) {
+          wanted.add(f.id);
+          stack.push(f.id);
+        }
+      }
+    }
+    return all.filter((f) => f.folder_id && wanted.has(f.folder_id));
+  }, [selectedFolder, allFiles, folders]);
 
   // Latest versions across the entire vault. The current-folder file table
   // and the background auto-sync both read from this single source so we
@@ -90,7 +142,7 @@ export function BrowseScreen() {
   const onVersion = useCallback(() => { refetchLatest(); refetchAllFiles(); }, [refetchLatest, refetchAllFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
   const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
-  useVaultRealtime(vaultId, { onVersion, onLock, onFile });
+  useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
   // updates (one per file start + one per file end) re-render only that
@@ -99,6 +151,59 @@ export function BrowseScreen() {
   // refetch wiring.
   const onAutoSyncComplete = useCallback(() => { rescan(); }, [rescan]);
   const onAutoSyncBusy = useCallback((b: boolean) => setSyncBusy(b), []);
+
+  // Multi-select in the tree (shift / cmd click + drag marquee) + right-click
+  // context menu. The bulk-download hook is shared with ManualDownloadAll's
+  // button so the progress UI is identical regardless of trigger.
+  const [treeSelection, setTreeSelection] = useState<TreeSelection>(emptyTreeSelection());
+  useEffect(() => { setTreeSelection(emptyTreeSelection()); }, [vaultId]);
+  // Escape clears the tree selection from anywhere in the Vault module.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTreeSelection(emptyTreeSelection());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Flatten tree selection to a concrete file list — folders contribute
+  // every descendant file recursively, de-duped with directly-selected files.
+  const selectedFiles = useMemo(() => {
+    const all = allFiles ?? [];
+    if (treeSelection.files.size === 0 && treeSelection.folders.size === 0) return [];
+    const out = new Map<FileId, VaultFile>();
+    for (const fid of treeSelection.files) {
+      const f = all.find((x) => x.id === fid);
+      if (f) out.set(fid, f);
+    }
+    if (treeSelection.folders.size > 0) {
+      // Recursive descent — files under folder X plus every descendant folder.
+      const wanted = new Set<string>();
+      const stack = Array.from(treeSelection.folders);
+      while (stack.length > 0) {
+        const id = stack.pop()!;
+        wanted.add(id);
+        for (const f of (folders ?? [])) if (f.parent_id === id) stack.push(f.id);
+      }
+      for (const f of all) {
+        if (f.folder_id && wanted.has(f.folder_id)) out.set(f.id, f);
+      }
+    }
+    return Array.from(out.values());
+  }, [treeSelection, allFiles, folders]);
+
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; target: TreeContextTarget } | null>(null);
+  const bulk = useBulkDownload({
+    heliosRoot,
+    vaultName: vault?.name ?? null,
+    folders: folders ?? [],
+    versionsByFileId,
+    onPickedRoot: setHeliosRoot,
+    onDone: () => { refetchFiles(); rescan(); },
+  });
+  function handleTreeContextMenu(target: TreeContextTarget, x: number, y: number) {
+    setCtxMenu({ x, y, target });
+  }
 
   function toggleOne(id: FileId) {
     setSelected((prev) => {
@@ -120,27 +225,13 @@ export function BrowseScreen() {
     setSelected(new Set());
   }
 
-  const createVault = useCreateVault();
   const createFolder = useCreateFolder();
   const createFile = useCreateFile();
-
-  const [vaultNameInput, setVaultNameInput] = useState("");
 
   // Tauri's webview doesn't render window.prompt(), so we use an in-app modal.
   const [prompt, setPrompt] = useState<{ kind: "folder" | "file" } | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
-
-  async function handleCreateVault(e: React.FormEvent) {
-    e.preventDefault();
-    const name = vaultNameInput.trim();
-    if (!name) return;
-    const result = await createVault.run(name);
-    if (result) {
-      setVaultNameInput("");
-      refetchVaults();
-    }
-  }
 
   async function handlePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -182,30 +273,19 @@ export function BrowseScreen() {
     bump();
   }
 
-  // Empty-vault state for admins
-  if (isAdmin && (!vaults || vaults.length === 0)) {
+  // No active vault — either the user has no vaults at all, or vaults are
+  // still loading. Vault creation now lives in the NavRail switcher, so
+  // empty-state copy points there.
+  if (!vaultsLoading && !vaultId) {
     return (
       <div className="flex h-full items-center justify-center bg-helios-base">
-        <form onSubmit={handleCreateVault} className="flex flex-col items-center gap-3">
-          <p className="text-sm text-helios-dim">No vault exists yet. Create one to get started.</p>
-          <input
-            type="text"
-            placeholder="Vault name"
-            value={vaultNameInput}
-            onChange={(e) => setVaultNameInput(e.target.value)}
-            className="rounded border border-helios-line bg-helios-panel px-3 py-1.5 text-sm text-helios-text placeholder-helios-dim focus:outline-none focus:ring-1 focus:ring-asu-gold"
-          />
-          <button
-            type="submit"
-            disabled={createVault.loading || !vaultNameInput.trim()}
-            className="rounded bg-asu-gold px-4 py-1.5 text-sm text-white hover:bg-asu-gold disabled:opacity-50"
-          >
-            Create vault
-          </button>
-          {createVault.error && (
-            <p className="text-xs text-[#EF5350]">{createVault.error.message}</p>
-          )}
-        </form>
+        <p className="text-sm text-helios-dim">
+          {vaults.length === 0
+            ? (isAdmin
+                ? "No vaults yet. Use the vault switcher in the top-left to create one."
+                : "You don't have access to any vault yet — contact an admin.")
+            : "Choose a vault from the switcher in the top-left."}
+        </p>
       </div>
     );
   }
@@ -213,7 +293,7 @@ export function BrowseScreen() {
   return (
     <div className="flex h-full flex-col">
       <UnmatchedFilesBanner
-        vaultId={vaultId}
+        vaultId={vaultId ?? undefined}
         unmatched={unmatched}
         onDone={() => {
           refetchAllFiles();
@@ -250,6 +330,9 @@ export function BrowseScreen() {
               onSelectFile={setSelectedFile}
               locks={locks ?? []}
               currentUserId={user?.id ?? ""}
+              treeSelection={treeSelection}
+              onTreeSelectionChange={setTreeSelection}
+              onContextMenu={handleTreeContextMenu}
             />
           ) : (
             <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
@@ -257,10 +340,14 @@ export function BrowseScreen() {
         </div>
       </div>
       <div className="flex-1 overflow-auto">
-        {selectedFolder ? (
-          <>
-            <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
-              {vaultFolderPath && (
+        {/* selectedFolder === null means "vault root view", not "nothing
+            selected" — files at the vault root were previously unreachable
+            because the FileTable was gated behind this check. Now we always
+            render the table; the `files` variable above derives root files
+            from allFiles when selectedFolder is null. */}
+        <>
+          <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
+              {vaultFolderPath && autoSyncEnabled && (
                 <VaultSyncSection
                   enabled
                   files={allFiles}
@@ -274,6 +361,58 @@ export function BrowseScreen() {
                   onBusyChange={onAutoSyncBusy}
                   onRescan={rescan}
                 />
+              )}
+              {!autoSyncEnabled && (
+                <>
+                  <span
+                    className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-helios-dim"
+                    title="Auto-sync is off for this vault. Click Download on a row, shift-click to multi-select, or use the bulk buttons. Change in Settings."
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-helios-line" />
+                    Manual mode
+                  </span>
+                  {selectedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => bulk.start(selectedFiles)}
+                      disabled={bulk.running}
+                      className="rounded border border-asu-gold/70 bg-asu-gold/15 px-2 py-0.5 text-xs text-helios-text hover:bg-asu-gold/25 disabled:opacity-50"
+                      title={`Download ${selectedFiles.length} selected file${selectedFiles.length === 1 ? "" : "s"}`}
+                    >
+                      Download {selectedFiles.length} selected
+                    </button>
+                  )}
+                  {/* Context button: recursive descent of current folder view
+                      (or whole vault when at root). Distinct from the master
+                      vault button below — at root they're identical and the
+                      master one wins for clarity. */}
+                  {selectedFiles.length === 0 && selectedFolder !== null && (
+                    <ManualDownloadAll
+                      files={filesToDownloadAll}
+                      versionsByFileId={versionsByFileId}
+                      heliosRoot={heliosRoot}
+                      vaultName={vault?.name ?? null}
+                      folders={folders ?? []}
+                      onPickedRoot={setHeliosRoot}
+                      onDone={() => { refetchFiles(); rescan(); }}
+                    />
+                  )}
+                  {/* Master vault button — always visible, never about the
+                      current folder, always grabs the entire active vault.
+                      Lives outside the row-selection logic on purpose so
+                      "download the whole thing" is one click from any view. */}
+                  {(allFiles?.length ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => bulk.start(allFiles ?? [])}
+                      disabled={bulk.running}
+                      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
+                      title={`Download every file in ${vault?.name ?? "the active vault"} (${allFiles?.length ?? 0} files)`}
+                    >
+                      Download {vault?.name ?? "vault"} ({allFiles?.length ?? 0})
+                    </button>
+                  )}
+                </>
               )}
               {isAdmin && (
                 <button
@@ -298,6 +437,8 @@ export function BrowseScreen() {
               versionsByFileId={versionsByFileId}
               vaultRoot={vaultFolderPath}
               folders={folders ?? []}
+              locks={locks ?? []}
+              currentUserId={user?.id ?? null}
             />
             <FileTable
               files={files ?? []}
@@ -315,14 +456,43 @@ export function BrowseScreen() {
               versionsByFileId={versionsByFileId}
               vaultRoot={vaultFolderPath}
               folders={folders ?? []}
+              downloadMode={downloadMode}
             />
-          </>
-        ) : (
-          <div className="p-6 text-sm text-helios-dim">Select a folder to see its files.</div>
-        )}
+        </>
       </div>
       <FileDetailPanel fileId={selectedFile} />
       </div>
+      {/* Bulk-download progress modal shared by ManualDownloadAll and the
+          right-click context menu. */}
+      <BulkDownloadModal api={bulk} />
+      {/* Right-click context menu on tree rows. Folder → download every file
+          under it; files → download the current multi-selection. */}
+      {ctxMenu && (() => {
+        const actions: MenuAction[] = [];
+        if (ctxMenu.target.kind === "folder") {
+          const n = ctxMenu.target.descendantFiles.length;
+          actions.push({
+            label: `Download ${n} file${n === 1 ? "" : "s"} in ${ctxMenu.target.folder.name}`,
+            disabledReason: n === 0 ? "Folder has no files" : undefined,
+            onClick: () => bulk.start(ctxMenu.target.kind === "folder" ? ctxMenu.target.descendantFiles : []),
+          });
+        } else {
+          const n = ctxMenu.target.files.length;
+          actions.push({
+            label: `Download ${n} selected file${n === 1 ? "" : "s"}`,
+            disabledReason: n === 0 ? "Nothing selected" : undefined,
+            onClick: () => bulk.start(ctxMenu.target.kind === "files" ? ctxMenu.target.files : []),
+          });
+        }
+        return (
+          <TreeContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            actions={actions}
+            onClose={() => setCtxMenu(null)}
+          />
+        );
+      })()}
       {prompt && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -446,7 +616,12 @@ function SyncStatusPill({ status, onRescan }: {
   let tone: string;
   let dot: string;
   if (busy) {
-    label = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
+    // Always show what's in-flight inline so the user doesn't have to click
+    // the pill to find out. Up to two filenames; truncates per-name so the
+    // pill doesn't blow out the toolbar.
+    const inFlight = activeFiles.slice(0, 2).join(", ");
+    const base = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
+    label = inFlight ? `${base} · ${inFlight}` : base;
     tone = "text-asu-gold";
     dot = "bg-yellow-400 animate-pulse";
   } else if (lastFailed > 0) {

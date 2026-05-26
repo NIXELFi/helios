@@ -15,7 +15,12 @@ function mockClient(filterAssertion: (col: string, val: any) => void, rows: any[
       select: () => ({
         eq: (col: string, val: any) => {
           filterAssertion(col, val);
-          return Promise.resolve({ data: rows, error: null });
+          return {
+            order: (_orderCol: string, _opts: { ascending: boolean }) => ({
+              range: (_from: number, _to: number) =>
+                Promise.resolve({ data: rows, error: null }),
+            }),
+          };
         },
       }),
     }),

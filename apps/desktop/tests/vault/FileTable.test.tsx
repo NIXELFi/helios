@@ -8,6 +8,7 @@ import { FileTable } from "../../src/modules/vault/components/FileTable";
 // Mock Tauri plugins so tests don't need a real Tauri runtime.
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue("/tmp/fake.sldprt"),
+  save: vi.fn().mockResolvedValue("/tmp/picked-save.sldprt"),
 }));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
@@ -180,6 +181,40 @@ describe("<FileTable>", () => {
     expect(onToggleSelect).toHaveBeenCalledWith("f1");
   });
 
+  it("clicking the cell padding around a checkbox toggles selection without opening the file detail panel", () => {
+    // Regression guard for the 2026-05-25 audit: clicking on the
+    // <td> padding around the small checkbox used to fall through to the
+    // row's onClick (which opens the file detail panel). The fix moved
+    // stopPropagation + onToggleSelect onto the cell wrapper so clicks in
+    // the cell's padding still toggle and never trigger row selection.
+    const onSelect = vi.fn();
+    const onToggleSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={onSelect}
+          selectedIds={new Set()}
+          onToggleSelect={onToggleSelect}
+          onToggleSelectAll={() => {}}
+          allSelected={false}
+        />,
+      ),
+    );
+    const checkboxes = screen.getAllByRole("checkbox");
+    // Click the checkbox CELL (the <td>) — its parentElement of the input.
+    const cell = checkboxes[1].parentElement as HTMLElement;
+    fireEvent.click(cell);
+    expect(onToggleSelect).toHaveBeenCalledWith("f1");
+    // Row's onClick must NOT have fired — that would have opened the file
+    // detail panel for a click the user intended as a selection toggle.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("header checkbox calls onToggleSelectAll", () => {
     const onToggleSelectAll = vi.fn();
     render(
@@ -237,6 +272,89 @@ describe("<FileTable>", () => {
     expect(screen.queryByText("Modified")).toBeNull();
     expect(screen.queryByText("Not local")).toBeNull();
     expect(screen.queryByText("Synced")).toBeNull();
+  });
+
+  it("manual mode shows a Download button on every file with a latest version, even when localMatch is synced", () => {
+    // f1 has a version + a synced local file → in auto mode no button would show.
+    // In manual mode the button must still appear because the user opted out
+    // of auto-sync and the row action is their only download path.
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    const localFiles = [
+      { basename: "frame.sldprt", relativePath: "frame.sldprt", absolutePath: "/x/frame.sldprt", sha256: "abc123", sizeBytes: 10 },
+    ];
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={localFiles}
+          versionsByFileId={versions}
+          vaultRoot="/Users/me/Vault"
+          folders={[]}
+          downloadMode="manual"
+        />,
+      ),
+    );
+    // Manual-mode label is "Download", not "Get Latest"
+    expect(screen.getByRole("button", { name: /^download$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /get latest/i })).toBeNull();
+  });
+
+  it("manual mode shows Download even when no vault folder is configured (uses save dialog)", () => {
+    // No vault folder + manual mode → auto mode would hide the button, but
+    // manual mode keeps it so the user can pick a destination via save dialog.
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={null}
+          versionsByFileId={versions}
+          vaultRoot={null}
+          folders={[]}
+          downloadMode="manual"
+        />,
+      ),
+    );
+    expect(screen.getByRole("button", { name: /^download$/i })).toBeInTheDocument();
+  });
+
+  it("auto mode hides the download button when vaultRoot is null (legacy behavior)", () => {
+    const versions = new Map([
+      ["f1", [{ id: "ver1", file_id: "f1", version_num: 1, sha256: "abc123", size_bytes: 10, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={null}
+          versionsByFileId={versions}
+          vaultRoot={null}
+          folders={[]}
+          downloadMode="auto"
+        />,
+      ),
+    );
+    expect(screen.queryByRole("button", { name: /get latest/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^download$/i })).toBeNull();
   });
 
   it("Get Latest button appears when file is vault-only and vaultRoot + version sha are set", () => {

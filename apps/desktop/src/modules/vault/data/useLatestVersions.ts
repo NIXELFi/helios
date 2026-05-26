@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, Version } from "./types";
+import { fetchAllRows } from "./paginate";
 
 /**
- * Fetches the latest version row for every file via a single PostgREST query.
- * Returns Map<FileId, Version> — one entry per file (the highest version_num).
+ * Fetches the latest version row for every file in fileIds.
+ *
+ * Two reasons this needs to be smarter than a single .in("file_id", …) call:
+ *  (1) PostgREST caps responses at 1000 rows by default — paginate via range.
+ *  (2) PostgREST puts the IN-clause values in the URL query string. With
+ *      thousands of UUIDs the URL blows past gateway limits and the request
+ *      either fails or gets silently truncated.
+ *
+ * Strategy: chunk the file id set into batches of ~200 and paginate each.
+ * Then bucket by file_id and keep the highest version_num seen.
  */
+const ID_CHUNK = 200;
+
 export function useLatestVersions(fileIds: FileId[]) {
   const client = useSupabaseClient();
   const [data, setData] = useState<Map<FileId, Version>>(new Map());
@@ -25,19 +36,34 @@ export function useLatestVersions(fileIds: FileId[]) {
     setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await (client.from("versions") as any)
-        .select("*")
-        .in("file_id", fileIds)
-        .order("version_num", { ascending: false });
-      if (!mounted) return;
-      if (err) {
-        setError(new Error(err.message ?? String(err)));
-        setLoading(false);
-        return;
+      const all: Version[] = [];
+      for (let i = 0; i < fileIds.length; i += ID_CHUNK) {
+        const slice = fileIds.slice(i, i + ID_CHUNK);
+        const { rows, error: err } = await fetchAllRows<Version>(
+          // Two ORDER BY clauses for stable pagination: version_num is unique
+          // PER file but many files in the IN slice can share version_num=1,
+          // so add file_id as the tiebreaker to keep page boundaries stable.
+          () => (client.from("versions") as any)
+            .select("*")
+            .in("file_id", slice)
+            .order("version_num", { ascending: false })
+            .order("file_id", { ascending: true }),
+        );
+        if (!mounted) return;
+        if (err) {
+          setError(err);
+          // Drop any partially-populated map so consumers don't render
+          // half-stale data alongside the error.
+          setData(new Map());
+          setLoading(false);
+          return;
+        }
+        all.push(...rows);
       }
       const map = new Map<FileId, Version>();
-      for (const v of rows ?? []) {
-        if (!map.has(v.file_id)) map.set(v.file_id, v);
+      for (const v of all) {
+        const prev = map.get(v.file_id);
+        if (!prev || v.version_num > prev.version_num) map.set(v.file_id, v);
       }
       setData(map);
       setLoading(false);

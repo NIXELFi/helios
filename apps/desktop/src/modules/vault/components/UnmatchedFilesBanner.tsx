@@ -14,32 +14,50 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
 
   if (!vaultId || unmatched.length === 0) return null;
 
   async function addOne(f: LocalFile) {
     setBusy(true);
-    const ok = await addFile.run(vaultId!, f);
+    setSummary(null);
+    const r = await addFile.run(vaultId!, f);
     setBusy(false);
-    if (ok) onDone?.();
+    if (r.ok) {
+      onDone?.();
+      if (!r.lockAcquired) {
+        setSummary(`Added "${f.basename}" to vault, but another user holds the lock.`);
+      }
+    }
   }
 
   async function addAll() {
     setBusy(true);
-    let ok = 0, fail = 0;
+    setSummary(null);
+    let added = 0;
+    let lockHeldByOther = 0;
+    let fail = 0;
     for (const f of unmatched) {
       const r = await addFile.run(vaultId!, f);
-      if (r) ok++;
+      if (r.ok && r.lockAcquired) added++;
+      else if (r.ok) lockHeldByOther++;
       else fail++;
-      setProgress(`${ok + fail}/${unmatched.length}`);
+      setProgress(`${added + lockHeldByOther + fail}/${unmatched.length}`);
     }
     setProgress(null);
     setBusy(false);
-    if (ok > 0) onDone?.();
+    if (added + lockHeldByOther > 0) onDone?.();
+    if (lockHeldByOther > 0 || fail > 0) {
+      const parts: string[] = [];
+      if (added > 0) parts.push(`${added} added`);
+      if (lockHeldByOther > 0) parts.push(`${lockHeldByOther} already in vault (locked by another user)`);
+      if (fail > 0) parts.push(`${fail} failed`);
+      setSummary(parts.join(", "));
+    }
   }
 
   return (
-    <div className="border-b border-[#FFB800]/40/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
+    <div className="border-b border-[#FFB800]/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
       <div className="flex items-center gap-3">
         <span className="text-[#FFD24D]">
           {unmatched.length} local file{unmatched.length === 1 ? "" : "s"} not in vault
@@ -58,9 +76,10 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
           {expanded ? "Hide" : "Show"}
         </button>
         {addFile.error && <span className="text-xs text-red-300">{addFile.error.message}</span>}
+        {summary && <span className="text-xs text-[#FFD24D]">{summary}</span>}
       </div>
       {expanded && (
-        <ul className="mt-2 max-h-48 space-y-1 overflow-auto rounded border border-[#FFB800]/40/30 bg-helios-base p-2 font-mono-num text-xs">
+        <ul className="mt-2 max-h-48 space-y-1 overflow-auto rounded border border-[#FFB800]/30 bg-helios-base p-2 font-mono-num text-xs">
           {unmatched.map((f) => (
             <li key={f.absolutePath} className="flex items-center justify-between gap-2 px-1">
               <span className="truncate text-helios-text">{f.relativePath}</span>

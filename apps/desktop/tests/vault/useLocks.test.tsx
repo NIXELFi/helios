@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import { useLocks } from "../../src/modules/vault/data/useLocks";
+import { notifyLockChange } from "../../src/modules/vault/data/lock-events";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -17,7 +18,14 @@ function mockClient(rows: any[], error: any = null): SupabaseClient {
       select: () => ({
         is: (col: string, val: any) => {
           observed = { col, val };
-          return Promise.resolve({ data: rows, error });
+          return {
+            order: (_orderCol: string, _opts: { ascending: boolean }) => ({
+              // Pagination via .range() — return all rows once; fetchAllRows
+              // exits when the page is smaller than its cap.
+              range: (_from: number, _to: number) =>
+                Promise.resolve({ data: rows, error }),
+            }),
+          };
         },
       }),
     }),
@@ -48,5 +56,39 @@ describe("useLocks", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error?.message).toBe("RLS blocked");
     expect(result.current.data).toBeNull();
+  });
+
+  it("refetches when notifyLockChange() is broadcast", async () => {
+    // Regression guard for the 2026-05-25 audit fix: lock-mutation hooks
+    // (useAcquireLock / useReleaseLock / useForceUnlock) broadcast via
+    // notifyLockChange after a successful RPC. useLocks must subscribe and
+    // refetch immediately, closing the window where the local cache shows
+    // a stale lock until realtime fires.
+    let callCount = 0;
+    const c = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u" } } }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      from: () => ({
+        select: () => ({
+          is: () => ({
+            order: () => ({
+              range: () => {
+                callCount++;
+                return Promise.resolve({ data: [], error: null });
+              },
+            }),
+          }),
+        }),
+      }),
+    } as any;
+    const { result } = renderHook(() => useLocks(), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(callCount).toBe(1);
+
+    // Simulate a lock mutation succeeding.
+    act(() => { notifyLockChange(); });
+    await waitFor(() => expect(callCount).toBe(2));
   });
 });

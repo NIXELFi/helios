@@ -53,10 +53,21 @@ describe("end-to-end: a designer's working day", () => {
     expect(lock2Now.released_at).not.toBeNull();
     expect(lock2Now.force_released_by).toBe(admin.id);
 
-    // Verify audit trail covers all five operations.
+    // Verify audit trail covers every state transition. Migration
+    // 20260511000200_pdm_locks_update_audit.sql added a `lock_released`
+    // row to the audit feed each time pdm.check_in / pdm.cancel_checkout /
+    // pdm.force_unlock flips released_at — so a designer's check_out followed
+    // by a check_in produces two rows (check_out, lock_released, check_in).
     const { data: audit } = await svc
       .from("audit_log").select("action").order("ts", { ascending: true });
     const actions = audit!.map((r) => r.action);
-    expect(actions).toEqual(["check_out", "check_in", "check_out", "force_unlock"]);
+    expect(actions).toEqual([
+      "check_out",      // lock acquired for v1 edit
+      "lock_released",  // pdm.check_in releases the v1 lock
+      "check_in",       // v1 written
+      "check_out",      // second lock for the vacation-blocked edit
+      "lock_released",  // pdm.force_unlock releases the vacation lock
+      "force_unlock",   // explicit force-unlock audit row
+    ]);
   });
 });

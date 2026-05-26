@@ -1,6 +1,6 @@
 {
   "name": "@helios/desktop",
-  "version": "3.4.5",
+  "version": "3.5.15",
   "private": true,
   "type": "module",
   "scripts": {

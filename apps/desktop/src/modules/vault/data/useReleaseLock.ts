@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId } from "./types";
+import { friendlyPgError } from "./pg-errors";
+import { notifyLockChange } from "./lock-events";
 
 export function useReleaseLock() {
   const client = useSupabaseClient();
@@ -16,9 +18,12 @@ export function useReleaseLock() {
       });
       setLoading(false);
       if (err) {
-        setError(new Error(err.message ?? String(err)));
+        setError(new Error(friendlyPgError(err, "lock").message));
         return false;
       }
+      // Broadcast so every mounted useLocks() refetches immediately rather
+      // than waiting on the realtime channel.
+      notifyLockChange();
       return true;
     },
     [client],

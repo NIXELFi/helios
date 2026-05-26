@@ -5,12 +5,12 @@ import type { Folder, Lock, VaultFile, Version } from "../../src/modules/vault/d
 import type { LocalFile } from "../../src/modules/vault/data/useLocalFolderScan";
 
 // Mock useDownloadVersion so tests can both control timing per-sha (deferred
-// promise) and capture which (sha, dest) tuples actually executed.
-const downloadCalls: Array<{ sha: string; dest: string }> = [];
+// promise) and capture which (sha, dest, signal) tuples actually executed.
+const downloadCalls: Array<{ sha: string; dest: string; signal?: AbortSignal }> = [];
 const downloadResolvers = new Map<string, (ok: boolean) => void>();
 
-function deferredDownload(sha: string, dest: string): Promise<boolean> {
-  downloadCalls.push({ sha, dest });
+function deferredDownload(sha: string, dest: string, signal?: AbortSignal): Promise<boolean> {
+  downloadCalls.push({ sha, dest, signal });
   return new Promise<boolean>((resolve) => {
     // Tests must use distinct shas per concurrent task to disambiguate.
     downloadResolvers.set(sha, resolve);
@@ -219,5 +219,63 @@ describe("useAutoSync", () => {
     // double-fetch even though its writes were abandoned.
     expect(downloadCalls.filter((c) => c.sha === "sha-old")).toHaveLength(1);
     expect(downloadCalls.filter((c) => c.sha === "sha-new")).toHaveLength(1);
+  });
+
+  it("aborts the in-flight download's AbortSignal on supersession", async () => {
+    // Regression guard for the 2026-05-25 audit fix: useAutoSync now threads
+    // an AbortController per generation through downloadVersionOnce. When the
+    // trigger effect supersedes a run, the controller is aborted — so the
+    // download path checks signal.aborted before its terminal writeFile and
+    // bails out without overwriting the destination.
+    //
+    // Without the AbortController, a slow superseded run could still write
+    // bytes to disk after the new run has already replaced them, producing
+    // a torn-write race.
+    const filesA: VaultFile[] = [makeFile("f1", "old.bin")];
+    const versionsA = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-old-abort")]],
+    ]);
+    const filesB: VaultFile[] = [makeFile("f2", "new.bin")];
+    const versionsB = new Map<string, Version[]>([
+      ["f2", [makeVersion("f2", "sha-new-abort")]],
+    ]);
+
+    const baseInput = {
+      enabled: true,
+      localFiles: EMPTY_LOCAL,
+      locks: EMPTY_LOCKS,
+      currentUserId: "u1",
+      vaultRoot: "/tmp/vault",
+      folders: EMPTY_FOLDERS,
+      onComplete: () => {},
+    };
+
+    const { rerender } = renderHook(
+      ({ files, versionsByFileId }) =>
+        useAutoSync({ ...baseInput, files, versionsByFileId }),
+      { initialProps: { files: filesA, versionsByFileId: versionsA } },
+    );
+
+    // Wait until run-1 dispatched the download with a signal.
+    await waitFor(() => {
+      const firstCall = downloadCalls.find((c) => c.sha === "sha-old-abort");
+      expect(firstCall).toBeDefined();
+      expect(firstCall!.signal).toBeDefined();
+    });
+    const firstCall = downloadCalls.find((c) => c.sha === "sha-old-abort")!;
+    // Before supersession the signal must not be aborted.
+    expect(firstCall.signal!.aborted).toBe(false);
+
+    // Trigger supersession.
+    rerender({ files: filesB, versionsByFileId: versionsB });
+
+    // After supersession the run-1 controller must have been aborted, so
+    // downloadVersionOnce will skip its writeFile.
+    expect(firstCall.signal!.aborted).toBe(true);
+
+    // Clean up: resolve the pending download so the test exits.
+    await act(async () => { resolveDownload("sha-old-abort", true); });
+    await waitFor(() => { expect(downloadResolvers.has("sha-new-abort")).toBe(true); });
+    await act(async () => { resolveDownload("sha-new-abort", true); });
   });
 });

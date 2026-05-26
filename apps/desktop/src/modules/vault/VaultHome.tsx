@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavRail, type VaultScreenId } from "./components/NavRail";
+import { DownloadModeWelcome } from "./components/DownloadModeWelcome";
 import { BrowseScreen } from "./screens/BrowseScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { WhoHasWhatScreen } from "./screens/WhoHasWhatScreen";
@@ -17,6 +18,7 @@ export function VaultHome() {
         {active === "who" ? <WhoHasWhatScreen /> : null}
         {active === "settings" ? <SettingsScreen /> : null}
       </main>
+      <DownloadModeWelcome />
     </div>
   );
 }

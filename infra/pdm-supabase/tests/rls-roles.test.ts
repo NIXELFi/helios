@@ -35,7 +35,14 @@ describe("user_roles RLS", () => {
     expect(error?.code).toBe("42501"); // permission denied
   });
 
-  it("an admin can insert into user_roles", async () => {
+  it("even an admin cannot direct-DML user_roles — role assignment is service-role-only", async () => {
+    // Migration 20260511001300_pdm_revoke_user_roles_dml.sql removed authenticated's
+    // DML privileges on user_roles entirely, on the basis that RLS can't safely
+    // gate "is this admin allowed to grant role X to user Y" with a single
+    // policy. Role assignment now happens via the bootstrap-admin script
+    // (service role) or a future SECURITY DEFINER RPC. This test pins that
+    // posture so a future migration accidentally re-granting INSERT would
+    // fail loudly.
     const email = uniqueEmail("admin");
     const u = await createTestUser(email);
     await setRole(u.id, "admin");
@@ -43,7 +50,7 @@ describe("user_roles RLS", () => {
 
     const target = await createTestUser(uniqueEmail("target"));
     const { error } = await c.from("user_roles").insert({ user_id: target.id, role: "viewer" });
-    expect(error).toBeNull();
+    expect(error?.code).toBe("42501");
   });
 
   it("pdm.is_admin() returns true for admins, false for editors", async () => {
