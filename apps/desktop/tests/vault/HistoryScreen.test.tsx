@@ -15,12 +15,12 @@ function mockClient(): SupabaseClient {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [{ id: "v1", name: "v", created_at: "x", created_by: "u1" }], error: null }) };
       if (table === "folders") return {
         select: () => ({
-          eq: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
+          eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }),
         }),
       };
       return {
         select: () => ({
-          eq: () => ({ range: () => Promise.resolve({ data: [], error: null }) }),
+          eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }),
         }),
       };
     }),

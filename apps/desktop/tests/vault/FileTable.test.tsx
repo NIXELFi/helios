@@ -181,6 +181,40 @@ describe("<FileTable>", () => {
     expect(onToggleSelect).toHaveBeenCalledWith("f1");
   });
 
+  it("clicking the cell padding around a checkbox toggles selection without opening the file detail panel", () => {
+    // Regression guard for the 2026-05-25 audit: clicking on the
+    // <td> padding around the small checkbox used to fall through to the
+    // row's onClick (which opens the file detail panel). The fix moved
+    // stopPropagation + onToggleSelect onto the cell wrapper so clicks in
+    // the cell's padding still toggle and never trigger row selection.
+    const onSelect = vi.fn();
+    const onToggleSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={onSelect}
+          selectedIds={new Set()}
+          onToggleSelect={onToggleSelect}
+          onToggleSelectAll={() => {}}
+          allSelected={false}
+        />,
+      ),
+    );
+    const checkboxes = screen.getAllByRole("checkbox");
+    // Click the checkbox CELL (the <td>) — its parentElement of the input.
+    const cell = checkboxes[1].parentElement as HTMLElement;
+    fireEvent.click(cell);
+    expect(onToggleSelect).toHaveBeenCalledWith("f1");
+    // Row's onClick must NOT have fired — that would have opened the file
+    // detail panel for a click the user intended as a selection toggle.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("header checkbox calls onToggleSelectAll", () => {
     const onToggleSelectAll = vi.fn();
     render(

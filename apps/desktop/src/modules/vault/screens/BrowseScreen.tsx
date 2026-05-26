@@ -437,6 +437,8 @@ export function BrowseScreen() {
               versionsByFileId={versionsByFileId}
               vaultRoot={vaultFolderPath}
               folders={folders ?? []}
+              locks={locks ?? []}
+              currentUserId={user?.id ?? null}
             />
             <FileTable
               files={files ?? []}

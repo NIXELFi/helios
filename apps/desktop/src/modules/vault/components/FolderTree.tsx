@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileId, Folder, FolderId, Lock, UserId, VaultFile } from "../data/types";
 
 /**
@@ -56,27 +56,35 @@ interface FolderNode {
   children: FolderNode[];
 }
 
-function buildTree(folders: Folder[]): FolderNode[] {
-  const byParent = new Map<string | null, Folder[]>();
-  for (const f of folders) {
-    const arr = byParent.get(f.parent_id) ?? [];
-    arr.push(f);
-    byParent.set(f.parent_id, arr);
-  }
+/**
+ * Builds an O(N) tree from a flat folders array, using a pre-computed
+ * parent->children index. Sorted alphabetically at each level.
+ */
+function buildTreeFromIndex(
+  byParent: Map<string | null, Folder[]>,
+): FolderNode[] {
   function nodesFor(parentId: string | null): FolderNode[] {
     return (byParent.get(parentId) ?? [])
+      .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((f) => ({ folder: f, children: nodesFor(f.id) }));
   }
   return nodesFor(null);
 }
 
-function ancestorsOf(folderId: FolderId, folders: Folder[]): FolderId[] {
+/**
+ * Walks parent_id pointers from leaf to root. O(depth) given an id->folder
+ * map vs O(depth * N) with a flat-array `find` per step.
+ */
+function ancestorsOfFromIndex(
+  folderId: FolderId,
+  byId: Map<FolderId, Folder>,
+): FolderId[] {
   const out: FolderId[] = [];
-  let current = folders.find((f) => f.id === folderId);
+  let current = byId.get(folderId);
   while (current?.parent_id) {
     out.push(current.parent_id);
-    current = folders.find((f) => f.id === current!.parent_id);
+    current = byId.get(current.parent_id);
   }
   return out;
 }
@@ -162,7 +170,24 @@ export function FolderTree({
   onContextMenu,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const tree = buildTree(folders);
+  // Pre-compute O(1) indexes from the folders array. Without these the tree
+  // recomputes O(N²) on every render — measurable on SDM26's ~500-folder
+  // vault (full re-render on every tick of the auto-sync status interval).
+  const foldersById = useMemo(() => {
+    const m = new Map<FolderId, Folder>();
+    for (const f of folders) m.set(f.id, f);
+    return m;
+  }, [folders]);
+  const foldersByParent = useMemo(() => {
+    const m = new Map<string | null, Folder[]>();
+    for (const f of folders) {
+      const arr = m.get(f.parent_id) ?? [];
+      arr.push(f);
+      m.set(f.parent_id, arr);
+    }
+    return m;
+  }, [folders]);
+  const tree = useMemo(() => buildTreeFromIndex(foldersByParent), [foldersByParent]);
   const anchorRef = useRef<RowItem | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -178,41 +203,56 @@ export function FolderTree({
     additive: boolean;
   }>(null);
 
+  // Pre-bucket files by folder_id for O(1) lookup during render.
+  const filesByFolder = useMemo(() => {
+    const m = new Map<string | null, VaultFile[]>();
+    for (const f of files) {
+      const key = f.folder_id;
+      const arr = m.get(key) ?? [];
+      arr.push(f);
+      m.set(key, arr);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return m;
+  }, [files]);
+
+  // Active lock by file_id — O(1) replacement for the previous O(L) lookup
+  // inside lockKindFor. Skips released locks so a stale row doesn't shadow
+  // the current state.
+  const lockByFile = useMemo(() => {
+    const m = new Map<FileId, Lock>();
+    for (const l of locks) {
+      if (l.released_at === null) m.set(l.file_id, l);
+    }
+    return m;
+  }, [locks]);
+
   // Files reachable under a folder (recursive). Used by right-click on a
-  // folder to download "everything inside".
+  // folder to download "everything inside". Uses the parent index so the
+  // descendant walk is O(N) instead of O(N²).
   function filesUnder(folderId: FolderId): VaultFile[] {
     const out: VaultFile[] = [];
     const stack: string[] = [folderId];
     while (stack.length > 0) {
       const id = stack.pop()!;
       out.push(...(filesByFolder.get(id) ?? []));
-      for (const f of folders) if (f.parent_id === id) stack.push(f.id);
+      for (const child of foldersByParent.get(id) ?? []) stack.push(child.id);
     }
     return out;
   }
 
-  // Pre-bucket files by folder_id for O(1) lookup during render.
-  const filesByFolder = new Map<string | null, VaultFile[]>();
-  for (const f of files) {
-    const key = f.folder_id;
-    const arr = filesByFolder.get(key) ?? [];
-    arr.push(f);
-    filesByFolder.set(key, arr);
-  }
-  for (const arr of filesByFolder.values()) {
-    arr.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
   useEffect(() => {
     if (!selected) return;
-    const ancestors = ancestorsOf(selected, folders);
+    const ancestors = ancestorsOfFromIndex(selected, foldersById);
     if (ancestors.length === 0) return;
     setExpanded((prev) => {
       const next = new Set(prev);
       for (const id of ancestors) next.add(id);
       return next;
     });
-  }, [selected, folders]);
+  }, [selected, foldersById]);
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -234,7 +274,7 @@ export function FolderTree({
   }
 
   function lockKindFor(fileId: FileId): "none" | "me" | "other" {
-    const lock = locks.find((l) => l.file_id === fileId && l.released_at === null);
+    const lock = lockByFile.get(fileId);
     if (!lock) return "none";
     return lock.user_id === currentUserId ? "me" : "other";
   }
@@ -248,7 +288,8 @@ export function FolderTree({
       out.push({ kind: "file", id: f.id });
     }
     function walk(parentId: string | null) {
-      const here = folders.filter((f) => f.parent_id === parentId)
+      const here = (foldersByParent.get(parentId) ?? [])
+        .slice()
         .sort((a, b) => a.name.localeCompare(b.name));
       for (const folder of here) {
         out.push({ kind: "folder", id: folder.id });

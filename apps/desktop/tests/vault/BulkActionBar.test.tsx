@@ -195,4 +195,88 @@ describe("<BulkActionBar>", () => {
     await waitFor(() => expect(screen.getByText(/checked out 2\/2/i)).toBeInTheDocument());
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("disables Check Out when every selected row is already locked by another user", async () => {
+    // Regression guard for the 2026-05-25 audit fix: clicking Check Out
+    // used to fire `acquireLock.run` on every selected file regardless of
+    // existing lock state, producing a cryptic "0/3 (3 failed)" toast
+    // because the server rejects with a unique-constraint error. Per-row
+    // gating in the bar now disables the button when nothing's eligible.
+    const c = mockClient(false);
+    const locks = [
+      { id: "l1", file_id: "f1", user_id: "other-user", acquired_at: "x", released_at: null, force_released_by: null },
+      { id: "l2", file_id: "f2", user_id: "other-user", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(c) });
+    await waitFor(() => expect(authResult.current).toBe(false));
+
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BulkActionBar
+          selectedIds={["f1", "f2"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          locks={locks as any}
+          currentUserId="u1"
+        />
+      </SupabaseAuthProvider>,
+    );
+    const checkOutBtn = await screen.findByRole("button", { name: /check out/i });
+    expect(checkOutBtn).toBeDisabled();
+    expect(checkOutBtn).toHaveAttribute("title", expect.stringMatching(/already locked/i));
+  });
+
+  it("disables Cancel Checkout when no selected row is locked by the current user", async () => {
+    const c = mockClient(false);
+    const locks = [
+      { id: "l1", file_id: "f1", user_id: "other-user", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(c) });
+    await waitFor(() => expect(authResult.current).toBe(false));
+
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BulkActionBar
+          selectedIds={["f1"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          locks={locks as any}
+          currentUserId="u1"
+        />
+      </SupabaseAuthProvider>,
+    );
+    const cancelBtn = await screen.findByRole("button", { name: /cancel checkout/i });
+    expect(cancelBtn).toBeDisabled();
+  });
+
+  it("Check Out only runs on rows the user CAN check out — reports skipped + locked-by-other counts", async () => {
+    // Mixed selection: one unlocked (gets checked out), one held by user
+    // (skipped as "already yours"), one held by another user (skipped as
+    // "locked by other user"). Net status is "Checked out 1/3 (...)".
+    const c = mockClient(false);
+    const locks = [
+      { id: "l1", file_id: "f2", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+      { id: "l2", file_id: "f3", user_id: "other-user", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(c) });
+    await waitFor(() => expect(authResult.current).toBe(false));
+
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BulkActionBar
+          selectedIds={["f1", "f2", "f3"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          locks={locks as any}
+          currentUserId="u1"
+        />
+      </SupabaseAuthProvider>,
+    );
+    const checkOutBtn = await screen.findByRole("button", { name: /check out/i });
+    expect(checkOutBtn).not.toBeDisabled();
+    await act(async () => { fireEvent.click(checkOutBtn); });
+    await waitFor(() => expect(screen.getByText(/checked out 1\/3/i)).toBeInTheDocument());
+    expect(screen.getByText(/1 locked by other user/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 already yours/i)).toBeInTheDocument();
+  });
 });

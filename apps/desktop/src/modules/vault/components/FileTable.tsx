@@ -121,7 +121,7 @@ function deriveRowState(
     return {
       state: "synced",
       stripe: "border-[#66BB6A]",
-      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/40/60",
+      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/60",
       label: "Synced",
       glyph: "✓",
     };
@@ -245,12 +245,24 @@ export function FileTable({
               }
             >
               {hasMultiSelect && (
-                <td className="w-10 px-3 py-2">
+                <td
+                  // Stop propagation on the whole cell so clicks in the
+                  // cell padding (around the small checkbox itself) toggle
+                  // selection instead of falling through to the <tr>
+                  // onClick which would open the file detail panel.
+                  className="w-10 px-3 py-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect!(f.id);
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={selectedIds!.has(f.id)}
-                    onChange={(e) => { e.stopPropagation(); onToggleSelect!(f.id); }}
-                    onClick={(e) => e.stopPropagation()}
+                    // onChange still has stopPropagation as a backup —
+                    // some browsers fire change before the cell's click
+                    // handler reaches stopPropagation.
+                    onChange={(e) => e.stopPropagation()}
                     aria-label={`Select ${f.name}`}
                     className="accent-asu-gold"
                   />
