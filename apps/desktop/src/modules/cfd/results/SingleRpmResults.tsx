@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { CycleChart } from "../components/charts/CycleChart";
 import { PvLoopView } from "./PvLoopView";
 import { PipeProfileView } from "./PipeProfileView";
+import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
 import type { SingleRpmStudy } from "../state/types";
@@ -12,9 +13,10 @@ interface Props {
 }
 
 export function SingleRpmResults({ study }: Props) {
-  const { cancelStudy } = useCfd();
+  const { cancelStudy, bridge } = useCfd();
   const [showPv, setShowPv] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
+  const [showWaveViewer, setShowWaveViewer] = useState(false);
   const last = study.cycles[study.cycles.length - 1];
   const elapsed = useMemo(() => {
     const end = study.finishedAt ?? Date.now();
@@ -215,7 +217,13 @@ export function SingleRpmResults({ study }: Props) {
                     </button>
                   )}
                   {study.params.captureWaves && (
-                    <span className="text-[10px] text-[#5A5F66]">Wave frames captured on disk (viewer in Phase 4).</span>
+                    <button
+                      type="button"
+                      className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
+                      onClick={() => setShowWaveViewer(true)}
+                    >
+                      Open wave viewer ↗
+                    </button>
                   )}
                 </div>
                 {showPv && (
@@ -233,6 +241,16 @@ export function SingleRpmResults({ study }: Props) {
           </>
         )}
       </div>
+      {study.params.captureWaves && (
+        <WaveViewerModal
+          open={showWaveViewer}
+          bridge={bridge}
+          jobId={study.id}
+          studyKind="single-rpm"
+          rpmInt={rpmInt}
+          onClose={() => setShowWaveViewer(false)}
+        />
+      )}
     </div>
   );
 }
