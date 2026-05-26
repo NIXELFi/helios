@@ -103,7 +103,7 @@ Implementation:
 1. Validate `job_id` (no `..`, no path separators), `study_kind` (∈ {single-rpm, sweep}).
 2. Build path: `<Documents>/Helios/cfd/captures/<job_id>/<study_kind>/<rpm_int>/`.
 3. Read `manifest.json` into `WaveFrameManifest`. If missing or unparseable → error.
-4. Read `waves.jsonl` line by line. Each line is parsed as a JSON object (not a typed struct — we keep the on-disk shape and let TS describe it). Lines that fail to parse are skipped and counted; if **any** line fails, return an error message with the bad line number (no partial returns). Empty lines tolerated.
+4. Read `waves.jsonl` line by line. Each line is parsed as a JSON object (not a typed struct — we keep the on-disk shape and let TS describe it). Empty lines are tolerated and skipped. **On the first parse error, return an error with the bad line number — no partial returns and no further reading.**
 5. Sanity-check: `frames.len() == manifest.frame_count` → if mismatch, return an error noting both counts.
 6. Return `serde_json::json!({ "manifest": <manifest>, "frames": <frames_array> })`.
 
@@ -322,12 +322,12 @@ Real-engine time at 8000 rpm = 15 ms/cycle. At 1× the animation runs faster tha
 Above the canvas:
 
 ```
-[Schematic] [Waterfall]   field: [p ▾] size: [p ▾] cyl: [x_b ▾]   speed: [1× ▾]
+[Schematic] [Waterfall]   field: [p ▾] size: [p ▾] cyl: [x_b ▾]   speed: [0.25× ▾]
                           [◀◀] [⏵/⏸] [▶▶]   θ ●━━━━━━━━━━━━━━━━━━━━ 720°
                           legend: ▆▇▆ (cell)  ◯ (cyl) — value bar from vmin to vmax
 ```
 
-The "field" select governs both schematic cell color *and* waterfall color. "size" is schematic-only. "cyl" is schematic-only. Speed select offers `0.25, 0.5, 1, 2, 4, 8` — values we'd actually want. The scrubber is a single-thumb range input over `[0, frameCount-1]`. Frame-step buttons advance/retreat by 1 frame.
+The "field" select governs both schematic cell color *and* waterfall color. "size" is schematic-only. "cyl" is schematic-only. Speed select offers `0.25, 0.5, 1, 2, 4, 8` — default is 0.25× (see Section 3.5 rationale: 1× plays a real-engine cycle in 15 ms at 8000 rpm, too fast to follow). The scrubber is a single-thumb range input over `[0, frameCount-1]`. Frame-step buttons advance/retreat by 1 frame.
 
 For sweep studies, an additional left-side control:
 
@@ -434,7 +434,7 @@ apps/desktop/src/modules/cfd/results/wave-viewer/
   SchematicView.tsx
   WaterfallView.tsx
   useWaveCapture.ts
-  colormaps.ts                # 5 256-entry LUTs (RdBu_r, inferno, viridis)
+  colormaps.ts                # 3 256-entry LUTs (RdBu_r, inferno, viridis) shared across 5 fields
   fields.ts                   # field metadata + Mach derivation
   layout.ts                   # tier layout function (data-driven)
   index.ts                    # public exports
