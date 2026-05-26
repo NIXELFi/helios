@@ -49,7 +49,7 @@ function WaveViewerModalBody(props: Props) {
   const [view, setView] = useState<"schematic" | "waterfall">("schematic");
   const [field, setField] = useState<WaveField>("p");
   const [sizeField, setSizeField] = useState<WaveSizeField>("p");
-  const [cylField, setCylField] = useState<WaveCylField>("x_b");
+  const [cylField, setCylField] = useState<WaveCylField>("p");
   const [speed, setSpeed] = useState<number>(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameIdx, setFrameIdx] = useState(0);
@@ -229,8 +229,6 @@ function WaveViewerModalBody(props: Props) {
             <WaterfallView
               packed={data}
               field={field}
-              frameIdx={frameInt}
-              onScrub={(idx) => { setIsPlaying(false); setFrameIdx(idx); }}
             />
           )}
         </div>

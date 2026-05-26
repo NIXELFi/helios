@@ -78,7 +78,7 @@ function draw(
   sizeField: WaveSizeField,
   cylField: WaveCylField,
 ) {
-  const { width, height, tiers, cylinderCenters, cylinderRowY, cylinderBaseR } = layout;
+  const { width, height, tiers, cylinderCenters, cylinderColumnX, cylinderBaseR } = layout;
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0E0E10";
   ctx.fillRect(0, 0, width, height);
@@ -87,27 +87,34 @@ function draw(
   drawConnections(ctx, layout, packed.manifest);
 
   for (const tier of tiers) {
-    if (tier.kind === "horiz-pipe") {
-      drawHorizontalPipe(ctx, packed, frameIdx, tier.pipe.index, field, sizeField, tier.pipeRect);
-    } else if (tier.kind === "vert-pipes") {
+    if (tier.kind === "wide-pipe") {
+      drawWidePipe(ctx, packed, frameIdx, tier.pipe.index, field, sizeField, tier.pipeRect);
+    } else if (tier.kind === "branch-pipes") {
       for (let i = 0; i < tier.pipes.length; i++) {
-        drawVerticalPipe(ctx, packed, frameIdx, tier.pipes[i]!.index, field, sizeField, tier.pipeRects[i]!);
+        drawBranchPipe(ctx, packed, frameIdx, tier.pipes[i]!.index, field, sizeField, tier.pipeRects[i]!);
       }
     }
   }
 
   for (let ci = 0; ci < packed.manifest.nCylinders; ci++) {
-    drawCylinder(ctx, packed, frameIdx, ci, cylField, cylinderCenters[ci]!, cylinderRowY, cylinderBaseR);
+    drawCylinder(ctx, packed, frameIdx, ci, cylField, cylinderColumnX, cylinderCenters[ci]!, cylinderBaseR);
   }
 
-  // INTAKE / EXHAUST banners.
+  // INTAKE on left side (vertical text), EXHAUST on right side.
   ctx.fillStyle = "#5A5F66";
   ctx.font = "bold 12px sans-serif";
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText("INTAKE", width / 2, 4);
-  ctx.textBaseline = "bottom";
-  ctx.fillText("EXHAUST", width / 2, height - 4);
+  ctx.textBaseline = "middle";
+  ctx.save();
+  ctx.translate(10, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("INTAKE", 0, 0);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(width - 10, height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.fillText("EXHAUST", 0, 0);
+  ctx.restore();
 }
 
 function drawConnections(
@@ -118,95 +125,96 @@ function drawConnections(
   ctx.strokeStyle = "#3A3F47";
   ctx.lineWidth = 1.5;
 
-  const horiz = (role: "plenum" | "collector") =>
-    layout.tiers.find((t) => t.kind === "horiz-pipe" && t.role === role);
-  const vert = (role: "runner" | "primary" | "secondary") =>
-    layout.tiers.find((t) => t.kind === "vert-pipes" && t.role === role);
+  const wide = (role: "plenum" | "collector") =>
+    layout.tiers.find((t) => t.kind === "wide-pipe" && t.role === role);
+  const branch = (role: "runner" | "primary" | "secondary") =>
+    layout.tiers.find((t) => t.kind === "branch-pipes" && t.role === role);
 
-  const plenum = horiz("plenum");
-  const runners = vert("runner");
-  const primaries = vert("primary");
-  const secondaries = vert("secondary");
-  const collector = horiz("collector");
+  const plenum = wide("plenum");
+  const runners = branch("runner");
+  const primaries = branch("primary");
+  const secondaries = branch("secondary");
+  const collector = wide("collector");
 
-  // Plenum → Runners (vertical drops from plenum bottom at each runner column)
-  if (plenum && plenum.kind === "horiz-pipe" && runners && runners.kind === "vert-pipes") {
-    const plenumBottom = plenum.pipeRect.y + plenum.pipeRect.h;
+  // Plenum → Runners: horizontal segments from plenum's right edge to each runner's left edge.
+  if (plenum && plenum.kind === "wide-pipe" && runners && runners.kind === "branch-pipes") {
+    const plenumRight = plenum.pipeRect.x + plenum.pipeRect.w;
     for (const r of runners.pipeRects) {
-      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
       ctx.beginPath();
-      ctx.moveTo(cx, plenumBottom);
-      ctx.lineTo(cx, r.y);
+      ctx.moveTo(plenumRight, cy);
+      ctx.lineTo(r.x, cy);
       ctx.stroke();
     }
   }
 
-  // Runners → Cylinders (vertical drop from runner bottom to top of cyl-row at the corresponding column)
-  if (runners && runners.kind === "vert-pipes") {
+  // Runners → Cylinders: horizontal segments from runner right → cylinder left edge.
+  if (runners && runners.kind === "branch-pipes") {
     for (let i = 0; i < runners.pipeRects.length; i++) {
       const r = runners.pipeRects[i]!;
-      const cx = r.x + r.w / 2;
-      const cyTop = layout.cylinderRowY - layout.cylinderBaseR;
+      const cy = r.y + r.h / 2;
+      const cylLeft = layout.cylinderColumnX - layout.cylinderBaseR;
       ctx.beginPath();
-      ctx.moveTo(cx, r.y + r.h);
-      ctx.lineTo(cx, cyTop);
+      ctx.moveTo(r.x + r.w, cy);
+      ctx.lineTo(cylLeft, cy);
       ctx.stroke();
     }
   }
 
-  // Cylinders → Primaries (vertical drop from bottom of cyl-row to top of primary)
-  if (primaries && primaries.kind === "vert-pipes") {
+  // Cylinders → Primaries: horizontal segments from cylinder right → primary left.
+  if (primaries && primaries.kind === "branch-pipes") {
     for (let i = 0; i < primaries.pipeRects.length; i++) {
       const p = primaries.pipeRects[i]!;
-      const cx = p.x + p.w / 2;
-      const cyBot = layout.cylinderRowY + layout.cylinderBaseR;
+      const cy = p.y + p.h / 2;
+      const cylRight = layout.cylinderColumnX + layout.cylinderBaseR;
       ctx.beginPath();
-      ctx.moveTo(cx, cyBot);
-      ctx.lineTo(cx, p.y);
+      ctx.moveTo(cylRight, cy);
+      ctx.lineTo(p.x, cy);
       ctx.stroke();
     }
   }
 
-  // Primaries → Secondaries (4-2-1) OR Primaries → Collector (4-1 / no secondaries).
-  // TODO: read pairing from manifest once exposed.
-  // For SDM26 4-cyl 4-2-1 (crates/engine-sim/src/model/sdm26.rs:686-699):
-  //   primary[0] + primary[3] → secondary[0]
-  //   primary[1] + primary[2] → secondary[1]
-  // For 4-1 (no secondaries): each primary drops straight into the collector.
-  if (primaries && primaries.kind === "vert-pipes") {
+  // Primaries → Secondaries (4-2-1 angled) OR Primaries → Collector (4-1).
+  if (primaries && primaries.kind === "branch-pipes") {
     const has421 =
-      secondaries && secondaries.kind === "vert-pipes" &&
+      secondaries && secondaries.kind === "branch-pipes" &&
       primaries.pipeRects.length === 4 && secondaries.pipeRects.length === 2;
-    if (has421 && secondaries && secondaries.kind === "vert-pipes") {
+    if (has421 && secondaries && secondaries.kind === "branch-pipes") {
+      // TODO: read pairing from manifest. For SDM26 4-cyl
+      // (crates/engine-sim/src/model/sdm26.rs:686-699):
+      //   primary[0] + primary[3] → secondary[0]
+      //   primary[1] + primary[2] → secondary[1]
       const pairing: Array<[number, number]> = [[0, 0], [1, 1], [2, 1], [3, 0]];
       for (const [pi, si] of pairing) {
         const p = primaries.pipeRects[pi]!;
         const s = secondaries.pipeRects[si]!;
+        const startX = p.x + p.w;
+        const startY = p.y + p.h / 2;
+        const endX = s.x;
+        const endY = s.y + s.h / 2;
         ctx.beginPath();
-        ctx.moveTo(p.x + p.w / 2, p.y + p.h);
-        ctx.lineTo(s.x + s.w / 2, s.y);
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
         ctx.stroke();
       }
-    } else if (collector && collector.kind === "horiz-pipe") {
-      // 4-1 (or any topology without a secondary tier): primaries drop
-      // straight into the collector at their own x.
+    } else if (collector && collector.kind === "wide-pipe") {
       for (const p of primaries.pipeRects) {
-        const cx = p.x + p.w / 2;
+        const cy = p.y + p.h / 2;
         ctx.beginPath();
-        ctx.moveTo(cx, p.y + p.h);
-        ctx.lineTo(cx, collector.pipeRect.y);
+        ctx.moveTo(p.x + p.w, cy);
+        ctx.lineTo(collector.pipeRect.x, cy);
         ctx.stroke();
       }
     }
   }
 
-  // Secondaries → Collector (vertical drop).
-  if (secondaries && secondaries.kind === "vert-pipes" && collector && collector.kind === "horiz-pipe") {
+  // Secondaries → Collector: horizontal segments.
+  if (secondaries && secondaries.kind === "branch-pipes" && collector && collector.kind === "wide-pipe") {
     for (const s of secondaries.pipeRects) {
-      const cx = s.x + s.w / 2;
+      const cy = s.y + s.h / 2;
       ctx.beginPath();
-      ctx.moveTo(cx, s.y + s.h);
-      ctx.lineTo(cx, collector.pipeRect.y);
+      ctx.moveTo(s.x + s.w, cy);
+      ctx.lineTo(collector.pipeRect.x, cy);
       ctx.stroke();
     }
   }
@@ -254,49 +262,8 @@ function fieldArr(packed: WaveCapturePacked, pipeIdx: number, field: WaveField):
   };
 }
 
-function drawHorizontalPipe(
-  ctx: CanvasRenderingContext2D,
-  packed: WaveCapturePacked,
-  frameIdx: number,
-  pipeIdx: number,
-  field: WaveField,
-  sizeField: WaveSizeField,
-  rect: { x: number; y: number; w: number; h: number },
-) {
-  const colorF = fieldArr(packed, pipeIdx, field);
-  const sizeF = fieldArr(packed, pipeIdx, sizeField);
-  const cmapName = WAVE_FIELD_META[field].colormap;
-  const colorRange = fieldRange(field, colorF.range);
-  const sizeRange = fieldRange(sizeField, sizeF.range);
-  const cellW = rect.w / colorF.nCells;
-  const midY = rect.y + rect.h / 2;
-  const baseH = rect.h * 0.30;
-  const swing = rect.h * 0.55;
-
-  ctx.strokeStyle = "#2A2C32";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-
-  for (let c = 0; c < colorF.nCells; c++) {
-    const v = colorF.read(frameIdx, c);
-    const s = sizeF.read(frameIdx, c);
-    const tC = clamp01((v - colorRange.vmin) / (colorRange.vmax - colorRange.vmin || 1));
-    const tS = clamp01((s - sizeRange.vmin) / (sizeRange.vmax - sizeRange.vmin || 1));
-    const h = baseH + tS * swing;
-    const [r, g, b] = sampleColormap(cmapName, tC);
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(rect.x + c * cellW, midY - h / 2, cellW, h);
-  }
-
-  // Pipe label (top-left corner inside the pipe).
-  ctx.fillStyle = "#9097A0";
-  ctx.font = "10px ui-monospace, monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), rect.x + 4, rect.y + 4);
-}
-
-function drawVerticalPipe(
+// "Wide" pipe (plenum/collector) — vertical strip; cells stack down Y; size bulges in X.
+function drawWidePipe(
   ctx: CanvasRenderingContext2D,
   packed: WaveCapturePacked,
   frameIdx: number,
@@ -329,8 +296,49 @@ function drawVerticalPipe(
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(midX - w / 2, rect.y + c * cellH, w, cellH);
   }
+  // Label centered above the pipe.
+  ctx.fillStyle = "#9097A0";
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), midX, rect.y - 2);
+}
 
-  // Pipe label (top, above pipe).
+// "Branch" pipe (runner/primary/secondary) — horizontal strip; cells along X; size bulges in Y.
+function drawBranchPipe(
+  ctx: CanvasRenderingContext2D,
+  packed: WaveCapturePacked,
+  frameIdx: number,
+  pipeIdx: number,
+  field: WaveField,
+  sizeField: WaveSizeField,
+  rect: { x: number; y: number; w: number; h: number },
+) {
+  const colorF = fieldArr(packed, pipeIdx, field);
+  const sizeF = fieldArr(packed, pipeIdx, sizeField);
+  const cmapName = WAVE_FIELD_META[field].colormap;
+  const colorRange = fieldRange(field, colorF.range);
+  const sizeRange = fieldRange(sizeField, sizeF.range);
+  const cellW = rect.w / colorF.nCells;
+  const midY = rect.y + rect.h / 2;
+  const baseH = rect.h * 0.30;
+  const swing = rect.h * 0.55;
+
+  ctx.strokeStyle = "#2A2C32";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+  for (let c = 0; c < colorF.nCells; c++) {
+    const v = colorF.read(frameIdx, c);
+    const s = sizeF.read(frameIdx, c);
+    const tC = clamp01((v - colorRange.vmin) / (colorRange.vmax - colorRange.vmin || 1));
+    const tS = clamp01((s - sizeRange.vmin) / (sizeRange.vmax - sizeRange.vmin || 1));
+    const h = baseH + tS * swing;
+    const [r, g, b] = sampleColormap(cmapName, tC);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(rect.x + c * cellW, midY - h / 2, cellW, h);
+  }
+  // Label above the strip (centered horizontally).
   ctx.fillStyle = "#9097A0";
   ctx.font = "10px ui-monospace, monospace";
   ctx.textAlign = "center";
@@ -405,7 +413,7 @@ function drawCylinder(
   ctx.lineWidth = 1.5;
   ctx.strokeRect(boreX, boreY, boreSide, boreSide);
 
-  // Cylinder number above bore (helios-dim).
+  // Cylinder number above bore.
   ctx.fillStyle = "#9097A0";
   ctx.font = "11px ui-monospace, monospace";
   ctx.textAlign = "center";

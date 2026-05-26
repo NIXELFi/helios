@@ -12,22 +12,16 @@ import type {
 interface Props {
   packed: WaveCapturePacked;
   field: WaveField;
-  /** Current schematic playhead, 0..frameCount-1. */
-  frameIdx: number;
-  onScrub(newFrameIdx: number): void;
 }
 
 interface TileProps {
   packed: WaveCapturePacked;
   pipeIdx: number;
   field: WaveField;
-  frameIdx: number;
-  onScrub(idx: number): void;
 }
 
-function WaterfallTile({ packed, pipeIdx, field, frameIdx, onScrub }: TileProps) {
+function WaterfallTile({ packed, pipeIdx, field }: TileProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const meta = packed.manifest.pipes[pipeIdx]!;
 
@@ -95,24 +89,6 @@ function WaterfallTile({ packed, pipeIdx, field, frameIdx, onScrub }: TileProps)
     ctx.putImageData(img, 0, 0);
   }, [packed, pipeIdx, field, meta.nCells]);
 
-  // Overlay scrub line on frameIdx change.
-  useEffect(() => {
-    const canvas = overlayRef.current;
-    const base = canvasRef.current;
-    if (!canvas || !base) return;
-    canvas.width = base.width;
-    canvas.height = base.height;
-    canvas.style.width = base.style.width;
-    canvas.style.height = base.style.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const nFrames = packed.manifest.frameCount;
-    const y = (frameIdx / Math.max(1, nFrames - 1)) * canvas.height;
-    ctx.fillStyle = "rgba(255, 198, 39, 0.85)";
-    ctx.fillRect(0, y - 1, canvas.width, 2);
-  }, [packed.manifest.frameCount, frameIdx]);
-
   const lengthMm = (meta.lengthM * 1000).toFixed(0);
   return (
     <div className="flex min-h-0 flex-col">
@@ -121,23 +97,12 @@ function WaterfallTile({ packed, pipeIdx, field, frameIdx, onScrub }: TileProps)
       </div>
       <div ref={wrapRef} className="relative min-h-[60px] flex-1 bg-helios-base">
         <canvas ref={canvasRef} className="absolute inset-0" />
-        <canvas
-          ref={overlayRef}
-          className="absolute inset-0 cursor-crosshair"
-          onClick={(e) => {
-            const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
-            const y = e.clientY - rect.top;
-            const t = Math.max(0, Math.min(1, y / rect.height));
-            const idx = Math.round(t * (packed.manifest.frameCount - 1));
-            onScrub(idx);
-          }}
-        />
       </div>
     </div>
   );
 }
 
-export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
+export function WaterfallView({ packed, field }: Props) {
   // Group pipes by role for grid layout.
   const byRole: Record<string, number[]> = { plenum: [], runner: [], primary: [], secondary: [], collector: [] };
   packed.manifest.pipes.forEach((p, i) => {
@@ -149,7 +114,7 @@ export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
       {byRole.plenum!.length > 0 && (
         <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
           {byRole.plenum!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
           ))}
         </div>
       )}
@@ -159,7 +124,7 @@ export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.runner!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.runner!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
           ))}
         </div>
       )}
@@ -169,7 +134,7 @@ export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.primary!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.primary!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
           ))}
         </div>
       )}
@@ -179,14 +144,14 @@ export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.secondary!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.secondary!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
           ))}
         </div>
       )}
       {byRole.collector!.length > 0 && (
         <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
           {byRole.collector!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
           ))}
         </div>
       )}

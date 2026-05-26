@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutSchematic, type SchematicLayout } from "../layout";
+import { layoutSchematic } from "../layout";
 import type { WaveFrameManifest, WavePipeMeta } from "../../../state/types";
 
 function makeManifest(pipes: WavePipeMeta[], nCylinders: number): WaveFrameManifest {
@@ -41,21 +41,21 @@ describe("layoutSchematic", () => {
     expect(layout.cylinderCenters).toHaveLength(4);
   });
 
-  it("aligns cylinder X-centers with runner and primary column centers", () => {
+  it("aligns cylinder Y-centers with runner and primary row centers", () => {
     const layout = layoutSchematic(makeManifest(SDM26_PIPES, 4), 1600, 900);
-    const runnerTier = layout.tiers.find((t) => t.kind === "vert-pipes" && t.role === "runner")!;
-    const primaryTier = layout.tiers.find((t) => t.kind === "vert-pipes" && t.role === "primary")!;
+    const runnerTier = layout.tiers.find((t) => t.kind === "branch-pipes" && t.role === "runner")!;
+    const primaryTier = layout.tiers.find((t) => t.kind === "branch-pipes" && t.role === "primary")!;
     expect(runnerTier).toBeDefined();
     expect(primaryTier).toBeDefined();
-    if (runnerTier.kind !== "vert-pipes" || primaryTier.kind !== "vert-pipes") throw new Error();
+    if (runnerTier.kind !== "branch-pipes" || primaryTier.kind !== "branch-pipes") throw new Error();
     expect(runnerTier.pipeRects).toHaveLength(4);
     expect(primaryTier.pipeRects).toHaveLength(4);
     for (let i = 0; i < 4; i++) {
-      const runnerCx = runnerTier.pipeRects[i]!.x + runnerTier.pipeRects[i]!.w / 2;
-      const primaryCx = primaryTier.pipeRects[i]!.x + primaryTier.pipeRects[i]!.w / 2;
-      const cylCx = layout.cylinderCenters[i]!;
-      expect(Math.abs(runnerCx - cylCx)).toBeLessThan(1);
-      expect(Math.abs(primaryCx - cylCx)).toBeLessThan(1);
+      const runnerCy = runnerTier.pipeRects[i]!.y + runnerTier.pipeRects[i]!.h / 2;
+      const primaryCy = primaryTier.pipeRects[i]!.y + primaryTier.pipeRects[i]!.h / 2;
+      const cylCy = layout.cylinderCenters[i]!;
+      expect(Math.abs(runnerCy - cylCy)).toBeLessThan(1);
+      expect(Math.abs(primaryCy - cylCy)).toBeLessThan(1);
     }
   });
 
@@ -71,16 +71,16 @@ describe("layoutSchematic", () => {
     expect(layout.cylinderCenters).toHaveLength(1);
   });
 
-  it("returns tier rects that don't overlap and fit in canvas", () => {
+  it("returns tier rects that don't overlap horizontally and fit in canvas", () => {
     const W = 1600, H = 900;
     const layout = layoutSchematic(makeManifest(SDM26_PIPES, 4), W, H);
-    let prevBottom = 0;
+    let prevRight = 0;
     for (const t of layout.tiers) {
-      expect(t.bounds.y).toBeGreaterThanOrEqual(prevBottom - 1e-6);
-      expect(t.bounds.y + t.bounds.h).toBeLessThanOrEqual(H + 1e-6);
-      expect(t.bounds.x).toBeGreaterThanOrEqual(0);
+      expect(t.bounds.x).toBeGreaterThanOrEqual(prevRight - 1e-6);
       expect(t.bounds.x + t.bounds.w).toBeLessThanOrEqual(W + 1e-6);
-      prevBottom = t.bounds.y + t.bounds.h;
+      expect(t.bounds.y).toBeGreaterThanOrEqual(0);
+      expect(t.bounds.y + t.bounds.h).toBeLessThanOrEqual(H + 1e-6);
+      prevRight = t.bounds.x + t.bounds.w;
     }
   });
 
@@ -92,6 +92,7 @@ describe("layoutSchematic", () => {
     expect(layout.tiers).toHaveLength(0);
     expect(layout.cylinderCenters).toHaveLength(0);
     expect(layout.cylinderBaseR).toBe(0);
+    expect(layout.cylinderColumnX).toBeGreaterThanOrEqual(0);
   });
 
   it("returns empty layout for tiny canvas", () => {

@@ -26,6 +26,8 @@ describe("WaveViewerModal", () => {
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
       clearRect: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(),
       beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
+      moveTo: vi.fn(), lineTo: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn(),
       scale: vi.fn(), setTransform: vi.fn(), createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(0) })),
       putImageData: vi.fn(), fillText: vi.fn(),
       fillStyle: "", strokeStyle: "", lineWidth: 1,
