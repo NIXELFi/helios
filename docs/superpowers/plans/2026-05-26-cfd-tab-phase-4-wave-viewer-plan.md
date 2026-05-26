@@ -1420,10 +1420,10 @@ function draw(
 
   for (const tier of tiers) {
     if (tier.kind === "horiz-pipe") {
-      drawHorizontalPipe(ctx, packed, frameIdx, tier.pipe.index, field, sizeField, tier.pipeRect, meta.colormap, packed.pipeRange[tier.pipe.index]);
+      drawHorizontalPipe(ctx, packed, frameIdx, tier.pipe.index, field, sizeField, tier.pipeRect);
     } else if (tier.kind === "vert-pipes") {
       for (let i = 0; i < tier.pipes.length; i++) {
-        drawVerticalPipe(ctx, packed, frameIdx, tier.pipes[i].index, field, sizeField, tier.pipeRects[i], meta.colormap, packed.pipeRange[tier.pipes[i].index]);
+        drawVerticalPipe(ctx, packed, frameIdx, tier.pipes[i].index, field, sizeField, tier.pipeRects[i]);
       }
     }
     // cyl-row: handled below in single pass
@@ -1476,8 +1476,6 @@ function drawHorizontalPipe(
   field: WaveField,
   sizeField: WaveSizeField,
   rect: { x: number; y: number; w: number; h: number },
-  cmap: ReturnType<typeof sampleColormap> extends infer R ? "RdBu_r" | "inferno" | "viridis" : never,
-  _pipeRange: any,
 ) {
   const colorF = fieldArr(packed, pipeIdx, field);
   const sizeF = fieldArr(packed, pipeIdx, sizeField);
@@ -1514,8 +1512,6 @@ function drawVerticalPipe(
   field: WaveField,
   sizeField: WaveSizeField,
   rect: { x: number; y: number; w: number; h: number },
-  _cmap: any,
-  _pipeRange: any,
 ) {
   const colorF = fieldArr(packed, pipeIdx, field);
   const sizeF = fieldArr(packed, pipeIdx, sizeField);
@@ -1977,8 +1973,9 @@ export function WaveViewerModal(props: Props) {
   useEffect(() => {
     if (!isPlaying || !data) return;
     const nFrames = data.manifest.frameCount;
+    // cycleSeconds = Δθ_deg / (rpm × 360 deg/rev × 1 min/60 s) = Δθ / (rpm × 6).
     const cycleSeconds = Math.max(
-      (data.manifest.thetaEndDeg - data.manifest.thetaStartDeg) / Math.max(1, data.manifest.rpm) / 6, // (Δθ/rpm) × 60/360
+      (data.manifest.thetaEndDeg - data.manifest.thetaStartDeg) / Math.max(1, data.manifest.rpm) / 6,
       1e-3,
     );
     lastTickRef.current = performance.now();
