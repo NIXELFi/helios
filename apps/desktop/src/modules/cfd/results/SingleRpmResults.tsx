@@ -61,6 +61,46 @@ export function SingleRpmResults({ study }: Props) {
         )}
       </header>
 
+      {/* Captures bar — sits below the header so the wave-viewer / P-V /
+          profiles buttons are always reachable without scrolling past the
+          charts + cycle table. */}
+      {hasCaptures && (
+        <section className="flex-shrink-0 border-b border-[#2A2C32] bg-[#0E0E10]">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider">
+            <span className="text-[#9097A0]">Captures</span>
+            {study.params.capturePvLoops && (
+              <button type="button"
+                className={
+                  "rounded-sm border px-2 py-0.5 " +
+                  (showPv ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                }
+                onClick={() => setShowPv((v) => !v)}>
+                {showPv ? "Hide P-V" : "Show P-V"}
+              </button>
+            )}
+            {study.params.capturePipeProfiles && (
+              <button type="button"
+                className={
+                  "rounded-sm border px-2 py-0.5 " +
+                  (showProfiles ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                }
+                onClick={() => setShowProfiles((v) => !v)}>
+                {showProfiles ? "Hide profiles" : "Show profiles"}
+              </button>
+            )}
+            {study.params.captureWaves && (
+              <button
+                type="button"
+                className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
+                onClick={() => setShowWaveViewer(true)}
+              >
+                Open wave viewer ↗
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Scrollable body so charts + table never push each other off-screen */}
       <div className="flex-1 min-h-0 overflow-auto">
         {study.cycles.length === 0 ? (
@@ -192,40 +232,10 @@ export function SingleRpmResults({ study }: Props) {
               </div>
             )}
 
-            {hasCaptures && (
+            {/* P-V and profile panels render here when toggled from the
+                top Captures bar. */}
+            {hasCaptures && (showPv || showProfiles) && (
               <section className="m-2 mt-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                <div className="flex items-center gap-2 border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider">
-                  <span className="text-[#9097A0]">Captures</span>
-                  {study.params.capturePvLoops && (
-                    <button type="button"
-                      className={
-                        "rounded-sm border px-2 py-0.5 " +
-                        (showPv ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
-                      }
-                      onClick={() => setShowPv((v) => !v)}>
-                      {showPv ? "Hide P-V" : "Show P-V"}
-                    </button>
-                  )}
-                  {study.params.capturePipeProfiles && (
-                    <button type="button"
-                      className={
-                        "rounded-sm border px-2 py-0.5 " +
-                        (showProfiles ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]" : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
-                      }
-                      onClick={() => setShowProfiles((v) => !v)}>
-                      {showProfiles ? "Hide profiles" : "Show profiles"}
-                    </button>
-                  )}
-                  {study.params.captureWaves && (
-                    <button
-                      type="button"
-                      className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
-                      onClick={() => setShowWaveViewer(true)}
-                    >
-                      Open wave viewer ↗
-                    </button>
-                  )}
-                </div>
                 {showPv && (
                   <div className="p-2">
                     <PvLoopView jobId={study.id} studyKind="single-rpm" rpmInt={rpmInt} />

@@ -376,6 +376,10 @@ function drawCylinder(
   const pistonY = boreY + vNorm * pistonRange;
 
   // Cyl-field color for chamber.
+  // Pipe pressures swing ±10 kPa around atm → diverging RdBu_r works.
+  // Cylinder pressure swings 1→50 atm (asymmetric) → use sequential
+  // inferno over the observed range, not diverging-around-atm (which
+  // collapses to white for nearly every frame).
   const fIdx = cylField === "x_b" ? CYL_FIELD_IDX.x_b
              : cylField === "p"   ? CYL_FIELD_IDX.p
              : CYL_FIELD_IDX.T;
@@ -383,14 +387,10 @@ function drawCylinder(
   const fRangeObs = packed.cylRange[ci]![fIdx]!;
   const f = fArr[frameIdx]!;
   const cmapName =
-    cylField === "x_b" ? "viridis" :
-    cylField === "p"   ? "RdBu_r"  :
-                         "inferno";
-  const rangeStruct = fieldRange(
-    cylField === "p" ? "p" : cylField === "T" ? "T" : "rho",
-    fRangeObs,
-  );
-  const tC = clamp01((f - rangeStruct.vmin) / (rangeStruct.vmax - rangeStruct.vmin || 1));
+    cylField === "x_b" ? "viridis" : "inferno";
+  const vmin = cylField === "x_b" ? 0 : fRangeObs.min;
+  const vmax = cylField === "x_b" ? 1 : fRangeObs.max;
+  const tC = clamp01((f - vmin) / (vmax - vmin || 1));
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
 
   // Bore background (crankcase / below-piston region) — match canvas bg.
