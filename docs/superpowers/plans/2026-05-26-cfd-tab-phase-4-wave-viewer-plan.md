@@ -709,16 +709,19 @@ git commit -m "feat(cfd): data-driven schematic tier layout for wave viewer"
 ### Task 5: `cfd_load_waves` Tauri command + tests
 
 **Files:**
-- Modify `apps/desktop/src-tauri/src/cfd/commands.rs`
-- Modify `apps/desktop/src-tauri/src/lib.rs`
+- Modify `crates/cfd-core/src/load.rs` (add `load_waves_from_dir` pure-fn + tests)
+- Modify `apps/desktop/src-tauri/src/cfd/commands.rs` (thin Tauri wrapper)
+- Modify `apps/desktop/src-tauri/src/lib.rs` (register command)
 
 Read `manifest.json` + `waves.jsonl` from the capture dir, parse line-by-line, return `{ manifest, frames }` as one JSON value. Per spec §1.2, first parse error aborts with the bad line number.
 
-- [ ] **Step 1: Write the failing test.** Append to the `#[cfg(test)] mod tests` block at the bottom of `apps/desktop/src-tauri/src/cfd/commands.rs` (or create one if absent). Tests use `tempfile::tempdir` for the capture root and call the command's inner logic directly (not the `#[tauri::command]` wrapper, which needs an `AppHandle`).
+**Why pure-fn in `cfd_core::load` not `commands.rs`:** The existing comment at the bottom of [`commands.rs`](../../apps/desktop/src-tauri/src/cfd/commands.rs) explicitly states *"pure load logic + tests live in `cfd_core::load`. Tauri lib tests don't run on Windows/GNU (Tauri runtime DLL footprint causes STATUS_ENTRYPOINT_NOT_FOUND in the test binary)"*. Putting tests in `commands.rs` will fail to link. Follow the existing `load_config_from_path` pattern at [`load.rs:24`](../../crates/cfd-core/src/load.rs#L24).
 
-Refactor pattern: factor the command body into a `fn cfd_load_waves_impl(capture_root: &Path, job_id: &str, study_kind: &str, rpm_int: u32) -> Result<serde_json::Value, String>` so tests can call it without a Tauri runtime.
+- [ ] **Step 1: Write the failing test in `crates/cfd-core/src/load.rs`.** Append a new `#[cfg(test)] mod load_waves_tests` block alongside the existing `tests` module. Tests use `tempfile::tempdir` for the capture root and call the pure function directly.
 
 ```rust
+// In crates/cfd-core/src/load.rs, alongside the existing tests module:
+
 #[cfg(test)]
 mod load_waves_tests {
     use super::*;
@@ -784,7 +787,7 @@ mod load_waves_tests {
         write_waves_lines(&dir, &[&l, &l, &l]);
 
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let v = cfd_load_waves_impl(&root, "job-1", "single-rpm", 8000).expect("ok");
+        let v = load_waves_from_dir(&root, "job-1", "single-rpm", 8000).expect("ok");
         assert!(v.get("manifest").is_some());
         assert_eq!(v["frames"].as_array().unwrap().len(), 3);
     }
@@ -797,7 +800,7 @@ mod load_waves_tests {
         write_waves_lines(&dir, &[&l, "not json", &l]);
 
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let err = cfd_load_waves_impl(&root, "job-2", "single-rpm", 8000).unwrap_err();
+        let err = load_waves_from_dir(&root, "job-2", "single-rpm", 8000).unwrap_err();
         assert!(err.contains("line 2"), "got: {err}");
     }
 
@@ -809,7 +812,7 @@ mod load_waves_tests {
         write_waves_lines(&dir, &[&l, &l]); // only 2
 
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let err = cfd_load_waves_impl(&root, "job-3", "single-rpm", 8000).unwrap_err();
+        let err = load_waves_from_dir(&root, "job-3", "single-rpm", 8000).unwrap_err();
         assert!(err.contains("frame") && err.contains("2") && err.contains("5"), "got: {err}");
     }
 
@@ -817,7 +820,7 @@ mod load_waves_tests {
     fn rejects_path_traversal_in_job_id() {
         let (tmp, _dir) = setup("job-4", "single-rpm", 8000);
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let err = cfd_load_waves_impl(&root, "../escape", "single-rpm", 8000).unwrap_err();
+        let err = load_waves_from_dir(&root, "../escape", "single-rpm", 8000).unwrap_err();
         assert!(err.contains("invalid"), "got: {err}");
     }
 
@@ -825,7 +828,7 @@ mod load_waves_tests {
     fn rejects_invalid_study_kind() {
         let (tmp, _dir) = setup("job-5", "single-rpm", 8000);
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let err = cfd_load_waves_impl(&root, "job-5", "wat", 8000).unwrap_err();
+        let err = load_waves_from_dir(&root, "job-5", "wat", 8000).unwrap_err();
         assert!(err.contains("study_kind"), "got: {err}");
     }
 
@@ -840,7 +843,7 @@ mod load_waves_tests {
         writeln!(f, "").unwrap();
         writeln!(f, "{}", l).unwrap();
         let root = tmp.path().join("Helios").join("cfd").join("captures");
-        let v = cfd_load_waves_impl(&root, "job-6", "single-rpm", 8000).expect("ok");
+        let v = load_waves_from_dir(&root, "job-6", "single-rpm", 8000).expect("ok");
         assert_eq!(v["frames"].as_array().unwrap().len(), 2);
     }
 }
@@ -848,37 +851,26 @@ mod load_waves_tests {
 
 - [ ] **Step 2: Run test to verify it fails.**
 
-Run: `cargo test -p helios_desktop_lib --lib load_waves` (or whatever the desktop-lib crate's package name is — check `apps/desktop/src-tauri/Cargo.toml`).
-Expected: FAIL "cannot find function `cfd_load_waves_impl`".
+Run: `cargo test -p cfd-core --lib load_waves`
+Expected: FAIL "cannot find function `load_waves_from_dir`".
 
-- [ ] **Step 3: Implement the command + impl.**
+- [ ] **Step 3: Implement the pure function in `crates/cfd-core/src/load.rs`.**
 
-In `apps/desktop/src-tauri/src/cfd/commands.rs`, right after `cfd_load_capture`:
+Add to the top of the file (alongside `path_under` and `load_config_from_path`):
 
 ```rust
-// ---------------- cfd_load_waves ----------------
-
 use std::io::{BufRead, BufReader};
 
-/// Read the manifest + every frame of `waves.jsonl` for a single capture
-/// directory and return `{ manifest, frames }` as one JSON value. JSONL
-/// is parsed in Rust line-by-line; the first parse error aborts with the
-/// 1-based line number.
-#[tauri::command]
-pub fn cfd_load_waves(
-    app: AppHandle,
-    job_id: String,
-    study_kind: String,
-    rpm_int: u32,
-) -> Result<serde_json::Value, String> {
-    let docs = app.path()
-        .document_dir()
-        .map_err(|e| format!("document_dir: {e}"))?;
-    let root = docs.join("Helios").join("cfd").join("captures");
-    cfd_load_waves_impl(&root, &job_id, &study_kind, rpm_int)
-}
-
-pub(crate) fn cfd_load_waves_impl(
+/// Read manifest.json + every frame of waves.jsonl for one capture
+/// directory under `capture_root`. Returns `{ manifest, frames }` as a
+/// single JSON value (manifest passed through, frames as JSON array).
+/// First parse error aborts with the 1-based line number; no partial
+/// returns. Empty lines are tolerated and skipped.
+///
+/// `capture_root` is the absolute base — typically
+/// `<Documents>/Helios/cfd/captures` — and the inner directory is built
+/// as `<capture_root>/<job_id>/<study_kind>/<rpm_int>/`.
+pub fn load_waves_from_dir(
     capture_root: &std::path::Path,
     job_id: &str,
     study_kind: &str,
@@ -921,7 +913,7 @@ pub(crate) fn cfd_load_waves_impl(
         let line = line_result.map_err(|e| format!("read line {}: {e}", idx + 1))?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            continue; // tolerate blank lines
+            continue;
         }
         let v: serde_json::Value = serde_json::from_str(trimmed)
             .map_err(|e| format!("parse waves.jsonl line {}: {e}", idx + 1))?;
@@ -939,24 +931,57 @@ pub(crate) fn cfd_load_waves_impl(
 }
 ```
 
+If `tempfile` isn't already a dev-dependency of `cfd-core`, add it under `[dev-dependencies]` in `crates/cfd-core/Cargo.toml`. (Check first with `grep tempfile crates/cfd-core/Cargo.toml` — it's likely already present from earlier capture tests.)
+
+- [ ] **Step 4: Run tests to verify they pass.**
+
+Run: `cargo test -p cfd-core --lib load_waves`
+Expected: all 6 PASS.
+
+- [ ] **Step 5: Add the thin Tauri wrapper to `apps/desktop/src-tauri/src/cfd/commands.rs`.**
+
+Right after the existing `cfd_load_capture` function:
+
+```rust
+// ---------------- cfd_load_waves ----------------
+
+/// JSONL-aware sibling of `cfd_load_capture`. Reads manifest + frames
+/// from `<Documents>/Helios/cfd/captures/<job_id>/<study_kind>/<rpm_int>/`
+/// and returns `{ manifest, frames }`. Pure logic lives in
+/// `cfd_core::load::load_waves_from_dir`.
+#[tauri::command]
+pub fn cfd_load_waves(
+    app: AppHandle,
+    job_id: String,
+    study_kind: String,
+    rpm_int: u32,
+) -> Result<serde_json::Value, String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let root = docs.join("Helios").join("cfd").join("captures");
+    cfd_core::load::load_waves_from_dir(&root, &job_id, &study_kind, rpm_int)
+}
+```
+
 Register in `apps/desktop/src-tauri/src/lib.rs` next to `cfd_load_capture`:
 
 ```rust
             cfd::commands::cfd_load_waves,
 ```
 
-- [ ] **Step 4: Run tests to verify they pass.**
+- [ ] **Step 6: Smoke-build the desktop lib.**
 
-Run: `cargo test -p helios_desktop_lib --lib load_waves` (substitute the real crate name).
-Expected: all 6 PASS.
+Run: `cargo check -p helios_desktop_lib` (substitute the real crate name from `apps/desktop/src-tauri/Cargo.toml` `[package].name`).
+Expected: builds clean. Existing engine-sim 45-parity suite must remain untouched — confirm with `cargo test -p engine-sim --tests` if you're worried.
 
-If the crate name is something other than `helios_desktop_lib`, just `cargo test --workspace load_waves` works too. Either way **the existing engine-sim 45-parity suite must remain untouched** — confirm with `cargo test -p engine-sim`.
-
-- [ ] **Step 5: Commit.**
+- [ ] **Step 7: Commit.**
 
 ```bash
-git add apps/desktop/src-tauri/src/cfd/commands.rs apps/desktop/src-tauri/src/lib.rs
-git commit -m "feat(cfd): cfd_load_waves Tauri command — JSONL-aware capture loader (Phase 4)"
+git add crates/cfd-core/src/load.rs crates/cfd-core/Cargo.toml \
+        apps/desktop/src-tauri/src/cfd/commands.rs apps/desktop/src-tauri/src/lib.rs
+git commit -m "feat(cfd): load_waves_from_dir (cfd-core) + cfd_load_waves Tauri wrapper (Phase 4)"
 ```
 
 ---
@@ -966,10 +991,10 @@ git commit -m "feat(cfd): cfd_load_waves Tauri command — JSONL-aware capture l
 ### Task 6: `loadWaves` on the Tauri bridge + mock bridge
 
 **Files:**
-- Modify `apps/desktop/src/modules/cfd/lib/tauriBridge.ts`
-- Search for any mock bridge file (likely in `apps/desktop/src/modules/cfd/__tests__/` or similar) and add a matching mock implementation.
+- Modify `apps/desktop/src/modules/cfd/lib/tauriBridge.ts` (real bridge)
+- Modify `apps/desktop/src/modules/cfd/__tests__/fakes/tauri.ts` (shared mock — there is exactly one, used by every test that needs a bridge)
 
-- [ ] **Step 1: Locate the mock bridge.** Run `grep -rn "loadCapture" apps/desktop/src/modules/cfd | grep -i mock` to find existing mock surface. Most likely it's defined inline in one of the test files (e.g., `CfdContext.test.tsx`). Note its shape — every method that returns a Promise must be present.
+- [ ] **Step 1: Open the shared fake at [`__tests__/fakes/tauri.ts`](../../apps/desktop/src/modules/cfd/__tests__/fakes/tauri.ts).** Note how `loadCapture` is implemented (a configurable closure: `setLoadCapture(impl)` at line ~125 swaps the function the bridge returns). Mirror that pattern for `loadWaves`.
 
 - [ ] **Step 2: Add `loadWaves` to the bridge interface (probably in `tauriBridge.ts` itself or a sibling `types.ts`).** Append:
 
@@ -993,13 +1018,7 @@ loadWaves: (jobId, studyKind, rpmInt) =>
 
 Sits next to `loadCapture` per pattern in [`tauriBridge.ts:63-69`](../../apps/desktop/src/modules/cfd/lib/tauriBridge.ts#L63-L69).
 
-- [ ] **Step 4: Stub on every mock bridge.** For each existing mock (CfdContext tests, ConfigScreen tests, etc.), add:
-
-```ts
-loadWaves: vi.fn().mockResolvedValue({ manifest: {}, frames: [] }),
-```
-
-If there's a shared mock helper, edit it once.
+- [ ] **Step 4: Add `loadWaves` to the shared fake in [`__tests__/fakes/tauri.ts`](../../apps/desktop/src/modules/cfd/__tests__/fakes/tauri.ts).** Following the `loadCapture` pattern at line ~56 and the `setLoadCapture` setter at line ~125, add a sibling `loadWaves` closure + a `setLoadWaves(impl)` setter. The default closure throws `"loadWaves not configured"` so tests that touch it without configuring it get a clear error.
 
 - [ ] **Step 5: Typecheck.**
 
@@ -2214,21 +2233,33 @@ git commit -m "feat(cfd): WaveViewerModal with controls, RPM switcher, view togg
 
 Replace the placeholder span at line 217-219 with a button that opens the modal.
 
-- [ ] **Step 1: Add imports.**
+- [ ] **Step 1: Add imports.** Near the other Phase 3 imports (`PvLoopView`, `PipeProfileView`):
 
 ```tsx
 import { WaveViewerModal } from "./wave-viewer";
 ```
 
-(near the other Phase 3 imports of `PvLoopView`, `PipeProfileView`).
+- [ ] **Step 2: Add `bridge` to the `useCfd` destructure.** [`SingleRpmResults.tsx:15`](../../apps/desktop/src/modules/cfd/results/SingleRpmResults.tsx#L15) currently reads:
 
-- [ ] **Step 2: Add state.** Near the `showPv` / `showProfiles` state declarations:
+```tsx
+const { cancelStudy } = useCfd();
+```
+
+Change to:
+
+```tsx
+const { cancelStudy, bridge } = useCfd();
+```
+
+(`bridge` is already exposed by `CfdContext` — `PvLoopView.tsx:15` uses the same pattern.)
+
+- [ ] **Step 3: Add state.** Near the existing `showPv` / `showProfiles` declarations:
 
 ```tsx
 const [showWaveViewer, setShowWaveViewer] = useState(false);
 ```
 
-- [ ] **Step 3: Replace the placeholder span.** Find the existing block:
+- [ ] **Step 4: Replace the placeholder span.** Find the existing block:
 
 ```tsx
 {study.params.captureWaves && (
@@ -2250,7 +2281,7 @@ Replace with:
 )}
 ```
 
-- [ ] **Step 4: Mount the modal.** At the end of the returned JSX (after the existing modals/sections, but inside the root element), add:
+- [ ] **Step 5: Mount the modal.** At the end of the returned JSX (after the existing modals/sections, but inside the root element), add:
 
 ```tsx
 {study.params.captureWaves && (
@@ -2265,14 +2296,12 @@ Replace with:
 )}
 ```
 
-Make sure `bridge` is in scope (it's accessed via `useCfd()` per [PvLoopView.tsx:15](../../apps/desktop/src/modules/cfd/results/PvLoopView.tsx#L15)) — if not, destructure it from the same hook used in this file.
-
-- [ ] **Step 5: Typecheck + tests.**
+- [ ] **Step 6: Typecheck + tests.**
 
 Run: `pnpm --filter @helios/desktop typecheck && pnpm --filter @helios/desktop test`
 Expected: zero new errors, all tests green.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
 ```bash
 git add apps/desktop/src/modules/cfd/results/SingleRpmResults.tsx
@@ -2288,48 +2317,68 @@ git commit -m "feat(cfd): wire WaveViewerModal into SingleRpmResults (replaces P
 
 In SweepResults the per-RPM expansion row has the Show P-V / Show profiles toggles. Add an "Open wave viewer" button there too, and pass `sweepCapturedRpms` to the modal.
 
+**Schema notes (verified against [`state/types.ts:201-247`](../../apps/desktop/src/modules/cfd/state/types.ts)):**
+- `SweepStudy.points: SweepPoint[]` — the array lives on the study itself, **not** under `study.summary`.
+- `SweepPoint` has `rpm: number`, `captureDir?: string`. There is **no `rpmInt`** field; convert with `Math.round(p.rpm)`.
+- `SweepStudy.summary?: SweepDoneSummary` is only `{ nRpms, nCompleted, totalStepCount, totalWallTimeS }` — it has no per-point data.
+- `useCfd()` exposes `bridge` (same source PvLoopView uses).
+
 - [ ] **Step 1: Locate the per-RPM expansion block.**
 
 ```bash
-grep -n "captureWaves\|capturePvLoops\|capturePipeProfiles" apps/desktop/src/modules/cfd/results/SweepResults.tsx
+grep -n "captureWaves\|capturePvLoops\|capturePipeProfiles\|Math.round(p.rpm)" apps/desktop/src/modules/cfd/results/SweepResults.tsx
 ```
 
-The structure mirrors SingleRpmResults — find the Captures section conditioned on `study.params.captureWaves`.
+The existing per-row code already uses `Math.round(p.rpm)` to derive the `rpmInt` it passes to `PvLoopView` / `PipeProfileView`. Reuse that pattern.
 
-- [ ] **Step 2: Compute the list of captured RPMs once at the top of the component.**
+- [ ] **Step 2: Add imports + bridge destructure.**
+
+```tsx
+import { useMemo, useState } from "react";  // ensure useMemo + useState are imported
+import { WaveViewerModal } from "./wave-viewer";
+```
+
+If the component currently destructures from `useCfd()`, add `bridge`:
+
+```tsx
+const { /* existing */, bridge } = useCfd();
+```
+
+- [ ] **Step 3: Compute the list of captured RPMs once at the top of the component.**
 
 ```tsx
 const sweepCapturedRpms = useMemo(
-  () => study.summary?.points
-    ?.filter((p) => p.captureDir != null)
-    .map((p) => p.rpmInt) ?? [],
-  [study.summary],
+  () =>
+    (study.points ?? [])
+      .filter((p) => p.captureDir != null)
+      .map((p) => Math.round(p.rpm)),
+  [study.points],
 );
 ```
 
-- [ ] **Step 3: Add state for the modal (one per expanded RPM, or one global state with the RPM also tracked).** A single global is simpler:
+- [ ] **Step 4: Add modal state.**
 
 ```tsx
 const [waveViewerRpm, setWaveViewerRpm] = useState<number | null>(null);
 ```
 
-- [ ] **Step 4: Replace the wave-viewer placeholder (if any) in the per-RPM expansion** with:
+- [ ] **Step 5: Add the button inside the per-RPM expansion's Captures section** (next to the existing Show P-V / Show profiles toggles — inside the same `study.params.captureWaves` branch if there's a placeholder there; otherwise alongside the other capture toggles):
 
 ```tsx
 {study.params.captureWaves && (
   <button
     type="button"
     className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
-    onClick={() => setWaveViewerRpm(rpmInt)}
+    onClick={() => setWaveViewerRpm(Math.round(p.rpm))}
   >
     Open wave viewer ↗
   </button>
 )}
 ```
 
-(If SweepResults didn't have a placeholder span, just add this button inside the existing Captures section so it sits next to Show P-V / Show profiles.)
+`p` here is the `SweepPoint` from the per-row map. Confirm the loop variable name with the grep above — it may be `point` instead of `p`.
 
-- [ ] **Step 5: Mount one modal at the bottom of the SweepResults JSX.**
+- [ ] **Step 6: Mount the modal once at the bottom of the SweepResults JSX** (outside the per-row map):
 
 ```tsx
 {study.params.captureWaves && waveViewerRpm != null && (
@@ -2345,12 +2394,12 @@ const [waveViewerRpm, setWaveViewerRpm] = useState<number | null>(null);
 )}
 ```
 
-- [ ] **Step 6: Typecheck + tests.**
+- [ ] **Step 7: Typecheck + tests.**
 
 Run: `pnpm --filter @helios/desktop typecheck && pnpm --filter @helios/desktop test`
 Expected: zero new errors, all tests green.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 8: Commit.**
 
 ```bash
 git add apps/desktop/src/modules/cfd/results/SweepResults.tsx
