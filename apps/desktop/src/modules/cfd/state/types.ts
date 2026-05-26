@@ -459,3 +459,58 @@ export interface PipeProfile {
 export interface PipeProfileArtifact {
   profiles: PipeProfile[];
 }
+
+// --- Wave viewer (Phase 4) ---
+
+export type WaveField = "p" | "u" | "T" | "rho" | "Mach";
+export type WaveSizeField = "p" | "u" | "T" | "rho";  // Mach not allowed for size
+export type WaveCylField = "x_b" | "p" | "T";
+
+export interface WavePipeMeta {
+  role: PipeRole;
+  label: string;
+  nCells: number;
+  lengthM: number;
+  index: number;
+}
+
+export interface WaveFrameManifest {
+  jobId: string;
+  rpm: number;
+  nPipes: number;
+  pipes: WavePipeMeta[];
+  nCylinders: number;
+  stepStride: number;
+  fields: string[];               // always ["rho", "u", "p", "T"]
+  frameCount: number;
+  thetaStartDeg: number;
+  thetaEndDeg: number;
+  capturedCycle: number;
+  incomplete: boolean;
+}
+
+/** Raw on-disk frame shape. Only used during the loader's parse step. */
+export interface RawWaveFrame {
+  theta: number;
+  tMs: number;
+  /** pipes[pipeIdx][fieldIdx][cellIdx]; fieldIdx is 0=rho, 1=u, 2=p, 3=T. */
+  pipes: [number[], number[], number[], number[]][];
+  cyl: { v: number; p: number; t: number; xB: number }[];
+}
+
+/** In-memory packed shape consumed by the renderers. Built once per load. */
+export interface WaveCapturePacked {
+  manifest: WaveFrameManifest;
+  /** length = frameCount */
+  theta: Float32Array;
+  /** length = frameCount */
+  tMs: Float32Array;
+  /** pipeArr[pipeIdx][fieldIdx] = Float32Array(frameCount * nCells), row-major [frame][cell]. */
+  pipeArr: Float32Array[][];
+  /** cylArr[cylIdx][fieldIdx] = Float32Array(frameCount). fields: 0=V, 1=p, 2=T, 3=xB. */
+  cylArr: Float32Array[][];
+  /** Per-(pipe, field) min/max over the whole cycle, for colormap auto-range. */
+  pipeRange: { min: number; max: number }[][];
+  /** Per-(cyl, field) min/max. */
+  cylRange: { min: number; max: number }[][];
+}
