@@ -19,7 +19,6 @@ use engine_sim::model::sdm26::{
 };
 
 use crate::capture::{PipeProfileRecorder, PvLoopRecorder, WaveFrameWriter};
-use crate::capture::waves::pick_stride;
 use crate::dto::{
     ErrorReason, JobCancelledEvent, JobDoneEvent, JobDoneSummary, JobErrorEvent,
     JobProgressEvent, JobProgressPayload, JobProgressSingleRpm, JobStartedEvent,
@@ -128,7 +127,7 @@ fn capture_one_extra_cycle(
     captured_cycle: i64,
     rpm_dir: &Path,
     flags: CaptureFlags,
-    prev_cycle_step_count: u64,
+    _prev_cycle_step_count: u64,
 ) -> Option<PathBuf> {
     if !(flags.waves || flags.pv_loops || flags.pipe_profiles) {
         return None;
@@ -141,7 +140,12 @@ fn capture_one_extra_cycle(
         Some(PvLoopRecorder::new(eng.cylinders.len()))
     } else { None };
     let mut waves = if flags.waves {
-        let stride = pick_stride(prev_cycle_step_count.max(1), 600);
+        // Write every step. `prev_cycle_step_count` is the cumulative
+        // warmup step count, not per-cycle, so the stride heuristic
+        // under-samples the converged capture cycle severely. A converged
+        // cycle is ~2k steps → ~2 MB JSONL, which is fine. Long startup
+        // cycles aren't expected to be the capture target.
+        let stride = 1u64;
         // Use a placeholder job_id; runner overwrites manifest if needed.
         WaveFrameWriter::create(rpm_dir, String::new(), eng, rpm, stride).ok()
     } else { None };

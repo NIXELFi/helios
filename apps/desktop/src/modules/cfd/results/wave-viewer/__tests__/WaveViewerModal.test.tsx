@@ -27,8 +27,9 @@ describe("WaveViewerModal", () => {
       clearRect: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(),
       beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
       scale: vi.fn(), setTransform: vi.fn(), createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(0) })),
-      putImageData: vi.fn(),
+      putImageData: vi.fn(), fillText: vi.fn(),
       fillStyle: "", strokeStyle: "", lineWidth: 1,
+      font: "", textAlign: "start", textBaseline: "alphabetic",
     })) as any;
   });
 

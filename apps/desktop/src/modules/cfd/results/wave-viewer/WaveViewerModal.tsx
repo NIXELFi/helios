@@ -50,7 +50,7 @@ function WaveViewerModalBody(props: Props) {
   const [field, setField] = useState<WaveField>("p");
   const [sizeField, setSizeField] = useState<WaveSizeField>("p");
   const [cylField, setCylField] = useState<WaveCylField>("x_b");
-  const [speed, setSpeed] = useState<number>(0.25);
+  const [speed, setSpeed] = useState<number>(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameIdx, setFrameIdx] = useState(0);
   const [waterfallPipeIdx, setWaterfallPipeIdx] = useState(0);
@@ -63,11 +63,11 @@ function WaveViewerModalBody(props: Props) {
   useEffect(() => {
     if (!isPlaying || !data) return;
     const nFrames = data.manifest.frameCount;
-    // cycleSeconds = Δθ_deg / (rpm × 360 deg/rev × 1 min/60 s) = Δθ / (rpm × 6).
-    const cycleSeconds = Math.max(
-      (data.manifest.thetaEndDeg - data.manifest.thetaStartDeg) / Math.max(1, data.manifest.rpm) / 6,
-      1e-3,
-    );
+    // 1× = cycle plays in VISUAL_CYCLE_SECONDS of real wall-clock time.
+    // (Real engine time would be ~15 ms at 8000 rpm — unfollowable. The
+    // viewer is for visualization, not playback timing.)
+    const VISUAL_CYCLE_SECONDS = 3.0;
+    const cycleSeconds = VISUAL_CYCLE_SECONDS;
     lastTickRef.current = performance.now();
 
     const tick = (now: number) => {

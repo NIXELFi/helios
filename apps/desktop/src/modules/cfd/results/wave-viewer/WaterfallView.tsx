@@ -111,20 +111,51 @@ export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Pro
     ctx.fillRect(0, y - 1, canvas.width, 2);
   }, [packed.manifest.frameCount, frameIdx]);
 
+  const pipeMeta = packed.manifest.pipes[pipeIdx]!;
+  const fieldLabel = field === "p" ? "pressure"
+                   : field === "u" ? "velocity"
+                   : field === "T" ? "temperature"
+                   : field === "rho" ? "density"
+                   : "Mach";
+  const lengthMm = (pipeMeta.lengthM * 1000).toFixed(0);
+  const thetaStart = packed.manifest.thetaStartDeg.toFixed(0);
+  const thetaEnd = packed.manifest.thetaEndDeg.toFixed(0);
+
   return (
-    <div className="relative inline-block">
-      <canvas ref={canvasRef} className="block" />
-      <canvas
-        ref={overlayRef}
-        className="absolute inset-0 cursor-crosshair"
-        onClick={(e) => {
-          const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
-          const y = e.clientY - rect.top;
-          const t = Math.max(0, Math.min(1, y / rect.height));
-          const idx = Math.round(t * (packed.manifest.frameCount - 1));
-          onScrub(idx);
-        }}
-      />
+    <div className="flex flex-col items-start gap-1 p-2 text-[10px] text-helios-dim">
+      <div className="text-[12px] text-helios-text">
+        <span className="font-mono">{pipeMeta.label}</span>
+        <span className="ml-2">·</span>
+        <span className="ml-2">{fieldLabel}</span>
+      </div>
+      <div className="flex gap-2">
+        {/* Y-axis label */}
+        <div className="flex flex-col justify-between text-right" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", lineHeight: "1" }}>
+          <span>θ {thetaStart}°</span>
+          <span>θ {thetaEnd}°</span>
+        </div>
+        {/* The two stacked canvases */}
+        <div className="relative inline-block">
+          <canvas ref={canvasRef} className="block" />
+          <canvas
+            ref={overlayRef}
+            className="absolute inset-0 cursor-crosshair"
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+              const y = e.clientY - rect.top;
+              const t = Math.max(0, Math.min(1, y / rect.height));
+              const idx = Math.round(t * (packed.manifest.frameCount - 1));
+              onScrub(idx);
+            }}
+          />
+        </div>
+      </div>
+      {/* X-axis label */}
+      <div className="flex w-full justify-between" style={{ marginLeft: "2rem" }}>
+        <span>0 mm</span>
+        <span className="text-helios-text">position →</span>
+        <span>{lengthMm} mm</span>
+      </div>
     </div>
   );
 }

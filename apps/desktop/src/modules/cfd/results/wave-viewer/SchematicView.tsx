@@ -9,6 +9,7 @@ import type {
   WaveCapturePacked,
   WaveCylField,
   WaveField,
+  WavePipeMeta,
   WaveSizeField,
 } from "../../state/types";
 
@@ -94,6 +95,25 @@ function draw(
   for (let ci = 0; ci < packed.manifest.nCylinders; ci++) {
     drawCylinder(ctx, packed, frameIdx, ci, cylField, cylinderCenters[ci]!, cylinderRowY, cylinderBaseR);
   }
+
+  // INTAKE / EXHAUST banners.
+  ctx.fillStyle = "#5A5F66";
+  ctx.font = "bold 12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("INTAKE", width / 2, 4);
+  ctx.textBaseline = "bottom";
+  ctx.fillText("EXHAUST", width / 2, height - 4);
+}
+
+function labelForPipe(meta: WavePipeMeta): string {
+  // Compact display: "plenum", "R1", "P3", "S2", "collector"
+  const m = meta.label.match(/^(runner|primary|secondary)_(\d+)$/);
+  if (m) {
+    const tag = m[1]!.charAt(0).toUpperCase();
+    return `${tag}${m[2]}`;
+  }
+  return meta.label;
 }
 
 function fieldArr(packed: WaveCapturePacked, pipeIdx: number, field: WaveField): {
@@ -161,6 +181,13 @@ function drawHorizontalPipe(
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(rect.x + c * cellW, midY - h / 2, cellW, h);
   }
+
+  // Pipe label (top-left corner inside the pipe).
+  ctx.fillStyle = "#9097A0";
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), rect.x + 4, rect.y + 4);
 }
 
 function drawVerticalPipe(
@@ -196,6 +223,13 @@ function drawVerticalPipe(
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(midX - w / 2, rect.y + c * cellH, w, cellH);
   }
+
+  // Pipe label (top, above pipe).
+  ctx.fillStyle = "#9097A0";
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), rect.x + rect.w / 2, rect.y - 2);
 }
 
 function drawCylinder(
@@ -240,6 +274,13 @@ function drawCylinder(
   ctx.strokeStyle = "#2A2C32";
   ctx.lineWidth = 1;
   ctx.stroke();
+
+  // Cylinder number.
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "bold 11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(ci + 1), cx, cy);
 }
 
 function clamp01(x: number): number {
