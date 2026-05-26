@@ -65,12 +65,15 @@ export function useDownloadMode(vaultId: VaultId | null): {
 
   const setMode = useCallback((next: DownloadMode) => {
     if (!vaultId) return;
-    setMap((prev) => {
-      const updated: Map = { ...prev, [vaultId]: next };
-      writeMap(updated);
-      broadcastMode(updated);
-      return updated;
-    });
+    // Compute the new map outside the state updater so the side effects
+    // (writeMap, broadcastMode) fire exactly once even under React's
+    // StrictMode double-invoke. Reading via readMap() at this moment is
+    // the authoritative source — picks up cross-tab updates the local
+    // `map` state may not have observed yet via the storage event.
+    const updated: Map = { ...readMap(), [vaultId]: next };
+    writeMap(updated);
+    broadcastMode(updated);
+    setMap(updated);
   }, [vaultId]);
 
   return { mode, setMode };

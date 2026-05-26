@@ -5,6 +5,23 @@ import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { gzipBytes } from "./compression";
 
+/**
+ * Result of a single useAddLocalFile().run(...) call.
+ *
+ * `ok: true` means the file is in the vault with a version row pointing at
+ * the uploaded sha. `lockAcquired` distinguishes whether the caller now holds
+ * an exclusive lock on the file — false means the file already existed and
+ * another user holds the lock. Callers should NOT proceed to edit/check-in
+ * without first acquiring the lock when `lockAcquired === false`.
+ *
+ * `alreadyExisted` is true on the idempotent-replay path (file existed with
+ * matching sha; no new version was created). Useful to distinguish "added
+ * something new" from "this file was already up-to-date in the vault."
+ */
+export type AddLocalFileResult =
+  | { ok: false; error: string }
+  | { ok: true; lockAcquired: boolean; alreadyExisted: boolean };
+
 const BUCKET = "vault-objects";
 
 async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
@@ -113,10 +130,11 @@ export function useAddLocalFile() {
    * error (ultrareview 2026-05-11, finding H13). The RPC fixes that.
    */
   const run = useCallback(
-    async (vaultId: VaultId, local: LocalFile): Promise<boolean> => {
+    async (vaultId: VaultId, local: LocalFile): Promise<AddLocalFileResult> => {
       if (!user) {
-        setError(new Error("not authenticated"));
-        return false;
+        const msg = "not authenticated";
+        setError(new Error(msg));
+        return { ok: false, error: msg };
       }
       setLoading(true);
       setError(null);
@@ -146,7 +164,7 @@ export function useAddLocalFile() {
         }
 
         // 4. Atomic create-file + version 1 + acquire-lock.
-        const { error: rpcErr } = await client.rpc("pdm_add_and_lock", {
+        const { data, error: rpcErr } = await client.rpc("pdm_add_and_lock", {
           p_vault_id: vaultId,
           p_folder_id: folderId,
           p_name: fileName,
@@ -156,12 +174,24 @@ export function useAddLocalFile() {
         });
         if (rpcErr) throw new Error(`add_and_lock: ${rpcErr.message}`);
 
+        // Surface the RPC's return: lock_id is null when the file already
+        // existed and another user holds the lock. The previous implementation
+        // returned `true` regardless, so the UI flashed a green tick and the
+        // user only learned about the lock conflict at check-in time.
+        const rpc = (data ?? {}) as {
+          lock_id?: string | null;
+          created?: boolean;
+        };
+        const lockAcquired = rpc.lock_id != null;
+        const alreadyExisted = rpc.created === false;
+
         setLoading(false);
-        return true;
+        return { ok: true, lockAcquired, alreadyExisted };
       } catch (e) {
-        setError(e instanceof Error ? e : new Error(String(e)));
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(new Error(msg));
         setLoading(false);
-        return false;
+        return { ok: false, error: msg };
       }
     },
     [client, user],

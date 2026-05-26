@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVaults } from "./useVaults";
 import type { Vault, VaultId } from "./types";
 
@@ -51,11 +51,24 @@ export function useActiveVault(): {
 } {
   const { data: vaults, loading, refetch } = useVaults();
   const [stored, setStored] = useState<VaultId | null>(() => readStored());
+  // Tracks whether the user has explicitly called setActiveVaultId during this
+  // hook's lifetime. Used to distinguish two "stored id not in vaults" cases:
+  //   1. Stale stored from a prior session (vault was revoked / deleted) →
+  //      should fall back to the most-recently-created vault and persist.
+  //   2. Freshly-set during this session (user just created a vault and
+  //      selected it; useVaults's cache hasn't refetched yet) → must trust
+  //      the user's choice and wait for useVaults to catch up.
+  const userSetIdInSessionRef = useRef(false);
 
   useEffect(() => {
     // Cross-window sync (different Helios windows on the same machine).
     const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) setStored(e.newValue);
+      if (e.key === STORAGE_KEY) {
+        // Treat a sibling-window's setActiveVaultId the same as our own — the
+        // user picked this vault, even if our cache hasn't caught up yet.
+        userSetIdInSessionRef.current = true;
+        setStored(e.newValue);
+      }
     };
     window.addEventListener("storage", onStorage);
     // Same-window sync (this is the one the UI relies on for instant updates
@@ -68,17 +81,24 @@ export function useActiveVault(): {
     };
   }, []);
 
-  // Resolution: stored id (if valid) → most-recently-created → null.
+  // Resolution: stored id (if still valid OR freshly chosen) → most-recently-
+  // created → null.
   const resolved = useMemo<VaultId | null>(() => {
     if (!vaults || vaults.length === 0) return null;
     if (stored && vaults.some((v) => v.id === stored)) return stored;
+    // stored is set but not in the current vaults list. If the user set it
+    // during this session (fresh create), trust them — useVaults will catch
+    // up shortly. Otherwise it's stale and we fall back.
+    if (stored && userSetIdInSessionRef.current) return stored;
     const sorted = [...vaults].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     return sorted[0]?.id ?? null;
   }, [vaults, stored]);
 
-  // Persist a corrected choice (stored was stale or missing) once vaults load.
+  // Persist a corrected choice (stored was stale on mount) once vaults load.
+  // Do NOT overwrite a stored value that was set by the user during this
+  // session — useVaults's refetch will surface the new vault momentarily.
   useEffect(() => {
-    if (resolved && resolved !== stored) {
+    if (resolved && resolved !== stored && !userSetIdInSessionRef.current) {
       writeStored(resolved);
       setStored(resolved);
     }
@@ -90,6 +110,7 @@ export function useActiveVault(): {
   );
 
   const setActiveVaultId = useCallback((id: VaultId) => {
+    userSetIdInSessionRef.current = true;
     writeStored(id);
     // Broadcast to every hook instance in this window (incl. self) so all
     // consumers re-render with the new vault id immediately.

@@ -32,7 +32,13 @@ export function useAllFiles(vault_id: VaultId | undefined): QueryResult<VaultFil
     setError(null);
     (async () => {
       const { rows, error: err } = await fetchAllRows<VaultFile>(
-        () => (client.from("files") as any).select("*").eq("vault_id", vault_id),
+        // Stable ORDER BY for safe pagination — see paginate.ts. `id` is the
+        // PK so order is guaranteed stable across pages; the caller sorts
+        // by name/path before rendering.
+        () => (client.from("files") as any)
+          .select("*")
+          .eq("vault_id", vault_id)
+          .order("id", { ascending: true }),
       );
       if (!mounted) return;
       if (err) {

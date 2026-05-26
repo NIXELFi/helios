@@ -74,6 +74,12 @@ export function useAutoSync(input: {
   // pending) — the in-flight run only needs `captured === activeGenRef.current`
   // to be allowed to write.
   const activeGenRef = useRef(0);
+  // AbortController for the currently-running generation. Supersession (the
+  // trigger effect re-firing while a run is in flight, or unmount) calls
+  // abort() so any in-flight downloadVersionOnce stops short of writing its
+  // bytes to disk. Without this the post-fetch writeFile of a superseded run
+  // could clobber the new run's freshly-written file (torn-write race).
+  const activeAbortRef = useRef<AbortController | null>(null);
 
   // Monotonic counter for task ids. We use ids — not filenames — to dedupe
   // `activeFiles`: two files with the same basename in different folders are
@@ -106,6 +112,10 @@ export function useAutoSync(input: {
     if (activeGenRef.current !== 0) return;
     const myGen = ++generationSeq.current;
     activeGenRef.current = myGen;
+    // Fresh AbortController for this generation. Aborting it interrupts the
+    // download path before its terminal writeFile.
+    const myAbort = new AbortController();
+    activeAbortRef.current = myAbort;
     // Helper: a write is only applied if our generation is still authoritative.
     // If a superseding pass has bumped activeGenRef, our partial state would
     // overwrite the newer pass's writes (or commit results from stale closure
@@ -176,7 +186,7 @@ export function useAutoSync(input: {
         const t = tasks[i]!;
         activeTaskIds.set(t.id, t.name);
         guardedSet((s) => ({ ...s, activeFiles: [...s.activeFiles, t.name] }));
-        const ok = await downloadRunRef.current(t.sha, t.dest);
+        const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal);
         // Count outcomes locally even if we're superseded, so the run's local
         // totals stay consistent — they just won't reach state.
         if (ok) downloaded++; else failed++;
@@ -210,10 +220,23 @@ export function useAutoSync(input: {
         activeFiles: [],
       }));
       activeGenRef.current = 0;
+      // The AbortController served its purpose — clear so a stale reference
+      // doesn't accidentally abort a future generation's signal.
+      if (activeAbortRef.current === myAbort) activeAbortRef.current = null;
       lastFinishedAt.current = Date.now();
       if (downloaded > 0) onCompleteRef.current?.();
     }
   }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders]);
+
+  // Unmount cleanup: abort any in-flight pass so its writeFile doesn't fire
+  // after the consumer is gone.
+  useEffect(() => {
+    return () => {
+      activeAbortRef.current?.abort();
+      activeAbortRef.current = null;
+      activeGenRef.current = 0;
+    };
+  }, []);
 
   // Cooldown: at least this many ms between the end of one pass and the start
   // of the next. Stops dependency churn / rescan-after-pass / realtime ticks
@@ -234,9 +257,14 @@ export function useAutoSync(input: {
   useEffect(() => {
     if (!enabled) return;
     // Supersede any in-flight generation: the closure inside that run holds
-    // stale deps, so its writes from this point on must not land.
+    // stale deps, so its writes from this point on must not land. Also abort
+    // its AbortController so any pending downloadVersionOnce drops its bytes
+    // before writeFile rather than potentially racing with the new run's
+    // write to the same dest path.
     if (activeGenRef.current !== 0) {
       activeGenRef.current = 0;
+      activeAbortRef.current?.abort();
+      activeAbortRef.current = null;
     }
     if (pending.current) return; // already scheduled
     const wait = Math.max(0, COOLDOWN_MS - (Date.now() - lastFinishedAt.current));

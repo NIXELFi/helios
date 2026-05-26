@@ -80,4 +80,26 @@ describe("useActiveVault", () => {
     expect(result.current.activeVaultId).toBeNull();
     expect(result.current.activeVault).toBeNull();
   });
+
+  it("does not overwrite a freshly-set vault id when useVaults hasn't refetched yet", async () => {
+    // Repro of the bug surfaced in the 2026-05-25 audit: useCreateVault
+    // succeeds, the UI calls setActiveVaultId(newId), but the useVaults cache
+    // still shows the old list. Without the fix, resolution falls back to
+    // "most-recently-created" and silently overwrites the user's choice.
+    const client = clientWith([
+      { id: "a", name: "A", created_at: "2026-05-01T00:00:00Z" },
+    ]);
+    const { result } = renderHook(() => useActiveVault(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.activeVaultId).toBe("a"));
+
+    // User creates vault "b" and immediately selects it. useVaults still
+    // returns only [A] until the next refetch lands.
+    act(() => { result.current.setActiveVaultId("b"); });
+
+    // Resolution must trust the user's choice even though "b" isn't in the
+    // cached vaults list yet. Without the fix, this asserts "a" because the
+    // effect overwrites stored back to the fallback.
+    await waitFor(() => expect(result.current.activeVaultId).toBe("b"));
+    expect(localStorage.getItem("helios.vault.activeVaultId")).toBe("b");
+  });
 });

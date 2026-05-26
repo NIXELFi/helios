@@ -40,10 +40,14 @@ export function useLatestVersions(fileIds: FileId[]) {
       for (let i = 0; i < fileIds.length; i += ID_CHUNK) {
         const slice = fileIds.slice(i, i + ID_CHUNK);
         const { rows, error: err } = await fetchAllRows<Version>(
+          // Two ORDER BY clauses for stable pagination: version_num is unique
+          // PER file but many files in the IN slice can share version_num=1,
+          // so add file_id as the tiebreaker to keep page boundaries stable.
           () => (client.from("versions") as any)
             .select("*")
             .in("file_id", slice)
-            .order("version_num", { ascending: false }),
+            .order("version_num", { ascending: false })
+            .order("file_id", { ascending: true }),
         );
         if (!mounted) return;
         if (err) {

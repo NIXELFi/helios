@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, QueryResult, Version } from "./types";
+import { fetchAllRows } from "./paginate";
 
 export function useVersions(file_id: FileId | undefined): QueryResult<Version[]> {
   const client = useSupabaseClient();
@@ -20,16 +21,21 @@ export function useVersions(file_id: FileId | undefined): QueryResult<Version[]>
     setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await (client.from("versions") as any)
-        .select("*")
-        .eq("file_id", file_id)
-        .order("version_num", { ascending: false });
+      // Paginated via fetchAllRows — long-lived files can exceed PostgREST's
+      // 1000-row cap over years of check-ins, and silent truncation here would
+      // drop the oldest history from the version panel.
+      const { rows, error: err } = await fetchAllRows<Version>(
+        () => (client.from("versions") as any)
+          .select("*")
+          .eq("file_id", file_id)
+          .order("version_num", { ascending: false }),
+      );
       if (!mounted) return;
       if (err) {
-        setError(err instanceof Error ? err : new Error(String(err.message ?? err)));
+        setError(err);
         setData(null);
       } else {
-        setData(rows ?? []);
+        setData(rows);
       }
       setLoading(false);
     })();

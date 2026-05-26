@@ -19,11 +19,16 @@ function makeClient(rows: any[]): SupabaseClient {
         return {
           select: () => ({
             in: () => ({
+              // Two .order() calls: (version_num desc, file_id asc) — the
+              // second is the pagination-stability tiebreaker added in the
+              // 2026-05-25 audit fix.
               order: () => ({
-                // The hook chunks ids into batches and paginates each batch.
-                // Returning all rows on the first .range() exits the loop.
-                range: (_from: number, _to: number) =>
-                  Promise.resolve({ data: rows, error: null }),
+                order: () => ({
+                  // The hook chunks ids into batches and paginates each batch.
+                  // Returning all rows on the first .range() exits the loop.
+                  range: (_from: number, _to: number) =>
+                    Promise.resolve({ data: rows, error: null }),
+                }),
               }),
             }),
           }),

@@ -75,7 +75,22 @@ export function useBulkDownload(opts: {
   const [skipped, setSkipped] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [active, setActive] = useState<Array<{ id: FileId; name: string }>>([]);
-  const cancelRef = useRef(false);
+  // Monotonic generation counter. Each start() captures a new generation;
+  // cancel() and a subsequent start() both increment it. Workers carry their
+  // captured generation through every loop iteration and the post-await
+  // settle; when their generation no longer matches genRef.current, they
+  // exit immediately and stop touching shared state.
+  //
+  // The previous boolean cancelRef had a Cancel→Start race: start() reset it
+  // to false, so any in-flight worker whose download was still awaiting would
+  // see the flag flip back, loop, and pull the next item from its (now-stale)
+  // downloadable closure — leaking run-1 work into run-2's pool.
+  const genRef = useRef(0);
+  // AbortController for the active run. Cancel and start both abort the
+  // previous controller so downloadVersionOnce drops in-flight bytes before
+  // their terminal writeFile — guarantees Cancel actually halts disk writes,
+  // not just future iterations of the worker loop.
+  const abortRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const bytesDoneRef = useRef(0);
   const [, setRateTick] = useState(0);
@@ -94,6 +109,16 @@ export function useBulkDownload(opts: {
     });
     if (downloadable.length === 0) return;
 
+    // Bump the generation. Any workers still alive from a previous run see
+    // the mismatch on their next loop iteration / post-await check and exit.
+    const myGen = ++genRef.current;
+    // Abort the previous controller so any in-flight downloads from the
+    // last run skip their writeFile, then start a fresh controller for this
+    // run's downloads.
+    abortRef.current?.abort();
+    const myAbort = new AbortController();
+    abortRef.current = myAbort;
+
     setOpen(true);
     setRunning(true);
     setTotal(downloadable.length);
@@ -103,7 +128,6 @@ export function useBulkDownload(opts: {
     setLastError(null);
     setActive([]);
     bytesDoneRef.current = 0;
-    cancelRef.current = false;
     startedAtRef.current = Date.now();
 
     // Build the effective destination directory:
@@ -132,11 +156,13 @@ export function useBulkDownload(opts: {
     // folders with the same name don't collide on the React render key.
     const activeMap = new Map<FileId, string>();
     let cursor = 0;
+    const isCurrent = () => myGen === genRef.current;
     const refreshActive = () => {
+      if (!isCurrent()) return;
       setActive(Array.from(activeMap.entries()).map(([id, name]) => ({ id, name })));
     };
     async function worker() {
-      while (!cancelRef.current) {
+      while (isCurrent()) {
         const i = cursor++;
         if (i >= downloadable.length) return;
         const file = downloadable[i]!;
@@ -152,6 +178,7 @@ export function useBulkDownload(opts: {
         // their edit; the bulk pull is not the right tool to "fix" diffs.
         try {
           const info = await stat(dest);
+          if (!isCurrent()) return;
           if (info.isFile) {
             if (info.size === version.size_bytes) {
               setSkipped((s) => s + 1);
@@ -167,9 +194,16 @@ export function useBulkDownload(opts: {
           // File doesn't exist — fall through to download.
         }
 
+        if (!isCurrent()) return;
         activeMap.set(file.id, file.name);
         refreshActive();
-        const result = await downloadVersionOnce(client, version.sha256, dest);
+        const result = await downloadVersionOnce(client, version.sha256, dest, {
+          signal: myAbort.signal,
+        });
+        // Post-await guard: if a Cancel/Restart happened while we were
+        // downloading, drop this result on the floor — it belongs to a
+        // superseded run and must not touch the current generation's state.
+        if (!isCurrent()) return;
         activeMap.delete(file.id);
         refreshActive();
         if (result.ok) {
@@ -183,12 +217,30 @@ export function useBulkDownload(opts: {
     }
     const workerCount = Math.min(WORKERS, downloadable.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    setRunning(false);
-    setActive([]);
-    onDone?.();
+    // Only flip terminal state if we're still the current generation —
+    // a superseded run finishing late must not clobber the active run's UI.
+    if (isCurrent()) {
+      setRunning(false);
+      setActive([]);
+      onDone?.();
+      // Controller served its purpose; clear so a stale reference doesn't
+      // abort a future controller.
+      if (abortRef.current === myAbort) abortRef.current = null;
+    }
   }, [heliosRoot, vaultName, folders, versionsByFileId, client, onPickedRoot, onDone]);
 
-  const cancel = useCallback(() => { cancelRef.current = true; }, []);
+  const cancel = useCallback(() => {
+    // Bumping the generation immediately invalidates every in-flight worker.
+    // Their post-await guard sees the mismatch and returns without writing
+    // to shared state; a subsequent start() bumps again and spawns fresh
+    // workers under the new generation. Also abort the controller so any
+    // download already past the gen-check skips its terminal writeFile.
+    genRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+    setActive([]);
+  }, []);
   const close = useCallback(() => { if (!running) setOpen(false); }, [running]);
 
   return {

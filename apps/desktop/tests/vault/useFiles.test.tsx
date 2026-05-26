@@ -23,8 +23,10 @@ function mockClient(
           eq: (col: string, val: any) => {
             filterAssertion(col, val);
             return {
-              range: (_from: number, _to: number) =>
-                Promise.resolve({ data: rows, error }),
+              order: (_orderCol: string, _opts: { ascending: boolean }) => ({
+                range: (_from: number, _to: number) =>
+                  Promise.resolve({ data: rows, error }),
+              }),
             };
           },
         }),

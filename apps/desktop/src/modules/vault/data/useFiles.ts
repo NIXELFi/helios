@@ -22,7 +22,11 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
     setError(null);
     (async () => {
       const { rows, error: err } = await fetchAllRows<VaultFile>(
-        () => (client.from("files") as any).select("*").eq("folder_id", folder_id),
+        // Stable ORDER BY is required for safe pagination — see paginate.ts.
+        () => (client.from("files") as any)
+          .select("*")
+          .eq("folder_id", folder_id)
+          .order("name", { ascending: true }),
       );
       if (!mounted) return;
       if (err) {

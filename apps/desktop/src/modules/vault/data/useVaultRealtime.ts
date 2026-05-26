@@ -24,8 +24,11 @@ export function useVaultRealtime(
   // Keep the callbacks in a ref so inline arrow functions from callers
   // don't tear down + recreate the realtime channel on every render. The
   // subscription only needs to be (re)built when client or vaultId change.
+  // The ref must be updated in an effect, not during render — mutating a ref
+  // during render violates React's purity model and can land an intermediate
+  // value into the ref if a render is discarded (concurrent rendering).
   const cbRef = useRef(cb);
-  cbRef.current = cb;
+  useEffect(() => { cbRef.current = cb; });
 
   useEffect(() => {
     if (!vaultId) return;
