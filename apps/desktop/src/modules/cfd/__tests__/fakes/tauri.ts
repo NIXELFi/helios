@@ -35,6 +35,13 @@ export interface FakeBridgeState {
       file: "pv.json" | "profiles.json" | "manifest.json",
     ) => Promise<unknown>,
   ): void;
+  setLoadWaves(
+    impl: (
+      jobId: string,
+      studyKind: "single-rpm" | "sweep",
+      rpmInt: number,
+    ) => Promise<unknown>,
+  ): void;
   setGetParameterSchema(impl: (configPath: string) => Promise<ParameterMeta[]>): void;
 }
 
@@ -60,6 +67,13 @@ export function makeFakeBridge(): FakeBridgeState {
     file: "pv.json" | "profiles.json" | "manifest.json",
   ) => Promise<unknown> = async () => {
     throw new Error("loadCapture not configured");
+  };
+  let loadWaves: (
+    jobId: string,
+    studyKind: "single-rpm" | "sweep",
+    rpmInt: number,
+  ) => Promise<unknown> = async () => {
+    throw new Error("loadWaves not configured");
   };
   let getParameterSchema: (configPath: string) => Promise<ParameterMeta[]> =
     async () => [];
@@ -97,6 +111,10 @@ export function makeFakeBridge(): FakeBridgeState {
       invocations.push({ command: "cfd_load_capture", args: { jobId, studyKind, rpmInt, file } });
       return loadCapture(jobId, studyKind, rpmInt, file);
     },
+    async loadWaves(jobId, studyKind, rpmInt) {
+      invocations.push({ command: "cfd_load_waves", args: { jobId, studyKind, rpmInt } });
+      return loadWaves(jobId, studyKind, rpmInt);
+    },
     async getParameterSchema(configPath) {
       invocations.push({ command: "cfd_get_parameter_schema", args: { configPath } });
       return getParameterSchema(configPath);
@@ -123,6 +141,7 @@ export function makeFakeBridge(): FakeBridgeState {
     setCancelJob(impl) { cancelJob = impl; },
     setListJobs(impl) { listJobs = impl; },
     setLoadCapture(impl) { loadCapture = impl; },
+    setLoadWaves(impl) { loadWaves = impl; },
     setGetParameterSchema(impl) { getParameterSchema = impl; },
   };
 }

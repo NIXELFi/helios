@@ -32,6 +32,14 @@ export interface CfdBridge {
     rpmInt: number,
     file: "pv.json" | "profiles.json" | "manifest.json",
   ): Promise<unknown>;
+  /**
+   * Load wave data for a given job and RPM point.
+   */
+  loadWaves(
+    jobId: string,
+    studyKind: "single-rpm" | "sweep",
+    rpmInt: number,
+  ): Promise<unknown>;
   /** Optimization (Phase 5): enumerate the optimizable parameter schema
    *  for a given config file. Backend reads `n_cylinders` from the config
    *  to populate `arrayLen` for per-cylinder fields. */
@@ -67,6 +75,8 @@ export const realBridge: CfdBridge = {
       rpmInt,
       file,
     }),
+  loadWaves: (jobId, studyKind, rpmInt) =>
+    invoke<unknown>("cfd_load_waves", { jobId, studyKind, rpmInt }),
   getParameterSchema: (configPath) =>
     invoke<ParameterMeta[]>("cfd_get_parameter_schema", { configPath }),
   subscribe: async (handler) => {
