@@ -53,7 +53,6 @@ function WaveViewerModalBody(props: Props) {
   const [speed, setSpeed] = useState<number>(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameIdx, setFrameIdx] = useState(0);
-  const [waterfallPipeIdx, setWaterfallPipeIdx] = useState(0);
 
   useEffect(() => { setFrameIdx(0); setIsPlaying(false); }, [rpmInt]);
 
@@ -188,17 +187,6 @@ function WaveViewerModalBody(props: Props) {
             </>
           )}
 
-          {view === "waterfall" && data && (
-            <label className="flex items-center gap-1">
-              pipe:
-              <select value={waterfallPipeIdx} onChange={(e) => setWaterfallPipeIdx(parseInt(e.target.value, 10))} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
-                {data.manifest.pipes.map((p, i) => (
-                  <option key={p.index} value={i}>{p.label}</option>
-                ))}
-              </select>
-            </label>
-          )}
-
           <label className="ml-auto flex items-center gap-1">
             speed:
             <select value={speed} onChange={(e) => setSpeed(parseFloat(e.target.value))} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
@@ -240,7 +228,6 @@ function WaveViewerModalBody(props: Props) {
           {state === "ready" && data && view === "waterfall" && (
             <WaterfallView
               packed={data}
-              pipeIdx={waterfallPipeIdx}
               field={field}
               frameIdx={frameInt}
               onScrub={(idx) => { setIsPlaying(false); setFrameIdx(idx); }}

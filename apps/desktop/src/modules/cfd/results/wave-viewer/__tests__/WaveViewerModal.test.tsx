@@ -50,14 +50,16 @@ describe("WaveViewerModal", () => {
     expect(screen.getByLabelText(/schematic/i)).toBeInTheDocument();
   });
 
-  it("switches to Waterfall view on tab click", async () => {
+  it("switches to Waterfall view on tab click and shows all pipes", async () => {
     const loadWaves = vi.fn().mockResolvedValue(dummyResponse);
     render(
       <WaveViewerModal open bridge={makeBridge(loadWaves)} jobId="j1" studyKind="single-rpm" rpmInt={8000} onClose={() => {}} />
     );
     await waitFor(() => expect(loadWaves).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: /waterfall/i }));
-    expect(screen.getByLabelText(/pipe:/i)).toBeInTheDocument();
+    // The waterfall view renders all pipes. With dummyResponse having a single
+    // "plenum" pipe, that label should appear in the document.
+    expect(screen.getByText(/plenum/i)).toBeInTheDocument();
   });
 
   it("calls onClose on close-button click", async () => {

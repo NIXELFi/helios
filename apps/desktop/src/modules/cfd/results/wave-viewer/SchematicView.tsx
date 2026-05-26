@@ -9,6 +9,7 @@ import type {
   WaveCapturePacked,
   WaveCylField,
   WaveField,
+  WaveFrameManifest,
   WavePipeMeta,
   WaveSizeField,
 } from "../../state/types";
@@ -82,6 +83,9 @@ function draw(
   ctx.fillStyle = "#0E0E10";
   ctx.fillRect(0, 0, width, height);
 
+  // Draw connection paths between tiers FIRST so pipes/cylinders sit on top.
+  drawConnections(ctx, layout, packed.manifest);
+
   for (const tier of tiers) {
     if (tier.kind === "horiz-pipe") {
       drawHorizontalPipe(ctx, packed, frameIdx, tier.pipe.index, field, sizeField, tier.pipeRect);
@@ -104,6 +108,100 @@ function draw(
   ctx.fillText("INTAKE", width / 2, 4);
   ctx.textBaseline = "bottom";
   ctx.fillText("EXHAUST", width / 2, height - 4);
+}
+
+function drawConnections(
+  ctx: CanvasRenderingContext2D,
+  layout: SchematicLayout,
+  _manifest: WaveFrameManifest,
+) {
+  ctx.strokeStyle = "#3A3F47";
+  ctx.lineWidth = 1.5;
+
+  const horiz = (role: "plenum" | "collector") =>
+    layout.tiers.find((t) => t.kind === "horiz-pipe" && t.role === role);
+  const vert = (role: "runner" | "primary" | "secondary") =>
+    layout.tiers.find((t) => t.kind === "vert-pipes" && t.role === role);
+
+  const plenum = horiz("plenum");
+  const runners = vert("runner");
+  const primaries = vert("primary");
+  const secondaries = vert("secondary");
+  const collector = horiz("collector");
+
+  // Plenum → Runners (vertical drops from plenum bottom at each runner column)
+  if (plenum && plenum.kind === "horiz-pipe" && runners && runners.kind === "vert-pipes") {
+    const plenumBottom = plenum.pipeRect.y + plenum.pipeRect.h;
+    for (const r of runners.pipeRects) {
+      const cx = r.x + r.w / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, plenumBottom);
+      ctx.lineTo(cx, r.y);
+      ctx.stroke();
+    }
+  }
+
+  // Runners → Cylinders (vertical drop from runner bottom to top of cyl-row at the corresponding column)
+  if (runners && runners.kind === "vert-pipes") {
+    for (let i = 0; i < runners.pipeRects.length; i++) {
+      const r = runners.pipeRects[i]!;
+      const cx = r.x + r.w / 2;
+      const cyTop = layout.cylinderRowY - layout.cylinderBaseR;
+      ctx.beginPath();
+      ctx.moveTo(cx, r.y + r.h);
+      ctx.lineTo(cx, cyTop);
+      ctx.stroke();
+    }
+  }
+
+  // Cylinders → Primaries (vertical drop from bottom of cyl-row to top of primary)
+  if (primaries && primaries.kind === "vert-pipes") {
+    for (let i = 0; i < primaries.pipeRects.length; i++) {
+      const p = primaries.pipeRects[i]!;
+      const cx = p.x + p.w / 2;
+      const cyBot = layout.cylinderRowY + layout.cylinderBaseR;
+      ctx.beginPath();
+      ctx.moveTo(cx, cyBot);
+      ctx.lineTo(cx, p.y);
+      ctx.stroke();
+    }
+  }
+
+  // Primaries → Secondaries (angled lines using the 4-2-1 pairing).
+  // TODO: read pairing from manifest once exposed. For SDM26 4-cyl
+  // (crates/engine-sim/src/model/sdm26.rs:686-699):
+  //   primary[0] + primary[3] → secondary[0]
+  //   primary[1] + primary[2] → secondary[1]
+  if (
+    primaries && primaries.kind === "vert-pipes" &&
+    secondaries && secondaries.kind === "vert-pipes" &&
+    primaries.pipeRects.length === 4 && secondaries.pipeRects.length === 2
+  ) {
+    const pairing: Array<[number, number]> = [[0, 0], [1, 1], [2, 1], [3, 0]];
+    for (const [pi, si] of pairing) {
+      const p = primaries.pipeRects[pi]!;
+      const s = secondaries.pipeRects[si]!;
+      const startX = p.x + p.w / 2;
+      const startY = p.y + p.h;
+      const endX = s.x + s.w / 2;
+      const endY = s.y;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
+  }
+
+  // Secondaries → Collector (vertical drop).
+  if (secondaries && secondaries.kind === "vert-pipes" && collector && collector.kind === "horiz-pipe") {
+    for (const s of secondaries.pipeRects) {
+      const cx = s.x + s.w / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, s.y + s.h);
+      ctx.lineTo(cx, collector.pipeRect.y);
+      ctx.stroke();
+    }
+  }
 }
 
 function labelForPipe(meta: WavePipeMeta): string {
@@ -242,21 +340,32 @@ function drawCylinder(
   cy: number,
   baseR: number,
 ) {
+  const boreSide = baseR * 2;
+  const boreX = cx - boreSide / 2;
+  const boreY = cy - boreSide / 2;
+
+  // Read cylinder volume to position piston.
+  const vArr = packed.cylArr[ci]![CYL_FIELD_IDX.V]!;
+  const vRange = packed.cylRange[ci]![CYL_FIELD_IDX.V]!;
+  const V = vArr[frameIdx]!;
+  const vSpan = (vRange.max - vRange.min) || 1;
+  const vNorm = clamp01((V - vRange.min) / vSpan);
+
+  // Piston geometry: top of bore at vNorm=0 (TDC), bottom at vNorm=1 (BDC).
+  const pistonH = boreSide * 0.12;
+  const pistonInset = boreSide * 0.06;
+  const pistonX = boreX + pistonInset;
+  const pistonW = boreSide - 2 * pistonInset;
+  const pistonRange = boreSide - pistonH; // distance piston can travel
+  const pistonY = boreY + vNorm * pistonRange;
+
+  // Cyl-field color for chamber.
   const fIdx = cylField === "x_b" ? CYL_FIELD_IDX.x_b
              : cylField === "p"   ? CYL_FIELD_IDX.p
              : CYL_FIELD_IDX.T;
-  const pArr = packed.cylArr[ci]![CYL_FIELD_IDX.p]!;
-  const pRange = packed.cylRange[ci]![CYL_FIELD_IDX.p]!;
   const fArr = packed.cylArr[ci]![fIdx]!;
   const fRangeObs = packed.cylRange[ci]![fIdx]!;
-
-  const p = pArr[frameIdx]!;
   const f = fArr[frameIdx]!;
-
-  const norm = clamp01((Math.log(Math.max(p, 1)) - Math.log(Math.max(pRange.min, 1))) /
-                       Math.max(1e-9, Math.log(Math.max(pRange.max, 1)) - Math.log(Math.max(pRange.min, 1))));
-  const r = baseR * (0.4 + 0.6 * norm);
-
   const cmapName =
     cylField === "x_b" ? "viridis" :
     cylField === "p"   ? "RdBu_r"  :
@@ -267,20 +376,33 @@ function drawCylinder(
   );
   const tC = clamp01((f - rangeStruct.vmin) / (rangeStruct.vmax - rangeStruct.vmin || 1));
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
+
+  // Bore background (crankcase / below-piston region) — match canvas bg.
+  ctx.fillStyle = "#0E0E10";
+  ctx.fillRect(boreX, boreY, boreSide, boreSide);
+
+  // Chamber above piston, colored by cylField.
   ctx.fillStyle = `rgb(${rr},${gg},${bb})`;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillRect(boreX + pistonInset, boreY, pistonW, pistonY - boreY);
+
+  // Piston body.
+  ctx.fillStyle = "#9097A0";
+  ctx.fillRect(pistonX, pistonY, pistonW, pistonH);
   ctx.strokeStyle = "#2A2C32";
   ctx.lineWidth = 1;
-  ctx.stroke();
+  ctx.strokeRect(pistonX, pistonY, pistonW, pistonH);
 
-  // Cylinder number.
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 11px sans-serif";
+  // Bore outline.
+  ctx.strokeStyle = "#5A5F66";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(boreX, boreY, boreSide, boreSide);
+
+  // Cylinder number above bore (helios-dim).
+  ctx.fillStyle = "#9097A0";
+  ctx.font = "11px ui-monospace, monospace";
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(String(ci + 1), cx, cy);
+  ctx.textBaseline = "bottom";
+  ctx.fillText(`C${ci + 1}`, cx, boreY - 4);
 }
 
 function clamp01(x: number): number {

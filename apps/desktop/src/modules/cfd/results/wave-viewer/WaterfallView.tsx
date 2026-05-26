@@ -1,6 +1,6 @@
 // WaterfallView.tsx
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { COLORMAPS } from "./colormaps";
 import { computeMach, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -11,38 +11,43 @@ import type {
 
 interface Props {
   packed: WaveCapturePacked;
-  pipeIdx: number;
   field: WaveField;
   /** Current schematic playhead, 0..frameCount-1. */
   frameIdx: number;
   onScrub(newFrameIdx: number): void;
 }
 
-export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Props) {
+interface TileProps {
+  packed: WaveCapturePacked;
+  pipeIdx: number;
+  field: WaveField;
+  frameIdx: number;
+  onScrub(idx: number): void;
+}
+
+function WaterfallTile({ packed, pipeIdx, field, frameIdx, onScrub }: TileProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const meta = packed.manifest.pipes[pipeIdx]!;
 
-  const meta = useMemo(() => packed.manifest.pipes[pipeIdx]!, [packed, pipeIdx]);
-
+  // Render heatmap on (packed, pipeIdx, field) change.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const nCells = meta.nCells;
-    const nFrames = packed.manifest.frameCount;
-
-    const targetW = 800;
-    const targetH = 600;
-    const cellPx = Math.max(1, Math.floor(targetW / nCells));
-    const framePx = Math.max(1, Math.floor(targetH / nFrames));
-    const W = cellPx * nCells;
-    const H = framePx * nFrames;
+    const W = Math.max(40, wrap.clientWidth);
+    const H = Math.max(40, wrap.clientHeight);
     canvas.width = W;
     canvas.height = H;
     canvas.style.width = `${W}px`;
     canvas.style.height = `${H}px`;
+
+    const nCells = meta.nCells;
+    const nFrames = packed.manifest.frameCount;
 
     const cmapName = WAVE_FIELD_META[field].colormap;
     const lut = COLORMAPS[cmapName];
@@ -72,28 +77,25 @@ export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Pro
     const img = ctx.createImageData(W, H);
     const span = range.vmax - range.vmin || 1;
 
-    for (let f = 0; f < nFrames; f++) {
-      for (let c = 0; c < nCells; c++) {
+    for (let py = 0; py < H; py++) {
+      const f = Math.floor((py / Math.max(1, H - 1)) * (nFrames - 1));
+      for (let px = 0; px < W; px++) {
+        const c = Math.floor((px / Math.max(1, W - 1)) * (nCells - 1));
         const v = valueAt(f, c);
         const t = Math.max(0, Math.min(1, (v - range.vmin) / span));
         const lutIdx = Math.min(255, Math.max(0, Math.round(t * 255)));
         const [r, g, b] = lut[lutIdx]!;
-        for (let dy = 0; dy < framePx; dy++) {
-          for (let dx = 0; dx < cellPx; dx++) {
-            const px = (c * cellPx + dx) + (f * framePx + dy) * W;
-            const o = px * 4;
-            img.data[o] = r;
-            img.data[o + 1] = g;
-            img.data[o + 2] = b;
-            img.data[o + 3] = 255;
-          }
-        }
+        const o = (py * W + px) * 4;
+        img.data[o] = r;
+        img.data[o + 1] = g;
+        img.data[o + 2] = b;
+        img.data[o + 3] = 255;
       }
     }
-
     ctx.putImageData(img, 0, 0);
   }, [packed, pipeIdx, field, meta.nCells]);
 
+  // Overlay scrub line on frameIdx change.
   useEffect(() => {
     const canvas = overlayRef.current;
     const base = canvasRef.current;
@@ -111,51 +113,83 @@ export function WaterfallView({ packed, pipeIdx, field, frameIdx, onScrub }: Pro
     ctx.fillRect(0, y - 1, canvas.width, 2);
   }, [packed.manifest.frameCount, frameIdx]);
 
-  const pipeMeta = packed.manifest.pipes[pipeIdx]!;
-  const fieldLabel = field === "p" ? "pressure"
-                   : field === "u" ? "velocity"
-                   : field === "T" ? "temperature"
-                   : field === "rho" ? "density"
-                   : "Mach";
-  const lengthMm = (pipeMeta.lengthM * 1000).toFixed(0);
-  const thetaStart = packed.manifest.thetaStartDeg.toFixed(0);
-  const thetaEnd = packed.manifest.thetaEndDeg.toFixed(0);
+  const lengthMm = (meta.lengthM * 1000).toFixed(0);
+  return (
+    <div className="flex min-h-0 flex-col">
+      <div className="mb-0.5 font-mono text-[9px] text-helios-dim">
+        {meta.label} <span className="text-[#5A5F66]">[{meta.nCells} cells · {lengthMm} mm]</span>
+      </div>
+      <div ref={wrapRef} className="relative min-h-[60px] flex-1 bg-helios-base">
+        <canvas ref={canvasRef} className="absolute inset-0" />
+        <canvas
+          ref={overlayRef}
+          className="absolute inset-0 cursor-crosshair"
+          onClick={(e) => {
+            const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const t = Math.max(0, Math.min(1, y / rect.height));
+            const idx = Math.round(t * (packed.manifest.frameCount - 1));
+            onScrub(idx);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function WaterfallView({ packed, field, frameIdx, onScrub }: Props) {
+  // Group pipes by role for grid layout.
+  const byRole: Record<string, number[]> = { plenum: [], runner: [], primary: [], secondary: [], collector: [] };
+  packed.manifest.pipes.forEach((p, i) => {
+    if (byRole[p.role]) byRole[p.role]!.push(i);
+  });
 
   return (
-    <div className="flex flex-col items-start gap-1 p-2 text-[10px] text-helios-dim">
-      <div className="text-[12px] text-helios-text">
-        <span className="font-mono">{pipeMeta.label}</span>
-        <span className="ml-2">·</span>
-        <span className="ml-2">{fieldLabel}</span>
-      </div>
-      <div className="flex gap-2">
-        {/* Y-axis label */}
-        <div className="flex flex-col justify-between text-right" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", lineHeight: "1" }}>
-          <span>θ {thetaStart}°</span>
-          <span>θ {thetaEnd}°</span>
+    <div className="flex h-full w-full flex-col gap-2 overflow-auto p-2">
+      {byRole.plenum!.length > 0 && (
+        <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
+          {byRole.plenum!.map((i) => (
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+          ))}
         </div>
-        {/* The two stacked canvases */}
-        <div className="relative inline-block">
-          <canvas ref={canvasRef} className="block" />
-          <canvas
-            ref={overlayRef}
-            className="absolute inset-0 cursor-crosshair"
-            onClick={(e) => {
-              const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
-              const y = e.clientY - rect.top;
-              const t = Math.max(0, Math.min(1, y / rect.height));
-              const idx = Math.round(t * (packed.manifest.frameCount - 1));
-              onScrub(idx);
-            }}
-          />
+      )}
+      {byRole.runner!.length > 0 && (
+        <div
+          className="grid gap-1"
+          style={{ gridTemplateColumns: `repeat(${byRole.runner!.length}, minmax(0, 1fr))`, height: "20%" }}
+        >
+          {byRole.runner!.map((i) => (
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+          ))}
         </div>
-      </div>
-      {/* X-axis label */}
-      <div className="flex w-full justify-between" style={{ marginLeft: "2rem" }}>
-        <span>0 mm</span>
-        <span className="text-helios-text">position →</span>
-        <span>{lengthMm} mm</span>
-      </div>
+      )}
+      {byRole.primary!.length > 0 && (
+        <div
+          className="grid gap-1"
+          style={{ gridTemplateColumns: `repeat(${byRole.primary!.length}, minmax(0, 1fr))`, height: "20%" }}
+        >
+          {byRole.primary!.map((i) => (
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+          ))}
+        </div>
+      )}
+      {byRole.secondary!.length > 0 && (
+        <div
+          className="grid gap-1"
+          style={{ gridTemplateColumns: `repeat(${byRole.secondary!.length}, minmax(0, 1fr))`, height: "20%" }}
+        >
+          {byRole.secondary!.map((i) => (
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+          ))}
+        </div>
+      )}
+      {byRole.collector!.length > 0 && (
+        <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
+          {byRole.collector!.map((i) => (
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} frameIdx={frameIdx} onScrub={onScrub} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
