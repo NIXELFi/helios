@@ -51,8 +51,8 @@ describe("useCreateVault", () => {
     expect(result.current.hook.error).toBeNull();
   });
 
-  it("surfaces RLS errors for non-admin users", async () => {
-    const c = mockClient(null, { message: "permission denied", code: "42501" });
+  it("surfaces RLS errors for non-admin users with a friendly message", async () => {
+    const c = mockClient(null, { message: "permission denied for table vaults", code: "42501" });
     const { result } = renderHook(
       () => ({ hook: useCreateVault(), authLoading: useAuthLoading() }),
       { wrapper: wrap(c) },
@@ -61,6 +61,10 @@ describe("useCreateVault", () => {
     await act(async () => {
       await result.current.hook.run("SDM26");
     });
-    expect(result.current.hook.error?.message).toContain("permission denied");
+    // Friendly mapping translates 42501 to a readable explanation in
+    // context ("create a vault"), not the raw "permission denied for table"
+    // SQL string.
+    expect(result.current.hook.error?.message).toMatch(/permission denied/i);
+    expect(result.current.hook.error?.message).toMatch(/create/i);
   });
 });

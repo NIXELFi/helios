@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { Folder, FolderId, VaultId } from "./types";
+import { friendlyPgError } from "./pg-errors";
 
 export function useCreateFolder() {
   const client = useSupabaseClient();
@@ -21,7 +22,7 @@ export function useCreateFolder() {
         .single();
       setLoading(false);
       if (err) {
-        setError(new Error(err.message ?? String(err)));
+        setError(new Error(friendlyPgError(err, "folder").message));
         return null;
       }
       return data as Folder;

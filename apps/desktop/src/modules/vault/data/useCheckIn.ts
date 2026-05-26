@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, Version } from "./types";
 import { gzipBytes } from "./compression";
+import { friendlyPgError } from "./pg-errors";
 
 const BUCKET = "vault-objects";
 
@@ -66,7 +67,15 @@ export function useCheckIn() {
             });
           if (upErr) {
             // Race: another client uploaded the same content between our
-            // check and our upload. Re-probe once before giving up.
+            // check and our upload. Re-probe once before giving up. We log
+            // the original upload error first — when the re-probe succeeds
+            // we'd otherwise swallow the error message even if it was a
+            // legit failure (auth, quota) coinciding with another client's
+            // independent upload. The console line gives diagnostics
+            // without forcing a user-visible error on the race path.
+            console.warn(
+              `[vault] storage upload returned an error (${upErr.message}); re-probing for sha=${sha}`,
+            );
             if (!(await objectExists(client, sha))) {
               throw new Error(`upload: ${upErr.message}`);
             }
@@ -79,7 +88,7 @@ export function useCheckIn() {
           p_size: bytes.byteLength,
           p_comment: comment,
         });
-        if (rpcErr) throw new Error(rpcErr.message ?? String(rpcErr));
+        if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
         setResult(ver as Version);
         return ver as Version;
       } catch (e) {

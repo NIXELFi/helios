@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import type { FileId, Lock } from "./types";
+import { friendlyPgError } from "./pg-errors";
+import { notifyLockChange } from "./lock-events";
 
 export function useAcquireLock() {
   const client = useSupabaseClient();
@@ -12,8 +14,7 @@ export function useAcquireLock() {
   const run = useCallback(
     async (file_id: FileId): Promise<Lock | null> => {
       if (!user) {
-        const e = new Error("not authenticated");
-        setError(e);
+        setError(new Error("Your session has expired — please sign in again."));
         return null;
       }
       setLoading(true);
@@ -24,11 +25,17 @@ export function useAcquireLock() {
         .single();
       setLoading(false);
       if (err) {
-        const e = new Error(err.message ?? String(err));
-        setError(e);
+        // 23505 from the locks table is "this file is already checked out
+        // (by someone, possibly this user holding a stale lock)" — friendly
+        // mapping gives a readable string instead of a raw FK / unique
+        // constraint violation.
+        setError(new Error(friendlyPgError(err, "lock").message));
         return null;
       }
       setResult(data);
+      // Broadcast so every mounted useLocks() refetches immediately
+      // rather than waiting on the realtime channel.
+      notifyLockChange();
       return data;
     },
     [client, user],
