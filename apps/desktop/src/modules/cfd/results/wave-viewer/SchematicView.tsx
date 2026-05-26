@@ -167,28 +167,36 @@ function drawConnections(
     }
   }
 
-  // Primaries → Secondaries (angled lines using the 4-2-1 pairing).
-  // TODO: read pairing from manifest once exposed. For SDM26 4-cyl
-  // (crates/engine-sim/src/model/sdm26.rs:686-699):
+  // Primaries → Secondaries (4-2-1) OR Primaries → Collector (4-1 / no secondaries).
+  // TODO: read pairing from manifest once exposed.
+  // For SDM26 4-cyl 4-2-1 (crates/engine-sim/src/model/sdm26.rs:686-699):
   //   primary[0] + primary[3] → secondary[0]
   //   primary[1] + primary[2] → secondary[1]
-  if (
-    primaries && primaries.kind === "vert-pipes" &&
-    secondaries && secondaries.kind === "vert-pipes" &&
-    primaries.pipeRects.length === 4 && secondaries.pipeRects.length === 2
-  ) {
-    const pairing: Array<[number, number]> = [[0, 0], [1, 1], [2, 1], [3, 0]];
-    for (const [pi, si] of pairing) {
-      const p = primaries.pipeRects[pi]!;
-      const s = secondaries.pipeRects[si]!;
-      const startX = p.x + p.w / 2;
-      const startY = p.y + p.h;
-      const endX = s.x + s.w / 2;
-      const endY = s.y;
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
+  // For 4-1 (no secondaries): each primary drops straight into the collector.
+  if (primaries && primaries.kind === "vert-pipes") {
+    const has421 =
+      secondaries && secondaries.kind === "vert-pipes" &&
+      primaries.pipeRects.length === 4 && secondaries.pipeRects.length === 2;
+    if (has421 && secondaries && secondaries.kind === "vert-pipes") {
+      const pairing: Array<[number, number]> = [[0, 0], [1, 1], [2, 1], [3, 0]];
+      for (const [pi, si] of pairing) {
+        const p = primaries.pipeRects[pi]!;
+        const s = secondaries.pipeRects[si]!;
+        ctx.beginPath();
+        ctx.moveTo(p.x + p.w / 2, p.y + p.h);
+        ctx.lineTo(s.x + s.w / 2, s.y);
+        ctx.stroke();
+      }
+    } else if (collector && collector.kind === "horiz-pipe") {
+      // 4-1 (or any topology without a secondary tier): primaries drop
+      // straight into the collector at their own x.
+      for (const p of primaries.pipeRects) {
+        const cx = p.x + p.w / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, p.y + p.h);
+        ctx.lineTo(cx, collector.pipeRect.y);
+        ctx.stroke();
+      }
     }
   }
 
