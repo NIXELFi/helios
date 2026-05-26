@@ -6,6 +6,7 @@
 //! Tauri runtime.
 
 use std::path::Path;
+use std::io::{BufRead, BufReader};
 
 use crate::dto::{build_config_summary, ConfigSummary, LoadedConfig};
 
@@ -39,6 +40,71 @@ pub fn load_config_from_path(
         summary,
         is_example,
     })
+}
+
+/// Read manifest.json + every frame of waves.jsonl for one capture
+/// directory under `capture_root`. Returns `{ manifest, frames }` as a
+/// single JSON value (manifest passed through, frames as JSON array).
+/// First parse error aborts with the 1-based line number; no partial
+/// returns. Empty lines are tolerated and skipped.
+pub fn load_waves_from_dir(
+    capture_root: &std::path::Path,
+    job_id: &str,
+    study_kind: &str,
+    rpm_int: u32,
+) -> Result<serde_json::Value, String> {
+    if job_id.contains("..") || job_id.contains('/') || job_id.contains('\\') {
+        return Err(format!("invalid job_id: {job_id}"));
+    }
+    match study_kind {
+        "single-rpm" | "sweep" => {}
+        _ => return Err(format!("invalid study_kind: {study_kind}")),
+    }
+
+    let dir = capture_root.join(job_id).join(study_kind).join(rpm_int.to_string());
+    let manifest_path = dir.join("manifest.json");
+    let waves_path = dir.join("waves.jsonl");
+
+    if !manifest_path.exists() {
+        return Err(format!("manifest not found: {}", manifest_path.display()));
+    }
+    if !waves_path.exists() {
+        return Err(format!("waves.jsonl not found: {}", waves_path.display()));
+    }
+
+    let manifest_bytes = std::fs::read(&manifest_path)
+        .map_err(|e| format!("read manifest: {e}"))?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("parse manifest: {e}"))?;
+
+    let frame_count_expected = manifest.get("frameCount")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| "manifest missing frameCount".to_string())?;
+
+    let f = std::fs::File::open(&waves_path)
+        .map_err(|e| format!("open waves: {e}"))?;
+    let reader = BufReader::new(f);
+    let mut frames: Vec<serde_json::Value> = Vec::with_capacity(frame_count_expected as usize);
+
+    for (idx, line_result) in reader.lines().enumerate() {
+        let line = line_result.map_err(|e| format!("read line {}: {e}", idx + 1))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = serde_json::from_str(trimmed)
+            .map_err(|e| format!("parse waves.jsonl line {}: {e}", idx + 1))?;
+        frames.push(v);
+    }
+
+    if frames.len() as u64 != frame_count_expected {
+        return Err(format!(
+            "frame count mismatch: manifest says {frame_count_expected}, file has {}",
+            frames.len()
+        ));
+    }
+
+    Ok(serde_json::json!({ "manifest": manifest, "frames": frames }))
 }
 
 #[cfg(test)]
@@ -87,5 +153,126 @@ mod tests {
         let _ = r;
         let r2 = load_config_from_path(&path, Some(std::path::Path::new("/totally/unrelated"))).unwrap();
         assert!(!r2.is_example);
+    }
+}
+
+#[cfg(test)]
+mod load_waves_tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn setup(job_id: &str, study_kind: &str, rpm_int: u32) -> (TempDir, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path()
+            .join("Helios").join("cfd").join("captures")
+            .join(job_id).join(study_kind).join(rpm_int.to_string());
+        fs::create_dir_all(&dir).unwrap();
+        (tmp, dir)
+    }
+
+    fn write_manifest(dir: &std::path::Path, frame_count: u64) {
+        let manifest = serde_json::json!({
+            "jobId": "test-job",
+            "rpm": 8000.0,
+            "nPipes": 2,
+            "pipes": [
+                { "role": "plenum", "label": "plenum", "nCells": 4, "lengthM": 0.2, "index": 0 },
+                { "role": "collector", "label": "collector", "nCells": 4, "lengthM": 0.3, "index": 1 }
+            ],
+            "nCylinders": 1,
+            "stepStride": 100,
+            "fields": ["rho", "u", "p", "T"],
+            "frameCount": frame_count,
+            "thetaStartDeg": 0.0,
+            "thetaEndDeg": 720.0,
+            "capturedCycle": 1,
+            "incomplete": false
+        });
+        fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    }
+
+    fn write_waves_lines(dir: &std::path::Path, lines: &[&str]) {
+        let mut f = fs::File::create(dir.join("waves.jsonl")).unwrap();
+        for line in lines {
+            writeln!(f, "{}", line).unwrap();
+        }
+    }
+
+    fn frame_line() -> String {
+        let frame = serde_json::json!({
+            "theta": 0.0, "t_ms": 0.0,
+            "pipes": [
+                [[1.0,1.0,1.0,1.0],[0.0,0.0,0.0,0.0],[101325.0,101325.0,101325.0,101325.0],[300.0,300.0,300.0,300.0]],
+                [[1.0,1.0,1.0,1.0],[0.0,0.0,0.0,0.0],[101325.0,101325.0,101325.0,101325.0],[800.0,800.0,800.0,800.0]]
+            ],
+            "cyl": [{ "v": 5e-5, "p": 101325.0, "t": 300.0, "x_b": 0.0 }]
+        });
+        serde_json::to_string(&frame).unwrap()
+    }
+
+    #[test]
+    fn happy_path_returns_manifest_and_frames() {
+        let (tmp, dir) = setup("job-1", "single-rpm", 8000);
+        write_manifest(&dir, 3);
+        let l = frame_line();
+        write_waves_lines(&dir, &[&l, &l, &l]);
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let v = load_waves_from_dir(&root, "job-1", "single-rpm", 8000).expect("ok");
+        assert!(v.get("manifest").is_some());
+        assert_eq!(v["frames"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn rejects_jsonl_parse_error_with_line_number() {
+        let (tmp, dir) = setup("job-2", "single-rpm", 8000);
+        write_manifest(&dir, 2);
+        let l = frame_line();
+        write_waves_lines(&dir, &[&l, "not json", &l]);
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let err = load_waves_from_dir(&root, "job-2", "single-rpm", 8000).unwrap_err();
+        assert!(err.contains("line 2"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_manifest_frame_count_mismatch() {
+        let (tmp, dir) = setup("job-3", "single-rpm", 8000);
+        write_manifest(&dir, 5);
+        let l = frame_line();
+        write_waves_lines(&dir, &[&l, &l]);
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let err = load_waves_from_dir(&root, "job-3", "single-rpm", 8000).unwrap_err();
+        assert!(err.contains("frame") && err.contains("2") && err.contains("5"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_path_traversal_in_job_id() {
+        let (tmp, _dir) = setup("job-4", "single-rpm", 8000);
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let err = load_waves_from_dir(&root, "../escape", "single-rpm", 8000).unwrap_err();
+        assert!(err.contains("invalid"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_invalid_study_kind() {
+        let (tmp, _dir) = setup("job-5", "single-rpm", 8000);
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let err = load_waves_from_dir(&root, "job-5", "wat", 8000).unwrap_err();
+        assert!(err.contains("study_kind"), "got: {err}");
+    }
+
+    #[test]
+    fn tolerates_blank_jsonl_lines() {
+        let (tmp, dir) = setup("job-6", "single-rpm", 8000);
+        write_manifest(&dir, 2);
+        let l = frame_line();
+        let mut f = fs::File::create(dir.join("waves.jsonl")).unwrap();
+        writeln!(f, "{}", l).unwrap();
+        writeln!(f, "").unwrap();
+        writeln!(f, "{}", l).unwrap();
+        let root = tmp.path().join("Helios").join("cfd").join("captures");
+        let v = load_waves_from_dir(&root, "job-6", "single-rpm", 8000).expect("ok");
+        assert_eq!(v["frames"].as_array().unwrap().len(), 2);
     }
 }

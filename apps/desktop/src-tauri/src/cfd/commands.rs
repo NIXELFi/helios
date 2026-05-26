@@ -242,6 +242,27 @@ pub fn cfd_load_capture(
         .map_err(|e| format!("parse {}: {}", p.display(), e))
 }
 
+// ---------------- cfd_load_waves ----------------
+
+/// JSONL-aware sibling of `cfd_load_capture`. Reads manifest + frames
+/// from `<Documents>/Helios/cfd/captures/<job_id>/<study_kind>/<rpm_int>/`
+/// and returns `{ manifest, frames }`. Pure logic lives in
+/// `cfd_core::load::load_waves_from_dir`.
+#[tauri::command]
+pub fn cfd_load_waves(
+    app: AppHandle,
+    job_id: String,
+    study_kind: String,
+    rpm_int: u32,
+) -> Result<serde_json::Value, String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let root = docs.join("Helios").join("cfd").join("captures");
+    cfd_core::load::load_waves_from_dir(&root, &job_id, &study_kind, rpm_int)
+}
+
 // ---------------- cfd_get_parameter_schema ----------------
 
 /// Enumerate optimizable parameters for the given config. Used by the
