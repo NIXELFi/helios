@@ -1254,7 +1254,7 @@ function packResponse(raw: unknown): WaveCapturePacked {
   for (let f = 0; f < nFrames; f++) {
     const fr = obj.frames[f];
     theta[f] = fr.theta;
-    tMs[f] = fr.tMs ?? (fr as unknown as { t_ms: number }).t_ms ?? 0;
+    tMs[f] = fr.t_ms;
 
     for (let pi = 0; pi < m.pipes.length; pi++) {
       const meta = m.pipes[pi];
@@ -1274,7 +1274,7 @@ function packResponse(raw: unknown): WaveCapturePacked {
 
     for (let ci = 0; ci < m.nCylinders; ci++) {
       const c = fr.cyl[ci];
-      const vals = [c.v, c.p, c.t, c.xB ?? (c as unknown as { x_b: number }).x_b ?? 0];
+      const vals = [c.v, c.p, c.t, c.x_b];
       for (let field = 0; field < 4; field++) {
         cylArr[ci][field][f] = vals[field];
         if (vals[field] < cylRange[ci][field].min) cylRange[ci][field].min = vals[field];
@@ -1301,7 +1301,7 @@ function packResponse(raw: unknown): WaveCapturePacked {
 }
 ```
 
-Note: the Rust side serializes per-cylinder fields as `{ v, p, t, x_b }` (snake_case for `x_b`), and the packer reads `c.xB` first with a `c.x_b` fallback for safety. Whichever shape ends up on the wire, this stays correct.
+Note: `RawWaveFrame` field names match the on-disk wire literally — `t_ms` and `x_b` are snake_case because the Rust writer at `crates/cfd-core/src/capture/waves.rs` does not apply `rename_all` to `WaveFrame` / `CylSnapshot`. `WaveCapturePacked.tMs` (in-memory packed) stays camelCase since it's TS-only.
 
 - [ ] **Step 4: Run tests to verify they pass.**
 

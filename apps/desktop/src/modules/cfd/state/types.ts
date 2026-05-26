@@ -492,10 +492,10 @@ export interface WaveFrameManifest {
 /** Raw on-disk frame shape. Only used during the loader's parse step. */
 export interface RawWaveFrame {
   theta: number;
-  tMs: number;
+  t_ms: number;
   /** pipes[pipeIdx][fieldIdx][cellIdx]; fieldIdx is 0=rho, 1=u, 2=p, 3=T. */
   pipes: [number[], number[], number[], number[]][];
-  cyl: { v: number; p: number; t: number; xB: number }[];
+  cyl: { v: number; p: number; t: number; x_b: number }[];
 }
 
 /** In-memory packed shape consumed by the renderers. Built once per load. */
