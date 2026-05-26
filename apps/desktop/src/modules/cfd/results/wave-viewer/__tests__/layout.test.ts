@@ -83,4 +83,20 @@ describe("layoutSchematic", () => {
       prevBottom = t.bounds.y + t.bounds.h;
     }
   });
+
+  it("returns empty layout for nCylinders === 0", () => {
+    const pipes: WavePipeMeta[] = [
+      { role: "plenum", label: "plenum", nCells: 10, lengthM: 0.1, index: 0 },
+    ];
+    const layout = layoutSchematic(makeManifest(pipes, 0), 1600, 900);
+    expect(layout.tiers).toHaveLength(0);
+    expect(layout.cylinderCenters).toHaveLength(0);
+    expect(layout.cylinderBaseR).toBe(0);
+  });
+
+  it("returns empty layout for tiny canvas", () => {
+    const layout = layoutSchematic(makeManifest(SDM26_PIPES, 4), 10, 10);
+    expect(layout.tiers).toHaveLength(0);
+    expect(layout.cylinderCenters).toHaveLength(0);
+  });
 });

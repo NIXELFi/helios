@@ -44,6 +44,19 @@ export function layoutSchematic(
   const secondaries = by.secondary;
   const nCyl = manifest.nCylinders;
 
+  // Degenerate inputs: return an empty layout rather than producing
+  // NaN / negative geometry. Renderer should treat this as a no-draw.
+  if (nCyl < 1 || width < 48 || height < 32) {
+    return {
+      tiers: [],
+      cylinderCenters: [],
+      cylinderRowY: Math.max(0, height / 2),
+      cylinderBaseR: 0,
+      width,
+      height,
+    };
+  }
+
   const tierDefs: TierDef[] = [];
   if (plenum)                tierDefs.push({ kind: "horiz-pipe", pipe: plenum,     weight: 1 });
   if (runners.length > 0)    tierDefs.push({ kind: "vert-pipes", pipes: runners,   weight: 2 });
