@@ -378,8 +378,9 @@ function drawCylinder(
   // Cyl-field color for chamber.
   // Pipe pressures swing ±10 kPa around atm → diverging RdBu_r works.
   // Cylinder pressure swings 1→50 atm (asymmetric) → use sequential
-  // inferno over the observed range, not diverging-around-atm (which
-  // collapses to white for nearly every frame).
+  // inferno over the observed range, not diverging-around-atm.
+  // For p specifically, take log so the chamber isn't black 90% of the
+  // cycle (linear would map most frames to "near min").
   const fIdx = cylField === "x_b" ? CYL_FIELD_IDX.x_b
              : cylField === "p"   ? CYL_FIELD_IDX.p
              : CYL_FIELD_IDX.T;
@@ -388,10 +389,39 @@ function drawCylinder(
   const f = fArr[frameIdx]!;
   const cmapName =
     cylField === "x_b" ? "viridis" : "inferno";
-  const vmin = cylField === "x_b" ? 0 : fRangeObs.min;
-  const vmax = cylField === "x_b" ? 1 : fRangeObs.max;
-  const tC = clamp01((f - vmin) / (vmax - vmin || 1));
+  let tC: number;
+  if (cylField === "x_b") {
+    tC = clamp01(f);
+  } else if (cylField === "p") {
+    const logMin = Math.log(Math.max(fRangeObs.min, 1));
+    const logMax = Math.log(Math.max(fRangeObs.max, 1));
+    const logSpan = logMax - logMin || 1;
+    tC = clamp01((Math.log(Math.max(f, 1)) - logMin) / logSpan);
+  } else {
+    tC = clamp01((f - fRangeObs.min) / (fRangeObs.max - fRangeObs.min || 1));
+  }
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
+
+  // Stroke detection: V direction × x_b state.
+  //  intake:     piston down (V rising), x_b ≈ 0   (fresh charge)
+  //  compression:piston up   (V falling), x_b ≈ 0   (unburned)
+  //  power:      piston down (V rising), x_b > 0.5 (burned)
+  //  exhaust:    piston up   (V falling), x_b > 0.5 (still burned)
+  // Look back ~5 frames for the V-direction sign so it isn't noisy
+  // near TDC/BDC where dV/dt → 0.
+  const xbArr = packed.cylArr[ci]![CYL_FIELD_IDX.x_b]!;
+  const xbNow = xbArr[frameIdx]!;
+  const back = Math.max(0, frameIdx - 5);
+  const dV = V - vArr[back]!;
+  const burned = xbNow > 0.5;
+  const stroke = burned
+    ? (dV >= 0 ? "POWER"   : "EXHAUST")
+    : (dV >= 0 ? "INTAKE"  : "COMPRESSION");
+  const strokeColor =
+    stroke === "INTAKE"      ? "#4FC3F7" :
+    stroke === "COMPRESSION" ? "#9097A0" :
+    stroke === "POWER"       ? "#FFAB40" :
+                               "#FF8A65";
 
   // Bore background (crankcase / below-piston region) — match canvas bg.
   ctx.fillStyle = "#0E0E10";
@@ -419,6 +449,13 @@ function drawCylinder(
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
   ctx.fillText(`C${ci + 1}`, cx, boreY - 4);
+
+  // Stroke label below bore, color-coded so it pops at a glance.
+  ctx.fillStyle = strokeColor;
+  ctx.font = "bold 10px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText(stroke, cx, boreY + boreSide + 4);
 }
 
 function clamp01(x: number): number {
