@@ -7,7 +7,6 @@ import { TabContextMenu } from "./TabContextMenu";
 export interface WorkspaceTabBarProps {
   workspaces: Workspace[];
   activeId: string;
-  appVersion: string;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, label: string) => void;

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import {
   CursorEmitter, ViewStateEmitter, LapSelectionEmitter, GpsPickerEmitter,
   detectLaps, formatClock,
@@ -28,13 +27,10 @@ import {
 } from "./lib/math-channels";
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
-import { useUpdater } from "./lib/use-updater";
 import { useFileOpener } from "./lib/use-file-opener";
 import { formatFileOpenSummary } from "./lib/file-open-summary";
 import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
-import { UpdatesPill } from "./components/UpdatesPill";
-import { UpdateModal } from "./components/UpdateModal";
 import { SessionPanel } from "./components/SessionPanel";
 import { ConfigPanel } from "./components/ConfigPanel";
 import { ChannelsModal } from "./components/ChannelsModal";
@@ -48,7 +44,18 @@ import { CommandPalette, type PaletteAction } from "./components/CommandPalette"
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { HelpModal } from "./help/HelpModal";
 
-export default function App() {
+export interface LogsAppProps {
+  /** Current app version — used to stamp exported workspace bundles. The
+   *  Shell owns the live `getVersion()` call so the wordmark + version in
+   *  the sidebar persists across modules. */
+  appVersion: string;
+  /** Lifted to the Shell so the UpdateModal can disable "Install and restart"
+   *  mid-playback even when the user is currently viewing Vault or CFD. */
+  playing: boolean;
+  onPlayingChange: (playing: boolean) => void;
+}
+
+export default function App({ appVersion, playing, onPlayingChange }: LogsAppProps) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
   const [workspaceId, setWorkspaceIdRaw] = useState(() => {
     const list = loadWorkspaces();
@@ -94,14 +101,12 @@ export default function App() {
   const closeHelp = () => setHelpState({ open: false });
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
-  const updater = useUpdater();
   useFileOpener({ onPending: handleFileOpenPending });
   // OS-level drag-drop of data files (CSV) onto the app window. .helios
   // workspace bundles are routed away from this hook (they belong to the
   // useFileOpener path above). Fires for any drop over the webview, so the
   // user doesn't have to aim at the sessions panel specifically.
   useFileDrop({ onDrop: (paths) => void handleAddSessionFiles(paths) });
-  const [updateModalOpen, setUpdateModalOpen] = useState(false);
   type ConfirmRequest = {
     title: string;
     body: string | ReactNode;
@@ -111,9 +116,6 @@ export default function App() {
     onConfirm: () => void;
   };
   const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [appVersion, setAppVersion] = useState<string>("dev");
-  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({
     label: "Starting…", loaded: 0, total: 1,
   });
@@ -202,10 +204,6 @@ export default function App() {
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (updater.state.kind === "available") setUpdateModalOpen(true);
-  }, [updater.state.kind]);
 
   // Global keyboard shortcuts. Universal hotkeys (⌘K) fire from anywhere;
   // single-key shortcuts ([ ] etc.) skip text inputs so typing still works.
@@ -1003,20 +1001,20 @@ export default function App() {
           No extra left padding needed here: the 176px-wide ModulePicker rail
           sits to the left of this header in the Shell layout, so the inset
           traffic lights (positioned at 14,14 in tauri.conf.json) overlap
-          ONLY the ModulePicker — which handles its own top clearance. */}
+          ONLY the ModulePicker — which handles its own top clearance. The
+          HELIOS wordmark used to live here too; it moved into the sidebar
+          so brand chrome persists across Log / Vault / CFD. */}
       <header
         data-tauri-drag-region
         className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs"
       >
-        <span className="font-helios text-sm text-[#FFC627] flex-shrink-0">HELIOS</span>
         {!editMode && (
           <>
-            <span className="ml-3 text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
+            <span className="text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
             <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
             <WorkspaceTabBar
               workspaces={workspaces}
               activeId={workspaceId}
-              appVersion={appVersion}
               onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
               onCreate={handleCreateWorkspace}
               onRename={handleRenameWorkspace}
@@ -1098,17 +1096,7 @@ export default function App() {
           )}
           {!editMode && (
             <>
-              <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={setPlaying} />
-              <UpdatesPill
-                state={updater.state}
-                onClick={() => {
-                  if (updater.state.kind === "up_to_date" || updater.state.kind === "offline") {
-                    updater.recheck();
-                  } else if (updater.state.kind === "available" || updater.state.kind === "downloading" || updater.state.kind === "installing") {
-                    setUpdateModalOpen(true);
-                  }
-                }}
-              />
+              <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={onPlayingChange} />
               <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
             </>
           )}
@@ -1203,14 +1191,6 @@ export default function App() {
           gpsPickerEmitter={gpsPickerEmitter}
           onSave={(cfg) => handleLapConfigSave(lapConfigSession.id, cfg)}
           onClose={() => setLapConfigSessionId(null)}
-        />
-      )}
-      {updateModalOpen && (
-        <UpdateModal
-          state={updater.state}
-          playbackBlocked={playing}
-          onInstall={() => updater.installAndRelaunch()}
-          onClose={() => setUpdateModalOpen(false)}
         />
       )}
       {confirmState && (

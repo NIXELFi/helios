@@ -9,7 +9,7 @@ export function ResultsScreen() {
 
   if (!activeStudy) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-[#0B0B0D] text-[#9097A0]">
+      <div className="flex h-full flex-col items-center justify-center bg-helios-base text-helios-dim">
         <p className="mb-4 text-[11px] uppercase tracking-wider text-[#5A5F66]">No study selected</p>
         <button
           type="button"

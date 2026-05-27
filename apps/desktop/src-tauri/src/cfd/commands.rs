@@ -198,6 +198,75 @@ pub fn cfd_start_job(
     Ok(StartJobResponse { job_id })
 }
 
+// ---------------- cfd_data_usage_bytes / cfd_clear_data ----------------
+
+/// Recursively walk a directory and sum the size in bytes of every regular
+/// file beneath it. Symlinks are followed only as `fs::metadata` follows
+/// them — broken links are silently skipped. Missing root → returns 0.
+fn dir_size_bytes(root: &std::path::Path) -> u64 {
+    if !root.exists() {
+        return 0;
+    }
+    let mut total: u64 = 0;
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+/// Total size of `<Documents>/Helios/cfd/captures` in bytes. Used by the
+/// "Clear data" button in the CFD NavRail to surface how much disk the
+/// accumulated study outputs are consuming. Configs live in a sibling
+/// directory (`<Documents>/Helios/cfd/configs`) and are intentionally
+/// excluded from this measurement.
+#[tauri::command]
+pub fn cfd_data_usage_bytes(app: AppHandle) -> Result<u64, String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let captures = docs.join("Helios").join("cfd").join("captures");
+    Ok(dir_size_bytes(&captures))
+}
+
+/// Recursively delete `<Documents>/Helios/cfd/captures` and recreate it
+/// as an empty directory so subsequent runs land cleanly. Configs are
+/// **never** touched — they live under `<Documents>/Helios/cfd/configs`
+/// which this command does not reference. Best-effort: a partially-deleted
+/// tree (e.g. a file locked by another process) propagates the error to
+/// the frontend rather than leaving the user in an ambiguous state.
+#[tauri::command]
+pub fn cfd_clear_data(app: AppHandle) -> Result<(), String> {
+    let docs = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("document_dir: {e}"))?;
+    let captures = docs.join("Helios").join("cfd").join("captures");
+    if captures.exists() {
+        std::fs::remove_dir_all(&captures)
+            .map_err(|e| format!("remove_dir_all {}: {}", captures.display(), e))?;
+    }
+    std::fs::create_dir_all(&captures)
+        .map_err(|e| format!("create_dir_all {}: {}", captures.display(), e))?;
+    Ok(())
+}
+
 // ---------------- cfd_load_capture ----------------
 
 /// Read one of the JSON capture artifacts for a job/rpm pair. The

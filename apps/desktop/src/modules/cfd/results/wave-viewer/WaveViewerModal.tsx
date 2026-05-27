@@ -112,18 +112,23 @@ function WaveViewerModalBody(props: Props) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="flex h-full w-full flex-col rounded-md border border-helios-line bg-helios-panel text-helios-text">
-        <div className="flex items-center justify-between border-b border-helios-line px-4 py-2">
-          <h2 id="wave-viewer-title" className="text-sm font-semibold">Wave viewer</h2>
-          <div className="text-[11px] text-helios-dim">{headerInfo}</div>
+        <header className="flex flex-shrink-0 items-center gap-3 border-b border-helios-line bg-helios-base px-4 py-2">
+          <div className="min-w-0">
+            <div id="wave-viewer-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
+              Wave viewer
+            </div>
+            <div className="mt-0.5 text-[10px] text-[#5A5F66]">{headerInfo}</div>
+          </div>
+          <div className="ml-auto" />
           <button
             type="button"
             aria-label="Close"
-            className="rounded border border-helios-line px-2 py-0.5 text-xs hover:border-asu-gold"
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text hover:border-asu-gold"
             onClick={onClose}
           >Close ✕</button>
-        </div>
+        </header>
 
-        <div className="flex flex-wrap items-center gap-3 border-b border-helios-line px-4 py-2 text-[11px] text-helios-dim">
+        <div className="flex flex-wrap items-center gap-2 border-b border-helios-line px-4 py-2 text-[11px] text-helios-dim">
           <div className="flex gap-1">
             <button
               type="button"
@@ -141,76 +146,93 @@ function WaveViewerModalBody(props: Props) {
             >Waterfall</button>
           </div>
 
+          <span className="mx-1 h-4 w-px self-center bg-helios-line" aria-hidden />
+
           {studyKind === "sweep" && sweepCapturedRpms && (
-            <label className="flex items-center gap-1">
-              RPM:
-              <select
-                value={rpmInt}
-                onChange={(e) => setRpmInt(parseInt(e.target.value, 10))}
-                className="rounded border border-helios-line bg-helios-base px-1 py-0.5"
-              >
-                {sweepCapturedRpms.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </label>
+            <SelectField
+              label="RPM"
+              value={String(rpmInt)}
+              onChange={(v) => setRpmInt(parseInt(v, 10))}
+              options={sweepCapturedRpms.map((r) => ({ value: String(r), label: String(r) }))}
+            />
           )}
 
-          <label className="flex items-center gap-1">
-            field:
-            <select value={field} onChange={(e) => setField(e.target.value as WaveField)} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
-              <option value="p">pressure</option>
-              <option value="u">velocity</option>
-              <option value="T">temperature</option>
-              <option value="rho">density</option>
-              <option value="Mach">Mach</option>
-            </select>
-          </label>
+          <SelectField
+            label="field"
+            value={field}
+            onChange={(v) => setField(v as WaveField)}
+            options={[
+              { value: "p", label: "pressure" },
+              { value: "u", label: "velocity" },
+              { value: "T", label: "temperature" },
+              { value: "rho", label: "density" },
+              { value: "Mach", label: "Mach" },
+            ]}
+          />
 
           {view === "schematic" && (
             <>
-              <label className="flex items-center gap-1">
-                size:
-                <select value={sizeField} onChange={(e) => setSizeField(e.target.value as WaveSizeField)} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
-                  <option value="p">pressure</option>
-                  <option value="u">velocity</option>
-                  <option value="T">temperature</option>
-                  <option value="rho">density</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-1">
-                cyl:
-                <select value={cylField} onChange={(e) => setCylField(e.target.value as WaveCylField)} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
-                  <option value="x_b">x_b</option>
-                  <option value="p">pressure</option>
-                  <option value="T">temperature</option>
-                </select>
-              </label>
+              <SelectField
+                label="size"
+                value={sizeField}
+                onChange={(v) => setSizeField(v as WaveSizeField)}
+                options={[
+                  { value: "p", label: "pressure" },
+                  { value: "u", label: "velocity" },
+                  { value: "T", label: "temperature" },
+                  { value: "rho", label: "density" },
+                ]}
+              />
+              <SelectField
+                label="cyl"
+                value={cylField}
+                onChange={(v) => setCylField(v as WaveCylField)}
+                options={[
+                  { value: "x_b", label: "x_b" },
+                  { value: "p", label: "pressure" },
+                  { value: "T", label: "temperature" },
+                ]}
+              />
             </>
           )}
 
-          <label className="ml-auto flex items-center gap-1">
-            speed:
-            <select value={speed} onChange={(e) => setSpeed(parseFloat(e.target.value))} className="rounded border border-helios-line bg-helios-base px-1 py-0.5">
-              {SPEED_OPTIONS.map((s) => <option key={s} value={s}>{s}×</option>)}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="rounded border border-helios-line px-2 py-0.5 hover:border-asu-gold"
-            onClick={() => setFrameIdx((f) => Math.max(0, f - 1))}
-            aria-label="Step back"
-          >◀◀</button>
-          <button
-            type="button"
-            className="rounded border border-helios-line px-2 py-0.5 hover:border-asu-gold"
-            onClick={() => setIsPlaying((p) => !p)}
-            aria-label={isPlaying ? "Pause" : "Play"}
-          >{isPlaying ? "⏸" : "⏵"}</button>
-          <button
-            type="button"
-            className="rounded border border-helios-line px-2 py-0.5 hover:border-asu-gold"
-            onClick={() => setFrameIdx((f) => data ? Math.min(data.manifest.frameCount - 1, f + 1) : f)}
-            aria-label="Step forward"
-          >▶▶</button>
+          <span className="ml-auto" />
+
+          <SelectField
+            label="speed"
+            value={String(speed)}
+            onChange={(v) => setSpeed(parseFloat(v))}
+            options={SPEED_OPTIONS.map((s) => ({ value: String(s), label: `${s}×` }))}
+          />
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className={transportBtnClass}
+              onClick={() => setFrameIdx((f) => Math.max(0, f - 1))}
+              aria-label="Step back"
+              title="Step back one frame"
+            >◀◀</button>
+            <button
+              type="button"
+              className={
+                "rounded-sm border px-2.5 py-0.5 text-[11px] cursor-pointer transition-colors " +
+                (isPlaying
+                  ? "border-asu-gold bg-asu-gold text-helios-base font-semibold"
+                  : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
+              }
+              onClick={() => setIsPlaying((p) => !p)}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              title={isPlaying ? "Pause" : "Play"}
+            >{isPlaying ? "⏸" : "⏵"}</button>
+            <button
+              type="button"
+              className={transportBtnClass}
+              onClick={() => setFrameIdx((f) => data ? Math.min(data.manifest.frameCount - 1, f + 1) : f)}
+              aria-label="Step forward"
+              title="Step forward one frame"
+            >▶▶</button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-hidden">
@@ -234,17 +256,22 @@ function WaveViewerModalBody(props: Props) {
         </div>
 
         {state === "ready" && data && (
-          <div className="flex items-center gap-2 border-t border-helios-line px-4 py-2 text-[11px] text-helios-dim">
-            <span>θ {data.theta[frameInt]?.toFixed(0)}°</span>
+          <div className="flex items-center gap-3 border-t border-helios-line bg-helios-base px-4 py-2 text-[11px] text-helios-dim">
+            <span className="font-mono-num tabular-nums text-helios-text">
+              θ {(data.theta[frameInt] ?? 0).toFixed(0).padStart(4, " ")}°
+            </span>
             <input
               type="range"
               min={0}
               max={data.manifest.frameCount - 1}
               value={frameInt}
               onChange={(e) => setFrameIdx(parseInt(e.target.value, 10))}
-              className="flex-1"
+              className="wave-scrubber flex-1"
+              aria-label="Frame scrubber"
             />
-            <span>frame {frameInt + 1}/{data.manifest.frameCount}</span>
+            <span className="font-mono-num tabular-nums">
+              frame {(frameInt + 1).toString().padStart(4, " ")} / {data.manifest.frameCount}
+            </span>
           </div>
         )}
       </div>
@@ -253,7 +280,50 @@ function WaveViewerModalBody(props: Props) {
 }
 
 function tabClass(active: boolean): string {
-  return `rounded border px-2 py-0.5 ${active ? "border-asu-gold bg-asu-gold/10 text-asu-gold" : "border-helios-line hover:border-asu-gold"}`;
+  // Mirrors the workspace-tab and NavRail pill language: dark panel with a
+  // helios-line border at rest, asu-gold border on hover, solid gold fill +
+  // black text + bold when selected. Keeps every "pick one of N" control in
+  // the app reading as one family.
+  return (
+    "rounded-sm border px-2.5 py-0.5 text-[11px] cursor-pointer transition-colors " +
+    (active
+      ? "border-asu-gold bg-asu-gold text-helios-base font-semibold"
+      : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
+  );
+}
+
+// Shared button class for the transport step-back / step-forward chrome.
+// The play/pause button has its own variant because it carries the "playing"
+// state and shows up filled gold while running.
+const transportBtnClass =
+  "rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text " +
+  "cursor-pointer transition-colors hover:border-asu-gold";
+
+/** Tiny labeled-select. Replaces the inline `<label>...<select>...</label>`
+ *  blocks scattered through the transport bar so each control reads as one
+ *  pill with a consistent dim label + dark dropdown, matching Helios's
+ *  workspace-tab chrome. */
+function SelectField(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  const { label, value, onChange, options } = props;
+  return (
+    <label className="flex items-center gap-1 rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-helios-dim">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-transparent text-[11px] text-helios-text outline-none [&>option]:bg-helios-panel [&>option]:text-helios-text"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function CenterText({ children, tone }: { children: React.ReactNode; tone?: "error" }) {

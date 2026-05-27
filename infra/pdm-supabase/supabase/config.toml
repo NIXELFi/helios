@@ -217,8 +217,15 @@ enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
-# If enabled, users need to confirm their email address before signing in.
-enable_confirmations = true
+# Email confirmation is DISABLED: Helios is a Tauri desktop app, so the
+# confirmation link's redirect to `site_url` (a web URL) can't be caught by
+# the app — leaving the user stuck "unconfirmed". With this off, sign-up
+# returns a session immediately and the AuthModal logs the user straight in.
+# (Authorization is still gated server-side: a new user has no
+# pdm.user_roles row, so they can't read bytes / write until an admin grants
+# a role. Email confirmation was never the access gate.) Re-enable only if
+# you wire custom SMTP + a deep-link redirect scheme.
+enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.

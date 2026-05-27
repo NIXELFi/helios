@@ -43,6 +43,8 @@ export interface FakeBridgeState {
     ) => Promise<unknown>,
   ): void;
   setGetParameterSchema(impl: (configPath: string) => Promise<ParameterMeta[]>): void;
+  setDataUsageBytes(impl: () => Promise<number>): void;
+  setClearAllData(impl: () => Promise<void>): void;
 }
 
 export function makeFakeBridge(): FakeBridgeState {
@@ -77,6 +79,8 @@ export function makeFakeBridge(): FakeBridgeState {
   };
   let getParameterSchema: (configPath: string) => Promise<ParameterMeta[]> =
     async () => [];
+  let dataUsageBytes: () => Promise<number> = async () => 0;
+  let clearAllData: () => Promise<void> = async () => {};
 
   const bridge: CfdBridge = {
     async loadConfig(path) {
@@ -119,6 +123,14 @@ export function makeFakeBridge(): FakeBridgeState {
       invocations.push({ command: "cfd_get_parameter_schema", args: { configPath } });
       return getParameterSchema(configPath);
     },
+    async dataUsageBytes() {
+      invocations.push({ command: "cfd_data_usage_bytes", args: {} });
+      return dataUsageBytes();
+    },
+    async clearAllData() {
+      invocations.push({ command: "cfd_clear_data", args: {} });
+      return clearAllData();
+    },
     async subscribe(handler) {
       subscribers.add(handler);
       return async () => {
@@ -143,5 +155,7 @@ export function makeFakeBridge(): FakeBridgeState {
     setLoadCapture(impl) { loadCapture = impl; },
     setLoadWaves(impl) { loadWaves = impl; },
     setGetParameterSchema(impl) { getParameterSchema = impl; },
+    setDataUsageBytes(impl) { dataUsageBytes = impl; },
+    setClearAllData(impl) { clearAllData = impl; },
   };
 }

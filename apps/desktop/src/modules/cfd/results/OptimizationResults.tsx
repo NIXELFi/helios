@@ -67,7 +67,7 @@ export function OptimizationResults({ study }: Props) {
   const elapsed = ((study.finishedAt ?? Date.now()) - study.startedAt) / 1000;
 
   return (
-    <div className="flex h-full flex-col bg-[#0B0B0D] text-[#D8DCE2]">
+    <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Optimization</div>

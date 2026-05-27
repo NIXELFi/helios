@@ -29,7 +29,23 @@ export function PvLoopView({ jobId, studyKind, rpmInt }: Props) {
     return () => { cancelled = true; };
   }, [bridge, jobId, studyKind, rpmInt]);
 
-  const cylSamples = useMemo(() => art?.cylinders[cylIdx] ?? [], [art, cylIdx]);
+  // Samples are recorded in global-crank order. For cylinders with a
+  // firing-order phase offset, local_theta wraps mid-recording — e.g. a
+  // cyl with a 540° offset sees its local theta progress 540→720→0→540
+  // across one global cycle. Plotting in record-order makes uPlot snap a
+  // horizontal segment from (720°, peak) back to (0°, ambient) at the
+  // wrap, which shows up as the spike at the right edge of p(θ)/T(θ) and
+  // visually swallows part of the trace for cylinders with large offsets.
+  // The chart is angle-domain (not time-domain), so re-sorting by
+  // thetaLocalDeg gives the correct monotone left-to-right trace. The
+  // P-V loop reads volume and pressure from the same sorted array — V is
+  // a single-valued function of theta within one cycle, so the loop shape
+  // is unchanged. (For 4-stroke engines V(θ) is periodic with period 720°,
+  // so each θ in [0, 720) maps to one V, one direction-of-traverse.)
+  const cylSamples = useMemo(() => {
+    const raw = art?.cylinders[cylIdx] ?? [];
+    return [...raw].sort((a, b) => a.thetaLocalDeg - b.thetaLocalDeg);
+  }, [art, cylIdx]);
   const V = useMemo(() => cylSamples.map((s) => s.volume * 1e6), [cylSamples]); // cc
   const P = useMemo(() => cylSamples.map((s) => s.pressure / 1e5), [cylSamples]); // bar
   const T = useMemo(() => cylSamples.map((s) => s.temperature), [cylSamples]);

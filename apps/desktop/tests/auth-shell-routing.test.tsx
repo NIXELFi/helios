@@ -33,24 +33,29 @@ vi.mock("@helios/auth", async () => {
 import App from "../src/Shell";
 
 describe("Shell auth-based routing", () => {
-  it("opens to Logs and never shows the login pane unless Vault is clicked", async () => {
+  it("opens to Logs with the auth modal closed", async () => {
     render(<App />);
-    // Logs is active by default.
-    // We don't assert on specific Logs DOM (varies); we assert that the LoginPane is NOT visible.
     await waitFor(() => {
-      // Wait for Auth provider to settle.
-      expect(screen.queryByRole("button", { name: /sign in/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId("logs-app")).toBeInTheDocument();
     });
+    // The auth modal is not open on boot.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Logged out → the sidebar shows a Sign in pill.
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeInTheDocument();
   });
 
-  it("shows the login pane when Vault is selected from the left rail", async () => {
+  it("opens the auth modal when the greyed-out Vault button is clicked", async () => {
     render(<App />);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /vault/i })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /vault/i }));
+    // Logged out → Vault is disabled; clicking it routes to the auth modal
+    // instead of navigating into the module.
+    const vaultBtn = screen.getByRole("button", { name: /vault/i });
+    expect(vaultBtn).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(vaultBtn);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
   });
 });

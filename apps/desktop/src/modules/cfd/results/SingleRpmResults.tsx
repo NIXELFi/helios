@@ -26,7 +26,7 @@ export function SingleRpmResults({ study }: Props) {
   const rpmInt = Math.round(study.params.rpm);
 
   return (
-    <div className="flex h-full flex-col bg-[#0B0B0D] text-[#D8DCE2]">
+    <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header strip — matches Logs WorkspaceTabBar density */}
       <header className="flex flex-shrink-0 items-center gap-3 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
         <div className="min-w-0 flex-1">

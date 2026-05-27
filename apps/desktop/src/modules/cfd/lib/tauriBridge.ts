@@ -44,6 +44,12 @@ export interface CfdBridge {
    *  for a given config file. Backend reads `n_cylinders` from the config
    *  to populate `arrayLen` for per-cylinder fields. */
   getParameterSchema(configPath: string): Promise<ParameterMeta[]>;
+  /** Total bytes consumed by accumulated study captures under
+   *  `<Documents>/Helios/cfd/captures`. Configs are NOT included. */
+  dataUsageBytes(): Promise<number>;
+  /** Recursively delete every study capture; recreate the captures dir
+   *  empty. Configs are never touched. */
+  clearAllData(): Promise<void>;
 }
 
 const EVENT_NAMES = [
@@ -79,6 +85,8 @@ export const realBridge: CfdBridge = {
     invoke<unknown>("cfd_load_waves", { jobId, studyKind, rpmInt }),
   getParameterSchema: (configPath) =>
     invoke<ParameterMeta[]>("cfd_get_parameter_schema", { configPath }),
+  dataUsageBytes: () => invoke<number>("cfd_data_usage_bytes"),
+  clearAllData: () => invoke<void>("cfd_clear_data"),
   subscribe: async (handler) => {
     const w = getCurrentWindow();
     const unsubs = await Promise.all(

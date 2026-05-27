@@ -36,6 +36,52 @@ body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-
      disabled. Tailwind's transition-* classes are short and discrete. */
 }
 
+/* Wave-viewer frame scrubber. Browser-default range inputs read as toy chrome
+   inside the Helios palette; this class replaces the track with a thin dark
+   strip and the thumb with the same asu-gold pill used by the workspace tab
+   scrollbar. Both -webkit-* and the standard ::-moz-range-thumb selectors are
+   needed for Chromium-based WebView2 (Windows) and WebKit (macOS Tauri). */
+input[type="range"].wave-scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+input[type="range"].wave-scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #2A2C32;
+  border-radius: 9999px;
+}
+input[type="range"].wave-scrubber::-moz-range-track {
+  height: 4px;
+  background: #2A2C32;
+  border-radius: 9999px;
+}
+input[type="range"].wave-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  background: #FFC627;
+  border-radius: 9999px;
+  border: 1px solid #0E0E10;
+  cursor: grab;
+}
+input[type="range"].wave-scrubber::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #FFC627;
+  border-radius: 9999px;
+  border: 1px solid #0E0E10;
+  cursor: grab;
+}
+input[type="range"].wave-scrubber:active::-webkit-slider-thumb { cursor: grabbing; }
+input[type="range"].wave-scrubber:active::-moz-range-thumb { cursor: grabbing; }
+input[type="range"].wave-scrubber:focus { outline: none; }
+
 /* In-app wiki / help-menu typography. Tailwind's @tailwindcss/typography is
    not installed; we style the rendered markdown directly here. */
 .helios-wiki-prose { color: #D8DCE2; font-size: 13px; line-height: 1.6; }

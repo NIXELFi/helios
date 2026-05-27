@@ -45,6 +45,8 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 37 | CFD Phase 5 — DOE optimization runs: opt-in tunable numeric leaves with min/max/step, flexible objective (metric × aggregator × RPM × min/max), parallel LHS trials, brushable parallel-coordinates results plot with click-to-drill trial inspection | [37-cfd-phase-5-optimization.md](37-cfd-phase-5-optimization.md) |
 | 38 | v3.4.1 — cancel-aware engine step loop so pathological optimization trials cancel mid-cycle instead of waiting for the in-flight `advance_one_cycle` to finish | [38-v3.4.1-cancel-granularity.md](38-v3.4.1-cancel-granularity.md) |
 | 39 | CFD tab Phase 4 — animated wave-frame viewer (schematic + per-pipe waterfall), selectable field/size/cyl-field, 0.25–8× playback, sweep RPM switcher; `cfd_load_waves` Tauri command reads JSONL captures | [39-cfd-phase-4-wave-viewer.md](39-cfd-phase-4-wave-viewer.md) |
+| 40 | UI unification across Log / Vault / CFD — moved HELIOS wordmark + version + UpdatesPill into the persistent sidebar; restyled Vault & CFD NavRails to match Log's pill language; standardized CFD body backgrounds on `helios-base`; CFD wave-viewer polish; P/T/x_b cylinder trace wrap-spike fix; CFD Clear-data button | [40-ui-unification.md](40-ui-unification.md) |
+| 41 | App-wide auth shell — user-configurable Supabase connection (URL + anon key stored locally), persistent sidebar user pill (sign in / out / disconnect), in-app self-signup with optional display name, Vault greyed-out when logged out | [41-auth-shell.md](41-auth-shell.md) |
 
 > **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 

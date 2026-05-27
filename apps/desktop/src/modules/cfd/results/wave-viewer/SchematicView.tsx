@@ -71,7 +71,7 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
   }, [packed, frameIdx, field, sizeField, cylField, layout, strokesByCyl]);
 
   return (
-    <div className="h-full w-full bg-[#0E0E10]">
+    <div className="h-full w-full bg-helios-base">
       <canvas ref={canvasRef} className="block" />
     </div>
   );
@@ -112,19 +112,29 @@ function draw(
   }
 
   // INTAKE on left side (vertical text), EXHAUST on right side.
-  ctx.fillStyle = "#5A5F66";
-  ctx.font = "bold 12px sans-serif";
+  // Inset a bit further so the text isn't clipped by the canvas edge, and
+  // match the uppercase-tracking-wider treatment used everywhere else in
+  // CFD so this reads as a section label rather than canvas noise.
+  ctx.fillStyle = "#9097A0";
+  ctx.font = "600 11px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  // Cheap CSS-style letter-spacing emulation via per-character spacing
+  // — the Canvas 2D `letterSpacing` property isn't supported on all
+  // WebView backends.
+  const drawSpaced = (text: string) => {
+    const tracked = text.split("").join(" ");
+    ctx.fillText(tracked, 0, 0);
+  };
   ctx.save();
-  ctx.translate(10, height / 2);
+  ctx.translate(16, height / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText("INTAKE", 0, 0);
+  drawSpaced("INTAKE");
   ctx.restore();
   ctx.save();
-  ctx.translate(width - 10, height / 2);
+  ctx.translate(width - 16, height / 2);
   ctx.rotate(Math.PI / 2);
-  ctx.fillText("EXHAUST", 0, 0);
+  drawSpaced("EXHAUST");
   ctx.restore();
 }
 
@@ -133,7 +143,10 @@ function drawConnections(
   layout: SchematicLayout,
   _manifest: WaveFrameManifest,
 ) {
-  ctx.strokeStyle = "#3A3F47";
+  // Bumped from #3A3F47 → #5A5F66 so the connectivity actually reads against
+  // the helios-base body. The previous 1.5px lines were nearly invisible at
+  // normal viewing distance.
+  ctx.strokeStyle = "#5A5F66";
   ctx.lineWidth = 1.5;
 
   const wide = (role: "plenum" | "collector") =>
@@ -293,7 +306,7 @@ function drawWidePipe(
   const baseW = rect.w * 0.30;
   const swing = rect.w * 0.55;
 
-  ctx.strokeStyle = "#2A2C32";
+  ctx.strokeStyle = "#3A3F47";
   ctx.lineWidth = 1;
   ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
@@ -307,12 +320,27 @@ function drawWidePipe(
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(midX - w / 2, rect.y + c * cellH, w, cellH);
   }
-  // Label centered above the pipe.
+  // Hairline cell separators — drawn AFTER the cell fills so they sit on top.
+  // Only render if cells are thick enough (>3px) to avoid moire on dense pipes.
+  if (cellH > 3) {
+    ctx.strokeStyle = "rgba(14,14,16,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let c = 1; c < colorF.nCells; c++) {
+      const y = Math.round(rect.y + c * cellH) + 0.5;
+      ctx.moveTo(rect.x, y);
+      ctx.lineTo(rect.x + rect.w, y);
+    }
+    ctx.stroke();
+  }
+  // Label centered above the pipe. Inter (the app body font) renders cleaner
+  // at small sizes than the monospace stack; saved ui-monospace for the
+  // status/numeric strips where alignment matters more than aesthetic.
   ctx.fillStyle = "#9097A0";
-  ctx.font = "10px ui-monospace, monospace";
+  ctx.font = "600 10px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
-  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), midX, rect.y - 2);
+  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), midX, rect.y - 3);
 }
 
 // "Branch" pipe (runner/primary/secondary) — horizontal strip; cells along X; size bulges in Y.
@@ -335,7 +363,7 @@ function drawBranchPipe(
   const baseH = rect.h * 0.30;
   const swing = rect.h * 0.55;
 
-  ctx.strokeStyle = "#2A2C32";
+  ctx.strokeStyle = "#3A3F47";
   ctx.lineWidth = 1;
   ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
@@ -349,12 +377,24 @@ function drawBranchPipe(
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(rect.x + c * cellW, midY - h / 2, cellW, h);
   }
+  // Hairline cell separators — same treatment as drawWidePipe but along X.
+  if (cellW > 3) {
+    ctx.strokeStyle = "rgba(14,14,16,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let c = 1; c < colorF.nCells; c++) {
+      const x = Math.round(rect.x + c * cellW) + 0.5;
+      ctx.moveTo(x, rect.y);
+      ctx.lineTo(x, rect.y + rect.h);
+    }
+    ctx.stroke();
+  }
   // Label above the strip (centered horizontally).
   ctx.fillStyle = "#9097A0";
-  ctx.font = "10px ui-monospace, monospace";
+  ctx.font = "600 10px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
-  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), rect.x + rect.w / 2, rect.y - 2);
+  ctx.fillText(labelForPipe(packed.manifest.pipes[pipeIdx]!), rect.x + rect.w / 2, rect.y - 3);
 }
 
 function drawCylinder(
@@ -415,11 +455,17 @@ function drawCylinder(
   const [rr, gg, bb] = sampleColormap(cmapName, tC);
 
   // Stroke is precomputed from V-curve analysis (see computeStrokesByCyl).
+  // Toned down from the original near-fluorescent palette so the labels
+  // read as supporting metadata rather than competing with the pipe / cyl
+  // visualization. INTAKE picks up the Helios asu-gold family, EXHAUST a
+  // dim cool tone, COMPRESSION inherits helios-dim, POWER uses a calmer
+  // amber. Saturation is intentionally lower than the canvas's colormap
+  // ranges.
   const strokeColor =
-    stroke === "INTAKE"      ? "#4FC3F7" :
+    stroke === "INTAKE"      ? "#7FB3D5" :
     stroke === "COMPRESSION" ? "#9097A0" :
-    stroke === "POWER"       ? "#FFAB40" :
-                               "#FF8A65";
+    stroke === "POWER"       ? "#E8A847" :
+                               "#A77860";
 
   // Bore background (crankcase / below-piston region) — match canvas bg.
   ctx.fillStyle = "#0E0E10";
@@ -436,24 +482,35 @@ function drawCylinder(
   ctx.lineWidth = 1;
   ctx.strokeRect(pistonX, pistonY, pistonW, pistonH);
 
-  // Bore outline.
-  ctx.strokeStyle = "#5A5F66";
+  // Bore outline. Bumped to #6A6F76 so the bore reads as a defined object
+  // against the helios-base body, especially when the chamber colormap is
+  // dim (mid-stroke at low pressure → near-black inferno).
+  ctx.strokeStyle = "#6A6F76";
   ctx.lineWidth = 1.5;
   ctx.strokeRect(boreX, boreY, boreSide, boreSide);
 
   // Cylinder number above bore.
-  ctx.fillStyle = "#9097A0";
-  ctx.font = "11px ui-monospace, monospace";
+  ctx.fillStyle = "#D8DCE2";
+  ctx.font = "600 11px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
   ctx.fillText(`C${ci + 1}`, cx, boreY - 4);
 
-  // Stroke label below bore, color-coded so it pops at a glance.
+  // Stroke label below bore — small colored dot + neutral label text so the
+  // stroke phase reads at a glance without the bold colored text fighting
+  // the colormap above. The dot picks up `strokeColor` (the softened phase
+  // palette defined above); the text uses helios-text for legibility.
+  const dotR = 3;
+  const dotY = boreY + boreSide + 8;
+  ctx.beginPath();
   ctx.fillStyle = strokeColor;
-  ctx.font = "bold 10px ui-monospace, monospace";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText(stroke, cx, boreY + boreSide + 4);
+  ctx.arc(cx - 32, dotY, dotR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#D8DCE2";
+  ctx.font = "600 9px 'Inter', system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(stroke, cx - 26, dotY);
 }
 
 function clamp01(x: number): number {

@@ -81,7 +81,10 @@ describe("WaveViewerModal", () => {
       <WaveViewerModal open bridge={makeBridge(loadWaves)} jobId="j1" studyKind="sweep" rpmInt={8000} sweepCapturedRpms={[6000, 8000, 10000]} onClose={() => {}} />
     );
     await waitFor(() => expect(loadWaves).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getByLabelText(/rpm:/i), { target: { value: "10000" } });
+    // The SelectField helper renders the label as a span without a trailing
+    // colon (the visual treatment dropped the colon for the uppercase
+    // tracking-wider chip style), so match on the bare label text.
+    fireEvent.change(screen.getByLabelText(/rpm/i), { target: { value: "10000" } });
     await waitFor(() => expect(loadWaves).toHaveBeenCalledWith("j1", "sweep", 10000));
   });
 });
