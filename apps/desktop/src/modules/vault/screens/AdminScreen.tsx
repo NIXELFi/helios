@@ -1,0 +1,280 @@
+import { useState } from "react";
+import { useUser } from "@helios/auth";
+import { useVaultUsers } from "../data/useVaultUsers";
+import { useIsOwner } from "../data/useIsOwner";
+import { useIsAdmin } from "../data/useIsAdmin";
+import { useSetUserRole } from "../data/useSetUserRole";
+import { useRevokeUserRole } from "../data/useRevokeUserRole";
+import { useSubteams } from "../data/useSubteams";
+import { useManageSubteams } from "../data/useManageSubteams";
+import type { VaultRole, VaultUser } from "../data/types";
+
+const ASSIGNABLE: Exclude<VaultRole, "owner">[] = ["viewer", "editor", "admin"];
+
+/** Admin-only user management. Lists every account + role and lets admins
+ *  grant/revoke roles. Authorization is enforced server-side by the
+ *  pdm_set_user_role / pdm_revoke_user_role RPCs; this UI mirrors the hybrid
+ *  rules (only the owner can touch the admin role) purely for affordance. */
+export function AdminScreen() {
+  const me = useUser();
+  const isAdmin = useIsAdmin();
+  const isOwner = useIsOwner();
+  const { data: users, loading, error, refetch } = useVaultUsers();
+  const setRole = useSetUserRole();
+  const revoke = useRevokeUserRole();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function handleSetRole(u: VaultUser, role: Exclude<VaultRole, "owner">) {
+    setPendingId(u.user_id);
+    setActionError(null);
+    const ok = await setRole.run(u.user_id, role);
+    if (!ok) setActionError(setRole.error?.message ?? "Failed to set role.");
+    else refetch();
+    setPendingId(null);
+  }
+
+  async function handleRevoke(u: VaultUser) {
+    setPendingId(u.user_id);
+    setActionError(null);
+    const ok = await revoke.run(u.user_id);
+    if (!ok) setActionError(revoke.error?.message ?? "Failed to revoke role.");
+    else refetch();
+    setPendingId(null);
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-helios-base text-helios-text">
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-helios-line bg-helios-base px-4 py-2">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Users &amp; roles</div>
+          <p className="mt-0.5 text-[10px] text-[#5A5F66]">
+            {isOwner
+              ? "You're the owner — you can grant any role, including admin."
+              : "Admins can grant editor / viewer. Only the owner can grant the admin role."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refetch}
+          className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text hover:border-asu-gold"
+        >
+          Refresh
+        </button>
+      </header>
+
+      {actionError && (
+        <div className="flex-shrink-0 border-b border-red-500/40 bg-red-500/10 px-4 py-1.5 text-[11px] text-red-200" role="alert">
+          {actionError}
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {loading ? (
+          <div className="p-6 text-sm text-helios-dim">Loading users…</div>
+        ) : error ? (
+          <div className="m-4 rounded-sm border border-red-500/40 bg-red-500/10 p-4 text-[12px] text-red-200">
+            {error.message}
+          </div>
+        ) : (
+          <table className="w-full text-left text-[12px]">
+            <thead className="sticky top-0 bg-helios-base text-[10px] uppercase tracking-wider text-[#5A5F66]">
+              <tr className="border-b border-helios-line [&>th]:px-4 [&>th]:py-2 [&>th]:font-normal">
+                <th>User</th>
+                <th>Name</th>
+                <th>Subteam</th>
+                <th>Role</th>
+                <th>Granted</th>
+                <th className="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(users ?? []).map((u) => (
+                <UserRow
+                  key={u.user_id}
+                  u={u}
+                  isMe={u.user_id === me?.id}
+                  isOwner={isOwner}
+                  isAdmin={isAdmin}
+                  busy={pendingId === u.user_id}
+                  anyBusy={pendingId !== null}
+                  onSetRole={handleSetRole}
+                  onRevoke={handleRevoke}
+                />
+              ))}
+              {(users ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6 text-center text-[11px] text-helios-dim">
+                    No users yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+
+        {/* Subteam management — any admin (incl. owner) can add/remove. */}
+        <SubteamsPanel canManage={isAdmin} />
+      </div>
+    </div>
+  );
+}
+
+function SubteamsPanel({ canManage }: { canManage: boolean }) {
+  const { data: subteams, loading, refetch } = useSubteams();
+  const manage = useManageSubteams();
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setErr(null);
+    const ok = await manage.create(name.trim());
+    if (!ok) { setErr(manage.error?.message ?? "Failed to add subteam."); return; }
+    setName("");
+    refetch();
+  }
+
+  async function remove(id: string) {
+    setBusyId(id);
+    setErr(null);
+    const ok = await manage.remove(id);
+    if (!ok) setErr(manage.error?.message ?? "Failed to remove subteam.");
+    else refetch();
+    setBusyId(null);
+  }
+
+  return (
+    <div className="border-t border-helios-line p-4">
+      <div className="mb-2 text-[11px] uppercase tracking-wider text-asu-gold">Subteams</div>
+      <p className="mb-3 text-[10px] text-[#5A5F66]">
+        Every account picks one of these at sign-up. {canManage ? "Add or remove subteams below." : "Only admins can change this list."}
+      </p>
+      {err && <p className="mb-2 text-[11px] text-red-300" role="alert">{err}</p>}
+      <div className="flex flex-wrap gap-1.5">
+        {loading && <span className="text-[11px] text-helios-dim">Loading…</span>}
+        {(subteams ?? []).map((s) => (
+          <span key={s.id} className="flex items-center gap-1.5 rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text">
+            {s.name}
+            {canManage && (
+              <button
+                type="button"
+                aria-label={`Remove ${s.name}`}
+                onClick={() => remove(s.id)}
+                disabled={busyId === s.id}
+                className="text-[10px] text-helios-dim hover:text-red-200 disabled:opacity-40"
+              >✕</button>
+            )}
+          </span>
+        ))}
+      </div>
+      {canManage && (
+        <form onSubmit={add} className="mt-3 flex items-center gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="New subteam name"
+            aria-label="New subteam name"
+            className="w-56 rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold"
+          />
+          <button
+            type="submit"
+            disabled={manage.loading || !name.trim()}
+            className="rounded-sm bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+          >
+            Add
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function UserRow(props: {
+  u: VaultUser;
+  isMe: boolean;
+  isOwner: boolean;
+  isAdmin: boolean;
+  busy: boolean;
+  anyBusy: boolean;
+  onSetRole: (u: VaultUser, role: Exclude<VaultRole, "owner">) => void;
+  onRevoke: (u: VaultUser) => void;
+}) {
+  const { u, isMe, isOwner, isAdmin, busy, anyBusy, onSetRole, onRevoke } = props;
+
+  // Editing rules (mirror the server RPCs):
+  //  - your own row: never editable here (prevents self-lockout footguns).
+  //  - owner row: never editable here (owner is bootstrap-managed).
+  //  - touching an admin row, or assigning admin, needs owner.
+  //  - editor/viewer on a non-admin row needs admin.
+  const isOwnerRow = u.role === "owner";
+  const isAdminRow = u.role === "admin";
+  const lockedByOwnership = isOwnerRow || (isAdminRow && !isOwner);
+  const editable = isAdmin && !isMe && !lockedByOwnership;
+
+  return (
+    <tr className="border-b border-helios-line/60 [&>td]:px-4 [&>td]:py-2">
+      <td>
+        <span className="text-helios-text">{u.email ?? "(unknown email)"}</span>
+        {isMe && <span className="ml-1.5 text-[10px] text-asu-gold">(you)</span>}
+      </td>
+      <td className="text-helios-text">{u.display_name ?? <span className="text-[#5A5F66]">—</span>}</td>
+      <td className="text-helios-dim">{u.subteam ?? <span className="text-[#5A5F66]">—</span>}</td>
+      <td>
+        <RoleBadge role={u.role} />
+      </td>
+      <td className="font-mono-num text-[11px] text-helios-dim">
+        {u.granted_at ? new Date(u.granted_at).toLocaleDateString() : "—"}
+      </td>
+      <td>
+        <div className="flex items-center justify-end gap-2">
+          <select
+            aria-label={`Set role for ${u.email ?? u.user_id}`}
+            value={u.role ?? ""}
+            disabled={!editable || anyBusy}
+            onChange={(e) => {
+              const v = e.target.value as Exclude<VaultRole, "owner">;
+              if (v) onSetRole(u, v);
+            }}
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text outline-none focus:border-asu-gold disabled:opacity-40"
+          >
+            {u.role === null && <option value="">— none —</option>}
+            {isOwnerRow && <option value="owner">owner</option>}
+            {ASSIGNABLE.map((r) => (
+              <option key={r} value={r} disabled={r === "admin" && !isOwner}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => onRevoke(u)}
+            disabled={!editable || u.role === null || anyBusy}
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
+            title={u.role === null ? "No role to revoke" : "Remove this user's access"}
+          >
+            {busy ? "…" : "Revoke"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function RoleBadge({ role }: { role: VaultRole | null }) {
+  if (role === null) {
+    return <span className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#5A5F66]">no access</span>;
+  }
+  const tone =
+    role === "owner" ? "border-asu-gold bg-asu-gold text-helios-base"
+    : role === "admin" ? "border-asu-gold text-asu-gold"
+    : role === "editor" ? "border-helios-line text-helios-text"
+    : "border-helios-line text-helios-dim";
+  return (
+    <span className={"rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider " + tone}>
+      {role}
+    </span>
+  );
+}

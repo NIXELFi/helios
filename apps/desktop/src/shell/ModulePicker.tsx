@@ -27,6 +27,10 @@ interface Props {
    *  (display name preferred over email). When `userLabel === null` the
    *  pill renders a "Sign in" affordance instead. */
   userLabel: string | null;
+  /** Subteam + role shown as a secondary line under the name so it's obvious
+   *  who you're signed in as and what access you have. Either may be null. */
+  userSubteam: string | null;
+  userRole: string | null;
   /** Click the user pill / sign-in pill. Opens the AuthModal. */
   onOpenAuth: () => void;
   /** Sign the user out of the current Supabase session. Wired into the
@@ -36,6 +40,8 @@ interface Props {
    *  dropdown so a user on a shared machine can hand off to someone with
    *  a different Supabase backend. */
   onDisconnect: () => void;
+  /** Open the self-service change-password modal. */
+  onChangePassword: () => void;
   /** True when the user is allowed to enter the Vault module. Pulled up
    *  to a prop so the same gate is shared with click-routing in the
    *  parent Shell. */
@@ -50,9 +56,12 @@ export function ModulePicker(props: Props) {
     updaterState,
     onUpdaterClick,
     userLabel,
+    userSubteam,
+    userRole,
     onOpenAuth,
     onSignOut,
     onDisconnect,
+    onChangePassword,
     vaultEnabled,
   } = props;
   return (
@@ -94,9 +103,12 @@ export function ModulePicker(props: Props) {
       <div className="border-t border-helios-line p-2">
         <UserPill
           label={userLabel}
+          subteam={userSubteam}
+          role={userRole}
           onOpenAuth={onOpenAuth}
           onSignOut={onSignOut}
           onDisconnect={onDisconnect}
+          onChangePassword={onChangePassword}
         />
       </div>
 
@@ -158,11 +170,14 @@ function NavButton(props: {
 
 function UserPill(props: {
   label: string | null;
+  subteam: string | null;
+  role: string | null;
   onOpenAuth: () => void;
   onSignOut: () => void;
   onDisconnect: () => void;
+  onChangePassword: () => void;
 }) {
-  const { label, onOpenAuth, onSignOut, onDisconnect } = props;
+  const { label, subteam, role, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -207,22 +222,39 @@ function UserPill(props: {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex w-full items-center justify-between rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold"
+        className="flex w-full flex-col gap-0.5 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold"
       >
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            aria-hidden
-            className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-asu-gold"
-          />
-          <span className="truncate" title={label}>{label}</span>
+        <span className="flex w-full items-center justify-between gap-1">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              aria-hidden
+              className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-asu-gold"
+            />
+            <span className="truncate" title={label}>{label}</span>
+          </span>
+          <span aria-hidden className="ml-1 text-[10px] text-helios-dim">▾</span>
         </span>
-        <span aria-hidden className="ml-1 text-[10px] text-helios-dim">▾</span>
+        {(subteam || role) && (
+          <span className="truncate pl-3 text-[10px] text-helios-dim">
+            {subteam && <span>{subteam}</span>}
+            {subteam && role && <span className="text-[#5A5F66]"> · </span>}
+            {role && <span className="uppercase tracking-wider text-asu-gold/80">{role}</span>}
+          </span>
+        )}
       </button>
       {open && (
         <div
           role="menu"
           className="absolute bottom-full left-0 mb-1 w-full rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text shadow-lg"
         >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOpen(false); onChangePassword(); }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel"
+          >
+            Change password…
+          </button>
           <button
             type="button"
             role="menuitem"

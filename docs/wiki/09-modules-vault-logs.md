@@ -24,24 +24,35 @@ A multi-user file storage system backed by Supabase. Introduced as "Phase 1" in 
 
 The Vault stores session files, telemetry logs, share bundles, and analysis sessions with **version control**, **file locking**, and **role-based access control**.
 
-### Requirements
+### Connection (bring-your-own Supabase)
 
-Vault needs Supabase credentials baked into the build via Vite env vars:
+As of v3.7.0 there's **no baked-in Supabase connection**. Each user enters their
+project's URL + anon key once via the sidebar **Sign in → Connect** step; it's
+stored in `localStorage` (the anon key is public — RLS enforces access). The
+old `VITE_SUPABASE_*` env vars are gone from the shipped app. This means anyone
+running their own copy of the Helios PDM backend (the `infra/pdm-supabase`
+migrations + matching auth config) can point Helios at it.
 
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=...
-```
+### Accounts
 
-If unset, opening the Vault tab shows an "auth not configured" message. Production builds in CI inject these via repo secrets.
+Auth is app-wide (the `AuthShell` wraps the whole window, not just Vault):
 
-### Sign-in
-
-Unauthenticated users see the **LoginPane**: email + password form. `client.auth.signInWithPassword({ email, password })` against Supabase; the auth provider listens for `onAuthStateChange` and re-renders the rest of the module once `SIGNED_IN` fires. Sessions persist via Supabase's `auth.persistSession: true` (localStorage; Tauri can tighten to OS keychain in a future build).
+- **Sign up / sign in** from the persistent sidebar user pill. Sign-up requires
+  a **display name** and a **subteam** (the list lives in `pdm.subteams`,
+  managed by admins — not hard-coded). Self-signup is enabled.
+- **Roles**: `owner` > `admin` > `editor` > `viewer`. Reads are open to any
+  member; writes need editor+; role management is owner/admin via the in-app
+  **Admin** screen (hybrid: only the owner grants the admin role).
+- **Passwords**: change-password from the user-pill dropdown; forgot-password
+  via a 6-digit email OTP (Resend SMTP). No magic-link redirect — codes work on
+  desktop.
+- The Vault button is greyed out until signed in; Logs + CFD work logged-out.
+  Sessions persist via Supabase's `auth.persistSession: true`.
 
 ### Screens
 
-The Vault is divided into four screens, switched via its own `NavRail`:
+The Vault is divided into screens, switched via its own `NavRail` (the **Admin**
+screen appears only for admins):
 
 1. **Browse** — Folder/file tree with multi-select. Each file row shows latest-version metadata, lock status, and local-sync state. An **UnmatchedFilesBanner** offers bulk "Add all" or per-file "Add" actions when local files exist that aren't in the vault.
 2. **History** — Per-file version timeline with author, comment, size, SHA256, and "Restore to working copy" actions.
@@ -85,10 +96,10 @@ Vault's data layer is `~25` custom hooks under [`apps/desktop/src/modules/vault/
 
 The auth logic lives in [`packages/auth/`](../../packages/auth/):
 
-- **`SupabaseAuthProvider`** — context provider; subscribes to `client.auth.onAuthStateChange`.
-- **`useUser()`**, **`useSession()`**, **`useAuthLoading()`**, **`useSupabaseClient()`** — hooks.
-- **`RequireAuth`** — HOC that renders a loading state, then the login pane if unauthenticated, then children once signed in.
-- **`createSupabaseClient()`** — reads from explicit args, then `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`. Sets `db.schema: "pdm"` so Vault tables resolve correctly.
+- **`SupabaseAuthProvider`** — context provider; accepts a `client` that may be `null` (no connection yet) and subscribes to `client.auth.onAuthStateChange`.
+- **`useUser()`**, **`useSession()`**, **`useAuthLoading()`**, **`useSupabaseClient()`**, **`useSupabaseClientOrNull()`** — hooks.
+- **`createSupabaseClient({ url, anonKey })`** — takes the connection explicitly (sourced from the in-app Connect step / `localStorage`, not env). Sets `db.schema: "pdm"` so Vault tables resolve correctly.
+- The desktop app's **`AuthShell`** (`apps/desktop/src/auth/`) owns the connection + builds the client; `AuthModal` handles connect / sign-in / sign-up / forgot-password.
 
 ### Palette unification
 

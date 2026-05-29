@@ -1,12 +1,16 @@
 #!/usr/bin/env tsx
 /**
- * One-shot: create or promote the first admin user.
+ * One-shot: create or promote the OWNER (the super-user that can hand out
+ * admin roles). Subsequent admins/editors/viewers are granted from the
+ * in-app Admin panel, not this script.
  *
  * Usage:
- *   pnpm bootstrap:admin -- --email me@example.com [--password 'temp123']
+ *   pnpm bootstrap:admin -- --email me@example.com [--password 'temp123'] [--role owner|admin]
  *
- * If --password is omitted and the user doesn't exist, a random temporary
- * password is generated and printed once. The admin must change it on first login.
+ * `--role` defaults to `owner`. Pass `--role admin` if you only want a plain
+ * admin (rare — the owner is what the hybrid permission model expects to exist
+ * exactly once). If --password is omitted and the user doesn't exist, a random
+ * temporary password is generated and printed once; change it on first login.
  */
 import { config } from "dotenv";
 import WebSocket from "ws";
@@ -64,14 +68,20 @@ async function main(): Promise<void> {
     console.log(`Found existing auth user: ${user.email} (id=${user.id})`);
   }
 
-  // Upsert into pdm.user_roles with role=admin.
+  // Upsert into pdm.user_roles. Defaults to 'owner' — the super-user the
+  // hybrid permission model expects (only the owner can grant the admin role).
+  const role = arg("role") ?? "owner";
+  if (!["owner", "admin", "editor", "viewer"].includes(role)) {
+    console.error(`Invalid --role '${role}'. Use owner | admin | editor | viewer.`);
+    process.exit(2);
+  }
   const { error: roleErr } = await svc
     .from("user_roles")
-    .upsert({ user_id: user.id, role: "admin" }, { onConflict: "user_id" });
+    .upsert({ user_id: user.id, role }, { onConflict: "user_id" });
   if (roleErr) throw roleErr;
-  console.log(`Granted role=admin to ${user.email}.`);
+  console.log(`Granted role=${role} to ${user.email}.`);
 
-  console.log("\nDone. The user can now log in via Helios and access all admin operations.");
+  console.log("\nDone. The user can now log in via Helios and manage roles from the Admin panel.");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -47,6 +47,9 @@ Running log of issues found in the running UI and the fixes applied. One file pe
 | 39 | CFD tab Phase 4 — animated wave-frame viewer (schematic + per-pipe waterfall), selectable field/size/cyl-field, 0.25–8× playback, sweep RPM switcher; `cfd_load_waves` Tauri command reads JSONL captures | [39-cfd-phase-4-wave-viewer.md](39-cfd-phase-4-wave-viewer.md) |
 | 40 | UI unification across Log / Vault / CFD — moved HELIOS wordmark + version + UpdatesPill into the persistent sidebar; restyled Vault & CFD NavRails to match Log's pill language; standardized CFD body backgrounds on `helios-base`; CFD wave-viewer polish; P/T/x_b cylinder trace wrap-spike fix; CFD Clear-data button | [40-ui-unification.md](40-ui-unification.md) |
 | 41 | App-wide auth shell — user-configurable Supabase connection (URL + anon key stored locally), persistent sidebar user pill (sign in / out / disconnect), in-app self-signup with optional display name, Vault greyed-out when logged out | [41-auth-shell.md](41-auth-shell.md) |
+| 42 | Admin panel — `owner` role tier + in-app Users screen for granting/revoking roles (hybrid: owner grants admin, admins grant editor/viewer), enforced by SECURITY DEFINER RPCs | [42-admin-panel.md](42-admin-panel.md) |
+| 43 | Password management + Resend email — change-password (logged in), forgot-password via 6-digit email OTP (no magic-link redirect), custom SMTP on a verified domain, branded recovery template | [43-password-and-email.md](43-password-and-email.md) |
+| 44 | Mandatory profile + managed subteams — display name + subteam required at sign-up, `pdm.subteams` table (seeded, admin-managed), Name/Subteam in the admin panel, subteam·role on the sidebar pill | [44-subteams-and-profile.md](44-subteams-and-profile.md) |
 
 > **Wiki:** see [`docs/wiki/`](../docs/wiki/) for the consolidated user + developer guide.
 

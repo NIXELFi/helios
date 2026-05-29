@@ -4,13 +4,16 @@ import "@testing-library/jest-dom/vitest";
 import { ModulePicker } from "../src/shell/ModulePicker";
 
 const baseProps = {
-  appVersion: "3.6.0",
-  updaterState: { kind: "up_to_date" as const, current: "3.6.0" },
+  appVersion: "3.7.0",
+  updaterState: { kind: "up_to_date" as const, current: "3.7.0" },
   onUpdaterClick: () => {},
   userLabel: null as string | null,
+  userSubteam: null as string | null,
+  userRole: null as string | null,
   onOpenAuth: () => {},
   onSignOut: () => {},
   onDisconnect: () => {},
+  onChangePassword: () => {},
   vaultEnabled: true,
 };
 
@@ -43,8 +46,8 @@ describe("<ModulePicker>", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} />);
     expect(screen.getByText("HELIOS")).toBeInTheDocument();
     // Version appears in two spots — the sidebar header subtitle and the
-    // UpdatesPill ("✓ v3.6.0"). The subtitle is the persistent label.
-    expect(screen.getByText(/v3\.6\.0 · ground-station/i)).toBeInTheDocument();
+    // UpdatesPill ("✓ v3.7.0"). The subtitle is the persistent label.
+    expect(screen.getByText(/v3\.7\.0 · ground-station/i)).toBeInTheDocument();
   });
 
   it("invokes onUpdaterClick when the updates pill is clicked", () => {
@@ -57,7 +60,7 @@ describe("<ModulePicker>", () => {
         onUpdaterClick={onUpdaterClick}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /v3\.6\.0/i }));
+    fireEvent.click(screen.getByRole("button", { name: /v3\.7\.0/i }));
     expect(onUpdaterClick).toHaveBeenCalled();
   });
 
@@ -90,6 +93,21 @@ describe("<ModulePicker>", () => {
     fireEvent.click(pill);
     fireEvent.click(screen.getByRole("menuitem", { name: /disconnect/i }));
     expect(onDisconnect).toHaveBeenCalled();
+  });
+
+  it("shows the user's subteam and role under their name in the pill", () => {
+    render(
+      <ModulePicker
+        {...baseProps}
+        active="logs"
+        onSelect={() => {}}
+        userLabel="Nick Murray"
+        userSubteam="Engine"
+        userRole="owner"
+      />,
+    );
+    expect(screen.getByText("Engine")).toBeInTheDocument();
+    expect(screen.getByText("owner")).toBeInTheDocument();
   });
 
   it("greys out the Vault button when vaultEnabled is false and still fires onSelect (Shell routes to auth)", () => {

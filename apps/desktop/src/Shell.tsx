@@ -6,8 +6,9 @@ import { CfdModule } from "./modules/cfd";
 import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
-import { AuthShell, useHeliosAuth, useConnection, userDisplayName } from "./auth/AuthShell";
+import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
 import { AuthModal } from "./auth/AuthModal";
+import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -41,7 +42,9 @@ function HeliosShell() {
 
   const { user, client } = useHeliosAuth();
   const { disconnect } = useConnection();
+  const myRole = useMyRole();
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [changePwOpen, setChangePwOpen] = useState(false);
 
   // Vault is gated on a live logged-in user — the module immediately hits
   // Supabase RLS-protected tables on mount, so rendering it without a session
@@ -98,6 +101,7 @@ function HeliosShell() {
   }
 
   const userLabel = user ? userDisplayName(user) : null;
+  const userSubteamLabel = user ? userSubteam(user) : null;
 
   return (
     <div className="flex h-screen w-screen">
@@ -108,9 +112,12 @@ function HeliosShell() {
         updaterState={updater.state}
         onUpdaterClick={handleUpdaterClick}
         userLabel={userLabel}
+        userSubteam={userSubteamLabel}
+        userRole={myRole}
         onOpenAuth={() => setAuthModalOpen(true)}
         onSignOut={() => void handleSignOut()}
         onDisconnect={() => void handleDisconnect()}
+        onChangePassword={() => setChangePwOpen(true)}
         vaultEnabled={vaultEnabled}
       />
       <main className="relative min-w-0 flex-1">
@@ -143,6 +150,11 @@ function HeliosShell() {
         />
       )}
       <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+      <ChangePasswordModal
+        open={changePwOpen}
+        client={client}
+        onClose={() => setChangePwOpen(false)}
+      />
     </div>
   );
 }

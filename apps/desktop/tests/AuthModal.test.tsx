@@ -10,6 +10,9 @@ import { clearConnection, saveConnection } from "../src/auth/connection";
 // calls without a real Supabase backend.
 const signInWithPassword = vi.fn();
 const signUp = vi.fn();
+const resetPasswordForEmail = vi.fn();
+const verifyOtp = vi.fn();
+const updateUser = vi.fn();
 
 vi.mock("@helios/auth", async () => {
   const actual = await vi.importActual<typeof import("@helios/auth")>("@helios/auth");
@@ -22,7 +25,19 @@ vi.mock("@helios/auth", async () => {
           onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
           signInWithPassword,
           signUp,
+          resetPasswordForEmail,
+          verifyOtp,
+          updateUser,
         },
+        // The signup step loads the subteam picker from pdm.subteams.
+        from: () => ({
+          select: () => ({
+            order: () => Promise.resolve({
+              data: [{ id: "st1", name: "Engine", sort_order: 1 }],
+              error: null,
+            }),
+          }),
+        }),
       } as any),
   };
 });
@@ -40,6 +55,9 @@ describe("<AuthModal>", () => {
     clearConnection();
     signInWithPassword.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
     signUp.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
+    resetPasswordForEmail.mockReset().mockResolvedValue({ data: {}, error: null });
+    verifyOtp.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
+    updateUser.mockReset().mockResolvedValue({ data: {}, error: null });
     // Belt-and-suspenders: ensure no env-var connection bleeds in.
     vi.stubEnv("VITE_SUPABASE_URL", "");
     vi.stubEnv("VITE_SUPABASE_ANON_KEY", "");
@@ -88,20 +106,28 @@ describe("<AuthModal>", () => {
     });
   });
 
-  it("passes the display name into signUp metadata", async () => {
+  it("requires display name + subteam, then passes both into signUp metadata", async () => {
     saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
     renderModal();
     // Flip to the Sign up tab.
     fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    // Subteam picker is populated asynchronously from pdm.subteams.
+    await screen.findByRole("option", { name: "Engine" });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "hunter2" } });
+    // Submitting without a subteam is blocked.
     fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Nick M." } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/subteam/i);
+    expect(signUp).not.toHaveBeenCalled();
+    // Pick the subteam, then it goes through with both fields in metadata.
+    fireEvent.change(screen.getByLabelText(/subteam/i), { target: { value: "Engine" } });
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
     await waitFor(() => {
       expect(signUp).toHaveBeenCalledWith({
         email: "new@example.com",
         password: "hunter2",
-        options: { data: { display_name: "Nick M." } },
+        options: { data: { display_name: "Nick M.", subteam: "Engine" } },
       });
     });
   });
@@ -116,5 +142,44 @@ describe("<AuthModal>", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(/invalid login credentials/i);
     });
+  });
+
+  it("forgot-password: requests an OTP code, then verifies it and sets a new password", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    renderModal();
+    // Go to the forgot step.
+    fireEvent.click(screen.getByRole("button", { name: /forgot password\?/i }));
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "u@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await waitFor(() =>
+      expect(resetPasswordForEmail).toHaveBeenCalledWith("u@example.com"),
+    );
+    // Now on the reset step — enter code + new password.
+    const code = await screen.findByLabelText(/6-digit code/i);
+    fireEvent.change(code, { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText(/^new password$/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.change(screen.getByLabelText(/confirm new password/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.click(screen.getByRole("button", { name: /reset password/i }));
+    await waitFor(() => {
+      expect(verifyOtp).toHaveBeenCalledWith({ email: "u@example.com", token: "123456", type: "recovery" });
+    });
+    await waitFor(() => {
+      expect(updateUser).toHaveBeenCalledWith({ password: "correcthorsebattery" });
+    });
+  });
+
+  it("forgot-password: rejects a non-6-digit code before calling verifyOtp", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /forgot password\?/i }));
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "u@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    const code = await screen.findByLabelText(/6-digit code/i);
+    fireEvent.change(code, { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText(/^new password$/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.change(screen.getByLabelText(/confirm new password/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.click(screen.getByRole("button", { name: /reset password/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/numeric code/i);
+    expect(verifyOtp).not.toHaveBeenCalled();
   });
 });

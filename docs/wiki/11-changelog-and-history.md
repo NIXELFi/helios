@@ -20,6 +20,8 @@ This page distills the 33 entries into a chronological digest plus a deduplicate
 | **v2.5.2** | 32 | Smart channel resolver — semantic matching gated by units row; 6 new canonical channels. |
 | **v2.5.3** | 33 | Split `engine.tps` / `engine.aps` (plus `_sub` variants); loader collision protection. |
 | **v3.0.x – v3.2.x** | (post-v2_changes) | Vault module, channel source-override picker, auto-resolver coverage expansion (~100 aliases), workspace UX polish, ⌘K palette, hotkeys, lap UX, footer compare, Tauri title-bar overlay, app-state persistence, dynamic LoadingScreen version, WCAG AA contrast + ARIA-modal + prefers-reduced-motion. |
+| **v3.4–v3.6** | 35–40 | CFD tab (engine-sim port, config editor, sweeps, optimization, wave viewer); UI unification across Log / Vault / CFD + persistent sidebar (brand, version, updater); CFD Clear-data + wave-viewer polish. |
+| **v3.7.0** | 41–44 | **App-wide auth + accounts.** User-configurable Supabase connection (bring-your-own project); persistent sign-in / sign-up with mandatory display name + subteam; `owner`/`admin`/`editor`/`viewer` role tiers + in-app admin panel; managed subteams (`pdm.subteams`); password change + forgot-password via 6-digit email OTP over Resend SMTP. |
 
 ## Per-entry summary
 

@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -123,6 +124,39 @@ export function useHeliosAuth(): HeliosAuthState {
     loading,
     client,
   };
+}
+
+/** Current user's vault role (owner/admin/editor/viewer) or null when they
+ *  have none / aren't signed in / no connection. Used by the sidebar pill;
+ *  safe to call from the Shell because it degrades to null instead of
+ *  throwing when the client is absent. */
+export function useMyRole(): string | null {
+  const client = useSupabaseClientOrNull();
+  const user = useUser();
+  const [role, setRole] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client || !user) {
+      setRole(null);
+      return;
+    }
+    let on = true;
+    (async () => {
+      const { data } = await (client.from("user_roles") as any)
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (on) setRole((data?.role as string) ?? null);
+    })();
+    return () => { on = false; };
+  }, [client, user]);
+  return role;
+}
+
+/** The user's chosen subteam (set at sign-up, stored in user_metadata). */
+export function userSubteam(user: User | null): string | null {
+  const meta = user?.user_metadata as Record<string, unknown> | undefined;
+  const s = typeof meta?.subteam === "string" ? meta.subteam.trim() : "";
+  return s || null;
 }
 
 /** Display name preferred over email. Falls back to the local part of the

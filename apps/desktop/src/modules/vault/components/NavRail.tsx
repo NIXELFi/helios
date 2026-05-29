@@ -1,6 +1,6 @@
 import { VaultSwitcher } from "./VaultSwitcher";
 
-export type VaultScreenId = "browse" | "history" | "who" | "settings";
+export type VaultScreenId = "browse" | "history" | "who" | "settings" | "admin";
 
 const ENTRIES: { id: VaultScreenId; label: string }[] = [
   { id: "browse", label: "Browse" },
@@ -9,8 +9,17 @@ const ENTRIES: { id: VaultScreenId; label: string }[] = [
   { id: "settings", label: "Settings" },
 ];
 
-export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScreenId) => void }) {
-  const { active, onSelect } = props;
+// The Admin entry is appended only for admins (gated by the caller via
+// `showAdmin`), so non-admins never even see the user-management screen.
+const ADMIN_ENTRY: { id: VaultScreenId; label: string } = { id: "admin", label: "Admin" };
+
+export function NavRail(props: {
+  active: VaultScreenId;
+  onSelect: (id: VaultScreenId) => void;
+  showAdmin?: boolean;
+}) {
+  const { active, onSelect, showAdmin } = props;
+  const entries = showAdmin ? [...ENTRIES, ADMIN_ENTRY] : ENTRIES;
   return (
     // Same button language as the Log workspace tabs in App.tsx — small
     // rounded-sm pills with bg-helios-panel + border-helios-line, gold
@@ -21,7 +30,7 @@ export function NavRail(props: { active: VaultScreenId; onSelect: (id: VaultScre
         <VaultSwitcher />
       </div>
       <div className="flex flex-col gap-1">
-        {ENTRIES.map((e) => {
+        {entries.map((e) => {
           const isActive = active === e.id;
           return (
             <button

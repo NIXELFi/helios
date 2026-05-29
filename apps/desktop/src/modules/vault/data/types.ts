@@ -50,6 +50,32 @@ export interface Lock {
   force_released_by: UserId | null;
 }
 
+/** Role tiers in pdm.user_roles. `owner` is the super-user (set only via the
+ *  bootstrap script); the others are managed from the in-app Admin panel. */
+export type VaultRole = "owner" | "admin" | "editor" | "viewer";
+
+/** A selectable SDM subteam. The list is managed in pdm.subteams (not
+ *  hard-coded) and every account picks one at sign-up. */
+export interface Subteam {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+/** One row from the admin_list_users RPC — every auth user plus their role
+ *  (null when they've signed up but not been granted access yet), display
+ *  name, and chosen subteam. */
+export interface VaultUser {
+  user_id: UserId;
+  email: string | null;
+  display_name: string | null;
+  subteam: string | null;
+  role: VaultRole | null;
+  granted_at: string | null;
+  created_at: string;
+}
+
 /** Common shape returned by every data hook. */
 export interface QueryResult<T> {
   data: T | null;
