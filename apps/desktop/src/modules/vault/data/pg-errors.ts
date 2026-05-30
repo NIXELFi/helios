@@ -51,7 +51,11 @@ export function friendlyPgError(
 ): FriendlyError {
   if (!err) return { message: "Unknown error", kind: "unknown" };
 
-  if (err instanceof Error && !("code" in err)) {
+  // A bare native Error (no SQL `code` and no HTTP `status`) can't be mapped,
+  // so surface its message. But Supabase's AuthApiError is a real Error
+  // subclass that carries a `status` (e.g. 401/403) without a `code` — those
+  // must fall through to the status-based mapping below, not early-return.
+  if (err instanceof Error && !("code" in err) && !("status" in err)) {
     return { message: err.message || "Unknown error", kind: "unknown" };
   }
 
@@ -108,8 +112,10 @@ export function friendlyPgError(
     return { message: "Item not found.", kind: "not-found" };
   }
 
-  // PostgREST + Supabase auth: JWT errors.
-  if (code === "PGRST301" || e.status === 401) {
+  // PostgREST + Supabase auth: JWT errors. AuthApiError surfaces a 401 on an
+  // expired/invalid session and a 403 when authenticated but unauthorized;
+  // both point the user at re-authenticating.
+  if (code === "PGRST301" || e.status === 401 || e.status === 403) {
     return { message: "Your session has expired — please sign in again.", kind: "auth" };
   }
 

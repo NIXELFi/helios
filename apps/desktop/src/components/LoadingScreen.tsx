@@ -29,7 +29,7 @@ export function LoadingScreen({ progress, stage, error, version }: Props) {
 
       <div className="mt-12 w-[520px] max-w-[80%] flex flex-col gap-2">
         {error ? (
-          <div className="border border-[#EF5350] bg-[#16171B] px-3 py-2 text-xs text-[#EF5350]">
+          <div role="alert" className="border border-[#EF5350] bg-[#16171B] px-3 py-2 text-xs text-[#EF5350]">
             {error}
           </div>
         ) : (
@@ -40,7 +40,14 @@ export function LoadingScreen({ progress, stage, error, version }: Props) {
                 {Math.round(pct * 100)}%
               </span>
             </div>
-            <div className="relative h-1.5 bg-[#16171B] border border-[#2A2C32] overflow-hidden">
+            <div
+              role="progressbar"
+              aria-label={stage}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(pct * 100)}
+              className="relative h-1.5 bg-[#16171B] border border-[#2A2C32] overflow-hidden"
+            >
               <div
                 className="absolute inset-y-0 left-0 bg-[#FFC627] transition-[width] duration-300 ease-out"
                 style={{ width: `${pct * 100}%` }}

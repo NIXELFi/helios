@@ -3,8 +3,16 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { stat, readFile } from "@tauri-apps/plugin-fs";
 import { useBulkDownload } from "../../src/modules/vault/data/useBulkDownload";
 import type { VaultFile, Version } from "../../src/modules/vault/data/types";
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 // Mock downloadVersionOnce — the hook calls this for every file. Each call
 // stays pending until the test resolves it via resolveDownload(sha, ok). This
@@ -40,8 +48,11 @@ vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
 
 // stat() in useBulkDownload is the "is the local file already up to date?"
 // probe — throwing means "file doesn't exist on disk, please download it".
+// readFile() backs the SHA-256 verification on a size match. Both are
+// configured per-test; the beforeEach restores the default (file absent).
 vi.mock("@tauri-apps/plugin-fs", () => ({
-  stat: vi.fn(() => Promise.reject(new Error("ENOENT"))),
+  stat: vi.fn(),
+  readFile: vi.fn(),
 }));
 
 // openDirDialog is only invoked when heliosRoot is null — we pass a non-null
@@ -92,6 +103,10 @@ describe("useBulkDownload", () => {
   beforeEach(() => {
     downloadCalls.length = 0;
     downloadResolvers.clear();
+    // Default: local file absent → every file downloads (preserves the
+    // original test behaviour before stat() became per-test configurable).
+    vi.mocked(stat).mockRejectedValue(new Error("ENOENT"));
+    vi.mocked(readFile).mockResolvedValue(new Uint8Array());
   });
 
   it("downloads all files when started, then closes the run", async () => {
@@ -195,6 +210,68 @@ describe("useBulkDownload", () => {
       for (let i = 0; i < 3; i++) resolveDownload(`r2-r2-f${i}`, true);
     });
     await waitFor(() => expect(result.current.running).toBe(false));
+  });
+
+  it("skips a file whose local content hash matches the latest version", async () => {
+    const localBytes = new Uint8Array([10, 20, 30, 40]);
+    const sha = await sha256Hex(localBytes);
+    vi.mocked(stat).mockResolvedValue({ isFile: true, size: localBytes.length } as any);
+    vi.mocked(readFile).mockResolvedValue(localBytes);
+    const files = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", sha, localBytes.length)]],
+    ]);
+    const { result } = renderHook(
+      () =>
+        useBulkDownload({ heliosRoot: "/tmp", vaultName: "test", folders: [], versionsByFileId }),
+      { wrapper: wrap(fakeClient()) },
+    );
+    await act(async () => { result.current.start(files); });
+    await waitFor(() => expect(result.current.running).toBe(false));
+    expect(downloadCalls.length).toBe(0);
+    expect(result.current.skipped).toBe(1);
+    expect(result.current.stale).toBe(0);
+  });
+
+  it("flags a same-size, different-content file as stale without clobbering it", async () => {
+    // The critical bug: size-only skip silently leaves the user on an old
+    // version and reports green. A same-size revision must NOT be counted as
+    // a clean skip, but also must not overwrite a possible local edit.
+    const localBytes = new Uint8Array([1, 1, 1, 1]);
+    vi.mocked(stat).mockResolvedValue({ isFile: true, size: localBytes.length } as any);
+    vi.mocked(readFile).mockResolvedValue(localBytes);
+    const files = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "a-different-server-sha", localBytes.length)]],
+    ]);
+    const { result } = renderHook(
+      () =>
+        useBulkDownload({ heliosRoot: "/tmp", vaultName: "test", folders: [], versionsByFileId }),
+      { wrapper: wrap(fakeClient()) },
+    );
+    await act(async () => { result.current.start(files); });
+    await waitFor(() => expect(result.current.running).toBe(false));
+    expect(downloadCalls.length).toBe(0);
+    expect(result.current.stale).toBe(1);
+    expect(result.current.skipped).toBe(0);
+  });
+
+  it("flags a size-mismatched local file as stale", async () => {
+    vi.mocked(stat).mockResolvedValue({ isFile: true, size: 999 } as any);
+    const files = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-x", 100)]],
+    ]);
+    const { result } = renderHook(
+      () =>
+        useBulkDownload({ heliosRoot: "/tmp", vaultName: "test", folders: [], versionsByFileId }),
+      { wrapper: wrap(fakeClient()) },
+    );
+    await act(async () => { result.current.start(files); });
+    await waitFor(() => expect(result.current.running).toBe(false));
+    expect(downloadCalls.length).toBe(0);
+    expect(result.current.stale).toBe(1);
+    expect(result.current.skipped).toBe(0);
   });
 
   it("cancel() stops a run that hasn't been restarted", async () => {

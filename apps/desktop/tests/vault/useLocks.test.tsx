@@ -22,8 +22,8 @@ function mockClient(rows: any[], error: any = null): SupabaseClient {
             order: (_orderCol: string, _opts: { ascending: boolean }) => ({
               // Pagination via .range() — return all rows once; fetchAllRows
               // exits when the page is smaller than its cap.
-              range: (_from: number, _to: number) =>
-                Promise.resolve({ data: rows, error }),
+              range: (from: number, to: number) =>
+                Promise.resolve({ data: rows.slice(from, to + 1), error }),
             }),
           };
         },

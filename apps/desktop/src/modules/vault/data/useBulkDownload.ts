@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
-import { stat } from "@tauri-apps/plugin-fs";
+import { stat, readFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { localDestPath } from "./folder-paths";
@@ -11,14 +11,31 @@ function joinDir(a: string, b: string): string {
   return `${a.replace(/\/+$/, "")}/${b}`;
 }
 
+/** SHA-256 of raw bytes as lowercase hex. A version's sha256 identifies the
+ *  ORIGINAL uncompressed content, and a local vault file is that same
+ *  uncompressed content, so hashing the local bytes and comparing to
+ *  version.sha256 is an exact content-equality check. */
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export interface BulkDownloadState {
   running: boolean;
   open: boolean;
   total: number;
   done: number;
   errs: number;
-  /** Files we skipped because the local copy was already up-to-date by size. */
+  /** Files we skipped because the local copy is already up-to-date (its
+   *  content hash matches the latest version). */
   skipped: number;
+  /** Files whose local copy differs from the latest version (different size,
+   *  or same size but different content hash). Left untouched to avoid
+   *  clobbering a possible local edit — surfaced so the run does NOT falsely
+   *  report everything as synced. */
+  stale: number;
   bytesDone: number;
   current: string | null;
   lastError: string | null;
@@ -73,6 +90,7 @@ export function useBulkDownload(opts: {
   const [done, setDone] = useState(0);
   const [errs, setErrs] = useState(0);
   const [skipped, setSkipped] = useState(0);
+  const [stale, setStale] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [active, setActive] = useState<Array<{ id: FileId; name: string }>>([]);
   // Monotonic generation counter. Each start() captures a new generation;
@@ -125,6 +143,7 @@ export function useBulkDownload(opts: {
     setDone(0);
     setErrs(0);
     setSkipped(0);
+    setStale(0);
     setLastError(null);
     setActive([]);
     bytesDoneRef.current = 0;
@@ -170,25 +189,45 @@ export function useBulkDownload(opts: {
         if (!version) continue;
         const dest = localDestPath(root!, file.folder_id, file.name, folders);
 
-        // Skip-if-already-synced: if the local file exists AND its size
-        // matches the server version's size_bytes, assume the contents
-        // match. This is a cheap heuristic — a SHA check would be safer
-        // but means reading every file. If the user has locally modified
-        // the file (different size), we ALSO skip it instead of clobbering
-        // their edit; the bulk pull is not the right tool to "fix" diffs.
+        // Skip-if-already-synced. The local copy is only considered current
+        // when its CONTENT matches the latest version — size equality alone
+        // is unsound because a revision can keep the exact same byte length,
+        // and skipping it silently left the user on a stale file while the
+        // run reported green (2026-05-29 audit, critical). So:
+        //   - size differs            → can't be the latest version → stale
+        //   - size matches, hash ==   → genuinely up to date         → skip
+        //   - size matches, hash !=   → same-size revision/edit       → stale
+        // "stale" files are left on disk untouched (never clobber a possible
+        // local edit) but counted separately so the summary doesn't claim
+        // everything is synced. We only pay the read+hash cost on a size
+        // match, which is the only case that could be a false "up to date".
         try {
           const info = await stat(dest);
           if (!isCurrent()) return;
           if (info.isFile) {
-            if (info.size === version.size_bytes) {
+            if (info.size !== version.size_bytes) {
+              setStale((s) => s + 1);
+              continue;
+            }
+            let localSha = "";
+            try {
+              const localBytes = await readFile(dest);
+              if (!isCurrent()) return;
+              localSha = await sha256Hex(localBytes);
+            } catch {
+              // Couldn't read the local file — treat as needing a download.
+              localSha = "";
+            }
+            if (localSha && localSha === version.sha256) {
               setSkipped((s) => s + 1);
               continue;
             }
-            // Size mismatch — preserve the user's local copy rather than
-            // overwriting. Counted as skipped, not errored, so the run
-            // shows green for the cases that worked.
-            setSkipped((s) => s + 1);
-            continue;
+            if (localSha) {
+              // Same size, different content — don't overwrite a local edit.
+              setStale((s) => s + 1);
+              continue;
+            }
+            // Unreadable local file → fall through and (re)download it.
           }
         } catch {
           // File doesn't exist — fall through to download.
@@ -244,7 +283,7 @@ export function useBulkDownload(opts: {
   const close = useCallback(() => { if (!running) setOpen(false); }, [running]);
 
   return {
-    running, open, total, done, errs, skipped,
+    running, open, total, done, errs, skipped, stale,
     bytesDone: bytesDoneRef.current,
     // For backwards-compat the legacy modal reads `current` (single name);
     // populate it from the active list's first entry.

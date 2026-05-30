@@ -32,44 +32,33 @@ export function snapTile(spec: TileSpec): TileSpec {
 }
 
 /** Find the next free top-left cell for a new tile. Tries left-to-right,
- *  top-to-bottom; falls back to (0,0) if the canvas is fully tiled. */
+ *  top-to-bottom; falls back to (0,0) if the canvas is fully tiled.
+ *
+ *  Occupancy is tested by RECTANGLE INTERSECTION between the candidate slot
+ *  and every existing tile, not by sampling grid-cell corner points. Corner
+ *  sampling misses sub-cell tiles and tiles whose edges fall between grid
+ *  lines, which let new tiles drop right on top of existing ones. */
 export function findNextFreeSlot(
   tiles: TileSpec[],
   cellsW = 6,
   cellsH = 4,
 ): { x: number; y: number; w: number; h: number } {
-  const occupied = (cx: number, cy: number) => {
-    const px = cx / GRID_COLS;
-    const py = cy / GRID_ROWS;
-    for (const t of tiles) {
-      if (px >= t.x && px < t.x + t.w && py >= t.y && py < t.y + t.h) return true;
-    }
-    return false;
-  };
+  const w = cellsW / GRID_COLS;
+  const h = cellsH / GRID_ROWS;
+  // Two rectangles overlap iff they overlap on both axes. A shared edge
+  // (a.right === b.left) is NOT an overlap, so adjacent placement is allowed.
+  const intersects = (x: number, y: number, t: TileSpec) =>
+    x < t.x + t.w && x + w > t.x && y < t.y + t.h && y + h > t.y;
   for (let cy = 0; cy <= GRID_ROWS - cellsH; cy++) {
     for (let cx = 0; cx <= GRID_COLS - cellsW; cx++) {
-      let clear = true;
-      outer:
-      for (let dy = 0; dy < cellsH; dy++) {
-        for (let dx = 0; dx < cellsW; dx++) {
-          if (occupied(cx + dx, cy + dy)) { clear = false; break outer; }
-        }
-      }
-      if (clear) {
-        return {
-          x: cx / GRID_COLS,
-          y: cy / GRID_ROWS,
-          w: cellsW / GRID_COLS,
-          h: cellsH / GRID_ROWS,
-        };
+      const x = cx / GRID_COLS;
+      const y = cy / GRID_ROWS;
+      if (!tiles.some((t) => intersects(x, y, t))) {
+        return { x, y, w, h };
       }
     }
   }
-  return {
-    x: 0, y: 0,
-    w: cellsW / GRID_COLS,
-    h: cellsH / GRID_ROWS,
-  };
+  return { x: 0, y: 0, w, h };
 }
 
 /** Snap every tile in the workspace to the grid without changing relative

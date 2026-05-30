@@ -113,3 +113,60 @@ describe("ChannelsModal — source override picker", () => {
     expect(screen.getByText(/1 overridden/)).toBeInTheDocument();
   });
 });
+
+describe("ChannelsModal — L12 empty state + keyed fragments", () => {
+  it("shows an empty-state row when the filter excludes every channel", () => {
+    render(
+      <ChannelsModal
+        channels={channels}
+        sessionLabel="Test"
+        sourceHeaders={sourceHeaders}
+        overrides={{}}
+        onOverrideChange={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const input = screen.getByPlaceholderText(/filter by id/i);
+    fireEvent.change(input, { target: { value: "zzz-nothing-matches" } });
+    expect(screen.getByText(/no matching channels/i)).toBeInTheDocument();
+    // Count chrome reflects the empty filter.
+    expect(screen.getByText(/0 \/ 2/)).toBeInTheDocument();
+  });
+
+  it("does not emit a React key warning for grouped rows", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ChannelsModal
+        channels={channels}
+        sessionLabel="Test"
+        sourceHeaders={sourceHeaders}
+        overrides={{}}
+        onOverrideChange={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const keyWarning = errSpy.mock.calls.some((c) =>
+      String(c[0]).includes("unique \"key\"") || String(c[0]).includes("unique key"),
+    );
+    expect(keyWarning).toBe(false);
+    errSpy.mockRestore();
+  });
+});
+
+describe("ChannelsModal — X2 modal a11y", () => {
+  it("closes on Escape", () => {
+    const onClose = vi.fn();
+    render(
+      <ChannelsModal
+        channels={channels}
+        sessionLabel="Test"
+        sourceHeaders={sourceHeaders}
+        overrides={{}}
+        onOverrideChange={() => {}}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

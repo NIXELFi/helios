@@ -11,14 +11,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 function realtimeClient() {
   const handlers: Record<string, () => void> = {};
   let channelName = "";
+  const channelNames: string[] = [];
   const subscribeMock = vi.fn();
+  // Capture the status callback passed to .subscribe() so tests can drive
+  // CHANNEL_ERROR / TIMED_OUT / SUBSCRIBED transitions.
+  let statusCb: ((status: string, err?: unknown) => void) | undefined;
   const channelMock = {
     on: vi.fn(function (this: any, _event: string, filter: { table: string }, cb: () => void) {
       handlers[filter.table] = cb;
       return this;
     }),
-    subscribe: vi.fn(function (this: any) {
-      subscribeMock();
+    subscribe: vi.fn(function (this: any, cb?: (status: string, err?: unknown) => void) {
+      statusCb = cb;
+      subscribeMock(cb);
       return this;
     }),
   };
@@ -29,6 +34,7 @@ function realtimeClient() {
     },
     channel: vi.fn((name: string) => {
       channelName = name;
+      channelNames.push(name);
       return channelMock;
     }),
     removeChannel: vi.fn(),
@@ -37,6 +43,8 @@ function realtimeClient() {
     client,
     fireEvent: (table: string) => handlers[table]?.(),
     getChannelName: () => channelName,
+    getChannelNames: () => channelNames,
+    fireStatus: (status: string, err?: unknown) => statusCb?.(status, err),
     channelMock,
     subscribeMock,
   };
@@ -54,13 +62,101 @@ describe("useVaultRealtime", () => {
     expect(channelMock.subscribe).not.toHaveBeenCalled();
   });
 
-  it("subscribes once on mount with channel `vault:<id>` and the three table listeners", () => {
+  it("subscribes once on mount with a `vault:<id>`-prefixed channel and the three table listeners", () => {
     const { client, fireEvent: _, getChannelName, channelMock, subscribeMock } = realtimeClient();
     const cb = { onVersion: vi.fn(), onLock: vi.fn(), onFile: vi.fn() };
     renderHook(() => useVaultRealtime("v1", cb), { wrapper: wrap(client) });
-    expect(getChannelName()).toBe("vault:v1");
+    // Name carries the vault id (so it's debuggable) plus a per-instance
+    // suffix so concurrent subscribers don't collide on topic name.
+    expect(getChannelName()).toMatch(/^vault:v1:/);
     expect(channelMock.on).toHaveBeenCalledTimes(3);
     expect(subscribeMock).toHaveBeenCalledTimes(1);
+    // A status callback must be supplied (for logging + reconnect).
+    expect(subscribeMock.mock.calls[0]![0]).toBeTypeOf("function");
+  });
+
+  it("gives each hook instance a unique channel name (no topic collision)", () => {
+    const { client, getChannelNames } = realtimeClient();
+    const cb = { onVersion: vi.fn() };
+    // Two concurrent subscribers to the SAME vault must not share a topic name.
+    renderHook(() => useVaultRealtime("v1", cb), { wrapper: wrap(client) });
+    renderHook(() => useVaultRealtime("v1", cb), { wrapper: wrap(client) });
+    const names = getChannelNames();
+    expect(names).toHaveLength(2);
+    expect(names[0]).toMatch(/^vault:v1:/);
+    expect(names[1]).toMatch(/^vault:v1:/);
+    expect(names[0]).not.toBe(names[1]);
+  });
+
+  it("re-subscribes on CHANNEL_ERROR with backoff (removes old channel, builds a new one)", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, fireStatus, subscribeMock } = realtimeClient();
+      renderHook(() => useVaultRealtime("v1", { onVersion: vi.fn() }), { wrapper: wrap(client) });
+      expect(subscribeMock).toHaveBeenCalledTimes(1);
+      expect((client.channel as any).mock.calls.length).toBe(1);
+      expect((client.removeChannel as any).mock.calls.length).toBe(0);
+
+      // Realtime drops the channel — fire the error status.
+      fireStatus("CHANNEL_ERROR");
+      // Backoff hasn't elapsed yet: no new channel.
+      expect((client.channel as any).mock.calls.length).toBe(1);
+
+      // After the backoff delay, the hook tears down the dead channel and
+      // builds a fresh subscription.
+      vi.advanceTimersByTime(5000);
+      expect((client.removeChannel as any).mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect((client.channel as any).mock.calls.length).toBe(2);
+      expect(subscribeMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-subscribes on TIMED_OUT", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, fireStatus, subscribeMock } = realtimeClient();
+      renderHook(() => useVaultRealtime("v1", { onVersion: vi.fn() }), { wrapper: wrap(client) });
+      fireStatus("TIMED_OUT");
+      vi.advanceTimersByTime(5000);
+      expect(subscribeMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not re-subscribe on SUBSCRIBED (steady state)", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, fireStatus, subscribeMock } = realtimeClient();
+      renderHook(() => useVaultRealtime("v1", { onVersion: vi.fn() }), { wrapper: wrap(client) });
+      fireStatus("SUBSCRIBED");
+      vi.advanceTimersByTime(10000);
+      expect(subscribeMock).toHaveBeenCalledTimes(1);
+      expect((client.channel as any).mock.calls.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule a reconnect after unmount (no leaked timer / channel)", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, fireStatus, subscribeMock } = realtimeClient();
+      const { unmount } = renderHook(
+        () => useVaultRealtime("v1", { onVersion: vi.fn() }),
+        { wrapper: wrap(client) },
+      );
+      // Error fires, then we unmount before the backoff elapses.
+      fireStatus("CHANNEL_ERROR");
+      unmount();
+      vi.advanceTimersByTime(10000);
+      // No second subscribe — the reconnect timer was cleared on unmount.
+      expect(subscribeMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("invokes the correct callback when a postgres_changes event fires for that table", () => {
@@ -111,11 +207,11 @@ describe("useVaultRealtime", () => {
       ({ id }) => useVaultRealtime(id, cb),
       { initialProps: { id: "v1" as string | undefined }, wrapper: wrap(client) },
     );
-    expect(getChannelName()).toBe("vault:v1");
+    expect(getChannelName()).toMatch(/^vault:v1:/);
     expect((client.removeChannel as any).mock.calls.length).toBe(0);
 
     rerender({ id: "v2" });
-    expect(getChannelName()).toBe("vault:v2");
+    expect(getChannelName()).toMatch(/^vault:v2:/);
     expect((client.removeChannel as any).mock.calls.length).toBe(1);
     // .on was called 3 more times (3 for v1 + 3 for v2 = 6).
     expect(channelMock.on).toHaveBeenCalledTimes(6);

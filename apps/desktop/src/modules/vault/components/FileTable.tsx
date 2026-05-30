@@ -7,6 +7,10 @@ interface Props {
   files: VaultFile[];
   selected: FileId | null;
   locks: Lock[];
+  /** Resolves a lock holder's user id → display string (email or name) so a
+   *  locked-by-other row shows "Locked by <person>". Optional: callers that
+   *  don't supply it fall through to the generic "Locked by other" label. */
+  holderEmailById?: Map<UserId, string>;
   currentUserId: UserId;
   canEdit?: boolean;
   onSelect: (id: FileId) => void;
@@ -66,6 +70,19 @@ interface RowStateInfo {
   glyph?: string;
 }
 
+// Shared status palette — kept in sync with LockBadge / LocalStatusBadge so
+// the whole vault chrome reads consistently (green = good, gold = needs
+// attention, red = locked, neutral = absent). Same hex + opacity values across
+// all three; locked-by-me gets a slightly stronger red fill than
+// locked-by-other so the user can tell at a glance which lock is theirs.
+const PILL = {
+  green: "bg-[#66BB6A]/20 text-[#9CCC65] border-[#66BB6A]/40",
+  gold: "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/40",
+  redMe: "bg-[#EF5350]/30 text-[#EF9A9A] border-[#EF5350]/50",
+  redOther: "bg-[#EF5350]/20 text-[#E57373] border-[#EF5350]/40",
+  neutral: "bg-helios-line/40 text-helios-dim border-helios-line",
+} as const;
+
 function deriveRowState(
   lockK: ReturnType<typeof lockStateFor>,
   localStatus: "synced" | "modified" | "vault-only" | "no-folder" | undefined,
@@ -76,7 +93,7 @@ function deriveRowState(
     return {
       state: "locked-other",
       stripe: "border-[#EF5350]",
-      pill: "bg-[#EF5350]/15 text-red-200 border-red-700/60",
+      pill: PILL.redOther,
       label: email ? `Locked by ${email}` : "Locked by other",
       glyph: "🔒",
     };
@@ -86,15 +103,15 @@ function deriveRowState(
       return {
         state: "locked-me-modified",
         stripe: "border-[#FFB800]",
-        pill: "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/50",
+        pill: PILL.gold,
         label: "Locked by me · Modified",
         glyph: "🔒",
       };
     }
     return {
       state: "locked-me",
-      stripe: "border-sky-400",
-      pill: "bg-sky-500/15 text-sky-200 border-sky-700/60",
+      stripe: "border-[#EF5350]",
+      pill: PILL.redMe,
       label: "Locked by me",
       glyph: "🔒",
     };
@@ -102,8 +119,8 @@ function deriveRowState(
   if (localStatus === "modified") {
     return {
       state: "modified-unlocked",
-      stripe: "border-orange-400",
-      pill: "bg-orange-500/15 text-orange-200 border-orange-700/60",
+      stripe: "border-[#FFB800]",
+      pill: PILL.gold,
       label: "Modified",
       glyph: "●",
     };
@@ -112,7 +129,7 @@ function deriveRowState(
     return {
       state: "vault-only",
       stripe: "border-helios-line",
-      pill: "bg-helios-line/40 text-helios-text border-helios-line",
+      pill: PILL.neutral,
       label: "Not local",
       glyph: "↓",
     };
@@ -121,7 +138,7 @@ function deriveRowState(
     return {
       state: "synced",
       stripe: "border-[#66BB6A]",
-      pill: "bg-[#66BB6A]/15 text-[#9CCC65] border-[#66BB6A]/60",
+      pill: PILL.green,
       label: "Synced",
       glyph: "✓",
     };
@@ -130,7 +147,7 @@ function deriveRowState(
   return {
     state: "neutral",
     stripe: "border-helios-line",
-    pill: "bg-helios-line/60 text-helios-dim border-helios-line",
+    pill: PILL.neutral,
     label: "—",
   };
 }
@@ -180,6 +197,7 @@ export function FileTable({
   files,
   selected,
   locks,
+  holderEmailById,
   currentUserId,
   canEdit = true,
   onSelect,
@@ -197,9 +215,10 @@ export function FileTable({
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
 
-  // We don't have user-email-by-id wired here (would need a useUsers hook).
-  // Keep an empty map; falls through to the generic "Locked by other" label.
-  const holderEmailById = new Map<UserId, string>();
+  // Lock-holder name resolution is supplied by the parent (BrowseScreen wires
+  // useVaultUsers). When absent we use an empty map, which falls through to the
+  // generic "Locked by other" label in deriveRowState.
+  const holderEmails = holderEmailById ?? new Map<UserId, string>();
 
   return (
     <table className="w-full text-sm">
@@ -222,6 +241,16 @@ export function FileTable({
         </tr>
       </thead>
       <tbody>
+        {files.length === 0 && (
+          <tr>
+            <td
+              colSpan={hasMultiSelect ? 4 : 3}
+              className="px-3 py-8 text-center text-sm italic text-helios-dim"
+            >
+              No files in this folder
+            </td>
+          </tr>
+        )}
         {files.map((f) => {
           const isSel = selected === f.id;
           const lk = lockStateFor(f, locks, currentUserId);
@@ -231,14 +260,28 @@ export function FileTable({
           const info = deriveRowState(
             lk,
             localMatch?.status,
-            holderEmailById,
+            holderEmails,
           );
           return (
             <tr
               key={f.id}
+              role="button"
+              tabIndex={0}
+              aria-current={isSel ? "page" : undefined}
+              aria-label={f.name}
               onClick={() => onSelect(f.id)}
+              onKeyDown={(e) => {
+                // Keyboard parity with the row's click affordance: Enter/Space
+                // opens the file detail panel. Other keys (Tab etc.) pass
+                // through untouched.
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(f.id);
+                }
+              }}
               className={
-                "group cursor-pointer border-b border-helios-line/60 transition-colors " +
+                "group cursor-pointer border-b border-helios-line/60 outline-none transition-colors " +
+                "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold " +
                 (isSel
                   ? "bg-helios-line/80"
                   : "hover:bg-helios-panel/60")

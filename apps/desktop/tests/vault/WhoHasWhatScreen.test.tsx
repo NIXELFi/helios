@@ -17,7 +17,7 @@ function mockClient(rows: any[], isAdmin = false): SupabaseClient {
     from: () => ({
       select: () => ({
         is: () => ({
-          order: () => ({ range: () => Promise.resolve({ data: rows, error: null }) }),
+          order: () => ({ range: (from: number, to: number) => Promise.resolve({ data: rows.slice(from, to + 1), error: null }) }),
         }),
       }),
     }),
@@ -36,6 +36,7 @@ function mockResolvedClient(
   files: any[],
   folders: any[],
   isAdmin = false,
+  users: any[] | null = null,
 ): SupabaseClient {
   return {
     auth: {
@@ -55,7 +56,7 @@ function mockResolvedClient(
         return {
           select: () => ({
             is: () => ({
-              order: () => ({ range: () => Promise.resolve({ data: rows, error: null }) }),
+              order: () => ({ range: (from: number, to: number) => Promise.resolve({ data: rows.slice(from, to + 1), error: null }) }),
             }),
           }),
         };
@@ -64,7 +65,10 @@ function mockResolvedClient(
         return {
           select: () => ({
             eq: () => ({
-              order: () => ({ range: () => Promise.resolve({ data: folders, error: null }) }),
+              order: () => {
+                const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: folders.slice(from, to + 1), error: null }) };
+                return node;
+              },
             }),
           }),
         };
@@ -73,7 +77,10 @@ function mockResolvedClient(
         return {
           select: () => ({
             eq: () => ({
-              order: () => ({ range: () => Promise.resolve({ data: files, error: null }) }),
+              order: () => {
+                const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: files.slice(from, to + 1), error: null }) };
+                return node;
+              },
             }),
           }),
         };
@@ -82,6 +89,12 @@ function mockResolvedClient(
     },
     rpc: (name: string) => {
       if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
+      if (name === "pdm_admin_list_users") {
+        // Non-admins get a raised error from the RPC; admins get the list.
+        return users
+          ? Promise.resolve({ data: users, error: null })
+          : Promise.resolve({ data: null, error: { code: "P0001", message: "not an admin" } });
+      }
       return Promise.resolve({ data: null, error: null });
     },
   } as any;
@@ -213,5 +226,52 @@ describe("<WhoHasWhatScreen>", () => {
 
     // Relative time appears (not the raw ISO timestamp).
     expect(screen.getByText(/h ago/)).toBeInTheDocument();
+  });
+
+  it("H12: filters out locks for files NOT in the active vault once its files are loaded", async () => {
+    // useLocks is cross-vault. When the active vault has its OWN files loaded,
+    // a lock whose file_id isn't among them belongs to a different vault and
+    // must NOT be shown under "{activeVault} checkouts". (Distinct from the
+    // "no files loaded" case above, which keeps showing locks as a fallback.)
+    const folders = [
+      { id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" },
+    ];
+    const files = [
+      { id: "mine-1", vault_id: "v1", folder_id: "f-root", name: "mine.sldprt", latest_version_id: null, created_at: "x" },
+    ];
+    const locks = [
+      // In-vault lock — should render.
+      { id: "l1", file_id: "mine-1", user_id: "u-a", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+      // Cross-vault lock — file_id not in this vault's files — should be hidden.
+      { id: "l2", file_id: "OTHERVAULT-9999", user_id: "u-b", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders)}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    expect(await screen.findByText("root/mine.sldprt")).toBeInTheDocument();
+    // The cross-vault lock's short file id must NOT appear.
+    expect(screen.queryByText("OTHERVAU")).toBeNull();
+  });
+
+  it("V21: resolves the holder user_id to a display name via the users list", async () => {
+    const folders = [{ id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" }];
+    const files = [{ id: "file-1", vault_id: "v1", folder_id: "f-root", name: "a.sldprt", latest_version_id: null, created_at: "x" }];
+    const holder = "00000000-0000-0000-0000-0000000000aa";
+    const locks = [
+      { id: "l1", file_id: "file-1", user_id: holder, acquired_at: new Date(Date.now() - 3600_000).toISOString(), released_at: null, force_released_by: null },
+    ];
+    const users = [
+      { user_id: holder, email: "alice@sdm.com", display_name: "Alice A", subteam: null, role: "editor", granted_at: "x", created_at: "x" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders, true, users)}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    // Display name (or email) shown instead of the opaque 8-char id.
+    expect(await screen.findByText("Alice A")).toBeInTheDocument();
+    expect(screen.queryByText("00000000")).toBeNull();
   });
 });

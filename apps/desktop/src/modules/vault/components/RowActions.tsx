@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { useAcquireLock } from "../data/useAcquireLock";
@@ -28,51 +29,212 @@ export function CheckOutButton({ fileId, onDone }: ActionProps) {
     if (result) onDone?.();
   }
 
+  // Surface the hook's error like GetLatestButton — hover tells the user what
+  // went wrong (e.g. "already checked out") and the button tints red instead
+  // of silently doing nothing.
+  const err = acquireLock.error?.message ?? null;
   return (
     <button
+      type="button"
       onClick={handleClick}
       disabled={acquireLock.loading}
-      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
+      title={err ? `Check-out failed: ${err}` : "Check out this file (lock it for editing)"}
+      className={
+        "rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+        (err
+          ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+          : "bg-asu-gold text-white hover:bg-asu-gold/90")
+      }
     >
-      Check Out
+      {acquireLock.loading ? "…" : err ? "Retry" : "Check Out"}
     </button>
   );
 }
 
 export function CheckInButton({ fileId, localFile, onDone }: CheckInButtonProps) {
   const checkIn = useCheckIn();
+  // The bytes to upload are read up-front (file dialog / disk) on click, then
+  // held here while the comment modal is open. `null` = modal closed.
+  const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
 
-  async function handleClick(e: React.MouseEvent) {
-    e.stopPropagation();
-    let bytes: ArrayBuffer;
+  async function readBytes(): Promise<ArrayBuffer | null> {
     if (localFile) {
       const fileBytes = await readFile(localFile.absolutePath);
-      bytes = fileBytes.buffer.slice(
-        fileBytes.byteOffset,
-        fileBytes.byteOffset + fileBytes.byteLength,
-      ) as ArrayBuffer;
-    } else {
-      const path = await openFileDialog({ multiple: false });
-      if (!path || Array.isArray(path)) return;
-      const fileBytes = await readFile(path);
-      bytes = fileBytes.buffer.slice(
+      return fileBytes.buffer.slice(
         fileBytes.byteOffset,
         fileBytes.byteOffset + fileBytes.byteLength,
       ) as ArrayBuffer;
     }
-    const comment = window.prompt("Check-in comment (optional):") ?? null;
+    const path = await openFileDialog({ multiple: false });
+    if (!path || Array.isArray(path)) return null;
+    const fileBytes = await readFile(path);
+    return fileBytes.buffer.slice(
+      fileBytes.byteOffset,
+      fileBytes.byteOffset + fileBytes.byteLength,
+    ) as ArrayBuffer;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    // Read the bytes first, then open the in-app comment modal. Tauri's webview
+    // doesn't render window.prompt() — it returns null — so the comment was
+    // always lost (audit C1). The modal collects the comment in-app instead.
+    const bytes = await readBytes();
+    if (!bytes) return;
+    setPendingBytes(bytes);
+  }
+
+  async function submit(comment: string | null) {
+    if (!pendingBytes) return;
+    const bytes = pendingBytes;
+    setPendingBytes(null);
     const result = await checkIn.run(fileId, bytes, comment);
     if (result) onDone?.();
   }
 
+  // Surface the hook's error like GetLatestButton — hover shows the failure
+  // and the button tints red instead of silently doing nothing.
+  const err = checkIn.error?.message ?? null;
   return (
-    <button
-      onClick={handleClick}
-      disabled={checkIn.loading}
-      className="rounded bg-green-700 px-2 py-0.5 text-xs text-white hover:bg-green-600 disabled:opacity-50"
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={checkIn.loading}
+        title={err ? `Check-in failed: ${err}` : "Check in your changes (uploads + releases the lock)"}
+        className={
+          "rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (err
+            ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+            : "bg-green-700 text-white hover:bg-green-600")
+        }
+      >
+        {checkIn.loading ? "…" : err ? "Retry" : "Check In…"}
+      </button>
+      {pendingBytes && (
+        <CheckInCommentModal
+          loading={checkIn.loading}
+          onSubmit={(comment) => { void submit(comment); }}
+          onCancel={() => setPendingBytes(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * In-app comment prompt for check-in. Mirrors the prompt modal in
+ * BrowseScreen — Tauri's webview can't render window.prompt(). Submit runs
+ * check-in with the typed comment; Skip runs it with a null comment; Cancel
+ * aborts entirely. Escape closes (treated as cancel); focus is trapped and
+ * restored per the modal a11y convention.
+ */
+function CheckInCommentModal({
+  loading,
+  onSubmit,
+  onCancel,
+}: {
+  loading: boolean;
+  onSubmit: (comment: string | null) => void;
+  onCancel: () => void;
+}) {
+  const [comment, setComment] = useState("");
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const restoreTo = document.activeElement as HTMLElement | null;
+    textareaRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+        return;
+      }
+      if (e.key === "Tab") {
+        // Focus-trap: cycle Tab/Shift+Tab within the dialog.
+        const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'textarea, button, [href], input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusables || focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreTo?.focus?.();
+    };
+  }, [onCancel]);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = comment.trim();
+    onSubmit(trimmed.length > 0 ? trimmed : null);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onCancel}
+      onMouseDown={(e) => e.stopPropagation()}
     >
-      Check In…
-    </button>
+      <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Check-in comment"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+        className="w-80 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4 shadow-lg"
+      >
+        <h3 className="text-sm font-semibold text-helios-text">Check-in comment</h3>
+        <textarea
+          ref={textareaRef}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          rows={3}
+          placeholder="Describe what changed (optional)"
+          className="w-full resize-none rounded border border-helios-line bg-helios-base px-2 py-1 text-sm text-helios-text placeholder-helios-dim focus:outline-none focus:ring-1 focus:ring-asu-gold"
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(null)}
+            disabled={loading}
+            className="rounded border border-helios-line px-3 py-1 text-xs text-helios-text hover:bg-helios-line disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Skip
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded bg-green-700 px-3 py-1 text-xs text-white hover:bg-green-600 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Submit
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -172,13 +334,24 @@ export function CancelButton({ fileId, onDone }: ActionProps) {
     if (ok) onDone?.();
   }
 
+  // Surface the release error like GetLatestButton — a silent no-op left the
+  // user wondering whether the lock was actually released.
+  const err = releaseLock.error?.message ?? null;
   return (
     <button
+      type="button"
       onClick={handleClick}
       disabled={releaseLock.loading}
-      className="ml-1 rounded bg-helios-line px-2 py-0.5 text-xs text-white hover:bg-helios-line disabled:opacity-50"
+      title={err ? `Cancel check-out failed: ${err}` : "Discard your check-out and release the lock"}
+      className={
+        "ml-1 rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+        (err
+          ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+          : "bg-helios-line text-white hover:brightness-110")
+      }
     >
-      Cancel
+      {releaseLock.loading ? "…" : err ? "Retry" : "Cancel"}
     </button>
   );
 }

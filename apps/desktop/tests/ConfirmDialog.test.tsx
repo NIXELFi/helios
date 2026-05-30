@@ -35,6 +35,52 @@ describe("ConfirmDialog (confirm mode)", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  it("clicking confirm also self-closes (onClose after onConfirm)", () => {
+    const { onConfirm, onClose } = setup();
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("still closes even when onConfirm throws", () => {
+    const onConfirm = vi.fn(() => { throw new Error("boom"); });
+    const onClose = vi.fn();
+    render(
+      <ConfirmDialog
+        title="Delete it?"
+        body="x"
+        confirmLabel="Delete"
+        confirmTone="danger"
+        cancelLabel="Cancel"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />,
+    );
+    // React (dev) catches a thrown handler error and re-dispatches it onto
+    // window rather than rethrowing from fireEvent; swallow the expected one so
+    // it doesn't surface as an unhandled test-file error.
+    const onErr = (e: ErrorEvent) => { if (e.message.includes("boom")) e.preventDefault(); };
+    window.addEventListener("error", onErr);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    } finally {
+      window.removeEventListener("error", onErr);
+    }
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    // try/finally in handleConfirm guarantees onClose still runs after the throw.
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("danger tone focuses the Cancel button on open (not the destructive confirm)", () => {
+    setup();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /cancel/i }));
+  });
+
+  it("default tone focuses the confirm button on open", () => {
+    setup({ confirmTone: "default", confirmLabel: "Save" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /save/i }));
+  });
+
   it("clicking cancel fires onClose only", () => {
     const { onConfirm, onClose } = setup();
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));

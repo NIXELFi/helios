@@ -30,4 +30,28 @@ describe("findUnmatchedLocal", () => {
     const result = findUnmatchedLocal(vaultFiles as any, [], folders as any);
     expect(result).toHaveLength(0);
   });
+
+  // H14: a present file must NOT be offered as an "add" candidate just because
+  // macOS reports it with different case or NFD Unicode than the DB stored.
+  it("does NOT flag a local file as unmatched when it differs only by case", () => {
+    // DB has root "frame.sldprt"; macOS scan reports "Frame.SLDPRT".
+    const localCased = { basename: "Frame.SLDPRT", relativePath: "Frame.SLDPRT", absolutePath: "/v/Frame.SLDPRT", sha256: "a", sizeBytes: 1 };
+    const localCasedBracket = { basename: "Bracket.sldprt", relativePath: "Chassis/Bracket.sldprt", absolutePath: "/v/Chassis/Bracket.sldprt", sha256: "b", sizeBytes: 1 };
+    const result = findUnmatchedLocal(vaultFiles as any, [localCased, localCasedBracket], folders as any);
+    expect(result).toHaveLength(0);
+  });
+
+  it("does NOT flag a local file as unmatched when it differs only by Unicode normalization (NFD vs NFC)", () => {
+    // DB stores the name NFC; macOS scan reports it NFD-encoded. Derive the NFD
+    // form at runtime so the source has a single, unambiguous literal.
+    const nfcName = "café.sldprt".normalize("NFC");
+    const nfdName = nfcName.normalize("NFD");
+    expect(nfcName).not.toBe(nfdName); // distinct strings pre-normalization
+    const nfcVaultFiles = [
+      { id: "f1", vault_id: "v", folder_id: null, name: nfcName, latest_version_id: null, created_at: "x" },
+    ];
+    const nfdLocal = { basename: nfdName, relativePath: nfdName, absolutePath: `/v/${nfdName}`, sha256: "a", sizeBytes: 1 };
+    const result = findUnmatchedLocal(nfcVaultFiles as any, [nfdLocal], []);
+    expect(result).toHaveLength(0);
+  });
 });

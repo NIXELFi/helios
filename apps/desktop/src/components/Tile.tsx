@@ -24,11 +24,17 @@ interface Props {
 
 const DRAG_THRESHOLD_PX = 4;
 
+// `captureEl`/`pointerId` record the element that actually received
+// setPointerCapture so release always targets the SAME element, regardless of
+// which surface (title bar or body click-shield) the up/cancel event fires on.
+// Both surfaces share these handlers; capturing and releasing on whichever
+// `currentTarget` happens to fire was fragile (capture on one, release attempt
+// on the other → release no-ops and the pointer stays captured).
 type DragState =
   | { kind: "none" }
-  | { kind: "press"; clientX: number; clientY: number }
-  | { kind: "move"; clientX0: number; clientY0: number; dx: number; dy: number }
-  | { kind: "resize"; dw: number; dh: number };
+  | { kind: "press"; clientX: number; clientY: number; captureEl: Element; pointerId: number }
+  | { kind: "move"; clientX0: number; clientY0: number; dx: number; dy: number; captureEl: Element; pointerId: number }
+  | { kind: "resize"; dw: number; dh: number; captureEl: Element; pointerId: number };
 
 export function Tile({
   spec, primary, visibleSessions, cursorEmitter, viewState,
@@ -82,13 +88,27 @@ export function Tile({
     return containerRef.current?.parentElement?.getBoundingClientRect() ?? null;
   }
 
+  // Release whatever element the drag captured the pointer on (not the element
+  // that happens to be firing the up/cancel event). Guarded so an extra
+  // pointerup/pointercancel on the other surface is a harmless no-op.
+  function releaseCapture(state: DragState) {
+    if (state.kind === "none") return;
+    const { captureEl, pointerId } = state;
+    if (captureEl instanceof Element && (captureEl as Element & { hasPointerCapture?: (id: number) => boolean }).hasPointerCapture?.(pointerId)) {
+      (captureEl as Element & { releasePointerCapture: (id: number) => void }).releasePointerCapture(pointerId);
+    }
+  }
+
   // ─── move drag (title bar + body click-shield) ───────────────────────────
   function onMoveDown(e: React.PointerEvent<HTMLElement>) {
     if (!editMode || e.button !== 0) return;
+    // Ignore a second pointerdown while a drag is already in flight (e.g. the
+    // body shield receiving an event after the title bar already captured).
+    if (drag.kind !== "none") return;
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ kind: "press", clientX: e.clientX, clientY: e.clientY });
+    setDrag({ kind: "press", clientX: e.clientX, clientY: e.clientY, captureEl: e.currentTarget, pointerId: e.pointerId });
   }
 
   function onMoveMove(e: React.PointerEvent<HTMLElement>) {
@@ -103,6 +123,7 @@ export function Tile({
           kind: "move",
           clientX0: drag.clientX, clientY0: drag.clientY,
           dx: dxPx / rect.width, dy: dyPx / rect.height,
+          captureEl: drag.captureEl, pointerId: drag.pointerId,
         });
       }
     } else if (drag.kind === "move") {
@@ -116,9 +137,10 @@ export function Tile({
 
   function onMoveUp(e: React.PointerEvent<HTMLElement>) {
     if (!editMode) return;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
+    // Only the element that captured this pointer should finish the drag; a
+    // stray up/cancel on the OTHER surface is ignored so we don't double-finish.
+    if (drag.kind === "none" || drag.pointerId !== e.pointerId) return;
+    releaseCapture(drag);
     if (drag.kind === "press") {
       onSelect?.();
     } else if (drag.kind === "move" && onChange) {
@@ -131,10 +153,11 @@ export function Tile({
   // ─── resize drag (corner handle) ─────────────────────────────────────────
   function onResizeDown(e: React.PointerEvent<HTMLElement>) {
     if (!editMode || e.button !== 0) return;
+    if (drag.kind !== "none") return;
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ kind: "resize", dw: 0, dh: 0 });
+    setDrag({ kind: "resize", dw: 0, dh: 0, captureEl: e.currentTarget, pointerId: e.pointerId });
   }
 
   function onResizeMove(e: React.PointerEvent<HTMLElement>) {
@@ -143,14 +166,13 @@ export function Tile({
     if (!rect) return;
     const targetW = (e.clientX - rect.left) / rect.width - spec.x;
     const targetH = (e.clientY - rect.top) / rect.height - spec.y;
-    setDrag({ kind: "resize", dw: targetW - spec.w, dh: targetH - spec.h });
+    setDrag({ ...drag, dw: targetW - spec.w, dh: targetH - spec.h });
   }
 
   function onResizeUp(e: React.PointerEvent<HTMLElement>) {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-    if (drag.kind === "resize" && onChange) {
+    if (drag.kind !== "resize" || drag.pointerId !== e.pointerId) return;
+    releaseCapture(drag);
+    if (onChange) {
       const snapped = snapTile({ ...spec, w: liveW, h: liveH });
       if (snapped.w !== spec.w || snapped.h !== spec.h) onChange(snapped);
     }

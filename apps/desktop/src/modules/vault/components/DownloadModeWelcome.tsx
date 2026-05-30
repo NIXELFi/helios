@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useActiveVault } from "../data/useActiveVault";
-import type { DownloadMode } from "../data/useDownloadMode";
+import { broadcastDownloadMode, type DownloadMode } from "../data/useDownloadMode";
 import type { Vault } from "../data/types";
 
 const STORAGE_KEY = "helios.vault.downloadMode";
@@ -77,10 +77,12 @@ export function DownloadModeWelcome() {
       const merged: Map = { ...readMap(), ...choices };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       localStorage.setItem(WELCOMED_KEY, "true");
-      // Re-render parents that watch these keys via the storage event. Fire
-      // it manually because same-window writes don't trigger one natively.
-      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
-      window.dispatchEvent(new StorageEvent("storage", { key: WELCOMED_KEY }));
+      // Notify same-window useDownloadMode instances with the merged map.
+      // We previously dispatched a synthetic StorageEvent without `newValue`,
+      // which the listener read as "key cleared" and wiped every vault's mode
+      // to {} (audit H16). The broadcast carries the actual map; cross-window
+      // siblings still get the native storage event from the writes above.
+      broadcastDownloadMode(merged);
     } catch { /* private mode */ }
     setForceHide(true);
   }

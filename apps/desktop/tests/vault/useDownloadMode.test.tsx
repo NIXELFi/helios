@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
-import { useDownloadMode } from "../../src/modules/vault/data/useDownloadMode";
+import { useDownloadMode, broadcastDownloadMode } from "../../src/modules/vault/data/useDownloadMode";
 
 const STORAGE_KEY = "helios.vault.downloadMode";
 
@@ -57,6 +57,47 @@ describe("useDownloadMode", () => {
 
     rerender({ id: "v2" });
     expect(result.current.mode).toBe("manual");
+  });
+
+  it("H16: a storage event without newValue does NOT wipe existing modes", () => {
+    // Repro of the 2026-05-25 audit finding (H16): DownloadModeWelcome.save()
+    // dispatched `new StorageEvent("storage", { key })` with NO newValue.
+    // useDownloadMode's listener did `setMap(e.newValue ? JSON.parse(...) : {})`
+    // → reset every vault's mode to {} on the first save. A storage event
+    // lacking newValue must fall back to re-reading localStorage, never wipe.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v1: "auto", v2: "auto" }));
+    const { result } = renderHook(() => useDownloadMode("v1"));
+    expect(result.current.mode).toBe("auto");
+
+    act(() => {
+      // The buggy dispatch: a same-key storage event with newValue === null.
+      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
+    });
+
+    // v1 must still be "auto" — not reset to the "manual" default.
+    expect(result.current.mode).toBe("auto");
+  });
+
+  it("H16: broadcastDownloadMode updates sibling instances without a StorageEvent", () => {
+    // The preferred fix path: DownloadModeWelcome calls the same-window
+    // broadcast that useDownloadMode already provides, instead of a synthetic
+    // StorageEvent. Sibling hook instances see the merged map immediately.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v1: "manual", v2: "manual" }));
+    const a = renderHook(() => useDownloadMode("v1"));
+    const b = renderHook(() => useDownloadMode("v2"));
+    expect(a.result.current.mode).toBe("manual");
+    expect(b.result.current.mode).toBe("manual");
+
+    act(() => {
+      // Simulate DownloadModeWelcome.save() persisting both picks then
+      // broadcasting the merged map.
+      const merged = { v1: "auto" as const, v2: "auto" as const };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      broadcastDownloadMode(merged);
+    });
+
+    expect(a.result.current.mode).toBe("auto");
+    expect(b.result.current.mode).toBe("auto");
   });
 
   it("setMode is StrictMode-safe — writeMap + broadcast fire exactly once per call", () => {

@@ -2,12 +2,18 @@ export type LockState = "latest" | "out-of-date" | "locked-by-me" | "locked-by-o
 
 export function LockBadge(props: { state: LockState; holderEmail?: string }) {
   const { state, holderEmail } = props;
-  const color = {
+  // Shared status palette (kept in sync with LocalStatusBadge): green = good,
+  // gold = needs attention, red = locked. Same hex values across both badges
+  // so the vault chrome reads consistently. "locked-by-me" gets a slightly
+  // stronger red fill than "locked-by-other" so the user can tell at a glance
+  // which lock is theirs.
+  const colors: Record<LockState, string> = {
     "latest": "bg-[#66BB6A]/20 text-[#9CCC65] border-[#66BB6A]/40",
-    "out-of-date": "bg-asu-gold/20 text-yellow-300 border-yellow-700",
-    "locked-by-me": "bg-[#EF5350]/30 text-red-200 border-red-700",
-    "locked-by-other": "bg-[#EF5350]/20 text-red-300 border-red-700",
-  }[state];
+    "out-of-date": "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/40",
+    "locked-by-me": "bg-[#EF5350]/30 text-[#EF9A9A] border-[#EF5350]/50",
+    "locked-by-other": "bg-[#EF5350]/20 text-[#E57373] border-[#EF5350]/40",
+  };
+  const color = colors[state];
   const label = {
     "latest": "Up to date",
     "out-of-date": "Out of date",

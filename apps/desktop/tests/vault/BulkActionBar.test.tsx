@@ -66,6 +66,42 @@ function wrap(client: SupabaseClient) {
   );
 }
 
+/** A deferred promise whose resolution we control from the test. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+/**
+ * Client whose storage `download` blocks on a caller-controlled deferred, so a
+ * test can suspend the bulk-download loop mid-flight (after item 1 starts,
+ * before it resolves) and observe what happens on unmount. `download` is a
+ * spy so the test can assert how many items the loop actually started.
+ */
+function controllableDownloadClient(gate: Promise<unknown>) {
+  const download = vi.fn().mockImplementation(async () => {
+    await gate;
+    return { data: new Blob([new Uint8Array([1])]), error: null };
+  });
+  const client = {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: "u1", email: "u1@x.com" } } },
+        error: null,
+      }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    rpc: (name: string) =>
+      name === "pdm_is_admin"
+        ? Promise.resolve({ data: false, error: null })
+        : Promise.resolve({ data: null, error: null }),
+    storage: { from: () => ({ download }) },
+    from: () => ({ select: () => Promise.resolve({ data: [], error: null }) }),
+  } as any;
+  return { client, download };
+}
+
 describe("<BulkActionBar>", () => {
   it("renders nothing when no files are selected", () => {
     const { container } = render(
@@ -278,5 +314,78 @@ describe("<BulkActionBar>", () => {
     await waitFor(() => expect(screen.getByText(/checked out 1\/3/i)).toBeInTheDocument());
     expect(screen.getByText(/1 locked by other user/i)).toBeInTheDocument();
     expect(screen.getByText(/1 already yours/i)).toBeInTheDocument();
+  });
+
+  it("the status span is an aria-live region so results are announced", async () => {
+    const c = mockClient(false);
+    const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(c) });
+    await waitFor(() => expect(authResult.current).toBe(false));
+    render(
+      <SupabaseAuthProvider client={c}>
+        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} />
+      </SupabaseAuthProvider>,
+    );
+    const checkOutBtn = await screen.findByRole("button", { name: /check out/i });
+    await act(async () => { fireEvent.click(checkOutBtn); });
+    const live = await screen.findByRole("status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toHaveTextContent(/checked out 2\/2/i);
+  });
+
+  it("Get Latest loop aborts on unmount — stops starting downloads for remaining files", async () => {
+    // V6: the bulk loops had no AbortController, so they kept downloading and
+    // calling setState after the component unmounted. The loop now bails on
+    // the abort signal; once unmounted, no further file is downloaded.
+    const gate = deferred<void>();
+    const { client, download } = controllableDownloadClient(gate.promise);
+    const { result: authResult } = renderHook(() => useAuthLoading(), { wrapper: wrap(client) });
+    await waitFor(() => expect(authResult.current).toBe(false));
+
+    const files = [
+      { id: "f1", vault_id: "v", folder_id: null, name: "a.sldprt", latest_version_id: "v1", created_at: "x" },
+      { id: "f2", vault_id: "v", folder_id: null, name: "b.sldprt", latest_version_id: "v2", created_at: "x" },
+    ];
+    const versions = new Map([
+      ["f1", [{ id: "v1", file_id: "f1", version_num: 1, sha256: "aa", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+      ["f2", [{ id: "v2", file_id: "f2", version_num: 1, sha256: "bb", size_bytes: 1, author_id: "u1", comment: null, parent_version_id: null, created_at: "x" }]],
+    ]);
+
+    const { unmount } = render(
+      <SupabaseAuthProvider client={client}>
+        <BulkActionBar
+          selectedIds={["f1", "f2"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          files={files as any}
+          localFiles={[]}
+          versionsByFileId={versions as any}
+          vaultRoot="/Users/me/Vault"
+          folders={[]}
+        />
+      </SupabaseAuthProvider>,
+    );
+
+    const getLatest = await screen.findByRole("button", { name: /get latest/i });
+    await act(async () => { fireEvent.click(getLatest); });
+    // The first download is in flight (blocked on the gate); the second hasn't
+    // started yet because the loop awaits each download in turn.
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+
+    // Unmount mid-flight, then release the in-flight download and let every
+    // queued microtask + macrotask settle. With the abort guard the loop
+    // returns after the first download; without it, it would fall through to
+    // start the second file's download.
+    unmount();
+    await act(async () => {
+      gate.resolve();
+      // Flush the full async chain (arrayBuffer → gunzip → sha verify → loop).
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    // The loop saw the abort after the first download resolved and returned —
+    // it never started the second file's download.
+    expect(download).toHaveBeenCalledTimes(1);
   });
 });

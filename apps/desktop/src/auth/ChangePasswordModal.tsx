@@ -1,6 +1,63 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { SupabaseClient } from "@helios/auth";
+
+/** Shared modal a11y: Escape-to-close, focus-trap, and focus-restore.
+ *  Mirrors the recipe in components/ConfirmDialog.tsx. Returns a ref to
+ *  attach to the dialog container so the trap knows its bounds. */
+function useModalA11y(open: boolean, onClose: () => void) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    // Focus-restore: remember whatever was focused when the modal opened.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    function focusable(): HTMLElement[] {
+      const root = containerRef.current;
+      if (!root) return [];
+      return Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab") {
+        const els = focusable();
+        const first = els[0];
+        const last = els[els.length - 1];
+        if (!first || !last) return;
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey && (active === first || !containerRef.current?.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // Focus-restore on unmount/close.
+      previouslyFocused?.focus?.();
+    };
+  }, [open]);
+
+  return containerRef;
+}
 
 interface Props {
   open: boolean;
@@ -24,6 +81,8 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const dialogRef = useModalA11y(open, close);
+
   if (!open) return null;
 
   function reset() {
@@ -41,6 +100,9 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    // Guard against re-entry (e.g. Enter pressed again while the request is
+    // in flight) — the disabled button alone doesn't block keyboard submits.
+    if (busy) return;
     setError(null);
     if (password.length < MIN_LEN) {
       setError(`Password must be at least ${MIN_LEN} characters.`);
@@ -77,7 +139,7 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="w-[min(92vw,400px)] rounded-md border border-helios-line bg-helios-panel text-helios-text shadow-xl">
+      <div ref={dialogRef} className="w-[min(92vw,400px)] rounded-md border border-helios-line bg-helios-panel text-helios-text shadow-xl">
         <header className="flex items-center justify-between border-b border-helios-line bg-helios-base px-4 py-2">
           <div id="change-pw-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
             Change password

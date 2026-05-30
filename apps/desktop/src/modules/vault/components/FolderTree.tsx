@@ -243,6 +243,16 @@ export function FolderTree({
     return out;
   }
 
+  // Reset the shift-select anchor whenever the underlying data set changes
+  // (e.g. switching vaults swaps the folders + files arrays). A surviving
+  // anchor pointing at a row from the previous vault would otherwise drive a
+  // bogus shift-range against rows that no longer exist — or worse, an id
+  // reused by the new vault at a different position. Cleared here so the next
+  // shift-click starts a fresh range.
+  useEffect(() => {
+    anchorRef.current = null;
+  }, [foldersById, filesByFolder]);
+
   useEffect(() => {
     if (!selected) return;
     const ancestors = ancestorsOfFromIndex(selected, foldersById);
@@ -507,17 +517,29 @@ export function FolderTree({
           style={{ paddingLeft: 6 + depth * 14 }}
         >
           {hasContents ? (
-            <span
-              role="none"
+            <button
+              type="button"
               aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.folder.name}`}
+              aria-expanded={isExpanded}
               onClick={(e) => {
                 e.stopPropagation();
                 toggleExpanded(node.folder.id);
               }}
-              className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-helios-dim hover:bg-helios-line hover:text-helios-text"
+              onKeyDown={(e) => {
+                // Toggle on Enter/Space and stop the event so the parent row's
+                // own keydown handler doesn't also fire (which would navigate-
+                // select the folder). A real <button> is keyboard-focusable and
+                // in the a11y tree, unlike the old role="none" span.
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleExpanded(node.folder.id);
+                }
+              }}
+              className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-helios-dim outline-none hover:bg-helios-line hover:text-helios-text focus-visible:ring-1 focus-visible:ring-asu-gold"
             >
               <Chevron expanded={isExpanded} />
-            </span>
+            </button>
           ) : (
             <span className="inline-block w-4 shrink-0" />
           )}
@@ -526,7 +548,7 @@ export function FolderTree({
           </span>
           <span className="truncate">{node.folder.name}</span>
           {folderFiles.length > 0 && (
-            <span className="ml-auto shrink-0 rounded bg-helios-line px-1.5 py-0.5 text-[10px] font-mono-num text-helios-dim group-hover:text-helios-dim">
+            <span className="ml-auto shrink-0 rounded bg-helios-line px-1.5 py-0.5 text-[10px] font-mono-num text-helios-dim transition-colors group-hover:text-helios-text">
               {folderFiles.length}
             </span>
           )}
@@ -596,7 +618,12 @@ export function FolderTree({
     const lx = Math.min(x0, x1), rx = Math.max(x0, x1);
     const ty = Math.min(y0, y1), by = Math.max(y0, y1);
     // Use viewport coords directly (the marquee is fixed-positioned too).
-    const rows = document.querySelectorAll<HTMLElement>("[data-row-kind]");
+    // Scope to THIS tree's container — a global document query would also
+    // sweep rows from any other FolderTree mounted on screen (or detached
+    // portals), selecting ids that don't belong to this instance.
+    const root = containerRef.current;
+    if (!root) return next;
+    const rows = root.querySelectorAll<HTMLElement>("[data-row-kind]");
     rows.forEach((row) => {
       const r = row.getBoundingClientRect();
       const intersects = !(r.right < lx || r.left > rx || r.bottom < ty || r.top > by);

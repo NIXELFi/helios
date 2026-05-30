@@ -24,12 +24,15 @@ export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]>
       const { rows, error: err } = await fetchAllRows<Folder>(
         // Explicit stable order: PostgREST does not guarantee a stable order
         // across .range() pages without an ORDER BY, so chunks of a paginated
-        // response could duplicate or skip rows. Sorting by name also gives
-        // the FolderTree a predictable initial order.
+        // response could duplicate or skip rows. `name` is not unique, so it
+        // alone is insufficient — append the PK `id` as a tiebreaker for a
+        // deterministic total order. Sorting by name also gives the
+        // FolderTree a predictable initial order.
         () => (client.from("folders") as any)
           .select("*")
           .eq("vault_id", vault_id)
-          .order("name", { ascending: true }),
+          .order("name", { ascending: true })
+          .order("id", { ascending: true }),
       );
       if (!mounted) return;
       if (err) {

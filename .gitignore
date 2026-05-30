@@ -55,6 +55,10 @@ infra/pdm-supabase/.env
 # Local Claude config
 .claude/
 
+# Local audit workspace — findings reports + fix trackers. Kept in-repo for
+# convenience but never committed (this is a public repo).
+.audit/
+
 # CFD capture artifacts written by the runner — per-job sweep outputs
 # (P-V, profiles, wave frames). Reproducible by re-running the sweep;
 # can reach multi-GB and must not be committed.

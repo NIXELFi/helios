@@ -5,7 +5,11 @@ import { useFolders } from "../../src/modules/vault/data/useFolders";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-function mockClient(filterAssertion: (col: string, val: any) => void, rows: any[]): SupabaseClient {
+function mockClient(
+  filterAssertion: (col: string, val: any) => void,
+  rows: any[],
+  orderCalls?: Array<[string, { ascending: boolean }]>,
+): SupabaseClient {
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
@@ -15,12 +19,20 @@ function mockClient(filterAssertion: (col: string, val: any) => void, rows: any[
       select: () => ({
         eq: (col: string, val: any) => {
           filterAssertion(col, val);
-          return {
-            order: (_orderCol: string, _opts: { ascending: boolean }) => ({
-              range: (_from: number, _to: number) =>
-                Promise.resolve({ data: rows, error: null }),
-            }),
-          };
+          // .order() is chainable so a unique tiebreaker can be appended;
+          // it also exposes .range() to terminate the pagination chain.
+          const makeChain = () => ({
+            order: (orderCol: string, opts: { ascending: boolean }) => {
+              orderCalls?.push([orderCol, opts]);
+              return makeChain();
+            },
+            // Simulate a real paged source: the fixture is the first page;
+            // subsequent .range() requests return empty so fetchAllRows
+            // terminates (a fixed-rows mock would loop forever).
+            range: (from: number, _to: number) =>
+              Promise.resolve({ data: from === 0 ? rows : [], error: null }),
+          });
+          return makeChain();
         },
       }),
     }),
@@ -41,6 +53,19 @@ describe("useFolders", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(observed).toEqual({ col: "vault_id", val: "v1" });
     expect(result.current.data?.length).toBe(1);
+  });
+
+  it("orders by name THEN id (unique tiebreaker) for safe pagination", async () => {
+    // `name` is not unique; without a PK tiebreaker rows can be skipped or
+    // duplicated at .range() page boundaries (H10).
+    const orderCalls: Array<[string, { ascending: boolean }]> = [];
+    const c = mockClient(() => {}, [], orderCalls);
+    const { result } = renderHook(() => useFolders("v1"), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(orderCalls).toEqual([
+      ["name", { ascending: true }],
+      ["id", { ascending: true }],
+    ]);
   });
 
   it("returns null data while vault_id is undefined (no fetch)", () => {

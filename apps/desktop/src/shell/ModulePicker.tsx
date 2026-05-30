@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { UpdatesPill } from "../components/UpdatesPill";
 import type { UpdaterState } from "../lib/use-updater";
 
@@ -71,8 +71,12 @@ export function ModulePicker(props: Props) {
     <nav className="flex w-44 flex-col border-r border-helios-line bg-helios-base">
       <div className={"border-b border-helios-line px-3 pb-3 " + BRAND_HEADER_TOP_PADDING}>
         <div className="font-helios text-xl leading-none text-asu-gold">HELIOS</div>
-        <div className="mt-1 text-[10px] uppercase tracking-wider text-helios-dim">
-          v{appVersion} · ground-station
+        <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">
+          {/* `appVersion` starts as "dev" until getVersion() resolves; show a
+              neutral placeholder instead of flashing "vdev" on every boot. */}
+          {appVersion && appVersion !== "dev"
+            ? `v${appVersion} · ground-station`
+            : "ground-station"}
         </div>
       </div>
 
@@ -131,8 +135,10 @@ function NavButton(props: {
   // We render disabled nav entries as a button with aria-disabled (not the
   // `disabled` attribute), so clicking still fires onClick. The parent
   // Shell uses that click to surface the auth modal — see the Vault wiring
-  // in Shell.tsx. The pointer stays the default cursor as a soft hint
-  // that the entry is not currently active.
+  // in Shell.tsx. Because the entry IS actionable (it opens sign-in), it
+  // keeps a pointer cursor and a real hover cue rather than reading as a
+  // dead control; we just dim it relative to the live modules so it's clear
+  // it isn't currently accessible.
   return (
     <button
       type="button"
@@ -142,8 +148,9 @@ function NavButton(props: {
       title={disabled ? disabledTitle : undefined}
       className={
         "flex items-center justify-between rounded-sm border px-3 py-1.5 text-left text-sm transition-colors " +
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
         (disabled
-          ? "cursor-default border-helios-line bg-helios-panel/40 text-helios-dim opacity-60 hover:border-helios-line"
+          ? "cursor-pointer border-helios-line bg-helios-panel/60 text-helios-text/70 hover:border-asu-gold hover:text-helios-text"
           : active
             ? "border-asu-gold bg-asu-gold font-semibold text-helios-base"
             : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
@@ -155,7 +162,7 @@ function NavButton(props: {
           className={
             "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
             (disabled
-              ? "bg-helios-line text-helios-dim"
+              ? "bg-helios-line text-helios-text/80"
               : active
                 ? "bg-helios-base text-asu-gold"
                 : "bg-asu-gold text-helios-base")
@@ -180,24 +187,64 @@ function UserPill(props: {
   const { label, subteam, role, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Click-outside / Escape closes the dropdown. Same pattern as the Log
-  // workspace overflow menu so the chrome feels consistent.
+  // Close the menu and return focus to the trigger so keyboard users aren't
+  // dumped at the top of the document (focus-restore, per the modal/menu a11y
+  // recipe). Callers that act on a menu item also call this.
+  function closeAndRestore() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  // Click-outside closes the dropdown (no focus restore — the user is mousing
+  // elsewhere). Same pattern as the Log workspace overflow menu.
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
     document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
+
+  // Roving focus: when the menu opens, move focus to the first item so arrow
+  // keys work immediately and the menu is operable without a mouse.
+  useEffect(() => {
+    if (!open) return;
+    const items = menuItems();
+    items[0]?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  function menuItems(): HTMLElement[] {
+    if (!menuRef.current) return [];
+    return Array.from(menuRef.current.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+  }
+
+  // Arrow-key navigation + Escape, scoped to the open menu. ArrowUp/Down wrap;
+  // Home/End jump to the ends; Escape closes and restores focus to the trigger.
+  function onMenuKeyDown(e: ReactKeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAndRestore();
+      return;
+    }
+    const items = menuItems();
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    let next = -1;
+    if (e.key === "ArrowDown") next = current < 0 ? 0 : (current + 1) % items.length;
+    else if (e.key === "ArrowUp") next = current <= 0 ? items.length - 1 : current - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    if (next >= 0) {
+      e.preventDefault();
+      items[next]?.focus();
+    }
+  }
 
   if (label === null) {
     // Logged out (or no connection configured). Single pill that opens the
@@ -207,7 +254,7 @@ function UserPill(props: {
       <button
         type="button"
         onClick={onOpenAuth}
-        className="flex w-full items-center justify-between rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold"
+        className="flex w-full items-center justify-between rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
       >
         <span>Sign in</span>
         <span aria-hidden className="text-[10px] text-helios-dim">→</span>
@@ -218,11 +265,12 @@ function UserPill(props: {
   return (
     <div ref={ref} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex w-full flex-col gap-0.5 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold"
+        className="flex w-full flex-col gap-0.5 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
       >
         <span className="flex w-full items-center justify-between gap-1">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -244,22 +292,25 @@ function UserPill(props: {
       </button>
       {open && (
         <div
+          ref={menuRef}
           role="menu"
+          aria-label="Account"
+          onKeyDown={onMenuKeyDown}
           className="absolute bottom-full left-0 mb-1 w-full rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text shadow-lg"
         >
           <button
             type="button"
             role="menuitem"
-            onClick={() => { setOpen(false); onChangePassword(); }}
-            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel"
+            onClick={() => { closeAndRestore(); onChangePassword(); }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
           >
             Change password…
           </button>
           <button
             type="button"
             role="menuitem"
-            onClick={() => { setOpen(false); onSignOut(); }}
-            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel"
+            onClick={() => { closeAndRestore(); onSignOut(); }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
           >
             Sign out
           </button>
@@ -267,8 +318,8 @@ function UserPill(props: {
           <button
             type="button"
             role="menuitem"
-            onClick={() => { setOpen(false); onDisconnect(); }}
-            className="block w-full px-3 py-1.5 text-left text-helios-dim hover:bg-helios-panel hover:text-red-200"
+            onClick={() => { closeAndRestore(); onDisconnect(); }}
+            className="block w-full px-3 py-1.5 text-left text-helios-dim hover:bg-helios-panel hover:text-red-200 focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:text-red-200 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
             title="Forget the saved Supabase URL and anon key on this machine"
           >
             Disconnect Supabase

@@ -64,6 +64,20 @@ describe("friendlyPgError", () => {
     expect(friendlyPgError(new Error("network blip")).kind).toBe("unknown");
   });
 
+  it("maps an Error instance carrying status 401 but no code to the auth message", () => {
+    // Supabase AuthApiError is a real Error subclass that carries `status`
+    // (e.g. 401 on an expired session) but no Postgres `code`. The guard
+    // must not early-return its raw message before the status-based mapping.
+    const authErr = Object.assign(new Error("Invalid JWT"), { status: 401 });
+    expect(friendlyPgError(authErr).message).toMatch(/session.*expired.*sign in/i);
+    expect(friendlyPgError(authErr).kind).toBe("auth");
+  });
+
+  it("maps an Error instance carrying status 403 (no code) to the auth message", () => {
+    const forbidden = Object.assign(new Error("Forbidden"), { status: 403 });
+    expect(friendlyPgError(forbidden).kind).toBe("auth");
+  });
+
   it("handles null/undefined input safely", () => {
     expect(friendlyPgError(null).message).toBe("Unknown error");
     expect(friendlyPgError(undefined).kind).toBe("unknown");

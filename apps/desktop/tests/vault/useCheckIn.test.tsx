@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider } from "@helios/auth";
 import { useCheckIn } from "../../src/modules/vault/data/useCheckIn";
+import { subscribeLockChanges } from "../../src/modules/vault/data/lock-events";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -126,5 +127,34 @@ describe("useCheckIn", () => {
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error?.message).toContain("lock required");
+  });
+
+  it("broadcasts a lock change after a successful check-in", async () => {
+    // pdm_check_in releases the caller's lock server-side. Mirror the other
+    // lock-mutation hooks and notify so every mounted useLocks() refetches
+    // immediately, closing the window where auto-sync could clobber the file.
+    let notified = 0;
+    const unsub = subscribeLockChanges(() => { notified++; });
+    const c = mockClient();
+    const { result } = renderHook(() => useCheckIn(), { wrapper: wrap(c) });
+    await act(async () => {
+      await result.current.run("f1", makeBytes(), null);
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    unsub();
+    expect(notified).toBe(1);
+  });
+
+  it("does not broadcast a lock change when check-in fails", async () => {
+    let notified = 0;
+    const unsub = subscribeLockChanges(() => { notified++; });
+    const c = mockClient(null, { message: "lock required" });
+    const { result } = renderHook(() => useCheckIn(), { wrapper: wrap(c) });
+    await act(async () => {
+      await result.current.run("f1", makeBytes(), null);
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    unsub();
+    expect(notified).toBe(0);
   });
 });

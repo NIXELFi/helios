@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { widgetRegistry, BUILTIN_WIDGET_TYPES } from "@helios/widgets";
 import type { ChannelMeta } from "@helios/store";
 import type { TileSpec, WidgetType } from "../workspaces/types";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const WIDGET_LABELS: Record<WidgetType, string> = {
   strip_chart:     "Strip Chart",
@@ -37,6 +39,19 @@ interface Props {
 export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, availableChannels }: Props) {
   const widget = widgetRegistry.get(tile.widgetType);
   const Editor = widget.ConfigEditor;
+  // Pending destructive widget-type change awaiting in-app confirmation.
+  // Replaces the native window.confirm (which Tauri's webview renders poorly /
+  // inconsistently) with the app's ConfirmDialog.
+  const [pendingType, setPendingType] = useState<WidgetType | null>(null);
+
+  function applyTypeChange(nextType: WidgetType) {
+    const nextWidget = widgetRegistry.get(nextType);
+    onChange({
+      ...tile,
+      widgetType: nextType,
+      config: nextWidget.defaultConfig as TileSpec["config"],
+    });
+  }
 
   return (
     <aside className="w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
@@ -44,6 +59,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
         <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Configure</span>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             aria-label="Duplicate tile"
             onClick={onDuplicate}
             title="Duplicate this tile"
@@ -52,6 +68,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             duplicate
           </button>
           <button
+            type="button"
             aria-label="Delete tile"
             onClick={onDelete}
             title="Delete this tile"
@@ -60,6 +77,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             delete
           </button>
           <button
+            type="button"
             aria-label="Close config"
             onClick={onClose}
             className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
@@ -76,16 +94,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           onChange={(e) => {
             const nextType = e.target.value as WidgetType;
             if (nextType === tile.widgetType) return;
-            const nextWidget = widgetRegistry.get(nextType);
-            if (!confirm(
-              `Convert "${tile.id}" from ${WIDGET_LABELS[tile.widgetType]} to ${WIDGET_LABELS[nextType]}?\n\n`
-              + `Position and size are kept; the widget's config will reset to its default channels and ranges.`
-            )) return;
-            onChange({
-              ...tile,
-              widgetType: nextType,
-              config: nextWidget.defaultConfig as TileSpec["config"],
-            });
+            setPendingType(nextType);
           }}
           className="flex-1 bg-[#16171B] text-[#FFC627] border border-[#2A2C32] rounded-sm px-1 py-0.5 text-xs focus:outline-none focus:border-[#FFC627] cursor-pointer"
         >
@@ -107,6 +116,23 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
       <div className="px-2 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
         Changes save automatically.
       </div>
+      {pendingType && (
+        <ConfirmDialog
+          title="Change widget type?"
+          body={
+            <>
+              Convert <span className="font-semibold">{tile.id}</span> from{" "}
+              {WIDGET_LABELS[tile.widgetType]} to {WIDGET_LABELS[pendingType]}? Position and size
+              are kept; the widget's config resets to its default channels and ranges.
+            </>
+          }
+          confirmLabel="Convert"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => applyTypeChange(pendingType)}
+          onClose={() => setPendingType(null)}
+        />
+      )}
     </aside>
   );
 }

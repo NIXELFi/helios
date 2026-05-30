@@ -65,4 +65,60 @@ describe("TabContextMenu", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(props.onClose).toHaveBeenCalled();
   });
+
+  it("menu items are focusable buttons (not plain divs)", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    const rename = screen.getByRole("menuitem", { name: /rename/i });
+    expect(rename.tagName).toBe("BUTTON");
+  });
+
+  it("focuses the first item on open", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: /rename/i }));
+  });
+
+  it("ArrowDown moves focus to the next item", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    const menu = screen.getByRole("menu", { name: /workspace actions/i });
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: /color/i }));
+  });
+
+  it("ArrowUp from the first item wraps to the last enabled item", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    const menu = screen.getByRole("menu", { name: /workspace actions/i });
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: /delete/i }));
+  });
+
+  it("Enter on a focused item activates it and closes", () => {
+    const props = defaultProps();
+    render(<TabContextMenu {...props} />);
+    const rename = screen.getByRole("menuitem", { name: /rename/i });
+    rename.focus();
+    fireEvent.keyDown(rename, { key: "Enter" });
+    expect(props.onRename).toHaveBeenCalled();
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
+  it("Space on a focused item activates it", () => {
+    const props = defaultProps();
+    render(<TabContextMenu {...props} />);
+    const dup = screen.getByRole("menuitem", { name: /duplicate/i });
+    dup.focus();
+    fireEvent.keyDown(dup, { key: " " });
+    expect(props.onDuplicate).toHaveBeenCalled();
+  });
+
+  it("opens the Color submenu from the keyboard (ArrowRight / Enter) and lets a swatch be chosen", () => {
+    const props = defaultProps();
+    render(<TabContextMenu {...props} />);
+    const color = screen.getByRole("menuitem", { name: /^color$/i });
+    color.focus();
+    fireEvent.keyDown(color, { key: "ArrowRight" });
+    const swatches = screen.getAllByRole("menuitem", { name: /color #/i });
+    expect(swatches.length).toBe(PALETTE.length);
+    fireEvent.keyDown(swatches[2]!, { key: "Enter" });
+    expect(props.onRecolor).toHaveBeenCalledWith(PALETTE[2]);
+  });
 });

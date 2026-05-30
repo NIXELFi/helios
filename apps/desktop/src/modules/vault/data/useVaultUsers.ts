@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { QueryResult, VaultUser } from "./types";
 
@@ -12,10 +12,18 @@ export function useVaultUsers(): QueryResult<VaultUser[]> {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
+  // Mirror of `data` so the fetch effect can tell an initial load from a
+  // background refetch without re-running when data changes.
+  const dataRef = useRef<VaultUser[] | null>(data);
+  dataRef.current = data;
 
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
+    // Only show the loading state on the initial load (no data yet). A
+    // background refetch (e.g. after a grant/revoke mutation) keeps the prior
+    // rows on screen instead of blanking the whole table, then swaps them in
+    // when the new data arrives.
+    if (dataRef.current === null) setLoading(true);
     setError(null);
     (async () => {
       const { data: rows, error: err } = await client.rpc("pdm_admin_list_users");

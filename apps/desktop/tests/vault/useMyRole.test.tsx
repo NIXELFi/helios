@@ -45,6 +45,18 @@ describe("useMyRole", () => {
     await waitFor(() => expect(result.current).toBe("editor" as MyRole));
   });
 
+  it("returns 'owner' when user_roles row has role=owner (V16)", async () => {
+    // The DB returns "owner" for the super-user; the MyRole union previously
+    // omitted it (hidden behind `as any`). It must be a representable value so
+    // consumers can compare === "owner" and type-check.
+    // Type-level guard: assigning the literal "owner" to MyRole only compiles
+    // when "owner" is part of the union (no cast). tsc fails here pre-fix.
+    const ownerRole: MyRole = "owner";
+    const c = mockClient({ user: { id: "u1" } }, { role: "owner" });
+    const { result } = renderHook(() => useMyRole(), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current).toBe(ownerRole));
+  });
+
   it("returns null when user has no role row", async () => {
     const c = mockClient({ user: { id: "u1" } }, null);
     const { result } = renderHook(() => useMyRole(), { wrapper: wrap(c) });

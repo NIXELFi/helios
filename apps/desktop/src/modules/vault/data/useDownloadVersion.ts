@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import { writeFile, mkdir } from "@tauri-apps/plugin-fs";
+import { writeFile, mkdir, rename } from "@tauri-apps/plugin-fs";
 import { gunzipIfNeeded, isGzipped } from "./compression";
 
 /** Hex sha256 of a byte buffer — used to verify download integrity before
@@ -46,11 +46,16 @@ function parentDir(path: string): string {
  * AbortSignal), but the function checks the signal at three safe points:
  *   - on entry (skip the whole attempt),
  *   - between retry attempts (skip remaining retries),
- *   - after download but before the local writeFile (so a superseded run
- *     never overwrites the destination with stale bytes).
+ *   - after download but before the local write (so a superseded run never
+ *     overwrites the destination with stale bytes).
  * This is the property useAutoSync / useBulkDownload need: a Cancel or
  * supersession of an in-flight pass must never produce a torn write to
  * disk, even if the network fetch already completed.
+ *
+ * The on-disk write itself is also made atomic: verified bytes are written
+ * to a `<dest>.part` temp file and then renamed onto the real destination,
+ * so an interrupted write or a concurrent writer can never leave a corrupt
+ * file at the real path.
  */
 export async function downloadVersionOnce(
   client: SupabaseClient,
@@ -132,7 +137,16 @@ export async function downloadVersionOnce(
         catch { /* mkdir errors when the dir exists in some Tauri versions */ }
       }
       if (signal?.aborted) return { ok: false, error: "aborted" };
-      await writeFile(destPath, arr);
+      // Atomic write: stage the verified bytes at a sibling temp path, then
+      // rename onto the real destination. A rename within the same directory
+      // is atomic on the local filesystems we target, so a torn/interrupted
+      // write (crash, concurrent writer, abort mid-write) can only ever leave
+      // a stale ".part" file — never a half-written file at the real path that
+      // a reader / sha-match would treat as valid. We do the verify BEFORE the
+      // write above, so the temp file only ever holds correct bytes.
+      const tmpPath = `${destPath}.part`;
+      await writeFile(tmpPath, arr);
+      await rename(tmpPath, destPath);
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

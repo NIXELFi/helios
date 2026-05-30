@@ -17,6 +17,12 @@ export function TabContextMenu(props: TabContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [colorOpen, setColorOpen] = useState(false);
   const [colorFlipLeft, setColorFlipLeft] = useState(false);
+  // Refs to the top-level menuitems, in visual order. Used for roving focus
+  // (Arrow keys) and to focus the first item on open. The Color item gets a
+  // ref so we can return focus to it when the submenu closes.
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const colorItemRef = useRef<HTMLButtonElement | null>(null);
+  const swatchRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Close on Escape, outside-click, or window resize. Esc gets stopPropagation
   // so it doesn't ALSO close an ancestor (e.g. an inline-rename input on the
@@ -38,6 +44,13 @@ export function TabContextMenu(props: TabContextMenuProps) {
     };
   }, [onClose]);
 
+  // Focus the first item on open so keyboard users land inside the menu.
+  useEffect(() => {
+    itemRefs.current[0]?.focus();
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Position with viewport-overflow handling (flip up/left if too close to
   // edge). useLayoutEffect runs synchronously before paint so the user never
   // sees a one-frame flash at the un-flipped anchor.
@@ -54,12 +67,15 @@ export function TabContextMenu(props: TabContextMenuProps) {
   }, [anchor]);
 
   // Detect if the color submenu would overflow right; flip it left if so.
-  function onColorEnter() {
-    setColorOpen(true);
+  function measureColorFlip() {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     setColorFlipLeft(r.right + 160 > window.innerWidth);
+  }
+  function onColorEnter() {
+    setColorOpen(true);
+    measureColorFlip();
   }
 
   function fire(handler: () => void) {
@@ -67,10 +83,78 @@ export function TabContextMenu(props: TabContextMenuProps) {
     onClose();
   }
 
+  // Open the color submenu from the keyboard and move focus to the first
+  // swatch. The submenu must render before we can focus it, so defer a frame.
+  function openColorSubmenu() {
+    measureColorFlip();
+    setColorOpen(true);
+    requestAnimationFrame(() => swatchRefs.current[0]?.focus());
+  }
+
+  // Roving focus across the top-level items. Disabled items (Delete when
+  // !canDelete) are skipped so focus never lands on a dead control.
+  function focusableTopItems(): HTMLButtonElement[] {
+    return itemRefs.current.filter(
+      (el): el is HTMLButtonElement => !!el && !el.hasAttribute("disabled"),
+    );
+  }
+  function moveTopFocus(delta: 1 | -1) {
+    const items = focusableTopItems();
+    if (items.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const idx = items.findIndex((el) => el === active);
+    const next = idx === -1
+      ? (delta === 1 ? 0 : items.length - 1)
+      : (idx + delta + items.length) % items.length;
+    items[next]?.focus();
+  }
+  function onMenuKeyDown(e: React.KeyboardEvent) {
+    // Submenu has its own handler; don't double-handle when focus is inside it.
+    if (e.key === "ArrowDown") { e.preventDefault(); moveTopFocus(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveTopFocus(-1); }
+  }
+
+  // Per-item key handling for Enter/Space activation. Kept here so each item
+  // can pass its own action.
+  function onItemKeyDown(e: React.KeyboardEvent, action: () => void) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      fire(action);
+    }
+  }
+
+  function onColorItemKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopPropagation();
+      openColorSubmenu();
+    }
+  }
+
+  function onSwatchKeyDown(e: React.KeyboardEvent, i: number) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      fire(() => props.onRecolor(palette[i]!));
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      swatchRefs.current[(i + 1) % palette.length]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      swatchRefs.current[(i - 1 + palette.length) % palette.length]?.focus();
+    } else if (e.key === "ArrowLeft") {
+      // Back out of the submenu to its parent item.
+      e.preventDefault();
+      setColorOpen(false);
+      colorItemRef.current?.focus();
+    }
+  }
+
   const itemBase =
-    "px-3 py-1 text-xs cursor-pointer text-[#D8DCE2] hover:bg-[#23252b] hover:text-[#FFC627] flex items-center justify-between";
+    "w-full text-left px-3 py-1 text-xs cursor-pointer text-[#D8DCE2] hover:bg-[#23252b] hover:text-[#FFC627] focus-visible:outline-none focus-visible:bg-[#23252b] focus-visible:text-[#FFC627] flex items-center justify-between";
   const itemDisabled =
-    "px-3 py-1 text-xs text-[#5A5F66] flex items-center justify-between cursor-not-allowed";
+    "w-full text-left px-3 py-1 text-xs text-[#5A5F66] flex items-center justify-between cursor-not-allowed";
 
   return (
     <div
@@ -80,18 +164,31 @@ export function TabContextMenu(props: TabContextMenuProps) {
       style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 60, minWidth: 160 }}
       className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm shadow-xl py-1"
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={onMenuKeyDown}
     >
-      <div role="menuitem" className={itemBase} onClick={() => fire(props.onRename)}>
-        Rename
-      </div>
-      <div
+      <button
+        type="button"
         role="menuitem"
+        ref={(el) => { itemRefs.current[0] = el; }}
         className={itemBase}
+        onClick={() => fire(props.onRename)}
+        onKeyDown={(e) => onItemKeyDown(e, props.onRename)}
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={colorOpen}
+        ref={(el) => { itemRefs.current[1] = el; colorItemRef.current = el; }}
+        className={itemBase + " relative"}
         onMouseEnter={onColorEnter}
         onMouseLeave={() => setColorOpen(false)}
+        onKeyDown={onColorItemKeyDown}
       >
         <span>Color</span>
-        <span className="text-[#9097A0]">▸</span>
+        <span className="text-[#9097A0]" aria-hidden>▸</span>
         {colorOpen && (
           <div
             role="menu"
@@ -103,43 +200,70 @@ export function TabContextMenu(props: TabContextMenuProps) {
               minWidth: 140,
             }}
           >
-            {palette.map((hex) => (
-              <div
+            {palette.map((hex, i) => (
+              <button
+                type="button"
                 key={hex}
                 role="menuitem"
                 aria-label={`Color ${hex}`}
+                ref={(el) => { swatchRefs.current[i] = el; }}
                 className={itemBase}
                 onClick={() => fire(() => props.onRecolor(hex))}
+                onKeyDown={(e) => onSwatchKeyDown(e, i)}
               >
                 <span
                   className="inline-block w-3 h-3 rounded-sm mr-2 border border-black/20"
                   style={{ background: hex }}
                 />
                 <span className="font-mono-num">{hex}</span>
-              </div>
+              </button>
             ))}
           </div>
         )}
-      </div>
-      <div role="menuitem" className={itemBase} onClick={() => fire(props.onDuplicate)}>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        ref={(el) => { itemRefs.current[2] = el; }}
+        className={itemBase}
+        onClick={() => fire(props.onDuplicate)}
+        onKeyDown={(e) => onItemKeyDown(e, props.onDuplicate)}
+      >
         Duplicate
-      </div>
-      <div role="menuitem" className={itemBase} onClick={() => fire(props.onExport)}>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        ref={(el) => { itemRefs.current[3] = el; }}
+        className={itemBase}
+        onClick={() => fire(props.onExport)}
+        onKeyDown={(e) => onItemKeyDown(e, props.onExport)}
+      >
         Export…
-      </div>
+      </button>
       <div className="my-1 border-t border-[#2A2C32]" />
       {canDelete ? (
-        <div
+        <button
+          type="button"
           role="menuitem"
-          className={itemBase + " hover:!text-[#EF5350]"}
+          ref={(el) => { itemRefs.current[4] = el; }}
+          className={itemBase + " hover:!text-[#EF5350] focus-visible:!text-[#EF5350]"}
           onClick={() => fire(props.onDelete)}
+          onKeyDown={(e) => onItemKeyDown(e, props.onDelete)}
         >
           Delete
-        </div>
+        </button>
       ) : (
-        <div role="menuitem" aria-disabled="true" className={itemDisabled}>
+        <button
+          type="button"
+          role="menuitem"
+          aria-disabled="true"
+          disabled
+          ref={(el) => { itemRefs.current[4] = el; }}
+          className={itemDisabled}
+        >
           Delete
-        </div>
+        </button>
       )}
     </div>
   );

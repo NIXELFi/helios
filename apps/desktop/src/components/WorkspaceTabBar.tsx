@@ -141,6 +141,16 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
   // releases. Doing it directly with native listeners (not React synthetic)
   // so we keep receiving moves even when the cursor leaves the thumb.
   const trackRef = useRef<HTMLDivElement>(null);
+  // Cleanup fn for an in-flight thumb-drag's window listeners. Held in a ref so
+  // an unmount mid-drag can tear them down (otherwise the mousemove/mouseup
+  // listeners on `window` leak and keep firing against a dead scroller).
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
   function onThumbMouseDown(e: React.MouseEvent) {
     e.preventDefault();
     const scroller = scrollerRef.current;
@@ -151,6 +161,8 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
     const trackWidth = track.clientWidth;
     const maxScroll = scroller.scrollWidth - scroller.clientWidth;
     if (maxScroll <= 0 || trackWidth <= 0) return;
+    // Tear down any prior drag still wired up before starting a new one.
+    dragCleanupRef.current?.();
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX;
       // Track-space delta → content-space delta. The thumb traverses
@@ -160,30 +172,43 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
       const ratio = usableTrack > 0 ? maxScroll / usableTrack : 0;
       scroller.scrollLeft = Math.max(0, Math.min(maxScroll, startScrollLeft + dx * ratio));
     };
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      dragCleanupRef.current = null;
     };
+    const onUp = () => cleanup();
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    dragCleanupRef.current = cleanup;
   }
 
   function startRename(w: Workspace) {
+    // If a rename is already in flight, commit it against the tab it was
+    // started for BEFORE switching targets. Without this, the in-flight input's
+    // onBlur (which fires as focus moves to the new input) could commit using
+    // the now-stale `renamingId`, mis-applying one tab's text to another.
+    if (renamingId !== null && renamingId !== w.id) commitRename();
     setRenamingId(w.id);
     setRenameValue(w.label);
   }
 
-  function commitRename() {
-    if (renamingId === null) return;
+  // Commit the rename for a SPECIFIC id. The id is captured at the call site
+  // (passed in by the input handlers, defaulting to the current renamingId) so
+  // a concurrent target switch can't redirect the commit to the wrong tab.
+  function commitRename(id: string | null = renamingId) {
+    if (id === null) return;
     const trimmed = renameValue.trim();
-    if (trimmed.length > 0 && trimmed !== workspaces.find((w) => w.id === renamingId)?.label) {
-      props.onRename(renamingId, trimmed);
+    if (trimmed.length > 0 && trimmed !== workspaces.find((w) => w.id === id)?.label) {
+      props.onRename(id, trimmed);
     }
-    setRenamingId(null);
+    // Only clear if we're still editing the tab we just committed; a freshly
+    // started rename (different id) must survive.
+    setRenamingId((cur) => (cur === id ? null : cur));
   }
 
-  function cancelRename() {
-    setRenamingId(null);
+  function cancelRename(id: string | null = renamingId) {
+    setRenamingId((cur) => (cur === id ? null : cur));
   }
 
   // Hoisted drag handlers — wired on the tablist <div> rather than each tab.
@@ -277,10 +302,10 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                    else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+                    if (e.key === "Enter") { e.preventDefault(); commitRename(w.id); }
+                    else if (e.key === "Escape") { e.preventDefault(); cancelRename(w.id); }
                   }}
-                  onBlur={commitRename}
+                  onBlur={() => commitRename(w.id)}
                   onClick={(e) => e.stopPropagation()}
                   onDoubleClick={(e) => e.stopPropagation()}
                   className="bg-transparent border-b border-current px-0.5 outline-none w-24"

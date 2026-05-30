@@ -278,4 +278,89 @@ describe("useAutoSync", () => {
     await waitFor(() => { expect(downloadResolvers.has("sha-new-abort")).toBe(true); });
     await act(async () => { resolveDownload("sha-new-abort", true); });
   });
+
+  it("honors the cooldown after a superseded run finishes (lastFinishedAt is not left stale)", async () => {
+    // Regression guard for the audit fix: a superseded run skips the final-
+    // commit block, so it used to never set `lastFinishedAt`. With the cooldown
+    // measuring `Date.now() - lastFinishedAt` and lastFinishedAt stuck at 0, a
+    // later trigger would compute wait=0 and fire immediately — defeating the
+    // 2s cooldown that throttles dependency churn. The reset of run-owned state
+    // (lastFinishedAt + activeGenRef-if-still-owned) must run regardless of
+    // isCurrent(), so the cooldown is honored after ANY completion.
+    //
+    // Isolation: we keep gen-2 in flight (never resolved) and supersede it with
+    // gen-3. gen-3's timer reads `lastFinishedAt` at SCHEDULE time, so the only
+    // thing that could have set it is gen-1's superseded completion. If the
+    // superseded run failed to set it (the bug), gen-3 fires at wait=0; with the
+    // fix it must wait the cooldown.
+    vi.useFakeTimers();
+    try {
+      const filesA: VaultFile[] = [makeFile("f1", "a.bin")];
+      const versionsA = new Map<string, Version[]>([
+        ["f1", [makeVersion("f1", "sha-cd-1")]],
+      ]);
+      const filesB: VaultFile[] = [makeFile("f2", "b.bin")];
+      const versionsB = new Map<string, Version[]>([
+        ["f2", [makeVersion("f2", "sha-cd-2")]],
+      ]);
+      const filesC: VaultFile[] = [makeFile("f3", "c.bin")];
+      const versionsC = new Map<string, Version[]>([
+        ["f3", [makeVersion("f3", "sha-cd-3")]],
+      ]);
+
+      const baseInput = {
+        enabled: true,
+        localFiles: EMPTY_LOCAL,
+        locks: EMPTY_LOCKS,
+        currentUserId: "u1",
+        vaultRoot: "/tmp/vault",
+        folders: EMPTY_FOLDERS,
+        onComplete: () => {},
+      };
+
+      const { rerender } = renderHook(
+        ({ files, versionsByFileId }) =>
+          useAutoSync({ ...baseInput, files, versionsByFileId }),
+        { initialProps: { files: filesA, versionsByFileId: versionsA } },
+      );
+
+      // gen-1's trigger timer fires (wait=0 since lastFinishedAt starts at 0).
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(downloadResolvers.has("sha-cd-1")).toBe(true);
+
+      // Supersede gen-1 with gen-2. gen-2's timer is scheduled with wait=0
+      // (lastFinishedAt still 0 here). Let it fire so gen-2 is now in flight.
+      rerender({ files: filesB, versionsByFileId: versionsB });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(downloadResolvers.has("sha-cd-2")).toBe(true);
+
+      // NOW let the superseded gen-1 download resolve. Its post-download path
+      // must run the reset (set lastFinishedAt) even though its final commit is
+      // dropped by the isCurrent() guard, and it must NOT zero the activeGenRef
+      // that gen-2 now owns.
+      await act(async () => { resolveDownload("sha-cd-1", true); });
+      await act(async () => { await Promise.resolve(); });
+
+      // Supersede gen-2 (still in flight) with gen-3. gen-3's timer is scheduled
+      // now, reading lastFinishedAt — which gen-1's finish set. So gen-3 must
+      // wait the cooldown, not fire immediately.
+      rerender({ files: filesC, versionsByFileId: versionsC });
+
+      // Short advance: gen-3 must NOT have started.
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      expect(downloadResolvers.has("sha-cd-3")).toBe(false);
+
+      // After the cooldown elapses, gen-3 fires.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(downloadResolvers.has("sha-cd-3")).toBe(true);
+
+      // Clean up in-flight downloads.
+      if (downloadResolvers.has("sha-cd-2")) {
+        await act(async () => { resolveDownload("sha-cd-2", true); });
+      }
+      await act(async () => { resolveDownload("sha-cd-3", true); });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

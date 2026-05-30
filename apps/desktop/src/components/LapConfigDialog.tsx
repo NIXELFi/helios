@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChannelMeta } from "@helios/store";
 import type { GpsPickerEmitter, LapDetectionConfig, LapDetectionMode, LapSet } from "@helios/lib";
 import { detectLaps, formatLapTime } from "@helios/lib";
@@ -7,6 +7,28 @@ import { lapInputsFor } from "../lib/lap-config";
 import type { LoadedSession } from "../lib/session";
 
 const PICKER_REQUEST_ID = "lap-config-start-finish";
+
+/** Coalesce a raw numeric-input value to a finite number, falling back to the
+ *  previous value when the parse is NaN/Infinity. Prevents `Number("")`,
+ *  `Number("abc")` and `Math.max(1, NaN)` from poisoning the stored config
+ *  (which yields NaN radii / centers and, downstream, negative-duration laps).
+ *  Exported for unit testing. */
+export function coalesceNum(raw: number, prev: number): number {
+  return Number.isFinite(raw) ? raw : prev;
+}
+
+/** Parse a textarea of newline/comma-separated seconds into a sorted, deduped
+ *  array of microsecond crossings. Out-of-order or duplicate entries would
+ *  otherwise produce negative-duration or zero-length laps. Exported for
+ *  unit testing. */
+export function parseManualCrossingsUs(text: string): number[] {
+  const lines = text.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+  const us = lines
+    .map((s) => Math.round(Number(s) * 1_000_000))
+    .filter((n) => Number.isFinite(n));
+  // Sort ascending, then dedupe (a Set preserves insertion order, so sort first).
+  return Array.from(new Set(us.sort((a, b) => a - b)));
+}
 
 interface Props {
   session: LoadedSession;
@@ -19,6 +41,7 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
   const [cfg, setCfg] = useState<LapDetectionConfig>(session.lapConfig);
   const inputs = useMemo(() => lapInputsFor(session.store), [session.store]);
   const channels = useMemo(() => session.store.list(), [session.store]);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // True while the GPS Track widget is awaiting our click. The dialog
   // collapses to a non-blocking banner during this window so the user can
@@ -44,6 +67,50 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
       if (req === null) setPicking(false);
     });
   }, [gpsPickerEmitter]);
+
+  // Modal a11y: Escape-to-close, focus-trap, focus-restore. Inactive while
+  // `picking` (the dialog is collapsed to a non-blocking banner then, and the
+  // GPS map underneath must stay interactive — Esc there cancels the pick via
+  // the picker's own state subscription above).
+  useEffect(() => {
+    const prevFocus = document.activeElement as HTMLElement | null;
+    // Focus the dialog body on open so Tab cycling starts inside the trap and
+    // Escape works even before the user clicks a field.
+    dialogRef.current?.focus?.();
+    function onKey(e: KeyboardEvent) {
+      if (picking) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusables = Array.from(
+          root.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hasAttribute("disabled"));
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      prevFocus?.focus?.();
+    };
+  }, [onClose, picking]);
 
   const preview: LapSet | null = useMemo(() => {
     if (cfg.mode === "none") return null;
@@ -72,6 +139,7 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
       >
         <span>Click the GPS track to set start-finish line</span>
         <button
+          type="button"
           onClick={() => { gpsPickerEmitter.cancel(); setPicking(false); }}
           className="px-2 py-0.5 bg-[#0E0E10] text-[#FFC627] hover:brightness-110 rounded-sm"
         >Cancel</button>
@@ -81,10 +149,10 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Lap detection config" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#0E0E10] border border-[#2A2C32] w-[720px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="bg-[#0E0E10] border border-[#2A2C32] w-[720px] max-h-[80vh] flex flex-col outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
           <span className="text-xs uppercase tracking-wider text-[#FFC627]">Lap detection · {session.label}</span>
-          <button aria-label="Close" onClick={onClose}
+          <button type="button" aria-label="Close" onClick={onClose}
                   className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm">×</button>
         </div>
 
@@ -129,8 +197,8 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
         </div>
 
         <div className="px-3 py-2 border-t border-[#2A2C32] flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1 text-xs text-[#9097A0] hover:text-[#D8DCE2]">Cancel</button>
-          <button onClick={() => { onSave(cfg); onClose(); }}
+          <button type="button" onClick={onClose} className="px-3 py-1 text-xs text-[#9097A0] hover:text-[#D8DCE2]">Cancel</button>
+          <button type="button" onClick={() => { onSave(cfg); onClose(); }}
                   className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] font-semibold hover:brightness-110">
             Save
           </button>
@@ -171,15 +239,16 @@ function GpsLineEditor({ cfg, setCfg, channels, onPickFromMap }: {
       <div className="col-span-2 flex items-end gap-2">
         <Field label="Center latitude">
           <input type="number" step="0.0000001" value={g.centerLat}
-                 onChange={(e) => setG("centerLat", Number(e.target.value))}
+                 onChange={(e) => setG("centerLat", coalesceNum(Number(e.target.value), g.centerLat))}
                  className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num w-full" />
         </Field>
         <Field label="Center longitude">
           <input type="number" step="0.0000001" value={g.centerLon}
-                 onChange={(e) => setG("centerLon", Number(e.target.value))}
+                 onChange={(e) => setG("centerLon", coalesceNum(Number(e.target.value), g.centerLon))}
                  className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num w-full" />
         </Field>
         <button
+          type="button"
           onClick={onPickFromMap}
           className="h-[30px] px-3 bg-[#16171B] border border-[#FFC627] text-[#FFC627] hover:bg-[#FFC627] hover:text-[#0E0E10] text-[11px] font-semibold whitespace-nowrap"
           title="Click on the GPS track widget to set the center"
@@ -187,12 +256,12 @@ function GpsLineEditor({ cfg, setCfg, channels, onPickFromMap }: {
       </div>
       <Field label="Radius (m)" hint="half-width of the start-finish line; smaller = stricter">
         <input type="number" min={1} step={1} value={g.radiusM}
-               onChange={(e) => setG("radiusM", Math.max(1, Number(e.target.value)))}
+               onChange={(e) => setG("radiusM", Math.max(1, coalesceNum(Number(e.target.value), g.radiusM)))}
                className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
       </Field>
       <Field label="Heading (deg, optional)" hint="0=N, 90=E. Filters wrong-direction crossings.">
         <input type="number" min={0} max={360} value={g.headingDeg ?? ""}
-               onChange={(e) => setG("headingDeg", e.target.value === "" ? undefined : Number(e.target.value))}
+               onChange={(e) => setG("headingDeg", e.target.value === "" ? undefined : coalesceNum(Number(e.target.value), g.headingDeg ?? 0))}
                className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
       </Field>
     </div>
@@ -211,7 +280,7 @@ function BeaconEditor({ cfg, setCfg, channels }: { cfg: LapDetectionConfig; setC
       </Field>
       <Field label="Threshold">
         <input type="number" step="0.1" value={b.threshold}
-               onChange={(e) => setB("threshold", Number(e.target.value))}
+               onChange={(e) => setB("threshold", coalesceNum(Number(e.target.value), b.threshold))}
                className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
       </Field>
     </div>
@@ -235,8 +304,7 @@ function ManualEditor({ cfg, setCfg }: { cfg: LapDetectionConfig; setCfg: (f: (p
   const m = cfg.manual ?? { crossingsUs: [] };
   const text = m.crossingsUs.map((u) => (u / 1_000_000).toFixed(3)).join("\n");
   function setText(t: string) {
-    const lines = t.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
-    const us = lines.map((s) => Math.round(Number(s) * 1_000_000)).filter((n) => Number.isFinite(n));
+    const us = parseManualCrossingsUs(t);
     setCfg((c) => ({ ...c, manual: { crossingsUs: us } }));
   }
   return (

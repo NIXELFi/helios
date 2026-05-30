@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { UserId, VaultRole } from "./types";
+import { friendlyPgError } from "./pg-errors";
 
 /** Grant or change a user's role via `pdm_set_user_role`. Authorization (only
  *  the owner may grant/change admin; any admin may grant editor/viewer) is
@@ -11,21 +12,42 @@ export function useSetUserRole() {
   const client = useSupabaseClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  // Guard post-await setState against unmount. A grant/revoke that resolves
+  // after the AdminScreen unmounts (tab switch) would otherwise warn and
+  // leak state into a dead component.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const run = useCallback(
-    async (target: UserId, role: Exclude<VaultRole, "owner">): Promise<boolean> => {
-      setLoading(true);
-      setError(null);
+    async (
+      target: UserId,
+      role: Exclude<VaultRole, "owner">,
+    ): Promise<{ ok: boolean; error: Error | null }> => {
+      if (mounted.current) {
+        setLoading(true);
+        setError(null);
+      }
       const { error: err } = await client.rpc("pdm_set_user_role", {
         p_target: target,
         p_role: role,
       });
-      setLoading(false);
+      // Return the result directly so callers get the real server message
+      // instead of reading a stale captured `.error` after the await.
       if (err) {
-        setError(new Error(String(err.message ?? err)));
-        return false;
+        const e = new Error(friendlyPgError(err, "role").message);
+        if (mounted.current) {
+          setError(e);
+          setLoading(false);
+        }
+        return { ok: false, error: e };
       }
-      return true;
+      if (mounted.current) setLoading(false);
+      return { ok: true, error: null };
     },
     [client],
   );

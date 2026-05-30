@@ -204,27 +204,35 @@ export function useAutoSync(input: {
       }
     }
     const workerCount = Math.min(CONCURRENCY, tasks.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-    // Final commit — only if we're still the authoritative generation. If a
-    // newer run took over (e.g. deps changed mid-pass), the new run owns the
-    // status and will publish its own results.
-    if (isCurrent()) {
-      setStatus((s) => ({
-        ...s,
-        busy: false,
-        lastDownloaded: downloaded,
-        lastSkipped: skipped,
-        lastFailed: failed,
-        lastRunAt: new Date().toISOString(),
-        activeFiles: [],
-      }));
-      activeGenRef.current = 0;
-      // The AbortController served its purpose — clear so a stale reference
-      // doesn't accidentally abort a future generation's signal.
+      // Final commit — only if we're still the authoritative generation. If a
+      // newer run took over (e.g. deps changed mid-pass), the new run owns the
+      // status and will publish its own results.
+      if (isCurrent()) {
+        setStatus((s) => ({
+          ...s,
+          busy: false,
+          lastDownloaded: downloaded,
+          lastSkipped: skipped,
+          lastFailed: failed,
+          lastRunAt: new Date().toISOString(),
+          activeFiles: [],
+        }));
+        if (downloaded > 0) onCompleteRef.current?.();
+      }
+    } finally {
+      // Reset run-owned bookkeeping regardless of whether we're still current.
+      // A superseded run skips the commit block above, but it must still mark
+      // the cooldown clock — otherwise `lastFinishedAt` stays stale and the
+      // next trigger computes wait=0, defeating the cooldown. We only clear
+      // state we still OWN: zero `activeGenRef` only if it still equals our
+      // generation (a superseding run may have already claimed it), and clear
+      // the AbortController only if it's still ours.
+      if (activeGenRef.current === myGen) activeGenRef.current = 0;
       if (activeAbortRef.current === myAbort) activeAbortRef.current = null;
       lastFinishedAt.current = Date.now();
-      if (downloaded > 0) onCompleteRef.current?.();
     }
   }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders]);
 

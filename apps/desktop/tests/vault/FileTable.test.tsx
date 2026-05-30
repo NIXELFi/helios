@@ -357,6 +357,47 @@ describe("<FileTable>", () => {
     expect(screen.queryByRole("button", { name: /^download$/i })).toBeNull();
   });
 
+  it("renders an empty-state row when there are no files (X5)", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={[]} selected={null} locks={[]} currentUserId="u1" onSelect={() => {}} />,
+      ),
+    );
+    expect(screen.getByText(/no files in this folder/i)).toBeInTheDocument();
+    // The header must still render; the empty state is a body row, not a
+    // replacement for the whole table.
+    expect(screen.getByText("Name")).toBeInTheDocument();
+  });
+
+  it("clickable rows are keyboard-accessible and fire onSelect on Enter (a11y)", () => {
+    const onSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={files} selected={null} locks={[]} currentUserId="u1" onSelect={onSelect} />,
+      ),
+    );
+    const row = screen.getByText("frame.sldprt").closest("tr") as HTMLElement;
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("role", "button");
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("f1");
+  });
+
+  it("rows fire onSelect on Space (a11y)", () => {
+    const onSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={files} selected={null} locks={[]} currentUserId="u1" onSelect={onSelect} />,
+      ),
+    );
+    const row = screen.getByText("wheel.sldprt").closest("tr") as HTMLElement;
+    fireEvent.keyDown(row, { key: " " });
+    expect(onSelect).toHaveBeenCalledWith("f2");
+  });
+
   it("Get Latest button appears when file is vault-only and vaultRoot + version sha are set", () => {
     // f1 has a version; f2 does not. Neither has a local file → both vault-only.
     // vaultRoot is set → Get Latest should appear for f1 (has sha) but not f2 (no sha).

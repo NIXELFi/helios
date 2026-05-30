@@ -10,7 +10,11 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
   const elapsedMs = api.startedAt ? Date.now() - api.startedAt : 0;
   const mb = api.bytesDone / 1024 / 1024;
   const rate = elapsedMs > 0 ? mb / (elapsedMs / 1000) : 0;
-  const pct = api.total > 0 ? Math.floor(((api.done + api.errs) / api.total) * 100) : 0;
+  // Every file ends in exactly one terminal bucket (done / skipped / stale /
+  // errored), so progress must count all four — otherwise the bar stalls
+  // below 100% whenever files are skipped or left as stale.
+  const settled = api.done + api.errs + api.skipped + api.stale;
+  const pct = api.total > 0 ? Math.floor((settled / api.total) * 100) : 0;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -32,7 +36,15 @@ export function BulkDownloadModal({ api }: { api: BulkDownloadAPI }) {
         <div className="mb-3 flex justify-between text-xs text-helios-dim">
           <span>
             {api.done}/{api.total} done
-            {api.skipped > 0 && <span> · {api.skipped} already had</span>}
+            {api.skipped > 0 && <span> · {api.skipped} up to date</span>}
+            {api.stale > 0 && (
+              <span
+                className="text-[#FFB800]"
+                title="Local copy differs from the latest version — left untouched so a local edit isn't overwritten. Use Get Latest on the file to pull it."
+              >
+                {" "}· {api.stale} differ (kept)
+              </span>
+            )}
             {api.errs > 0 && <span className="text-[#EF5350]"> · {api.errs} failed</span>}
           </span>
           <span className="font-mono-num">

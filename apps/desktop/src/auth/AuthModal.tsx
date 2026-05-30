@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { useConnection, useHeliosAuth } from "./AuthShell";
@@ -10,6 +10,72 @@ interface Props {
 }
 
 type ModalStep = "connect" | "signin" | "signup" | "forgot" | "reset";
+
+/** Safely derive the host to show in the header. A malformed persisted URL
+ *  must not crash the modal render, so we fall back to the raw string. */
+function connectionHost(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/** Shared modal a11y: Escape-to-close, focus-trap, and focus-restore.
+ *  Mirrors the recipe in components/ConfirmDialog.tsx. Returns a ref to
+ *  attach to the dialog container so the trap knows its bounds. */
+function useModalA11y(open: boolean, onClose: () => void) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    // Focus-restore: remember whatever was focused when the modal opened.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    function focusable(): HTMLElement[] {
+      const root = containerRef.current;
+      if (!root) return [];
+      return Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab") {
+        const els = focusable();
+        const first = els[0];
+        const last = els[els.length - 1];
+        if (!first || !last) return;
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey && (active === first || !containerRef.current?.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
+  }, [open]);
+
+  return containerRef;
+}
 
 /** Top-level auth dialog for Helios. Two layers:
  *  1. "Connect" — collect Supabase URL + anon key (only needed once per
@@ -34,9 +100,21 @@ export function AuthModal({ open, onClose }: Props) {
   // Carries the email from the "forgot" step into the "reset" step so the
   // user doesn't retype it alongside the code.
   const [forgotEmail, setForgotEmail] = useState("");
+  // Bumped on each closed→open transition. Used as part of the step children's
+  // React key so they remount (and clear any typed fields, incl. password)
+  // every time the modal is reopened — credentials must not survive a close.
+  const [openGen, setOpenGen] = useState(0);
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) setStep(connection ? "signin" : "connect");
+    if (open && !wasOpen.current) {
+      setStep(connection ? "signin" : "connect");
+      setForgotEmail("");
+      setOpenGen((g) => g + 1);
+    }
+    wasOpen.current = open;
   }, [open, connection]);
+
+  const dialogRef = useModalA11y(open, onClose);
 
   if (!open) return null;
 
@@ -50,7 +128,7 @@ export function AuthModal({ open, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-[min(92vw,440px)] rounded-md border border-helios-line bg-helios-panel text-helios-text shadow-xl">
+      <div ref={dialogRef} className="w-[min(92vw,440px)] rounded-md border border-helios-line bg-helios-panel text-helios-text shadow-xl">
         <header className="flex items-center justify-between border-b border-helios-line bg-helios-base px-4 py-2">
           <div className="min-w-0">
             <div id="auth-modal-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
@@ -64,7 +142,7 @@ export function AuthModal({ open, onClose }: Props) {
               {step === "connect" && "Paste the URL + anon key from your Supabase project."}
               {step === "forgot" && "We'll email you a 6-digit code."}
               {step === "reset" && "Check your email for the code."}
-              {(step === "signin" || step === "signup") && connection && new URL(connection.url).host}
+              {(step === "signin" || step === "signup") && connection && connectionHost(connection.url)}
             </div>
           </div>
           <button
@@ -78,6 +156,7 @@ export function AuthModal({ open, onClose }: Props) {
         <div className="p-4">
           {step === "connect" && (
             <ConnectStep
+              key={`connect-${openGen}`}
               initial={connection}
               onConnect={(c) => {
                 setConnection(c);
@@ -85,27 +164,43 @@ export function AuthModal({ open, onClose }: Props) {
               }}
             />
           )}
-          {step === "signin" && client && (
+          {/* The Connect step succeeded but the client couldn't be built
+              (malformed URL / bad key). Surface it inline instead of an
+              empty body so the user knows to fix the connection. */}
+          {(step === "signin" || step === "signup" || step === "forgot" || step === "reset") &&
+            !client && (
+              <div className="space-y-3">
+                <p className="text-xs text-red-300" role="alert">
+                  Connection failed — check the Supabase URL and anon key.
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setStep("connect")}
+                    className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300"
+                  >
+                    Change connection…
+                  </button>
+                </div>
+              </div>
+            )}
+          {/* Single instance for both modes so flipping Sign-in ↔ Sign-up
+              preserves what the user typed; the openGen key remounts it (and
+              clears the fields) only when the modal is reopened. */}
+          {(step === "signin" || step === "signup") && client && (
             <CredentialsStep
-              mode="signin"
+              key={`creds-${openGen}`}
+              mode={step}
               client={client}
-              onSwitchMode={() => setStep("signup")}
+              onSwitchMode={() => setStep(step === "signin" ? "signup" : "signin")}
               onChangeConnection={() => setStep("connect")}
-              onForgot={() => setStep("forgot")}
-              onDone={onClose}
-            />
-          )}
-          {step === "signup" && client && (
-            <CredentialsStep
-              mode="signup"
-              client={client}
-              onSwitchMode={() => setStep("signin")}
-              onChangeConnection={() => setStep("connect")}
+              onForgot={step === "signin" ? () => setStep("forgot") : undefined}
               onDone={onClose}
             />
           )}
           {step === "forgot" && client && (
             <ForgotStep
+              key={`forgot-${openGen}`}
               client={client}
               initialEmail={forgotEmail}
               onBack={() => setStep("signin")}
@@ -114,6 +209,7 @@ export function AuthModal({ open, onClose }: Props) {
           )}
           {step === "reset" && client && (
             <ResetStep
+              key={`reset-${openGen}`}
               client={client}
               email={forgotEmail}
               onBack={() => setStep("signin")}
@@ -222,11 +318,14 @@ function CredentialsStep(props: {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    // Guard against re-entry (Enter pressed again while in flight) — the
+    // disabled button doesn't block a second keyboard submit.
+    if (busy) return;
     setError(null);
     setInfo(null);
-    setBusy(true);
-    try {
-      if (mode === "signin") {
+    if (mode === "signin") {
+      setBusy(true);
+      try {
         const { error } = await client.auth.signInWithPassword({ email, password });
         if (error) {
           setError(error.message);
@@ -236,18 +335,32 @@ function CredentialsStep(props: {
         // onAuthStateChange; close the modal so the user sees the sidebar
         // pill update.
         onDone();
-      } else {
-        // Sign-up. Display name + subteam are mandatory and land in
-        // user_metadata (display_name drives the sidebar pill; subteam shows
-        // in the admin panel).
-        if (!displayName.trim()) {
-          setError("Display name is required.");
-          return;
-        }
-        if (!subteam) {
-          setError("Select your subteam.");
-          return;
-        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      // Sign-up. Display name + subteam are mandatory and land in
+      // user_metadata (display_name drives the sidebar pill; subteam shows
+      // in the admin panel).
+      if (!displayName.trim()) {
+        setError("Display name is required.");
+        return;
+      }
+      if (!subteam) {
+        setError("Select your subteam.");
+        return;
+      }
+      // Client-side length pre-check so the user gets the same friendly
+      // inline message as ResetStep / ChangePasswordModal instead of a
+      // server round-trip error. The server still enforces the real minimum.
+      if (password.length < MIN_PASSWORD_LEN) {
+        setError(`Password must be at least ${MIN_PASSWORD_LEN} characters.`);
+        return;
+      }
+      setBusy(true);
+      try {
         const { error, data } = await client.auth.signUp({
           email,
           password,
@@ -267,11 +380,11 @@ function CredentialsStep(props: {
         } else {
           setInfo("Account created. Check your email for a confirmation link, then sign in.");
         }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -384,6 +497,8 @@ function ForgotStep(props: {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    // Guard against re-entry (Enter pressed again while in flight).
+    if (busy) return;
     setError(null);
     if (!email.trim()) {
       setError("Enter your email.");
@@ -394,19 +509,18 @@ function ForgotStep(props: {
       // Sends the recovery email. With the recovery template configured to
       // include {{ .Token }}, the email carries a 6-digit OTP the user types
       // on the next step — no web redirect, which is what makes this work in
-      // a desktop app. We don't branch on the error to avoid leaking whether
-      // an address is registered; we always advance to the code step.
-      const { error: err } = await client.auth.resetPasswordForEmail(email.trim());
-      if (err) {
-        setError(err.message);
-        return;
-      }
-      onCodeSent(email.trim());
+      // a desktop app. We deliberately DON'T branch on the result error to
+      // avoid leaking whether an address is registered: we always advance to
+      // the code step. (verifyOtp on the next step rejects bogus codes.)
+      await client.auth.resetPasswordForEmail(email.trim());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Even a transport-level throw shouldn't reveal account existence; log
+      // for diagnosis but still advance so the UX is identical either way.
+      console.error("resetPasswordForEmail failed", e);
     } finally {
       setBusy(false);
     }
+    onCodeSent(email.trim());
   }
 
   return (
@@ -454,6 +568,8 @@ function ResetStep(props: {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    // Guard against re-entry (Enter pressed again while in flight).
+    if (busy) return;
     setError(null);
     setInfo(null);
     // Accept 4–10 digits rather than hard-coding 6, so the flow survives a
@@ -499,6 +615,7 @@ function ResetStep(props: {
   }
 
   async function resend() {
+    if (busy) return;
     setError(null);
     setInfo(null);
     setBusy(true);

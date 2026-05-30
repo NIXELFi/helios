@@ -70,8 +70,9 @@ describe("<AdminScreen>", () => {
     expect(screen.getByText("admin@x.com")).toBeInTheDocument();
     expect(screen.getByText("viewer@x.com")).toBeInTheDocument();
     expect(screen.getByText("new@x.com")).toBeInTheDocument();
-    // The no-role user shows a "no access" badge.
-    expect(screen.getByText(/no access/i)).toBeInTheDocument();
+    // The no-role user shows a "no access" badge — and the empty select option
+    // uses the SAME standardized wording, so there can be more than one.
+    expect(screen.getAllByText(/no access/i).length).toBeGreaterThan(0);
   });
 
   it("owner can promote a viewer to admin", async () => {
@@ -107,7 +108,12 @@ describe("<AdminScreen>", () => {
     // editable (clicking it while still disabled would be a no-op).
     await screen.findByText(/grant any role, including admin/i);
     const row = screen.getByText("viewer@x.com").closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: /revoke/i }));
+    // The row button reads exactly "Revoke"; clicking it opens a confirmation
+    // dialog (H18) rather than firing the RPC directly.
+    fireEvent.click(within(row).getByRole("button", { name: /^revoke$/i }));
+    expect(calls.some((c) => c.name === "pdm_revoke_user_role")).toBe(false);
+    // Confirm in the dialog → the RPC fires.
+    fireEvent.click(screen.getByRole("button", { name: /revoke access/i }));
     await waitFor(() =>
       expect(calls.some((c) => c.name === "pdm_revoke_user_role" && c.args.p_target === "viewer-1")).toBe(true),
     );

@@ -78,4 +78,69 @@ describe("CommandPalette component", () => {
     expect(run).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("closes on Escape from a window-level key event (input not focused)", () => {
+    const onClose = vi.fn();
+    render(<CommandPalette open onClose={onClose} actions={[action("a", "X")]} />);
+    // Dispatch on window/document, not the input — handler must be global.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("navigates with ArrowDown via a window-level key event", () => {
+    render(<CommandPalette open onClose={() => {}} actions={[
+      action("a", "Alpha"), action("b", "Bravo"), action("c", "Charlie"),
+    ]} />);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    const options = screen.getAllByRole("option");
+    expect(options[1]!).toHaveAttribute("aria-selected", "true");
+    expect(options[0]!).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("L10 — does not run an off-screen action and clamps selection to the 30 shown rows", () => {
+    // 40 matching actions; only 30 render. The footer count and Enter must
+    // both stay within the shown slice.
+    const runs = Array.from({ length: 40 }, () => vi.fn());
+    const actions: PaletteAction[] = runs.map((run, i) => ({
+      id: `a${i}`, label: `Action ${String(i).padStart(2, "0")}`, kind: "workspace", run,
+    }));
+    const onClose = vi.fn();
+    render(<CommandPalette open onClose={onClose} actions={actions} />);
+
+    // Only 30 rows are rendered.
+    expect(screen.getAllByRole("option")).toHaveLength(30);
+
+    // Press ArrowDown far past the 30-row cap (e.g. 50 times). Selection must
+    // clamp to the last SHOWN row (index 29), never beyond.
+    act(() => {
+      for (let i = 0; i < 50; i++) {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      }
+    });
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(30);
+    // The last shown row is highlighted (not an off-screen row 30..39).
+    expect(options[29]!).toHaveAttribute("aria-selected", "true");
+
+    // Enter runs a row that is actually on screen (index 29), not an
+    // off-screen one.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(runs[29]).toHaveBeenCalledTimes(1);
+    // No off-screen action (>=30) was ever run.
+    for (let i = 30; i < 40; i++) expect(runs[i]).not.toHaveBeenCalled();
+  });
+
+  it("L10 — footer count reflects the shown (capped) row count, not the full filtered length", () => {
+    const actions: PaletteAction[] = Array.from({ length: 40 }, (_, i) => action(`a${i}`, `Action ${i}`));
+    render(<CommandPalette open onClose={() => {}} actions={actions} />);
+    // 30 shown, so footer says "30 matches" (capped), not "40".
+    expect(screen.getByText(/30 matches/)).toBeInTheDocument();
+    expect(screen.queryByText(/40 matches/)).toBeNull();
+  });
 });

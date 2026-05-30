@@ -33,20 +33,33 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
+// Hard cap on recursion depth. A vault tree this deep is pathological; the
+// cap is a backstop against cyclic real-path trees (and as a second line of
+// defense behind the symlink skip below) so the walk can't stack-overflow or
+// hang the UI thread indefinitely.
+const MAX_DEPTH = 64;
+
 async function walk(
   dir: string,
   relPrefix: string,
   out: LocalFile[],
   shaCache: ShaCache,
+  depth = 0,
 ): Promise<void> {
+  if (depth > MAX_DEPTH) return;
   const entries = await readDir(dir);
   for (const e of entries) {
     // Skip hidden + common cruft.
     if (e.name.startsWith(".")) continue;
+    // Never follow symlinks. A symlinked directory can point back up the tree
+    // (or to another scanned root), producing an infinite recursion / hang.
+    // We skip symlinks entirely — including symlinked files — rather than try
+    // to track visited real paths, which Tauri's readDir doesn't expose.
+    if (e.isSymlink) continue;
     const abs = `${dir}/${e.name}`;
     const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name;
     if (e.isDirectory) {
-      await walk(abs, rel, out, shaCache);
+      await walk(abs, rel, out, shaCache, depth + 1);
     } else if (e.isFile) {
       try {
         // Probe via stat() to drive the sha cache (mtime+size key). If stat
@@ -135,14 +148,28 @@ export function useLocalFolderScan(
       return;
     }
     let mounted = true;
+    // Capture the paused state at scan start. A scan kicked off while running
+    // (paused=false) can still be in flight when auto-sync flips paused=true
+    // mid-download. Committing its partial, mid-write results would churn the
+    // file table with half-downloaded files — so if paused flipped true during
+    // the walk, we drop the commit. The next unpaused scan publishes a clean
+    // snapshot.
+    const startedPaused = pausedRef.current;
     setLoading(true);
     setError(null);
     (async () => {
       try {
         const collected: LocalFile[] = [];
         await walk(rootPath, "", collected, shaCacheRef.current);
-        if (mounted) {
+        // Skip the commit if paused flipped true while we were walking (and it
+        // wasn't already paused at start — that case never publishes anyway).
+        const pausedNow = pausedRef.current && !startedPaused;
+        if (mounted && !pausedNow) {
           setFiles(collected);
+          setLoading(false);
+        } else if (mounted) {
+          // Clear the loading flag but leave `files` untouched — a later
+          // unpaused refetch will publish fresh results.
           setLoading(false);
         }
       } catch (e) {

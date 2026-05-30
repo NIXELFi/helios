@@ -27,8 +27,8 @@ function mockClient(files: any[] = FILES): SupabaseClient {
               order: (_orderCol: string, _opts: { ascending: boolean }) => ({
                 // Pagination via .range() — return all rows once; fetchAllRows
                 // exits when a page is smaller than its page-size cap (1000).
-                range: (_from: number, _to: number) =>
-                  Promise.resolve({ data: files, error: null }),
+                range: (from: number, to: number) =>
+                  Promise.resolve({ data: files.slice(from, to + 1), error: null }),
               }),
             }),
           }),

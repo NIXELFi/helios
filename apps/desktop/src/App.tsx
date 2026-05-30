@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CursorEmitter, ViewStateEmitter, LapSelectionEmitter, GpsPickerEmitter,
-  detectLaps, formatClock,
+  detectLaps, formatClock, formatLapTime,
 } from "@helios/lib";
 import type { LapDetectionConfig, LapSelection } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
@@ -22,6 +22,8 @@ import {
   loadLapSelection, saveLapSelection,
 } from "./lib/app-state";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
+import { stepToLapBoundary } from "./lib/lap-step";
+import { progressFraction } from "./lib/load-progress";
 import {
   type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
 } from "./lib/math-channels";
@@ -56,16 +58,24 @@ export interface LogsAppProps {
 }
 
 export default function App({ appVersion, playing, onPlayingChange }: LogsAppProps) {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => loadWorkspaces());
-  const [workspaceId, setWorkspaceIdRaw] = useState(() => {
+  // Load workspaces from storage exactly once at boot. Previously both
+  // useState initializers below called loadWorkspaces() independently, which
+  // re-ran the side-effecting schema migrations twice. We derive both the
+  // workspaces array and the initial active id from this single result.
+  const bootRef = useRef<{ workspaces: Workspace[]; activeId: string } | null>(null);
+  if (bootRef.current === null) {
     const list = loadWorkspaces();
     const saved = loadLastWorkspaceId();
     // Restore the last active workspace if it still exists; otherwise fall
     // back to the first workspace so a stale id doesn't strand the user on
     // a blank header.
-    if (saved && list.some((w) => w.id === saved)) return saved;
-    return list[0]?.id ?? "overview";
-  });
+    const activeId = saved && list.some((w) => w.id === saved)
+      ? saved
+      : list[0]?.id ?? "overview";
+    bootRef.current = { workspaces: list, activeId };
+  }
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => bootRef.current!.workspaces);
+  const [workspaceId, setWorkspaceIdRaw] = useState(() => bootRef.current!.activeId);
   // Wrap setWorkspaceId to persist the choice. Every call site (tab click,
   // import, duplicate, new) flows through this so we never miss a write.
   const setWorkspaceId = (id: string) => {
@@ -73,7 +83,14 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     saveLastWorkspaceId(id);
   };
   const [sessions, setSessions] = useState<LoadedSession[] | null>(null);
+  // Mirror sessions/primaryId/mathChannels into refs so async handlers (file
+  // open, lap-config save) can read the LATEST committed values at apply time
+  // instead of whatever was captured in their closure when the handler ran.
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [primaryId, setPrimaryId] = useState<string | null>(null);
+  const primaryIdRef = useRef(primaryId);
+  primaryIdRef.current = primaryId;
   const [error, setError] = useState<string | null>(null);
   const [emitter] = useState(() => new CursorEmitter());
   const [viewState] = useState(() => new ViewStateEmitter());
@@ -100,6 +117,8 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   const openHelp = (slug?: string) => setHelpState({ open: true, slug });
   const closeHelp = () => setHelpState({ open: false });
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
+  const mathChannelsRef = useRef(mathChannels);
+  mathChannelsRef.current = mathChannels;
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   useFileOpener({ onPending: handleFileOpenPending });
   // OS-level drag-drop of data files (CSV) onto the app window. .helios
@@ -119,6 +138,9 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({
     label: "Starting…", loaded: 0, total: 1,
   });
+  // Highest progress fraction shown so far — keeps the loading bar monotonic
+  // across boot stages whose denominators differ (see lib/load-progress).
+  const progressFloorRef = useRef(0);
 
   useEffect(() => {
     loadAllSessions((p) => setLoadProgress(p))
@@ -128,13 +150,19 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         // dropped from the recents list and never bother the user with a
         // popup — they came from days-ago activity, not the current intent.
         const recents = loadRecentSessions();
+        // One monotonic total for every post-load stage: each recent file is a
+        // step, plus a "compute math" step and a final "ready" step. The bar's
+        // monotonic floor (progressFraction) guards the boundary against the
+        // bundled-only denominator used during the loadAllSessions phase.
+        const total = bundled.length + recents.length + 2;
         const userLoaded: LoadedSession[] = [];
         let colorIdx = bundled.length;
-        for (const path of recents) {
+        for (let i = 0; i < recents.length; i++) {
+          const path = recents[i]!;
           setLoadProgress({
             label: `Re-opening ${path.split(/[\\/]/).pop() ?? path}`,
-            loaded: bundled.length,
-            total: bundled.length + recents.length + 1,
+            loaded: bundled.length + i,
+            total,
           });
           try {
             const session = await loadUserSession(path, colorForIndex(colorIdx));
@@ -147,59 +175,75 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         const loaded = [...bundled, ...userLoaded];
         setLoadProgress({
           label: "Computing math channels",
-          loaded: loaded.length,
-          total: loaded.length + 1,
+          loaded: bundled.length + recents.length,
+          total,
         });
-        const initialMath = loadMathChannels();
-        const errors = new Map<string, Map<string, string>>();
-        for (const session of loaded) {
-          const r = applyMathChannels(session.store, initialMath, session.laps);
-          errors.set(session.id, r.errors);
-        }
-        setMathErrors(errors);
-        setSessions(loaded);
+        // Everything from here through the lap-restore is best-effort: a single
+        // bad bundled math formula or a malformed saved lap selection must NOT
+        // strand the user on a blank loading screen. We commit whatever
+        // sessions loaded no matter what, then attempt the niceties.
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
-        setPrimaryId(firstVisible?.id ?? null);
-        // Restore the user's last manual lap selection if any of its refs
-        // still point at a valid (loaded session, in-range lap). Falls back
-        // to the auto-pick (best/2nd-best on the primary) only when there's
-        // nothing to restore — i.e. the user never explicitly picked, or
-        // every saved ref points at a session that's no longer loaded.
-        const saved = loadLapSelection();
-        const validRef = (r: { sessionId: string; lapIndex: number } | null) => {
-          if (!r) return null;
-          const s = loaded.find((x) => x.id === r.sessionId);
-          if (!s?.laps) return null;
-          if (r.lapIndex < 0 || r.lapIndex >= s.laps.laps.length) return null;
-          return r;
-        };
-        const restoredMain = saved ? validRef(saved.main) : null;
-        const restoredRef  = saved ? validRef(saved.ref)  : null;
-        const restoredOverlays = saved
-          ? saved.overlays.map(validRef).filter((r): r is { sessionId: string; lapIndex: number } => r !== null)
-          : [];
-        if (restoredMain || restoredRef || restoredOverlays.length > 0) {
-          lapSelectionEmitter.set({
-            main: restoredMain,
-            ref: restoredRef,
-            overlays: restoredOverlays,
-          });
-        } else if (firstVisible?.laps && firstVisible.laps.bestLapIndex >= 0) {
-          const set = firstVisible.laps;
-          lapSelectionEmitter.setMain({ sessionId: firstVisible.id, lapIndex: set.bestLapIndex });
-          const trusted = set.laps
-            .map((l, i) => ({ l, i }))
-            .filter((x) => x.l.trusted && x.i !== set.bestLapIndex)
-            .sort((a, b) => a.l.durationS - b.l.durationS);
-          if (trusted.length > 0) {
-            lapSelectionEmitter.setRef({ sessionId: firstVisible.id, lapIndex: trusted[0]!.i });
+        try {
+          const initialMath = loadMathChannels();
+          const errors = new Map<string, Map<string, string>>();
+          for (const session of loaded) {
+            try {
+              const r = applyMathChannels(session.store, initialMath, session.laps);
+              errors.set(session.id, r.errors);
+            } catch (mathErr) {
+              // Surface as a per-session compile error rather than aborting boot.
+              errors.set(session.id, new Map([["*", String(mathErr)]]));
+            }
           }
+          setMathErrors(errors);
+        } catch (mathErr) {
+          // loadMathChannels itself failed (corrupt blob) — boot without math.
+          console.error("Math channel init failed during boot:", mathErr);
         }
-        setLoadProgress({
-          label: "Ready",
-          loaded: loaded.length + 1,
-          total: loaded.length + 1,
-        });
+        // Commit the loaded sessions BEFORE the lap-restore so any throw below
+        // can't prevent the app from leaving the loading screen.
+        setSessions(loaded);
+        setPrimaryId(firstVisible?.id ?? null);
+        try {
+          // Restore the user's last manual lap selection if any of its refs
+          // still point at a valid (loaded session, in-range lap). Falls back
+          // to the auto-pick (best/2nd-best on the primary) only when there's
+          // nothing to restore — i.e. the user never explicitly picked, or
+          // every saved ref points at a session that's no longer loaded.
+          const saved = loadLapSelection();
+          const validRef = (r: { sessionId: string; lapIndex: number } | null) => {
+            if (!r) return null;
+            const s = loaded.find((x) => x.id === r.sessionId);
+            if (!s?.laps) return null;
+            if (r.lapIndex < 0 || r.lapIndex >= s.laps.laps.length) return null;
+            return r;
+          };
+          const restoredMain = saved ? validRef(saved.main) : null;
+          const restoredRef  = saved ? validRef(saved.ref)  : null;
+          const restoredOverlays = saved
+            ? saved.overlays.map(validRef).filter((r): r is { sessionId: string; lapIndex: number } => r !== null)
+            : [];
+          if (restoredMain || restoredRef || restoredOverlays.length > 0) {
+            lapSelectionEmitter.set({
+              main: restoredMain,
+              ref: restoredRef,
+              overlays: restoredOverlays,
+            });
+          } else if (firstVisible?.laps && firstVisible.laps.bestLapIndex >= 0) {
+            const set = firstVisible.laps;
+            lapSelectionEmitter.setMain({ sessionId: firstVisible.id, lapIndex: set.bestLapIndex });
+            const trusted = set.laps
+              .map((l, i) => ({ l, i }))
+              .filter((x) => x.l.trusted && x.i !== set.bestLapIndex)
+              .sort((a, b) => a.l.durationS - b.l.durationS);
+            if (trusted.length > 0) {
+              lapSelectionEmitter.setRef({ sessionId: firstVisible.id, lapIndex: trusted[0]!.i });
+            }
+          }
+        } catch (lapErr) {
+          console.error("Lap-selection restore failed during boot:", lapErr);
+        }
+        setLoadProgress({ label: "Ready", loaded: total, total });
       })
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,8 +256,15 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      // Treat rich-text / contentEditable surfaces (e.g. a note field) as text
+      // input too, so single-key shortcuts don't fire while the user is typing
+      // into them. Ignore auto-repeat: holding a key shouldn't spam toggles.
+      const inField =
+        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+        target?.isContentEditable === true;
+      if (e.repeat) return;
 
       // ⌘K — toggle command palette (works from anywhere).
       if (mod && e.key.toLowerCase() === "k") {
@@ -288,23 +339,22 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         return;
       }
       // [ / ] — step cursor to previous/next lap boundary on the primary.
+      // The step logic (epsilon handling so it isn't sticky on a boundary,
+      // clamping `[` to the session start) lives in stepToLapBoundary so it's
+      // unit-tested independently of the keyboard plumbing.
       if ((e.key === "[" || e.key === "]") && !inField && !mod && !e.shiftKey) {
         const p = sessions?.find((s) => s.id === primaryId);
         if (!p?.laps || p.laps.laps.length === 0) return;
         e.preventDefault();
         const cur = emitter.get();
-        if (e.key === "]") {
-          const next = p.laps.laps.find((l) => l.startUs > cur);
-          if (next) emitter.emit(next.startUs);
-        } else {
-          // Find the lap boundary strictly less than cursor, walking backwards.
-          let target: number | null = null;
-          for (const lap of p.laps.laps) {
-            if (lap.startUs < cur) target = lap.startUs;
-            else break;
-          }
-          if (target !== null) emitter.emit(target);
-        }
+        const boundaries = p.laps.laps.map((l) => l.startUs);
+        const target = stepToLapBoundary(
+          boundaries,
+          p.store.extentUs().startUs,
+          cur,
+          e.key === "]" ? "next" : "prev",
+        );
+        if (target !== null) emitter.emit(target);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -346,29 +396,39 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     }
   }, [primaryId, sessions, emitter, viewState]);
 
-  // Save cursor + zoom under the current primary id whenever they change,
-  // debounced 500ms so a 60Hz scrub doesn't write localStorage 60 times a
-  // second. Each new primary gets its own debounce window — switching primary
-  // mid-debounce flushes nothing and starts a fresh timer for the new id.
+  // Save cursor + zoom + datums under the current primary id whenever they
+  // change, debounced 500ms so a 60Hz scrub doesn't write localStorage 60
+  // times a second. Each new primary gets its own debounce window. Switching
+  // primary (or unmounting) FLUSHES any pending write first, so unsaved datums
+  // / zoom / cursor for the outgoing primary aren't dropped on the floor —
+  // this effect's `primaryId` closure still points at the OLD id during its
+  // cleanup, so the flush lands under the correct key.
   useEffect(() => {
     if (!primaryId) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let pending = false;
+    const write = () => {
+      const vs = viewState.get();
+      saveViewStateFor(primaryId, {
+        cursorUs: emitter.get(),
+        zoomRange: vs.zoomRange,
+        datums: vs.datums.length > 0 ? vs.datums.slice() : undefined,
+      });
+      pending = false;
+    };
     const schedule = () => {
+      pending = true;
       if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const vs = viewState.get();
-        saveViewStateFor(primaryId, {
-          cursorUs: emitter.get(),
-          zoomRange: vs.zoomRange,
-          datums: vs.datums.length > 0 ? vs.datums.slice() : undefined,
-        });
-      }, 500);
+      timer = setTimeout(write, 500);
     };
     const offCursor = emitter.subscribe(schedule);
     const offView = viewState.subscribe(schedule);
     return () => {
       offCursor(); offView();
       if (timer !== null) clearTimeout(timer);
+      // Flush a pending debounced write synchronously so a primary switch
+      // mid-debounce persists the outgoing view-state instead of losing it.
+      if (pending) write();
     };
   }, [primaryId, emitter, viewState]);
 
@@ -385,10 +445,13 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   }, [lapSelectionEmitter]);
 
   if (error || !sessions || !primaryId) {
-    const denom = Math.max(1, loadProgress.total);
+    // Clamp to [0,1] and never let the bar slide backward as the denominator
+    // changes between boot stages.
+    const fraction = progressFraction(loadProgress, progressFloorRef.current);
+    progressFloorRef.current = fraction;
     return (
       <LoadingScreen
-        progress={loadProgress.loaded / denom}
+        progress={fraction}
         stage={loadProgress.label}
         error={error}
         version={appVersion}
@@ -530,7 +593,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       paletteActions.push({
         id: `lap:${i}-main`,
         label: `Set lap ${lapNum} as Main`,
-        sublabel: `${lap.durationS.toFixed(2)}s${lap.index === set.bestLapIndex + 1 ? " · best" : ""}`,
+        sublabel: `${lap.durationS.toFixed(2)}s${i === set.bestLapIndex ? " · best" : ""}`,
         kind: "lap",
         keywords: ["main", `lap ${lapNum}`, String(lapNum)],
         run: () => lapSelectionEmitter.setMain({ sessionId: primary.id, lapIndex: i }),
@@ -588,7 +651,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     let n = 1;
     while (taken.has(`Workspace ${n}`)) n++;
     const fresh: Workspace = {
-      id: crypto.randomUUID(),
+      id: safeUUID(),
       label: `Workspace ${n}`,
       color: nextColor,
       tiles: [],
@@ -611,7 +674,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     if (!src) return;
     const copy: Workspace = {
       ...JSON.parse(JSON.stringify(src)),
-      id: crypto.randomUUID(),
+      id: safeUUID(),
       label: `${src.label} copy`,
     };
     commitWorkspaces((prev) => {
@@ -635,12 +698,21 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       confirmTone: "danger",
       cancelLabel: "Cancel",
       onConfirm: () => {
-        commitWorkspaces((prev) => prev.filter((w) => w.id !== id));
-        if (workspaceId === id) {
-          const remaining = workspaces.filter((w) => w.id !== id);
-          const idx = workspaces.findIndex((w) => w.id === id);
-          const next = remaining[idx] ?? remaining[idx - 1] ?? remaining[0]!;
-          setWorkspaceId(next.id);
+        // Compute the next-active workspace from the LATEST list inside the
+        // updater (not a stale closure snapshot of `workspaces`), so a delete
+        // that races with another workspace mutation can't pick a wrong/gone id.
+        let nextActiveId: string | null = null;
+        commitWorkspaces((prev) => {
+          const idx = prev.findIndex((w) => w.id === id);
+          const remaining = prev.filter((w) => w.id !== id);
+          if (prev.some((w) => w.id === id) && remaining.length > 0) {
+            const next = remaining[idx] ?? remaining[idx - 1] ?? remaining[0]!;
+            nextActiveId = next.id;
+          }
+          return remaining;
+        });
+        if (workspaceId === id && nextActiveId !== null) {
+          setWorkspaceId(nextActiveId);
           setSelectedTileId(null);
         }
         setConfirmState(null);
@@ -686,8 +758,13 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     const firstImportedIndex = workspaces.length;
     const merged = mergeImported(workspaces, result.bundle.workspaces);
     commitWorkspaces(() => merged);
-    setWorkspaceId(merged[firstImportedIndex]!.id);
-    setSelectedTileId(null);
+    // An empty bundle merges to no new workspaces — guard the index so we don't
+    // crash dereferencing a non-existent entry. Just keep the current tab.
+    const firstImported = merged[firstImportedIndex];
+    if (firstImported) {
+      setWorkspaceId(firstImported.id);
+      setSelectedTileId(null);
+    }
   }
 
   function handleFileOpenPending(perFile: PerFileResult[]) {
@@ -716,7 +793,9 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         commitWorkspaces((prev) => {
           const firstImportedIndex = prev.length;
           const merged = mergeImported(prev, validBundles);
-          firstImportedId = merged[firstImportedIndex]!.id;
+          // Guard the index: an empty bundle adds nothing, so the entry at
+          // firstImportedIndex is undefined — don't crash on `.id`.
+          firstImportedId = merged[firstImportedIndex]?.id ?? null;
           return merged;
         });
         if (firstImportedId !== null) {
@@ -750,12 +829,15 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     let newId = `${orig.id}-copy`;
     let i = 2;
     while (existingIds.has(newId)) newId = `${orig.id}-copy-${i++}`;
+    // Use cell-rounded dimensions ONLY to find a free position; the copy keeps
+    // the original's exact fractional size so duplicating never silently
+    // resizes a carefully-sized tile.
     const slot = findNextFreeSlot(
       workspace.tiles,
       Math.max(2, Math.round(orig.w * GRID_COLS)),
       Math.max(2, Math.round(orig.h * GRID_ROWS)),
     );
-    const dupe: TileSpec = { ...orig, id: newId, ...slot };
+    const dupe: TileSpec = { ...orig, id: newId, x: slot.x, y: slot.y };
     commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
       ? w
       : { ...w, tiles: [...w.tiles, dupe] }
@@ -803,19 +885,22 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
    *  math channels applied. Failures surface in a single ConfirmDialog
    *  rather than per-file dialogs so a 5-file drop doesn't queue 5 modals. */
   async function handleAddSessionFiles(paths: string[]) {
-    if (!sessions) return;
+    if (!sessionsRef.current) return;
     const { accepted, rejected } = classifyPaths(paths);
     const failures: { path: string; reason: string }[] = rejected.slice();
     const newSessions: LoadedSession[] = [];
     // Collect the next color slot up-front so all newly-added sessions get
-    // distinct colors regardless of how many failures land in between.
-    let nextIndex = sessions.length;
+    // distinct colors regardless of how many failures land in between. Read
+    // the LATEST session count via the ref (the closure-captured `sessions`
+    // could be stale if a previous drop is still in flight).
+    let nextIndex = sessionsRef.current.length;
     for (const a of accepted) {
       try {
         const color = colorForIndex(nextIndex);
         nextIndex++;
         const session = await loadUserSession(a.path, color);
-        const r = applyMathChannels(session.store, mathChannels, session.laps);
+        // Apply the math channels as of now (ref), not as captured at call time.
+        const r = applyMathChannels(session.store, mathChannelsRef.current, session.laps);
         const errorsForSession = r.errors;
         // Replace any pre-existing session with the same id (re-loading the
         // same file should refresh, not duplicate).
@@ -866,26 +951,25 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       confirmTone: "danger",
       cancelLabel: "Cancel",
       onConfirm: () => {
-        setSessions((prev) => {
-          if (!prev) return prev;
-          const next = prev.filter((s) => s.id !== sessionId);
-          // Promote the first remaining visible session as primary if we just
-          // dropped the current primary.
-          if (sessionId === primaryId) {
-            const fallback = next.find((s) => s.visible) ?? next[0];
-            setPrimaryId(fallback?.id ?? null);
-          }
-          return next;
-        });
+        // Compute the post-removal session list and the primary fallback from
+        // the LATEST committed state (ref), OUTSIDE the updater — so the
+        // setSessions updater stays pure (no nested setState, no stale reads).
+        const current = sessionsRef.current ?? [];
+        const remaining = current.filter((s) => s.id !== sessionId);
+        setSessions(() => remaining);
+        // Promote the first remaining visible session as primary if we just
+        // dropped the current primary.
+        if (sessionId === primaryIdRef.current) {
+          const fallback = remaining.find((s) => s.visible) ?? remaining[0];
+          setPrimaryId(fallback?.id ?? null);
+        }
         // Drop math errors and lap selections that point at the removed session.
         setMathErrors((prev) => {
           const next = new Map(prev);
           next.delete(sessionId);
           return next;
         });
-        const validIds = new Set(
-          (sessions ?? []).filter((s) => s.id !== sessionId).map((s) => s.id),
-        );
+        const validIds = new Set(remaining.map((s) => s.id));
         lapSelectionEmitter.prune(validIds);
         // If this was a user-opened file, take it off the silent re-load list
         // so removal feels durable across restarts.
@@ -908,23 +992,27 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   /** Update the lap detection config for one session, recompute its laps,
    *  re-apply math channels (lap_* depends on the LapSet), and persist. */
   function handleLapConfigSave(sessionId: string, cfg: LapDetectionConfig) {
-    setSessions((prev) => {
-      if (!prev) return prev;
-      const next = prev.map((s) => {
-        if (s.id !== sessionId) return s;
-        const laps = cfg.mode === "none" ? null : detectLaps(cfg, lapInputsFor(s.store));
-        return { ...s, lapConfig: cfg, laps };
-      });
-      // Re-apply math channels for the updated session so lap_* works.
-      const target = next.find((s) => s.id === sessionId)!;
-      // Math channels live as columns inside the rate group; remove the math
-      // ids first so a stale lap_* output doesn't survive.
-      for (const m of mathChannels) target.store.removeChannel(m.id);
-      const r = applyMathChannels(target.store, mathChannels, target.laps);
-      const newErrors = new Map(mathErrors);
-      newErrors.set(sessionId, r.errors);
-      setMathErrors(newErrors);
-      return next;
+    const current = sessionsRef.current;
+    if (!current) return;
+    const math = mathChannelsRef.current;
+    // Compute everything (laps + store mutation + math errors) OUTSIDE the
+    // setState updaters so each updater stays pure and the store mutation runs
+    // exactly once (a setState updater can be invoked twice under StrictMode).
+    const next = current.map((s) => {
+      if (s.id !== sessionId) return s;
+      const laps = cfg.mode === "none" ? null : detectLaps(cfg, lapInputsFor(s.store));
+      return { ...s, lapConfig: cfg, laps };
+    });
+    const target = next.find((s) => s.id === sessionId)!;
+    // Math channels live as columns inside the rate group; remove the math
+    // ids first so a stale lap_* output doesn't survive.
+    for (const m of math) target.store.removeChannel(m.id);
+    const r = applyMathChannels(target.store, math, target.laps);
+    setSessions(() => next);
+    setMathErrors((prev) => {
+      const updated = new Map(prev);
+      updated.set(sessionId, r.errors);
+      return updated;
     });
     saveLapConfig(sessionId, cfg);
     // Drop any current lap selection pointing into the session whose laps
@@ -1117,6 +1205,18 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         />
         <main className="flex-1 relative min-w-0">
           {editMode && <GridOverlay />}
+          {workspace.tiles.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center text-[#9097A0] text-sm max-w-xs px-4">
+                <div className="text-[#D8DCE2] font-medium mb-1">No tiles</div>
+                <div>
+                  {editMode
+                    ? "Press + Add tile to place a widget."
+                    : "Edit then + Add tile, or press ⌘K."}
+                </div>
+              </div>
+            </div>
+          )}
           {workspace.tiles.map((spec) => (
             <Tile
               key={spec.id}
@@ -1150,7 +1250,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       <footer className="h-6 flex items-center px-3 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
         {visibleSessions.length} session{visibleSessions.length === 1 ? "" : "s"} visible
         {" · "}primary: {primary.store.list().length} channels
-        {" · "}range {(ext.endUs - ext.startUs) / 1_000_000}s
+        {" · "}range {formatRangeSeconds(ext.endUs - ext.startUs)}
         {" · "}{workspace.tiles.length} tile{workspace.tiles.length === 1 ? "" : "s"}
         <LapCompareSegment sessions={sessions} selection={lapSelection} />
         {" · "}<FpsCounter />
@@ -1241,21 +1341,13 @@ function LapCompareSegment({ sessions, selection }: { sessions: LoadedSession[];
   return (
     <span className="ml-2 pl-2 border-l border-[#2A2C32] font-mono-num tabular-nums">
       <span className="text-[#9097A0]">Main</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(mainLap.durationS)}</span>
+      <span className="text-[#D8DCE2]">{formatLapTime(mainLap.durationS * 1_000_000)}</span>
       <span className="text-[#9097A0]"> · Ref</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(refLap.durationS)}</span>
+      <span className="text-[#D8DCE2]">{formatLapTime(refLap.durationS * 1_000_000)}</span>
       <span className="text-[#9097A0]"> · Δ</span>{" "}
       <span style={{ color: deltaColor }}>{delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)}s</span>
     </span>
   );
-}
-
-function formatLapTime(s: number): string {
-  if (!Number.isFinite(s) || s < 0) return "—";
-  const min = Math.floor(s / 60);
-  const sec = s - min * 60;
-  if (min === 0) return `${sec.toFixed(2)}s`;
-  return `${min}:${sec.toFixed(2).padStart(5, "0")}`;
 }
 
 function CursorClock({ emitter }: { emitter: CursorEmitter }) {
@@ -1333,6 +1425,7 @@ function ExportMenuButton({ sessions, primary, viewState }: {
   sessions: LoadedSession[]; primary: LoadedSession; viewState: ViewStateEmitter;
 }) {
   const [open, setOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -1342,16 +1435,29 @@ function ExportMenuButton({ sessions, primary, viewState }: {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
+  // Export can reject (dynamic import failure, no GPS channels for KML, a
+  // filesystem error). Surface it inline and keep the menu open on failure
+  // instead of leaking an unhandled rejection and silently closing.
   async function exportCsv(scope: "session" | "zoom") {
-    const { exportSessionCsv } = await import("./lib/csv-export");
-    const range = scope === "zoom" ? viewState.get().zoomRange : null;
-    await exportSessionCsv(primary, range);
-    setOpen(false);
+    setErr(null);
+    try {
+      const { exportSessionCsv } = await import("./lib/csv-export");
+      const range = scope === "zoom" ? viewState.get().zoomRange : null;
+      await exportSessionCsv(primary, range);
+      setOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
   async function exportKml() {
-    const { exportSessionKml } = await import("./lib/kml-export");
-    await exportSessionKml(primary);
-    setOpen(false);
+    setErr(null);
+    try {
+      const { exportSessionKml } = await import("./lib/kml-export");
+      await exportSessionKml(primary);
+      setOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
   // Keep `sessions` referenced so React's exhaustive-deps lint stays quiet
   // even though we only consume the primary right now; multi-session export
@@ -1360,15 +1466,17 @@ function ExportMenuButton({ sessions, primary, viewState }: {
   return (
     <div ref={ref} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
         className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
         title="Export"
       >Export ▾</button>
       {open && (
         <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
-          <button onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
-          <button onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
-          <button onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
+          <button type="button" onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
+          <button type="button" onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
+          <button type="button" onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
+          {err && <div role="alert" className="px-2 py-1.5 text-[#EF5350] border-t border-[#2A2C32]">Export failed: {err}</div>}
         </div>
       )}
     </div>
@@ -1442,27 +1550,48 @@ function PlaybackControls({
     let wallStartMs = performance.now();
     let cursorStartUs = emitter.get();
     let lastWrittenUs = cursorStartUs;
+    const inBounds = (us: number, b: { startUs: number; endUs: number }) =>
+      us >= b.startUs && us < b.endUs;
     const b0 = effectiveBounds();
+    // Whether the cursor was inside the active bounds on the previous frame.
+    // We only wrap-to-start when playback runs OFF the end from *inside* the
+    // window. If the cursor is currently outside (e.g. the user just zoomed to
+    // a window that doesn't contain the cursor), we don't yank it to the start;
+    // we let it advance and start looping once it has entered the window.
+    let wasInBounds = inBounds(cursorStartUs, b0);
     if (cursorStartUs >= b0.endUs - 1000 || cursorStartUs < b0.startUs) {
+      // Starting play at (or past) the end, or before the start, begins from
+      // the window start — the natural "press play, watch from the top" case.
       cursorStartUs = b0.startUs;
       emitter.emit(cursorStartUs);
       lastWrittenUs = cursorStartUs;
+      wasInBounds = true;
     }
 
     const tick = () => {
       const b = effectiveBounds();
       const currentUs = emitter.get();
       if (currentUs !== lastWrittenUs) {
+        // Cursor moved out from under us (user scrubbed); re-base from there.
         wallStartMs = performance.now();
         cursorStartUs = currentUs;
+        wasInBounds = inBounds(currentUs, b);
       }
       const wallElapsedMs = performance.now() - wallStartMs;
       let next = Math.round(cursorStartUs + wallElapsedMs * 1000 * speedRef.current);
-      if (next >= b.endUs || next < b.startUs) {
+      const nextInBounds = inBounds(next, b);
+      // Loop to the window start only when we were inside the window and have
+      // now run off its end (or under its start). Intentional behavior: at the
+      // end of the range, playback LOOPS back to the start rather than stopping
+      // — keeps a session under continuous review without re-pressing play. If
+      // the cursor was already outside the window (a fresh zoom moved it out of
+      // view), we leave `next` alone so we don't snap the user to the start.
+      if (!nextInBounds && wasInBounds) {
         next = b.startUs;
         wallStartMs = performance.now();
         cursorStartUs = next;
       }
+      wasInBounds = inBounds(next, b);
       emitter.emit(next);
       lastWrittenUs = next;
       rafId = requestAnimationFrame(tick);
@@ -1472,18 +1601,26 @@ function PlaybackControls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, emitter]);
 
+  // Read the latest `playing` through a ref so the Space listener can be
+  // attached exactly once instead of being torn down and re-added on every
+  // play/pause toggle (which churned a window listener each press). The prop
+  // setter takes a plain boolean, so we can't use a functional updater here —
+  // the ref gives us the same "latest value" guarantee.
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.code !== "Space") return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
       e.preventDefault();
-      setPlaying(!playing);
+      setPlaying(!playingRef.current);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing]);
+  }, []);
 
   return (
     <div className="flex items-center gap-1">
@@ -1517,6 +1654,39 @@ function PlaybackControls({
 function basenameOf(path: string): string {
   const segs = path.split(/[\\/]/).filter(Boolean);
   return segs[segs.length - 1] ?? path;
+}
+
+/** Format a µs span as a footer "range" string in seconds. Guards a non-finite
+ *  span (e.g. an empty store whose extent is ±Infinity) and rounds to 1 dp so
+ *  the footer doesn't print a 15-digit float. */
+function formatRangeSeconds(spanUs: number): string {
+  if (!Number.isFinite(spanUs)) return "—";
+  return `${(spanUs / 1_000_000).toFixed(1)}s`;
+}
+
+/** crypto.randomUUID() is only defined in a secure context (https / localhost
+ *  / Tauri). Outside one (e.g. a plain-http dev server, or an older webview)
+ *  it's undefined and throws. Fall back to a v4-shaped id built from
+ *  getRandomValues, and finally to Math.random so workspace creation/duplication
+ *  never hard-crashes the app. */
+function safeUUID(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.randomUUID === "function") {
+    try { return c.randomUUID(); } catch { /* fall through */ }
+  }
+  if (c && typeof c.getRandomValues === "function") {
+    const b = c.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6]! & 0x0f) | 0x40; // version 4
+    b[8] = (b[8]! & 0x3f) | 0x80; // variant 10
+    const hex = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  // Last-resort, non-cryptographic. Adequate for local workspace ids.
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 function GridOverlay() {

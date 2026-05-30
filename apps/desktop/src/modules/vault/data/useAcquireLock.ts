@@ -15,6 +15,9 @@ export function useAcquireLock() {
     async (file_id: FileId): Promise<Lock | null> => {
       if (!user) {
         setError(new Error("Your session has expired — please sign in again."));
+        // Clear any result from a prior successful acquire so hook state
+        // reflects this (failed) attempt rather than a stale lock.
+        setResult(null);
         return null;
       }
       setLoading(true);

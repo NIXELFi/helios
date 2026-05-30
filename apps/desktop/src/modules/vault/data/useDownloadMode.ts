@@ -39,6 +39,22 @@ function broadcastMode(next: Map) {
   for (const s of modeSubs) s(next);
 }
 
+/**
+ * Same-window broadcast for code OUTSIDE this hook (e.g. the first-run
+ * DownloadModeWelcome modal) that writes the download-mode map directly to
+ * localStorage. Call this with the freshly-written map so every mounted
+ * useDownloadMode instance updates instantly.
+ *
+ * This replaces the old `new StorageEvent("storage", { key })` dispatch the
+ * modal used — that event carried NO `newValue`, so the listener treated it as
+ * "key cleared" and wiped every vault's mode to {} on the very first save
+ * (audit H16). Cross-window sync still rides the native storage event the
+ * localStorage write itself triggers in *other* windows.
+ */
+export function broadcastDownloadMode(next: Map) {
+  broadcastMode(next);
+}
+
 export function useDownloadMode(vaultId: VaultId | null): {
   mode: DownloadMode;
   setMode: (next: DownloadMode) => void;
@@ -48,8 +64,12 @@ export function useDownloadMode(vaultId: VaultId | null): {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY) {
-        try { setMap(e.newValue ? JSON.parse(e.newValue) : {}); }
-        catch { setMap({}); }
+        // A storage event for our key with no `newValue` means either the key
+        // was genuinely removed OR a (legacy) synthetic event was dispatched
+        // without one. Don't blindly wipe to {} (audit H16) — re-read the
+        // current localStorage value as the source of truth.
+        try { setMap(e.newValue ? JSON.parse(e.newValue) : readMap()); }
+        catch { setMap(readMap()); }
       }
     };
     const sub: ModeSub = (next) => setMap(next);

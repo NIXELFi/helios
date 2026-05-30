@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 vi.mock("@tauri-apps/plugin-fs", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
+  rename: vi.fn().mockResolvedValue(undefined),
 }));
 
 const fs = await import("@tauri-apps/plugin-fs");
@@ -63,9 +64,12 @@ describe("useDownloadVersion", () => {
   beforeEach(() => {
     vi.mocked(fs.writeFile).mockClear();
     vi.mocked(fs.mkdir).mockClear();
+    vi.mocked(fs.rename).mockClear();
+    vi.mocked(fs.rename).mockResolvedValue(undefined);
+    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
   });
 
-  it("downloads from Storage and writes to disk", async () => {
+  it("downloads from Storage, writes to a .part temp file, then renames to the dest (atomic)", async () => {
     // jsdom's Blob.arrayBuffer is available in newer versions; fall back to
     // constructing a Blob with an explicit arrayBuffer polyfill if needed.
     const bytes = new Uint8Array([1, 2, 3]);
@@ -80,9 +84,16 @@ describe("useDownloadVersion", () => {
     await act(async () => { ok = await result.current.run(sha, "/Users/me/Vault/parts/x.sldprt"); });
     expect(ok).toBe(true);
     expect(fs.mkdir).toHaveBeenCalledWith("/Users/me/Vault/parts", { recursive: true });
+    // Bytes land at a temp path first so an interrupted/torn write never
+    // corrupts the real file...
     expect(fs.writeFile).toHaveBeenCalledWith(
-      "/Users/me/Vault/parts/x.sldprt",
+      "/Users/me/Vault/parts/x.sldprt.part",
       expect.any(Uint8Array),
+    );
+    // ...then an atomic rename promotes it to the real destination.
+    expect(fs.rename).toHaveBeenCalledWith(
+      "/Users/me/Vault/parts/x.sldprt.part",
+      "/Users/me/Vault/parts/x.sldprt",
     );
   });
 
@@ -174,13 +185,17 @@ describe("useDownloadVersion", () => {
       const bytes = new Uint8Array([9, 9, 9]);
       const wrongSha = "0".repeat(64); // not the actual sha of [9,9,9]
       vi.mocked(fs.writeFile).mockClear();
+      vi.mocked(fs.rename).mockClear();
       const c = mockClient({ data: makeBlob(bytes), error: null });
       const result = await downloadVersionOnce(c, wrongSha, "/tmp/x.bin");
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error).toMatch(/sha256 mismatch/i);
       }
+      // Neither the temp write nor the promote-to-dest rename happens — the
+      // corrupt bytes never touch disk.
       expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(fs.rename).not.toHaveBeenCalled();
     });
 
     it("recovers when storage holds raw bytes that happen to start with the gzip magic", async () => {
@@ -191,13 +206,34 @@ describe("useDownloadVersion", () => {
       const rawBytes = new Uint8Array([0x1f, 0x8b, 0xff, 0xfe, 0xaa, 0xbb]);
       const sha = await sha256Hex(rawBytes);
       vi.mocked(fs.writeFile).mockClear();
+      vi.mocked(fs.rename).mockClear();
       const c = mockClient({ data: makeBlob(rawBytes), error: null });
       const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
       expect(result).toEqual({ ok: true });
-      // writeFile must receive the RAW bytes (not the gunzip output).
+      // writeFile must receive the RAW bytes (not the gunzip output), written
+      // to the temp path then promoted via rename.
       expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(fs.writeFile).toHaveBeenCalledWith("/tmp/x.bin.part", expect.any(Uint8Array));
       const writtenArg = vi.mocked(fs.writeFile).mock.calls[0]![1] as Uint8Array;
       expect(Array.from(writtenArg)).toEqual(Array.from(rawBytes));
+      expect(fs.rename).toHaveBeenCalledWith("/tmp/x.bin.part", "/tmp/x.bin");
+    });
+
+    it("does not leave a corrupt file at the dest if the rename fails after a temp write", async () => {
+      // If the atomic promote fails, the bytes only ever existed at the .part
+      // path — the real destination is never touched, so a concurrent reader
+      // never sees a half-written file. The call reports failure.
+      const bytes = new Uint8Array([5, 6, 7]);
+      const sha = await sha256Hex(bytes);
+      vi.mocked(fs.writeFile).mockClear();
+      vi.mocked(fs.rename).mockClear();
+      vi.mocked(fs.rename).mockRejectedValueOnce(new Error("rename failed"));
+      const c = mockClient({ data: makeBlob(bytes), error: null });
+      const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
+      expect(result.ok).toBe(false);
+      // The write went to the temp path only; the dest was never written.
+      expect(fs.writeFile).toHaveBeenCalledWith("/tmp/x.bin.part", expect.any(Uint8Array));
+      expect(fs.writeFile).not.toHaveBeenCalledWith("/tmp/x.bin", expect.anything());
     });
 
     it("accepts both upper and lowercase hex shas (canonicalizes to lowercase)", async () => {

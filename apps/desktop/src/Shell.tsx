@@ -62,8 +62,21 @@ function HeliosShell() {
   // If the user navigates away from Vault (or signs out while on Vault),
   // bounce them to Logs so they don't sit on a forbidden module. Otherwise
   // we'd render the Vault notice + hidden ModulePicker activeness mismatch.
+  //
+  // We also drop "vault" from the visited set the moment access is revoked.
+  // Without this, the module stays "visited" and remounts HIDDEN the instant
+  // the user signs back in — firing RLS-protected Supabase queries the user
+  // never asked for. Clearing it means Vault only re-mounts on an explicit
+  // re-visit (active === "vault").
   useEffect(() => {
-    if (active === "vault" && !vaultEnabled) setActive("logs");
+    if (vaultEnabled) return;
+    if (active === "vault") setActive("logs");
+    setVisited((prev) => {
+      if (!prev.has("vault")) return prev;
+      const next = new Set(prev);
+      next.delete("vault");
+      return next;
+    });
   }, [active, vaultEnabled]);
 
   function activate(id: ModuleId) {
@@ -145,7 +158,7 @@ function HeliosShell() {
         <UpdateModal
           state={updater.state}
           playbackBlocked={logsPlaying && active === "logs"}
-          onInstall={() => updater.installAndRelaunch()}
+          onInstall={() => void updater.installAndRelaunch()}
           onClose={() => setUpdateModalOpen(false)}
         />
       )}

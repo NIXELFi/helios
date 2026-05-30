@@ -89,7 +89,10 @@ export function SessionPanel({
                   className="cursor-pointer accent-[#FFC627]"
                 />
                 <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} aria-hidden />
-                <span className={"flex-1 truncate " + (s.visible ? "text-[#D8DCE2]" : "text-[#5A5F66]")}>
+                <span
+                  title={s.label}
+                  className={"flex-1 truncate " + (s.visible ? "text-[#D8DCE2]" : "text-[#5A5F66]")}
+                >
                   {s.label}
                 </span>
                 {isPrimary && (
@@ -158,6 +161,10 @@ function SidebarLapList({ primary, emitter, selection }: {
   const all = primary.laps.laps;
   const trustedTimes = all.filter((l) => l.trusted).map((l) => l.durationS);
   const best = trustedTimes.length === 0 ? null : Math.min(...trustedTimes);
+  // Drive the star from the authoritative bestLapIndex (matches the rest of the
+  // app) rather than fragile float === equality on durationS, which can tag the
+  // wrong row (or none) when two laps share a rounded time.
+  const bestIndex = primary.laps.bestLapIndex;
 
   function isMain(ref: LapRef) {
     return !!sel.main && sel.main.sessionId === ref.sessionId && sel.main.lapIndex === ref.lapIndex;
@@ -185,7 +192,7 @@ function SidebarLapList({ primary, emitter, selection }: {
           <tbody>
             {all.map((lap, i) => {
               const ref: LapRef = { sessionId: primary.id, lapIndex: i };
-              const isBest = best !== null && lap.trusted && lap.durationS === best;
+              const isBest = bestIndex >= 0 && i === bestIndex;
               const dt = best !== null ? lap.durationS - best : 0;
               const main = isMain(ref);
               const refSel = isRef(ref);

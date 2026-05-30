@@ -135,17 +135,25 @@ export function useMyRole(): string | null {
   const user = useUser();
   const [role, setRole] = useState<string | null>(null);
   useEffect(() => {
-    if (!client || !user) {
-      setRole(null);
-      return;
-    }
+    // Clear any previously-resolved role up front so the prior user's role
+    // doesn't linger on screen during the in-flight window after the user
+    // (or client) changes.
+    setRole(null);
+    if (!client || !user) return;
     let on = true;
     (async () => {
-      const { data } = await (client.from("user_roles") as any)
+      const { data, error } = await (client.from("user_roles") as any)
         .select("role")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (on) setRole((data?.role as string) ?? null);
+      if (!on) return;
+      if (error) {
+        // Degrade to "no role" rather than throwing; log for diagnosis.
+        console.error("useMyRole: failed to load user role", error);
+        setRole(null);
+        return;
+      }
+      setRole((data?.role as string) ?? null);
     })();
     return () => { on = false; };
   }, [client, user]);

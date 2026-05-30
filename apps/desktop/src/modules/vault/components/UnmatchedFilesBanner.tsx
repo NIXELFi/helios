@@ -28,6 +28,10 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
       if (!r.lockAcquired) {
         setSummary(`Added "${f.basename}" to vault, but another user holds the lock.`);
       }
+    } else {
+      // Previously a failed single-row add was silent (only addAll aggregated
+      // failures). Surface it so the user knows which file failed and why.
+      setSummary(`Failed to add "${f.basename}": ${r.error}`);
     }
   }
 
@@ -65,7 +69,7 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
         <button
           onClick={addAll}
           disabled={busy}
-          className="rounded bg-[#FFB800] px-3 py-1 text-xs text-white hover:bg-[#FFB800] disabled:opacity-50"
+          className="rounded bg-[#FFB800] px-3 py-1 text-xs text-white hover:brightness-110 disabled:opacity-50"
         >
           {busy && progress ? `Adding ${progress}…` : "Add all to vault"}
         </button>

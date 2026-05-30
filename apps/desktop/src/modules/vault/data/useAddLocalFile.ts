@@ -24,18 +24,48 @@ export type AddLocalFileResult =
 
 const BUCKET = "vault-objects";
 
-async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
+/**
+ * Tri-state existence probe for a content-addressed object.
+ *   true     → the object is present in storage (skip upload)
+ *   false    → the object is definitively absent (must upload)
+ *   "unknown"→ we couldn't determine (transient list error / throw)
+ *
+ * The previous version collapsed "couldn't determine" into `false`, which
+ * forced a doomed `upsert:false` upload of an object that already existed and
+ * surfaced a spurious error (audit V7). We now re-probe once on an
+ * indeterminate result; if it's still indeterminate, the caller proceeds and
+ * lets the upload's own conflict handling + the RPC be the source of truth.
+ */
+async function probeObject(
+  client: ReturnType<typeof useSupabaseClient>,
+  sha: string,
+): Promise<boolean | "unknown"> {
   const prefix = sha.slice(0, 2);
   try {
     const { data, error } = await client.storage.from(BUCKET).list(prefix, {
       limit: 1,
       search: sha,
     });
-    if (error) return false;
+    if (error) return "unknown";
     return (data ?? []).some((o) => o.name === sha);
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+/**
+ * Resolve whether the object exists, re-probing once if the first probe is
+ * indeterminate. Returns true/false definitively, or "unknown" if both probes
+ * failed (caller must not treat "unknown" as "absent").
+ */
+async function objectExists(
+  client: ReturnType<typeof useSupabaseClient>,
+  sha: string,
+): Promise<boolean | "unknown"> {
+  const first = await probeObject(client, sha);
+  if (first !== "unknown") return first;
+  // Indeterminate — re-probe once before giving up.
+  return probeObject(client, sha);
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -145,19 +175,44 @@ export function useAddLocalFile() {
         const dirSegments = segments.slice(0, -1);
         const folderId = await ensureFolderHierarchy(client, vaultId, dirSegments);
 
-        // 2. Read local bytes + hash.
-        const bytes = await readFile(local.absolutePath);
-        const sha = await sha256Hex(bytes);
+        // 2. Resolve sha256 + size. The local-folder scan already computed and
+        //    cached local.sha256 (and sizeBytes) — reuse it instead of
+        //    re-reading + re-hashing the entire file, which freezes the UI on
+        //    100MB+ CAD parts / CSVs (audit V8). Only fall back to reading
+        //    when the scan didn't provide a sha. Bytes are read lazily, and
+        //    only when we actually need to upload them.
+        let bytes: Uint8Array | null = null;
+        const readBytes = async (): Promise<Uint8Array> => {
+          if (bytes === null) bytes = await readFile(local.absolutePath);
+          return bytes;
+        };
+        let sha: string;
+        let size: number;
+        if (local.sha256) {
+          sha = local.sha256;
+          size = local.sizeBytes;
+        } else {
+          const b = await readBytes();
+          sha = await sha256Hex(b);
+          size = b.length;
+        }
 
         // 3. Upload bytes (skip if content already exists in storage by sha).
+        //    An "unknown" probe (transient list error) is NOT treated as
+        //    "absent": we still attempt the upload but let its conflict
+        //    handling + a post-failure re-probe decide, rather than forcing a
+        //    guaranteed-failing upload of an object that may already exist.
         const path = `${sha.slice(0, 2)}/${sha}`;
-        if (!(await objectExists(client, sha))) {
-          const compressed = await gzipBytes(bytes);
+        if ((await objectExists(client, sha)) !== true) {
+          const compressed = await gzipBytes(await readBytes());
           const { error: upErr } = await client.storage
             .from(BUCKET)
             .upload(path, compressed as BufferSource, { contentType: "application/octet-stream", upsert: false });
           if (upErr) {
-            if (!(await objectExists(client, sha))) {
+            // The object may already exist (we uploaded with upsert:false, or
+            // a concurrent caller raced us). Only fail if a re-probe confirms
+            // it's still definitively absent.
+            if ((await objectExists(client, sha)) === false) {
               throw new Error(`upload: ${upErr.message}`);
             }
           }
@@ -169,7 +224,7 @@ export function useAddLocalFile() {
           p_folder_id: folderId,
           p_name: fileName,
           p_sha256: sha,
-          p_size: bytes.length,
+          p_size: size,
           p_comment: "added from local folder",
         });
         if (rpcErr) throw new Error(`add_and_lock: ${rpcErr.message}`);

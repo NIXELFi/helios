@@ -23,6 +23,20 @@ function clientWith(vaults: Array<{ id: string; name: string; created_at: string
   } as any;
 }
 
+function clientThatErrors(message: string): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: "u1", email: "t@x" } } },
+        error: null,
+      }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    rpc: () => Promise.resolve({ data: null, error: null }),
+    from: () => ({ select: () => Promise.resolve({ data: null, error: new Error(message) }) }),
+  } as any;
+}
+
 const wrap = (client: SupabaseClient) => ({ children }: { children: React.ReactNode }) =>
   <SupabaseAuthProvider client={client}>{children}</SupabaseAuthProvider>;
 
@@ -79,6 +93,18 @@ describe("useActiveVault", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.activeVaultId).toBeNull();
     expect(result.current.activeVault).toBeNull();
+    // No vaults is NOT an error.
+    expect(result.current.error).toBeNull();
+  });
+
+  it("surfaces the useVaults error so the switcher can tell load-failed from no-vaults (H4)", async () => {
+    // Repro of the 2026-05-29 audit H4: useActiveVault dropped useVaults's
+    // error, so a failed load looked identical to an empty vault list.
+    const client = clientThatErrors("RLS blocked");
+    const { result } = renderHook(() => useActiveVault(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error?.message).toBe("RLS blocked");
+    expect(result.current.activeVaultId).toBeNull();
   });
 
   it("does not overwrite a freshly-set vault id when useVaults hasn't refetched yet", async () => {

@@ -29,4 +29,33 @@ describe("<VersionList>", () => {
     fireEvent.click(screen.getByText(/third/));
     expect(onSelect).toHaveBeenCalledWith("v3");
   });
+
+  it("X8: rows are real, focusable <button> elements (keyboard-accessible)", () => {
+    const onSelect = vi.fn();
+    render(<VersionList versions={versions as any} onSelect={onSelect} />);
+    const rows = screen.getAllByRole("button");
+    expect(rows.length).toBe(versions.length);
+    // Native buttons are inherently keyboard-operable (Enter/Space → click);
+    // assert they're real <button> elements with a type, not clickable divs.
+    expect(rows[0].tagName).toBe("BUTTON");
+    expect(rows[0]).toHaveAttribute("type", "button");
+    fireEvent.click(rows[0]);
+    expect(onSelect).toHaveBeenCalledWith("v3");
+  });
+
+  it("X8: formats created_at instead of dumping the raw ISO string", () => {
+    render(<VersionList versions={versions as any} onSelect={() => {}} />);
+    // None of the bare ISO dates are rendered verbatim.
+    expect(screen.queryByText("2026-03-01")).toBeNull();
+    expect(screen.queryByText("2026-02-01")).toBeNull();
+    expect(screen.queryByText("2026-01-01")).toBeNull();
+    // A locale-formatted date (slash-separated, not the dashed ISO form)
+    // appears instead — one per row.
+    expect(screen.getAllByText(/\d+\/\d+\/\d{4}/).length).toBe(versions.length);
+  });
+
+  it("X8: shows an empty state when there are no versions", () => {
+    render(<VersionList versions={[]} onSelect={() => {}} />);
+    expect(screen.getByText(/no versions yet/i)).toBeInTheDocument();
+  });
 });

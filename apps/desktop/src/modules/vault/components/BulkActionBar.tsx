@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useReleaseLock } from "../data/useReleaseLock";
@@ -50,6 +50,40 @@ export function BulkActionBar({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // AbortController for the in-flight long-running loop (Get Latest /
+  // Check In Changes — the two that write files and call setState across many
+  // awaits). The loops poll `signal.aborted` between iterations and after each
+  // await, so once the controller fires they stop reading files, stop calling
+  // RPCs, and never touch state. Each invocation installs a fresh controller
+  // (aborting any prior). We abort on unmount and whenever the selection
+  // changes, which covers the audit case where the bar kept writing files /
+  // calling setState after the user cleared the selection or navigated away.
+  const abortRef = useRef<AbortController | null>(null);
+  // Key the selection-change effect on the selection's CONTENT, not the array
+  // identity — the parent passes a fresh `Array.from(selected)` on every
+  // render, so depending on the array reference would abort an in-flight loop
+  // on every unrelated re-render. This string only changes when the actual set
+  // of selected ids changes.
+  const selectionKey = selectedIds.join(",");
+  useEffect(() => {
+    // Cancel any loop still chewing through a previous selection on unmount or
+    // when the selection content changes (e.g. cleared), so it can't finish
+    // reading/writing files or calling setState for rows the user no longer
+    // has selected.
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, [selectionKey]);
+
+  /** Start a fresh abort scope for a long-running loop, superseding any prior. */
+  function beginAbortScope(): AbortSignal {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    return ctrl.signal;
+  }
 
   // O(1) lookup of the currently-active lock by file_id. Used to skip rows
   // for which a bulk action would silently fail at the RPC layer (e.g.
@@ -104,10 +138,15 @@ export function BulkActionBar({
     });
 
   async function bulkCheckInChanges() {
+    const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
     let ok = 0, fail = 0, skipped = 0, lockedByOther = 0;
     for (const id of selectedIds) {
+      // Bail the moment the run is superseded (unmount / selection cleared) so
+      // we stop reading files and calling check-in RPCs for rows the user is
+      // no longer acting on.
+      if (signal.aborted) return;
       const file = files.find((f) => f.id === id);
       if (!file) { skipped++; continue; }
       const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
@@ -119,20 +158,25 @@ export function BulkActionBar({
       // Acquire lock if we don't already hold it. Stop the row if we can't.
       if (lockKindFor(id) === "none") {
         const acquired = await acquireLock.run(id);
+        if (signal.aborted) return;
         if (!acquired) { fail++; continue; }
       }
       try {
         const fileBytes = await readFile(m.local.absolutePath);
+        if (signal.aborted) return;
         const ab = fileBytes.buffer.slice(
           fileBytes.byteOffset,
           fileBytes.byteOffset + fileBytes.byteLength,
         ) as ArrayBuffer;
         const r = await checkIn.run(id, ab, "bulk check-in");
+        if (signal.aborted) return;
         if (r) ok++; else fail++;
       } catch {
+        if (signal.aborted) return;
         fail++;
       }
     }
+    if (signal.aborted) return;
     const parts: string[] = [`Checked in ${ok}/${selectedIds.length}`];
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
@@ -145,18 +189,25 @@ export function BulkActionBar({
   }
 
   async function bulkGetLatest() {
+    const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
     let ok = 0, fail = 0, skipped = 0;
     for (const id of selectedIds) {
+      // Bail before starting the next download once the run is superseded
+      // (unmount / selection cleared) — and pass the signal through so an
+      // in-flight download drops its terminal disk write too.
+      if (signal.aborted) return;
       const file = files.find((f) => f.id === id);
       if (!file) { skipped++; continue; }
       const ver = versionsByFileId.get(id)?.[0];
       if (!ver) { skipped++; continue; }
       const dest = localDestPath(vaultRoot!, file.folder_id, file.name, folders);
-      const r = await download.run(ver.sha256, dest);
+      const r = await download.run(ver.sha256, dest, signal);
+      if (signal.aborted) return;
       if (r) ok++; else fail++;
     }
+    if (signal.aborted) return;
     setStatus(
       `Downloaded ${ok}/${selectedIds.length}` +
         (fail ? ` (${fail} failed, ${skipped} skipped)` : skipped ? ` (${skipped} skipped)` : ""),
@@ -230,7 +281,7 @@ export function BulkActionBar({
   if (selectedIds.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2 text-xs">
       <span className="text-helios-dim">{selectedIds.length} selected</span>
       <button
         type="button"
@@ -246,7 +297,7 @@ export function BulkActionBar({
             ? `${eligibility.canCheckOut} of ${selectedIds.length} can be checked out`
             : undefined
         }
-        className="rounded bg-asu-gold px-2 py-1 text-white hover:bg-asu-gold disabled:opacity-50"
+        className="rounded bg-asu-gold px-2 py-1 text-white hover:bg-asu-gold/90 disabled:opacity-50"
       >
         Check Out
       </button>
@@ -272,7 +323,7 @@ export function BulkActionBar({
           type="button"
           onClick={bulkCheckInChanges}
           disabled={busy}
-          className="rounded bg-[#66BB6A] px-2 py-1 text-white hover:bg-[#66BB6A] disabled:opacity-50"
+          className="rounded bg-[#66BB6A] px-2 py-1 text-white hover:brightness-110 disabled:opacity-50"
         >
           Check In Changes
         </button>
@@ -304,7 +355,16 @@ export function BulkActionBar({
       >
         Clear
       </button>
-      {status && <span className="ml-2 text-helios-dim">{status}</span>}
+      {status && (
+        <span
+          role="status"
+          aria-live="polite"
+          title={status}
+          className="ml-2 max-w-[16rem] truncate text-helios-dim"
+        >
+          {status}
+        </span>
+      )}
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"

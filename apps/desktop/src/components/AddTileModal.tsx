@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   stripChartWidget, numericReadoutWidget, roundGaugeWidget, barGaugeWidget,
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
@@ -42,8 +43,51 @@ interface Props {
 }
 
 export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
+  // A single add closes the modal; guard against a rapid double-click or
+  // Enter-repeat firing onAdd twice (which would mint a colliding id from the
+  // same `existingIds` snapshot before the parent re-renders).
+  const addedRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Modal a11y: Escape-to-close, focus-trap, focus-restore. Mirrors
+  // ConfirmDialog's convention.
+  useEffect(() => {
+    const prevFocus = document.activeElement as HTMLElement | null;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusables = root.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      prevFocus?.focus?.();
+    };
+  }, [onClose]);
+
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Add tile"
@@ -57,6 +101,7 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
           <span className="text-xs uppercase tracking-wider text-[#FFC627]">Add Tile</span>
           <button
+            type="button"
             aria-label="Close"
             onClick={onClose}
             className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
@@ -66,7 +111,10 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
           {PALETTE.map((entry) => (
             <button
               key={entry.type}
+              type="button"
               onClick={() => {
+                if (addedRef.current) return;  // ignore double-add (rapid click / Enter-repeat)
+                addedRef.current = true;
                 const id = uniqueId(entry.type, existingIds);
                 onAdd({
                   id,

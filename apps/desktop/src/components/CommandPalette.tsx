@@ -45,6 +45,10 @@ export function CommandPalette({ open, onClose, actions }: Props) {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  // Mirror of `selected` so the window-level Enter handler reads the current
+  // index without re-subscribing the listener on every selection change.
+  const selectedRef = useRef(0);
+  selectedRef.current = selected;
 
   // Reset state every time the palette opens so a previous query doesn't
   // bleed into the next session.
@@ -58,11 +62,16 @@ export function CommandPalette({ open, onClose, actions }: Props) {
   }, [open]);
 
   const filtered = useMemo(() => filterActions(actions, query), [actions, query]);
+  // L10 — only the first 30 rows render, so every index/clamp/scroll/footer
+  // computation must run against this slice, never the full `filtered` length.
+  // Otherwise ArrowDown/Enter could select or run an off-screen action and the
+  // highlight would vanish.
+  const shown = useMemo(() => filtered.slice(0, 30), [filtered]);
 
-  // Keep the selected index in range when the filtered list shrinks.
+  // Keep the selected index within the SHOWN rows when the list shrinks.
   useEffect(() => {
-    if (selected >= filtered.length) setSelected(Math.max(0, filtered.length - 1));
-  }, [filtered.length, selected]);
+    if (selected >= shown.length) setSelected(Math.max(0, shown.length - 1));
+  }, [shown.length, selected]);
 
   // Scroll the highlighted row into view when navigating with the keyboard.
   // jsdom doesn't implement scrollIntoView, so guard with a feature-check —
@@ -76,27 +85,40 @@ export function CommandPalette({ open, onClose, actions }: Props) {
     }
   }, [selected]);
 
-  if (!open) return null;
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelected((s) => Math.min(s + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelected((s) => Math.max(0, s - 1));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const action = filtered[selected];
-      if (action) {
-        action.run();
+  // L10 / X2 — handle keys at the window level while open so Escape and arrow
+  // navigation work even when the input isn't focused (mirrors the other
+  // dialogs). Indexing/clamping is against `shown`, not `filtered`.
+  useEffect(() => {
+    if (!open) return;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
         onClose();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelected((s) => Math.min(s + 1, shown.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelected((s) => Math.max(0, s - 1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const action = shown[selectedRef.current];
+        if (action) {
+          action.run();
+          onClose();
+        }
       }
     }
-  }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreTo?.focus?.();
+    };
+  }, [open, onClose, shown]);
+
+  if (!open) return null;
 
   return (
     <div
@@ -114,7 +136,6 @@ export function CommandPalette({ open, onClose, actions }: Props) {
           ref={inputRef}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setSelected(0); }}
-          onKeyDown={handleKeyDown}
           placeholder="Switch workspace · change primary · open panel…"
           className="w-full bg-transparent text-helios-text text-sm px-4 py-3 border-b border-helios-line focus:outline-none placeholder:text-helios-dim font-mono-num"
           spellCheck={false}
@@ -125,12 +146,12 @@ export function CommandPalette({ open, onClose, actions }: Props) {
           role="listbox"
           className="max-h-[50vh] overflow-y-auto"
         >
-          {filtered.length === 0 ? (
+          {shown.length === 0 ? (
             <li className="px-4 py-6 text-center text-xs text-helios-dim">
               No matches.
             </li>
           ) : (
-            filtered.slice(0, 30).map((a, i) => (
+            shown.map((a, i) => (
               <li
                 key={a.id}
                 role="option"
@@ -164,7 +185,7 @@ export function CommandPalette({ open, onClose, actions }: Props) {
           <span>↑↓ navigate</span>
           <span>↵ run</span>
           <span>esc close</span>
-          <span className="ml-auto">{filtered.length} match{filtered.length === 1 ? "" : "es"}</span>
+          <span className="ml-auto">{shown.length} match{shown.length === 1 ? "" : "es"}</span>
         </div>
       </div>
     </div>

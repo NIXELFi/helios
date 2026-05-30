@@ -40,9 +40,10 @@ export function NavRail(props: {
               onClick={() => onSelect(e.id)}
               className={
                 "rounded-sm border px-3 py-1.5 text-left text-sm transition-colors " +
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
                 (isActive
-                  ? "border-asu-gold bg-asu-gold font-semibold text-helios-base"
-                  : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
+                  ? "border-asu-gold bg-asu-gold font-semibold text-helios-base hover:bg-asu-gold/90"
+                  : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold hover:bg-helios-line")
               }
             >
               {e.label}

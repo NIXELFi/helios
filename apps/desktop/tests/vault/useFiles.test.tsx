@@ -10,6 +10,7 @@ function mockClient(
   filterAssertion: (col: string, val: any) => void,
   rows: any[],
   error: any = null,
+  orderCalls?: Array<[string, { ascending: boolean }]>,
 ): SupabaseClient {
   return {
     auth: {
@@ -22,12 +23,20 @@ function mockClient(
         select: () => ({
           eq: (col: string, val: any) => {
             filterAssertion(col, val);
-            return {
-              order: (_orderCol: string, _opts: { ascending: boolean }) => ({
-                range: (_from: number, _to: number) =>
-                  Promise.resolve({ data: rows, error }),
-              }),
-            };
+            // .order() is chainable so a unique tiebreaker can be appended;
+            // it also exposes .range() so pagination terminates the chain.
+            const makeChain = () => ({
+              order: (orderCol: string, opts: { ascending: boolean }) => {
+                orderCalls?.push([orderCol, opts]);
+                return makeChain();
+              },
+              // Simulate a real paged source: the fixture is the first page;
+              // subsequent .range() requests return empty so fetchAllRows
+              // terminates (a fixed-rows mock would loop forever).
+              range: (from: number, _to: number) =>
+                Promise.resolve({ data: from === 0 ? rows : [], error }),
+            });
+            return makeChain();
           },
         }),
       };
@@ -55,6 +64,20 @@ describe("useFiles", () => {
     expect(observedTable).toBe("files");
     expect(observed).toEqual({ col: "folder_id", val: "f1" });
     expect(result.current.data?.length).toBe(1);
+  });
+
+  it("orders by name THEN id (unique tiebreaker) for safe pagination", async () => {
+    // `name` is not unique; without a PK tiebreaker rows can be skipped or
+    // duplicated at .range() page boundaries (H10). The id tiebreaker makes
+    // the total order deterministic across pages.
+    const orderCalls: Array<[string, { ascending: boolean }]> = [];
+    const c = mockClient(() => {}, () => {}, [], null, orderCalls);
+    const { result } = renderHook(() => useFiles("f1"), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(orderCalls).toEqual([
+      ["name", { ascending: true }],
+      ["id", { ascending: true }],
+    ]);
   });
 
   it("returns null data while folder_id is undefined (no fetch)", () => {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useUser } from "@helios/auth";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { useIsOwner } from "../data/useIsOwner";
 import { useIsAdmin } from "../data/useIsAdmin";
@@ -10,6 +11,11 @@ import { useManageSubteams } from "../data/useManageSubteams";
 import type { VaultRole, VaultUser } from "../data/types";
 
 const ASSIGNABLE: Exclude<VaultRole, "owner">[] = ["viewer", "editor", "admin"];
+
+/** Standardized wording for a user who hasn't been granted any vault role.
+ *  Previously this was spelled three different ways ("no access" / "— none —" /
+ *  "(no role assigned)") across the admin/settings screens. */
+const NO_ROLE_LABEL = "no access";
 
 /** Admin-only user management. Lists every account + role and lets admins
  *  grant/revoke roles. Authorization is enforced server-side by the
@@ -24,12 +30,16 @@ export function AdminScreen() {
   const revoke = useRevokeUserRole();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Pending revoke awaiting confirmation; null when no dialog is open.
+  const [confirmRevoke, setConfirmRevoke] = useState<VaultUser | null>(null);
 
   async function handleSetRole(u: VaultUser, role: Exclude<VaultRole, "owner">) {
     setPendingId(u.user_id);
     setActionError(null);
-    const ok = await setRole.run(u.user_id, role);
-    if (!ok) setActionError(setRole.error?.message ?? "Failed to set role.");
+    // Consume the RESULT the hook returns — reading setRole.error after the
+    // await captures the previous render's value (always stale → generic msg).
+    const { ok, error: err } = await setRole.run(u.user_id, role);
+    if (!ok) setActionError(err?.message ?? "Failed to set role.");
     else refetch();
     setPendingId(null);
   }
@@ -37,8 +47,8 @@ export function AdminScreen() {
   async function handleRevoke(u: VaultUser) {
     setPendingId(u.user_id);
     setActionError(null);
-    const ok = await revoke.run(u.user_id);
-    if (!ok) setActionError(revoke.error?.message ?? "Failed to revoke role.");
+    const { ok, error: err } = await revoke.run(u.user_id);
+    if (!ok) setActionError(err?.message ?? "Failed to revoke role.");
     else refetch();
     setPendingId(null);
   }
@@ -57,7 +67,8 @@ export function AdminScreen() {
         <button
           type="button"
           onClick={refetch}
-          className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text hover:border-asu-gold"
+          disabled={loading}
+          className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
         >
           Refresh
         </button>
@@ -77,15 +88,15 @@ export function AdminScreen() {
             {error.message}
           </div>
         ) : (
-          <table className="w-full text-left text-[12px]">
+          <table className="w-full table-fixed text-left text-[12px]">
             <thead className="sticky top-0 bg-helios-base text-[10px] uppercase tracking-wider text-[#5A5F66]">
               <tr className="border-b border-helios-line [&>th]:px-4 [&>th]:py-2 [&>th]:font-normal">
-                <th>User</th>
-                <th>Name</th>
-                <th>Subteam</th>
-                <th>Role</th>
-                <th>Granted</th>
-                <th className="text-right">Actions</th>
+                <th className="w-[26%]">User</th>
+                <th className="w-[18%]">Name</th>
+                <th className="w-[16%]">Subteam</th>
+                <th className="w-[12%]">Role</th>
+                <th className="w-[12%]">Granted</th>
+                <th className="w-[16%] text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -99,7 +110,7 @@ export function AdminScreen() {
                   busy={pendingId === u.user_id}
                   anyBusy={pendingId !== null}
                   onSetRole={handleSetRole}
-                  onRevoke={handleRevoke}
+                  onRevoke={(user) => setConfirmRevoke(user)}
                 />
               ))}
               {(users ?? []).length === 0 && (
@@ -116,6 +127,27 @@ export function AdminScreen() {
         {/* Subteam management — any admin (incl. owner) can add/remove. */}
         <SubteamsPanel canManage={isAdmin} />
       </div>
+
+      {confirmRevoke && (
+        <ConfirmDialog
+          title="Revoke access"
+          body={
+            <>
+              Remove <span className="font-semibold">{confirmRevoke.email ?? confirmRevoke.user_id}</span>'s
+              access to this vault? They'll keep their account but lose all role-gated actions until re-granted.
+            </>
+          }
+          confirmLabel="Revoke access"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            const u = confirmRevoke;
+            setConfirmRevoke(null);
+            handleRevoke(u);
+          }}
+          onClose={() => setConfirmRevoke(null)}
+        />
+      )}
     </div>
   );
 }
@@ -125,25 +157,24 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
   const manage = useManageSubteams();
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Subteam pending removal awaiting confirmation.
+  const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setErr(null);
-    const ok = await manage.create(name.trim());
-    if (!ok) { setErr(manage.error?.message ?? "Failed to add subteam."); return; }
+    const { ok, error } = await manage.create(name.trim());
+    if (!ok) { setErr(error?.message ?? "Failed to add subteam."); return; }
     setName("");
     refetch();
   }
 
   async function remove(id: string) {
-    setBusyId(id);
     setErr(null);
-    const ok = await manage.remove(id);
-    if (!ok) setErr(manage.error?.message ?? "Failed to remove subteam.");
+    const { ok, error } = await manage.remove(id);
+    if (!ok) setErr(error?.message ?? "Failed to remove subteam.");
     else refetch();
-    setBusyId(null);
   }
 
   return (
@@ -162,9 +193,10 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
               <button
                 type="button"
                 aria-label={`Remove ${s.name}`}
-                onClick={() => remove(s.id)}
-                disabled={busyId === s.id}
-                className="text-[10px] text-helios-dim hover:text-red-200 disabled:opacity-40"
+                title={`Remove ${s.name}`}
+                onClick={() => setConfirmRemove({ id: s.id, name: s.name })}
+                disabled={manage.removing}
+                className="text-[10px] text-helios-dim hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
               >✕</button>
             )}
           </span>
@@ -181,12 +213,35 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
           />
           <button
             type="submit"
-            disabled={manage.loading || !name.trim()}
-            className="rounded-sm bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+            // Only the create flow disables Add — a pending remove no longer
+            // blocks adding (separate `creating`/`removing` loading flags).
+            disabled={manage.creating || !name.trim()}
+            className="rounded-sm bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-base hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
           >
             Add
           </button>
         </form>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove subteam"
+          body={
+            <>
+              Remove the subteam <span className="font-semibold">{confirmRemove.name}</span>? Accounts that
+              picked it keep their existing choice, but it won't be offered to new sign-ups.
+            </>
+          }
+          confirmLabel="Remove"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            const id = confirmRemove.id;
+            setConfirmRemove(null);
+            remove(id);
+          }}
+          onClose={() => setConfirmRemove(null)}
+        />
       )}
     </div>
   );
@@ -214,14 +269,30 @@ function UserRow(props: {
   const lockedByOwnership = isOwnerRow || (isAdminRow && !isOwner);
   const editable = isAdmin && !isMe && !lockedByOwnership;
 
+  // Explain WHY a row's controls are disabled so the locked state isn't a
+  // mystery (V17). Empty string when the row is editable.
+  const lockReason = isMe
+    ? "You can't change your own role here."
+    : isOwnerRow
+      ? "The owner role is managed by the bootstrap script, not here."
+      : isAdminRow && !isOwner
+        ? "Only the owner can change an admin's role."
+        : !isAdmin
+          ? "Only admins can change roles."
+          : "";
+
   return (
-    <tr className="border-b border-helios-line/60 [&>td]:px-4 [&>td]:py-2">
-      <td>
-        <span className="text-helios-text">{u.email ?? "(unknown email)"}</span>
+    <tr className="border-b border-helios-line/60 [&>td]:px-4 [&>td]:py-2" title={lockReason || undefined}>
+      <td className="truncate">
+        <span className="text-helios-text" title={u.email ?? "(unknown email)"}>{u.email ?? "(unknown email)"}</span>
         {isMe && <span className="ml-1.5 text-[10px] text-asu-gold">(you)</span>}
       </td>
-      <td className="text-helios-text">{u.display_name ?? <span className="text-[#5A5F66]">—</span>}</td>
-      <td className="text-helios-dim">{u.subteam ?? <span className="text-[#5A5F66]">—</span>}</td>
+      <td className="truncate text-helios-text" title={u.display_name ?? undefined}>
+        {u.display_name ?? <span className="text-[#5A5F66]">—</span>}
+      </td>
+      <td className="truncate text-helios-dim" title={u.subteam ?? undefined}>
+        {u.subteam ?? <span className="text-[#5A5F66]">—</span>}
+      </td>
       <td>
         <RoleBadge role={u.role} />
       </td>
@@ -234,13 +305,14 @@ function UserRow(props: {
             aria-label={`Set role for ${u.email ?? u.user_id}`}
             value={u.role ?? ""}
             disabled={!editable || anyBusy}
+            title={!editable ? lockReason : undefined}
             onChange={(e) => {
               const v = e.target.value as Exclude<VaultRole, "owner">;
               if (v) onSetRole(u, v);
             }}
             className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-text outline-none focus:border-asu-gold disabled:opacity-40"
           >
-            {u.role === null && <option value="">— none —</option>}
+            {u.role === null && <option value="">{NO_ROLE_LABEL}</option>}
             {isOwnerRow && <option value="owner">owner</option>}
             {ASSIGNABLE.map((r) => (
               <option key={r} value={r} disabled={r === "admin" && !isOwner}>
@@ -252,8 +324,12 @@ function UserRow(props: {
             type="button"
             onClick={() => onRevoke(u)}
             disabled={!editable || u.role === null || anyBusy}
-            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
-            title={u.role === null ? "No role to revoke" : "Remove this user's access"}
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
+            title={
+              !editable ? lockReason
+              : u.role === null ? "No role to revoke"
+              : "Remove this user's access"
+            }
           >
             {busy ? "…" : "Revoke"}
           </button>
@@ -265,7 +341,7 @@ function UserRow(props: {
 
 function RoleBadge({ role }: { role: VaultRole | null }) {
   if (role === null) {
-    return <span className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#5A5F66]">no access</span>;
+    return <span className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[#5A5F66]">{NO_ROLE_LABEL}</span>;
   }
   const tone =
     role === "owner" ? "border-asu-gold bg-asu-gold text-helios-base"

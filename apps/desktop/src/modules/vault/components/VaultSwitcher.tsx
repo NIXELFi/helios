@@ -52,9 +52,10 @@ export function VaultSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-helios-line"
+        className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={activeVault ? `Active vault: ${activeVault.name}. Choose vault` : "Choose vault"}
         title={activeVault?.name ?? "Choose vault"}
       >
         <span className="truncate text-helios-text">
@@ -66,7 +67,10 @@ export function VaultSwitcher() {
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 right-0 top-full z-10 mt-1 rounded border border-helios-line bg-helios-panel py-1 shadow-lg"
+          // z-50 keeps the picker above the sync popover (z-30) and on the
+          // same layer as the other menus/dropdowns (TreeContextMenu z-50);
+          // it was z-10 and got painted under those overlays.
+          className="absolute left-0 right-0 top-full z-50 mt-1 rounded border border-helios-line bg-helios-panel py-1 shadow-lg"
         >
           {vaults.length === 0 && (
             <div className="px-3 py-2 text-xs text-helios-dim">No vaults yet</div>
@@ -106,7 +110,7 @@ export function VaultSwitcher() {
                     <button
                       type="submit"
                       disabled={createVault.loading || !name.trim()}
-                      className="rounded bg-asu-gold px-2 py-1 text-xs text-white disabled:opacity-50"
+                      className="rounded bg-asu-gold px-2 py-1 text-xs text-white hover:bg-asu-gold/90 disabled:opacity-50"
                     >
                       Create
                     </button>

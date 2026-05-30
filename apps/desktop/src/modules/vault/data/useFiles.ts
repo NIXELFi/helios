@@ -22,11 +22,15 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
     setError(null);
     (async () => {
       const { rows, error: err } = await fetchAllRows<VaultFile>(
-        // Stable ORDER BY is required for safe pagination — see paginate.ts.
+        // Stable, UNIQUE ORDER BY is required for safe pagination — see
+        // paginate.ts. `name` alone is not unique, so rows could be skipped
+        // or duplicated at .range() page boundaries; append the PK `id` as a
+        // tiebreaker for a deterministic total order (cf. useAllFiles).
         () => (client.from("files") as any)
           .select("*")
           .eq("folder_id", folder_id)
-          .order("name", { ascending: true }),
+          .order("name", { ascending: true })
+          .order("id", { ascending: true }),
       );
       if (!mounted) return;
       if (err) {

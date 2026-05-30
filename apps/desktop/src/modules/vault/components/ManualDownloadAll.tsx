@@ -1,4 +1,5 @@
 import { useBulkDownload } from "../data/useBulkDownload";
+import { sanitizeVaultName } from "../data/useVaultFolder";
 import { BulkDownloadModal } from "./BulkDownloadModal";
 import type { FileId, Folder, VaultFile, Version } from "../data/types";
 
@@ -42,8 +43,11 @@ export function ManualDownloadAll({
     return v && v.sha256;
   }).length;
   if (downloadableCount === 0) return null;
+  // Files actually land under `sanitizeVaultName(vaultName)` (see
+  // useBulkDownload.ts / useVaultFolder.ts), so the shown destination must
+  // sanitize too — otherwise it claims a path that won't exist on disk.
   const effective = heliosRoot && vaultName
-    ? `${heliosRoot.replace(/\/+$/, "")}/${vaultName}`
+    ? `${heliosRoot.replace(/\/+$/, "")}/${sanitizeVaultName(vaultName)}`
     : null;
   return (
     <>

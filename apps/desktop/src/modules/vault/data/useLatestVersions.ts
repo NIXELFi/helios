@@ -30,6 +30,11 @@ export function useLatestVersions(fileIds: FileId[]) {
   useEffect(() => {
     if (fileIds.length === 0) {
       setData(new Map());
+      // Reset loading/error too: if fileIds empties while a prior fetch was in
+      // flight, loading would otherwise stick true (and a stale error remain)
+      // forever, leaving consumers on a permanent spinner.
+      setLoading(false);
+      setError(null);
       return;
     }
     let mounted = true;

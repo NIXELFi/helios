@@ -21,13 +21,15 @@ import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
+import { useVaultUsers } from "../data/useVaultUsers";
 import { findUnmatchedLocal } from "../data/find-unmatched";
+import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
-import type { FileId, FolderId, VaultFile, Version } from "../data/types";
+import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
 // How often to fall back to a full local rescan if the filesystem watcher
 // drops events. 30s is short enough to feel live, long enough to be cheap.
@@ -39,16 +41,13 @@ export function BrowseScreen() {
   const myRole = useMyRole();
   const canEdit = isAdmin || myRole === "editor";
 
-  const [refreshKey, setRefreshKey] = useState(0);
-  const bump = () => setRefreshKey((k) => k + 1);
-
   const { activeVault: vault, activeVaultId: vaultId, vaults, loading: vaultsLoading } = useActiveVault();
 
-  const { data: folders, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
+  const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
-  const { data: filesInFolder, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
-  const { data: locks, refetch: refetchLocks } = useLocks();
+  const { data: filesInFolder, loading: filesLoading, error: filesError, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
+  const { data: locks, error: locksError, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
 
@@ -59,6 +58,16 @@ export function BrowseScreen() {
     setSelectedFile(null);
     setSelected(new Set());
   }, [vaultId]);
+
+  // Clear the checkbox multi-selection whenever the effective folder context
+  // changes — selecting a different folder shows a different file list, so a
+  // stale selection set (ids from the previous folder) is meaningless. Driving
+  // this off the folder id rather than the tree's onSelect callback means it
+  // fires only on a real folder change, never on file-leaf navigation within
+  // the same folder.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [selectedFolder]);
 
   // Local vault folder scan — auto-rescan on window focus + 30s interval +
   // native filesystem watcher so the synced/modified state stays live without
@@ -87,11 +96,29 @@ export function BrowseScreen() {
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
-  const { data: allFiles, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
-  const unmatched =
-    allFiles && localFiles && folders
-      ? findUnmatchedLocal(allFiles, localFiles, folders)
-      : [];
+  const { data: allFiles, error: allFilesError, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
+  // Lock-holder names: map each user id → email (fall back to display name) so
+  // the FileTable can render "Locked by <person>" instead of "Locked by other".
+  // useVaultUsers errors for non-admins (the RPC is admin-gated); that's fine —
+  // we simply fall back to the generic label, so we don't surface its error.
+  const { data: vaultUsers } = useVaultUsers();
+  const holderEmailById = useMemo(() => {
+    const m = new Map<UserId, string>();
+    for (const u of vaultUsers ?? []) {
+      const label = u.email ?? u.display_name;
+      if (label) m.set(u.user_id, label);
+    }
+    return m;
+  }, [vaultUsers]);
+  // Memoized: findUnmatchedLocal allocates a fresh array each call, so without
+  // this every render handed a new identity to <UnmatchedFilesBanner>.
+  const unmatched = useMemo(
+    () =>
+      allFiles && localFiles && folders
+        ? findUnmatchedLocal(allFiles, localFiles, folders)
+        : [],
+    [allFiles, localFiles, folders],
+  );
 
   // When the user has the vault root selected (selectedFolder === null) we
   // derive the file list from the vault-wide query instead of asking the
@@ -128,13 +155,33 @@ export function BrowseScreen() {
   // and the background auto-sync both read from this single source so we
   // don't duplicate the round-trip.
   const allFileIds = useMemo(() => (allFiles ?? []).map((f) => f.id), [allFiles]);
-  const { data: latestByFileId, refetch: refetchLatest } = useLatestVersions(allFileIds);
+  const { data: latestByFileId, error: latestError, refetch: refetchLatest } = useLatestVersions(allFileIds);
   const versionsByFileId = useMemo(
     () => new Map<FileId, Version[]>(
       Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),
     ),
     [latestByFileId],
   );
+
+  // File-area error/loading state (H1). The file list itself comes from the
+  // vault-wide query at root (allFilesError) or the per-folder query inside a
+  // folder (filesError); either blocks the table. The locks and latest-version
+  // queries feed the per-row status pills — a failure there doesn't blank the
+  // list but must not be swallowed, so we fold all into one banner with a
+  // single retry rather than leaving any on a permanent spinner.
+  const fileListError = selectedFolder === null ? allFilesError : filesError;
+  const fileAreaError = fileListError ?? locksError ?? latestError;
+  const fileAreaErrorCtx: PgErrorContext =
+    fileListError ? "file" : locksError ? "lock" : "version";
+  // At the vault root the list is derived from allFiles (no per-folder spinner);
+  // inside a folder it reflects the per-folder query's loading flag.
+  const fileListLoading = selectedFolder !== null && filesLoading && filesInFolder === null;
+  const retryFileArea = useCallback(() => {
+    refetchFiles();
+    refetchAllFiles();
+    refetchLocks();
+    refetchLatest();
+  }, [refetchFiles, refetchAllFiles, refetchLocks, refetchLatest]);
 
   // Realtime: when anyone checks in / locks / unlocks / adds a file in this
   // vault, refetch the affected slice. The auto-sync hook below picks up the
@@ -270,7 +317,6 @@ export function BrowseScreen() {
     refetchLocks();
     refetchAllFiles();
     rescan();
-    bump();
   }
 
   // No active vault — either the user has no vaults at all, or vaults are
@@ -320,11 +366,21 @@ export function BrowseScreen() {
           )}
         </header>
         <div className="flex-1 overflow-auto">
-          {folders ? (
+          {/* Three distinct states: error (with retry) → loading → loaded.
+              useFolders nulls `data` on error, so the error branch must come
+              first or a failed query would sit on the loading placeholder
+              forever (H1). */}
+          {foldersError ? (
+            <InlineError
+              message={friendlyPgError(foldersError, "folder").message}
+              fallback="Couldn't load folders."
+              onRetry={refetchFolders}
+            />
+          ) : folders ? (
             <FolderTree
               folders={folders}
               selected={selectedFolder}
-              onSelect={(id) => { setSelectedFolder(id); clearSelection(); }}
+              onSelect={(id) => setSelectedFolder(id)}
               files={allFiles ?? []}
               selectedFile={selectedFile}
               onSelectFile={setSelectedFile}
@@ -334,8 +390,10 @@ export function BrowseScreen() {
               onTreeSelectionChange={setTreeSelection}
               onContextMenu={handleTreeContextMenu}
             />
-          ) : (
+          ) : foldersLoading ? (
             <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
+          ) : (
+            <div className="p-3 text-sm text-helios-dim">No folders yet.</div>
           )}
         </div>
       </div>
@@ -406,7 +464,7 @@ export function BrowseScreen() {
                       type="button"
                       onClick={() => bulk.start(allFiles ?? [])}
                       disabled={bulk.running}
-                      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
+                      className="rounded bg-asu-gold px-2 py-0.5 text-xs text-white hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
                       title={`Download every file in ${vault?.name ?? "the active vault"} (${allFiles?.length ?? 0} files)`}
                     >
                       Download {vault?.name ?? "vault"} ({allFiles?.length ?? 0})
@@ -423,44 +481,62 @@ export function BrowseScreen() {
                 </button>
               )}
             </div>
-            <BulkActionBar
-              selectedIds={Array.from(selected)}
-              onClear={clearSelection}
-              onDone={() => {
-                refetchFiles();
-                refetchLocks();
-                rescan();
-                clearSelection();
-              }}
-              files={files ?? []}
-              localFiles={localFiles}
-              versionsByFileId={versionsByFileId}
-              vaultRoot={vaultFolderPath}
-              folders={folders ?? []}
-              locks={locks ?? []}
-              currentUserId={user?.id ?? null}
-            />
-            <FileTable
-              files={files ?? []}
-              selected={selectedFile}
-              locks={locks ?? []}
-              currentUserId={user?.id ?? ""}
-              canEdit={canEdit}
-              onSelect={setSelectedFile}
-              onActionComplete={handleActionComplete}
-              selectedIds={selected}
-              onToggleSelect={toggleOne}
-              onToggleSelectAll={toggleAll}
-              allSelected={files !== null && files.length > 0 && selected.size === files.length}
-              localFiles={localFiles}
-              versionsByFileId={versionsByFileId}
-              vaultRoot={vaultFolderPath}
-              folders={folders ?? []}
-              downloadMode={downloadMode}
-            />
+            {/* Three distinct states for the file list (H1): a failed query
+                shows an inline error + retry, an initial load shows a
+                placeholder, and the table (with its own per-row empty copy)
+                shows otherwise. Previously a failed query left a permanent
+                spinner because the error was never read. */}
+            {fileAreaError ? (
+              <InlineError
+                message={friendlyPgError(fileAreaError, fileAreaErrorCtx).message}
+                fallback="Couldn't load files."
+                onRetry={retryFileArea}
+              />
+            ) : fileListLoading ? (
+              <div className="p-3 text-sm text-helios-dim">Loading files…</div>
+            ) : (
+              <>
+                <BulkActionBar
+                  selectedIds={Array.from(selected)}
+                  onClear={clearSelection}
+                  onDone={() => {
+                    refetchFiles();
+                    refetchLocks();
+                    rescan();
+                    clearSelection();
+                  }}
+                  files={files ?? []}
+                  localFiles={localFiles}
+                  versionsByFileId={versionsByFileId}
+                  vaultRoot={vaultFolderPath}
+                  folders={folders ?? []}
+                  locks={locks ?? []}
+                  currentUserId={user?.id ?? null}
+                />
+                <FileTable
+                  files={files ?? []}
+                  selected={selectedFile}
+                  locks={locks ?? []}
+                  holderEmailById={holderEmailById}
+                  currentUserId={user?.id ?? ""}
+                  canEdit={canEdit}
+                  onSelect={setSelectedFile}
+                  onActionComplete={handleActionComplete}
+                  selectedIds={selected}
+                  onToggleSelect={toggleOne}
+                  onToggleSelectAll={toggleAll}
+                  allSelected={files !== null && files.length > 0 && selected.size === files.length}
+                  localFiles={localFiles}
+                  versionsByFileId={versionsByFileId}
+                  vaultRoot={vaultFolderPath}
+                  folders={folders ?? []}
+                  downloadMode={downloadMode}
+                />
+              </>
+            )}
         </>
       </div>
-      <FileDetailPanel fileId={selectedFile} />
+      <FileDetailPanel fileId={selectedFile} files={allFiles ?? []} />
       </div>
       {/* Bulk-download progress modal shared by ManualDownloadAll and the
           right-click context menu. */}
@@ -469,19 +545,26 @@ export function BrowseScreen() {
           under it; files → download the current multi-selection. */}
       {ctxMenu && (() => {
         const actions: MenuAction[] = [];
+        // Capture the concrete file list ONCE up front, narrowed against the
+        // discriminated target. The click handler closes over this local const
+        // instead of re-narrowing ctxMenu.target.kind (which could drift), and
+        // we guard bulk.start so an empty list never opens an empty progress
+        // modal (V9).
         if (ctxMenu.target.kind === "folder") {
-          const n = ctxMenu.target.descendantFiles.length;
+          const targetFiles = ctxMenu.target.descendantFiles;
+          const n = targetFiles.length;
           actions.push({
             label: `Download ${n} file${n === 1 ? "" : "s"} in ${ctxMenu.target.folder.name}`,
             disabledReason: n === 0 ? "Folder has no files" : undefined,
-            onClick: () => bulk.start(ctxMenu.target.kind === "folder" ? ctxMenu.target.descendantFiles : []),
+            onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
           });
         } else {
-          const n = ctxMenu.target.files.length;
+          const targetFiles = ctxMenu.target.files;
+          const n = targetFiles.length;
           actions.push({
             label: `Download ${n} selected file${n === 1 ? "" : "s"}`,
             disabledReason: n === 0 ? "Nothing selected" : undefined,
-            onClick: () => bulk.start(ctxMenu.target.kind === "files" ? ctxMenu.target.files : []),
+            onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
           });
         }
         return (
@@ -526,7 +609,7 @@ export function BrowseScreen() {
               <button
                 type="submit"
                 disabled={!promptValue.trim() || createFolder.loading || createFile.loading}
-                className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold disabled:opacity-50"
+                className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
               >
                 Create
               </button>
@@ -534,6 +617,28 @@ export function BrowseScreen() {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Inline error placeholder with a retry affordance. Rendered where a loading
+ *  spinner would otherwise sit so a failed query is visibly distinct from
+ *  loading and empty states (H1). */
+function InlineError({ message, fallback, onRetry }: {
+  message: string;
+  fallback: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="alert" className="m-3 rounded border border-[#EF5350]/50 bg-[#EF5350]/10 p-3 text-sm text-red-200">
+      <p className="font-medium">{message || fallback}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-2 rounded border border-[#EF5350]/60 px-2 py-0.5 text-xs text-red-100 hover:bg-[#EF5350]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      >
+        Retry
+      </button>
     </div>
   );
 }

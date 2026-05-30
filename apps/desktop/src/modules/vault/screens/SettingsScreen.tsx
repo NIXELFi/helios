@@ -17,6 +17,8 @@ export function SettingsScreen() {
   const { root, setRoot, clear } = useVaultFolder({ vaultName: activeVault?.name ?? null });
   const { mode, setMode } = useDownloadMode(activeVaultId);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   async function handlePickFolder() {
     setPickError(null);
@@ -29,7 +31,19 @@ export function SettingsScreen() {
   }
 
   async function handleSignOut() {
-    await client.auth.signOut();
+    if (signingOut) return; // guard against a double-click re-entrancy
+    setSigningOut(true);
+    setSignOutError(null);
+    try {
+      const { error } = await client.auth.signOut();
+      if (error) setSignOutError(error.message);
+    } catch (e) {
+      // signOut can reject (network down) — surface it instead of leaving an
+      // unhandled rejection.
+      setSignOutError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSigningOut(false);
+    }
   }
 
   const vaultLabel = activeVault?.name ?? "(no vault selected)";
@@ -50,11 +64,14 @@ export function SettingsScreen() {
             <span className="text-helios-text">{role ?? "(no role assigned)"}</span>
           </div>
           <button
+            type="button"
             onClick={handleSignOut}
-            className="rounded border border-helios-line px-3 py-1 text-xs text-helios-text hover:bg-helios-line"
+            disabled={signingOut}
+            className="rounded border border-helios-line px-3 py-1 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
           >
-            Sign out
+            {signingOut ? "Signing out…" : "Sign out"}
           </button>
+          {signOutError && <p className="mt-2 text-xs text-[#EF5350]" role="alert">{signOutError}</p>}
         </div>
       </section>
 
@@ -87,14 +104,16 @@ export function SettingsScreen() {
               )}
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={handlePickFolder}
-                  className="rounded border border-helios-line px-3 py-1 text-xs text-helios-text hover:bg-helios-line"
+                  className="rounded border border-helios-line px-3 py-1 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
                 >
                   Change folder
                 </button>
                 <button
+                  type="button"
                   onClick={() => clear()}
-                  className="rounded border border-helios-line px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
+                  className="rounded border border-helios-line px-3 py-1 text-xs text-helios-dim hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
                 >
                   Clear
                 </button>
@@ -102,8 +121,9 @@ export function SettingsScreen() {
             </>
           ) : (
             <button
+              type="button"
               onClick={handlePickFolder}
-              className="rounded bg-asu-gold px-3 py-1.5 text-xs text-white hover:bg-asu-gold"
+              className="rounded bg-asu-gold px-3 py-1.5 text-xs text-helios-base hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
               Pick Helios folder
             </button>
@@ -128,10 +148,11 @@ export function SettingsScreen() {
               type="button"
               onClick={() => setMode("auto")}
               disabled={!activeVaultId}
+              aria-pressed={mode === "auto"}
               className={
-                "rounded px-3 py-1.5 text-xs " +
+                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 " +
                 (mode === "auto"
-                  ? "bg-asu-gold text-white"
+                  ? "bg-asu-gold text-helios-base"
                   : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
               }
             >
@@ -141,10 +162,11 @@ export function SettingsScreen() {
               type="button"
               onClick={() => setMode("manual")}
               disabled={!activeVaultId}
+              aria-pressed={mode === "manual"}
               className={
-                "rounded px-3 py-1.5 text-xs " +
+                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 " +
                 (mode === "manual"
-                  ? "bg-asu-gold text-white"
+                  ? "bg-asu-gold text-helios-base"
                   : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
               }
             >

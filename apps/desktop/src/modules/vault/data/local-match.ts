@@ -15,6 +15,19 @@ export function vaultRelativePath(file: VaultFile, folders: Folder[]): string {
 }
 
 /**
+ * Normalize a relative path for *comparison only* (never for display/storage).
+ *
+ * macOS's filesystem is case-insensitive and `readDir` returns NFD-normalized
+ * Unicode, while the DB stores names verbatim (typically NFC). An exact string
+ * compare therefore mismatches present files — they show as vault-only/modified
+ * (re-downloaded every sync) and already-vaulted files reappear as "add"
+ * candidates. Folding to NFC + lowercase on both sides makes the compare robust.
+ */
+export function normalizePathForCompare(p: string): string {
+  return p.normalize("NFC").toLowerCase();
+}
+
+/**
  * Match a single vault file to a local file by full relative path
  * (vault folder hierarchy + filename). This eliminates false matches where
  * two files in different folders share the same basename.
@@ -33,8 +46,8 @@ export function matchLocal(
 ): LocalMatch {
   if (localFiles === null) return { status: "no-folder" };
 
-  const expected = vaultRelativePath(file, folders);
-  const local = localFiles.find((l) => l.relativePath === expected);
+  const expected = normalizePathForCompare(vaultRelativePath(file, folders));
+  const local = localFiles.find((l) => normalizePathForCompare(l.relativePath) === expected);
   if (!local) return { status: "vault-only" };
 
   const versions = versionsByFileId.get(file.id) ?? [];

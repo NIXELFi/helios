@@ -1,0 +1,63 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { SupabaseAuthProvider } from "@helios/auth";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { FileDetailPanel } from "../../src/modules/vault/screens/FileDetailPanel";
+
+function mockClient(versions: any[] = []): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    from: (table: string) => {
+      if (table === "versions") {
+        // useVersions: .select().eq().order().range()
+        return {
+          select: () => ({
+            eq: () => ({ order: () => ({ range: (from: number, to: number) => Promise.resolve({ data: versions.slice(from, to + 1), error: null }) }) }),
+          }),
+        };
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    },
+    rpc: () => Promise.resolve({ data: null, error: null }),
+  } as any;
+}
+
+const files = [
+  { id: "file-1", vault_id: "v1", folder_id: "fl1", name: "frame.sldprt", latest_version_id: null, created_at: "x" },
+];
+
+describe("<FileDetailPanel>", () => {
+  it("shows the placeholder when no file is selected", () => {
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <FileDetailPanel fileId={null} files={files as any} />
+      </SupabaseAuthProvider>,
+    );
+    expect(screen.getByText(/select a file/i)).toBeInTheDocument();
+  });
+
+  it("V13: shows the selected file's NAME in the header", async () => {
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} />
+      </SupabaseAuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("frame.sldprt")).toBeInTheDocument());
+  });
+
+  it("V13: handles a selectedFile that no longer exists in the file list", async () => {
+    render(
+      <SupabaseAuthProvider client={mockClient()}>
+        <FileDetailPanel fileId={"deleted-file" as any} files={files as any} />
+      </SupabaseAuthProvider>,
+    );
+    expect(await screen.findByText(/no longer available/i)).toBeInTheDocument();
+    // It must NOT show the generic "no versions yet" empty state for a file
+    // that simply doesn't exist.
+    expect(screen.queryByText(/no versions yet/i)).toBeNull();
+  });
+});

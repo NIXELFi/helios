@@ -80,4 +80,32 @@ describe("matchLocal", () => {
   it("works without explicit folders arg (root-level files)", () => {
     expect(matchLocal(file as any, [], new Map()).status).toBe("vault-only");
   });
+
+  // H14: macOS filesystem is case-insensitive and returns NFD-normalized
+  // Unicode while the DB stores NFC. Comparison must normalize both sides
+  // (NFC + case-fold) so present files don't show as vault-only/modified.
+  it("matches when local relativePath differs only by case (case-insensitive FS)", () => {
+    const localFiles = [{ basename: "Frame.SLDPRT", relativePath: "Frame.SLDPRT", absolutePath: "/x", sha256: "abc", sizeBytes: 1 }];
+    const versions = new Map([["f1", [{ id: "v1", file_id: "f1", version_num: 1, sha256: "abc", size_bytes: 1, author_id: "u", comment: null, parent_version_id: null, created_at: "x" }] as any]]);
+    // vault file name is "frame.sldprt" (lowercase); local is "Frame.SLDPRT"
+    expect(matchLocal(file as any, localFiles, versions, []).status).toBe("synced");
+  });
+
+  it("matches when local relativePath differs only by Unicode normalization (NFD vs NFC)", () => {
+    // NFC stored in DB, NFD returned by macOS readDir. Built from \u escapes so
+    // the two strings are unambiguously distinct pre-normalization.
+    const nfc = "café.txt"; // "cafe" + precomposed e-acute (NFC)
+    const nfd = "café.txt"; // "cafe" + combining acute accent (NFD)
+    expect(nfc).not.toBe(nfd); // sanity: distinct strings before normalization
+    const nfcFile = { ...file, name: nfc };
+    const localFiles = [{ basename: "x", relativePath: nfd, absolutePath: "/x", sha256: "abc", sizeBytes: 1 }];
+    const versions = new Map([["f1", [{ id: "v1", file_id: "f1", version_num: 1, sha256: "abc", size_bytes: 1, author_id: "u", comment: null, parent_version_id: null, created_at: "x" }] as any]]);
+    expect(matchLocal(nfcFile as any, localFiles, versions, []).status).toBe("synced");
+  });
+
+  it("matches a folder path differing by case + NFD against NFC vault folders", () => {
+    // vault expects "chassis/frame.sldprt"; local has "Chassis/Frame.sldprt"
+    const localFiles = [{ basename: "Frame.sldprt", relativePath: "Chassis/Frame.sldprt", absolutePath: "/x", sha256: "abc", sizeBytes: 1 }];
+    expect(matchLocal(fileInFolder as any, localFiles, new Map(), folders as any).status).toBe("modified");
+  });
 });

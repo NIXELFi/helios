@@ -54,4 +54,27 @@ describe("<ChangePasswordModal>", () => {
     fireEvent.click(screen.getByRole("button", { name: /update password/i }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/weak password/i));
   });
+
+  // ── S5: double-submit guard (Enter re-entry) ──────────────────────────
+  it("does not call updateUser twice when submitted again while busy", async () => {
+    let resolve: ((v: unknown) => void) | undefined;
+    const updateUser = vi.fn().mockReturnValue(new Promise((r) => { resolve = r; }));
+    render(<ChangePasswordModal open client={makeClient(updateUser)} onClose={() => {}} />);
+    fill(STRONG, STRONG);
+    const form = screen.getByLabelText(/^new password$/i).closest("form")!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await waitFor(() => expect(updateUser).toHaveBeenCalled());
+    expect(updateUser).toHaveBeenCalledTimes(1);
+    resolve?.({ data: {}, error: null });
+  });
+
+  // ── X2: modal a11y — Escape closes ────────────────────────────────────
+  it("closes on Escape", () => {
+    const onClose = vi.fn();
+    render(<ChangePasswordModal open client={makeClient()} onClose={onClose} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

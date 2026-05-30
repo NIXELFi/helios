@@ -47,9 +47,12 @@ export function useActiveVault(): {
   setActiveVaultId: (id: VaultId) => void;
   vaults: Vault[];
   loading: boolean;
+  // Surfaced so the switcher can distinguish "load failed" from "no vaults" —
+  // both otherwise resolve to an empty list + null active vault.
+  error: Error | null;
   refetch: () => void;
 } {
-  const { data: vaults, loading, refetch } = useVaults();
+  const { data: vaults, loading, error, refetch } = useVaults();
   const [stored, setStored] = useState<VaultId | null>(() => readStored());
   // Tracks whether the user has explicitly called setActiveVaultId during this
   // hook's lifetime. Used to distinguish two "stored id not in vaults" cases:
@@ -123,6 +126,7 @@ export function useActiveVault(): {
     setActiveVaultId,
     vaults: vaults ?? [],
     loading,
+    error,
     refetch,
   };
 }

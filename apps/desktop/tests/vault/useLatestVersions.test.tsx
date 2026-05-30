@@ -25,9 +25,10 @@ function makeClient(rows: any[]): SupabaseClient {
               order: () => ({
                 order: () => ({
                   // The hook chunks ids into batches and paginates each batch.
-                  // Returning all rows on the first .range() exits the loop.
-                  range: (_from: number, _to: number) =>
-                    Promise.resolve({ data: rows, error: null }),
+                  // Honour .range(from,to) so fetchAllRows sees a partial page
+                  // and terminates — its runaway guard (H11) trips otherwise.
+                  range: (from: number, to: number) =>
+                    Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
                 }),
               }),
             }),
@@ -36,6 +37,31 @@ function makeClient(rows: any[]): SupabaseClient {
       }
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),
+  } as any;
+}
+
+// A client whose versions query never resolves — used to hold the hook in its
+// loading state so we can test the empty-fileIds early return mid-flight.
+function makeClientNeverResolves(): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: "u1", email: "u1@x.com" } } },
+        error: null,
+      }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    from: vi.fn().mockImplementation(() => ({
+      select: () => ({
+        in: () => ({
+          order: () => ({
+            order: () => ({
+              range: () => new Promise<never>(() => {}),
+            }),
+          }),
+        }),
+      }),
+    })),
   } as any;
 }
 
@@ -51,6 +77,26 @@ describe("useLatestVersions", () => {
     const { result } = renderHook(() => useLatestVersions([]), { wrapper: wrap(client) });
     expect(result.current.data.size).toBe(0);
     expect(result.current.loading).toBe(false);
+  });
+
+  it("clears loading when fileIds empties while a fetch is still in flight (V19)", async () => {
+    // Repro of the 2026-05-29 audit V19: a fetch is in flight (loading=true,
+    // never resolves in this test), then fileIds empties (folder deselected).
+    // The empty early-return must reset loading→false and error→null so the
+    // spinner doesn't stick forever. Before the fix it returned early without
+    // touching loading, leaving it stuck at true.
+    const client = makeClientNeverResolves();
+    const { result, rerender } = renderHook(
+      ({ ids }: { ids: string[] }) => useLatestVersions(ids),
+      { wrapper: wrap(client), initialProps: { ids: ["f1"] } },
+    );
+    // The in-flight fetch sets loading=true and never settles.
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    // Now empty the id set mid-flight.
+    rerender({ ids: [] });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.data.size).toBe(0);
   });
 
   it("returns latest version per file from a multi-file, multi-version response", async () => {

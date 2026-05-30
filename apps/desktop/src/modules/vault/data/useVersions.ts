@@ -20,6 +20,10 @@ export function useVersions(file_id: FileId | undefined): QueryResult<Version[]>
     let mounted = true;
     setLoading(true);
     setError(null);
+    // Clear the previous file's versions immediately so switching from file A
+    // to file B shows a loading state rather than A's stale history while B's
+    // query is in flight.
+    setData(null);
     (async () => {
       // Paginated via fetchAllRows — long-lived files can exceed PostgREST's
       // 1000-row cap over years of check-ins, and silent truncation here would

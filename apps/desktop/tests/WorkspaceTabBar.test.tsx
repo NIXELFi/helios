@@ -105,6 +105,22 @@ describe("WorkspaceTabBar — inline rename", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(props.onRename).not.toHaveBeenCalled();
   });
+
+  it("starting a second rename while one is active does not mis-commit the first edit onto the second tab", () => {
+    const props = defaultProps();
+    render(<WorkspaceTabBar {...props} />);
+    // Begin renaming tab A and type a new value, but DON'T commit.
+    fireEvent.doubleClick(screen.getByText("Overview"));
+    const inputA = screen.getByDisplayValue("Overview") as HTMLInputElement;
+    fireEvent.change(inputA, { target: { value: "Edited A" } });
+    // Now begin renaming tab B. The first input blurs as part of this. Whatever
+    // commits must NOT write tab A's typed text ("Edited A") onto tab B.
+    fireEvent.doubleClick(screen.getByText("Engine focus"));
+    // No rename should target "b" with the stale "Edited A" text.
+    expect(props.onRename).not.toHaveBeenCalledWith("b", "Edited A");
+    // The pending edit IS flushed to its own tab ("a"), not lost or misrouted.
+    expect(props.onRename).toHaveBeenCalledWith("a", "Edited A");
+  });
 });
 
 describe("computeDropIndex", () => {

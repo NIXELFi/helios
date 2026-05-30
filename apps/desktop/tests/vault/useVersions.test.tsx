@@ -80,6 +80,51 @@ describe("useVersions", () => {
     expect(result.current.error?.message).toBe("RLS blocked");
   });
 
+  it("resets data to null when file_id changes so the previous file's versions don't linger (V13)", async () => {
+    // Repro of the 2026-05-29 audit V13: selecting file B should show loading,
+    // not file A's stale version list, while B's query is in flight. The hook
+    // must reset data→null at the start of each fetch effect.
+    observed = null;
+    rangeCalls = [];
+    // file A resolves immediately; file B's query never resolves (stays in
+    // flight) so we can observe the in-between state.
+    const aRows = [
+      { id: "a1", file_id: "fA", version_num: 1, sha256: "x", size_bytes: 1, author_id: null, comment: null, parent_version_id: null, created_at: "x" },
+    ];
+    const client = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u" } } }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: (_col: string, val: any) => ({
+            order: () => ({
+              // Honour the .range(from,to) so fetchAllRows sees a partial page
+              // and terminates; a real paginated query slices the same way.
+              range: (from: number, to: number) =>
+                val === "fA"
+                  ? Promise.resolve({ data: aRows.slice(from, to + 1), error: null })
+                  : new Promise<never>(() => {}),
+            }),
+          }),
+        }),
+      }),
+    } as any as SupabaseClient;
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useVersions(id),
+      { wrapper: wrap(client), initialProps: { id: "fA" } },
+    );
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+
+    // Switch to file B — its query never resolves.
+    rerender({ id: "fB" });
+    // Data must immediately reset to null (loading) rather than show A's rows.
+    expect(result.current.data).toBeNull();
+    expect(result.current.loading).toBe(true);
+  });
+
   it("paginates past the PostgREST 1000-row cap", async () => {
     // Two pages: first returns 1000 rows (signals "maybe more"), second returns
     // 500 (a partial page, so fetchAllRows stops). Without pagination the hook

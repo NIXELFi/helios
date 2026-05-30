@@ -23,4 +23,14 @@ describe("<LocalStatusBadge>", () => {
     const { container } = render(<LocalStatusBadge status="no-folder" />);
     expect(container.firstChild).toBeNull();
   });
+
+  it("does not throw for an unrecognized status value (exhaustive config)", () => {
+    // The config map used to omit some statuses, so `cfg[status].color` threw
+    // a TypeError if a status value fell through. The map is now exhaustive
+    // over LocalStatus, and an unknown value renders nothing rather than
+    // crashing the row.
+    expect(() =>
+      render(<LocalStatusBadge status={"brand-new-status" as any} />),
+    ).not.toThrow();
+  });
 });

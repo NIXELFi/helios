@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -41,6 +41,30 @@ function mockClient(): SupabaseClient {
       }
       return { select: () => Promise.resolve({ data: [], error: null }) };
     }),
+  } as any;
+}
+
+// Variant whose add_and_lock RPC fails, so every useAddLocalFile().run(...)
+// resolves to { ok: false } — used to exercise the per-row failure path.
+function failingClient(): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: "u1" } } },
+        error: null,
+      }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    storage: {
+      from: () => ({
+        list: vi.fn().mockResolvedValue({ data: [], error: null }),
+        upload: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+    },
+    rpc: vi.fn().mockResolvedValue({ data: null, error: { message: "permission denied" } }),
+    from: vi.fn().mockImplementation(() => ({
+      select: () => Promise.resolve({ data: [], error: null }),
+    })),
   } as any;
 }
 
@@ -86,5 +110,22 @@ describe("<UnmatchedFilesBanner>", () => {
     expect(screen.getByText("new.sldprt")).toBeInTheDocument();
     expect(screen.getByText("other.sldprt")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^add$/i })).toHaveLength(2);
+  });
+
+  it("surfaces a per-row error when a single Add fails", async () => {
+    // addOne used to ignore r.ok === false entirely — only addAll aggregated
+    // failures — so a failed single-row Add gave the user no feedback. It now
+    // surfaces a message naming the file that failed.
+    render(
+      <SupabaseAuthProvider client={failingClient()}>
+        <UnmatchedFilesBanner vaultId="v1" folders={[]} unmatched={unmatched} />
+      </SupabaseAuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /show/i }));
+    const addButtons = screen.getAllByRole("button", { name: /^add$/i });
+    await act(async () => { fireEvent.click(addButtons[0]); });
+    await waitFor(() =>
+      expect(screen.getByText(/failed to add "new\.sldprt"/i)).toBeInTheDocument(),
+    );
   });
 });

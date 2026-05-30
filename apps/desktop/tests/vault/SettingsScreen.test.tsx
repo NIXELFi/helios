@@ -82,6 +82,36 @@ describe("<SettingsScreen>", () => {
     expect(c.auth.signOut).toHaveBeenCalled();
   });
 
+  it("H5: a failed sign-out is caught and surfaced, not left unhandled", async () => {
+    const c = mockClient("editor");
+    (c.auth.signOut as any) = vi.fn().mockRejectedValue(new Error("network down"));
+    render(
+      <SupabaseAuthProvider client={c}>
+        <SettingsScreen />
+      </SupabaseAuthProvider>,
+    );
+    const btn = await screen.findByRole("button", { name: /sign out/i });
+    await act(async () => { fireEvent.click(btn); });
+    expect(await screen.findByText(/network down/i)).toBeInTheDocument();
+  });
+
+  it("H5: Auto/Manual toggle exposes aria-pressed reflecting the active mode", async () => {
+    render(
+      <SupabaseAuthProvider client={mockClient("editor")}>
+        <SettingsScreen />
+      </SupabaseAuthProvider>,
+    );
+    // Default mode for an unset vault is "manual".
+    const autoBtn = await screen.findByRole("button", { name: /auto — download everything/i });
+    const manualBtn = screen.getByRole("button", { name: /manual — download on click/i });
+    expect(manualBtn).toHaveAttribute("aria-pressed", "true");
+    expect(autoBtn).toHaveAttribute("aria-pressed", "false");
+
+    await act(async () => { fireEvent.click(autoBtn); });
+    expect(autoBtn).toHaveAttribute("aria-pressed", "true");
+    expect(manualBtn).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("pick Helios folder button stores a single root in localStorage", async () => {
     render(
       <SupabaseAuthProvider client={mockClient()}>

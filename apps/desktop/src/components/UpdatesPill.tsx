@@ -13,9 +13,15 @@ export function UpdatesPill({ state, onClick }: Props) {
   const view = pillFor(state);
   return (
     <button
+      type="button"
       onClick={onClick}
+      // The visible label is a terse glyph ("✓ v3.7.0", "↑ v3.8.0 ready");
+      // mirror the descriptive title into an aria-label so screen readers get
+      // the full state, not just the symbol.
+      aria-label={view.title}
       className={
         "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors flex items-center gap-1 " +
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
         view.className
       }
       title={view.title}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { Fragment, useMemo, useRef, useState, useEffect } from "react";
 import type { ChannelMeta } from "@helios/store";
 
 interface SourceHeaderEntry {
@@ -35,6 +35,42 @@ export function ChannelsModal({
 }: Props) {
   const [filter, setFilter] = useState("");
   const [openPickerFor, setOpenPickerFor] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // X2 — Escape-to-close + focus-trap + focus-restore (mirrors ConfirmDialog).
+  useEffect(() => {
+    const restoreTo = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>("input,button,select,textarea")?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusable = root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreTo?.focus?.();
+    };
+  }, [onClose]);
 
   const grouped = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -65,6 +101,7 @@ export function ChannelsModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="bg-[#0E0E10] border border-[#2A2C32] w-[860px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -110,9 +147,16 @@ export function ChannelsModal({
               </tr>
             </thead>
             <tbody>
+              {grouped.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-2 py-6 text-center text-[11px] text-[#9097A0]">
+                    No matching channels.
+                  </td>
+                </tr>
+              )}
               {grouped.map(([group, list]) => (
-                <>
-                  <tr key={`g-${group}`} className="bg-[#16171B]">
+                <Fragment key={group}>
+                  <tr className="bg-[#16171B]">
                     <td colSpan={8} className="px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">{group}</td>
                   </tr>
                   {list.map((c) => {
@@ -159,7 +203,7 @@ export function ChannelsModal({
                       </tr>
                     );
                   })}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

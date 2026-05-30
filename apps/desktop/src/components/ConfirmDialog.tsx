@@ -16,9 +16,15 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const isAlert = cancelLabel === undefined;
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // Destructive (non-alert) dialogs focus Cancel on open so an accidental
+  // Enter/Space doesn't fire the destructive action. Everything else focuses
+  // the confirm button (the safe / primary action).
+  const focusCancelOnOpen = confirmTone === "danger" && !isAlert;
 
   useEffect(() => {
-    confirmRef.current?.focus();
+    if (focusCancelOnOpen) cancelRef.current?.focus();
+    else confirmRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         // stopPropagation so a stacked context (e.g. an open menu underneath
@@ -31,11 +37,18 @@ export function ConfirmDialog({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, focusCancelOnOpen]);
 
   function handleConfirm() {
-    onConfirm();
-    if (isAlert) onClose();  // alert mode dismisses itself on click
+    // Always self-close after running the action so callers no longer have to
+    // wire close into every onConfirm. try/finally guarantees the dialog
+    // dismisses even if onConfirm throws. Callers that ALSO close in onConfirm
+    // (e.g. Vault's AdminScreen) stay correct because closing is idempotent.
+    try {
+      onConfirm();
+    } finally {
+      onClose();
+    }
   }
 
   const confirmClass =
@@ -66,13 +79,15 @@ export function ConfirmDialog({
         <div className="px-4 py-3 border-t border-[#2A2C32] flex justify-end gap-2">
           {!isAlert && (
             <button
+              ref={cancelRef}
+              type="button"
               onClick={onClose}
-              className="px-3 py-1 text-xs rounded-sm border cursor-pointer transition-colors bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]"
+              className="px-3 py-1 text-xs rounded-sm border cursor-pointer transition-colors bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
               {cancelLabel}
             </button>
           )}
-          <button ref={confirmRef} onClick={handleConfirm} className={confirmClass}>
+          <button ref={confirmRef} type="button" onClick={handleConfirm} className={confirmClass}>
             {confirmLabel}
           </button>
         </div>

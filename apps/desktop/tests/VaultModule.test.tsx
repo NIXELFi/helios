@@ -40,9 +40,9 @@ describe("<VaultModule>", () => {
       },
       from: vi.fn().mockImplementation((table: string) => {
         if (table === "vaults") return { select: () => Promise.resolve({ data: [], error: null }) };
-        if (table === "folders") return { select: () => ({ eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }) }) };
-        if (table === "files") return { select: () => ({ eq: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }) }) };
-        if (table === "locks") return { select: () => ({ is: () => ({ order: () => ({ range: () => Promise.resolve({ data: [], error: null }) }) }) }) };
+        if (table === "folders") return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
+        if (table === "files") return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
+        if (table === "locks") return { select: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
         if (table === "user_roles") return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { role: "admin" }, error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
