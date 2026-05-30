@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { SupabaseAuthProvider, useAuthLoading } from "@helios/auth";
 import { useAddLocalFile } from "../../src/modules/vault/data/useAddLocalFile";
+import { subscribeLockChanges } from "../../src/modules/vault/data/lock-events";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -160,6 +161,42 @@ describe("useAddLocalFile", () => {
       "storage.upload",
       "rpc:pdm_add_and_lock",
     ]);
+  });
+
+  it("broadcasts a lock change when the add acquires a lock (new file → checked out)", async () => {
+    let notified = 0;
+    const unsub = subscribeLockChanges(() => { notified++; });
+    const c = buildHappyClient();
+    (c.rpc as any) = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      return Promise.resolve({ data: { file_id: "fi1", version_id: "ve1", lock_id: "lo1", created: true }, error: null });
+    };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    await act(async () => { await result.current.hook.run("v1", localFileRoot); });
+    unsub();
+    expect(notified).toBe(1);
+  });
+
+  it("does NOT broadcast when no lock was acquired (lock_id null)", async () => {
+    let notified = 0;
+    const unsub = subscribeLockChanges(() => { notified++; });
+    const c = buildHappyClient();
+    (c.rpc as any) = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      return Promise.resolve({ data: { file_id: "fi1", version_id: "ve1", lock_id: null, created: false }, error: null });
+    };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    await act(async () => { await result.current.hook.run("v1", localFileRoot); });
+    unsub();
+    expect(notified).toBe(0);
   });
 
   it("surfaces lock_id=null as ok:true but lockAcquired:false", async () => {

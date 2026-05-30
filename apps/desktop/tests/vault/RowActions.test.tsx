@@ -1,9 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { SupabaseAuthProvider } from "@helios/auth";
+import { SupabaseAuthProvider, useUser } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CheckInButton, CheckOutButton, CancelButton } from "../../src/modules/vault/components/RowActions";
+
+// Capture the real-vault read-only transitions + download-on-checkout/undo.
+const roCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
+vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
+  setReadonly: (path: string, readonly: boolean) => { roCalls.push({ path, readonly }); return Promise.resolve(); },
+}));
+const dlCalls = vi.hoisted(() => [] as Array<{ sha: string; dest: string }>);
+vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
+  useDownloadVersion: () => ({
+    run: (sha: string, dest: string) => { dlCalls.push({ sha, dest }); return Promise.resolve(true); },
+    loading: false, error: null,
+  }),
+}));
+
+/** Renders the resolved user id so a test can wait for the session before
+ *  clicking Check Out (useAcquireLock needs the user). */
+function UserProbe() {
+  const u = useUser();
+  return <span data-testid="uid">{u?.id ?? ""}</span>;
+}
 
 // Mock Tauri plugins so tests don't need a real Tauri runtime. readFile is the
 // source of the bytes that get checked in; the dialog open() picks the file
@@ -85,6 +105,53 @@ const localFile = {
 function wrap(client: SupabaseClient, children: React.ReactNode) {
   return <SupabaseAuthProvider client={client}>{children}</SupabaseAuthProvider>;
 }
+
+describe("RowActions real-vault read-only transitions", () => {
+  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; });
+
+  it("check-out downloads the file if missing, then makes it writable", async () => {
+    render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" /><UserProbe /></>));
+    await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+    fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+    await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+    expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false });
+  });
+
+  it("check-out of an already-local file makes it writable without re-downloading", async () => {
+    const local = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "sha-x", sizeBytes: 4, readonly: true };
+    render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" localFile={local as any} /><UserProbe /></>));
+    await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+    fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+    await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false }));
+    expect(dlCalls).toHaveLength(0);
+  });
+
+  it("check-in makes the file read-only after a successful check-in", async () => {
+    const local = { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "old", sizeBytes: 4, readonly: false };
+    render(wrap(mockClient(), <CheckInButton fileId={"f1" as any} localFile={local as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} />));
+    fireEvent.click(screen.getByRole("button", { name: /check in/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true }));
+  });
+
+  it("undo does NOT release the lock until the confirm is accepted", async () => {
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    // The confirm is shown, but nothing destructive has happened yet.
+    expect(await screen.findByRole("button", { name: /discard & undo/i })).toBeInTheDocument();
+    expect(capturedRpc).toBeNull(); // pdm_cancel_checkout NOT called
+    expect(dlCalls).toHaveLength(0); // no restore download
+    expect(roCalls).toHaveLength(0);
+  });
+
+  it("undo check-out restores the latest version and sets read-only", async () => {
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
+    await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+    expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: true });
+  });
+});
 
 describe("CheckInButton (C1: in-app comment modal, not window.prompt)", () => {
   beforeEach(() => {
@@ -176,9 +243,12 @@ describe("RowActions error surfacing (H2)", () => {
     });
   });
 
-  it("CancelButton surfaces a release-lock failure via title", async () => {
+  it("CancelButton confirms before undoing, then surfaces a release-lock failure via title", async () => {
     render(wrap(mockClient({ rpcError: { message: "no active lock" } }), <CancelButton fileId={"f1" as any} />));
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    // Click Cancel → opens the undo-checkout confirm (does NOT release yet).
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    // Confirm the destructive undo → now the release runs and fails.
+    fireEvent.click(await screen.findByRole("button", { name: /discard & undo/i }));
     await waitFor(() => {
       const btn = screen.getByRole("button", { name: /cancel|retry/i });
       expect(btn.getAttribute("title")).toMatch(/no active lock|lock/i);

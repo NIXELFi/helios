@@ -4,6 +4,7 @@ import type { LocalFile } from "./useLocalFolderScan";
 import { matchLocal } from "./local-match";
 import { localDestPath } from "./folder-paths";
 import { useDownloadVersion } from "./useDownloadVersion";
+import { setReadonly } from "./fs-readonly";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -14,6 +15,10 @@ export interface AutoSyncStatus {
   lastSkipped: number;
   /** Number of failed downloads in the last pass. */
   lastFailed: number;
+  /** Files held back on the first (migration) pass because they had local
+   *  changes and weren't checked out — left untouched so unsaved work isn't
+   *  clobbered. Surfaced so the user can check them in or discard. */
+  lastHeldBack: number;
   /** ISO timestamp of the last completed pass. */
   lastRunAt: string | null;
   /** Total number of files queued for download in the current pass. */
@@ -87,7 +92,7 @@ export function useAutoSync(input: {
   const taskIdSeq = useRef(0);
 
   const [status, setStatus] = useState<AutoSyncStatus>({
-    busy: false, lastDownloaded: 0, lastSkipped: 0, lastFailed: 0, lastRunAt: null,
+    busy: false, lastDownloaded: 0, lastSkipped: 0, lastFailed: 0, lastHeldBack: 0, lastRunAt: null,
     totalTasks: 0, completedTasks: 0, totalBytes: 0, completedBytes: 0,
     activeFiles: [], startedAt: null,
   });
@@ -133,6 +138,9 @@ export function useAutoSync(input: {
         ? (locks ?? []).filter((l) => l.user_id === currentUserId).map((l) => l.file_id)
         : [],
     );
+    // Files we won't overwrite because the local copy could be unsaved work
+    // (writable + unlocked + differs from latest). Surfaced via lastHeldBack.
+    const heldBack: string[] = [];
 
     // Partition into "needs download" vs "skip" upfront so the worker pool
     // only races on actual downloads. Each task gets a stable id used as the
@@ -148,6 +156,22 @@ export function useAutoSync(input: {
       if (!ver) { skipped++; continue; }
       const m = matchLocal(file, localFiles, versionsByFileId, folders);
       if (m.status === "synced") { skipped++; continue; }
+      // Present locally but differs from the latest version. The read-only bit
+      // is our "clean copy" marker (reconciliation only ever sets a SYNCED file
+      // read-only), so:
+      //   - read-only local copy  → a clean, un-edited copy that's now stale
+      //     (a newer version landed) → safe to refresh (download overwrites it;
+      //     the download clears the read-only bit first, then reconciliation
+      //     re-applies it).
+      //   - writable local copy   → a possible unsaved local edit (predates the
+      //     read-only model, or the user cleared the bit) → DON'T clobber it.
+      //     Hold it back and surface it; the user resolves by checking it in or
+      //     discarding (undo check-out). A missing file (no m.local) downloads.
+      if (m.local && m.local.readonly !== true) {
+        heldBack.push(file.name);
+        skipped++;
+        continue;
+      }
       tasks.push({
         id: ++taskIdSeq.current,
         sha: ver.sha256,
@@ -207,16 +231,51 @@ export function useAutoSync(input: {
     try {
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
+      // Reconcile OS read-only bits to lock state (real-vault invariant): a
+      // local file is writable iff the current user holds its lock; otherwise
+      // read-only. This is what makes check-out → writable and check-in / undo
+      // → read-only work — those mutate `locks`, which re-triggers a pass. We
+      // only toggle files whose current bit differs (from the scan), so steady
+      // state does zero IPC. Files downloaded THIS pass aren't in `localFiles`
+      // yet; the post-download rescan re-triggers a pass that reconciles them.
+      if (isCurrent() && localFiles) {
+        for (const file of files) {
+          if (!isCurrent()) break;
+          const m = matchLocal(file, localFiles, versionsByFileId, folders);
+          if (!m.local) continue; // not present locally → nothing to chmod
+          const lockedByMe = myLocks.has(file.id);
+          const currentlyReadonly = m.local.readonly === true;
+          if (lockedByMe) {
+            // Checked out by me → must be writable so I can edit.
+            if (currentlyReadonly) await setReadonly(m.local.absolutePath, false);
+          } else if (m.status === "synced" && !currentlyReadonly) {
+            // Unlocked AND clean (matches latest) → enforce read-only. We
+            // deliberately do NOT touch an unlocked file that DIFFERS from
+            // latest: a writable one is a possible unsaved edit (left writable
+            // + held back, never frozen or clobbered); a read-only one is a
+            // clean stale copy (the download path will refresh it). This keeps
+            // the read-only bit a reliable "clean copy" marker.
+            await setReadonly(m.local.absolutePath, true);
+          }
+        }
+      }
+
       // Final commit — only if we're still the authoritative generation. If a
       // newer run took over (e.g. deps changed mid-pass), the new run owns the
       // status and will publish its own results.
       if (isCurrent()) {
+        if (heldBack.length > 0) {
+          console.warn(
+            `[vault] ${heldBack.length} local file(s) had unsaved changes and weren't checked out; left untouched (check in or discard): ${heldBack.join(", ")}`,
+          );
+        }
         setStatus((s) => ({
           ...s,
           busy: false,
           lastDownloaded: downloaded,
           lastSkipped: skipped,
           lastFailed: failed,
+          lastHeldBack: heldBack.length,
           lastRunAt: new Date().toISOString(),
           activeFiles: [],
         }));

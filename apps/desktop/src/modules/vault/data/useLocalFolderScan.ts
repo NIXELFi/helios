@@ -7,6 +7,10 @@ export interface LocalFile {
   absolutePath: string;
   sha256: string;
   sizeBytes: number;
+  /** OS read-only bit at scan time. Drives the real-vault reconciliation
+   *  (a file is writable iff checked out by the current user). Undefined when
+   *  stat was unavailable — treated as writable by reconcilers. */
+  readonly?: boolean;
 }
 
 /**
@@ -67,11 +71,15 @@ async function walk(
         // fall back to read-and-hash so the file still appears in the scan.
         let mtimeMs = 0;
         let size = 0;
+        let readonly: boolean | undefined;
         let statOk = false;
         try {
           const info = await stat(abs);
           mtimeMs = info.mtime ? info.mtime.getTime() : 0;
           size = info.size;
+          // FileInfo.readonly may be absent on some platforms/types — read
+          // defensively; undefined means "unknown" (treated as writable).
+          readonly = (info as { readonly?: boolean }).readonly;
           statOk = true;
         } catch {
           // stat blocked / not granted — proceed without cache hit path
@@ -92,6 +100,7 @@ async function walk(
           absolutePath: abs,
           sha256: sha,
           sizeBytes: size,
+          readonly,
         });
       } catch {
         // Skip unreadable files (permission denied, broken symlink, etc.)

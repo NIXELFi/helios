@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import { writeFile, mkdir, rename, remove } from "@tauri-apps/plugin-fs";
 import { gunzipIfNeeded, isGzipped } from "./compression";
+import { setReadonly } from "./fs-readonly";
 
 /** Hex sha256 of a byte buffer — used to verify download integrity before
  *  writing to disk. Matches the format pdm.versions.sha256 is stored in. */
@@ -154,6 +155,12 @@ export async function downloadVersionOnce(
       const tmpPath = `${destPath}.${crypto.randomUUID()}.part`;
       try {
         await writeFile(tmpPath, arr);
+        // The real-vault model leaves non-checked-out files read-only. Renaming
+        // onto a read-only destination fails on Windows (MoveFileExW →
+        // ACCESS_DENIED), so clear the bit first; the caller (auto-sync
+        // reconciliation / check-in) re-applies read-only after. Best-effort:
+        // no-ops when the dest doesn't exist yet (first download).
+        await setReadonly(destPath, false);
         await rename(tmpPath, destPath);
       } catch (writeErr) {
         try { await remove(tmpPath); } catch { /* best-effort; temp may not exist */ }

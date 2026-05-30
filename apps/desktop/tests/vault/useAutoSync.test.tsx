@@ -25,6 +25,16 @@ vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
   }),
 }));
 
+// Capture setReadonly calls from the reconciliation pass. vi.hoisted so the
+// array exists when the hoisted vi.mock factory runs.
+const readonlyCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
+vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
+  setReadonly: (path: string, readonly: boolean) => {
+    readonlyCalls.push({ path, readonly });
+    return Promise.resolve();
+  },
+}));
+
 function resolveDownload(sha: string, ok = true): void {
   const r = downloadResolvers.get(sha);
   if (!r) throw new Error(`no pending download for sha ${sha}`);
@@ -61,6 +71,88 @@ describe("useAutoSync", () => {
   beforeEach(() => {
     downloadCalls.length = 0;
     downloadResolvers.clear();
+    readonlyCalls.length = 0;
+    localStorage.clear(); // reset the per-vault read-only migration flag
+  });
+
+  it("reconciles read-only bits to lock state (writable iff checked out by ME)", async () => {
+    // All present files are synced (no downloads); the pass runs to reconcile.
+    const files: VaultFile[] = [
+      makeFile("f1", "a.bin"), makeFile("f2", "b.bin"), makeFile("f3", "c.bin"),
+      makeFile("f4", "d.bin"), makeFile("f5", "e.bin"),
+    ];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-a")]], ["f2", [makeVersion("f2", "sha-b")]],
+      ["f3", [makeVersion("f3", "sha-c")]], ["f4", [makeVersion("f4", "sha-d")]],
+      ["f5", [makeVersion("f5", "sha-e")]],
+    ]);
+    const localFiles: LocalFile[] = [
+      // locked-by-me but read-only → made writable
+      { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "sha-a", sizeBytes: 1, readonly: true },
+      // unlocked, synced, writable → made read-only
+      { basename: "b.bin", relativePath: "b.bin", absolutePath: "/v/b.bin", sha256: "sha-b", sizeBytes: 1, readonly: false },
+      // unlocked, synced, already read-only → no toggle
+      { basename: "c.bin", relativePath: "c.bin", absolutePath: "/v/c.bin", sha256: "sha-c", sizeBytes: 1, readonly: true },
+      // locked by ANOTHER user, synced, writable → read-only for ME (not my lock)
+      { basename: "d.bin", relativePath: "d.bin", absolutePath: "/v/d.bin", sha256: "sha-d", sizeBytes: 1, readonly: false },
+      // f5 (e.bin) is locked-by-me but MISSING locally → no chmod possible
+    ];
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+      { id: "l2", file_id: "f4", user_id: "u2", acquired_at: "x", released_at: null, force_released_by: null },
+      { id: "l3", file_id: "f5", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+      }),
+    );
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    expect(downloadCalls).toHaveLength(0);
+    expect(readonlyCalls).toContainEqual({ path: "/v/a.bin", readonly: false }); // mine → writable
+    expect(readonlyCalls).toContainEqual({ path: "/v/b.bin", readonly: true });  // unlocked synced → RO
+    expect(readonlyCalls).toContainEqual({ path: "/v/d.bin", readonly: true });  // other's lock → RO for me
+    expect(readonlyCalls.find((c) => c.path === "/v/c.bin")).toBeUndefined();    // already RO → no-op
+    expect(readonlyCalls.find((c) => c.path.includes("e.bin"))).toBeUndefined(); // missing → no chmod
+  });
+
+  it("holds back a WRITABLE, unlocked, modified file (possible unsaved edit) — never clobbers or freezes it", async () => {
+    const files: VaultFile[] = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-latest")]]]);
+    const localFiles: LocalFile[] = [
+      { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "sha-LOCAL-DIFFERS", sizeBytes: 1, readonly: false },
+    ];
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+      }),
+    );
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    expect(downloadCalls.find((c) => c.sha === "sha-latest")).toBeUndefined(); // not overwritten
+    expect(result.current.lastHeldBack).toBe(1);
+    // Not frozen read-only either — the user can still recover / check it in.
+    expect(readonlyCalls.find((c) => c.path === "/v/a.bin" && c.readonly === true)).toBeUndefined();
+  });
+
+  it("refreshes a READ-ONLY, unlocked, stale file (clean copy; a newer version landed)", async () => {
+    const files: VaultFile[] = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-latest")]]]);
+    const localFiles: LocalFile[] = [
+      { basename: "a.bin", relativePath: "a.bin", absolutePath: "/v/a.bin", sha256: "sha-OLD", sizeBytes: 1, readonly: true },
+    ];
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+      }),
+    );
+    await waitFor(() => { expect(downloadResolvers.has("sha-latest")).toBe(true); });
+    await act(async () => { resolveDownload("sha-latest", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(result.current.lastDownloaded).toBe(1); // refreshed, not held back
+    expect(result.current.lastHeldBack).toBe(0);
   });
 
   it("does not double-execute when multiple renders happen before the run starts", async () => {

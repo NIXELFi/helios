@@ -6,27 +6,65 @@ import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { localDestPath } from "../data/folder-paths";
+import { setReadonly } from "../data/fs-readonly";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, FolderId, Folder } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
-interface ActionProps {
-  fileId: FileId;
-  onDone?: () => void;
+/** Context needed to find + toggle the local working copy for the real-vault
+ *  read-only transitions. Optional so callers without a vault folder (or tests)
+ *  degrade gracefully to "lock-only" behavior. */
+interface LocalCtx {
+  vaultRoot?: string | null;
+  folderId?: FolderId | null;
+  fileName?: string;
+  folders?: Folder[];
+  latestSha?: string | null;
 }
 
-interface CheckInButtonProps {
+/** The local working-copy path for this file, or null if no vault folder. */
+function localTarget(ctx: LocalCtx): string | null {
+  return ctx.vaultRoot && ctx.fileName
+    ? localDestPath(ctx.vaultRoot, ctx.folderId ?? null, ctx.fileName, ctx.folders ?? [])
+    : null;
+}
+
+interface ActionProps extends LocalCtx {
+  fileId: FileId;
+  onDone?: () => void;
+  localFile?: LocalFile;
+}
+
+interface CheckInButtonProps extends LocalCtx {
   fileId: FileId;
   localFile?: LocalFile;
   onDone?: () => void;
 }
 
-export function CheckOutButton({ fileId, onDone }: ActionProps) {
+export function CheckOutButton({
+  fileId, onDone, vaultRoot, folderId, fileName, folders, latestSha, localFile,
+}: ActionProps) {
   const acquireLock = useAcquireLock();
+  const download = useDownloadVersion();
 
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     const result = await acquireLock.run(fileId);
-    if (result) onDone?.();
+    if (!result) return;
+    // Real-vault: checking out gets you the latest version (download it if you
+    // don't have it locally) and makes the local copy WRITABLE so you can edit.
+    const dest = localTarget({ vaultRoot, folderId, fileName, folders });
+    if (dest) {
+      // Get the latest if we don't have it OR our local copy is stale, so the
+      // user edits the CURRENT version — not an outdated base they'd then check
+      // in over a teammate's newer work. Then make it writable.
+      const stale =
+        !localFile ||
+        (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
+      if (latestSha && stale) await download.run(latestSha, dest);
+      await setReadonly(dest, false);
+    }
+    onDone?.();
   }
 
   // Surface the hook's error like GetLatestButton — hover tells the user what
@@ -52,7 +90,9 @@ export function CheckOutButton({ fileId, onDone }: ActionProps) {
   );
 }
 
-export function CheckInButton({ fileId, localFile, onDone }: CheckInButtonProps) {
+export function CheckInButton({
+  fileId, localFile, onDone, vaultRoot, folderId, fileName, folders,
+}: CheckInButtonProps) {
   const checkIn = useCheckIn();
   // The bytes to upload are read up-front (file dialog / disk) on click, then
   // held here while the comment modal is open. `null` = modal closed.
@@ -90,7 +130,14 @@ export function CheckInButton({ fileId, localFile, onDone }: CheckInButtonProps)
     const bytes = pendingBytes;
     setPendingBytes(null);
     const result = await checkIn.run(fileId, bytes, comment);
-    if (result) onDone?.();
+    if (result) {
+      // The file is now the latest version and no longer checked out → make the
+      // local copy read-only (real-vault). Prefer the actual file we read; fall
+      // back to the computed vault path.
+      const dest = localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
+      if (dest) await setReadonly(dest, true);
+      onDone?.();
+    }
   }
 
   // Surface the hook's error like GetLatestButton — hover shows the failure
@@ -280,8 +327,10 @@ export function GetLatestButton({
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     let dest: string;
+    let intoVault = false;
     if (vaultRoot) {
       dest = localDestPath(vaultRoot, folderId, fileName, folders);
+      intoVault = true;
     } else {
       // No vault folder configured + manual mode → ask the user where to put
       // it. Default the suggested filename so the dialog is one click for the
@@ -291,7 +340,14 @@ export function GetLatestButton({
       dest = picked;
     }
     const ok = await download.run(latestSha!, dest);
-    if (ok) onDone?.();
+    if (ok) {
+      // A file downloaded into the vault folder is a non-checked-out copy →
+      // read-only (real-vault), even in manual mode where auto-sync's
+      // reconciliation never runs. Don't touch a user-chosen save-dialog path
+      // outside the vault.
+      if (intoVault) await setReadonly(dest, true);
+      onDone?.();
+    }
   }
 
   // Failures used to be silent — click, "…" flash, nothing. Surface the
@@ -325,33 +381,68 @@ export function GetLatestButton({
   );
 }
 
-export function CancelButton({ fileId, onDone }: ActionProps) {
+export function CancelButton({
+  fileId, onDone, vaultRoot, folderId, fileName, folders, latestSha,
+}: ActionProps) {
   const releaseLock = useReleaseLock();
+  const download = useDownloadVersion();
+  const [confirming, setConfirming] = useState(false);
 
-  async function handleClick(e: React.MouseEvent) {
-    e.stopPropagation();
+  async function doRelease() {
     const ok = await releaseLock.run(fileId);
-    if (ok) onDone?.();
+    if (!ok) return;
+    // Undo check-out (real-vault): discard local edits + restore the latest
+    // vaulted version, then read-only. Done here so it works in manual mode
+    // too (not only via auto-sync). The download clears read-only before the
+    // write, so restoring over a read-only file is safe.
+    const dest = localTarget({ vaultRoot, folderId, fileName, folders });
+    if (dest && latestSha) {
+      // Restore the latest version (discarding local edits), THEN read-only —
+      // but only freeze if the restore actually SUCCEEDED. On a failed download
+      // the local edit is still on disk; leaving it writable keeps the
+      // held-back rule protecting it. A read-only-but-dirty file would look like
+      // a clean stale copy and get clobbered on the next pass.
+      const restored = await download.run(latestSha, dest);
+      if (restored) await setReadonly(dest, true);
+    }
+    onDone?.();
   }
 
   // Surface the release error like GetLatestButton — a silent no-op left the
   // user wondering whether the lock was actually released.
   const err = releaseLock.error?.message ?? null;
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={releaseLock.loading}
-      title={err ? `Cancel check-out failed: ${err}` : "Discard your check-out and release the lock"}
-      className={
-        "ml-1 rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-        (err
-          ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
-          : "bg-helios-line text-white hover:brightness-110")
-      }
-    >
-      {releaseLock.loading ? "…" : err ? "Retry" : "Cancel"}
-    </button>
+    <>
+      <button
+        type="button"
+        // Undo check-out is destructive in the real-vault model: releasing the
+        // lock lets auto-sync restore the latest version, discarding any local
+        // edits. Confirm before doing it (in-app dialog — window.confirm is a
+        // no-op in the Tauri webview).
+        onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+        disabled={releaseLock.loading}
+        title={err ? `Cancel check-out failed: ${err}` : "Undo check-out: discard local changes and restore the latest version"}
+        className={
+          "ml-1 rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (err
+            ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+            : "bg-helios-line text-white hover:brightness-110")
+        }
+      >
+        {releaseLock.loading ? "…" : err ? "Retry" : "Cancel"}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="Undo check-out?"
+          body="This releases your lock and restores the latest vaulted version. Any local changes you made to this file will be discarded."
+          confirmLabel="Discard & undo"
+          confirmTone="danger"
+          cancelLabel="Keep editing"
+          onConfirm={() => { void doRelease(); }}
+          onClose={() => setConfirming(false)}
+        />
+      )}
+    </>
   );
 }

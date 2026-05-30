@@ -73,6 +73,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::load_csv::load_csv,
             commands::restart::helios_relaunch,
+            commands::set_readonly::set_path_readonly,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,

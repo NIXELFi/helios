@@ -12,11 +12,16 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   remove: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
+  setReadonly: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Deterministic UUID so tests can assert the exact temp path the unique-name
 // scheme produces (PART-FILES). Real crypto.randomUUID stays unmocked in prod.
 const FIXED_UUID = "11111111-2222-3333-4444-555555555555";
 
 const fs = await import("@tauri-apps/plugin-fs");
+const fsReadonly = await import("../../src/modules/vault/data/fs-readonly");
 
 function mockClient(downloadResult: { data: any; error: any }): SupabaseClient {
   return {
@@ -73,6 +78,8 @@ describe("useDownloadVersion", () => {
     vi.mocked(fs.remove).mockClear();
     vi.mocked(fs.rename).mockResolvedValue(undefined);
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fsReadonly.setReadonly).mockClear();
+    vi.mocked(fsReadonly.setReadonly).mockResolvedValue(undefined);
     vi.mocked(fs.remove).mockResolvedValue(undefined);
     // Pin crypto.randomUUID so the unique temp path is deterministic in tests.
     vi.spyOn(crypto, "randomUUID").mockReturnValue(FIXED_UUID);
@@ -102,6 +109,22 @@ describe("useDownloadVersion", () => {
     expect(fs.rename).toHaveBeenCalledWith(tmp, "/Users/me/Vault/parts/x.sldprt");
     // The dest itself is never written directly.
     expect(fs.writeFile).not.toHaveBeenCalledWith("/Users/me/Vault/parts/x.sldprt", expect.anything());
+  });
+
+  it("clears the dest's read-only bit BEFORE renaming (Windows rename onto a read-only file fails)", async () => {
+    const bytes = new Uint8Array([9, 9, 9]);
+    const sha = await sha256Hex(bytes);
+    const blob = new Blob([bytes]);
+    if (!blob.arrayBuffer) (blob as any).arrayBuffer = async () => bytes.buffer;
+    const c = mockClient({ data: blob, error: null });
+    const ok = await downloadVersionOnce(c, sha, "/v/x.sldprt");
+    expect(ok.ok).toBe(true);
+    // setReadonly(dest, false) was called, and BEFORE the rename onto dest —
+    // otherwise the rename ACCESS_DENIEDs on Windows when dest is read-only.
+    expect(vi.mocked(fsReadonly.setReadonly)).toHaveBeenCalledWith("/v/x.sldprt", false);
+    const roOrder = vi.mocked(fsReadonly.setReadonly).mock.invocationCallOrder[0]!;
+    const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[0]!;
+    expect(roOrder).toBeLessThan(renameOrder);
   });
 
   it("uses a DIFFERENT temp name per call so concurrent writers to the same dest can't collide", async () => {

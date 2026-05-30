@@ -4,6 +4,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { gzipBytes } from "./compression";
+import { notifyLockChange } from "./lock-events";
 
 /**
  * Result of a single useAddLocalFile().run(...) call.
@@ -239,6 +240,11 @@ export function useAddLocalFile() {
         };
         const lockAcquired = rpc.lock_id != null;
         const alreadyExisted = rpc.created === false;
+
+        // Broadcast so useLocks() consumers (and the auto-sync reconciliation
+        // pass) pick up the new checkout immediately rather than waiting on the
+        // realtime channel — the freshly-added file should go writable promptly.
+        if (lockAcquired) notifyLockChange();
 
         setLoading(false);
         return { ok: true, lockAcquired, alreadyExisted };

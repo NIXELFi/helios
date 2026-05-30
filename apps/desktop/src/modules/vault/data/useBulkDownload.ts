@@ -3,6 +3,7 @@ import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 import { stat, readFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
+import { setReadonly } from "./fs-readonly";
 import { localDestPath } from "./folder-paths";
 import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
@@ -250,6 +251,10 @@ export function useBulkDownload(opts: {
         activeMap.delete(file.id);
         refreshActive();
         if (result.ok) {
+          // Downloaded into the vault folder = a non-checked-out copy →
+          // read-only (real-vault model), so it holds even in manual mode where
+          // auto-sync's reconciliation never runs.
+          await setReadonly(dest, true);
           bytesDoneRef.current += version.size_bytes ?? 0;
           setDone((d) => d + 1);
         } else {

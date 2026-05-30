@@ -335,7 +335,16 @@ export function FileTable({
               <td className="px-3 py-2">
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {info.state !== "locked-me" && info.state !== "locked-me-modified" && info.state !== "locked-other" && canEdit && (
-                    <CheckOutButton fileId={f.id} onDone={onActionComplete} />
+                    <CheckOutButton
+                      fileId={f.id}
+                      onDone={onActionComplete}
+                      vaultRoot={vaultRoot ?? null}
+                      folderId={f.folder_id}
+                      fileName={f.name}
+                      folders={folders}
+                      latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
+                      localFile={localMatch?.local}
+                    />
                   )}
                   {(info.state === "locked-me" || info.state === "locked-me-modified") && (
                     <>
@@ -343,8 +352,20 @@ export function FileTable({
                         fileId={f.id}
                         localFile={localMatch?.local}
                         onDone={onActionComplete}
+                        vaultRoot={vaultRoot ?? null}
+                        folderId={f.folder_id}
+                        fileName={f.name}
+                        folders={folders}
                       />
-                      <CancelButton fileId={f.id} onDone={onActionComplete} />
+                      <CancelButton
+                        fileId={f.id}
+                        onDone={onActionComplete}
+                        vaultRoot={vaultRoot ?? null}
+                        folderId={f.folder_id}
+                        fileName={f.name}
+                        folders={folders}
+                        latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
+                      />
                     </>
                   )}
                   {(() => {
