@@ -18,6 +18,8 @@
     "fs:allow-read-file",
     "fs:allow-write-file",
     "fs:allow-mkdir",
+    "fs:allow-rename",
+    "fs:allow-remove",
     "fs:allow-watch",
     "fs:allow-unwatch",
     "fs:allow-stat",
