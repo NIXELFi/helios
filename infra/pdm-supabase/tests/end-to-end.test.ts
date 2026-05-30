@@ -60,7 +60,12 @@ describe("end-to-end: a designer's working day", () => {
     // by a check_in produces two rows (check_out, lock_released, check_in).
     const { data: audit } = await svc
       .from("audit_log").select("action").order("ts", { ascending: true });
-    const actions = audit!.map((r) => r.action);
+    // Scope to the lock/version LIFECYCLE actions this test exercises. The feed
+    // also carries structural + role events (file_create, folder_create,
+    // role_grant, … — see 20260530130000_pdm_audit_structural_events.sql) from
+    // the seed/setRole calls; those aren't what this scenario asserts.
+    const lifecycle = new Set(["check_out", "lock_released", "check_in", "cancel_checkout", "force_unlock"]);
+    const actions = audit!.map((r) => r.action).filter((a) => lifecycle.has(a));
     expect(actions).toEqual([
       "check_out",      // lock acquired for v1 edit
       "lock_released",  // pdm.check_in releases the v1 lock
