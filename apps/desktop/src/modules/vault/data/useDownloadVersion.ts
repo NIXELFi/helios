@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import { writeFile, mkdir, rename } from "@tauri-apps/plugin-fs";
+import { writeFile, mkdir, rename, remove } from "@tauri-apps/plugin-fs";
 import { gunzipIfNeeded, isGzipped } from "./compression";
 
 /** Hex sha256 of a byte buffer — used to verify download integrity before
@@ -140,13 +140,25 @@ export async function downloadVersionOnce(
       // Atomic write: stage the verified bytes at a sibling temp path, then
       // rename onto the real destination. A rename within the same directory
       // is atomic on the local filesystems we target, so a torn/interrupted
-      // write (crash, concurrent writer, abort mid-write) can only ever leave
-      // a stale ".part" file — never a half-written file at the real path that
-      // a reader / sha-match would treat as valid. We do the verify BEFORE the
-      // write above, so the temp file only ever holds correct bytes.
-      const tmpPath = `${destPath}.part`;
-      await writeFile(tmpPath, arr);
-      await rename(tmpPath, destPath);
+      // write (crash, abort mid-write) can only ever leave a stale ".part"
+      // file — never a half-written file at the real path that a reader /
+      // sha-match would treat as valid. We do the verify BEFORE the write
+      // above, so the temp file only ever holds correct bytes.
+      //
+      // The temp name carries a random UUID so two concurrent writers to the
+      // SAME dest (a retry racing the original, or two callers) stage to
+      // distinct files instead of clobbering one shared `${dest}.part` and
+      // corrupting each other's rename (PART-FILES). On any write/rename
+      // failure we best-effort remove() the temp so an orphaned `.part` can't
+      // accumulate (the local scan would otherwise surface it as a candidate).
+      const tmpPath = `${destPath}.${crypto.randomUUID()}.part`;
+      try {
+        await writeFile(tmpPath, arr);
+        await rename(tmpPath, destPath);
+      } catch (writeErr) {
+        try { await remove(tmpPath); } catch { /* best-effort; temp may not exist */ }
+        throw writeErr;
+      }
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

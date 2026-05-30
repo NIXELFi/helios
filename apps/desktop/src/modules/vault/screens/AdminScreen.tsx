@@ -108,7 +108,6 @@ export function AdminScreen() {
                   isOwner={isOwner}
                   isAdmin={isAdmin}
                   busy={pendingId === u.user_id}
-                  anyBusy={pendingId !== null}
                   onSetRole={handleSetRole}
                   onRevoke={(user) => setConfirmRevoke(user)}
                 />
@@ -159,6 +158,10 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
   const [err, setErr] = useState<string | null>(null);
   // Subteam pending removal awaiting confirmation.
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null);
+  // Which subteam id has an in-flight remove. `manage.removing` is a single
+  // shared flag that would disable EVERY ✕ during any one removal; tracking the
+  // targeted id keeps the other ✕ buttons clickable (per-row, like UserRow).
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -172,9 +175,11 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
 
   async function remove(id: string) {
     setErr(null);
+    setRemovingId(id);
     const { ok, error } = await manage.remove(id);
     if (!ok) setErr(error?.message ?? "Failed to remove subteam.");
     else refetch();
+    setRemovingId(null);
   }
 
   return (
@@ -195,7 +200,7 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
                 aria-label={`Remove ${s.name}`}
                 title={`Remove ${s.name}`}
                 onClick={() => setConfirmRemove({ id: s.id, name: s.name })}
-                disabled={manage.removing}
+                disabled={removingId === s.id}
                 className="text-[10px] text-helios-dim hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
               >✕</button>
             )}
@@ -253,11 +258,10 @@ function UserRow(props: {
   isOwner: boolean;
   isAdmin: boolean;
   busy: boolean;
-  anyBusy: boolean;
   onSetRole: (u: VaultUser, role: Exclude<VaultRole, "owner">) => void;
   onRevoke: (u: VaultUser) => void;
 }) {
-  const { u, isMe, isOwner, isAdmin, busy, anyBusy, onSetRole, onRevoke } = props;
+  const { u, isMe, isOwner, isAdmin, busy, onSetRole, onRevoke } = props;
 
   // Editing rules (mirror the server RPCs):
   //  - your own row: never editable here (prevents self-lockout footguns).
@@ -304,7 +308,9 @@ function UserRow(props: {
           <select
             aria-label={`Set role for ${u.email ?? u.user_id}`}
             value={u.role ?? ""}
-            disabled={!editable || anyBusy}
+            // Disable only THIS row while ITS own mutation is in flight (busy),
+            // not every row during any single mutation (the old anyBusy flag).
+            disabled={!editable || busy}
             title={!editable ? lockReason : undefined}
             onChange={(e) => {
               const v = e.target.value as Exclude<VaultRole, "owner">;
@@ -323,7 +329,7 @@ function UserRow(props: {
           <button
             type="button"
             onClick={() => onRevoke(u)}
-            disabled={!editable || u.role === null || anyBusy}
+            disabled={!editable || u.role === null || busy}
             className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
             title={
               !editable ? lockReason

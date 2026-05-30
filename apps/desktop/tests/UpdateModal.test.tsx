@@ -114,4 +114,69 @@ describe("<UpdateModal>", () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
+
+  // MODAL-ESC: Escape must not cascade to a sibling window keydown listener.
+  it("Escape does not fire a sibling window keydown listener when idle (stopImmediatePropagation)", () => {
+    const { onClose } = setup(availableState);
+    const sibling = vi.fn();
+    window.addEventListener("keydown", sibling);
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", sibling);
+    }
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(sibling).not.toHaveBeenCalled();
+  });
+
+  // install-fail-silent: a failed install flips the updater to `offline`.
+  // Without installAttempted the modal would unmount silently; with it the
+  // modal stays open and surfaces the error + a retry.
+  it("renders nothing for `offline` when no install was attempted", () => {
+    const { container } = render(
+      <UpdateModal
+        state={{ kind: "offline", error: "network down" }}
+        playbackBlocked={false}
+        onInstall={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps an error + retry visible when offline was reached via an install attempt (install-fail-silent)", () => {
+    const onRetry = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <UpdateModal
+        state={{ kind: "offline", error: "install bundle verification failed" }}
+        playbackBlocked={false}
+        installAttempted
+        onInstall={() => {}}
+        onRetry={onRetry}
+        onClose={onClose}
+      />,
+    );
+    // The modal is still on screen (not silently unmounted).
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/update failed/i)).toBeInTheDocument();
+    // The actual error is surfaced.
+    expect(screen.getByRole("alert")).toHaveTextContent(/install bundle verification failed/i);
+    // A retry affordance is present and wired.
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  // formatReleaseDate: a YYYY-MM-DD date must render as that LOCAL calendar
+  // day, not shift back a day west of UTC (the old `new Date("YYYY-MM-DD")`
+  // parsed as UTC midnight then rendered local).
+  it("renders the release date as the local calendar day (no UTC off-by-one)", () => {
+    setup({ kind: "available", update: { ...update, date: "2026-05-20" } });
+    // Expected = the date built from explicit local components, formatted the
+    // same way the modal does. This is timezone-independent and pins the fix.
+    const expected = new Date(2026, 4, 20).toLocaleDateString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+    });
+    expect(screen.getByText(`Released ${expected}`)).toBeInTheDocument();
+  });
 });

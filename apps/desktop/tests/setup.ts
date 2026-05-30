@@ -33,6 +33,17 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
 }
 
+// jsdom does not implement URL.createObjectURL / revokeObjectURL. maplibre-gl
+// (pulled in transitively via @helios/widgets' GPS Track widget) calls it at
+// import time and throws without it, so any test that imports App / widget code
+// would crash on collection. Stub no-ops.
+if (typeof URL.createObjectURL === "undefined") {
+  (URL as unknown as { createObjectURL: () => string }).createObjectURL = () => "blob:stub";
+}
+if (typeof URL.revokeObjectURL === "undefined") {
+  (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = () => {};
+}
+
 // jsdom does not implement Path2D — uPlot's points renderer constructs one.
 if (typeof (globalThis as { Path2D?: unknown }).Path2D === "undefined") {
   class Path2DStub {

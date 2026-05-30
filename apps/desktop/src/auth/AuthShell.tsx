@@ -133,18 +133,25 @@ export function useHeliosAuth(): HeliosAuthState {
 export function useMyRole(): string | null {
   const client = useSupabaseClientOrNull();
   const user = useUser();
+  // Key on the user's id, NOT the user object. onAuthStateChange hands us a
+  // fresh `user` object on every benign event (incl. the hourly
+  // TOKEN_REFRESHED), and depending on `user` would reset + refetch the role
+  // each time — making the sidebar role tag blink. Keying on the id means we
+  // only clear + refetch when the signed-in identity (or the client) actually
+  // changes.
+  const userId = user?.id ?? null;
   const [role, setRole] = useState<string | null>(null);
   useEffect(() => {
     // Clear any previously-resolved role up front so the prior user's role
-    // doesn't linger on screen during the in-flight window after the user
+    // doesn't linger on screen during the in-flight window after the user id
     // (or client) changes.
     setRole(null);
-    if (!client || !user) return;
+    if (!client || !userId) return;
     let on = true;
     (async () => {
       const { data, error } = await (client.from("user_roles") as any)
         .select("role")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
       if (!on) return;
       if (error) {
@@ -156,7 +163,7 @@ export function useMyRole(): string | null {
       setRole((data?.role as string) ?? null);
     })();
     return () => { on = false; };
-  }, [client, user]);
+  }, [client, userId]);
   return role;
 }
 

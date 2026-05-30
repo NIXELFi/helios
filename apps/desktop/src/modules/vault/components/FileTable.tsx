@@ -70,11 +70,12 @@ interface RowStateInfo {
   glyph?: string;
 }
 
-// Shared status palette — kept in sync with LockBadge / LocalStatusBadge so
-// the whole vault chrome reads consistently (green = good, gold = needs
-// attention, red = locked, neutral = absent). Same hex + opacity values across
-// all three; locked-by-me gets a slightly stronger red fill than
-// locked-by-other so the user can tell at a glance which lock is theirs.
+// The vault status palette. This is now the SINGLE live renderer of vault
+// status — the old LockBadge / LocalStatusBadge components were dead code and
+// were deleted (DEAD-BADGES / V14), so there's no second palette to drift
+// against. green = good, gold = needs attention, red = locked, neutral =
+// absent; locked-by-me gets a slightly stronger red fill than locked-by-other
+// so the user can tell at a glance which lock is theirs.
 const PILL = {
   green: "bg-[#66BB6A]/20 text-[#9CCC65] border-[#66BB6A]/40",
   gold: "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/40",
@@ -268,7 +269,14 @@ export function FileTable({
               role="button"
               tabIndex={0}
               aria-current={isSel ? "page" : undefined}
-              aria-label={f.name}
+              // Name the row via aria-labelledby pointing at the visible file
+              // name span (below) instead of a redundant aria-label string.
+              // This drops the double-announce AND scopes the row's accessible
+              // name to just the file name — without it, a role="button" row
+              // would otherwise absorb the inner action-button labels (Check
+              // In, Get Latest, …) into its own name (FileTable aria-label
+              // a11y smell).
+              aria-labelledby={`file-row-name-${f.id}`}
               onClick={() => onSelect(f.id)}
               onKeyDown={(e) => {
                 // Keyboard parity with the row's click affordance: Enter/Space
@@ -318,7 +326,7 @@ export function FileTable({
               >
                 <div className="flex items-center gap-2">
                   <FileTypeIcon name={f.name} />
-                  <span className="truncate font-mono-num text-[13px]">{f.name}</span>
+                  <span id={`file-row-name-${f.id}`} className="truncate font-mono-num text-[13px]">{f.name}</span>
                 </div>
               </td>
               <td className="px-3 py-2">

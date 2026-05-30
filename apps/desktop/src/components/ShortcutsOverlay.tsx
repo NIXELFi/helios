@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface Shortcut {
   keys: string[];
@@ -61,17 +61,56 @@ interface Props {
  *  bindings themselves live in App.tsx; if you add a new hotkey there,
  *  add the corresponding entry here. */
 export function ShortcutsOverlay({ open, onClose }: Props) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Read onClose via a ref so the open-keyed effect doesn't re-run (and thus
+  // re-capture focus-restore / re-subscribe) when the parent re-renders with a
+  // fresh onClose identity.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Esc-to-close + focus-trap + focus-restore (mirrors the other dialogs).
   useEffect(() => {
     if (!open) return;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    // Focus the first focusable (the Close button) so keyboard users land in.
+    dialogRef.current?.querySelector<HTMLElement>(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        // stopImmediatePropagation so a stacked window Escape handler (or the
+        // app-level `?`/shortcuts handler) doesn't ALSO fire on this keypress.
         e.preventDefault();
-        onClose();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onCloseRef.current();
+      } else if (e.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusable = root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !root.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreTo?.focus?.();
+    };
+    // Keyed on `open` only; onClose is read via onCloseRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
@@ -84,13 +123,16 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="w-[560px] max-w-[90vw] bg-helios-panel border border-helios-line rounded-md shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
           <span className="text-xs uppercase tracking-wider text-asu-gold">Keyboard shortcuts</span>
           <button
+            type="button"
             aria-label="Close"
+            title="Close"
             onClick={onClose}
             className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-base rounded-sm"
           >×</button>

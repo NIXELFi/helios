@@ -136,11 +136,46 @@ describe("CommandPalette component", () => {
     for (let i = 30; i < 40; i++) expect(runs[i]).not.toHaveBeenCalled();
   });
 
-  it("L10 — footer count reflects the shown (capped) row count, not the full filtered length", () => {
+  it("footer reflects the TOTAL filtered count when capped, while only 30 rows render", () => {
     const actions: PaletteAction[] = Array.from({ length: 40 }, (_, i) => action(`a${i}`, `Action ${i}`));
     render(<CommandPalette open onClose={() => {}} actions={actions} />);
-    // 30 shown, so footer says "30 matches" (capped), not "40".
-    expect(screen.getByText(/30 matches/)).toBeInTheDocument();
-    expect(screen.queryByText(/40 matches/)).toBeNull();
+    // Only 30 rows render…
+    expect(screen.getAllByRole("option")).toHaveLength(30);
+    // …but the footer tells the user there are 40 in total ("showing 30 of 40").
+    expect(screen.getByText(/showing 30 of 40/i)).toBeInTheDocument();
+  });
+
+  it("footer shows a plain match count when nothing is capped", () => {
+    const actions: PaletteAction[] = [action("a", "Alpha"), action("b", "Bravo")];
+    render(<CommandPalette open onClose={() => {}} actions={actions} />);
+    expect(screen.getByText(/2 matches/)).toBeInTheDocument();
+    expect(screen.queryByText(/showing/i)).toBeNull();
+  });
+
+  it("footer is singular for a single match", () => {
+    render(<CommandPalette open onClose={() => {}} actions={[action("a", "Alpha")]} />);
+    expect(screen.getByText(/^1 match$/)).toBeInTheDocument();
+  });
+
+  // CommandPalette Tab — Tab/Shift+Tab cycle within the dialog (focus-trap),
+  // mirroring the other modals. With a single focusable (the filter input,
+  // which is both first and last), the trap preventDefaults the Tab and keeps
+  // focus inside rather than letting it escape to the document body.
+  it("traps Tab focus within the dialog (preventDefault + focus stays inside)", () => {
+    render(<CommandPalette open onClose={() => {}} actions={[action("a", "Alpha")]} />);
+    const input = screen.getByLabelText("Filter commands");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const fwd = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    act(() => { window.dispatchEvent(fwd); });
+    // The trap handled Tab (prevented the default tab-out) and kept focus in.
+    expect(fwd.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(input);
+
+    const back = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    act(() => { window.dispatchEvent(back); });
+    expect(back.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(input);
   });
 });

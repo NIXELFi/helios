@@ -46,16 +46,29 @@ export function MathChannelsModal({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // X2 — Escape-to-close + focus-trap + focus-restore (mirrors ConfirmDialog).
-  // Suppressed while the in-app delete confirm is open so its own Escape wins.
+  // The trap/Escape are suppressed while the in-app delete confirm is open so
+  // its own Escape wins.
   const trapActive = pendingDelete === null;
+  // MathChannelsModal focus recapture — `onClose` is a fresh closure each parent
+  // render and `trapActive` toggles whenever the nested delete-confirm opens.
+  // Read both through refs so the keydown effect can stay mount-only ([]):
+  // otherwise the effect re-runs on every parent render and whenever the confirm
+  // toggles, recapturing `restoreTo` (the focus-restore target) from the wrong
+  // moment and re-stealing focus.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const trapActiveRef = useRef(trapActive);
+  trapActiveRef.current = trapActive;
   useEffect(() => {
-    if (!trapActive) return;
+    // Captured once on mount: the element to restore focus to on unmount.
     const restoreTo = document.activeElement as HTMLElement | null;
     function onKey(e: KeyboardEvent) {
+      // While the delete-confirm is open, let ITS handler own the keyboard.
+      if (!trapActiveRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       } else if (e.key === "Tab") {
         const root = dialogRef.current;
         if (!root) return;
@@ -80,7 +93,10 @@ export function MathChannelsModal({
       window.removeEventListener("keydown", onKey);
       restoreTo?.focus?.();
     };
-  }, [onClose, trapActive]);
+    // Mount-only: onClose + trapActive read via refs so a parent re-render or a
+    // confirm toggle doesn't recapture restoreTo / re-subscribe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const availableSet = useMemo(() => {
     // Both an exact-id set and a normalized lookup so the modal's unknown

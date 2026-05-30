@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { FolderTree } from "../../src/modules/vault/components/FolderTree";
 import type { Folder, VaultFile } from "../../src/modules/vault/data/types";
@@ -88,6 +88,56 @@ describe("<FolderTree>", () => {
       fireEvent.keyDown(screen.getByRole("button", { name: /collapse chassis/i }), { key: " " });
       expect(screen.queryByRole("button", { name: /frame/i })).not.toBeInTheDocument();
     });
+  });
+
+  // MARQUEE-LEAK: starting a marquee drag adds window mousemove/mouseup
+  // listeners that the old code only removed in onUp. Unmounting mid-drag (e.g.
+  // the user switches screens while dragging) leaked them AND let a later
+  // mousemove call setMarquee on an unmounted component. The fix is an effect
+  // cleanup that tears down any active drag listeners on unmount.
+  it("removes window drag listeners on unmount mid-drag (no leak / setState-after-unmount)", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const files: VaultFile[] = [
+      { id: "x1", vault_id: "v", folder_id: null, name: "a.sldprt", latest_version_id: null, created_at: "x" },
+    ];
+    const { container, unmount } = render(
+      <FolderTree
+        folders={folders}
+        files={files}
+        selected={null}
+        onSelect={() => {}}
+        treeSelection={{ files: new Set(), folders: new Set() }}
+        onTreeSelectionChange={() => {}}
+      />,
+    );
+    // Begin a marquee: mousedown on the container whitespace, then move past
+    // the >4px threshold so the drag (and its window listeners) is live.
+    const root = container.firstChild as HTMLElement;
+    fireEvent.mouseDown(root, { button: 0, clientX: 0, clientY: 0 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 50, clientY: 50 }));
+    });
+    const addedMove = addSpy.mock.calls.filter((c) => c[0] === "mousemove").map((c) => c[1]);
+    const addedUp = addSpy.mock.calls.filter((c) => c[0] === "mouseup").map((c) => c[1]);
+    expect(addedMove.length).toBeGreaterThan(0);
+
+    // Unmount while the drag is still active.
+    unmount();
+
+    // The exact move + up handlers added for the drag must have been removed.
+    const removedMove = removeSpy.mock.calls.filter((c) => c[0] === "mousemove").map((c) => c[1]);
+    const removedUp = removeSpy.mock.calls.filter((c) => c[0] === "mouseup").map((c) => c[1]);
+    for (const fn of addedMove) expect(removedMove).toContain(fn);
+    for (const fn of addedUp) expect(removedUp).toContain(fn);
+
+    // A post-unmount mousemove must not throw (listener is gone; no setState).
+    expect(() => {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 99, clientY: 99 }));
+    }).not.toThrow();
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
   });
 
   // V11: reset the shift-select anchor when the folder set changes (vault

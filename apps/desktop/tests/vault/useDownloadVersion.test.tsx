@@ -9,7 +9,12 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
+  remove: vi.fn().mockResolvedValue(undefined),
 }));
+
+// Deterministic UUID so tests can assert the exact temp path the unique-name
+// scheme produces (PART-FILES). Real crypto.randomUUID stays unmocked in prod.
+const FIXED_UUID = "11111111-2222-3333-4444-555555555555";
 
 const fs = await import("@tauri-apps/plugin-fs");
 
@@ -65,11 +70,16 @@ describe("useDownloadVersion", () => {
     vi.mocked(fs.writeFile).mockClear();
     vi.mocked(fs.mkdir).mockClear();
     vi.mocked(fs.rename).mockClear();
+    vi.mocked(fs.remove).mockClear();
     vi.mocked(fs.rename).mockResolvedValue(undefined);
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fs.remove).mockResolvedValue(undefined);
+    // Pin crypto.randomUUID so the unique temp path is deterministic in tests.
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(FIXED_UUID);
   });
+  afterEach(() => { vi.mocked(crypto.randomUUID).mockRestore?.(); });
 
-  it("downloads from Storage, writes to a .part temp file, then renames to the dest (atomic)", async () => {
+  it("downloads from Storage, writes to a UNIQUE .part temp file, then renames to the dest (atomic)", async () => {
     // jsdom's Blob.arrayBuffer is available in newer versions; fall back to
     // constructing a Blob with an explicit arrayBuffer polyfill if needed.
     const bytes = new Uint8Array([1, 2, 3]);
@@ -84,17 +94,32 @@ describe("useDownloadVersion", () => {
     await act(async () => { ok = await result.current.run(sha, "/Users/me/Vault/parts/x.sldprt"); });
     expect(ok).toBe(true);
     expect(fs.mkdir).toHaveBeenCalledWith("/Users/me/Vault/parts", { recursive: true });
-    // Bytes land at a temp path first so an interrupted/torn write never
-    // corrupts the real file...
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      "/Users/me/Vault/parts/x.sldprt.part",
-      expect.any(Uint8Array),
-    );
+    const tmp = `/Users/me/Vault/parts/x.sldprt.${FIXED_UUID}.part`;
+    // Bytes land at a UNIQUE temp path first so a torn write never corrupts the
+    // real file AND two concurrent writers to the same dest never collide.
+    expect(fs.writeFile).toHaveBeenCalledWith(tmp, expect.any(Uint8Array));
     // ...then an atomic rename promotes it to the real destination.
-    expect(fs.rename).toHaveBeenCalledWith(
-      "/Users/me/Vault/parts/x.sldprt.part",
-      "/Users/me/Vault/parts/x.sldprt",
-    );
+    expect(fs.rename).toHaveBeenCalledWith(tmp, "/Users/me/Vault/parts/x.sldprt");
+    // The dest itself is never written directly.
+    expect(fs.writeFile).not.toHaveBeenCalledWith("/Users/me/Vault/parts/x.sldprt", expect.anything());
+  });
+
+  it("uses a DIFFERENT temp name per call so concurrent writers to the same dest can't collide", async () => {
+    // Two parallel downloads of the same dest (e.g. a retry racing the original,
+    // or two callers) must stage to distinct temp paths. With a fixed `.part`
+    // name they'd write the same file and the renames would corrupt each other.
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sha = await sha256Hex(bytes);
+    vi.mocked(crypto.randomUUID)
+      .mockReturnValueOnce("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" as any)
+      .mockReturnValueOnce("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" as any);
+    const c = mockClient({ data: makeBlob(bytes), error: null });
+    await downloadVersionOnce(c, sha, "/tmp/same.bin");
+    await downloadVersionOnce(c, sha, "/tmp/same.bin");
+    const tmpPaths = vi.mocked(fs.writeFile).mock.calls.map((c) => c[0]);
+    expect(tmpPaths[0]).not.toBe(tmpPaths[1]);
+    expect(tmpPaths[0]).toContain("/tmp/same.bin.");
+    expect(tmpPaths[1]).toContain("/tmp/same.bin.");
   });
 
   it("surfaces errors when storage download fails", async () => {
@@ -210,13 +235,14 @@ describe("useDownloadVersion", () => {
       const c = mockClient({ data: makeBlob(rawBytes), error: null });
       const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
       expect(result).toEqual({ ok: true });
+      const tmp = `/tmp/x.bin.${FIXED_UUID}.part`;
       // writeFile must receive the RAW bytes (not the gunzip output), written
       // to the temp path then promoted via rename.
       expect(fs.writeFile).toHaveBeenCalledTimes(1);
-      expect(fs.writeFile).toHaveBeenCalledWith("/tmp/x.bin.part", expect.any(Uint8Array));
+      expect(fs.writeFile).toHaveBeenCalledWith(tmp, expect.any(Uint8Array));
       const writtenArg = vi.mocked(fs.writeFile).mock.calls[0]![1] as Uint8Array;
       expect(Array.from(writtenArg)).toEqual(Array.from(rawBytes));
-      expect(fs.rename).toHaveBeenCalledWith("/tmp/x.bin.part", "/tmp/x.bin");
+      expect(fs.rename).toHaveBeenCalledWith(tmp, "/tmp/x.bin");
     });
 
     it("does not leave a corrupt file at the dest if the rename fails after a temp write", async () => {
@@ -231,9 +257,49 @@ describe("useDownloadVersion", () => {
       const c = mockClient({ data: makeBlob(bytes), error: null });
       const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
       expect(result.ok).toBe(false);
+      const tmp = `/tmp/x.bin.${FIXED_UUID}.part`;
       // The write went to the temp path only; the dest was never written.
-      expect(fs.writeFile).toHaveBeenCalledWith("/tmp/x.bin.part", expect.any(Uint8Array));
+      expect(fs.writeFile).toHaveBeenCalledWith(tmp, expect.any(Uint8Array));
       expect(fs.writeFile).not.toHaveBeenCalledWith("/tmp/x.bin", expect.anything());
+    });
+
+    it("removes the orphaned temp file when the rename fails (no .part leak)", async () => {
+      // PART-FILES: on a rename failure the staged temp file would otherwise
+      // linger forever — and the local-folder scan (no .part filter on its
+      // side here) would surface it as an "Add to Vault" candidate. Best-effort
+      // remove() the temp on failure so orphans don't accumulate.
+      const bytes = new Uint8Array([5, 6, 7]);
+      const sha = await sha256Hex(bytes);
+      vi.mocked(fs.rename).mockRejectedValueOnce(new Error("rename failed"));
+      const c = mockClient({ data: makeBlob(bytes), error: null });
+      const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
+      expect(result.ok).toBe(false);
+      expect(fs.remove).toHaveBeenCalledWith(`/tmp/x.bin.${FIXED_UUID}.part`);
+    });
+
+    it("removes the orphaned temp file when the temp writeFile itself fails", async () => {
+      // A failed write can still leave a partial temp file on some platforms;
+      // clean it up too so a half-written .part never lingers.
+      const bytes = new Uint8Array([5, 6, 7]);
+      const sha = await sha256Hex(bytes);
+      vi.mocked(fs.writeFile).mockRejectedValueOnce(new Error("disk full"));
+      const c = mockClient({ data: makeBlob(bytes), error: null });
+      const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
+      expect(result.ok).toBe(false);
+      expect(fs.remove).toHaveBeenCalledWith(`/tmp/x.bin.${FIXED_UUID}.part`);
+    });
+
+    it("a failing best-effort temp cleanup does not mask the original error", async () => {
+      // remove() throwing (temp already gone, permission) must not turn a
+      // download failure into an unhandled rejection.
+      const bytes = new Uint8Array([5, 6, 7]);
+      const sha = await sha256Hex(bytes);
+      vi.mocked(fs.rename).mockRejectedValueOnce(new Error("rename failed"));
+      vi.mocked(fs.remove).mockRejectedValueOnce(new Error("remove failed"));
+      const c = mockClient({ data: makeBlob(bytes), error: null });
+      const result = await downloadVersionOnce(c, sha, "/tmp/x.bin");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain("rename failed");
     });
 
     it("accepts both upper and lowercase hex shas (canonicalizes to lowercase)", async () => {

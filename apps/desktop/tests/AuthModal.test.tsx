@@ -17,6 +17,9 @@ const updateUser = vi.fn();
 // When true, createSupabaseClient throws so AuthShell yields a null client —
 // used to exercise the "Connection failed" inline error (S7).
 let clientShouldThrow = false;
+// When true, the subteam-picker query (pdm.subteams) resolves with an error —
+// used to exercise SUBTEAM-FETCH-ERR (the picker must not silently dead-end).
+let subteamsShouldError = false;
 
 vi.mock("@helios/auth", async () => {
   const actual = await vi.importActual<typeof import("@helios/auth")>("@helios/auth");
@@ -37,10 +40,13 @@ vi.mock("@helios/auth", async () => {
         // The signup step loads the subteam picker from pdm.subteams.
         from: () => ({
           select: () => ({
-            order: () => Promise.resolve({
-              data: [{ id: "st1", name: "Engine", sort_order: 1 }],
-              error: null,
-            }),
+            order: () =>
+              subteamsShouldError
+                ? Promise.resolve({ data: null, error: { message: "permission denied" } })
+                : Promise.resolve({
+                    data: [{ id: "st1", name: "Engine", sort_order: 1 }],
+                    error: null,
+                  }),
           }),
         }),
       } as any);
@@ -61,6 +67,7 @@ describe("<AuthModal>", () => {
   beforeEach(() => {
     clearConnection();
     clientShouldThrow = false;
+    subteamsShouldError = false;
     signInWithPassword.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
     signUp.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
     resetPasswordForEmail.mockReset().mockResolvedValue({ data: {}, error: null });
@@ -288,6 +295,19 @@ describe("<AuthModal>", () => {
     expect(screen.queryByRole("button", { name: /^sign in$/i })).toBeNull();
   });
 
+  // ── SUBTEAM-FETCH-ERR: subteam picker surfaces a load failure ─────────
+  // A swallowed query error left the picker empty and dead-ended sign-up with
+  // no explanation. The failure must now surface an inline error.
+  it("surfaces an inline error when the subteam list fails to load (SUBTEAM-FETCH-ERR)", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    subteamsShouldError = true;
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    // An inline alert explains the picker couldn't load, instead of an empty
+    // picker silently dead-ending the flow.
+    expect(await screen.findByText(/couldn't load subteams/i)).toBeInTheDocument();
+  });
+
   // ── X2: modal a11y — Escape closes ────────────────────────────────────
   it("closes on Escape", () => {
     saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
@@ -295,5 +315,27 @@ describe("<AuthModal>", () => {
     renderModal({ onClose });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // ── MODAL-ESC: Escape must NOT cascade to sibling window listeners ─────
+  // The modal and any background window keydown (e.g. BrowseScreen's
+  // selection-clear, or a stacked dialog) both live on `window`. Plain
+  // stopPropagation does NOT stop a sibling window listener — only
+  // stopImmediatePropagation does. Assert the sibling is NOT invoked.
+  it("Escape does not fire a sibling window keydown listener (stopImmediatePropagation)", () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    // Registered AFTER the modal's effect listener, so it would run next in the
+    // window keydown chain unless the modal halts immediate propagation.
+    const sibling = vi.fn();
+    window.addEventListener("keydown", sibling);
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", sibling);
+    }
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(sibling).not.toHaveBeenCalled();
   });
 });

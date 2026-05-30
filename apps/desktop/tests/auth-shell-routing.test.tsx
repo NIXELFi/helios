@@ -195,4 +195,46 @@ describe("useMyRole role reset on user change (S4)", () => {
     act(() => resolveU2?.({ data: { role: "viewer" }, error: null }));
     await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("viewer"));
   });
+
+  // ROLE-FLICKER: onAuthStateChange hands a NEW user object on benign events
+  // (incl. the hourly TOKEN_REFRESHED) with the SAME id. The role must NOT be
+  // reset/refetched on those — keying on user.id means the role tag doesn't
+  // blink. We assert both: the role never drops back to "none", and the fetch
+  // does not fire a second time.
+  it("does NOT reset or refetch role on a token refresh for the same user id", async () => {
+    localStorage.setItem(
+      "helios:supabase-connection",
+      JSON.stringify({ url: "https://example.supabase.co", anonKey: "anon-key" }),
+    );
+
+    let fetches = 0;
+    roleResolver = () => {
+      fetches += 1;
+      return Promise.resolve({ data: { role: "admin" }, error: null });
+    };
+
+    render(
+      <AuthShell>
+        <RoleProbe />
+      </AuthShell>,
+    );
+    await waitFor(() => expect(authCallback).not.toBeNull());
+
+    // Initial sign-in resolves to "admin".
+    act(() => authCallback!("SIGNED_IN", { user: { id: "u1", user_metadata: {} } }));
+    await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("admin"));
+    expect(fetches).toBe(1);
+
+    // A TOKEN_REFRESHED with a brand-new user object (same id) must be a no-op
+    // for the role: no reset to "none", no second fetch.
+    act(() =>
+      authCallback!("TOKEN_REFRESHED", {
+        user: { id: "u1", user_metadata: { display_name: "changed" } },
+      }),
+    );
+    // Give any (incorrect) reset effect a tick to run.
+    await Promise.resolve();
+    expect(screen.getByTestId("role")).toHaveTextContent("admin");
+    expect(fetches).toBe(1);
+  });
 });

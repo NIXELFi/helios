@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -37,7 +37,9 @@ function mockResolvedClient(
   folders: any[],
   isAdmin = false,
   users: any[] | null = null,
+  extra: { filesHang?: boolean; filesError?: { message: string }; foldersError?: { message: string } } = {},
 ): SupabaseClient {
+  const { filesHang = false, filesError, foldersError } = extra;
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
@@ -66,7 +68,10 @@ function mockResolvedClient(
           select: () => ({
             eq: () => ({
               order: () => {
-                const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: folders.slice(from, to + 1), error: null }) };
+                const node: any = { order: () => node, range: (from: number, to: number) =>
+                  foldersError
+                    ? Promise.resolve({ data: null, error: foldersError })
+                    : Promise.resolve({ data: folders.slice(from, to + 1), error: null }) };
                 return node;
               },
             }),
@@ -78,7 +83,12 @@ function mockResolvedClient(
           select: () => ({
             eq: () => ({
               order: () => {
-                const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: files.slice(from, to + 1), error: null }) };
+                const node: any = { order: () => node, range: (from: number, to: number) =>
+                  filesHang
+                    ? new Promise(() => {})
+                    : filesError
+                      ? Promise.resolve({ data: null, error: filesError })
+                      : Promise.resolve({ data: files.slice(from, to + 1), error: null }) };
                 return node;
               },
             }),
@@ -154,19 +164,15 @@ describe("<WhoHasWhatScreen>", () => {
     expect(screen.queryByRole("button", { name: /force unlock/i })).toBeNull();
   });
 
-  it("does NOT blank when locks exist but their file_id isn't in the active vault's file list", async () => {
+  it("does NOT blank while files are still LOADING (keeps locks until load resolves)", async () => {
     // Repro of the bug surfaced during manual smoke-testing on 2026-05-25:
     // useLocks is cross-vault (no vault_id filter), useAllFiles is scoped to
-    // the active vault. If a lock's file_id isn't in the loaded files list —
-    // either because it belongs to a different vault, the file was deleted,
-    // or files are still loading — the screen used to filter the lock out
-    // entirely, producing "shows for 2 seconds then goes blank" once
-    // useAllFiles resolved.
-    //
-    // Correct behavior: render the lock anyway, fall back to a short file_id
-    // display, so the user still sees that something is checked out.
-    const folders: any[] = []; // active vault has no folders
-    const files: any[] = [];   // active vault has no files
+    // the active vault. While files are still LOADING we must keep every lock
+    // so the screen doesn't "show for 2 seconds then go blank" once useAllFiles
+    // resolves. (Distinct from the loaded-empty case below, which DOES filter.)
+    // We model loading by hanging the files query so it never resolves.
+    const folders: any[] = [];
+    const files: any[] = [];
     const locks = [
       {
         id: "l1",
@@ -178,14 +184,27 @@ describe("<WhoHasWhatScreen>", () => {
       },
     ];
     render(
-      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders)}>
+      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders, false, null, { filesHang: true })}>
         <WhoHasWhatScreen />
       </SupabaseAuthProvider>,
     );
-    // Row renders with shortId fallback for BOTH file and user.
+    // Row renders with shortId fallback for BOTH file and user while loading.
     expect(await screen.findByText("FILEAAAA")).toBeInTheDocument();
     expect(screen.getByText("USERBBBB")).toBeInTheDocument();
     expect(screen.queryByText(/nothing checked out/i)).toBeNull();
+  });
+
+  it("LOW: surfaces a files query error (paths no longer silently degrade)", async () => {
+    const folders = [{ id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" }];
+    const locks = [
+      { id: "l1", file_id: "file-1", user_id: "u-a", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockResolvedClient(locks, [], folders, false, null, { filesError: { message: "files boom" } })}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText(/files boom/i)).toBeInTheDocument());
   });
 
   it("resolves file_id → human-readable path when the vault context is loaded", async () => {
@@ -252,6 +271,100 @@ describe("<WhoHasWhatScreen>", () => {
     );
     expect(await screen.findByText("root/mine.sldprt")).toBeInTheDocument();
     // The cross-vault lock's short file id must NOT appear.
+    expect(screen.queryByText("OTHERVAU")).toBeNull();
+  });
+
+  it("C1-MISS: Force unlock opens an in-app reason modal instead of window.prompt", async () => {
+    // window.prompt is a no-op in the Tauri webview — it returns null, so the
+    // old force-unlock click was DEAD. The button must now open an in-app
+    // modal that collects the reason. Assert prompt is never touched.
+    const promptSpy = vi.spyOn(window, "prompt");
+    const folders = [{ id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" }];
+    const files = [{ id: "file-1", vault_id: "v1", folder_id: "f-root", name: "a.sldprt", latest_version_id: null, created_at: "x" }];
+    const locks = [
+      { id: "l1", file_id: "file-1", user_id: "u-a", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders, true)}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    const btn = await screen.findByRole("button", { name: /force unlock/i });
+    await act(async () => { fireEvent.click(btn); });
+    // An in-app dialog appears; window.prompt was never called.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(promptSpy).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it("C1-MISS: confirming the reason modal calls pdm_force_unlock with the typed reason", async () => {
+    const folders = [{ id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" }];
+    const files = [{ id: "file-1", vault_id: "v1", folder_id: "f-root", name: "a.sldprt", latest_version_id: null, created_at: "x" }];
+    const locks = [
+      { id: "l1", file_id: "file-1", user_id: "u-a", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    const c = mockResolvedClient(locks, files, folders, true);
+    const rpcSpy = vi.spyOn(c, "rpc");
+    render(
+      <SupabaseAuthProvider client={c}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    const btn = await screen.findByRole("button", { name: /force unlock/i });
+    await act(async () => { fireEvent.click(btn); });
+    const dialog = screen.getByRole("dialog");
+    const textbox = within(dialog).getByRole("textbox");
+    await act(async () => { fireEvent.change(textbox, { target: { value: "stale lock, owner on leave" } }); });
+    // Confirm submits the reason (scoped to the dialog — the row button shares
+    // the "Force unlock" label).
+    const confirm = within(dialog).getByRole("button", { name: /^force unlock$/i });
+    await act(async () => { fireEvent.click(confirm); });
+    await waitFor(() =>
+      expect(rpcSpy).toHaveBeenCalledWith("pdm_force_unlock", { p_lock_id: "l1", p_reason: "stale lock, owner on leave" }),
+    );
+  });
+
+  it("C1-MISS: an empty reason does NOT call pdm_force_unlock", async () => {
+    const folders = [{ id: "f-root", vault_id: "v1", parent_id: null, name: "root", created_at: "x" }];
+    const files = [{ id: "file-1", vault_id: "v1", folder_id: "f-root", name: "a.sldprt", latest_version_id: null, created_at: "x" }];
+    const locks = [
+      { id: "l1", file_id: "file-1", user_id: "u-a", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    const c = mockResolvedClient(locks, files, folders, true);
+    const rpcSpy = vi.spyOn(c, "rpc");
+    render(
+      <SupabaseAuthProvider client={c}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    const btn = await screen.findByRole("button", { name: /force unlock/i });
+    await act(async () => { fireEvent.click(btn); });
+    // Confirm with no reason typed → blocked (submit disabled / no-op).
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: /^force unlock$/i });
+    await act(async () => { fireEvent.click(confirm); });
+    expect(rpcSpy).not.toHaveBeenCalledWith("pdm_force_unlock", expect.anything());
+  });
+
+  it("LOW: an active vault with genuinely zero files hides cross-vault locks (loaded-empty ≠ loading)", async () => {
+    // useLocks is cross-vault. The OLD code kept ALL locks whenever `files` was
+    // null OR empty — so a vault that genuinely has no files showed every
+    // cross-vault lock under its header. Distinguish loading (files===null)
+    // from loaded-empty (files===[]) via useAllFiles' `loading`. With files
+    // loaded-empty, a lock whose file_id isn't local must be hidden.
+    const folders: any[] = [];
+    const files: any[] = []; // vault genuinely empty (loaded, not loading)
+    const locks = [
+      { id: "l1", file_id: "OTHERVAULT-FILE", user_id: "u-x", acquired_at: new Date().toISOString(), released_at: null, force_released_by: null },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockResolvedClient(locks, files, folders)}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    // Once files resolve to empty, the cross-vault lock is filtered out and the
+    // empty-state copy shows instead of the foreign lock's short id.
+    await waitFor(() => expect(screen.getByText(/nothing checked out/i)).toBeInTheDocument());
     expect(screen.queryByText("OTHERVAU")).toBeNull();
   });
 

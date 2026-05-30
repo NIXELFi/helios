@@ -20,8 +20,11 @@ export function TabContextMenu(props: TabContextMenuProps) {
   // Refs to the top-level menuitems, in visual order. Used for roving focus
   // (Arrow keys) and to focus the first item on open. The Color item gets a
   // ref so we can return focus to it when the submenu closes.
-  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const colorItemRef = useRef<HTMLButtonElement | null>(null);
+  // The Color row is a non-button container (role=menuitem + tabIndex) so the
+  // submenu's swatch <button>s aren't nested inside a <button> (invalid HTML).
+  // Hence HTMLElement, not HTMLButtonElement, for the top-level item refs.
+  const itemRefs = useRef<Array<HTMLElement | null>>([]);
+  const colorItemRef = useRef<HTMLDivElement | null>(null);
   const swatchRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Close on Escape, outside-click, or window resize. Esc gets stopPropagation
@@ -93,9 +96,9 @@ export function TabContextMenu(props: TabContextMenuProps) {
 
   // Roving focus across the top-level items. Disabled items (Delete when
   // !canDelete) are skipped so focus never lands on a dead control.
-  function focusableTopItems(): HTMLButtonElement[] {
+  function focusableTopItems(): HTMLElement[] {
     return itemRefs.current.filter(
-      (el): el is HTMLButtonElement => !!el && !el.hasAttribute("disabled"),
+      (el): el is HTMLElement => !!el && !el.hasAttribute("disabled"),
     );
   }
   function moveTopFocus(delta: 1 | -1) {
@@ -138,10 +141,14 @@ export function TabContextMenu(props: TabContextMenuProps) {
       e.stopPropagation();
       fire(() => props.onRecolor(palette[i]!));
     } else if (e.key === "ArrowDown") {
+      // TABMENU-ARROWS — stop the event reaching the root menu's roving-focus
+      // handler (moveTopFocus), which would yank focus out to a top-level item.
       e.preventDefault();
+      e.stopPropagation();
       swatchRefs.current[(i + 1) % palette.length]?.focus();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      e.stopPropagation();
       swatchRefs.current[(i - 1 + palette.length) % palette.length]?.focus();
     } else if (e.key === "ArrowLeft") {
       // Back out of the submenu to its parent item.
@@ -176,13 +183,17 @@ export function TabContextMenu(props: TabContextMenuProps) {
       >
         Rename
       </button>
-      <button
-        type="button"
+      {/* TABMENU nested button — the Color row is a div (role=menuitem +
+          tabIndex), NOT a <button>, so the submenu's swatch <button>s below
+          aren't nested inside a <button> (invalid HTML / validateDOMNesting). */}
+      <div
         role="menuitem"
+        tabIndex={-1}
         aria-haspopup="menu"
         aria-expanded={colorOpen}
         ref={(el) => { itemRefs.current[1] = el; colorItemRef.current = el; }}
         className={itemBase + " relative"}
+        onClick={openColorSubmenu}
         onMouseEnter={onColorEnter}
         onMouseLeave={() => setColorOpen(false)}
         onKeyDown={onColorItemKeyDown}
@@ -208,7 +219,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
                 aria-label={`Color ${hex}`}
                 ref={(el) => { swatchRefs.current[i] = el; }}
                 className={itemBase}
-                onClick={() => fire(() => props.onRecolor(hex))}
+                onClick={(e) => { e.stopPropagation(); fire(() => props.onRecolor(hex)); }}
                 onKeyDown={(e) => onSwatchKeyDown(e, i)}
               >
                 <span
@@ -220,7 +231,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
             ))}
           </div>
         )}
-      </button>
+      </div>
       <button
         type="button"
         role="menuitem"

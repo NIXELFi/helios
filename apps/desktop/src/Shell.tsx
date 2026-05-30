@@ -40,7 +40,7 @@ function HeliosShell() {
   // mid-playback regardless of which module is currently visible.
   const [logsPlaying, setLogsPlaying] = useState(false);
 
-  const { user, client } = useHeliosAuth();
+  const { user, client, loading: authLoading } = useHeliosAuth();
   const { disconnect } = useConnection();
   const myRole = useMyRole();
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -50,14 +50,32 @@ function HeliosShell() {
   // Supabase RLS-protected tables on mount, so rendering it without a session
   // would be a bunch of failed queries. CFD and Logs don't depend on auth.
   const vaultEnabled = user !== null;
+  // During the boot getSession() window we don't yet KNOW whether a returning
+  // user is signed in. Don't present the disabled "Sign in to use Vault" state
+  // (it flashes for a signed-in user) and don't bounce off Vault until auth
+  // resolves — gate both on `authLoading`.
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
+  // True once the user has clicked "Install and restart". Used to keep the
+  // UpdateModal visible (with an error + retry) if the install fails and the
+  // updater flips to `offline` — otherwise the modal would silently unmount
+  // mid-install with no explanation. Reset whenever the modal is closed.
+  const [installAttempted, setInstallAttempted] = useState(false);
+
+  // Auto-open the UpdateModal when an update becomes available — BUT not on top
+  // of an already-open AuthModal / ChangePasswordModal. Stacking modals breaks
+  // Escape (one keypress would close both) and is disorienting. If another
+  // modal is open we hold off; the moment it closes (this effect re-runs on the
+  // anotherModalOpen dep) the update modal pops.
+  const anotherModalOpen = authModalOpen || changePwOpen;
   useEffect(() => {
-    if (updater.state.kind === "available") setUpdateModalOpen(true);
-  }, [updater.state.kind]);
+    if (updater.state.kind !== "available") return;
+    if (anotherModalOpen) return;
+    setUpdateModalOpen(true);
+  }, [updater.state.kind, anotherModalOpen]);
 
   // If the user navigates away from Vault (or signs out while on Vault),
   // bounce them to Logs so they don't sit on a forbidden module. Otherwise
@@ -69,6 +87,10 @@ function HeliosShell() {
   // never asked for. Clearing it means Vault only re-mounts on an explicit
   // re-visit (active === "vault").
   useEffect(() => {
+    // Hold off while auth is still resolving — a returning signed-in user is
+    // briefly `user === null` during boot getSession(), and bouncing/dropping
+    // Vault here would flash the forbidden state before their session lands.
+    if (authLoading) return;
     if (vaultEnabled) return;
     if (active === "vault") setActive("logs");
     setVisited((prev) => {
@@ -77,12 +99,16 @@ function HeliosShell() {
       next.delete("vault");
       return next;
     });
-  }, [active, vaultEnabled]);
+  }, [active, vaultEnabled, authLoading]);
 
   function activate(id: ModuleId) {
-    // Vault click while logged out routes to the auth modal instead of
-    // navigating. Other modules navigate normally.
     if (id === "vault" && !vaultEnabled) {
+      // While auth is still resolving we don't yet know if this is a returning
+      // signed-in user; swallow the click rather than prematurely popping the
+      // auth modal in front of them.
+      if (authLoading) return;
+      // Vault click while logged out routes to the auth modal instead of
+      // navigating. Other modules navigate normally.
       setAuthModalOpen(true);
       return;
     }
@@ -132,6 +158,7 @@ function HeliosShell() {
         onDisconnect={() => void handleDisconnect()}
         onChangePassword={() => setChangePwOpen(true)}
         vaultEnabled={vaultEnabled}
+        authLoading={authLoading}
       />
       <main className="relative min-w-0 flex-1">
         {visited.has("logs") && (
@@ -158,8 +185,26 @@ function HeliosShell() {
         <UpdateModal
           state={updater.state}
           playbackBlocked={logsPlaying && active === "logs"}
-          onInstall={() => void updater.installAndRelaunch()}
-          onClose={() => setUpdateModalOpen(false)}
+          // A failed install flips the updater to `offline`; without this the
+          // modal would unmount silently. installAttempted keeps it open so the
+          // modal can surface the error + a retry instead of vanishing.
+          installAttempted={installAttempted}
+          onInstall={() => {
+            setInstallAttempted(true);
+            void updater.installAndRelaunch();
+          }}
+          onRetry={() => {
+            // From `offline` an install can't be re-triggered directly
+            // (installAndRelaunch requires `available`). Recheck to get back to
+            // an installable state and drop the failed flag so the modal flows
+            // normally once the update is re-found.
+            setInstallAttempted(false);
+            updater.recheck();
+          }}
+          onClose={() => {
+            setUpdateModalOpen(false);
+            setInstallAttempted(false);
+          }}
         />
       )}
       <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />

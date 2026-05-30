@@ -95,6 +95,23 @@ describe("ConfirmDialog (confirm mode)", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // ── MODAL-ESC: Escape must NOT cascade to sibling window listeners ─────
+  // ConfirmDialog is shared app-wide; its Escape now uses
+  // stopImmediatePropagation so a background window keydown underneath (e.g.
+  // BrowseScreen's selection-clear) doesn't ALSO fire on the same keypress.
+  it("Escape does not fire a sibling window keydown listener (stopImmediatePropagation)", () => {
+    const { onClose } = setup();
+    const sibling = vi.fn();
+    window.addEventListener("keydown", sibling);
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", sibling);
+    }
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(sibling).not.toHaveBeenCalled();
+  });
+
   it("danger tone applies a red-styled confirm button", () => {
     setup();
     const btn = screen.getByRole("button", { name: /delete/i });

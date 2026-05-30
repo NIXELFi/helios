@@ -72,6 +72,37 @@ describe("fetchAllRows", () => {
     expect(error?.message).toBe("boom");
   });
 
+  it("does NOT duplicate rows when a later page returns MORE rows than the probe", async () => {
+    // PAGINATE-ADVANCE (H11 follow-up): the probe (first response) sets the
+    // effective page size, but the loop advanced `from` by that PROBE size
+    // rather than by the actual rows received. If a later response comes back
+    // LARGER than the probe (e.g. a server that ignores the requested range
+    // upper bound, or a cap that lifts mid-scan), advancing by the smaller
+    // probe re-requests rows already collected → duplicate rows.
+    //
+    // Source: response N starts at `from` and returns however many rows it
+    // likes, ignoring `to`. Page 0 returns 3 (the probe); page 1 returns 5;
+    // page 2 returns the final 2. Total 10 distinct rows. The fix must advance
+    // by each page's real length so the result is 0..9 with no repeats.
+    const allRows = Array.from({ length: 10 }, (_, i) => ({ id: i }));
+    const lengths = [3, 5, 2];
+    let call = 0;
+    const build = () => ({
+      // Deliberately ignore `to` to model a source whose page size exceeds the
+      // probe — the exact condition that made `from += probe` over-read.
+      range: (from: number, _to: number) => {
+        const take = lengths[call] ?? 0;
+        call++;
+        const slice = allRows.slice(from, from + take);
+        return Promise.resolve({ data: slice, error: null });
+      },
+    });
+    const { rows, error } = await fetchAllRows<{ id: number }>(build);
+    expect(error).toBeNull();
+    // Every distinct id exactly once, in order — no duplicates from re-fetch.
+    expect(rows.map((r) => r.id)).toEqual(Array.from({ length: 10 }, (_, i) => i));
+  });
+
   it("throws a clear runaway-guard error if a malicious/buggy source never terminates", async () => {
     // A source that always returns a full page would loop forever without a
     // hard cap. The guard must throw an explicit error instead of hanging.

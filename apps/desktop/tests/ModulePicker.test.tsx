@@ -181,4 +181,54 @@ describe("<ModulePicker>", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(pill).toHaveFocus();
   });
+
+  // USERPILL-TAB: Tab must close the open account menu (it was previously left
+  // orphaned/open behind the newly-focused control).
+  it("closes the account menu on Tab so it isn't left orphaned (USERPILL-TAB)", () => {
+    render(
+      <ModulePicker {...baseProps} active="logs" onSelect={() => {}} userLabel="Nick M." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /nick m\./i }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    const items = screen.getAllByRole("menuitem");
+    // Tab from a menu item closes the menu (default Tab navigation proceeds).
+    fireEvent.keyDown(items[0], { key: "Tab" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  // USERPILL-TAB: focus leaving the whole pill+menu closes it too (trigger
+  // blur / tab-away), not just an explicit Tab keypress inside the menu.
+  it("closes the account menu when focus leaves the component (blur)", () => {
+    render(
+      <>
+        <ModulePicker {...baseProps} active="logs" onSelect={() => {}} userLabel="Nick M." />
+        <button type="button">outside</button>
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /nick m\./i }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    // Blur out of the menu to an element outside the component.
+    const outside = screen.getByRole("button", { name: /outside/i });
+    fireEvent.blur(screen.getAllByRole("menuitem")[0], { relatedTarget: outside });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  // VAULT-GATE-LOADING: while auth is still resolving, Vault must NOT present
+  // the disabled "Sign in to use Vault" state (it would flash for a returning
+  // signed-in user).
+  it("does not show the disabled Vault state while auth is loading (VAULT-GATE-LOADING)", () => {
+    render(
+      <ModulePicker
+        {...baseProps}
+        active="logs"
+        onSelect={() => {}}
+        vaultEnabled={false}
+        authLoading
+      />,
+    );
+    const vaultBtn = screen.getByRole("button", { name: /vault/i });
+    // Not marked disabled, and no "Sign in to use Vault" title flash.
+    expect(vaultBtn).not.toHaveAttribute("aria-disabled", "true");
+    expect(vaultBtn).not.toHaveAttribute("title", "Sign in to use Vault");
+  });
 });

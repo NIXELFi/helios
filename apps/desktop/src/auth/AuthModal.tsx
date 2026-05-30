@@ -47,7 +47,12 @@ function useModalA11y(open: boolean, onClose: () => void) {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        e.stopPropagation();
+        // stopImmediatePropagation (not just stopPropagation): both are
+        // attached to `window`, so plain stopPropagation does NOT stop a
+        // SIBLING window keydown listener (e.g. BrowseScreen's selection-clear
+        // or a stacked dialog). Immediate stop prevents one Escape cascading
+        // into background handlers.
+        e.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
@@ -292,6 +297,11 @@ function CredentialsStep(props: {
   const [displayName, setDisplayName] = useState("");
   const [subteam, setSubteam] = useState("");
   const [subteams, setSubteams] = useState<{ id: string; name: string }[]>([]);
+  // Track the subteam-picker load separately from the form-level error so a
+  // failed fetch surfaces a distinct inline message instead of silently
+  // leaving an empty picker that dead-ends sign-up.
+  const [subteamsLoading, setSubteamsLoading] = useState(false);
+  const [subteamsError, setSubteamsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -307,11 +317,26 @@ function CredentialsStep(props: {
   useEffect(() => {
     if (mode !== "signup") return;
     let on = true;
+    setSubteamsLoading(true);
+    setSubteamsError(null);
     (async () => {
-      const { data } = await (client.from("subteams") as any)
-        .select("id,name,sort_order")
-        .order("sort_order", { ascending: true });
-      if (on && data) setSubteams(data as { id: string; name: string }[]);
+      try {
+        const { data, error } = await (client.from("subteams") as any)
+          .select("id,name,sort_order")
+          .order("sort_order", { ascending: true });
+        if (!on) return;
+        if (error) {
+          // Don't swallow: an empty picker silently dead-ends sign-up. Surface
+          // it so the user knows the list failed to load (and can retry).
+          setSubteamsError(error.message ?? "Couldn't load subteams.");
+          return;
+        }
+        setSubteams((data as { id: string; name: string }[]) ?? []);
+      } catch (e) {
+        if (on) setSubteamsError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (on) setSubteamsLoading(false);
+      }
     })();
     return () => { on = false; };
   }, [mode, client]);
@@ -429,11 +454,18 @@ function CredentialsStep(props: {
             aria-label="Subteam"
             className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold [&>option]:bg-helios-panel"
           >
-            <option value="">Select your subteam…</option>
+            <option value="">
+              {subteamsLoading ? "Loading subteams…" : "Select your subteam…"}
+            </option>
             {subteams.map((s) => (
               <option key={s.id} value={s.name}>{s.name}</option>
             ))}
           </select>
+          {subteamsError && (
+            <span className="block text-[10px] text-red-300" role="alert">
+              Couldn't load subteams: {subteamsError}
+            </span>
+          )}
         </label>
       )}
       {error && <p className="text-xs text-red-300" role="alert">{error}</p>}

@@ -46,6 +46,10 @@ interface Props {
    *  to a prop so the same gate is shared with click-routing in the
    *  parent Shell. */
   vaultEnabled: boolean;
+  /** True during boot getSession(), before we know whether a returning user
+   *  is signed in. While loading we suppress the disabled "Sign in to use
+   *  Vault" presentation so a signed-in user doesn't see it flash. */
+  authLoading?: boolean;
 }
 
 export function ModulePicker(props: Props) {
@@ -63,7 +67,12 @@ export function ModulePicker(props: Props) {
     onDisconnect,
     onChangePassword,
     vaultEnabled,
+    authLoading = false,
   } = props;
+  // While auth is still resolving, don't render Vault as disabled — a returning
+  // signed-in user would otherwise see "Sign in to use Vault" flash before
+  // their session lands. Treat it as a normal (pending) entry until we know.
+  const vaultDisabled = !vaultEnabled && !authLoading;
   return (
     // Sidebar layout: brand header → nav buttons → spacer → user pill →
     // updater footer. Brand + user + updater live here (not inside any
@@ -91,7 +100,7 @@ export function ModulePicker(props: Props) {
           badge="NEW"
           active={active === "vault"}
           onClick={() => onSelect("vault")}
-          disabled={!vaultEnabled}
+          disabled={vaultDisabled}
           disabledTitle="Sign in to use Vault"
         />
         <NavButton
@@ -223,13 +232,22 @@ function UserPill(props: {
     return Array.from(menuRef.current.querySelectorAll<HTMLElement>('[role="menuitem"]'));
   }
 
-  // Arrow-key navigation + Escape, scoped to the open menu. ArrowUp/Down wrap;
-  // Home/End jump to the ends; Escape closes and restores focus to the trigger.
+  // Arrow-key navigation + Escape + Tab, scoped to the open menu. ArrowUp/Down
+  // wrap; Home/End jump to the ends; Escape closes and restores focus to the
+  // trigger.
   function onMenuKeyDown(e: ReactKeyboardEvent) {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
       closeAndRestore();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Tab should exit the menu, not stay trapped inside it. Close it (so it
+      // isn't left orphaned/open behind the newly-focused control) but DON'T
+      // preventDefault — let the browser move focus naturally. No focus-restore
+      // here either: the user is intentionally tabbing onward.
+      setOpen(false);
       return;
     }
     const items = menuItems();
@@ -263,7 +281,17 @@ function UserPill(props: {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className="relative"
+      onBlur={(e) => {
+        // Close when focus leaves the whole pill+menu (e.g. the user tabbed
+        // out, or focus moved elsewhere). relatedTarget null = focus left the
+        // document; otherwise close only if it landed outside this component.
+        const next = e.relatedTarget as Node | null;
+        if (!next || !ref.current?.contains(next)) setOpen(false);
+      }}
+    >
       <button
         ref={triggerRef}
         type="button"

@@ -45,18 +45,20 @@ export async function fetchAllRows<T>(
     const page = (data ?? []) as T[];
     out.push(...page);
 
-    if (iter === 0) {
-      // Probe: if the server returned fewer rows than we asked for, that
-      // smaller count is its effective per-response cap. Use it as the stop
-      // threshold for subsequent pages. (A short first page can also just
-      // mean "that's all the rows" — handled by the partial-page check below.)
-      if (page.length === 0) break; // no rows at all; nothing to page.
-      pageSize = page.length;
-    }
+    if (iter === 0 && page.length === 0) break; // no rows at all; nothing to page.
+
+    // Effective page size = the LARGEST page seen so far. The first response
+    // probes the cap, but a later response can come back larger (a server that
+    // ignores the range upper bound, or a cap that lifts mid-scan). Tracking the
+    // max keeps the partial-page stop condition correct in that case.
+    if (page.length > pageSize || iter === 0) pageSize = page.length;
 
     // A page shorter than the effective page size is the last page.
     if (page.length < pageSize) break;
-    from += pageSize;
+    // Advance by the rows we ACTUALLY received, not the probe size — advancing
+    // by a stale/smaller probe would re-request rows already collected and
+    // duplicate them when a page exceeds the probe (PAGINATE-ADVANCE).
+    from += page.length;
   }
   return { rows: out, error: null };
 }

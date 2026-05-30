@@ -37,7 +37,16 @@ export function ChannelsModal({
   const [openPickerFor, setOpenPickerFor] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // CHANNELS-FOCUS-STEAL — `onClose` is an inline arrow from the parent, so it
+  // gets a fresh identity on every App render (e.g. when picking a source
+  // override flows back through App state). Read it through a ref so the
+  // keydown/focus effect can stay mount-only ([]) and not re-subscribe or
+  // re-steal focus on a benign parent re-render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   // X2 — Escape-to-close + focus-trap + focus-restore (mirrors ConfirmDialog).
+  // Mount-only so the one-time focus + focus-restore capture happen once.
   useEffect(() => {
     const restoreTo = document.activeElement as HTMLElement | null;
     dialogRef.current?.querySelector<HTMLElement>("input,button,select,textarea")?.focus();
@@ -45,7 +54,7 @@ export function ChannelsModal({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       } else if (e.key === "Tab") {
         const root = dialogRef.current;
         if (!root) return;
@@ -70,7 +79,10 @@ export function ChannelsModal({
       window.removeEventListener("keydown", onKey);
       restoreTo?.focus?.();
     };
-  }, [onClose]);
+    // Mount-only: onClose is read via onCloseRef so a fresh parent closure
+    // doesn't re-run this effect (which would re-focus + recapture restoreTo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const grouped = useMemo(() => {
     const f = filter.trim().toLowerCase();

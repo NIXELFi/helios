@@ -121,4 +121,50 @@ describe("TabContextMenu", () => {
     fireEvent.keyDown(swatches[2]!, { key: "Enter" });
     expect(props.onRecolor).toHaveBeenCalledWith(PALETTE[2]);
   });
+
+  // TABMENU-ARROWS — ArrowUp/Down inside the color submenu must move between
+  // swatches and NOT bubble up to the root menu's roving-focus handler (which
+  // would jump focus back out to a top-level menuitem).
+  it("ArrowDown in the color submenu moves to the next swatch (does not escape to top-level items)", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    const color = screen.getByRole("menuitem", { name: /^color$/i });
+    color.focus();
+    fireEvent.keyDown(color, { key: "ArrowRight" });
+    const swatches = screen.getAllByRole("menuitem", { name: /color #/i });
+    swatches[0]!.focus();
+    fireEvent.keyDown(swatches[0]!, { key: "ArrowDown" });
+    // Focus stays inside the submenu, on the next swatch.
+    expect(document.activeElement).toBe(swatches[1]!);
+    expect(swatches).toContain(document.activeElement);
+  });
+
+  it("ArrowUp in the color submenu moves to the previous swatch (wraps), staying in the submenu", () => {
+    render(<TabContextMenu {...defaultProps()} />);
+    const color = screen.getByRole("menuitem", { name: /^color$/i });
+    color.focus();
+    fireEvent.keyDown(color, { key: "ArrowRight" });
+    const swatches = screen.getAllByRole("menuitem", { name: /color #/i });
+    swatches[0]!.focus();
+    fireEvent.keyDown(swatches[0]!, { key: "ArrowUp" });
+    // Wraps to the last swatch, still inside the submenu.
+    expect(document.activeElement).toBe(swatches[swatches.length - 1]!);
+    expect(swatches).toContain(document.activeElement);
+  });
+
+  // TABMENU nested button — the Color row must not nest the swatch <button>s
+  // inside another <button> (invalid HTML / validateDOMNesting warning).
+  it("does not render the swatch buttons nested inside the Color button (no DOM-nesting warning)", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<TabContextMenu {...defaultProps()} />);
+    fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /^color$/i }));
+    // No <button> may be a descendant of another <button>.
+    const swatch = screen.getAllByRole("menuitem", { name: /color #/i })[0]!;
+    expect(swatch.closest("button button")).toBeNull();
+    const nestingWarning = errSpy.mock.calls.some((c) =>
+      String(c[0]).includes("validateDOMNesting") &&
+      String(c[0]).includes("<button> cannot appear as a descendant of <button>"),
+    );
+    expect(nestingWarning).toBe(false);
+    errSpy.mockRestore();
+  });
 });

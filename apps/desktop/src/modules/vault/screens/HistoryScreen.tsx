@@ -5,10 +5,12 @@ import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useVersions } from "../data/useVersions";
 import { useLocks } from "../data/useLocks";
+import { useVaultUsers } from "../data/useVaultUsers";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { VersionList } from "../components/VersionList";
-import type { FileId, FolderId } from "../data/types";
+import { holderLabel } from "./WhoHasWhatScreen";
+import type { FileId, FolderId, UserId } from "../data/types";
 
 export function HistoryScreen() {
   const user = useUser();
@@ -22,6 +24,19 @@ export function HistoryScreen() {
   // instead of the previous hardcoded `locks={[]}`. useLocks is cross-vault;
   // FileTable matches by file_id so unrelated locks are simply ignored.
   const { data: locks } = useLocks();
+  // Lock-holder names so a locked-by-other row reads "Locked by <person>"
+  // instead of the generic "Locked by other". useVaultUsers is admin-gated
+  // (raises for non-admins); we ignore its error and fall back to the generic
+  // label, like BrowseScreen. Standardized display_name-first via holderLabel.
+  const { data: vaultUsers } = useVaultUsers();
+  const holderEmailById = useMemo(() => {
+    const m = new Map<UserId, string>();
+    for (const u of vaultUsers ?? []) {
+      const label = holderLabel(u);
+      if (label) m.set(u.user_id, label);
+    }
+    return m;
+  }, [vaultUsers]);
 
   // Scope locks to the files currently shown so a cross-vault lock can't tint
   // an unrelated row (FileTable matches on file_id, but keep the prop tight).
@@ -62,6 +77,7 @@ export function HistoryScreen() {
             files={files}
             selected={fileId}
             locks={folderLocks}
+            holderEmailById={holderEmailById}
             currentUserId={user?.id ?? ""}
             canEdit={false}
             onSelect={setFileId}

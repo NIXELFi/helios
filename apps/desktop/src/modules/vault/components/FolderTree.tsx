@@ -190,6 +190,12 @@ export function FolderTree({
   const tree = useMemo(() => buildTreeFromIndex(foldersByParent), [foldersByParent]);
   const anchorRef = useRef<RowItem | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Teardown for the CURRENTLY-active marquee drag (removes its window
+  // mousemove/mouseup listeners). Held in a ref so an unmount mid-drag can
+  // run it from the cleanup effect below — otherwise the listeners (added in
+  // onContainerMouseDown, removed only in onUp) leak and a later mousemove
+  // calls setMarquee on an unmounted component (MARQUEE-LEAK).
+  const dragTeardownRef = useRef<(() => void) | null>(null);
 
   // Drag-marquee state: while running, all rows whose center falls inside
   // the rectangle (in container coords) get added to the selection on
@@ -263,6 +269,16 @@ export function FolderTree({
       return next;
     });
   }, [selected, foldersById]);
+
+  // Detach any active marquee drag listeners on unmount. Without this, an
+  // unmount mid-drag (switching screens while dragging) leaks the window
+  // mousemove/mouseup listeners and a later mousemove fires setMarquee on an
+  // unmounted component (MARQUEE-LEAK).
+  useEffect(() => {
+    return () => {
+      dragTeardownRef.current?.();
+    };
+  }, []);
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -597,9 +613,13 @@ export function FolderTree({
       setMarquee({ x0: startX, y0: startY, x1: curX, y1: curY, baseline, additive });
       onTreeSelectionChange?.(computeMarqueeSelection(startX, startY, curX, curY, baseline));
     }
-    function onUp() {
+    function teardown() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      dragTeardownRef.current = null;
+    }
+    function onUp() {
+      teardown();
       if (!started && !onRow && !additive) {
         // Plain click on whitespace → clear the multi-selection.
         onTreeSelectionChange?.(emptyTreeSelection());
@@ -608,6 +628,8 @@ export function FolderTree({
     }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    // Record the teardown so an unmount mid-drag can detach these listeners.
+    dragTeardownRef.current = teardown;
   }
 
   function computeMarqueeSelection(

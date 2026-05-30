@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 import { useUser } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
@@ -204,10 +205,17 @@ export function BrowseScreen() {
   // button so the progress UI is identical regardless of trigger.
   const [treeSelection, setTreeSelection] = useState<TreeSelection>(emptyTreeSelection());
   useEffect(() => { setTreeSelection(emptyTreeSelection()); }, [vaultId]);
-  // Escape clears the tree selection from anywhere in the Vault module.
+  // Escape clears the tree selection from anywhere in the Vault module — but
+  // NOT when a modal/dialog is open. Otherwise pressing Escape to dismiss the
+  // check-in comment box, a confirm dialog, or the new-folder prompt would also
+  // wipe the tree multi-selection underneath (the modals live on `window` too,
+  // and not all of them stopImmediatePropagation). Guarding on an open
+  // [role="dialog"] makes this robust regardless of each modal's Esc handling.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTreeSelection(emptyTreeSelection());
+      if (e.key !== "Escape") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      setTreeSelection(emptyTreeSelection());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -420,6 +428,35 @@ export function BrowseScreen() {
                   onRescan={rescan}
                 />
               )}
+              {autoSyncEnabled && !vaultFolderPath && (
+                /* Auto mode is on but no Helios root is configured. Without a
+                   local destination useAutoSync can't run and useLocalFolderScan
+                   has nothing to scan — previously this rendered NOTHING (the
+                   VaultSyncSection and Manual-mode pills are both gated out),
+                   so auto-download looked completely dead. Surface the state +
+                   a one-click way to pick a folder (which activates sync). */
+                <span
+                  className="flex items-center gap-1.5 rounded px-2 py-0.5 text-xs text-[#FFB800]"
+                  title="Auto-download is on for this vault, but you haven't picked a local Helios folder yet. Pick one to start syncing — or switch to Manual in Settings."
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#FFB800]" />
+                  Auto-download on — no sync folder set
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const picked = await openDirDialog({ directory: true, multiple: false });
+                        if (typeof picked === "string") setHeliosRoot(picked);
+                      } catch {
+                        /* user cancelled or dialog unavailable — no-op */
+                      }
+                    }}
+                    className="ml-1 rounded border border-asu-gold/70 bg-asu-gold/15 px-2 py-0.5 text-xs text-helios-text hover:bg-asu-gold/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+                  >
+                    Set folder
+                  </button>
+                </span>
+              )}
               {!autoSyncEnabled && (
                 <>
                   <span
@@ -503,7 +540,13 @@ export function BrowseScreen() {
                     refetchFiles();
                     refetchLocks();
                     rescan();
-                    clearSelection();
+                    // Intentionally do NOT clearSelection() here: clearing the
+                    // selection unmounts BulkActionBar (it returns null when
+                    // nothing is selected), which destroys the aria-live result
+                    // status ("Checked out 2/2 (1 failed)") in the same commit
+                    // it's set — the user/screen-reader never sees it. Leave the
+                    // selection so the result stays visible; the user clears it
+                    // with the bar's own Clear button when ready.
                   }}
                   files={files ?? []}
                   localFiles={localFiles}
@@ -536,7 +579,10 @@ export function BrowseScreen() {
             )}
         </>
       </div>
-      <FileDetailPanel fileId={selectedFile} files={allFiles ?? []} />
+      {/* Pass `undefined` (not `[]`) while allFiles is still loading so the
+          panel shows its normal state, not a false "file deleted" message. It
+          only treats a selection as missing once the list has actually loaded. */}
+      <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} />
       </div>
       {/* Bulk-download progress modal shared by ManualDownloadAll and the
           right-click context menu. */}

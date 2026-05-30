@@ -218,7 +218,11 @@ export function useBulkDownload(opts: {
               // Couldn't read the local file — treat as needing a download.
               localSha = "";
             }
-            if (localSha && localSha === version.sha256) {
+            // Case-insensitive compare: locally-computed shas are lowercase,
+            // but a version row's sha256 could be uppercase/mixed (legacy
+            // import). downloadVersionOnce already lowercases on verify, so a
+            // verbatim compare here would loop-redownload such files forever.
+            if (localSha && localSha === version.sha256?.toLowerCase()) {
               setSkipped((s) => s + 1);
               continue;
             }

@@ -45,6 +45,7 @@ export function CommandPalette({ open, onClose, actions }: Props) {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Mirror of `selected` so the window-level Enter handler reads the current
   // index without re-subscribing the listener on every selection change.
   const selectedRef = useRef(0);
@@ -109,6 +110,25 @@ export function CommandPalette({ open, onClose, actions }: Props) {
           action.run();
           onClose();
         }
+      } else if (e.key === "Tab") {
+        // Focus-trap: cycle Tab/Shift+Tab within the dialog (mirrors the other
+        // modals) so focus never escapes to the page behind the palette.
+        const root = dialogRef.current;
+        if (!root) return;
+        const focusable = root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !root.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     }
     window.addEventListener("keydown", onKey);
@@ -129,6 +149,7 @@ export function CommandPalette({ open, onClose, actions }: Props) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="w-[640px] max-w-[80vw] bg-helios-panel border border-helios-line rounded-md shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -185,7 +206,13 @@ export function CommandPalette({ open, onClose, actions }: Props) {
           <span>↑↓ navigate</span>
           <span>↵ run</span>
           <span>esc close</span>
-          <span className="ml-auto">{shown.length} match{shown.length === 1 ? "" : "es"}</span>
+          {/* Footer reflects the TOTAL filtered count, not the 30-row cap, so
+              the user knows more matches exist below the rendered slice. */}
+          <span className="ml-auto">
+            {filtered.length > shown.length
+              ? `showing ${shown.length} of ${filtered.length}`
+              : `${filtered.length} match${filtered.length === 1 ? "" : "es"}`}
+          </span>
         </div>
       </div>
     </div>

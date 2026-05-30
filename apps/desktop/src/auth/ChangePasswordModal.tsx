@@ -28,7 +28,11 @@ function useModalA11y(open: boolean, onClose: () => void) {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        e.stopPropagation();
+        // stopImmediatePropagation (not just stopPropagation): both are
+        // attached to `window`, so plain stopPropagation does NOT stop a
+        // SIBLING window keydown listener. Immediate stop prevents one Escape
+        // cascading into background handlers / a stacked dialog.
+        e.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }

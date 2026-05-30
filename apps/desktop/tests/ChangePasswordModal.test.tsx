@@ -77,4 +77,19 @@ describe("<ChangePasswordModal>", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // ── MODAL-ESC: Escape must NOT cascade to sibling window listeners ─────
+  it("Escape does not fire a sibling window keydown listener (stopImmediatePropagation)", () => {
+    const onClose = vi.fn();
+    render(<ChangePasswordModal open client={makeClient()} onClose={onClose} />);
+    const sibling = vi.fn();
+    window.addEventListener("keydown", sibling);
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", sibling);
+    }
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(sibling).not.toHaveBeenCalled();
+  });
 });

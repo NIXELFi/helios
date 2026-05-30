@@ -54,7 +54,10 @@ export function matchLocal(
   const latest = versions[0];
   if (!latest) return { status: "modified", local }; // file row exists, no version yet
   return {
-    status: latest.sha256 === local.sha256 ? "synced" : "modified",
+    // Case-insensitive: local shas are lowercase hex; a version row's sha256
+    // could be uppercase/mixed (legacy import) — a verbatim compare would
+    // mark a synced file "modified" and trigger an endless re-download.
+    status: latest.sha256?.toLowerCase() === local.sha256?.toLowerCase() ? "synced" : "modified",
     local,
   };
 }

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { ChannelsModal } from "../src/components/ChannelsModal";
@@ -168,5 +169,70 @@ describe("ChannelsModal — X2 modal a11y", () => {
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // CHANNELS-FOCUS-STEAL — a parent re-render (e.g. after picking a source
+  // override flows back through App state) must not re-run the focus effect
+  // and yank focus back to the filter input. The keydown/focus effect is now
+  // mount-only (deps []), reading onClose via a ref, so a fresh onClose
+  // identity on re-render does NOT re-subscribe or re-focus.
+  it("does not steal focus to the filter input when a new onClose identity arrives on re-render", () => {
+    function Harness() {
+      const [, force] = useState(0);
+      // A brand-new onClose closure every render, simulating the inline
+      // arrow the parent passes.
+      return (
+        <>
+          <button data-testid="outside" onClick={() => force((n) => n + 1)}>bump</button>
+          <ChannelsModal
+            channels={channels}
+            sessionLabel="Test"
+            sourceHeaders={sourceHeaders}
+            overrides={{}}
+            onOverrideChange={() => {}}
+            onClose={() => {}}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    // Move focus somewhere that is NOT the filter input.
+    const swatch = screen.getAllByRole("button", { name: /APS Sensor 1/ })[0]!;
+    swatch.focus();
+    expect(document.activeElement).toBe(swatch);
+    // Force a parent re-render (new onClose identity passed down).
+    fireEvent.click(screen.getByTestId("outside"));
+    // Focus must NOT have jumped back to the filter input.
+    const filter = screen.getByPlaceholderText(/filter by id/i);
+    expect(document.activeElement).not.toBe(filter);
+    expect(document.activeElement).toBe(swatch);
+  });
+
+  it("still closes on Escape after a parent re-render with a new onClose identity", () => {
+    function Harness() {
+      const [n, setN] = useState(0);
+      const onClose = vi.fn();
+      return (
+        <>
+          <button data-testid="bump" onClick={() => setN((x) => x + 1)}>bump {n}</button>
+          <span data-testid="closes">{onCloseCalls.length}</span>
+          <ChannelsModal
+            channels={channels}
+            sessionLabel="Test"
+            sourceHeaders={sourceHeaders}
+            overrides={{}}
+            onOverrideChange={() => {}}
+            onClose={() => { onClose(); onCloseCalls.push(1); }}
+          />
+        </>
+      );
+    }
+    const onCloseCalls: number[] = [];
+    render(<Harness />);
+    // Re-render once so onClose identity changes.
+    fireEvent.click(screen.getByTestId("bump"));
+    // Escape must still call the LATEST onClose (read via ref).
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onCloseCalls.length).toBe(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CursorEmitter, ViewStateEmitter, LapSelectionEmitter, GpsPickerEmitter,
@@ -78,10 +78,12 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   const [workspaceId, setWorkspaceIdRaw] = useState(() => bootRef.current!.activeId);
   // Wrap setWorkspaceId to persist the choice. Every call site (tab click,
   // import, duplicate, new) flows through this so we never miss a write.
-  const setWorkspaceId = (id: string) => {
+  // Memoized so it's a stable dependency for the paletteActions useMemo
+  // (setWorkspaceIdRaw + saveLastWorkspaceId are themselves stable).
+  const setWorkspaceId = useCallback((id: string) => {
     setWorkspaceIdRaw(id);
     saveLastWorkspaceId(id);
-  };
+  }, []);
   const [sessions, setSessions] = useState<LoadedSession[] | null>(null);
   // Mirror sessions/primaryId/mathChannels into refs so async handlers (file
   // open, lap-config save) can read the LATEST committed values at apply time
@@ -114,8 +116,20 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [helpState, setHelpState] = useState<{ open: boolean; slug?: string }>({ open: false });
-  const openHelp = (slug?: string) => setHelpState({ open: true, slug });
-  const closeHelp = () => setHelpState({ open: false });
+  // STABILIZE MODAL CALLBACKS: setState setters are referentially stable, so
+  // these close/open handlers can be memoized with empty deps. Passing stable
+  // identities down means a child modal's keydown/focus effect (keyed on
+  // onClose) doesn't re-run — and thus doesn't re-steal focus — on every App
+  // re-render (e.g. each setSessions while a modal is open). Belt-and-suspenders
+  // for the ChannelsModal focus-steal fix.
+  const openHelp = useCallback((slug?: string) => setHelpState({ open: true, slug }), []);
+  const closeHelp = useCallback(() => setHelpState({ open: false }), []);
+  const closeChannels = useCallback(() => setChannelsOpen(false), []);
+  const closeAddTile = useCallback(() => setAddTileOpen(false), []);
+  const closeMathChannels = useCallback(() => setMathChannelsOpen(false), []);
+  const closeLapConfig = useCallback(() => setLapConfigSessionId(null), []);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const [mathChannels, setMathChannelsState] = useState<MathChannel[]>(() => loadMathChannels());
   const mathChannelsRef = useRef(mathChannels);
   mathChannelsRef.current = mathChannels;
@@ -135,6 +149,19 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     onConfirm: () => void;
   };
   const [confirmState, setConfirmState] = useState<ConfirmRequest | null>(null);
+  // Stable confirm-dialog close (see STABILIZE MODAL CALLBACKS above).
+  const closeConfirm = useCallback(() => setConfirmState(null), []);
+  // Stable override-change handler for ChannelsModal. Binds to the CURRENT
+  // primary via the ref (not a render-time `primary.id`) so the identity never
+  // changes — ChannelsModal's keydown/focus effect won't re-run on App
+  // re-renders triggered by an override pick (the focus-steal regression).
+  // handleChannelOverrideChange itself reads sessionsRef.current, so the
+  // empty-deps closure is safe.
+  const onOverrideChange = useCallback((canonicalId: string, sourceHeader: string | null) => {
+    const id = primaryIdRef.current;
+    if (id) handleChannelOverrideChange(id, canonicalId, sourceHeader);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [loadProgress, setLoadProgress] = useState<LoadProgress>({
     label: "Starting…", loaded: 0, total: 1,
   });
@@ -183,6 +210,17 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         // strand the user on a blank loading screen. We commit whatever
         // sessions loaded no matter what, then attempt the niceties.
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
+        // ZERO-SESSION boot strand: if NOTHING loaded (loadAllSessions resolved
+        // empty AND no recent user sessions survived), don't leave the
+        // LoadingScreen spinning forever — the render guard waits on a
+        // primaryId that would never arrive. Surface an explicit error so the
+        // LoadingScreen shows its error state. (SAMPLES is non-empty today, so
+        // this is defensive against a future build that ships no samples.)
+        if (loaded.length === 0) {
+          setError("No sessions could be loaded. Open a CSV with ⌘O to get started.");
+          setLoadProgress({ label: "No sessions", loaded: total, total });
+          return;
+        }
         try {
           const initialMath = loadMathChannels();
           const errors = new Map<string, Map<string, string>>();
@@ -272,6 +310,25 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         setPaletteOpen((open) => !open);
         return;
       }
+      // F1 — open the in-app Help & Wiki. Universal (works from form fields
+      // too) since it never interferes with text input. Kept above the modal
+      // guard so Help stays reachable from anywhere.
+      if (e.key === "F1") {
+        e.preventDefault();
+        openHelp();
+        return;
+      }
+      // SHORTCUTS-UNDER-MODAL — when any modal/overlay is open, the remaining
+      // app-level shortcuts (⌘E, ⌘1-9, ⌘O, ?, M/R, [, ]) must NOT fire
+      // underneath it. Without this guard, pressing `?` over an open dialog
+      // stacked a second one, and `[`/`]`/M/R scrubbed the chart behind the
+      // modal. The modal owns the keyboard while it's up. ⌘K and F1 above are
+      // intentionally exempt so the palette/help stay summonable/dismissable.
+      const anyModalOpen =
+        paletteOpen || channelsOpen || addTileOpen || mathChannelsOpen ||
+        lapConfigSessionId !== null || confirmState !== null || shortcutsOpen ||
+        helpState.open;
+      if (anyModalOpen) return;
       // ⌘1..9 — jump to workspace by index.
       if (mod && /^[1-9]$/.test(e.key) && !inField) {
         const idx = parseInt(e.key, 10) - 1;
@@ -303,13 +360,6 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       if (e.key === "?" && !inField && !mod) {
         e.preventDefault();
         setShortcutsOpen(true);
-        return;
-      }
-      // F1 — open the in-app Help & Wiki. Universal (works from form fields
-      // too) since it never interferes with text input.
-      if (e.key === "F1") {
-        e.preventDefault();
-        openHelp();
         return;
       }
       // M / R — single-key lap assignment. Finds the lap containing the
@@ -359,8 +409,15 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // The modal-open flags are read inside the handler (SHORTCUTS-UNDER-MODAL
+    // guard), so they must be deps or the listener would close over stale
+    // values and fail to suppress shortcuts when a modal is up.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaces, sessions, primaryId, emitter]);
+  }, [
+    workspaces, sessions, primaryId, emitter,
+    paletteOpen, channelsOpen, addTileOpen, mathChannelsOpen,
+    lapConfigSessionId, confirmState, shortcutsOpen, helpState.open,
+  ]);
 
   // Restore cursor + zoom whenever the primary session changes (including on
   // first boot). Cursor is clamped to the current session's extent so a saved
@@ -444,6 +501,183 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     return () => { off(); if (timer !== null) clearTimeout(timer); };
   }, [lapSelectionEmitter]);
 
+  // STABILIZE MODAL CALLBACKS / CommandPalette churn: the palette's keydown +
+  // filter effects are keyed on the `actions` array identity, so rebuilding it
+  // every App render (e.g. on each cursor-driven re-render or setSessions while
+  // the palette is up) re-registered the window listener and re-captured the
+  // focus-restore target. Memoizing keeps a stable identity unless the inputs
+  // actually change. Built BEFORE the early return so the hook order is stable;
+  // returns [] until sessions/primaryId are ready.
+  const paletteActions = useMemo<PaletteAction[]>(() => {
+    if (!sessions || !primaryId) return [];
+    const vis = sessions.filter((s) => s.visible);
+    const prim = sessions.find((s) => s.id === primaryId) ?? vis[0] ?? sessions[0];
+    if (!prim) return [];
+    const actions: PaletteAction[] = [];
+    workspaces.forEach((w, i) => {
+      actions.push({
+        id: `ws:${w.id}`,
+        label: `Switch to ${w.label}`,
+        sublabel: w.id === workspaceId ? "(current)" : undefined,
+        kind: "workspace",
+        hint: i < 9 ? `⌘${i + 1}` : undefined,
+        keywords: [w.id, "workspace", "tab"],
+        run: () => { setWorkspaceId(w.id); setSelectedTileId(null); },
+      });
+    });
+    sessions.forEach((s) => {
+      actions.push({
+        id: `ses:${s.id}`,
+        label: `Set primary: ${s.label}`,
+        sublabel: s.id === primaryId ? "(current)" : undefined,
+        kind: "session",
+        keywords: [s.id, "primary", "session"],
+        run: () => setPrimaryId(s.id),
+      });
+    });
+    actions.push(
+      { id: "sys:channels", label: "Open Channels", kind: "system", keywords: ["inspect", "data"], run: () => setChannelsOpen(true) },
+      { id: "sys:math",     label: "Open Math channels", kind: "system", keywords: ["formula", "expression"], run: () => setMathChannelsOpen(true) },
+      { id: "sys:add-tile", label: "Add tile…", kind: "system", run: () => { if (!editMode) setEditMode(true); setAddTileOpen(true); } },
+      { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: "⌘E", run: () => setEditMode((e) => !e) },
+      { id: "sys:shortcuts", label: "Keyboard shortcuts", kind: "system", hint: "?", keywords: ["help", "hotkeys"], run: () => setShortcutsOpen(true) },
+      { id: "sys:help",      label: "Open Help & Wiki",   kind: "system", hint: "F1", keywords: ["docs", "guide", "manual", "wiki"], run: () => openHelp() },
+      { id: "sys:help-getting-started", label: "Help: Getting started",    kind: "system", keywords: ["docs", "onboarding"], run: () => openHelp("01-getting-started") },
+      { id: "sys:help-widgets",         label: "Help: Widgets reference",  kind: "system", keywords: ["docs", "widget"],      run: () => openHelp("04-widgets-reference") },
+      { id: "sys:help-channels",        label: "Help: Channels & data",    kind: "system", keywords: ["docs", "csv"],         run: () => openHelp("05-channels-and-data") },
+      { id: "sys:help-math",            label: "Help: Math channels",      kind: "system", keywords: ["docs", "formula"],     run: () => openHelp("06-math-channels") },
+      { id: "sys:help-laps",            label: "Help: Laps & analysis",    kind: "system", keywords: ["docs", "lap"],         run: () => openHelp("07-laps-and-analysis") },
+      { id: "sys:help-keyboard",        label: "Help: Keyboard & commands",kind: "system", keywords: ["docs", "hotkey"],      run: () => openHelp("08-keyboard-and-commands") },
+      { id: "sys:reset-zoom", label: "Reset zoom", kind: "system", run: () => viewState.resetZoom() },
+      { id: "sys:clear-datums", label: "Clear datums", kind: "system", run: () => viewState.clearDatums() },
+      {
+        id: "sys:drop-datum",
+        label: "Drop datum at current cursor",
+        sublabel: "Same as shift-click on a strip chart",
+        kind: "system",
+        keywords: ["mark", "annotate", "datum"],
+        run: () => viewState.addDatum(emitter.get()),
+      },
+      {
+        id: "sys:zoom-to-lap",
+        label: "Zoom to current lap",
+        sublabel: "Fit chart x-range to the lap containing the cursor",
+        kind: "system",
+        keywords: ["fit", "lap", "zoom"],
+        run: () => {
+          const cur = emitter.get();
+          const ls = prim.laps;
+          if (!ls) return;
+          const lap = ls.laps.find((l) => cur >= l.startUs && cur <= l.endUs);
+          if (lap) viewState.setZoom({ startUs: lap.startUs, endUs: lap.endUs });
+        },
+      },
+    );
+    // Lap-selection helpers. The user can also drive these from the Lap Panel,
+    // but ⌘K → "main" → enter is the fastest way to retarget the Δt and any
+    // distance-mode strip-chart on the current workspace.
+    if (prim.laps && prim.laps.laps.length > 0) {
+      const set = prim.laps;
+      const trustedSorted = set.laps
+        .map((l, i) => ({ l, i }))
+        .filter((x) => x.l.trusted)
+        .sort((a, b) => a.l.durationS - b.l.durationS);
+      const best = trustedSorted[0];
+      const second = trustedSorted[1];
+      if (best) {
+        actions.push({
+          id: "lap:best-main",
+          label: `Set best lap as Main`,
+          sublabel: `lap ${best.l.index} · ${best.l.durationS.toFixed(2)}s`,
+          kind: "lap",
+          keywords: ["main", "best", "fastest"],
+          run: () => lapSelectionEmitter.setMain({ sessionId: prim.id, lapIndex: best.i }),
+        });
+      }
+      if (second) {
+        actions.push({
+          id: "lap:second-ref",
+          label: `Set 2nd-best lap as Ref`,
+          sublabel: `lap ${second.l.index} · ${second.l.durationS.toFixed(2)}s`,
+          kind: "lap",
+          keywords: ["ref", "reference", "compare"],
+          run: () => lapSelectionEmitter.setRef({ sessionId: prim.id, lapIndex: second.i }),
+        });
+      }
+      if (lapSelection.main && lapSelection.ref) {
+        actions.push({
+          id: "lap:swap-main-ref",
+          label: "Swap Main and Ref",
+          kind: "lap",
+          keywords: ["compare", "flip", "reverse"],
+          run: () => {
+            const m = lapSelection.main!;
+            const r = lapSelection.ref!;
+            lapSelectionEmitter.setMain(r);
+            lapSelectionEmitter.setRef(m);
+          },
+        });
+      }
+      if (lapSelection.ref) {
+        actions.push({
+          id: "lap:clear-ref",
+          label: "Clear Ref lap (hide Δt)",
+          kind: "lap",
+          keywords: ["delta", "clear", "remove"],
+          run: () => lapSelectionEmitter.setRef(null),
+        });
+      }
+      // Per-lap "Set as Main/Ref" actions. Surfaced for every trusted lap so the
+      // user can ⌘K → "lap 5 main" → Enter without leaving the keyboard.
+      // Capped to a sane number to keep the palette responsive on endurance
+      // sessions with hundreds of laps.
+      const MAX_PER_LAP = 30;
+      let lapActionCount = 0;
+      for (let i = 0; i < set.laps.length && lapActionCount < MAX_PER_LAP; i++) {
+        const lap = set.laps[i]!;
+        if (!lap.trusted) continue;
+        const lapNum = lap.index;
+        actions.push({
+          id: `lap:${i}-main`,
+          label: `Set lap ${lapNum} as Main`,
+          sublabel: `${lap.durationS.toFixed(2)}s${i === set.bestLapIndex ? " · best" : ""}`,
+          kind: "lap",
+          keywords: ["main", `lap ${lapNum}`, String(lapNum)],
+          run: () => lapSelectionEmitter.setMain({ sessionId: prim.id, lapIndex: i }),
+        });
+        actions.push({
+          id: `lap:${i}-ref`,
+          label: `Set lap ${lapNum} as Ref`,
+          sublabel: `${lap.durationS.toFixed(2)}s`,
+          kind: "lap",
+          keywords: ["ref", "reference", `lap ${lapNum}`, String(lapNum)],
+          run: () => lapSelectionEmitter.setRef({ sessionId: prim.id, lapIndex: i }),
+        });
+        lapActionCount++;
+      }
+    }
+    return actions;
+    // setWorkspaceId/openHelp are memoized; the remaining setters are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaces, workspaceId, sessions, primaryId, editMode, lapSelection, viewState, emitter, lapSelectionEmitter, openHelp, setWorkspaceId]);
+
+  // Math-modal channel list: source channels only (math channels dropped) for
+  // the source-shadow guard. Memoized so the prop identity is stable across App
+  // re-renders (STABILIZE MODAL CALLBACKS). Built before the early return for a
+  // stable hook order; returns [] until the primary session is ready.
+  // NOTE (MATH-ON-MATH, partial): the modal reuses THIS same list for its
+  // "Unknown channel" warning, so a math channel referencing ANOTHER math
+  // channel is still flagged unknown. Fully resolving that requires the modal
+  // to fold its own math ids (it already has `otherMathIds`) into the warning
+  // lookup — a one-line MathChannelsModal change, out of scope for this
+  // App-only edit. See report.
+  const mathModalAvailableChannels = useMemo(() => {
+    if (!sessions || !primaryId) return [];
+    const vis = sessions.filter((s) => s.visible);
+    const prim = sessions.find((s) => s.id === primaryId) ?? vis[0] ?? sessions[0];
+    return prim ? prim.store.list().filter((c) => c.source !== "math") : [];
+  }, [sessions, primaryId, mathChannels, mathErrors]);
+
   if (error || !sessions || !primaryId) {
     // Clamp to [0,1] and never let the bar slide backward as the denominator
     // changes between boot stages.
@@ -464,151 +698,6 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   const ext = primary.store.extentUs();
   const primaryMathErrors = mathErrors.get(primary.id) ?? new Map<string, string>();
 
-  // Build the command-palette action list from current state. Re-derived
-  // every render — cheap, and avoids stale-closure subtleties.
-  const paletteActions: PaletteAction[] = [];
-  workspaces.forEach((w, i) => {
-    paletteActions.push({
-      id: `ws:${w.id}`,
-      label: `Switch to ${w.label}`,
-      sublabel: w.id === workspaceId ? "(current)" : undefined,
-      kind: "workspace",
-      hint: i < 9 ? `⌘${i + 1}` : undefined,
-      keywords: [w.id, "workspace", "tab"],
-      run: () => { setWorkspaceId(w.id); setSelectedTileId(null); },
-    });
-  });
-  sessions.forEach((s) => {
-    paletteActions.push({
-      id: `ses:${s.id}`,
-      label: `Set primary: ${s.label}`,
-      sublabel: s.id === primaryId ? "(current)" : undefined,
-      kind: "session",
-      keywords: [s.id, "primary", "session"],
-      run: () => setPrimaryId(s.id),
-    });
-  });
-  paletteActions.push(
-    { id: "sys:channels", label: "Open Channels", kind: "system", keywords: ["inspect", "data"], run: () => setChannelsOpen(true) },
-    { id: "sys:math",     label: "Open Math channels", kind: "system", keywords: ["formula", "expression"], run: () => setMathChannelsOpen(true) },
-    { id: "sys:add-tile", label: "Add tile…", kind: "system", run: () => { if (!editMode) setEditMode(true); setAddTileOpen(true); } },
-    { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: "⌘E", run: () => setEditMode((e) => !e) },
-    { id: "sys:shortcuts", label: "Keyboard shortcuts", kind: "system", hint: "?", keywords: ["help", "hotkeys"], run: () => setShortcutsOpen(true) },
-    { id: "sys:help",      label: "Open Help & Wiki",   kind: "system", hint: "F1", keywords: ["docs", "guide", "manual", "wiki"], run: () => openHelp() },
-    { id: "sys:help-getting-started", label: "Help: Getting started",    kind: "system", keywords: ["docs", "onboarding"], run: () => openHelp("01-getting-started") },
-    { id: "sys:help-widgets",         label: "Help: Widgets reference",  kind: "system", keywords: ["docs", "widget"],      run: () => openHelp("04-widgets-reference") },
-    { id: "sys:help-channels",        label: "Help: Channels & data",    kind: "system", keywords: ["docs", "csv"],         run: () => openHelp("05-channels-and-data") },
-    { id: "sys:help-math",            label: "Help: Math channels",      kind: "system", keywords: ["docs", "formula"],     run: () => openHelp("06-math-channels") },
-    { id: "sys:help-laps",            label: "Help: Laps & analysis",    kind: "system", keywords: ["docs", "lap"],         run: () => openHelp("07-laps-and-analysis") },
-    { id: "sys:help-keyboard",        label: "Help: Keyboard & commands",kind: "system", keywords: ["docs", "hotkey"],      run: () => openHelp("08-keyboard-and-commands") },
-    { id: "sys:reset-zoom", label: "Reset zoom", kind: "system", run: () => viewState.resetZoom() },
-    { id: "sys:clear-datums", label: "Clear datums", kind: "system", run: () => viewState.clearDatums() },
-    {
-      id: "sys:drop-datum",
-      label: "Drop datum at current cursor",
-      sublabel: "Same as shift-click on a strip chart",
-      kind: "system",
-      keywords: ["mark", "annotate", "datum"],
-      run: () => viewState.addDatum(emitter.get()),
-    },
-    {
-      id: "sys:zoom-to-lap",
-      label: "Zoom to current lap",
-      sublabel: "Fit chart x-range to the lap containing the cursor",
-      kind: "system",
-      keywords: ["fit", "lap", "zoom"],
-      run: () => {
-        const cur = emitter.get();
-        const ls = primary.laps;
-        if (!ls) return;
-        const lap = ls.laps.find((l) => cur >= l.startUs && cur <= l.endUs);
-        if (lap) viewState.setZoom({ startUs: lap.startUs, endUs: lap.endUs });
-      },
-    },
-  );
-  // Lap-selection helpers. The user can also drive these from the Lap Panel,
-  // but ⌘K → "main" → enter is the fastest way to retarget the Δt and any
-  // distance-mode strip-chart on the current workspace.
-  if (primary.laps && primary.laps.laps.length > 0) {
-    const set = primary.laps;
-    const trustedSorted = set.laps
-      .map((l, i) => ({ l, i }))
-      .filter((x) => x.l.trusted)
-      .sort((a, b) => a.l.durationS - b.l.durationS);
-    const best = trustedSorted[0];
-    const second = trustedSorted[1];
-    if (best) {
-      paletteActions.push({
-        id: "lap:best-main",
-        label: `Set best lap as Main`,
-        sublabel: `lap ${best.l.index} · ${best.l.durationS.toFixed(2)}s`,
-        kind: "lap",
-        keywords: ["main", "best", "fastest"],
-        run: () => lapSelectionEmitter.setMain({ sessionId: primary.id, lapIndex: best.i }),
-      });
-    }
-    if (second) {
-      paletteActions.push({
-        id: "lap:second-ref",
-        label: `Set 2nd-best lap as Ref`,
-        sublabel: `lap ${second.l.index} · ${second.l.durationS.toFixed(2)}s`,
-        kind: "lap",
-        keywords: ["ref", "reference", "compare"],
-        run: () => lapSelectionEmitter.setRef({ sessionId: primary.id, lapIndex: second.i }),
-      });
-    }
-    if (lapSelection.main && lapSelection.ref) {
-      paletteActions.push({
-        id: "lap:swap-main-ref",
-        label: "Swap Main and Ref",
-        kind: "lap",
-        keywords: ["compare", "flip", "reverse"],
-        run: () => {
-          const m = lapSelection.main!;
-          const r = lapSelection.ref!;
-          lapSelectionEmitter.setMain(r);
-          lapSelectionEmitter.setRef(m);
-        },
-      });
-    }
-    if (lapSelection.ref) {
-      paletteActions.push({
-        id: "lap:clear-ref",
-        label: "Clear Ref lap (hide Δt)",
-        kind: "lap",
-        keywords: ["delta", "clear", "remove"],
-        run: () => lapSelectionEmitter.setRef(null),
-      });
-    }
-    // Per-lap "Set as Main/Ref" actions. Surfaced for every trusted lap so the
-    // user can ⌘K → "lap 5 main" → Enter without leaving the keyboard.
-    // Capped to a sane number to keep the palette responsive on endurance
-    // sessions with hundreds of laps.
-    const MAX_PER_LAP = 30;
-    let lapActionCount = 0;
-    for (let i = 0; i < set.laps.length && lapActionCount < MAX_PER_LAP; i++) {
-      const lap = set.laps[i]!;
-      if (!lap.trusted) continue;
-      const lapNum = lap.index;
-      paletteActions.push({
-        id: `lap:${i}-main`,
-        label: `Set lap ${lapNum} as Main`,
-        sublabel: `${lap.durationS.toFixed(2)}s${i === set.bestLapIndex ? " · best" : ""}`,
-        kind: "lap",
-        keywords: ["main", `lap ${lapNum}`, String(lapNum)],
-        run: () => lapSelectionEmitter.setMain({ sessionId: primary.id, lapIndex: i }),
-      });
-      paletteActions.push({
-        id: `lap:${i}-ref`,
-        label: `Set lap ${lapNum} as Ref`,
-        sublabel: `${lap.durationS.toFixed(2)}s`,
-        kind: "lap",
-        keywords: ["ref", "reference", `lap ${lapNum}`, String(lapNum)],
-        run: () => lapSelectionEmitter.setRef({ sessionId: primary.id, lapIndex: i }),
-      });
-      lapActionCount++;
-    }
-  }
   const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
   const selectedTile = workspace.tiles.find((t) => t.id === selectedTileId) ?? null;
   const lapConfigSession = lapConfigSessionId
@@ -889,16 +978,15 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     const { accepted, rejected } = classifyPaths(paths);
     const failures: { path: string; reason: string }[] = rejected.slice();
     const newSessions: LoadedSession[] = [];
-    // Collect the next color slot up-front so all newly-added sessions get
-    // distinct colors regardless of how many failures land in between. Read
-    // the LATEST session count via the ref (the closure-captured `sessions`
-    // could be stale if a previous drop is still in flight).
-    let nextIndex = sessionsRef.current.length;
+    // COLOR-DESYNC: don't pre-assign colors by a running index here. The commit
+    // dedups by id (a re-load REPLACES, doesn't append), so a per-file index
+    // would drift past the real array position and overlaid sessions could
+    // share/skew trace colors. mergeSessionsWithColors derives each session's
+    // color from its FINAL position in the deduped array, so we load with a
+    // placeholder color (overwritten on merge).
     for (const a of accepted) {
       try {
-        const color = colorForIndex(nextIndex);
-        nextIndex++;
-        const session = await loadUserSession(a.path, color);
+        const session = await loadUserSession(a.path, colorForIndex(0));
         // Apply the math channels as of now (ref), not as captured at call time.
         const r = applyMathChannels(session.store, mathChannelsRef.current, session.laps);
         const errorsForSession = r.errors;
@@ -919,13 +1007,10 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       }
     }
     if (newSessions.length > 0) {
-      setSessions((prev) => {
-        if (!prev) return prev;
-        const idMap = new Map<string, LoadedSession>();
-        for (const s of prev) idMap.set(s.id, s);
-        for (const ns of newSessions) idMap.set(ns.id, ns);
-        return Array.from(idMap.values());
-      });
+      // Compute the merged+recolored list from the LATEST committed state via
+      // the ref, OUTSIDE the updater, so the setSessions updater stays pure.
+      const merged = mergeSessionsWithColors(sessionsRef.current ?? [], newSessions);
+      setSessions(() => merged);
     }
     if (failures.length > 0) {
       const lines = failures.map((f) => `${basenameOf(f.path)}: ${f.reason}`).join("\n");
@@ -1037,41 +1122,30 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
     canonicalId: string,
     sourceHeader: string | null,
   ) {
-    setSessions((prev) => {
-      if (!prev) return prev;
-      let saved: Record<string, string> | null = null;
-      const next = prev.map((s) => {
-        if (s.id !== sessionId) return s;
-        const overrides = { ...s.channelOverrides };
-        if (sourceHeader === null) {
-          delete overrides[canonicalId];
-          s.store.clearChannelOverride(canonicalId);
-        } else {
-          overrides[canonicalId] = sourceHeader;
-          s.store.setChannelOverride(canonicalId, sourceHeader);
-        }
-        saved = overrides;
-        return { ...s, channelOverrides: overrides };
-      });
-      if (saved) saveChannelOverrides(sessionId, saved);
-      return next;
-    });
+    // Compute the next sessions + the map to persist OUTSIDE the updater, from
+    // the LATEST committed state (ref). The store mutation + localStorage write
+    // happen here, not inside a setSessions updater (which StrictMode can
+    // double-invoke) — keeping the updater pure: setSessions(() => next).
+    const current = sessionsRef.current;
+    if (!current) return;
+    const { next, saved } = computeOverrideChange(current, sessionId, canonicalId, sourceHeader);
+    setSessions(() => next);
+    saveChannelOverrides(sessionId, saved);
   }
 
   /** Replace the math-channel set, persist, and re-apply against every loaded
    *  session. Old math-channel ids are removed from each store first so a
    *  rename/delete doesn't leave stale columns behind. */
   function handleMathChannelsChange(next: MathChannel[]) {
+    // Read the LATEST committed math set + sessions via refs (not the stale
+    // closure values) and do all store mutation + error computation OUTSIDE
+    // any setSessions updater, so each setState call is a pure assignment.
+    const oldChannels = mathChannelsRef.current;
     setMathChannelsState(next);
     saveMathChannels(next);
-    if (!sessions) return;
-    const allOldIds = new Set([...mathChannels.map((m) => m.id), ...next.map((m) => m.id)]);
-    const errors = new Map<string, Map<string, string>>();
-    for (const session of sessions) {
-      for (const id of allOldIds) session.store.removeChannel(id);
-      const r = applyMathChannels(session.store, next, session.laps);
-      errors.set(session.id, r.errors);
-    }
+    const current = sessionsRef.current;
+    if (!current) return;
+    const { errors } = computeMathChannelsUpdate(current, oldChannels, next);
     setMathErrors(errors);
   }
 
@@ -1263,26 +1337,24 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
           sessionLabel={primary.label}
           sourceHeaders={primary.store.listSourceHeaders()}
           overrides={primary.channelOverrides}
-          onOverrideChange={(canonicalId, sourceHeader) =>
-            handleChannelOverrideChange(primary.id, canonicalId, sourceHeader)
-          }
-          onClose={() => setChannelsOpen(false)}
+          onOverrideChange={onOverrideChange}
+          onClose={closeChannels}
         />
       )}
       {addTileOpen && (
         <AddTileModal
           existingIds={workspace.tiles.map((t) => t.id)}
           onAdd={handleAddTile}
-          onClose={() => setAddTileOpen(false)}
+          onClose={closeAddTile}
         />
       )}
       {mathChannelsOpen && (
         <MathChannelsModal
           channels={mathChannels}
           errors={primaryMathErrors}
-          availableChannels={primary.store.list().filter((c) => c.source !== "math")}
+          availableChannels={mathModalAvailableChannels}
           onChange={handleMathChannelsChange}
-          onClose={() => setMathChannelsOpen(false)}
+          onClose={closeMathChannels}
         />
       )}
       {lapConfigSession && (
@@ -1290,7 +1362,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
           session={lapConfigSession}
           gpsPickerEmitter={gpsPickerEmitter}
           onSave={(cfg) => handleLapConfigSave(lapConfigSession.id, cfg)}
-          onClose={() => setLapConfigSessionId(null)}
+          onClose={closeLapConfig}
         />
       )}
       {confirmState && (
@@ -1301,17 +1373,17 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
           confirmTone={confirmState.confirmTone}
           cancelLabel={confirmState.cancelLabel}
           onConfirm={confirmState.onConfirm}
-          onClose={() => setConfirmState(null)}
+          onClose={closeConfirm}
         />
       )}
       <CommandPalette
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        onClose={closePalette}
         actions={paletteActions}
       />
       <ShortcutsOverlay
         open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
+        onClose={closeShortcuts}
       />
       <HelpModal
         open={helpState.open}
@@ -1654,6 +1726,92 @@ function PlaybackControls({
 function basenameOf(path: string): string {
   const segs = path.split(/[\\/]/).filter(Boolean);
   return segs[segs.length - 1] ?? path;
+}
+
+/** Merge freshly-loaded sessions into the existing list, deduping by id
+ *  (a re-loaded file REPLACES the existing session in place rather than
+ *  appending a duplicate), then re-derive every session's overlay color from
+ *  its FINAL position in the deduped array.
+ *
+ *  COLOR-DESYNC: the previous code pre-assigned each accepted file a color
+ *  from `nextIndex = sessions.length + k`, but because the commit dedups by id
+ *  the array doesn't always grow — a re-load keeps the same length — so the
+ *  pre-assigned index drifted past the real array position and overlaid
+ *  sessions could share or skew trace colors. Deriving color from the final
+ *  position (the same convention loadAllSessions/boot uses) keeps colors in
+ *  lockstep with array order for both appends and in-place replacements.
+ *  Pure: returns a new array, mutates nothing. */
+export function mergeSessionsWithColors(
+  prev: LoadedSession[],
+  incoming: LoadedSession[],
+): LoadedSession[] {
+  // Preserve order: existing ids keep their slot (replaced in place), genuinely
+  // new ids append in arrival order. A Map keyed by id gives us last-wins
+  // dedup while Array.from preserves first-insertion order.
+  const byId = new Map<string, LoadedSession>();
+  for (const s of prev) byId.set(s.id, s);
+  for (const ns of incoming) byId.set(ns.id, ns);
+  return Array.from(byId.values()).map((s, i) => {
+    const color = colorForIndex(i);
+    return s.color === color ? s : { ...s, color };
+  });
+}
+
+/** Compute the result of binding (or clearing) a channel override for one
+ *  session, as a PURE function of the input list: returns the next sessions
+ *  array and the overrides map the caller must persist. The target session's
+ *  ChannelStore is mutated here (that's intrinsic to the override taking
+ *  effect, not a React side effect) but no React state is touched and no
+ *  unrelated closure is read — so the caller can do `setSessions(() => next)`
+ *  with a pure updater and `saveChannelOverrides(...)` outside it.
+ *  IMPURE-UPDATERS: previously this mutated the store + persisted INSIDE a
+ *  `setSessions(prev => …)` updater, which StrictMode can double-invoke. */
+export function computeOverrideChange(
+  sessions: LoadedSession[],
+  sessionId: string,
+  canonicalId: string,
+  sourceHeader: string | null,
+): { next: LoadedSession[]; saved: Record<string, string> } {
+  let saved: Record<string, string> = {};
+  const next = sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    const overrides = { ...s.channelOverrides };
+    if (sourceHeader === null) {
+      delete overrides[canonicalId];
+      s.store.clearChannelOverride(canonicalId);
+    } else {
+      overrides[canonicalId] = sourceHeader;
+      s.store.setChannelOverride(canonicalId, sourceHeader);
+    }
+    saved = overrides;
+    return { ...s, channelOverrides: overrides };
+  });
+  return { next, saved };
+}
+
+/** Re-apply the math-channel set to every loaded session: remove the union of
+ *  old+new math ids from each store first (so a rename/delete leaves no stale
+ *  column) then re-apply, collecting per-session compile errors. PURE w.r.t.
+ *  React state — store mutation is intrinsic; the returned errors map is what
+ *  the caller feeds to setMathErrors OUTSIDE any setSessions updater.
+ *  IMPURE-UPDATERS: previously read the stale `mathChannels`/`sessions`
+ *  closures and called setMathErrors coupled to the updater. */
+export function computeMathChannelsUpdate(
+  sessions: LoadedSession[],
+  oldChannels: MathChannel[],
+  nextChannels: MathChannel[],
+): { errors: Map<string, Map<string, string>> } {
+  const allIds = new Set([
+    ...oldChannels.map((m) => m.id),
+    ...nextChannels.map((m) => m.id),
+  ]);
+  const errors = new Map<string, Map<string, string>>();
+  for (const session of sessions) {
+    for (const id of allIds) session.store.removeChannel(id);
+    const r = applyMathChannels(session.store, nextChannels, session.laps);
+    errors.set(session.id, r.errors);
+  }
+  return { errors };
 }
 
 /** Format a µs span as a footer "range" string in seconds. Guards a non-finite

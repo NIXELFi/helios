@@ -11,6 +11,10 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   readFile: vi.fn().mockResolvedValue(new Uint8Array()),
 }));
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn().mockResolvedValue(null),
+}));
+
 function buildMockClient(isAdmin = false): SupabaseClient {
   return {
     auth: {
@@ -240,6 +244,30 @@ describe("<BrowseScreen>", () => {
     await waitFor(() => expect(screen.getByText("chassis")).toBeInTheDocument());
     fireEvent.click(screen.getByText("chassis"));
     await waitFor(() => expect(screen.getAllByText("frame.sldprt").length).toBeGreaterThan(0));
+  });
+
+  it("auto mode without a sync folder shows an actionable 'set folder' prompt (not a blank toolbar)", async () => {
+    // Repro of the reported bug: a vault in AUTO download mode but with no
+    // Helios root configured. The old gate rendered VaultSyncSection only when
+    // (vaultFolderPath && autoSyncEnabled) and the Manual pill only when
+    // (!autoSyncEnabled) — so auto-mode-without-folder rendered NOTHING, and
+    // useAutoSync silently no-op'd on `!vaultRoot`. The feature looked dead.
+    localStorage.setItem("helios.vault.downloadMode", JSON.stringify({ v1: "auto" }));
+    localStorage.removeItem("helios.vault.localFolder");
+    try {
+      const c = buildMockClient();
+      render(
+        <SupabaseAuthProvider client={c}>
+          <BrowseScreen />
+        </SupabaseAuthProvider>,
+      );
+      await waitFor(() => expect(screen.getByText("sdm26")).toBeInTheDocument());
+      // The dead-zone must surface an explanation + a way to fix it.
+      await waitFor(() => expect(screen.getByText(/no sync folder set/i)).toBeInTheDocument());
+      expect(screen.getByRole("button", { name: /set folder/i })).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("helios.vault.downloadMode");
+    }
   });
 
   it("shows the FileDetailPanel placeholder when no file is selected", async () => {
