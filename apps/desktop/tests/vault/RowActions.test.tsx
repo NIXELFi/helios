@@ -10,6 +10,11 @@ const roCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: (path: string, readonly: boolean) => { roCalls.push({ path, readonly }); return Promise.resolve(); },
 }));
+// CheckInButton now records assembly refs after a successful check-in (it
+// parses the file via the parse_sw_refs Tauri command). There's no Tauri
+// runtime in jsdom, so reject — useRecordRefs swallows it, keeping these tests
+// focused on the check-in/lock behavior they assert.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockRejectedValue(new Error("no tauri in test")) }));
 const dlCalls = vi.hoisted(() => [] as Array<{ sha: string; dest: string }>);
 vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({

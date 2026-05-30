@@ -2013,11 +2013,13 @@ dependencies = [
 name = "helios-desktop"
 version = "3.8.0"
 dependencies = [
+ "cfb 0.10.0",
  "cfd-core",
  "engine-sim",
  "helios-arrow",
  "helios-core",
  "helios-csv",
+ "pdm-sw-parser",
  "serde",
  "serde_json",
  "tauri",

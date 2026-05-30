@@ -5,10 +5,11 @@ import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDownloadVersion } from "../data/useDownloadVersion";
+import { useRecordRefs } from "../data/useRecordRefs";
 import { localDestPath } from "../data/folder-paths";
 import { setReadonly } from "../data/fs-readonly";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
-import type { FileId, FolderId, Folder } from "../data/types";
+import type { FileId, FolderId, Folder, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
 /** Context needed to find + toggle the local working copy for the real-vault
@@ -94,12 +95,17 @@ export function CheckInButton({
   fileId, localFile, onDone, vaultRoot, folderId, fileName, folders,
 }: CheckInButtonProps) {
   const checkIn = useCheckIn();
+  const recordRefs = useRecordRefs();
   // The bytes to upload are read up-front (file dialog / disk) on click, then
   // held here while the comment modal is open. `null` = modal closed.
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
+  // Source path of the bytes being checked in — captured so we can parse the
+  // file's assembly references after a successful check-in (see submit()).
+  const pathRef = useRef<string | null>(null);
 
   async function readBytes(): Promise<ArrayBuffer | null> {
     if (localFile) {
+      pathRef.current = localFile.absolutePath;
       const fileBytes = await readFile(localFile.absolutePath);
       return fileBytes.buffer.slice(
         fileBytes.byteOffset,
@@ -108,6 +114,7 @@ export function CheckInButton({
     }
     const path = await openFileDialog({ multiple: false });
     if (!path || Array.isArray(path)) return null;
+    pathRef.current = path;
     const fileBytes = await readFile(path);
     return fileBytes.buffer.slice(
       fileBytes.byteOffset,
@@ -136,6 +143,10 @@ export function CheckInButton({
       // back to the computed vault path.
       const dest = localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
       if (dest) await setReadonly(dest, true);
+      // Record this version's assembly references (best-effort, fire-and-forget
+      // — must never block or fail the check-in the user just completed).
+      const refName = localFile?.basename ?? fileName ?? "";
+      if (pathRef.current && refName) void recordRefs.run(result.id, pathRef.current, refName);
       onDone?.();
     }
   }
@@ -378,6 +389,101 @@ export function GetLatestButton({
     >
       {download.loading ? "…" : err ? "Retry" : idleLabel}
     </button>
+  );
+}
+
+interface GetVersionButtonProps {
+  version: Version;
+  fileName: string;
+  folderId: FolderId | null;
+  vaultRoot: string | null;
+  folders: Folder[];
+  onDone?: () => void;
+}
+
+/**
+ * SW-PDM "Get Version": download a SPECIFIC (usually older) version of a file
+ * to the local working copy. Non-destructive to vault history — it does NOT
+ * check the file out, acquire a lock, or create a new version; it only
+ * retrieves the chosen version's bytes (every version carries its own sha256).
+ *
+ *  - With a vault folder configured we write to the canonical local path. That
+ *    OVERWRITES the local working copy (and would discard local edits if the
+ *    file is checked out), so we confirm first, then leave the copy read-only —
+ *    it's a non-checked-out copy in the real-vault model.
+ *  - Without a vault folder we prompt a save dialog so the user chooses where
+ *    the bytes land, and never touch the read-only bit on a path of their own.
+ */
+export function GetVersionButton({
+  version, fileName, folderId, vaultRoot, folders, onDone,
+}: GetVersionButtonProps) {
+  const download = useDownloadVersion();
+  const [confirming, setConfirming] = useState(false);
+  // No content to fetch without a sha — keep the row clean.
+  if (!version.sha256) return null;
+
+  async function doGet() {
+    let dest: string;
+    let intoVault = false;
+    if (vaultRoot) {
+      dest = localDestPath(vaultRoot, folderId, fileName, folders);
+      intoVault = true;
+    } else {
+      const picked = await saveFileDialog({ defaultPath: fileName });
+      if (!picked || typeof picked !== "string") return;
+      dest = picked;
+    }
+    const ok = await download.run(version.sha256, dest);
+    if (ok) {
+      // A version pulled into the vault folder is a non-checked-out copy →
+      // read-only. A user-chosen save path outside the vault is left untouched.
+      if (intoVault) await setReadonly(dest, true);
+      onDone?.();
+    }
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    // Into-vault overwrites the local working copy → confirm before discarding.
+    // A save-dialog path is a fresh location the user picks, so go straight there.
+    if (vaultRoot) setConfirming(true);
+    else await doGet();
+  }
+
+  const err = download.error?.message ?? null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={download.loading}
+        title={
+          err
+            ? `Get version failed: ${err}`
+            : `Download version ${version.version_num} to your local copy (read-only — does not check out or create a new version)`
+        }
+        className={
+          "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (err
+            ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+            : "border-helios-line text-helios-text hover:bg-helios-line")
+        }
+      >
+        {download.loading ? "…" : err ? "Retry" : "Get"}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title={`Get version ${version.version_num}?`}
+          body={`This replaces your local copy of ${fileName} with version ${version.version_num} and leaves it read-only. Any local changes will be discarded. It does not check the file out or create a new version.`}
+          confirmLabel="Get this version"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => { void doGet(); }}
+          onClose={() => setConfirming(false)}
+        />
+      )}
+    </>
   );
 }
 

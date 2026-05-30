@@ -58,4 +58,41 @@ describe("<VersionList>", () => {
     render(<VersionList versions={[]} onSelect={() => {}} />);
     expect(screen.getByText(/no versions yet/i)).toBeInTheDocument();
   });
+
+  it("renders renderActions output once per version", () => {
+    render(
+      <VersionList
+        versions={versions as any}
+        onSelect={() => {}}
+        renderActions={(v) => <span>act-{(v as any).version_num}</span>}
+      />,
+    );
+    expect(screen.getByText("act-3")).toBeInTheDocument();
+    expect(screen.getByText("act-2")).toBeInTheDocument();
+    expect(screen.getByText("act-1")).toBeInTheDocument();
+  });
+
+  it("row action is a sibling of the row button (not nested) — activating it does not select the row", () => {
+    const onSelect = vi.fn();
+    render(
+      <VersionList
+        versions={versions as any}
+        onSelect={onSelect}
+        renderActions={(v) => <button type="button">act-{(v as any).version_num}</button>}
+      />,
+    );
+    // Click the action button. If it were nested inside the row <button>, the
+    // click would bubble and fire onSelect. A sibling must not.
+    fireEvent.click(screen.getByRole("button", { name: "act-3" }));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("still selects the row when the row body is clicked, with actions present", () => {
+    const onSelect = vi.fn();
+    render(
+      <VersionList versions={versions as any} onSelect={onSelect} renderActions={() => <span>x</span>} />,
+    );
+    fireEvent.click(screen.getByText(/third/));
+    expect(onSelect).toHaveBeenCalledWith("v3");
+  });
 });

@@ -6,20 +6,27 @@ import { useFiles } from "../data/useFiles";
 import { useVersions } from "../data/useVersions";
 import { useLocks } from "../data/useLocks";
 import { useVaultUsers } from "../data/useVaultUsers";
+import { useVaultFolder } from "../data/useVaultFolder";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { VersionList } from "../components/VersionList";
+import { GetVersionButton } from "../components/RowActions";
 import { holderLabel } from "./WhoHasWhatScreen";
 import type { FileId, FolderId, UserId } from "../data/types";
 
 export function HistoryScreen() {
   const user = useUser();
-  const { activeVaultId: vaultId } = useActiveVault();
+  const { activeVaultId: vaultId, activeVault } = useActiveVault();
   const { data: folders, loading: foldersLoading, error: foldersError } = useFolders(vaultId ?? undefined);
   const [folderId, setFolderId] = useState<FolderId | null>(null);
   const { data: files, loading: filesLoading, error: filesError } = useFiles(folderId ?? undefined);
   const [fileId, setFileId] = useState<FileId | null>(null);
   const { data: versions, loading: versionsLoading, error: versionsError } = useVersions(fileId ?? undefined);
+  // Per-vault local working folder → enables the "Get this version" action on
+  // each history row (SW-PDM Get Version). Null when no folder is configured,
+  // in which case Get falls back to a save dialog.
+  const { path: vaultFolderPath } = useVaultFolder({ vaultName: activeVault?.name ?? null });
+  const selectedFile = useMemo(() => files?.find((f) => f.id === fileId) ?? null, [files, fileId]);
   // Real lock state so the file table can show who has each file checked out,
   // instead of the previous hardcoded `locks={[]}`. useLocks is cross-vault;
   // FileTable matches by file_id so unrelated locks are simply ignored.
@@ -92,7 +99,23 @@ export function HistoryScreen() {
         ) : versionsError ? (
           <div className="p-6 text-sm text-[#EF5350]">{versionsError.message}</div>
         ) : versions ? (
-          <VersionList versions={versions} onSelect={() => {}} />
+          <VersionList
+            versions={versions}
+            onSelect={() => {}}
+            renderActions={
+              selectedFile
+                ? (v) => (
+                    <GetVersionButton
+                      version={v}
+                      fileName={selectedFile.name}
+                      folderId={selectedFile.folder_id}
+                      vaultRoot={vaultFolderPath}
+                      folders={folders ?? []}
+                    />
+                  )
+                : undefined
+            }
+          />
         ) : null}
       </div>
     </div>

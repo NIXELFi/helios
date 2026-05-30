@@ -1,8 +1,14 @@
+import type { ReactNode } from "react";
 import type { Version, VersionId } from "../data/types";
 
 interface Props {
   versions: Version[];
   onSelect: (id: VersionId) => void;
+  /** Optional per-row action(s) (e.g. a "Get this version" button). Rendered
+   *  as a SIBLING of the row's select button — never nested inside it (nesting
+   *  a button in a button is invalid HTML and makes the action click bubble
+   *  into a row selection). */
+  renderActions?: (version: Version) => ReactNode;
 }
 
 /** Format an ISO timestamp as a short relative-time string ("3h ago",
@@ -24,20 +30,20 @@ function formatCreatedAt(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-export function VersionList({ versions, onSelect }: Props) {
+export function VersionList({ versions, onSelect, renderActions }: Props) {
   if (versions.length === 0) {
     return <div className="p-3 text-sm text-helios-dim">No versions yet.</div>;
   }
   return (
     <ol className="divide-y divide-helios-line text-sm">
       {versions.map((v) => (
-        <li key={v.id}>
+        <li key={v.id} className="flex items-stretch">
           {/* Real, keyboard-accessible button so the clickable affordance
               isn't a mouse-only div. Enter/Space activate it natively. */}
           <button
             type="button"
             onClick={() => onSelect(v.id)}
-            className="w-full cursor-pointer px-3 py-2 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-asu-gold"
+            className="flex-1 cursor-pointer px-3 py-2 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-asu-gold"
           >
             <div className="flex items-center justify-between">
               <span className="font-mono-num text-xs text-helios-dim">v{v.version_num}</span>
@@ -45,6 +51,12 @@ export function VersionList({ versions, onSelect }: Props) {
             </div>
             <div className="text-helios-text">{v.comment ?? <em className="text-helios-dim">(no comment)</em>}</div>
           </button>
+          {/* Per-row actions live OUTSIDE the select button (sibling) so they
+              don't form an invalid nested-button and their clicks don't bubble
+              into a row selection. */}
+          {renderActions && (
+            <div className="flex items-center pr-2">{renderActions(v)}</div>
+          )}
         </li>
       ))}
     </ol>

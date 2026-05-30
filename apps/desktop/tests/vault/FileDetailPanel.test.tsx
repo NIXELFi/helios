@@ -5,6 +5,24 @@ import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FileDetailPanel } from "../../src/modules/vault/screens/FileDetailPanel";
 
+// The detail panel now renders GetVersionButton per version, which pulls in
+// the Tauri dialog/fs plugins. Mock them so rendering never touches a real
+// Tauri runtime (the buttons aren't clicked in these tests).
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn().mockResolvedValue(null),
+  save: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
+  setReadonly: vi.fn().mockResolvedValue(undefined),
+}));
+// The panel renders ReferencesPanel (Contains / Where-Used); stub the data
+// hooks so this suite's lightweight mock client doesn't need the refs chains.
+// ReferencesPanel has its own dedicated test.
+vi.mock("../../src/modules/vault/data/useReferences", () => ({
+  useContains: () => ({ data: [], loading: false, error: null }),
+  useWhereUsed: () => ({ data: [], loading: false, error: null }),
+}));
+
 function mockClient(versions: any[] = []): SupabaseClient {
   return {
     auth: {
@@ -47,6 +65,18 @@ describe("<FileDetailPanel>", () => {
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("frame.sldprt")).toBeInTheDocument());
+  });
+
+  it("shows a Get button per version when a vault folder + folders are provided", async () => {
+    const versions = [
+      { id: "vv1", file_id: "file-1", version_num: 1, sha256: "s1", size_bytes: 1, author_id: null, comment: "first", parent_version_id: null, created_at: "2026-01-01" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient(versions)}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} vaultRoot="/v" folders={[]} />
+      </SupabaseAuthProvider>,
+    );
+    expect(await screen.findByRole("button", { name: /^get$/i })).toBeInTheDocument();
   });
 
   it("V13: handles a selectedFile that no longer exists in the file list", async () => {

@@ -1,6 +1,8 @@
 import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
-import type { FileId, VaultFile } from "../data/types";
+import { GetVersionButton } from "../components/RowActions";
+import { ReferencesPanel } from "../components/ReferencesPanel";
+import type { FileId, FolderId, Folder, VaultFile, Version } from "../data/types";
 
 interface Props {
   fileId: FileId | null;
@@ -9,9 +11,15 @@ interface Props {
    *  by another user since it was selected). Optional for callers that don't
    *  have the list handy — the header then falls back to a generic title. */
   files?: VaultFile[];
+  /** Per-vault local working folder + the vault's folder tree. When provided,
+   *  each version row gets a "Get this version" action (SW-PDM Get Version).
+   *  Omitted by callers without a vault folder context — the panel is then
+   *  view-only history (no Get action). */
+  vaultRoot?: string | null;
+  folders?: Folder[];
 }
 
-export function FileDetailPanel({ fileId, files }: Props) {
+export function FileDetailPanel({ fileId, files, vaultRoot, folders }: Props) {
   if (!fileId) {
     return (
       <aside className="flex h-full w-80 items-center justify-center border-l border-helios-line bg-helios-base p-4 text-sm text-helios-dim">
@@ -38,11 +46,40 @@ export function FileDetailPanel({ fileId, files }: Props) {
     );
   }
 
-  return <FileDetailLoader fileId={fileId} fileName={selected?.name ?? null} />;
+  return (
+    <FileDetailLoader
+      fileId={fileId}
+      fileName={selected?.name ?? null}
+      folderId={selected?.folder_id ?? null}
+      vaultRoot={vaultRoot ?? null}
+      folders={folders ?? []}
+    />
+  );
 }
 
-function FileDetailLoader({ fileId, fileName }: { fileId: FileId; fileName: string | null }) {
+function FileDetailLoader({
+  fileId, fileName, folderId, vaultRoot, folders,
+}: {
+  fileId: FileId;
+  fileName: string | null;
+  folderId: FolderId | null;
+  vaultRoot: string | null;
+  folders: Folder[];
+}) {
   const { data, loading, error } = useVersions(fileId);
+  // Only offer "Get this version" when we know the file's name (needed to
+  // compute the local destination / save-dialog default).
+  const renderActions = fileName
+    ? (v: Version) => (
+        <GetVersionButton
+          version={v}
+          fileName={fileName}
+          folderId={folderId}
+          vaultRoot={vaultRoot}
+          folders={folders}
+        />
+      )
+    : undefined;
   return (
     <aside className="flex h-full w-80 flex-col border-l border-helios-line bg-helios-base">
       <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
@@ -63,9 +100,11 @@ function FileDetailLoader({ fileId, fileName }: { fileId: FileId; fileName: stri
         ) : !data || data.length === 0 ? (
           <div className="p-3 text-sm text-helios-dim">No versions yet.</div>
         ) : (
-          <VersionList versions={data} onSelect={() => {}} />
+          <VersionList versions={data} onSelect={() => {}} renderActions={renderActions} />
         )}
       </div>
+      {/* Assembly references for the latest version of the selected file. */}
+      <ReferencesPanel versionId={data?.[0]?.id ?? null} fileId={fileId} />
     </aside>
   );
 }

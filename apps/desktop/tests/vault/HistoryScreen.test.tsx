@@ -5,6 +5,16 @@ import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HistoryScreen } from "../../src/modules/vault/screens/HistoryScreen";
 
+// HistoryScreen now renders GetVersionButton per version → pulls in Tauri
+// dialog/fs plugins. Mock so rendering never hits a real Tauri runtime.
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn().mockResolvedValue(null),
+  save: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
+  setReadonly: vi.fn().mockResolvedValue(undefined),
+}));
+
 interface Opts {
   // null → folders query never resolves (stays loading). Otherwise resolves
   // with this error (or empty data on null-error).
@@ -15,6 +25,7 @@ interface Opts {
   files?: any[];
   locks?: any[];
   users?: any[];
+  versions?: any[];
 }
 
 function mockClient(opts: Opts = {}): SupabaseClient {
@@ -25,6 +36,7 @@ function mockClient(opts: Opts = {}): SupabaseClient {
     files = [],
     locks = [],
     users = [],
+    versions = [],
   } = opts;
   // range() must honor (from,to) slicing — fetchAllRows pages until it sees a
   // short page, so a source that ignores range and always returns the full
@@ -60,6 +72,7 @@ function mockClient(opts: Opts = {}): SupabaseClient {
         return okChain(folders);
       }
       if (table === "files") return okChain(files);
+      if (table === "versions") return okChain(versions);
       return okChain([]);
     }),
     rpc: (name: string) => {
@@ -96,6 +109,24 @@ describe("<HistoryScreen>", () => {
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/folders boom/i)).toBeInTheDocument());
+  });
+
+  it("offers a 'Get this version' action per version once a file is selected", async () => {
+    const folders = [{ id: "fold-1", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" }];
+    const files = [{ id: "file-1", vault_id: "v1", folder_id: "fold-1", name: "frame.sldprt", latest_version_id: null, created_at: "x" }];
+    const versions = [
+      { id: "ver-1", file_id: "file-1", version_num: 1, sha256: "s1", size_bytes: 1, author_id: null, comment: "first", parent_version_id: null, created_at: "2026-01-01" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient({ folders, files, versions })}>
+        <HistoryScreen />
+      </SupabaseAuthProvider>,
+    );
+    const folderRow = await screen.findByRole("button", { name: "chassis" });
+    await act(async () => { fireEvent.click(folderRow); });
+    const fileRow = await screen.findByText("frame.sldprt");
+    await act(async () => { fireEvent.click(fileRow); });
+    expect(await screen.findByRole("button", { name: /^get$/i })).toBeInTheDocument();
   });
 
   it("LOW: wires holder names so a locked-by-other row reads 'Locked by <name>'", async () => {
