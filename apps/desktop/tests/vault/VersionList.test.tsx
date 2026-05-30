@@ -59,6 +59,17 @@ describe("<VersionList>", () => {
     expect(screen.getByText(/no versions yet/i)).toBeInTheDocument();
   });
 
+  it("shows a revision badge when a version has a revision", () => {
+    const withRev = [{ ...versions[0], revision: 2 }, ...versions.slice(1)];
+    render(<VersionList versions={withRev as any} onSelect={() => {}} />);
+    expect(screen.getByText(/rev\s*2/i)).toBeInTheDocument();
+  });
+
+  it("renders no revision badge for versions without a revision", () => {
+    render(<VersionList versions={versions as any} onSelect={() => {}} />);
+    expect(screen.queryByText(/^rev\s*\d+/i)).toBeNull();
+  });
+
   it("renders renderActions output once per version", () => {
     render(
       <VersionList

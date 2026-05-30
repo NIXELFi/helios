@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -21,6 +21,10 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
 vi.mock("../../src/modules/vault/data/useReferences", () => ({
   useContains: () => ({ data: [], loading: false, error: null }),
   useWhereUsed: () => ({ data: [], loading: false, error: null }),
+}));
+const setRevRun = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "vv1", revision: 1 }));
+vi.mock("../../src/modules/vault/data/useSetRevision", () => ({
+  useSetRevision: () => ({ run: setRevRun, loading: false, error: null }),
 }));
 
 function mockClient(versions: any[] = []): SupabaseClient {
@@ -77,6 +81,34 @@ describe("<FileDetailPanel>", () => {
       </SupabaseAuthProvider>,
     );
     expect(await screen.findByRole("button", { name: /^get$/i })).toBeInTheDocument();
+  });
+
+  it("offers Set Revision to editors and calls the RPC with the file id", async () => {
+    setRevRun.mockClear();
+    const versions = [
+      { id: "vv1", file_id: "file-1", version_num: 1, sha256: "s1", size_bytes: 1, author_id: null, comment: "first", parent_version_id: null, revision: null, created_at: "2026-01-01" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient(versions)}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} vaultRoot="/v" folders={[]} canEdit />
+      </SupabaseAuthProvider>,
+    );
+    const btn = await screen.findByRole("button", { name: /set revision/i });
+    fireEvent.click(btn);
+    await waitFor(() => expect(setRevRun).toHaveBeenCalledWith("file-1"));
+  });
+
+  it("hides Set Revision when the user cannot edit", async () => {
+    const versions = [
+      { id: "vv1", file_id: "file-1", version_num: 1, sha256: "s1", size_bytes: 1, author_id: null, comment: "first", parent_version_id: null, revision: null, created_at: "2026-01-01" },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient(versions)}>
+        <FileDetailPanel fileId={"file-1" as any} files={files as any} />
+      </SupabaseAuthProvider>,
+    );
+    await screen.findByRole("button", { name: /^get$/i }).catch(() => null);
+    expect(screen.queryByRole("button", { name: /set revision/i })).toBeNull();
   });
 
   it("V13: handles a selectedFile that no longer exists in the file list", async () => {

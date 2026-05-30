@@ -38,6 +38,9 @@ export interface Version {
   author_id: UserId | null;
   comment: string | null;
   parent_version_id: VersionId | null;
+  /** Manually-stamped numeric revision (SW-PDM "Set Revision"), or null if this
+   *  version has never been given a revision. Distinct from `version_num`. */
+  revision: number | null;
   created_at: string;
 }
 

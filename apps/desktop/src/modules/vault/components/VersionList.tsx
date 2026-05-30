@@ -46,7 +46,14 @@ export function VersionList({ versions, onSelect, renderActions }: Props) {
             className="flex-1 cursor-pointer px-3 py-2 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-asu-gold"
           >
             <div className="flex items-center justify-between">
-              <span className="font-mono-num text-xs text-helios-dim">v{v.version_num}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="font-mono-num text-xs text-helios-dim">v{v.version_num}</span>
+                {v.revision != null && (
+                  <span className="rounded bg-asu-gold/20 px-1 py-0.5 font-mono-num text-[10px] font-semibold text-asu-gold">
+                    rev {v.revision}
+                  </span>
+                )}
+              </span>
               <span className="text-xs text-helios-dim" title={v.created_at}>{formatCreatedAt(v.created_at)}</span>
             </div>
             <div className="text-helios-text">{v.comment ?? <em className="text-helios-dim">(no comment)</em>}</div>
