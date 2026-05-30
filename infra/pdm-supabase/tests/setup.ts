@@ -62,16 +62,29 @@ export async function signInAs(
   return c;
 }
 
-/** Sets a user's pdm role. Bypasses RLS via service role. */
+/** Sets a user's GLOBAL pdm role (vault_id NULL — applies to every vault).
+ *  Bypasses RLS via service role. Delete-then-insert because the unique index
+ *  is on (user_id, coalesce(vault_id, ZERO)) — supabase-js upsert can't target
+ *  that expression index. */
 export async function setRole(
   userId: string,
-  role: "admin" | "editor" | "viewer",
+  role: "owner" | "admin" | "editor" | "viewer",
 ): Promise<void> {
   const svc = serviceClient();
-  const { error } = await svc.from("user_roles").upsert(
-    { user_id: userId, role },
-    { onConflict: "user_id" },
-  ).select().single();
+  await svc.from("user_roles").delete().eq("user_id", userId).is("vault_id", null);
+  const { error } = await svc.from("user_roles").insert({ user_id: userId, role, vault_id: null }).select().single();
+  if (error) throw error;
+}
+
+/** Sets a user's role scoped to a single vault (per-vault roles). */
+export async function setVaultRole(
+  userId: string,
+  role: "admin" | "editor" | "viewer",
+  vaultId: string,
+): Promise<void> {
+  const svc = serviceClient();
+  await svc.from("user_roles").delete().eq("user_id", userId).eq("vault_id", vaultId);
+  const { error } = await svc.from("user_roles").insert({ user_id: userId, role, vault_id: vaultId }).select().single();
   if (error) throw error;
 }
 
