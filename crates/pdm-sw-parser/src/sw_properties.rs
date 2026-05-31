@@ -34,14 +34,46 @@ pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut have_physical = false;
     let n = bytes.len();
-    let mut i = 0usize;
-    while i + 2 < n {
+
+    // The property parts sit near the FRONT of the container (most parts) or at
+    // the very END (assemblies); the bulk in between is geometry. Decompressing
+    // all of it just to reach the property block is what made a 139 MB assembly
+    // take ~25 s. For large files we scan only the two edges and skip the middle
+    // (which never holds the property block) — the same 139 MB file drops to a
+    // few seconds. Small files are scanned whole (already fast).
+    const SCAN_ALL_MAX: usize = 24 * 1024 * 1024;
+    const HEAD_WINDOW: usize = 8 * 1024 * 1024;
+    const TAIL_WINDOW: usize = 12 * 1024 * 1024;
+    if n <= SCAN_ALL_MAX {
+        scan_region(bytes, 0, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+    } else {
+        scan_region(bytes, 0, HEAD_WINDOW, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        scan_region(bytes, n - TAIL_WINDOW, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+    }
+    physical.into_iter().chain(custom).collect()
+}
+
+/// Scan deflate streams whose start offset falls in `[start, end)`, extracting
+/// the mass vector + custom properties. A stream may legitimately extend past
+/// `end`; we just don't *start* new attempts there.
+#[allow(clippy::too_many_arguments)]
+fn scan_region(
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    physical: &mut Vec<SwProperty>,
+    custom: &mut Vec<SwProperty>,
+    seen: &mut BTreeSet<String>,
+    have_physical: &mut bool,
+) {
+    let mut i = start;
+    while i + 2 < end {
         match try_inflate(&bytes[i..]) {
             Some((head, consumed)) => {
                 // Cheap byte-level marker check on the (capped) head; only the
                 // small property streams pay for UTF-8 conversion + parsing, so
                 // we never stringify or rescan multi-MB geometry streams.
-                let want_mass = !have_physical && contains_sub(&head, b"SW-MassProp-Config");
+                let want_mass = !*have_physical && contains_sub(&head, b"SW-MassProp-Config");
                 let want_props =
                     contains_sub(&head, b"<property name=") || contains_sub(&head, b"Material=");
                 if want_mass || want_props {
@@ -51,12 +83,12 @@ pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
                     // config we take the first — best-effort).
                     if want_mass {
                         if let Some(rows) = mass_rows(&text) {
-                            physical = rows;
-                            have_physical = true;
+                            *physical = rows;
+                            *have_physical = true;
                         }
                     }
                     if want_props {
-                        extract_props(&text, &mut custom, &mut seen);
+                        extract_props(&text, custom, seen);
                     }
                 }
                 i += consumed.max(1);
@@ -64,7 +96,6 @@ pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
             None => i += 1,
         }
     }
-    physical.into_iter().chain(custom).collect()
 }
 
 /// Parse the `SW-MassProp-Config-*` vector and build the user-facing physical
