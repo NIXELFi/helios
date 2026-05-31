@@ -37,6 +37,10 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
+// Stable empty Set returned before the first scan / when there's no root, so
+// consumers don't see a new identity (and re-render) on every render.
+const EMPTY_OPEN_IN_SW: Set<string> = new Set();
+
 // Hard cap on recursion depth. A vault tree this deep is pathological; the
 // cap is a backstop against cyclic real-path trees (and as a second line of
 // defense behind the symlink skip below) so the walk can't stack-overflow or
@@ -47,6 +51,7 @@ async function walk(
   dir: string,
   relPrefix: string,
   out: LocalFile[],
+  openInSw: Set<string>,
   shaCache: ShaCache,
   depth = 0,
 ): Promise<void> {
@@ -55,6 +60,20 @@ async function walk(
   for (const e of entries) {
     // Skip hidden + common cruft.
     if (e.name.startsWith(".")) continue;
+    // SolidWorks writes a `~$<name>` sidecar next to a file while it's open for
+    // editing and deletes it on close. Never let these enter the LocalFile list
+    // (they'd otherwise leak into the "not in vault" unmatched banner). Instead
+    // capture them as a live "open in SolidWorks" signal: a `~$Foo.SLDPRT` in
+    // this folder means the real `Foo.SLDPRT` (same folder/relPrefix) is open.
+    // The captured relativePath is built exactly like the LocalFile.relativePath
+    // below so the FileTable's lookup keys line up.
+    if (e.name.startsWith("~$")) {
+      const realName = e.name.slice(2);
+      if (realName) {
+        openInSw.add(relPrefix ? `${relPrefix}/${realName}` : realName);
+      }
+      continue;
+    }
     // Never follow symlinks. A symlinked directory can point back up the tree
     // (or to another scanned root), producing an infinite recursion / hang.
     // We skip symlinks entirely — including symlinked files — rather than try
@@ -63,7 +82,7 @@ async function walk(
     const abs = `${dir}/${e.name}`;
     const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name;
     if (e.isDirectory) {
-      await walk(abs, rel, out, shaCache, depth + 1);
+      await walk(abs, rel, out, openInSw, shaCache, depth + 1);
     } else if (e.isFile) {
       try {
         // Probe via stat() to drive the sha cache (mtime+size key). If stat
@@ -129,6 +148,10 @@ export function useLocalFolderScan(
 ) {
   const { intervalMs, rescanOnFocus, watchFs, paused } = options;
   const [files, setFiles] = useState<LocalFile[] | null>(null);
+  // Relative paths (built the same way as LocalFile.relativePath) of files that
+  // SolidWorks currently has open for editing, derived from `~$` lock sidecars
+  // seen during the walk. Used as an informational "Open in SolidWorks" signal.
+  const [openInSw, setOpenInSw] = useState<Set<string>>(EMPTY_OPEN_IN_SW);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
@@ -152,6 +175,7 @@ export function useLocalFolderScan(
   useEffect(() => {
     if (!rootPath) {
       setFiles(null);
+      setOpenInSw(EMPTY_OPEN_IN_SW);
       setError(null);
       setLoading(false);
       return;
@@ -177,14 +201,18 @@ export function useLocalFolderScan(
         let rootExists = true;
         try { await stat(rootPath); } catch { rootExists = false; }
         const collected: LocalFile[] = [];
+        const openSw = new Set<string>();
         if (rootExists) {
-          await walk(rootPath, "", collected, shaCacheRef.current);
+          await walk(rootPath, "", collected, openSw, shaCacheRef.current);
         }
         // Skip the commit if paused flipped true while we were walking (and it
         // wasn't already paused at start — that case never publishes anyway).
         const pausedNow = pausedRef.current && !startedPaused;
         if (mounted && !pausedNow) {
           setFiles(collected);
+          // Reuse the stable empty set when there's nothing open, so consumers
+          // don't churn on a fresh empty-Set identity each scan.
+          setOpenInSw(openSw.size === 0 ? EMPTY_OPEN_IN_SW : openSw);
           setLoading(false);
         } else if (mounted) {
           // Clear the loading flag but leave `files` untouched — a later
@@ -260,5 +288,5 @@ export function useLocalFolderScan(
     };
   }, [rootPath, watchFs, refetch]);
 
-  return { files, loading, error, refetch };
+  return { files, openInSw, loading, error, refetch };
 }

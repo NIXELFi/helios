@@ -102,7 +102,7 @@ export function BrowseScreen() {
   // file table doesn't flicker between modified/synced as bytes land; the
   // explicit rescan from onComplete catches the final state.
   const [syncBusy, setSyncBusy] = useState(false);
-  const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
+  const { files: localFiles, openInSw, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
     intervalMs: LOCAL_RESCAN_INTERVAL_MS,
     rescanOnFocus: true,
     watchFs: true,
@@ -606,6 +606,7 @@ export function BrowseScreen() {
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
                   downloadMode={downloadMode}
+                  openInSw={openInSw}
                 />
               </>
             )}
