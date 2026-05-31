@@ -155,6 +155,45 @@ describe("useAutoSync", () => {
     expect(result.current.lastHeldBack).toBe(0);
   });
 
+  it("freezes a just-downloaded file read-only immediately after a successful download", async () => {
+    // A freshly-downloaded vault copy is always a clean copy (the user's
+    // edited/locked files are held back earlier in the pass), so the download
+    // worker freezes it read-only right away — closing the window where the
+    // file is briefly writable before post-pass reconciliation runs.
+    const files: VaultFile[] = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-fresh")]]]);
+    // No local copy → it's a download (missing file).
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+      }),
+    );
+    await waitFor(() => { expect(downloadResolvers.has("sha-fresh")).toBe(true); });
+    await act(async () => { resolveDownload("sha-fresh", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(result.current.lastDownloaded).toBe(1);
+    // The download worker froze the just-downloaded destination read-only.
+    expect(readonlyCalls).toContainEqual({ path: "/v/a.bin", readonly: true });
+  });
+
+  it("does not freeze a file whose download FAILED", async () => {
+    const files: VaultFile[] = [makeFile("f1", "a.bin")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-fail")]]]);
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+      }),
+    );
+    await waitFor(() => { expect(downloadResolvers.has("sha-fail")).toBe(true); });
+    await act(async () => { resolveDownload("sha-fail", false); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(result.current.lastFailed).toBe(1);
+    // Failed download → nothing on disk to freeze.
+    expect(readonlyCalls.find((c) => c.path === "/v/a.bin")).toBeUndefined();
+  });
+
   it("does not double-execute when multiple renders happen before the run starts", async () => {
     // Stable identities — caller would be passing memoized values from React
     // Query. Re-rendering with the same values must not cause two passes.
