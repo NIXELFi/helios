@@ -24,25 +24,150 @@ pub struct SwProperty {
     pub value: String,
 }
 
-/// Top-level entry: extract custom properties (de-duplicated by name) from the
-/// bytes of a SolidWorks file.
+/// Top-level entry: extract data-card properties from the bytes of a SolidWorks
+/// file. Returns the computed physical properties (Mass / Volume / Surface Area)
+/// first — the most useful at-a-glance facts — followed by the modeler's custom
+/// properties (de-duplicated by name).
 pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
-    let mut out: Vec<SwProperty> = Vec::new();
+    let mut physical: Vec<SwProperty> = Vec::new();
+    let mut custom: Vec<SwProperty> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut have_physical = false;
     let n = bytes.len();
     let mut i = 0usize;
     while i + 2 < n {
         match try_inflate(&bytes[i..]) {
             Some((text, consumed)) => {
+                // Physical properties: parse the first SW-MassProp-Config vector
+                // we see (single-config parts have exactly one; for multi-config
+                // we take the first — best-effort).
+                if !have_physical && text.contains("SW-MassProp-Config") {
+                    if let Some(rows) = mass_rows(&text) {
+                        physical = rows;
+                        have_physical = true;
+                    }
+                }
                 if text.contains("<property name=") || text.contains("Material=") {
-                    extract_props(&text, &mut out, &mut seen);
+                    extract_props(&text, &mut custom, &mut seen);
                 }
                 i += consumed.max(1);
             }
             None => i += 1,
         }
     }
+    physical.into_iter().chain(custom).collect()
+}
+
+/// Parse the `SW-MassProp-Config-*` vector and build the user-facing physical
+/// rows. The vector is comma-separated SI doubles:
+/// `[CoM_x, CoM_y, CoM_z, Volume(m³), Area(m²), Mass(kg), …moments…]`.
+/// Mass is shown only when > 0 (a 0 means no material is assigned — common for
+/// reference / surface bodies); Volume and Surface Area are always shown when
+/// present.
+fn mass_rows(text: &str) -> Option<Vec<SwProperty>> {
+    let key = text.find("SW-MassProp-Config")?;
+    let rest = &text[key..];
+    let vt = rest.find("<vt:")?;
+    let after = &rest[vt + 4..];
+    let gt = after.find('>')?;
+    let val_start = vt + 4 + gt + 1;
+    let close = rest[val_start..].find("</vt:")?;
+    let raw = &rest[val_start..val_start + close];
+
+    let nums: Vec<f64> = raw
+        .split(',')
+        .filter_map(|s| s.trim().parse::<f64>().ok())
+        .collect();
+    if nums.len() < 6 {
+        return None;
+    }
+    let (volume_m3, area_m2, mass_kg) = (nums[3], nums[4], nums[5]);
+
+    let mut rows = Vec::new();
+    if mass_kg > 0.0 {
+        rows.push(SwProperty { name: "Mass".into(), value: fmt_mass(mass_kg) });
+    }
+    if volume_m3 > 0.0 {
+        rows.push(SwProperty { name: "Volume".into(), value: fmt_volume(volume_m3) });
+    }
+    if area_m2 > 0.0 {
+        rows.push(SwProperty { name: "Surface Area".into(), value: fmt_area(area_m2) });
+    }
+    if rows.is_empty() {
+        None
+    } else {
+        Some(rows)
+    }
+}
+
+/// Mass: kg at/above 1 kg (3 decimals, trailing zeros trimmed), else grams.
+fn fmt_mass(kg: f64) -> String {
+    if kg >= 1.0 {
+        alloc::format!("{} kg", trim_decimals(kg, 3))
+    } else {
+        alloc::format!("{} g", grouped(kg * 1_000.0, 1))
+    }
+}
+
+/// Volume: cm³, dropping to mm³ for sub-10-cm³ parts.
+fn fmt_volume(m3: f64) -> String {
+    let cm3 = m3 * 1.0e6;
+    if cm3 < 10.0 {
+        alloc::format!("{} mm³", grouped(m3 * 1.0e9, 1))
+    } else {
+        alloc::format!("{} cm³", grouped(cm3, 1))
+    }
+}
+
+/// Surface area: cm², dropping to mm² for sub-10-cm² parts.
+fn fmt_area(m2: f64) -> String {
+    let cm2 = m2 * 1.0e4;
+    if cm2 < 10.0 {
+        alloc::format!("{} mm²", grouped(m2 * 1.0e6, 1))
+    } else {
+        alloc::format!("{} cm²", grouped(cm2, 1))
+    }
+}
+
+/// Format with a fixed number of decimals and thousands separators, e.g.
+/// `43676.0 → "43,676.0"`.
+fn grouped(x: f64, decimals: usize) -> String {
+    let s = alloc::format!("{:.*}", decimals, x);
+    let (int_part, frac) = match s.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (s.as_str(), None),
+    };
+    let neg = int_part.starts_with('-');
+    let digits = int_part.trim_start_matches('-');
+    let len = digits.len();
+    let mut grouped = String::new();
+    for (idx, ch) in digits.chars().enumerate() {
+        if idx > 0 && (len - idx) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(ch);
+    }
+    let mut out = String::new();
+    if neg {
+        out.push('-');
+    }
+    out.push_str(&grouped);
+    if let Some(f) = frac {
+        out.push('.');
+        out.push_str(f);
+    }
     out
+}
+
+/// Format a value with up to `decimals` decimals, trimming trailing zeros (and a
+/// trailing dot), with thousands separators on the integer part.
+fn trim_decimals(x: f64, decimals: usize) -> String {
+    let s = grouped(x, decimals);
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
 }
 
 /// Try to raw-inflate a deflate stream starting at `input[0]`. Returns the
@@ -122,12 +247,19 @@ fn extract_props_in(text: &str, out: &mut Vec<SwProperty>, seen: &mut BTreeSet<S
         let Some(qrel) = text[name_start..].find('"') else { break };
         let name = &text[name_start..name_start + qrel];
         search = name_start + qrel;
-        if name.is_empty() || is_system_prop(name) {
-            // Skip pid placeholders (<property name="" …>) and SolidWorks'
-            // auto-generated system properties — the data card should show only
-            // the user-defined fields the modeler actually typed.
+        if name.is_empty() {
+            // Skip pid placeholders (<property name="" …>).
             continue;
         }
+        // A user-entered field keeps its name; a few SolidWorks system fields are
+        // relabeled to friendly data-card fields (e.g. "SW-Last Saved By" →
+        // "Last Saved By"); all other SW-/SW_ internals are dropped.
+        let label: Option<&str> = if is_system_prop(name) {
+            doc_prop_label(name)
+        } else {
+            Some(name)
+        };
+        let Some(label) = label else { continue };
         // Value: the first <vt:TYPE>…</vt:TYPE> after the name attribute.
         let rest = &text[search..];
         if let Some(vt) = rest.find("<vt:") {
@@ -136,12 +268,29 @@ fn extract_props_in(text: &str, out: &mut Vec<SwProperty>, seen: &mut BTreeSet<S
                 let val_start = vt + 4 + gt + 1;
                 if let Some(close) = rest[val_start..].find("</vt:") {
                     let value = rest[val_start..val_start + close].trim();
-                    if !value.is_empty() {
-                        push(out, seen, name, value);
+                    if value.is_empty() {
+                        continue;
                     }
+                    // A "Default" configuration is noise — nearly every part has
+                    // one; only a meaningful named config is worth a card row.
+                    if label == "Configuration" && unescape_xml(value) == "Default" {
+                        continue;
+                    }
+                    push(out, seen, label, value);
                 }
             }
         }
+    }
+}
+
+/// A handful of SolidWorks system properties carry data worth showing on the
+/// card. Map them to friendly labels; everything else `is_system_prop` filters
+/// stays hidden.
+fn doc_prop_label(name: &str) -> Option<&'static str> {
+    match name {
+        "SW-Last Saved By" => Some("Last Saved By"),
+        "SW-Configuration Name" => Some("Configuration"),
+        _ => None,
     }
 }
 
@@ -221,5 +370,76 @@ mod tests {
     fn non_solidworks_bytes_yield_no_properties() {
         let props = parse_properties(b"\xd0\xcf\x11\xe0 just some random non-deflate bytes here, no properties at all");
         assert!(props.is_empty());
+    }
+
+    // --- Physical (mass) properties from the SW-MassProp-Config vector --------
+    // The vector is `[CoM_x, CoM_y, CoM_z, Volume(m³), Area(m²), Mass(kg), …]`
+    // in SI base units (validated against the real CBR600RR engine — Mass[5] =
+    // 60.0 kg — and the steel chassis — Volume[3]×7850 = Mass[5] = 27.569 kg).
+
+    #[test]
+    fn extracts_physical_mass_properties_from_si_vector() {
+        // Real "SDM26 Chassis FINAL" Config-0 vector.
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0" pid="9"><vt:lpstr>-0.4902829144421719, -0.0012712297887835, 0.3421738590032732, 0.0035119830630731, 4.3675970584841899, 27.5690670451234610, 2.96, 12.49, 12.08, 0.02, 0.0, 0.0, 0.0, 0.0</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Mass"), Some("27.569 kg"));
+        assert_eq!(get("Volume"), Some("3,512.0 cm³"));
+        assert_eq!(get("Surface Area"), Some("43,676.0 cm²"));
+        // Physical rows lead the card.
+        assert_eq!(props[0].name, "Mass");
+    }
+
+    #[test]
+    fn small_part_uses_grams_and_mm3() {
+        let v = "0.019, 0.0, 0.0, 0.0000006, 0.0003418, 0.006137, 0,0,0,0,0,0,0,0";
+        let xml = format!(r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>{v}</vt:lpstr></property></propertySection></Properties>"#);
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Mass"), Some("6.1 g"));
+        assert_eq!(get("Volume"), Some("600.0 mm³"));
+        assert_eq!(get("Surface Area"), Some("341.8 mm²"));
+    }
+
+    #[test]
+    fn no_mass_row_when_no_material_but_volume_area_remain() {
+        // Surface/template body: Mass = 0 (no material), but volume + area exist.
+        let v = "0.31, 0.0, 0.0, 0.0609906320493882, 1.3384751178002108, 0.0, 0,0,0,0,0,0,0,0";
+        let xml = format!(r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>{v}</vt:lpstr></property></propertySection></Properties>"#);
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert!(get("Mass").is_none());
+        assert_eq!(get("Volume"), Some("60,990.6 cm³"));
+        assert_eq!(get("Surface Area"), Some("13,384.8 cm²"));
+    }
+
+    #[test]
+    fn surfaces_curated_document_properties_relabeled() {
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-Last Saved By" pid="2"><vt:lpstr>danie</vt:lpstr></property><property name="SW-Configuration Name" pid="3"><vt:lpstr>Race Setup</vt:lpstr></property><property name="SW-Author" pid="4"><vt:lpstr>bob</vt:lpstr></property><property name="PartNo" pid="5"><vt:lpstr>X1</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Last Saved By"), Some("danie"));
+        assert_eq!(get("Configuration"), Some("Race Setup"));
+        assert_eq!(get("PartNo"), Some("X1"));
+        // SW-Author isn't on the curated whitelist → still hidden.
+        assert!(get("Author").is_none());
+        assert!(get("SW-Author").is_none());
+    }
+
+    #[test]
+    fn hides_default_configuration_as_noise() {
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-Configuration Name" pid="3"><vt:lpstr>Default</vt:lpstr></property><property name="PartNo" pid="5"><vt:lpstr>X1</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        assert!(props.iter().all(|p| p.name != "Configuration"));
+        assert!(props.iter().any(|p| p.name == "PartNo"));
+    }
+
+    #[test]
+    fn user_properties_still_extracted_alongside_physical() {
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>0,0,0,0.0001,0.01,0.785,0,0,0,0,0,0,0,0</vt:lpstr></property><property name="PartNo" pid="2"><vt:lpstr>ABC-123</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Mass"), Some("785.0 g"));
+        assert_eq!(get("PartNo"), Some("ABC-123"));
     }
 }
