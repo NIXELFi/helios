@@ -25,6 +25,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Build-only: supplies the .NET Framework 4.8 reference assemblies so the
+      project builds with the `dotnet` SDK without the system-wide Developer
+      Pack installed. PrivateAssets=all => build-time only, nothing extra ships.
+    -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="SolidWorks.Interop.sldworks">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
       <EmbedInteropTypes>false</EmbedInteropTypes>

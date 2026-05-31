@@ -39,7 +39,13 @@ If your SOLIDWORKS API DLLs aren't at the default path
 dotnet build -c Release -p:SolidWorksApiPath="C:\Path\To\SOLIDWORKS\api\redist"
 ```
 
-Output: `bin\x64\Release\net48\HeliosVault.dll`.
+Output: `bin\Release\net48\HeliosVault.dll` (x64 — the `PlatformTarget` doesn't
+add a path segment for an SDK-style project).
+
+> The build needs the **.NET Framework 4.8 reference assemblies**. The project
+> pulls them in automatically via the build-only `Microsoft.NETFramework.ReferenceAssemblies`
+> NuGet package, so the system-wide Developer Pack is optional and the first
+> build will restore from NuGet (needs internet once).
 
 ## Register (so SOLIDWORKS sees it)
 
@@ -48,11 +54,27 @@ COM-register the DLL **from an elevated (Administrator) prompt** — this runs t
 
 ```powershell
 # RegAsm ships with .NET Framework:
-%windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe /codebase "bin\x64\Release\net48\HeliosVault.dll"
+%windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe /codebase "bin\Release\net48\HeliosVault.dll"
 ```
 
 You should see *"Types registered successfully."* (the `/codebase` warning is
 expected for a non-GAC assembly).
+
+> **If RegAsm fails with `Could not load file or assembly 'SolidWorks.Interop.swpublished'`:**
+> RegAsm runs the `[ComRegisterFunction]` hook, which loads the add-in type —
+> and that type implements `ISwAddin` from the SW interops. RegAsm resolves a
+> loaded assembly's dependencies from *its own folder*, so unless your SW
+> install GACs the interops, copy the three referenced interop DLLs next to
+> `HeliosVault.dll` first (build only; the running SOLIDWORKS resolves them from
+> its own app dir, so they aren't needed there at runtime):
+>
+> ```powershell
+> $redist = "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist"
+> $out    = "bin\Release\net48"
+> Copy-Item "$redist\SolidWorks.Interop.swpublished.dll" $out
+> Copy-Item "$redist\SolidWorks.Interop.sldworks.dll"    $out
+> Copy-Item "$redist\SolidWorks.Interop.swconst.dll"     $out
+> ```
 
 ## Test
 
@@ -65,7 +87,7 @@ expected for a non-GAC assembly).
 ## Unregister
 
 ```powershell
-%windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe /unregister "bin\x64\Release\net48\HeliosVault.dll"
+%windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe /unregister "bin\Release\net48\HeliosVault.dll"
 ```
 
 ## Troubleshooting

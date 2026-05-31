@@ -1,0 +1,5 @@
+# .NET build output for the SOLIDWORKS add-in. Reproducible via `dotnet build`;
+# the bin/ folder also holds locally-staged SOLIDWORKS interop DLLs used only
+# for COM registration (see README "Register"). Never commit either.
+src/bin/
+src/obj/
