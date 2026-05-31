@@ -22,6 +22,7 @@ import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
+import { useInterval } from "../data/useInterval";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { findUnmatchedLocal } from "../data/find-unmatched";
 import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
@@ -35,6 +36,11 @@ import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types
 // How often to fall back to a full local rescan if the filesystem watcher
 // drops events. 30s is short enough to feel live, long enough to be cheap.
 const LOCAL_RESCAN_INTERVAL_MS = 30_000;
+
+// How often to poll the vault metadata (files/versions/locks) for other
+// people's changes, as a safety net behind realtime. 15s feels near-live for a
+// shared CAD vault without hammering the server with full-list refetches.
+const VAULT_POLL_MS = 15_000;
 
 export function BrowseScreen() {
   const user = useUser();
@@ -195,6 +201,19 @@ export function BrowseScreen() {
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
   const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
+
+  // Periodic safety-net poll. Realtime (above) is the fast path, but if its
+  // channel drops, the app was backgrounded, or an event is missed, new files
+  // would never appear until the user manually did something (e.g. started a
+  // download). Polling the vault metadata on an interval picks up other people's
+  // check-ins automatically — the auto-sync hook then downloads them — so the
+  // local vault stays current with zero user action. Gated on an active vault.
+  const poll = useCallback(() => {
+    refetchAllFiles();
+    refetchLatest();
+    refetchLocks();
+  }, [refetchAllFiles, refetchLatest, refetchLocks]);
+  useInterval(poll, vaultId ? VAULT_POLL_MS : null);
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
   // updates (one per file start + one per file end) re-render only that
