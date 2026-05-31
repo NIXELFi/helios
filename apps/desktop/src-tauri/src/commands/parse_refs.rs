@@ -8,25 +8,44 @@
 
 use std::fs;
 
-/// Read `path` and return the SolidWorks custom (user-defined) properties —
-/// the data-card name/value fields (PartNo, Description, Material, …).
-/// Best-effort: a non-SolidWorks / unparseable file yields an empty list.
-#[tauri::command]
-pub fn parse_sw_properties(path: String) -> Result<Vec<pdm_sw_parser::SwProperty>, String> {
-    let bytes = fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
+// Parsing a big SolidWorks file (decompressing every container stream) is
+// CPU-bound and can take hundreds of ms to a few seconds. Tauri runs a
+// synchronous `#[command] fn` on the main thread, which freezes the UI (the
+// beachball). So the commands are `async` and hand the work to a blocking
+// thread-pool task; the heavy logic stays in plain sync helpers (also used by
+// the tests below).
+
+/// Read `path` and return the SolidWorks data-card properties (Mass / Volume /
+/// Surface Area / Center of Mass / Material / custom fields). Best-effort: a
+/// non-SolidWorks / unparseable file yields an empty list.
+fn read_sw_properties(path: &str) -> Result<Vec<pdm_sw_parser::SwProperty>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
     Ok(pdm_sw_parser::parse_properties(&bytes))
 }
 
-/// Read `path` and return the referenced part/sub-assembly/model path hints
-/// found inside (raw strings as they appear in the SW file — resolution to
-/// vault files happens server-side in `pdm.record_refs`).
-#[tauri::command]
-pub fn parse_sw_refs(path: String) -> Result<Vec<String>, String> {
-    let bytes = fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
+/// Read `path` and return referenced part/sub-assembly/model path hints (raw
+/// strings as they appear in the file — resolution to vault files happens
+/// server-side in `pdm.record_refs`).
+fn read_sw_refs(path: &str) -> Result<Vec<String>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
     Ok(pdm_sw_parser::parse_refs(&bytes)
         .into_iter()
         .map(|r| r.path)
         .collect())
+}
+
+#[tauri::command]
+pub async fn parse_sw_properties(path: String) -> Result<Vec<pdm_sw_parser::SwProperty>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_sw_properties(&path))
+        .await
+        .map_err(|e| format!("parse task panicked: {e}"))?
+}
+
+#[tauri::command]
+pub async fn parse_sw_refs(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_sw_refs(&path))
+        .await
+        .map_err(|e| format!("parse task panicked: {e}"))?
 }
 
 #[cfg(test)]
@@ -56,7 +75,7 @@ mod tests {
         payload.extend_from_slice(b"junk\xff\xff..\\hardware\\m6-bolt.sldprt\x00");
         let path = write_cfb_with_refs(&payload);
 
-        let refs = parse_sw_refs(path.clone()).unwrap();
+        let refs = read_sw_refs(&path).unwrap();
         assert!(refs.iter().any(|p| p.ends_with("frame-rail.sldprt")));
         assert!(refs.iter().any(|p| p.ends_with("m6-bolt.sldprt")));
         let _ = fs::remove_file(&path);
@@ -64,6 +83,6 @@ mod tests {
 
     #[test]
     fn errors_on_missing_path() {
-        assert!(parse_sw_refs("/nope/missing.sldasm".to_string()).is_err());
+        assert!(read_sw_refs("/nope/missing.sldasm").is_err());
     }
 }

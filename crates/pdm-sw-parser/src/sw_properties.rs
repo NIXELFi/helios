@@ -37,18 +37,27 @@ pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
     let mut i = 0usize;
     while i + 2 < n {
         match try_inflate(&bytes[i..]) {
-            Some((text, consumed)) => {
-                // Physical properties: parse the first SW-MassProp-Config vector
-                // we see (single-config parts have exactly one; for multi-config
-                // we take the first — best-effort).
-                if !have_physical && text.contains("SW-MassProp-Config") {
-                    if let Some(rows) = mass_rows(&text) {
-                        physical = rows;
-                        have_physical = true;
+            Some((head, consumed)) => {
+                // Cheap byte-level marker check on the (capped) head; only the
+                // small property streams pay for UTF-8 conversion + parsing, so
+                // we never stringify or rescan multi-MB geometry streams.
+                let want_mass = !have_physical && contains_sub(&head, b"SW-MassProp-Config");
+                let want_props =
+                    contains_sub(&head, b"<property name=") || contains_sub(&head, b"Material=");
+                if want_mass || want_props {
+                    let text = String::from_utf8_lossy(&head);
+                    // Physical properties: parse the first SW-MassProp-Config
+                    // vector we see (single-config parts have one; for multi-
+                    // config we take the first — best-effort).
+                    if want_mass {
+                        if let Some(rows) = mass_rows(&text) {
+                            physical = rows;
+                            have_physical = true;
+                        }
                     }
-                }
-                if text.contains("<property name=") || text.contains("Material=") {
-                    extract_props(&text, &mut custom, &mut seen);
+                    if want_props {
+                        extract_props(&text, &mut custom, &mut seen);
+                    }
                 }
                 i += consumed.max(1);
             }
@@ -81,7 +90,7 @@ fn mass_rows(text: &str) -> Option<Vec<SwProperty>> {
     if nums.len() < 6 {
         return None;
     }
-    let (volume_m3, area_m2, mass_kg) = (nums[3], nums[4], nums[5]);
+    let (com, volume_m3, area_m2, mass_kg) = ((nums[0], nums[1], nums[2]), nums[3], nums[4], nums[5]);
 
     let mut rows = Vec::new();
     if mass_kg > 0.0 {
@@ -93,11 +102,10 @@ fn mass_rows(text: &str) -> Option<Vec<SwProperty>> {
     if area_m2 > 0.0 {
         rows.push(SwProperty { name: "Surface Area".into(), value: fmt_area(area_m2) });
     }
-    if rows.is_empty() {
-        None
-    } else {
-        Some(rows)
-    }
+    // Center of mass is meaningful whenever the vector exists — it's the
+    // geometric centroid, present even for a no-material (zero-mass) body.
+    rows.push(SwProperty { name: "Center of Mass".into(), value: fmt_com(com.0, com.1, com.2) });
+    Some(rows)
 }
 
 /// Mass: kg at/above 1 kg (3 decimals, trailing zeros trimmed), else grams.
@@ -127,6 +135,17 @@ fn fmt_area(m2: f64) -> String {
     } else {
         alloc::format!("{} cm²", grouped(cm2, 1))
     }
+}
+
+/// Center of mass: (x, y, z) offset of the centroid from the model origin, in
+/// millimetres (the natural unit for part-scale coordinates).
+fn fmt_com(x: f64, y: f64, z: f64) -> String {
+    alloc::format!(
+        "({}, {}, {}) mm",
+        grouped(x * 1000.0, 1),
+        grouped(y * 1000.0, 1),
+        grouped(z * 1000.0, 1)
+    )
 }
 
 /// Format with a fixed number of decimals and thousands separators, e.g.
@@ -170,25 +189,33 @@ fn trim_decimals(x: f64, decimals: usize) -> String {
     }
 }
 
-/// Try to raw-inflate a deflate stream starting at `input[0]`. Returns the
-/// decompressed text (lossy UTF-8) and the number of input bytes consumed, or
-/// None if this offset isn't the start of a usable stream. We only care about
-/// streams that decompress to a meaningful amount of data.
-fn try_inflate(input: &[u8]) -> Option<(String, usize)> {
+/// Largest decompressed head we keep per stream. Property parts (custom props +
+/// the mass vector) are a few KB; this is far above any real one, while keeping
+/// us from buffering / stringifying multi-MB geometry sections.
+const INSPECT_CAP: usize = 256 * 1024;
+
+/// Try to raw-inflate a deflate stream starting at `input[0]`. Returns up to the
+/// first `INSPECT_CAP` decompressed bytes (the head — enough to contain any
+/// property part) plus the number of *input* bytes the whole stream consumed, or
+/// None if this offset isn't the start of a usable stream. We keep decompressing
+/// past the cap (discarding output) only to learn the full input length, so the
+/// caller advances cleanly past the stream instead of crawling byte-by-byte —
+/// but bail on absurdly large streams to bound worst-case work.
+fn try_inflate(input: &[u8]) -> Option<(Vec<u8>, usize)> {
     let mut dec = flate2::read::DeflateDecoder::new(input);
-    let mut collected: Vec<u8> = Vec::new();
+    let mut head: Vec<u8> = Vec::new();
     let mut buf = [0u8; 65536];
+    let mut total_out = 0usize;
     loop {
         match dec.read(&mut buf) {
             Ok(0) => break,
             Ok(k) => {
-                collected.extend_from_slice(&buf[..k]);
-                // Cap: property XML parts are small; geometry sections can be
-                // large but we still need full consume to advance. Bail very
-                // large sections early (they're geometry, never properties) to
-                // keep check-in-time parsing fast — we lose exact `consumed`
-                // but advance by what we read, which is enough to make progress.
-                if collected.len() > 8 * 1024 * 1024 {
+                total_out += k;
+                if head.len() < INSPECT_CAP {
+                    let take = (INSPECT_CAP - head.len()).min(k);
+                    head.extend_from_slice(&buf[..take]);
+                }
+                if total_out > 64 * 1024 * 1024 {
                     break;
                 }
             }
@@ -196,10 +223,28 @@ fn try_inflate(input: &[u8]) -> Option<(String, usize)> {
         }
     }
     let consumed = dec.total_in() as usize;
-    if collected.len() < 32 || consumed == 0 {
+    if total_out < 32 || consumed == 0 {
         return None;
     }
-    Some((String::from_utf8_lossy(&collected).into_owned(), consumed))
+    Some((head, consumed))
+}
+
+/// Byte-substring search (no UTF-8 conversion). Used to cheaply gate which
+/// streams are worth fully parsing.
+fn contains_sub(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || hay.len() < needle.len() {
+        return false;
+    }
+    let first = needle[0];
+    let last = hay.len() - needle.len();
+    let mut i = 0;
+    while i <= last {
+        if hay[i] == first && &hay[i..i + needle.len()] == needle {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Extract the user-facing data-card properties from a decompressed XML string:
@@ -388,6 +433,15 @@ mod tests {
         assert_eq!(get("Surface Area"), Some("43,676.0 cm²"));
         // Physical rows lead the card.
         assert_eq!(props[0].name, "Mass");
+    }
+
+    #[test]
+    fn includes_center_of_mass_in_mm() {
+        // Chassis vector: CG = (-0.4902829, -0.0012712, 0.3421739) m.
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>-0.4902829144421719, -0.0012712297887835, 0.3421738590032732, 0.0035119830630731, 4.3675970584841899, 27.5690670451234610, 2.96, 12.49, 12.08, 0.02, 0.0, 0.0, 0.0, 0.0</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Center of Mass"), Some("(-490.3, -1.3, 342.2) mm"));
     }
 
     #[test]
