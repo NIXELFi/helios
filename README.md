@@ -1,6 +1,6 @@
 # Helios
 
-**Sun Devil Motorsports ground-station telemetry suite.** Tauri (Rust + React) desktop app for ingesting CSV telemetry exports, overlaying multiple sessions, scrubbing through laps, defining math channels, and laying out a custom workspace of plots and gauges — MoTeC i2 in spirit, with editing built in.
+**Sun Devil Motorsports ground-station suite.** Tauri (Rust + React) desktop app for ingesting CSV data-log exports, overlaying multiple sessions, scrubbing through laps, defining math channels, and laying out a custom workspace of plots and gauges — MoTeC i2 in spirit, with editing built in.
 
 > **Status:** `v2.2` — see [`v2_changes/`](v2_changes/) for the running log of every issue and fix landed since the v1 baseline.
 

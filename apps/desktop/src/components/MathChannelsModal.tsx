@@ -524,8 +524,8 @@ function Editor({
     : [];
 
   // C4 — the id field is edited locally so a colliding/shadowing value is
-  // never propagated to the parent (which would silently overwrite real
-  // telemetry or another math channel via store.addChannel + duplicate keys).
+  // never propagated to the parent (which would silently overwrite a real
+  // logged channel or another math channel via store.addChannel + duplicate keys).
   // The draft re-syncs whenever the committed channel.id changes (e.g. on
   // switching channels), so it always starts from the last valid value.
   const [idDraft, setIdDraft] = useState(channel.id);

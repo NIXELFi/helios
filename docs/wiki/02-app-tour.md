@@ -6,7 +6,7 @@ Helios is a single window divided into six regions: module rail, sessions sideba
 
 The 56-px-wide rail on the far left switches between Helios's two top-level modules:
 
-- **Logs** — telemetry analysis. The default and what most users live in.
+- **Logs** — data-log analysis. The default and what most users live in.
 - **Vault** — cloud-backed file storage (Supabase). Marked **NEW** with an ASU-maroon pill.
 
 Modules are mount-once: the first time you click a tab, the module loads and stays mounted; the rail just toggles visibility. So switching tabs is instant and you never lose session state.
@@ -109,7 +109,7 @@ If offline, the pill turns blue and just says "Offline."
 Shown on every launch while sessions are loaded — both bundled samples (on first run) and any of your own files in the recent-sessions list:
 
 - Large **HELIOS** wordmark (Orbitron 900, gold).
-- Subtitle "Sun Devil Motorsports · Telemetry".
+- Subtitle "Sun Devil Motorsports · Ground Station".
 - 520 × 1.5 px progress bar with a sliding shimmer overlay (`prefers-reduced-motion: reduce` disables the shimmer).
 - Stage label: "Loading [Session Name] X/Y…"
 - Footer: "v{version} · ground-station".

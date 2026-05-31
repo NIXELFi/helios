@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { MOD_KEY, shortcut } from "../lib/platform";
 
 interface Shortcut {
   keys: string[];
@@ -14,10 +15,10 @@ const GROUPS: Group[] = [
   {
     title: "Workspace",
     items: [
-      { keys: ["⌘", "1"], label: "Switch to workspace 1 (⌘1..9 for tab N)" },
-      { keys: ["⌘", "E"], label: "Toggle edit mode" },
-      { keys: ["⌘", "K"], label: "Open command palette" },
-      { keys: ["⌘", "O"], label: "Open data file…" },
+      { keys: [MOD_KEY, "1"], label: `Switch to workspace 1 (${shortcut(1)}..9 for tab N)` },
+      { keys: [MOD_KEY, "E"], label: "Toggle edit mode" },
+      { keys: [MOD_KEY, "K"], label: "Open command palette" },
+      { keys: [MOD_KEY, "O"], label: "Open data file…" },
       { keys: ["?"],      label: "Show this overlay" },
       { keys: ["F1"],     label: "Open Help & Wiki" },
     ],

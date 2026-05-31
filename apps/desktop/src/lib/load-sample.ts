@@ -9,12 +9,11 @@ import {
 
 export interface SampleEntry { id: string; label: string; resource: string; }
 
-export const SAMPLES: SampleEntry[] = [
-  { id: "sdm26-synthetic-multi-lap", label: "SDM26 synthetic 4 laps (demo)",       resource: "samples/sdm26-synthetic-multi-lap.csv" },
-  { id: "driver-tryout-good-gps",    label: "Driver tryout 4/16 — Kaden (good GPS)", resource: "samples/driver-tryout-good-gps.csv" },
-  { id: "sdm26-best-accel",          label: "SDM26 5/3 — Best Accel",               resource: "samples/sdm26-best-accel.csv" },
-  { id: "sdm26-synthetic",           label: "SDM26 synthetic lap (demo)",           resource: "samples/sdm26-synthetic-lap.csv" },
-];
+// The public build ships NO bundled CSVs — neither real team data nor synthetic
+// demos. On launch with no recent user sessions, App.tsx shows the "Open a CSV
+// with ⌘O to get started" empty state (its zero-session boot strand). Add an
+// entry here only for a non-sensitive fixture you intend to ship to users.
+export const SAMPLES: SampleEntry[] = [];
 
 export async function loadSampleSession(resourceRelPath: string): Promise<ChannelStore> {
   const store = new ChannelStore();

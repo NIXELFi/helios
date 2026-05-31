@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { UpdatesPill } from "../components/UpdatesPill";
 import type { UpdaterState } from "../lib/use-updater";
+import { IS_MAC } from "../lib/platform";
 
 export type ModuleId = "logs" | "vault" | "cfd";
 
-// macOS uses `titleBarStyle: "Overlay"` + inset traffic-lights at (14, 14),
-// so the brand header needs ~48 px of top padding to clear them. Windows
-// and Linux draw native window decorations ABOVE the webview, so the same
-// padding shows up as dead space. Detect the platform once at module load
-// and pick the right top padding. Tauri's webview sets a normal userAgent
-// per OS — no extra plugin needed.
-const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+// macOS uses `titleBarStyle: "Overlay"` + inset traffic-lights at (14, 14), so
+// the brand header needs ~48 px of top padding to clear them. Windows and Linux
+// draw native window decorations ABOVE the webview, so the same padding shows
+// up as dead space.
 const BRAND_HEADER_TOP_PADDING = IS_MAC ? "pt-12" : "pt-3";
 
 interface Props {

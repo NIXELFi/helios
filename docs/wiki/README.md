@@ -1,6 +1,6 @@
 # Helios Wiki
 
-The complete user and developer guide for **Helios** — Sun Devil Motorsports' ground-station telemetry suite. A Tauri (Rust + React) desktop app for ingesting your CSV telemetry exports, overlaying multiple sessions, scrubbing through laps, computing math channels, and laying out custom workspaces of plots and gauges — and for collaborating on those files with your team through the cloud-backed **Vault**.
+The complete user and developer guide for **Helios** — Sun Devil Motorsports' ground-station suite. A Tauri (Rust + React) desktop app for ingesting your CSV data-log exports, overlaying multiple sessions, scrubbing through laps, computing math channels, and laying out custom workspaces of plots and gauges — and for collaborating on those files with your team through the cloud-backed **Vault**.
 
 > **Version:** 3.2.1 · **Status:** stable
 > The same pages render inside the app (**Help** button in the header, or **F1**, or `⌘K` → "Open Help & Wiki") and on GitHub.

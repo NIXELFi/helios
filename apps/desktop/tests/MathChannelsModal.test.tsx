@@ -61,7 +61,7 @@ describe("MathChannelsModal — C4 id collision guard", () => {
     fireEvent.change(idInput(), { target: { value: "engine.rpm" } });
     // Shadow warning shown.
     expect(screen.getByText(/shadow|already|source channel|exists/i)).toBeInTheDocument();
-    // The shadowing id must not be committed (would overwrite real telemetry).
+    // The shadowing id must not be committed (would overwrite a real logged channel).
     for (const call of onChange.mock.calls) {
       const next = call[0] as MathChannel[];
       expect(next.some((c) => c.id === "engine.rpm")).toBe(false);

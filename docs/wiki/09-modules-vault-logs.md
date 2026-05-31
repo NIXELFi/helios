@@ -4,7 +4,7 @@ Helios has two top-level modules, switched via the 56-px left rail (`ModulePicke
 
 ## Logs
 
-The default module and the one most users live in — telemetry analysis.
+The default module and the one most users live in — data-log analysis.
 
 Everything covered elsewhere in this wiki happens inside Logs:
 
@@ -22,7 +22,7 @@ Implementation: [`apps/desktop/src/App.tsx`](../../apps/desktop/src/App.tsx).
 
 A multi-user file storage system backed by Supabase. Introduced as "Phase 1" in v3.0.0 and marked **NEW** on the module rail.
 
-The Vault stores session files, telemetry logs, share bundles, and analysis sessions with **version control**, **file locking**, and **role-based access control**.
+The Vault stores session files, data logs, share bundles, and analysis sessions with **version control**, **file locking**, and **role-based access control**.
 
 ### Connection (bring-your-own Supabase)
 

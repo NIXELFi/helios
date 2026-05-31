@@ -5,6 +5,7 @@ import { useMyRole } from "../data/useMyRole";
 import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
+import { DEVICE_NOUN } from "../../../lib/platform";
 
 export function SettingsScreen() {
   const user = useUser();
@@ -140,7 +141,7 @@ export function SettingsScreen() {
           <span className="text-helios-text">Auto</span> mirrors every file in this vault to your
           local folder in the background. <span className="text-helios-text">Manual</span> shows
           the file list but only downloads bytes when you click Download on a row — useful when
-          you can't open the file types in this vault on your machine (e.g. SolidWorks parts on a Mac).
+          you can't open the file types in this vault on your machine (e.g. SolidWorks parts on a {DEVICE_NOUN}).
         </p>
         <div className="rounded border border-helios-line bg-helios-base p-4 text-sm">
           <div className="flex gap-2">

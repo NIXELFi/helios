@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useActiveVault } from "../data/useActiveVault";
 import { broadcastDownloadMode, type DownloadMode } from "../data/useDownloadMode";
 import type { Vault } from "../data/types";
+import { DEVICE_NOUN } from "../../../lib/platform";
 
 const STORAGE_KEY = "helios.vault.downloadMode";
 const WELCOMED_KEY = "helios.vault.downloadMode.welcomed";
@@ -91,14 +92,14 @@ export function DownloadModeWelcome() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="w-[36rem] max-w-[90vw] rounded-lg border border-helios-line bg-helios-panel p-6 shadow-2xl">
         <h2 className="mb-2 text-lg font-semibold text-helios-text">
-          Choose how each vault syncs to this Mac
+          Choose how each vault syncs to this {DEVICE_NOUN}
         </h2>
         <p className="mb-5 text-sm text-helios-dim">
           <span className="text-helios-text">Auto</span> downloads every file in the vault to your
           local folder in the background — best when you regularly open the file types in that
           vault. <span className="text-helios-text">Manual</span> shows the file list but only
           downloads bytes when you click — best when you can't open the file types on this machine
-          (e.g. SolidWorks parts on a Mac). You can change this any time in Settings.
+          (e.g. SolidWorks parts on a {DEVICE_NOUN}). You can change this any time in Settings.
         </p>
         <div className="mb-5 space-y-2">
           {vaults.map((v: Vault) => (

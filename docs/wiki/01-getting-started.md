@@ -1,6 +1,6 @@
 # Getting started
 
-Helios is for analyzing **your** telemetry CSVs. The bundled samples on first launch exist only so the app isn't empty before you've loaded anything — the moment you have your own data, drop it in.
+Helios is for analyzing **your** data-log CSVs. On first launch the Logs module opens empty — press **⌘O** (or the **Open CSV…** button) to load a log and you're in. (Vault and CFD work without any log loaded.)
 
 ## Install a release build
 

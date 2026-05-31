@@ -6,6 +6,7 @@ import {
 } from "@helios/lib";
 import type { LapDetectionConfig, LapSelection } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
+import { shortcut } from "./lib/platform";
 import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
@@ -217,7 +218,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         // LoadingScreen shows its error state. (SAMPLES is non-empty today, so
         // this is defensive against a future build that ships no samples.)
         if (loaded.length === 0) {
-          setError("No sessions could be loaded. Open a CSV with ⌘O to get started.");
+          setError(`No data loaded yet — open a CSV (${shortcut("O")}), or switch to Vault / CFD in the sidebar.`);
           setLoadProgress({ label: "No sessions", loaded: total, total });
           return;
         }
@@ -520,7 +521,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         label: `Switch to ${w.label}`,
         sublabel: w.id === workspaceId ? "(current)" : undefined,
         kind: "workspace",
-        hint: i < 9 ? `⌘${i + 1}` : undefined,
+        hint: i < 9 ? shortcut(i + 1) : undefined,
         keywords: [w.id, "workspace", "tab"],
         run: () => { setWorkspaceId(w.id); setSelectedTileId(null); },
       });
@@ -539,7 +540,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       { id: "sys:channels", label: "Open Channels", kind: "system", keywords: ["inspect", "data"], run: () => setChannelsOpen(true) },
       { id: "sys:math",     label: "Open Math channels", kind: "system", keywords: ["formula", "expression"], run: () => setMathChannelsOpen(true) },
       { id: "sys:add-tile", label: "Add tile…", kind: "system", run: () => { if (!editMode) setEditMode(true); setAddTileOpen(true); } },
-      { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: "⌘E", run: () => setEditMode((e) => !e) },
+      { id: "sys:edit",     label: editMode ? "Exit edit mode" : "Enter edit mode", kind: "system", hint: shortcut("E"), run: () => setEditMode((e) => !e) },
       { id: "sys:shortcuts", label: "Keyboard shortcuts", kind: "system", hint: "?", keywords: ["help", "hotkeys"], run: () => setShortcutsOpen(true) },
       { id: "sys:help",      label: "Open Help & Wiki",   kind: "system", hint: "F1", keywords: ["docs", "guide", "manual", "wiki"], run: () => openHelp() },
       { id: "sys:help-getting-started", label: "Help: Getting started",    kind: "system", keywords: ["docs", "onboarding"], run: () => openHelp("01-getting-started") },
@@ -689,6 +690,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         stage={loadProgress.label}
         error={error}
         version={appVersion}
+        onOpenFile={() => void handleAddSessionDialog()}
       />
     );
   }
@@ -974,7 +976,9 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
    *  math channels applied. Failures surface in a single ConfirmDialog
    *  rather than per-file dialogs so a 5-file drop doesn't queue 5 modals. */
   async function handleAddSessionFiles(paths: string[]) {
-    if (!sessionsRef.current) return;
+    // NB: do NOT bail when sessionsRef.current is null — that's the zero-session
+    // boot state (no bundled samples + no recents), and opening a file is the
+    // ONLY way out of the empty Logs tab. Treat null as an empty list below.
     const { accepted, rejected } = classifyPaths(paths);
     const failures: { path: string; reason: string }[] = rejected.slice();
     const newSessions: LoadedSession[] = [];
@@ -1011,6 +1015,17 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
       // the ref, OUTSIDE the updater, so the setSessions updater stays pure.
       const merged = mergeSessionsWithColors(sessionsRef.current ?? [], newSessions);
       setSessions(() => merged);
+      // Recover from the zero-session boot state: adopt a primary if the
+      // current one is gone/never set, and clear the "No sessions could be
+      // loaded" notice so the Logs tab leaves the empty splash and shows the
+      // file just opened. No-op in the normal case (primary already valid,
+      // error already null).
+      setPrimaryId((cur) =>
+        cur && merged.some((s) => s.id === cur)
+          ? cur
+          : merged.find((s) => s.visible)?.id ?? merged[0]?.id ?? null,
+      );
+      setError(null);
     }
     if (failures.length > 0) {
       const lines = failures.map((f) => `${basenameOf(f.path)}: ${f.reason}`).join("\n");
@@ -1200,7 +1215,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
             className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-dim hover:border-asu-gold hover:text-helios-text rounded-sm cursor-pointer transition-colors flex items-center gap-1 font-mono-num"
             title="Open command palette"
           >
-            <span>⌘K</span>
+            <span>{shortcut("K")}</span>
           </button>
           <button
             onClick={() => openHelp()}
@@ -1286,7 +1301,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
                 <div>
                   {editMode
                     ? "Press + Add tile to place a widget."
-                    : "Edit then + Add tile, or press ⌘K."}
+                    : `Edit then + Add tile, or press ${shortcut("K")}.`}
                 </div>
               </div>
             </div>

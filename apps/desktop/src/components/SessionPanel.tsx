@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatLapTime } from "@helios/lib";
 import type { LapRef, LapSelection, LapSelectionEmitter } from "@helios/lib";
 import type { LoadedSession } from "../lib/session";
+import { MOD_KEY } from "../lib/platform";
 
 interface Props {
   sessions: LoadedSession[];
@@ -231,7 +232,7 @@ function SidebarLapList({ primary, emitter, selection }: {
                         letter="R"
                         active={refSel}
                         activeColor="#4FC3F7"
-                        title="Set as Ref lap (also ⌘+click row)"
+                        title={`Set as Ref lap (also ${MOD_KEY}+click row)`}
                         onClick={(e) => { e.stopPropagation(); emitter.setRef(refSel ? null : ref); }}
                       />
                       <LapToggleBtn
