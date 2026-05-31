@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 # runtime/thread) + a random per-launch token. See src/bridge/.
 axum = "0.7"
 tokio = { workspace = true, features = ["net", "time"] }
+reqwest = { workspace = true }
 getrandom = "0.2"
 helios-core = { path = "../../../crates/helios-core" }
 helios-csv = { path = "../../../crates/helios-csv" }

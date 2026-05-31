@@ -24,27 +24,30 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
 use serde_json::json;
 
-use super::BridgeState;
+use super::{supabase, BridgeState};
 
 /// Build the router for the bridge API. Split out so it can be unit-tested
 /// without binding a socket.
 pub fn router(state: Arc<BridgeState>) -> Router {
     Router::new()
         .route("/health", get(health))
-        // Endpoint surface — wired in later commits. Present now as 501 stubs so
-        // the shape is discoverable and the add-in can be scaffolded against it.
-        .route("/status", get(not_implemented))
-        .route("/versions", get(not_implemented))
-        .route("/checkout", post(not_implemented))
+        // Metadata ops — served natively from the snapshot + Supabase REST, so
+        // they answer even while Helios is minimized in the tray.
+        .route("/status", get(status))
+        .route("/versions", get(versions))
+        .route("/checkout", post(checkout))
+        // Blob ops — forwarded to the running UI in a later commit (reuses the
+        // tested gzip/sha256/atomic-write code). Stubbed 501 until then.
         .route("/checkin", post(not_implemented))
         .route("/get-latest", post(not_implemented))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
@@ -87,10 +90,99 @@ async fn health(State(state): State<Arc<BridgeState>>) -> impl IntoResponse {
     }))
 }
 
-/// Placeholder for endpoints not yet wired up.
+/// A `?path=<local file path>` query, shared by the path-addressed endpoints.
+#[derive(Deserialize)]
+struct PathQuery {
+    path: String,
+}
+
+/// `POST` bodies that address a file by its local path.
+#[derive(Deserialize)]
+struct PathBody {
+    path: String,
+}
+
+/// `GET /status?path=` — what does Helios know about this local file? Answered
+/// entirely from the pushed snapshot (no network), so it's instant and works
+/// while minimized. `tracked:false` means the path isn't a known vault file.
+async fn status(State(state): State<Arc<BridgeState>>, Query(q): Query<PathQuery>) -> Response {
+    match state.file_by_path(&q.path) {
+        None => Json(json!({ "tracked": false, "path": q.path })).into_response(),
+        Some(f) => {
+            let checked_out = f.lock.is_some();
+            let checked_out_by_me = f.lock.as_ref().map(|l| l.by_me).unwrap_or(false);
+            Json(json!({
+                "tracked": true,
+                "path": q.path,
+                "fileId": f.file_id,
+                "name": f.name,
+                "latest": f.latest,
+                "checkedOut": checked_out,
+                "checkedOutByMe": checked_out_by_me,
+                "lock": f.lock,
+            }))
+            .into_response()
+        }
+    }
+}
+
+/// `GET /versions?path=` — full version history for the file at this path.
+async fn versions(State(state): State<Arc<BridgeState>>, Query(q): Query<PathQuery>) -> Response {
+    let Some(file) = state.file_by_path(&q.path) else {
+        return not_tracked(&q.path);
+    };
+    let Some(session) = state.session() else {
+        return no_session();
+    };
+    match supabase::get_versions(&state.http, &session, &file.file_id).await {
+        Ok(rows) => Json(json!({ "fileId": file.file_id, "versions": rows })).into_response(),
+        Err(e) => supa_error(e),
+    }
+}
+
+/// `POST /checkout {path}` — acquire the lock for this file (check it out).
+async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBody>) -> Response {
+    let Some(file) = state.file_by_path(&body.path) else {
+        return not_tracked(&body.path);
+    };
+    let Some(session) = state.session() else {
+        return no_session();
+    };
+    match supabase::acquire_lock(&state.http, &session, &file.file_id).await {
+        Ok(lock) => Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response(),
+        Err(e) => supa_error(e),
+    }
+}
+
+/// Placeholder for blob endpoints not yet wired up (forwarded to the UI later).
 async fn not_implemented() -> impl IntoResponse {
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(json!({ "error": "not implemented yet (Phase 2 in progress)" })),
     )
+}
+
+// --- shared error responses ------------------------------------------------
+
+fn not_tracked(path: &str) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "not a tracked vault file", "path": path, "tracked": false })),
+    )
+        .into_response()
+}
+
+fn no_session() -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({ "error": "Helios has no signed-in session; open Helios and sign in" })),
+    )
+        .into_response()
+}
+
+/// Relay a Supabase failure to the add-in, preserving the upstream status when
+/// it's a sane HTTP code (else 502).
+fn supa_error(e: supabase::SupaError) -> Response {
+    let code = StatusCode::from_u16(e.status).unwrap_or(StatusCode::BAD_GATEWAY);
+    (code, Json(json!({ "error": e.message }))).into_response()
 }

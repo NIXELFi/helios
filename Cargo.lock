@@ -2077,6 +2077,7 @@ dependencies = [
  "helios-core",
  "helios-csv",
  "pdm-sw-parser",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",

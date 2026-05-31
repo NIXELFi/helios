@@ -19,6 +19,7 @@
 //! lock/version reads don't need to wake the webview.
 
 mod server;
+mod supabase;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -34,6 +35,9 @@ pub struct Session {
     pub supabase_url: String,
     pub anon_key: String,
     pub access_token: String,
+    /// The signed-in user's id (auth.uid). Needed to insert lock rows on
+    /// check-out, matching the frontend's `useAcquireLock`.
+    pub user_id: String,
 }
 
 /// Latest-version facts for a file, enough to answer `/status` without a round
@@ -90,6 +94,8 @@ pub struct Inner {
 pub struct BridgeState {
     /// Per-launch random secret the add-in must present as a bearer token.
     pub token: String,
+    /// Reused HTTP client for native Supabase REST calls (metadata ops).
+    pub(crate) http: reqwest::Client,
     inner: RwLock<Inner>,
 }
 
@@ -97,8 +103,26 @@ impl BridgeState {
     pub fn new() -> Self {
         Self {
             token: random_token(),
+            http: reqwest::Client::new(),
             inner: RwLock::new(Inner::default()),
         }
+    }
+
+    /// Clone of the current session, if signed in.
+    pub(crate) fn session(&self) -> Option<Session> {
+        self.read().session.clone()
+    }
+
+    /// Resolve a local filesystem path (what the add-in knows) to the vault file
+    /// in the current snapshot, if it's tracked. Matching is path-normalized.
+    pub(crate) fn file_by_path(&self, path: &str) -> Option<SnapshotFile> {
+        let target = norm_path(path);
+        self.read()
+            .snapshot
+            .files
+            .iter()
+            .find(|f| norm_path(&f.local_path) == target)
+            .cloned()
     }
 
     /// Read access. Recovers from a poisoned lock instead of panicking — the
@@ -192,6 +216,14 @@ fn write_discovery_file(port: u16, token: &str) -> Result<(), String> {
     std::fs::write(&path, serde_json::to_vec_pretty(&body).unwrap())
         .map_err(|e| format!("bridge: write {}: {e}", path.display()))?;
     Ok(())
+}
+
+/// Normalize a filesystem path for matching: forward slashes, lowercase, no
+/// trailing slash. SOLIDWORKS reports `C:\dir\part.SLDPRT`; the snapshot stores
+/// `localDestPath`-style forward-slash paths — normalizing both the same way
+/// lets `/status?path=` reverse-resolve regardless of separator/case.
+pub(crate) fn norm_path(p: &str) -> String {
+    p.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
 /// 32 bytes of OS randomness, hex-encoded — the per-launch bridge secret.
