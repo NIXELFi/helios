@@ -8,6 +8,15 @@
 
 use std::fs;
 
+/// Read `path` and return the SolidWorks custom (user-defined) properties —
+/// the data-card name/value fields (PartNo, Description, Material, …).
+/// Best-effort: a non-SolidWorks / unparseable file yields an empty list.
+#[tauri::command]
+pub fn parse_sw_properties(path: String) -> Result<Vec<pdm_sw_parser::SwProperty>, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
+    Ok(pdm_sw_parser::parse_properties(&bytes))
+}
+
 /// Read `path` and return the referenced part/sub-assembly/model path hints
 /// found inside (raw strings as they appear in the SW file — resolution to
 /// vault files happens server-side in `pdm.record_refs`).

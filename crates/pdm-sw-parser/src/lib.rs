@@ -11,9 +11,11 @@ pub mod cfb_reader;
 pub mod error;
 pub mod ref_hint;
 pub mod sldasm;
+pub mod sw_properties;
 
 pub use error::ParseError;
 pub use ref_hint::RefHint;
+pub use sw_properties::{parse_properties, SwProperty};
 
 /// Top-level entry point.
 pub fn parse_refs(bytes: &[u8]) -> alloc::vec::Vec<RefHint> {

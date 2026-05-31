@@ -75,6 +75,7 @@ pub fn run() {
             commands::restart::helios_relaunch,
             commands::set_readonly::set_path_readonly,
             commands::parse_refs::parse_sw_refs,
+            commands::parse_refs::parse_sw_properties,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,
