@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Helios Vault — SOLIDWORKS add-in (Phase 1 skeleton).
+    .NET Framework 4.8 COM add-in, x64 (SOLIDWORKS is 64-bit). Self-registers
+    for COM via the [ComRegisterFunction] hooks in SwAddin.cs (run `regasm
+    /codebase`). See README.md for build + register steps.
+
+    The SOLIDWORKS interop assemblies are referenced from your local SW install.
+    Override the path if yours differs:
+        dotnet build -c Release -p:SolidWorksApiPath="D:\...\api\redist"
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>HeliosVault</RootNamespace>
+    <AssemblyName>HeliosVault</AssemblyName>
+    <!-- Assembly is NOT COM-visible by default; only the SwAddin class opts in. -->
+    <ComVisible>false</ComVisible>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <SolidWorksApiPath Condition="'$(SolidWorksApiPath)' == ''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
