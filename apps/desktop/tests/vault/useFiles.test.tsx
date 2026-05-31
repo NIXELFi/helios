@@ -110,4 +110,39 @@ describe("useFiles", () => {
     expect(result.current.data).toBeNull();
     expect(result.current.error?.message).toBe("permission denied");
   });
+
+  it("embeds the latest version (sha rides with the row) so the file list needs no separate per-vault version fetch", async () => {
+    // The v3.8.2 perf fix: instead of fetching every file's latest version in
+    // serial chunks (≈44 round-trips on SDM25's 8.6k files, button blank until
+    // done), the file query joins `latest` inline. Verify the embed is
+    // requested and that an embedded `latest` passes through to the row.
+    let observedSelect: string | null = null;
+    const row = {
+      id: "fi1", vault_id: "v1", folder_id: "f1", name: "frame.sldprt",
+      latest_version_id: "ver1", created_at: "x",
+      latest: { id: "ver1", file_id: "fi1", version_num: 3, sha256: "deadbeef", size_bytes: 42, author_id: null, comment: null, parent_version_id: null, revision: 2, created_at: "x" },
+    };
+    const c = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      from: () => ({
+        select: (sel: string) => {
+          observedSelect = sel;
+          const makeChain = () => ({
+            order: () => makeChain(),
+            range: (from: number) => Promise.resolve({ data: from === 0 ? [row] : [], error: null }),
+          });
+          return { eq: () => makeChain() };
+        },
+      }),
+    } as any;
+    const { result } = renderHook(() => useFiles("f1"), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(observedSelect).toContain("latest:versions!files_latest_version_fk");
+    expect(result.current.data?.[0]?.latest?.sha256).toBe("deadbeef");
+    // properties is intentionally excluded from the embed.
+    expect(observedSelect).not.toContain("properties");
+  });
 });

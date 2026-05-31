@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { QueryResult, VaultFile, VaultId } from "./types";
+import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
 
 /**
@@ -36,7 +37,7 @@ export function useAllFiles(vault_id: VaultId | undefined): QueryResult<VaultFil
         // PK so order is guaranteed stable across pages; the caller sorts
         // by name/path before rendering.
         () => (client.from("files") as any)
-          .select("*")
+          .select(FILE_WITH_LATEST_SELECT)
           .eq("vault_id", vault_id)
           .order("id", { ascending: true }),
       );
