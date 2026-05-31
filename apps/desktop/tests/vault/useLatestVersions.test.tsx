@@ -18,19 +18,12 @@ function makeClient(rows: any[]): SupabaseClient {
       if (table === "versions") {
         return {
           select: () => ({
+            // Hook now fetches latest versions directly by id: select().in("id",…).
+            // fetchAllRows paginates via .range(from,to) — slice so it sees a
+            // short page and terminates (runaway guard otherwise).
             in: () => ({
-              // Two .order() calls: (version_num desc, file_id asc) — the
-              // second is the pagination-stability tiebreaker added in the
-              // 2026-05-25 audit fix.
-              order: () => ({
-                order: () => ({
-                  // The hook chunks ids into batches and paginates each batch.
-                  // Honour .range(from,to) so fetchAllRows sees a partial page
-                  // and terminates — its runaway guard (H11) trips otherwise.
-                  range: (from: number, to: number) =>
-                    Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
-                }),
-              }),
+              range: (from: number, to: number) =>
+                Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
             }),
           }),
         };
@@ -53,13 +46,7 @@ function makeClientNeverResolves(): SupabaseClient {
     },
     from: vi.fn().mockImplementation(() => ({
       select: () => ({
-        in: () => ({
-          order: () => ({
-            order: () => ({
-              range: () => new Promise<never>(() => {}),
-            }),
-          }),
-        }),
+        in: () => ({ range: () => new Promise<never>(() => {}) }),
       }),
     })),
   } as any;
@@ -99,16 +86,15 @@ describe("useLatestVersions", () => {
     expect(result.current.data.size).toBe(0);
   });
 
-  it("returns latest version per file from a multi-file, multi-version response", async () => {
+  it("fetches latest versions by id and keys them by file_id", async () => {
+    // Given each file's latest_version_id, the hook fetches those rows directly
+    // and maps them by the row's file_id (one row per file — no bucketing).
     const rows = [
-      // file_id "f1" has two versions; v2 (version_num 2) should win
-      { id: "v2", file_id: "f1", version_num: 2, sha256: "sha-v2", size_bytes: 10, author_id: "u", comment: null, parent_version_id: "v1", created_at: "x" },
-      { id: "v1", file_id: "f1", version_num: 1, sha256: "sha-v1", size_bytes: 5, author_id: "u", comment: null, parent_version_id: null, created_at: "x" },
-      // file_id "f2" has one version
-      { id: "v3", file_id: "f2", version_num: 1, sha256: "sha-f2", size_bytes: 8, author_id: "u", comment: null, parent_version_id: null, created_at: "x" },
+      { id: "v2", file_id: "f1", version_num: 2, sha256: "sha-v2", size_bytes: 10, author_id: "u", comment: null, parent_version_id: "v1", revision: null, properties: null, created_at: "x" },
+      { id: "v3", file_id: "f2", version_num: 1, sha256: "sha-f2", size_bytes: 8, author_id: "u", comment: null, parent_version_id: null, revision: null, properties: null, created_at: "x" },
     ];
     const client = makeClient(rows);
-    const { result } = renderHook(() => useLatestVersions(["f1", "f2"]), { wrapper: wrap(client) });
+    const { result } = renderHook(() => useLatestVersions(["v2", "v3"]), { wrapper: wrap(client) });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.data.size).toBe(2);
     expect(result.current.data.get("f1")?.sha256).toBe("sha-v2");

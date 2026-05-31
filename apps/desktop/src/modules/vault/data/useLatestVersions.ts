@@ -1,38 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { FileId, Version } from "./types";
+import type { FileId, Version, VersionId } from "./types";
 import { fetchAllRows } from "./paginate";
 
 /**
- * Fetches the latest version row for every file in fileIds.
+ * Fetches the latest version row for each file, given the files'
+ * `latest_version_id` pointers. Returns a Map keyed by file_id.
  *
- * Two reasons this needs to be smarter than a single .in("file_id", …) call:
- *  (1) PostgREST caps responses at 1000 rows by default — paginate via range.
- *  (2) PostgREST puts the IN-clause values in the URL query string. With
- *      thousands of UUIDs the URL blows past gateway limits and the request
- *      either fails or gets silently truncated.
+ * This fetches each file's latest version DIRECTLY by id (one row per file)
+ * instead of pulling every version of every file and bucketing for the max —
+ * the old approach scanned a vault's entire version history (thousands of rows
+ * for a vault with years of check-ins) just to find the latest of each, which
+ * made the file list's actions (which need `latestSha`) take a long time to
+ * appear. Fetching by the denormalized `latest_version_id` is O(files), not
+ * O(all versions).
  *
- * Strategy: chunk the file id set into batches of ~200 and paginate each.
- * Then bucket by file_id and keep the highest version_num seen.
+ * Still chunked (PostgREST puts IN values in the URL; thousands of UUIDs blow
+ * the gateway limit) and paginated (1000-row cap) per chunk.
  */
 const ID_CHUNK = 200;
 
-export function useLatestVersions(fileIds: FileId[]) {
+export function useLatestVersions(latestVersionIds: VersionId[]) {
   const client = useSupabaseClient();
   const [data, setData] = useState<Map<FileId, Version>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
 
-  // Serialize the file-id set so useEffect deps stay stable.
-  const sortedKey = [...fileIds].sort().join(",");
+  // Serialize the id set so useEffect deps stay stable across renders.
+  const sortedKey = [...latestVersionIds].sort().join(",");
 
   useEffect(() => {
-    if (fileIds.length === 0) {
+    if (latestVersionIds.length === 0) {
       setData(new Map());
-      // Reset loading/error too: if fileIds empties while a prior fetch was in
-      // flight, loading would otherwise stick true (and a stale error remain)
-      // forever, leaving consumers on a permanent spinner.
       setLoading(false);
       setError(null);
       return;
@@ -41,34 +41,21 @@ export function useLatestVersions(fileIds: FileId[]) {
     setLoading(true);
     setError(null);
     (async () => {
-      const all: Version[] = [];
-      for (let i = 0; i < fileIds.length; i += ID_CHUNK) {
-        const slice = fileIds.slice(i, i + ID_CHUNK);
+      const map = new Map<FileId, Version>();
+      for (let i = 0; i < latestVersionIds.length; i += ID_CHUNK) {
+        const slice = latestVersionIds.slice(i, i + ID_CHUNK);
         const { rows, error: err } = await fetchAllRows<Version>(
-          // Two ORDER BY clauses for stable pagination: version_num is unique
-          // PER file but many files in the IN slice can share version_num=1,
-          // so add file_id as the tiebreaker to keep page boundaries stable.
-          () => (client.from("versions") as any)
-            .select("*")
-            .in("file_id", slice)
-            .order("version_num", { ascending: false })
-            .order("file_id", { ascending: true }),
+          () => (client.from("versions") as any).select("*").in("id", slice),
         );
         if (!mounted) return;
         if (err) {
           setError(err);
-          // Drop any partially-populated map so consumers don't render
-          // half-stale data alongside the error.
           setData(new Map());
           setLoading(false);
           return;
         }
-        all.push(...rows);
-      }
-      const map = new Map<FileId, Version>();
-      for (const v of all) {
-        const prev = map.get(v.file_id);
-        if (!prev || v.version_num > prev.version_num) map.set(v.file_id, v);
+        // Each id is unique → exactly one row per file; key by file_id.
+        for (const v of rows) map.set(v.file_id, v);
       }
       setData(map);
       setLoading(false);

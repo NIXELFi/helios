@@ -6,6 +6,7 @@ import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
+import { useMyRole } from "../data/useMyRole";
 import { useCanEditVault } from "../data/useVaultRole";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
@@ -49,10 +50,14 @@ export function BrowseScreen() {
   const isAdmin = useIsAdmin();
 
   const { activeVault: vault, activeVaultId: vaultId, vaults, loading: vaultsLoading } = useActiveVault();
-  // Per-active-vault permissions: a per-vault editor gets edit affordances in
-  // their vault; a global role still satisfies these everywhere (server-side
-  // helpers treat a NULL-vault role as authoritative in every vault).
-  const canEdit = useCanEditVault(vaultId);
+  // Per-active-vault permissions, UNIONED with the global role. The per-vault
+  // helper (pdm_can_edit_in) is authoritative when present; the global fallback
+  // (admin/owner via pdm_is_admin, or a global editor via useMyRole) keeps edit
+  // affordances working when that RPC isn't deployed yet (the server RLS
+  // enforces the real rule regardless of what the client shows).
+  const myRole = useMyRole();
+  const canEdit =
+    useCanEditVault(vaultId) || isAdmin || myRole === "editor" || myRole === "owner";
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -165,8 +170,14 @@ export function BrowseScreen() {
   // Latest versions across the entire vault. The current-folder file table
   // and the background auto-sync both read from this single source so we
   // don't duplicate the round-trip.
-  const allFileIds = useMemo(() => (allFiles ?? []).map((f) => f.id), [allFiles]);
-  const { data: latestByFileId, error: latestError, refetch: refetchLatest } = useLatestVersions(allFileIds);
+  // Latest version per file, fetched directly by the denormalized
+  // latest_version_id pointer (one row per file) — far faster than scanning all
+  // versions. Files with no version yet have a null pointer and are skipped.
+  const latestVersionIds = useMemo(
+    () => (allFiles ?? []).map((f) => f.latest_version_id).filter((x): x is string => x != null),
+    [allFiles],
+  );
+  const { data: latestByFileId, error: latestError, refetch: refetchLatest } = useLatestVersions(latestVersionIds);
   const versionsByFileId = useMemo(
     () => new Map<FileId, Version[]>(
       Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),

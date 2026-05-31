@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { PropertiesPanel } from "../../src/modules/vault/components/PropertiesPanel";
 
-const runMock = vi.hoisted(() => vi.fn());
-vi.mock("../../src/modules/vault/data/useRecordProperties", () => ({
-  useRecordProperties: () => ({ run: runMock }),
+const useFilePropertiesMock = vi.hoisted(() => vi.fn());
+vi.mock("../../src/modules/vault/data/useFileProperties", () => ({
+  useFileProperties: (...a: unknown[]) => useFilePropertiesMock(...(a as [])),
 }));
 
 const ver = (over: any = {}) => ({
@@ -14,40 +14,33 @@ const ver = (over: any = {}) => ({
 });
 
 describe("<PropertiesPanel>", () => {
-  beforeEach(() => runMock.mockReset());
-
-  it("shows stored properties as name/value rows", () => {
-    render(
-      <PropertiesPanel
-        version={ver({ properties: [{ name: "PartNo", value: "ABC-1" }, { name: "Material", value: "7075-T6" }] }) as any}
-        fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} canEdit={false}
-      />,
-    );
+  it("shows resolved properties as name/value rows", () => {
+    useFilePropertiesMock.mockReturnValue({
+      props: [{ name: "PartNo", value: "ABC-1" }, { name: "Material", value: "7075-T6" }],
+      loading: false,
+    });
+    render(<PropertiesPanel version={ver() as any} fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} />);
     expect(screen.getByText("PartNo")).toBeInTheDocument();
     expect(screen.getByText("ABC-1")).toBeInTheDocument();
     expect(screen.getByText("Material")).toBeInTheDocument();
     expect(screen.getByText("7075-T6")).toBeInTheDocument();
-    expect(runMock).not.toHaveBeenCalled(); // already stored → no backfill
   });
 
-  it("lazily backfills from the local copy when an editor views a version with no properties", async () => {
-    runMock.mockResolvedValue([{ name: "Description", value: "Bracket" }]);
-    render(
-      <PropertiesPanel
-        version={ver({ properties: null }) as any}
-        fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} canEdit
-      />,
-    );
-    await waitFor(() => expect(runMock).toHaveBeenCalledWith("v1", "/v/p.sldprt", "p.sldprt"));
-    expect(await screen.findByText("Description")).toBeInTheDocument();
-    expect(screen.getByText("Bracket")).toBeInTheDocument();
+  it("shows a reading state while resolving", () => {
+    useFilePropertiesMock.mockReturnValue({ props: null, loading: true });
+    render(<PropertiesPanel version={ver() as any} fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} />);
+    expect(screen.getByText(/reading/i)).toBeInTheDocument();
   });
 
-  it("does not backfill for a viewer (canEdit=false)", () => {
-    render(
-      <PropertiesPanel version={ver({ properties: null }) as any} fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} canEdit={false} />,
-    );
-    expect(runMock).not.toHaveBeenCalled();
+  it("shows an empty state when there are no custom properties", () => {
+    useFilePropertiesMock.mockReturnValue({ props: [], loading: false });
+    render(<PropertiesPanel version={ver() as any} fileName="p.sldprt" folderId={null} vaultRoot="/v" folders={[]} />);
     expect(screen.getByText(/no custom properties/i)).toBeInTheDocument();
+  });
+
+  it("renders nothing when no version is selected", () => {
+    useFilePropertiesMock.mockReturnValue({ props: null, loading: false });
+    const { container } = render(<PropertiesPanel version={null} fileName={null} folderId={null} vaultRoot={null} folders={[]} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

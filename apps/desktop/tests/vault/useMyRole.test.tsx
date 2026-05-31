@@ -7,10 +7,9 @@ import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 function mockClient(session: any, roleRow: any): SupabaseClient {
-  const maybeSingle = vi.fn().mockResolvedValue({ data: roleRow, error: null });
-  // useMyRole now filters to the global row: .eq(user).is("vault_id", null).maybeSingle()
-  const is = vi.fn().mockReturnValue({ maybeSingle });
-  const eq = vi.fn().mockReturnValue({ is, maybeSingle });
+  // useMyRole now does .select("*").eq("user_id", id) and picks the global row
+  // in JS — the chain resolves to an array of rows.
+  const eq = vi.fn().mockResolvedValue({ data: roleRow ? [roleRow] : [], error: null });
   const select = vi.fn().mockReturnValue({ eq });
   return {
     auth: {

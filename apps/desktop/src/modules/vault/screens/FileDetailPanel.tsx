@@ -143,7 +143,6 @@ function FileDetailLoader({
         folderId={folderId}
         vaultRoot={vaultRoot}
         folders={folders}
-        canEdit={canEdit}
       />
       {/* Assembly references for the latest version of the selected file. */}
       <ReferencesPanel versionId={data?.[0]?.id ?? null} fileId={fileId} />

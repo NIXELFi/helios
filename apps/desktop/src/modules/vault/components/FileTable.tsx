@@ -236,16 +236,20 @@ export function FileTable({
               />
             </th>
           )}
-          <th className="px-3 py-2.5 font-medium">Name</th>
-          <th className="px-3 py-2.5 font-medium">Status</th>
-          <th className="px-3 py-2.5 font-medium text-right">Actions</th>
+          <th className="px-2.5 py-2 font-medium">Name</th>
+          <th className="px-2.5 py-2 font-medium">Status</th>
+          <th className="px-2.5 py-2 font-medium">Actions</th>
+          {/* Trailing spacer absorbs slack so Name/Status/Actions cluster on
+              the left and sit next to each other, instead of Actions drifting
+              to the far right edge on a wide panel. */}
+          <th className="w-full" aria-hidden />
         </tr>
       </thead>
       <tbody>
         {files.length === 0 && (
           <tr>
             <td
-              colSpan={hasMultiSelect ? 4 : 3}
+              colSpan={hasMultiSelect ? 5 : 4}
               className="px-3 py-8 text-center text-sm italic text-helios-dim"
             >
               No files in this folder
@@ -321,19 +325,19 @@ export function FileTable({
               )}
               <td
                 className={
-                  "px-3 py-2 text-helios-text border-l-[3px] " + info.stripe
+                  "px-2.5 py-1.5 text-helios-text border-l-[3px] " + info.stripe
                 }
               >
                 <div className="flex items-center gap-2">
                   <FileTypeIcon name={f.name} />
-                  <span id={`file-row-name-${f.id}`} className="truncate font-mono-num text-[13px]">{f.name}</span>
+                  <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
                 </div>
               </td>
-              <td className="px-3 py-2">
+              <td className="px-2.5 py-1.5">
                 <StatusPill info={info} />
               </td>
-              <td className="px-3 py-2">
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <td className="px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center justify-start gap-1.5">
                   {info.state !== "locked-me" && info.state !== "locked-me-modified" && info.state !== "locked-other" && canEdit && (
                     <CheckOutButton
                       fileId={f.id}
@@ -398,6 +402,8 @@ export function FileTable({
                   })()}
                 </div>
               </td>
+              {/* Slack-absorbing spacer so the columns above cluster left. */}
+              <td aria-hidden />
             </tr>
           );
         })}

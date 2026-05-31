@@ -26,10 +26,10 @@ const setRevRun = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "vv1", revisi
 vi.mock("../../src/modules/vault/data/useSetRevision", () => ({
   useSetRevision: () => ({ run: setRevRun, loading: false, error: null }),
 }));
-// PropertiesPanel lazily backfills via useRecordProperties; stub it so this
-// suite's lightweight client isn't driven into a real Tauri/parse path.
-vi.mock("../../src/modules/vault/data/useRecordProperties", () => ({
-  useRecordProperties: () => ({ run: vi.fn().mockResolvedValue(null) }),
+// PropertiesPanel resolves via useFileProperties (parse local / download);
+// stub it so this suite's lightweight client isn't driven into a real Tauri path.
+vi.mock("../../src/modules/vault/data/useFileProperties", () => ({
+  useFileProperties: () => ({ props: [], loading: false }),
 }));
 
 function mockClient(versions: any[] = []): SupabaseClient {

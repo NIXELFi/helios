@@ -155,6 +155,9 @@ fn is_system_prop(name: &str) -> bool {
         || name.starts_with("SW_")
         || name == "Component Type"
         || name == "IsCPReArchEnabled"
+        // Add-in / viewer artifacts that aren't user-entered data-card fields.
+        || name == "V_WorldOrientation"
+        || name == "Assembly type"
 }
 
 fn push(out: &mut Vec<SwProperty>, seen: &mut BTreeSet<String>, name: &str, value: &str) {

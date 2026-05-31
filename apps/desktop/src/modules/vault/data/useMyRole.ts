@@ -24,13 +24,19 @@ export function useMyRole(): MyRole {
     }
     let mounted = true;
     (async () => {
+      // Per-vault roles mean a user can have several user_roles rows; this
+      // hook reports the GLOBAL role. We fetch all of the user's rows and pick
+      // the global one (vault_id null/absent) in JS rather than filtering with
+      // `.is("vault_id", null)` — that filter (and selecting the column) errors
+      // against a backend whose user_roles predates the vault_id column (not
+      // yet migrated). `select("*")` is column-agnostic.
       const { data } = await client
         .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .is("vault_id", null)
-        .maybeSingle<RoleRow>();
-      if (mounted) setRole(data?.role ?? null);
+        .select("*")
+        .eq("user_id", user.id);
+      const rows = (data ?? []) as Array<RoleRow & { vault_id?: string | null }>;
+      const global = rows.find((r) => r.vault_id == null) ?? rows[0];
+      if (mounted) setRole(global?.role ?? null);
     })();
     return () => {
       mounted = false;
