@@ -34,6 +34,17 @@ describe("useLocalFolderScan", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("treats a not-yet-created folder as empty ([]), not null, so auto-sync can bootstrap it", async () => {
+    // The vault subfolder doesn't exist yet (never synced / deleted). stat +
+    // readDir reject. The scan must publish [] (not null) — otherwise auto-sync
+    // early-returns on !localFiles forever and never downloads to create it.
+    vi.mocked(fs.stat).mockRejectedValue(new Error("No such file or directory (os error 2)"));
+    vi.mocked(fs.readDir).mockRejectedValue(new Error("No such file or directory (os error 2)"));
+    const { result } = renderHook(() => useLocalFolderScan("/root/SDM27"));
+    await waitFor(() => expect(result.current.files).toEqual([]));
+    expect(result.current.error).toBeNull();
+  });
+
   it("walks a directory tree and hashes each file", async () => {
     vi.mocked(fs.readDir).mockImplementation(async (p: any) => {
       if (p === "/root") return [

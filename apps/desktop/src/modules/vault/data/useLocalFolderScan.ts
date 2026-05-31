@@ -168,8 +168,18 @@ export function useLocalFolderScan(
     setError(null);
     (async () => {
       try {
+        // A vault subfolder that doesn't exist yet (never synced, or deleted)
+        // is NOT an error — treat it as empty. Returning null here would make
+        // auto-sync early-return on `!localFiles` forever: the folder can't be
+        // created without a download, and no download happens without the
+        // folder. Publishing [] lets auto-sync bootstrap it (the download path
+        // mkdir's the destination).
+        let rootExists = true;
+        try { await stat(rootPath); } catch { rootExists = false; }
         const collected: LocalFile[] = [];
-        await walk(rootPath, "", collected, shaCacheRef.current);
+        if (rootExists) {
+          await walk(rootPath, "", collected, shaCacheRef.current);
+        }
         // Skip the commit if paused flipped true while we were walking (and it
         // wasn't already paused at start — that case never publishes anyway).
         const pausedNow = pausedRef.current && !startedPaused;
