@@ -19,6 +19,11 @@ tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-single-instance = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# SOLIDWORKS add-in bridge: a small loopback HTTP server (axum on its own tokio
+# runtime/thread) + a random per-launch token. See src/bridge/.
+axum = "0.7"
+tokio = { workspace = true, features = ["net", "time"] }
+getrandom = "0.2"
 helios-core = { path = "../../../crates/helios-core" }
 helios-csv = { path = "../../../crates/helios-csv" }
 helios-arrow = { path = "../../../crates/helios-arrow" }

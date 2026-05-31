@@ -1,7 +1,8 @@
+mod bridge;
 mod cfd;
 mod commands;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
@@ -27,6 +28,10 @@ fn extract_helios_paths<I: IntoIterator<Item = String>>(args: I) -> Vec<String> 
 pub fn run() {
     let first_launch_paths: Vec<String> = extract_helios_paths(std::env::args().skip(1));
     let pending = PendingOpenFiles(Mutex::new(first_launch_paths));
+
+    // Shared state for the SOLIDWORKS add-in bridge. Started in `.setup` once the
+    // app is up; the frontend feeds it the session + vault snapshot over IPC.
+    let bridge_state = Arc::new(bridge::BridgeState::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -60,6 +65,15 @@ pub fn run() {
         }))
         .manage(pending)
         .manage(cfd::CfdState::default())
+        .manage(bridge_state.clone())
+        .setup(move |_app| {
+            // Best-effort: a bridge failure (e.g. port bind) must never stop the
+            // app from launching. The add-in degrades to "Helios not reachable".
+            if let Err(e) = bridge::start(bridge_state.clone()) {
+                eprintln!("helios-vault-bridge failed to start: {e}");
+            }
+            Ok(())
+        })
         .on_page_load(|window, _payload| {
             let app = window.app_handle();
             let state = app.state::<PendingOpenFiles>();
@@ -76,6 +90,9 @@ pub fn run() {
             commands::set_readonly::set_path_readonly,
             commands::parse_refs::parse_sw_refs,
             commands::parse_refs::parse_sw_properties,
+            bridge::bridge_set_session,
+            bridge::bridge_clear_session,
+            bridge::bridge_set_snapshot,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,
