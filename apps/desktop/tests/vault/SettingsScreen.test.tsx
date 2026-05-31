@@ -26,14 +26,13 @@ function mockClient(role: string | null = "editor", isAdmin = false): SupabaseCl
     },
     from: (table: string) => {
       if (table === "user_roles") {
+        // useMyRole now filters to the global row: .eq().is("vault_id", null).maybeSingle()
+        const result = Promise.resolve({ data: role ? { role } : null, error: null });
         return {
           select: () => ({
             eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: role ? { role } : null,
-                  error: null,
-                }),
+              is: () => ({ maybeSingle: () => result }),
+              maybeSingle: () => result,
             }),
           }),
         };

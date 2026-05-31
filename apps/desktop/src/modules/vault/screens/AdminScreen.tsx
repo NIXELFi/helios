@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useUser } from "@helios/auth";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { useVaultUsers } from "../data/useVaultUsers";
+import { useVaults } from "../data/useVaults";
 import { useIsOwner } from "../data/useIsOwner";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useSetUserRole } from "../data/useSetUserRole";
@@ -25,7 +26,11 @@ export function AdminScreen() {
   const me = useUser();
   const isAdmin = useIsAdmin();
   const isOwner = useIsOwner();
-  const { data: users, loading, error, refetch } = useVaultUsers();
+  const { data: vaults } = useVaults();
+  // Scope: null = GLOBAL roles (apply to every vault); a vault id = that
+  // vault's effective roles. Grants/revokes target the chosen scope.
+  const [scopeVaultId, setScopeVaultId] = useState<string | null>(null);
+  const { data: users, loading, error, refetch } = useVaultUsers(scopeVaultId);
   const setRole = useSetUserRole();
   const revoke = useRevokeUserRole();
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -38,7 +43,7 @@ export function AdminScreen() {
     setActionError(null);
     // Consume the RESULT the hook returns — reading setRole.error after the
     // await captures the previous render's value (always stale → generic msg).
-    const { ok, error: err } = await setRole.run(u.user_id, role);
+    const { ok, error: err } = await setRole.run(u.user_id, role, scopeVaultId);
     if (!ok) setActionError(err?.message ?? "Failed to set role.");
     else refetch();
     setPendingId(null);
@@ -47,7 +52,7 @@ export function AdminScreen() {
   async function handleRevoke(u: VaultUser) {
     setPendingId(u.user_id);
     setActionError(null);
-    const { ok, error: err } = await revoke.run(u.user_id);
+    const { ok, error: err } = await revoke.run(u.user_id, scopeVaultId);
     if (!ok) setActionError(err?.message ?? "Failed to revoke role.");
     else refetch();
     setPendingId(null);
@@ -59,11 +64,28 @@ export function AdminScreen() {
         <div>
           <div className="text-[11px] uppercase tracking-wider text-asu-gold">Users &amp; roles</div>
           <p className="mt-0.5 text-[10px] text-[#5A5F66]">
-            {isOwner
-              ? "You're the owner — you can grant any role, including admin."
-              : "Admins can grant editor / viewer. Only the owner can grant the admin role."}
+            {scopeVaultId
+              ? "Roles scoped to this vault. A global role still applies here unless overridden."
+              : isOwner
+                ? "Global roles apply to every vault. You're the owner — you can grant any role, including admin."
+                : "Global roles apply to every vault. Admins can grant editor / viewer. Only the owner can grant the admin role."}
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+            Scope
+            <select
+              aria-label="Role scope"
+              value={scopeVaultId ?? ""}
+              onChange={(e) => setScopeVaultId(e.target.value || null)}
+              className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] normal-case tracking-normal text-helios-text outline-none focus:border-asu-gold"
+            >
+              <option value="">Global (all vaults)</option>
+              {(vaults ?? []).map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </label>
         <button
           type="button"
           onClick={refetch}
@@ -72,6 +94,7 @@ export function AdminScreen() {
         >
           Refresh
         </button>
+        </div>
       </header>
 
       {actionError && (

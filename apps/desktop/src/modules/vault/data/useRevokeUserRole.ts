@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { UserId } from "./types";
+import type { UserId, VaultId } from "./types";
 import { friendlyPgError } from "./pg-errors";
 
 /** Remove a user's role entirely (back to no vault access) via
@@ -20,14 +20,15 @@ export function useRevokeUserRole() {
   }, []);
 
   const run = useCallback(
-    async (target: UserId): Promise<{ ok: boolean; error: Error | null }> => {
+    async (target: UserId, vaultId?: VaultId | null): Promise<{ ok: boolean; error: Error | null }> => {
       if (mounted.current) {
         setLoading(true);
         setError(null);
       }
-      const { error: err } = await client.rpc("pdm_revoke_user_role", {
-        p_target: target,
-      });
+      // Omit p_vault_id to revoke the GLOBAL role (2-arg RPC); include it to
+      // revoke a per-vault role (3-arg RPC).
+      const args = vaultId ? { p_target: target, p_vault_id: vaultId } : { p_target: target };
+      const { error: err } = await client.rpc("pdm_revoke_user_role", args);
       // Return the result directly so callers get the real server message
       // instead of reading a stale captured `.error` after the await.
       if (err) {

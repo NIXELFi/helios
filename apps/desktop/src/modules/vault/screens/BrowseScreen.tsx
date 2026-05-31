@@ -6,7 +6,7 @@ import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
-import { useMyRole } from "../data/useMyRole";
+import { useCanEditVault } from "../data/useVaultRole";
 import { useCreateFolder } from "../data/useCreateFolder";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
@@ -38,11 +38,15 @@ const LOCAL_RESCAN_INTERVAL_MS = 30_000;
 
 export function BrowseScreen() {
   const user = useUser();
+  // Global admin — used only for truly global affordances (e.g. "you can
+  // create a vault" messaging). In-vault edit/admin checks are per-vault below.
   const isAdmin = useIsAdmin();
-  const myRole = useMyRole();
-  const canEdit = isAdmin || myRole === "editor";
 
   const { activeVault: vault, activeVaultId: vaultId, vaults, loading: vaultsLoading } = useActiveVault();
+  // Per-active-vault permissions: a per-vault editor gets edit affordances in
+  // their vault; a global role still satisfies these everywhere (server-side
+  // helpers treat a NULL-vault role as authoritative in every vault).
+  const canEdit = useCanEditVault(vaultId);
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -363,7 +367,7 @@ export function BrowseScreen() {
           <span className="text-xs uppercase tracking-wider text-helios-dim">
             {vault?.name ?? "(no vault)"}
           </span>
-          {isAdmin && vaultId && (
+          {canEdit && vaultId && (
             <button
               onClick={() => openPrompt("folder")}
               className="rounded px-1.5 py-0.5 text-xs text-helios-dim hover:bg-helios-line hover:text-helios-text"
@@ -509,7 +513,7 @@ export function BrowseScreen() {
                   )}
                 </>
               )}
-              {isAdmin && (
+              {canEdit && (
                 <button
                   onClick={() => openPrompt("file")}
                   className="rounded px-2 py-0.5 text-xs text-helios-dim hover:bg-helios-line hover:text-helios-text"

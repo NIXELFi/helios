@@ -28,6 +28,7 @@ export function useMyRole(): MyRole {
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
+        .is("vault_id", null)
         .maybeSingle<RoleRow>();
       if (mounted) setRole(data?.role ?? null);
     })();

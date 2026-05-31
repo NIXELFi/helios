@@ -10,6 +10,7 @@ interface Opts {
   isAdmin: boolean;
   isOwner: boolean;
   users: VaultUser[];
+  vaults?: { id: string; name: string }[];
 }
 
 function makeClient(opts: Opts) {
@@ -28,20 +29,24 @@ function makeClient(opts: Opts) {
         case "pdm_is_admin": return Promise.resolve({ data: opts.isAdmin, error: null });
         case "pdm_is_owner": return Promise.resolve({ data: opts.isOwner, error: null });
         case "pdm_admin_list_users": return Promise.resolve({ data: opts.users, error: null });
+        case "pdm_list_vault_roles": return Promise.resolve({ data: opts.users, error: null });
         case "pdm_set_user_role": return Promise.resolve({ data: null, error: null });
         case "pdm_revoke_user_role": return Promise.resolve({ data: null, error: null });
         default: return Promise.resolve({ data: null, error: null });
       }
     }),
-    // The SubteamsPanel reads pdm.subteams via from().select().order().
-    from: () => ({
-      select: () => ({
-        order: () => Promise.resolve({
-          data: [{ id: "st1", name: "Engine", sort_order: 1 }],
-          error: null,
+    from: (table: string) => {
+      // useVaults populates the scope selector via from("vaults").select("*").
+      if (table === "vaults") {
+        return { select: () => Promise.resolve({ data: opts.vaults ?? [], error: null }) };
+      }
+      // The SubteamsPanel reads pdm.subteams via from().select().order().
+      return {
+        select: () => ({
+          order: () => Promise.resolve({ data: [{ id: "st1", name: "Engine", sort_order: 1 }], error: null }),
         }),
-      }),
-    }),
+      };
+    },
   } as any;
   return { client, calls };
 }
@@ -116,6 +121,27 @@ describe("<AdminScreen>", () => {
     fireEvent.click(screen.getByRole("button", { name: /revoke access/i }));
     await waitFor(() =>
       expect(calls.some((c) => c.name === "pdm_revoke_user_role" && c.args.p_target === "viewer-1")).toBe(true),
+    );
+  });
+
+  it("scoping to a vault lists per-vault roles and grants with p_vault_id", async () => {
+    const { calls } = renderScreen({
+      meId: "owner-1", isAdmin: true, isOwner: true, users: USERS,
+      vaults: [{ id: "vault-A", name: "SDM26" }],
+    });
+    await screen.findByText(/grant any role, including admin/i);
+    // Switch scope from Global to the vault.
+    fireEvent.change(screen.getByLabelText("Role scope"), { target: { value: "vault-A" } });
+    await waitFor(() =>
+      expect(calls.some((c) => c.name === "pdm_list_vault_roles" && c.args.p_vault_id === "vault-A")).toBe(true),
+    );
+    // Granting now targets that vault.
+    const sel = await screen.findByLabelText("Set role for viewer@x.com");
+    fireEvent.change(sel, { target: { value: "editor" } });
+    await waitFor(() =>
+      expect(calls.some((c) =>
+        c.name === "pdm_set_user_role" && c.args.p_target === "viewer-1" &&
+        c.args.p_role === "editor" && c.args.p_vault_id === "vault-A")).toBe(true),
     );
   });
 

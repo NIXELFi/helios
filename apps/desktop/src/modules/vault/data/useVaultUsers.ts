@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { QueryResult, VaultUser } from "./types";
+import type { QueryResult, VaultId, VaultUser } from "./types";
 
-/** Every auth user + their role, via the admin-gated `pdm_admin_list_users`
- *  RPC. The function raises if the caller isn't an admin, so a non-admin
- *  consumer surfaces that as `error`. The client uses `db.schema = 'pdm'`,
- *  so `rpc('pdm_admin_list_users')` resolves to `pdm.pdm_admin_list_users()`. */
-export function useVaultUsers(): QueryResult<VaultUser[]> {
+/** Every auth user + their role. With no `vaultId` (the default) this lists
+ *  GLOBAL roles via the admin-gated `pdm_admin_list_users` RPC. With a
+ *  `vaultId` it lists the EFFECTIVE per-vault role via `pdm_list_vault_roles`
+ *  (the per-vault row if present, else the global one — `scope` distinguishes).
+ *  Both raise for non-admins, surfaced as `error`. The client uses
+ *  `db.schema = 'pdm'`, so the RPCs resolve to their `pdm.pdm_*` aliases. */
+export function useVaultUsers(vaultId?: VaultId | null): QueryResult<VaultUser[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<VaultUser[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,9 @@ export function useVaultUsers(): QueryResult<VaultUser[]> {
     if (dataRef.current === null) setLoading(true);
     setError(null);
     (async () => {
-      const { data: rows, error: err } = await client.rpc("pdm_admin_list_users");
+      const { data: rows, error: err } = vaultId
+        ? await client.rpc("pdm_list_vault_roles", { p_vault_id: vaultId })
+        : await client.rpc("pdm_admin_list_users");
       if (!mounted) return;
       if (err) {
         setError(new Error(err.message ?? String(err)));
@@ -39,7 +43,7 @@ export function useVaultUsers(): QueryResult<VaultUser[]> {
     return () => {
       mounted = false;
     };
-  }, [client, tick]);
+  }, [client, tick, vaultId]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
   return { data, loading, error, refetch };

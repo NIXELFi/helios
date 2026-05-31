@@ -76,6 +76,18 @@ describe("per-vault roles", () => {
     expect(data![0]).toMatchObject({ role: "editor", vault_id: a.vaultId });
   });
 
+  it("set_user_role with NO vault arg grants a GLOBAL role (2-arg back-compat path)", async () => {
+    const owner = await createTestUser(uniqueEmail("owner")); await setRole(owner.id, "owner");
+    const target = await createTestUser(uniqueEmail("target"));
+    const oc = await signInAs(owner.email!);
+    const { error } = await oc.rpc("pdm_set_user_role", { p_target: target.id, p_role: "editor" }); // 2-arg
+    expect(error).toBeNull();
+    const svc = serviceClient();
+    const { data } = await svc.from("user_roles").select("role,vault_id").eq("user_id", target.id);
+    expect(data).toHaveLength(1);
+    expect(data![0]).toMatchObject({ role: "editor", vault_id: null });
+  });
+
   it("list_vault_roles reports the effective role (per-vault row overrides global)", async () => {
     const owner = await createTestUser(uniqueEmail("owner")); await setRole(owner.id, "owner");
     const u = await createTestUser(uniqueEmail("u")); await setRole(u.id, "viewer"); // global viewer

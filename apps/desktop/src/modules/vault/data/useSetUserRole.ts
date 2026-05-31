@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { UserId, VaultRole } from "./types";
+import type { UserId, VaultId, VaultRole } from "./types";
 import { friendlyPgError } from "./pg-errors";
 
 /** Grant or change a user's role via `pdm_set_user_role`. Authorization (only
@@ -27,15 +27,19 @@ export function useSetUserRole() {
     async (
       target: UserId,
       role: Exclude<VaultRole, "owner">,
+      vaultId?: VaultId | null,
     ): Promise<{ ok: boolean; error: Error | null }> => {
       if (mounted.current) {
         setLoading(true);
         setError(null);
       }
-      const { error: err } = await client.rpc("pdm_set_user_role", {
-        p_target: target,
-        p_role: role,
-      });
+      // Omit p_vault_id for a GLOBAL grant (resolves the 2-arg RPC); include it
+      // for a per-vault grant (the 3-arg RPC). The two arities are disjoint
+      // server-side so there's no overload ambiguity.
+      const args = vaultId
+        ? { p_target: target, p_role: role, p_vault_id: vaultId }
+        : { p_target: target, p_role: role };
+      const { error: err } = await client.rpc("pdm_set_user_role", args);
       // Return the result directly so callers get the real server message
       // instead of reading a stale captured `.error` after the await.
       if (err) {
