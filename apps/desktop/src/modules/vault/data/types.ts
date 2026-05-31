@@ -41,7 +41,16 @@ export interface Version {
   /** Manually-stamped numeric revision (SW-PDM "Set Revision"), or null if this
    *  version has never been given a revision. Distinct from `version_num`. */
   revision: number | null;
+  /** SolidWorks custom properties parsed from the file (data card), or null if
+   *  not parsed yet. */
+  properties: SwProperty[] | null;
   created_at: string;
+}
+
+/** A SolidWorks custom property name/value pair (data-card field). */
+export interface SwProperty {
+  name: string;
+  value: string;
 }
 
 export interface Lock {

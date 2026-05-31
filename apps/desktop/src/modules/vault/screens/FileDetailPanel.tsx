@@ -2,6 +2,7 @@ import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
 import { GetVersionButton } from "../components/RowActions";
 import { ReferencesPanel } from "../components/ReferencesPanel";
+import { PropertiesPanel } from "../components/PropertiesPanel";
 import { useSetRevision } from "../data/useSetRevision";
 import type { FileId, FolderId, Folder, VaultFile, Version } from "../data/types";
 
@@ -135,6 +136,15 @@ function FileDetailLoader({
           <VersionList versions={data} onSelect={() => {}} renderActions={renderActions} />
         )}
       </div>
+      {/* SolidWorks custom properties (data card) for the latest version. */}
+      <PropertiesPanel
+        version={data?.[0] ?? null}
+        fileName={fileName}
+        folderId={folderId}
+        vaultRoot={vaultRoot}
+        folders={folders}
+        canEdit={canEdit}
+      />
       {/* Assembly references for the latest version of the selected file. */}
       <ReferencesPanel versionId={data?.[0]?.id ?? null} fileId={fileId} />
     </aside>

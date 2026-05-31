@@ -6,6 +6,7 @@ import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
+import { useRecordProperties } from "../data/useRecordProperties";
 import { localDestPath } from "../data/folder-paths";
 import { setReadonly } from "../data/fs-readonly";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -96,6 +97,7 @@ export function CheckInButton({
 }: CheckInButtonProps) {
   const checkIn = useCheckIn();
   const recordRefs = useRecordRefs();
+  const recordProperties = useRecordProperties();
   // The bytes to upload are read up-front (file dialog / disk) on click, then
   // held here while the comment modal is open. `null` = modal closed.
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
@@ -146,7 +148,10 @@ export function CheckInButton({
       // Record this version's assembly references (best-effort, fire-and-forget
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
-      if (pathRef.current && refName) void recordRefs.run(result.id, pathRef.current, refName);
+      if (pathRef.current && refName) {
+        void recordRefs.run(result.id, pathRef.current, refName);
+        void recordProperties.run(result.id, pathRef.current, refName);
+      }
       onDone?.();
     }
   }
