@@ -125,6 +125,9 @@ function FileDetailLoader({
           </button>
         </div>
       )}
+      {/* One unified scroll for history + data card + references, so a tall
+          card (lots of properties) scrolls instead of crushing the version
+          list. */}
       <div className="flex-1 overflow-auto">
         {loading ? (
           <div className="p-3 text-sm text-helios-dim">Loading…</div>
@@ -133,19 +136,20 @@ function FileDetailLoader({
         ) : !data || data.length === 0 ? (
           <div className="p-3 text-sm text-helios-dim">No versions yet.</div>
         ) : (
-          <VersionList versions={data} onSelect={() => {}} renderActions={renderActions} />
+          <>
+            <VersionList versions={data} onSelect={() => {}} renderActions={renderActions} />
+            {/* SolidWorks data card + assembly references for the latest version. */}
+            <PropertiesPanel
+              version={data[0] ?? null}
+              fileName={fileName}
+              folderId={folderId}
+              vaultRoot={vaultRoot}
+              folders={folders}
+            />
+            <ReferencesPanel versionId={data[0]?.id ?? null} fileId={fileId} />
+          </>
         )}
       </div>
-      {/* SolidWorks custom properties (data card) for the latest version. */}
-      <PropertiesPanel
-        version={data?.[0] ?? null}
-        fileName={fileName}
-        folderId={folderId}
-        vaultRoot={vaultRoot}
-        folders={folders}
-      />
-      {/* Assembly references for the latest version of the selected file. */}
-      <ReferencesPanel versionId={data?.[0]?.id ?? null} fileId={fileId} />
     </aside>
   );
 }
