@@ -1,10 +1,14 @@
-//! Write the per-user (HKCU) SOLIDWORKS add-in + COM-CLSID registration pointing
-//! at a staged DLL. No RegAsm, no elevation. Mirrors what RegAsm produces but
-//! under HKCU\Software\Classes instead of HKLM, so it needs no admin.
+//! SOLIDWORKS add-in registration, split by privilege:
 //!
-//! NOTE: gated on the Task 0 spike — if SOLIDWORKS 2025 turns out to require the
-//! Addins *list* entry in HKLM, only `register_addins_list` needs to move to a
-//! one-time elevated step; the CLSID stays per-user here.
+//! - **Per-user (no admin):** the managed-COM CLSID under
+//!   `HKCU\Software\Classes\CLSID\{guid}` and the per-user enable flag
+//!   `HKCU\Software\SolidWorks\AddInsStartup\{guid}`. Per-user COM resolves via
+//!   the HKCR merge as long as SOLIDWORKS runs non-elevated as the same user.
+//! - **Machine-wide (needs elevation):** the **list entry**
+//!   `HKLM\SOFTWARE\SolidWorks\AddIns\{guid}`. SOLIDWORKS discovers add-ins
+//!   ONLY by enumerating that HKLM key — there is no HKCU discovery — so this
+//!   one entry can't be per-user. Written once via an elevated `reg import`
+//!   (single UAC), then skipped when already present.
 
 use std::path::Path;
 use winreg::enums::*;
@@ -14,23 +18,21 @@ const GUID: &str = "{B7A4E2C9-3F1D-4A8B-9C2E-5D6F7A8B9C0D}";
 // Matches the add-in's stable AssemblyVersion (never bumped) + class name.
 const ASSEMBLY: &str = "HeliosVault, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
 const CLASS: &str = "HeliosVault.SwAddin";
+const TITLE: &str = "Helios Vault";
+const DESCRIPTION: &str = "Sun Devil Motorsports - Helios PDM";
 
 fn code_base(dll: &Path) -> String {
     format!("file:///{}", dll.display().to_string().replace('\\', "/"))
 }
 
-/// (Re)write every key so SOLIDWORKS discovers + auto-loads the add-in from
-/// `dll`. `file_version` names the versioned InprocServer32 subkey.
-pub fn register(dll: &Path, file_version: &str) -> std::io::Result<()> {
+/// Write the per-user parts (no admin): the managed-COM CLSID pointing at `dll`
+/// and the per-user auto-load flag. SOLIDWORKS still won't *load* it until the
+/// HKLM list entry exists (see `register_hklm_list_elevated`).
+pub fn register_per_user(dll: &Path, file_version: &str) -> std::io::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let cb = code_base(dll);
 
-    // Add-in list entry + per-user auto-load.
-    let (addins, _) = hkcu.create_subkey(format!("Software\\SolidWorks\\Addins\\{GUID}"))?;
-    addins.set_value("", &1u32)?;
-    addins.set_value("Title", &"Helios Vault")?;
-    addins.set_value("Description", &"Sun Devil Motorsports — Helios PDM")?;
-
+    // Per-user auto-load flag (HKCU is the ONLY place this lives).
     let (startup, _) = hkcu.create_subkey(format!("Software\\SolidWorks\\AddInsStartup\\{GUID}"))?;
     startup.set_value("", &1u32)?;
 
@@ -55,7 +57,7 @@ pub fn register(dll: &Path, file_version: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// True if the registered CodeBase already points at `dll` (skip rewrite).
+/// True if the registered CLSID CodeBase already points at `dll` (skip rewrite).
 pub fn already_points_at(dll: &Path) -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let want = code_base(dll);
@@ -65,17 +67,52 @@ pub fn already_points_at(dll: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// True if the machine-wide discovery entry exists (readable without admin).
+pub fn hklm_list_entry_present() -> bool {
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(format!("SOFTWARE\\SolidWorks\\AddIns\\{GUID}"))
+        .is_ok()
+}
+
+/// Write the HKLM list entry via an elevated `reg import` (one UAC). Returns
+/// Err if the user declines the prompt or the import fails. We use a .reg file +
+/// `reg import` to avoid quoting issues, and REGEDIT4 (ANSI) so the ASCII
+/// content needs no UTF-16 encoding.
+pub fn register_hklm_list_elevated() -> Result<(), String> {
+    let content = format!(
+        "REGEDIT4\r\n\r\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\SolidWorks\\AddIns\\{GUID}]\r\n\
+         @=dword:00000001\r\n\"Title\"=\"{TITLE}\"\r\n\"Description\"=\"{DESCRIPTION}\"\r\n"
+    );
+    let path = std::env::temp_dir().join("helios_addin_hklm.reg");
+    std::fs::write(&path, content).map_err(|e| format!("write reg file: {e}"))?;
+
+    // Start-Process … -Verb RunAs triggers the UAC; -Wait so a decline (which
+    // throws) surfaces as a non-zero exit.
+    let ps = format!(
+        "$ErrorActionPreference='Stop'; Start-Process -FilePath reg.exe \
+         -ArgumentList @('import', '{}') -Verb RunAs -Wait",
+        path.display().to_string().replace('\'', "''")
+    );
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
+        .status()
+        .map_err(|e| format!("spawn elevation: {e}"))?;
+    let _ = std::fs::remove_file(&path);
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("elevation was declined or the registry import failed".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn register_then_points_at_under_a_test_guid() {
-        // Exercise the real winreg write/read against a throwaway HKCU path so
-        // we don't touch the actual add-in keys. We can't easily swap GUID, so
-        // just verify already_points_at is false for a non-existent dll path
-        // (no panic, no false positive).
-        let p = std::path::Path::new("C:\\nonexistent\\HeliosVault.dll");
-        let _ = already_points_at(p); // must not panic
+    fn lookups_do_not_panic() {
+        let _ = hklm_list_entry_present();
+        let _ = already_points_at(std::path::Path::new("C:\\nope\\HeliosVault.dll"));
     }
 }

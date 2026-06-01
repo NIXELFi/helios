@@ -37,6 +37,23 @@ export function SettingsScreen() {
     }
   }
 
+  // Install / repair the SOLIDWORKS add-in registration. Prompts once for
+  // elevation (the machine-wide discovery entry SOLIDWORKS reads needs admin).
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
+  async function installAddin() {
+    setProvisioning(true);
+    setProvisionMsg(null);
+    try {
+      await invoke("provision_sw_addin");
+      setProvisionMsg("Installed — restart SOLIDWORKS to load the add-in.");
+    } catch (e) {
+      setProvisionMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProvisioning(false);
+    }
+  }
+
   async function handlePickFolder() {
     setPickError(null);
     try {
@@ -127,6 +144,22 @@ export function SettingsScreen() {
             >
               Don&apos;t start on login
             </button>
+          </div>
+          <div className="mt-3 border-t border-helios-line pt-3">
+            <p className="mb-2 text-xs text-helios-dim">
+              Installs the &ldquo;Helios Vault&rdquo; add-in into SOLIDWORKS. Helios does
+              this automatically on first run; use this to (re)install or repair it.
+              It prompts once for admin (the machine-wide entry SOLIDWORKS reads needs it).
+            </p>
+            <button
+              type="button"
+              onClick={() => void installAddin()}
+              disabled={provisioning}
+              className="rounded border border-helios-line px-3 py-1.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+            >
+              {provisioning ? "Installing…" : "Install / repair SOLIDWORKS add-in"}
+            </button>
+            {provisionMsg && <p className="mt-2 text-xs text-helios-dim">{provisionMsg}</p>}
           </div>
         </div>
       </section>

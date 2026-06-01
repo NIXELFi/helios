@@ -40,8 +40,23 @@ pub fn staged_version() -> Option<String> {
     v.get("version").and_then(|x| x.as_str()).map(str::to_string)
 }
 
+fn read_state() -> serde_json::Value {
+    std::fs::read_to_string(addin_root().join("state.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn write_state(v: &serde_json::Value) {
+    let _ = std::fs::write(
+        addin_root().join("state.json"),
+        serde_json::to_vec_pretty(v).unwrap(),
+    );
+}
+
 /// Copy `bundled_dll` to <root>\<version>\HeliosVault.dll and record it in
-/// state.json. No-op copy if the target already exists. Returns the staged path.
+/// state.json (merging — preserves other flags like `hklmAttempted`). No-op copy
+/// if the target already exists. Returns the staged path.
 pub fn stage(bundled_dll: &Path, version: &str) -> std::io::Result<PathBuf> {
     let dir = addin_root().join(version);
     std::fs::create_dir_all(&dir)?;
@@ -49,12 +64,28 @@ pub fn stage(bundled_dll: &Path, version: &str) -> std::io::Result<PathBuf> {
     if !dest.exists() {
         std::fs::copy(bundled_dll, &dest)?;
     }
-    std::fs::write(
-        addin_root().join("state.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({ "version": version, "dll": dest }))
-            .unwrap(),
-    )?;
+    let mut v = read_state();
+    v["version"] = serde_json::json!(version);
+    v["dll"] = serde_json::json!(dest);
+    write_state(&v);
     Ok(dest)
+}
+
+/// Has the one-time HKLM (elevated) provisioning already been attempted? Tracked
+/// so we don't pop a UAC on every launch.
+pub fn hklm_attempted() -> bool {
+    read_state()
+        .get("hklmAttempted")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+}
+
+/// Record that the HKLM provisioning has been attempted (so it isn't re-prompted
+/// automatically — the user can still retry from Settings).
+pub fn set_hklm_attempted(done: bool) {
+    let mut v = read_state();
+    v["hklmAttempted"] = serde_json::json!(done);
+    write_state(&v);
 }
 
 /// Remove version folders other than `keep`. Best-effort; locked dirs (a running

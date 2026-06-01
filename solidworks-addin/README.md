@@ -105,11 +105,16 @@ For end users, **nothing above is manual** — the Helios desktop app provisions
 the add-in itself:
 
 - On every launch, Helios (`apps/desktop/src-tauri/src/addin_injector/`) detects
-  SOLIDWORKS, stages the bundled, version-stamped `HeliosVault.dll` into
-  `%LOCALAPPDATA%\Helios\addin\<version>\`, and writes the **per-user (HKCU)**
-  add-in + COM registration directly — **no RegAsm, no admin/UAC**. It updates
-  automatically (versioned folders, so a new DLL never collides with one a
-  running SW has loaded) and notifies the user to restart SW when needed.
+  SOLIDWORKS, stages the bundled, version-stamped `HeliosVault.dll` into a
+  per-version folder, and registers it — no RegAsm. The managed-COM **CLSID** and
+  the per-user **enable flag** are written per-user (HKCU, no admin). The one
+  thing that needs admin is the **discovery list entry**
+  `HKLM\SOFTWARE\SolidWorks\AddIns\{guid}` — SOLIDWORKS finds add-ins ONLY there
+  (no HKCU discovery) — so the injector writes it via a **one-time elevated step
+  (single UAC), skipped once present**. If the user declines, "Install / repair
+  SOLIDWORKS add-in" in Settings retries it. It updates automatically (versioned
+  folders, so a new DLL never collides with one a running SW has loaded) and
+  notifies the user to restart SW when needed.
 - Helios runs minimized in the **system tray** (close → hide, quit from the tray)
   with **auto-start on login**, so the localhost bridge is always live and the
   add-in shows **"● Connected · \<you\>"**.

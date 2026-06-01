@@ -43,20 +43,50 @@ pub fn run(app: &AppHandle) -> bool {
             return false;
         }
     };
-    if !changed && registry::already_points_at(&staged) {
-        return false; // already up to date
-    }
-    if let Err(e) = registry::register(&staged, &version) {
-        eprintln!("injector: register failed: {e}");
-        return false;
+
+    let mut did_something = false;
+
+    // Per-user CLSID + AddInsStartup (no admin) — keep current with the staged DLL.
+    if changed || !registry::already_points_at(&staged) {
+        if let Err(e) = registry::register_per_user(&staged, &version) {
+            eprintln!("injector: per-user register failed: {e}");
+            return false;
+        }
+        did_something = true;
+        eprintln!("injector: per-user registration updated → v{version}");
     }
     staging::gc(&version);
 
-    if sw_detect::is_sldworks_running() {
+    // Machine-wide discovery entry (HKLM) — SOLIDWORKS finds add-ins ONLY here,
+    // and it needs elevation. Prompt once if missing; the user can retry from
+    // Settings (provision_now) if they decline.
+    if !registry::hklm_list_entry_present() && !staging::hklm_attempted() {
+        staging::set_hklm_attempted(true);
+        match registry::register_hklm_list_elevated() {
+            Ok(()) => {
+                did_something = true;
+                eprintln!("injector: HKLM discovery entry installed");
+            }
+            Err(e) => eprintln!("injector: HKLM provisioning skipped ({e}) — retry from Settings"),
+        }
+    }
+
+    if did_something && sw_detect::is_sldworks_running() {
         notify_restart_sw(app);
     }
-    eprintln!("injector: add-in registered v{version} at {}", staged.display());
-    true
+    did_something
+}
+
+/// Force a full (re)install of the add-in registration, prompting for elevation
+/// for the HKLM discovery entry. Backs the Settings "Install / repair add-in".
+pub fn provision_now(app: &AppHandle) -> Result<(), String> {
+    let dll = bundled_dll(app).ok_or("bundled add-in DLL not found")?;
+    let version = staging::dll_file_version(&dll).ok_or("couldn't read add-in DLL version")?;
+    let staged = staging::stage(&dll, &version).map_err(|e| e.to_string())?;
+    registry::register_per_user(&staged, &version).map_err(|e| e.to_string())?;
+    registry::register_hklm_list_elevated()?;
+    staging::set_hklm_attempted(true);
+    Ok(())
 }
 
 fn notify_restart_sw(app: &AppHandle) {
