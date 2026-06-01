@@ -50,17 +50,17 @@
   <ItemGroup>
     <Reference Include="SolidWorks.Interop.sldworks">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.sldworks.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
       <Private>false</Private>
     </Reference>
     <Reference Include="SolidWorks.Interop.swconst">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swconst.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
       <Private>false</Private>
     </Reference>
     <Reference Include="SolidWorks.Interop.swpublished">
       <HintPath>$(SolidWorksApiPath)\SolidWorks.Interop.swpublished.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
