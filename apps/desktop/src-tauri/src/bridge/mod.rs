@@ -65,9 +65,18 @@ pub struct LockInfo {
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotFile {
     pub file_id: String,
-    /// Absolute local working-copy path, normalized lowercase for matching.
+    /// Absolute local working-copy path (any separator; matched normalized).
     pub local_path: String,
     pub name: String,
+    /// Which vault this file belongs to (Helios is multi-vault — a file open in
+    /// SOLIDWORKS could be from any vault the user has).
+    #[serde(default)]
+    pub vault_name: Option<String>,
+    /// The file's latest-version id. The snapshot stays lean (no per-version
+    /// rows); `/status` resolves version/sha from this on demand.
+    #[serde(default)]
+    pub latest_version_id: Option<String>,
+    #[serde(default)]
     pub latest: Option<LatestVersion>,
     pub lock: Option<LockInfo>,
 }

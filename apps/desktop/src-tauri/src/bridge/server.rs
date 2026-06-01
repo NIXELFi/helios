@@ -102,28 +102,47 @@ struct PathBody {
     path: String,
 }
 
-/// `GET /status?path=` — what does Helios know about this local file? Answered
-/// entirely from the pushed snapshot (no network), so it's instant and works
-/// while minimized. `tracked:false` means the path isn't a known vault file.
+/// `GET /status?path=` — what does Helios know about this local file? The
+/// tracked/lock/vault facts come straight from the pushed snapshot (instant, no
+/// network). The latest version/sha is looked up on demand from `latest_version_id`
+/// (kept out of the snapshot to stay lean at tens of thousands of files); if
+/// there's no session or the lookup fails it's simply omitted. `tracked:false`
+/// means the path isn't a known vault file.
 async fn status(State(state): State<Arc<BridgeState>>, Query(q): Query<PathQuery>) -> Response {
-    match state.file_by_path(&q.path) {
-        None => Json(json!({ "tracked": false, "path": q.path })).into_response(),
-        Some(f) => {
-            let checked_out = f.lock.is_some();
-            let checked_out_by_me = f.lock.as_ref().map(|l| l.by_me).unwrap_or(false);
-            Json(json!({
-                "tracked": true,
-                "path": q.path,
-                "fileId": f.file_id,
-                "name": f.name,
-                "latest": f.latest,
-                "checkedOut": checked_out,
-                "checkedOutByMe": checked_out_by_me,
-                "lock": f.lock,
-            }))
-            .into_response()
+    let Some(f) = state.file_by_path(&q.path) else {
+        return Json(json!({ "tracked": false, "path": q.path })).into_response();
+    };
+
+    // Resolve the latest version lazily (best-effort). Map the raw PostgREST
+    // columns to the camelCase shape the add-in expects.
+    let latest = match (&f.latest_version_id, state.session()) {
+        (Some(vid), Some(session)) => {
+            match supabase::get_version_by_id(&state.http, &session, vid).await {
+                Ok(v) if v.is_object() => Some(json!({
+                    "versionNum": v.get("version_num"),
+                    "sha256": v.get("sha256"),
+                    "revision": v.get("revision"),
+                })),
+                _ => None,
+            }
         }
-    }
+        _ => None,
+    };
+
+    let checked_out = f.lock.is_some();
+    let checked_out_by_me = f.lock.as_ref().map(|l| l.by_me).unwrap_or(false);
+    Json(json!({
+        "tracked": true,
+        "path": q.path,
+        "fileId": f.file_id,
+        "name": f.name,
+        "vault": f.vault_name,
+        "latest": latest,
+        "checkedOut": checked_out,
+        "checkedOutByMe": checked_out_by_me,
+        "lock": f.lock,
+    }))
+    .into_response()
 }
 
 /// `GET /versions?path=` — full version history for the file at this path.

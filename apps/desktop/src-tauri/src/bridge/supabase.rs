@@ -77,6 +77,40 @@ pub async fn get_versions(
     parse_json(resp).await
 }
 
+/// `GET /rest/v1/versions?id=eq.<id>` — one version row by id. Used by `/status`
+/// to resolve a file's latest version/sha on demand (kept out of the snapshot).
+pub async fn get_version_by_id(
+    http: &reqwest::Client,
+    s: &Session,
+    version_id: &str,
+) -> SupaResult {
+    let url = format!("{}/rest/v1/versions", s.supabase_url.trim_end_matches('/'));
+    let mut headers = base_headers(s)?;
+    headers.insert(
+        reqwest::header::HeaderName::from_static("accept-profile"),
+        HeaderValue::from_static("pdm"),
+    );
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+
+    let resp = http
+        .get(&url)
+        .headers(headers)
+        .query(&[
+            ("id", format!("eq.{version_id}")),
+            ("select", "version_num,sha256,revision".to_string()),
+            ("limit", "1".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| SupaError::new(502, format!("version request failed: {e}")))?;
+
+    match parse_json(resp).await {
+        Ok(Value::Array(mut rows)) if !rows.is_empty() => Ok(rows.remove(0)),
+        Ok(_) => Ok(Value::Null),
+        Err(e) => Err(e),
+    }
+}
+
 /// `INSERT locks {file_id, user_id}` returning the created row — check-out.
 /// Mirrors `useAcquireLock`. A 409 (unique violation) means the file is already
 /// checked out; the add-in surfaces that to the user.

@@ -9,6 +9,7 @@ import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
+import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -43,6 +44,12 @@ function HeliosShell() {
   const { user, client, loading: authLoading } = useHeliosAuth();
   const { disconnect } = useConnection();
   const myRole = useMyRole();
+
+  // Feed the SOLIDWORKS add-in bridge from the shell — always mounted, every
+  // module — so the localhost API stays current with the signed-in session +
+  // every vault even when the user is in Logs/CFD or the app is minimized in the
+  // tray. No-ops when signed out. See modules/vault/data/useBridgeSync.
+  useBridgeSync();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
 

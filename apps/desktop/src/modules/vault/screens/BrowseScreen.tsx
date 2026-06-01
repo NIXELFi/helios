@@ -22,7 +22,6 @@ import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
 import { useAutoSync } from "../data/useAutoSync";
-import { useBridgeSync } from "../data/useBridgeSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useInterval } from "../data/useInterval";
 import { useVaultUsers } from "../data/useVaultUsers";
@@ -185,18 +184,6 @@ export function BrowseScreen() {
     ),
     [latestByFileId],
   );
-
-  // Feed the SOLIDWORKS add-in bridge: push the signed-in session + a snapshot
-  // of this vault (path ↔ file_id, latest version, lock holder) so the localhost
-  // API can answer status / versions / checkout for the add-in — even while
-  // Helios is minimized in the tray. See data/useBridgeSync.ts.
-  useBridgeSync({
-    files: allFiles,
-    folders: folders ?? [],
-    locks,
-    versionsByFileId,
-    vaultRoot: vaultFolderPath,
-  });
 
   // File-area error/loading state (H1). The file list itself comes from the
   // vault-wide query at root (allFilesError) or the per-folder query inside a
