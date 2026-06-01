@@ -18,29 +18,25 @@ component status, and shows a Connected·<user> line). Phase 5 (injector + tray)
 This is the only thing gating "the add-in installs itself with zero manual steps."
 It needs the user **at the machine** for one UAC + a couple of visual checks.
 
-### 1a. The HKCU spike (the one risk)
+### 1a. The HKCU question — RESOLVED
 
-The whole no-admin design assumes SOLIDWORKS 2025 will load an add-in registered
-**entirely under HKCU**. Prove it:
+The spike's premise was wrong: **SOLIDWORKS discovers add-ins ONLY via
+`HKLM\SOFTWARE\SolidWorks\AddIns\{guid}`** — there is no HKCU discovery. The
+injector originally wrote the *list* entry to HKCU, so SW never saw it (it loaded
+on the dev box only because an old elevated RegAsm registration left an HKLM entry
+behind). Two fixes landed:
 
-1. Close SOLIDWORKS.
-2. **(needs one UAC)** Remove the old machine-wide registration so the test is
-   isolated:
-   ```powershell
-   $g="{B7A4E2C9-3F1D-4A8B-9C2E-5D6F7A8B9C0D}"
-   reg delete "HKLM\SOFTWARE\SolidWorks\Addins\$g" /f
-   reg delete "HKLM\SOFTWARE\Classes\CLSID\$g" /f
-   ```
-   (Run from an elevated prompt.)
-3. Write the HKCU-only keys — use the script in the plan, **Task 0 / Step 2**
-   (`../docs/superpowers/plans/2026-06-01-helios-addin-injector-tray.md`), pointing
-   at `src/bin/Release/net48/HeliosVault.dll`. No admin needed.
-4. Launch SOLIDWORKS → **Tools → Add-Ins**.
-   - **Loads + ticked** → the no-admin design holds. Done; continue to 1b.
-   - **Not listed** → SW needs the *Addins list* entry in HKLM. Fallback: in
-     `src-tauri/src/addin_injector/registry.rs`, move only the
-     `Software\SolidWorks\Addins\{guid}` write to a one-time elevated step (single
-     UAC on first run); keep the CLSID + AddInsStartup under HKCU. Then re-test.
+- **Self-contained DLL** (commit `09b179d`): `EmbedInteropTypes=true`, so the
+  staged DLL has no external `SolidWorks.Interop.*` dependency and loads from the
+  staged folder, on any SW version/edition.
+- **HKLM list entry via one-time elevation** (`registry.rs::register_hklm_list_elevated`,
+  driven from `mod.rs::run` / `provision_now`): the CLSID + AddInsStartup stay
+  per-user (no admin); the HKLM discovery entry is written via a single UAC,
+  skipped once present, retryable from **Settings → "Install / repair SOLIDWORKS
+  add-in"** if declined.
+
+So validation 1a is now just: launch Helios on a clean machine → approve the one
+UAC → SW loads "Helios Vault". The manual confirm below (1b) covers it.
 
 ### 1b. Live injector + tray pass
 
@@ -50,9 +46,11 @@ installed app, **or** for a quick dev check, copy the DLL to where the dev build
 resolves resources and run `pnpm dev`.
 
 Confirm:
-- On Helios launch, `%LOCALAPPDATA%\Helios\addin\<version>\HeliosVault.dll` exists
-  and `HKCU\Software\SolidWorks\Addins\{guid}` is written (check the Helios log for
-  `injector: add-in registered …`).
+- On Helios launch, the staged `…\Helios\addin\<version>\HeliosVault.dll` exists,
+  the per-user CLSID is written, and (after approving the one UAC)
+  `HKLM\SOFTWARE\SolidWorks\AddIns\{guid}` exists (Helios log:
+  `injector: HKLM discovery entry installed`). If you declined, use Settings →
+  "Install / repair SOLIDWORKS add-in".
 - Relaunch SOLIDWORKS → the add-in loads from the staged DLL; the Task Pane shows
   **"● Connected · \<you\>"**.
 - **Tray:** closing the Helios window hides it to the tray (bridge `/health` still

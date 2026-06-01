@@ -32,6 +32,14 @@ fn get_autostart(app: tauri::AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// Force-install / repair the SOLIDWORKS add-in registration. Prompts once for
+/// elevation to write the machine-wide (HKLM) discovery entry; the per-user
+/// CLSID stays no-admin. Backs the Settings "Install / repair add-in" action.
+#[tauri::command]
+fn provision_sw_addin(app: tauri::AppHandle) -> Result<(), String> {
+    addin_injector::provision_now(&app)
+}
+
 #[tauri::command]
 fn get_pending_open_files(state: tauri::State<'_, PendingOpenFiles>) -> Vec<String> {
     // Recover from a poisoned mutex instead of crashing the IPC command —
@@ -180,6 +188,7 @@ pub fn run() {
             bridge::bridge_respond,
             set_autostart,
             get_autostart,
+            provision_sw_addin,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,
