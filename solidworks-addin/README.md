@@ -122,8 +122,11 @@ cd apps/desktop
 pnpm build:win   # = pnpm build:addin (dotnet build + stage DLL) && pnpm tauri build
 ```
 
-The `resources/addin/HeliosVault.dll` it stages is git-ignored (a build
-artifact). The dev/manual `regasm` flow above still works for add-in development.
+The prebuilt `apps/desktop/src-tauri/resources/addin/HeliosVault.dll` is
+**committed to the repo**, so the bundle can include the add-in even on a build
+machine without the .NET toolchain. Rebuild + recommit it after add-in changes
+with `pnpm --filter @helios/desktop build:addin`. The dev/manual `regasm` flow
+above still works for add-in development.
 
 See `HANDOFF.md` for the architecture, roadmap, and how to continue this work in
 a Claude Code session **on the Windows machine**.
