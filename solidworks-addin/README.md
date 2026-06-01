@@ -99,5 +99,31 @@ expected for a non-GAC assembly).
   SW interop → tell me your SOLIDWORKS version; these have stable equivalents
   (`SetAddinCallbackInfo`, `DisplayWindowFromHandle`) we can swap in.
 
+## Shipping (Phase 5): the Helios injector + tray
+
+For end users, **nothing above is manual** — the Helios desktop app provisions
+the add-in itself:
+
+- On every launch, Helios (`apps/desktop/src-tauri/src/addin_injector/`) detects
+  SOLIDWORKS, stages the bundled, version-stamped `HeliosVault.dll` into
+  `%LOCALAPPDATA%\Helios\addin\<version>\`, and writes the **per-user (HKCU)**
+  add-in + COM registration directly — **no RegAsm, no admin/UAC**. It updates
+  automatically (versioned folders, so a new DLL never collides with one a
+  running SW has loaded) and notifies the user to restart SW when needed.
+- Helios runs minimized in the **system tray** (close → hide, quit from the tray)
+  with **auto-start on login**, so the localhost bridge is always live and the
+  add-in shows **"● Connected · \<you\>"**.
+
+**Building the Windows installer** (must run on a Windows box with the add-in
+toolchain, since it builds the DLL that gets bundled):
+
+```powershell
+cd apps/desktop
+pnpm build:win   # = pnpm build:addin (dotnet build + stage DLL) && pnpm tauri build
+```
+
+The `resources/addin/HeliosVault.dll` it stages is git-ignored (a build
+artifact). The dev/manual `regasm` flow above still works for add-in development.
+
 See `HANDOFF.md` for the architecture, roadmap, and how to continue this work in
 a Claude Code session **on the Windows machine**.

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useMyRole } from "../data/useMyRole";
@@ -20,6 +21,21 @@ export function SettingsScreen() {
   const [pickError, setPickError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  // Launch-on-login (keeps Helios in the tray so the SOLIDWORKS add-in stays
+  // connected). null while we read the current state from the backend.
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  useEffect(() => {
+    void invoke<boolean>("get_autostart").then(setAutostart).catch(() => setAutostart(null));
+  }, []);
+  async function setAutostartEnabled(enabled: boolean) {
+    try {
+      await invoke("set_autostart", { enabled });
+      setAutostart(enabled);
+    } catch {
+      /* non-Tauri context / denied — leave the state as-is */
+    }
+  }
 
   async function handlePickFolder() {
     setPickError(null);
@@ -73,6 +89,45 @@ export function SettingsScreen() {
             {signingOut ? "Signing out…" : "Sign out"}
           </button>
           {signOutError && <p className="mt-2 text-xs text-[#EF5350]" role="alert">{signOutError}</p>}
+        </div>
+      </section>
+
+      <section className="mb-8 max-w-xl space-y-3">
+        <h2 className="text-sm uppercase tracking-wider text-helios-dim">Startup &amp; SOLIDWORKS</h2>
+        <p className="text-xs text-helios-dim">
+          Keep Helios running in the background (system tray) so the SOLIDWORKS
+          add-in stays connected and the vault stays in sync. Closing the window
+          hides it to the tray; quit from the tray icon.
+        </p>
+        <div className="rounded border border-helios-line bg-helios-base p-4 text-sm">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void setAutostartEnabled(true)}
+              aria-pressed={autostart === true}
+              className={
+                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+                (autostart === true
+                  ? "bg-asu-gold text-helios-base"
+                  : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
+              }
+            >
+              Start on login (in tray)
+            </button>
+            <button
+              type="button"
+              onClick={() => void setAutostartEnabled(false)}
+              aria-pressed={autostart === false}
+              className={
+                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+                (autostart === false
+                  ? "bg-asu-gold text-helios-base"
+                  : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
+              }
+            >
+              Don&apos;t start on login
+            </button>
+          </div>
         </div>
       </section>
 

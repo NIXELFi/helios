@@ -7,6 +7,8 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:addin": "dotnet build -c Release ../../solidworks-addin/src && node -e \"const fs=require('fs');fs.mkdirSync('src-tauri/resources/addin',{recursive:true});fs.copyFileSync('../../solidworks-addin/src/bin/Release/net48/HeliosVault.dll','src-tauri/resources/addin/HeliosVault.dll')\"",
+    "build:win": "pnpm build:addin && pnpm tauri build",
     "vite:dev": "vite",
     "vite:build": "vite build",
     "typecheck": "tsc --noEmit",

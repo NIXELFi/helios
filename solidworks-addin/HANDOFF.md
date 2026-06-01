@@ -24,19 +24,26 @@ the in-SW gap.
 - **Workflow:** author C# on macOS, **build/test on Windows** (or run Claude
   Code directly on the Windows box — preferred, closes the loop).
 
-## Roadmap
-1. **Phase 1 — DONE (this commit):** loadable add-in + "Helios Vault" Task Pane,
-   reflects the active document. Placeholder buttons. → `src/`, build per README.
-2. **Phase 2:** add a localhost bridge API to the Helios Tauri app
-   (`apps/desktop/src-tauri`): `GET /status?path=`, `POST /checkout`,
-   `POST /checkin`, `POST /get-latest`, `GET /versions?path=` — each delegating
-   to the existing vault hooks/RPCs. Auth = the app's current session.
-3. **Phase 3:** wire the Task Pane buttons to the bridge (real check-in/out /
-   get-latest / version list / lock status for the active document).
-4. **Phase 4:** enforcement — handle SW document events (open + save-pre-notify)
-   to block or force a check-out.
-5. **Phase 5:** Helios auto-start-on-login + minimize-to-tray; one-click
-   installer + COM registration for the add-in.
+## Roadmap / status
+1. **Phase 1 — DONE + verified:** loadable add-in + "Helios Vault" Task Pane,
+   reflects the active document. Builds/registers/loads in SW2025.
+2. **Phase 2 — DONE + verified:** localhost bridge in `apps/desktop/src-tauri`.
+   Metadata ops native in Rust (`/status`, `/status-batch`, `/versions`,
+   `/checkout`, `/add`, `/health`); blob ops (`/checkin`, `/get-latest`) forward
+   to the UI's tested code. Multi-vault snapshot pushed from the frontend.
+3. **Phase 3 — DONE + verified:** Task Pane wired to the bridge — real check-in/
+   out / get-latest / versions / lock status, **Add-to-Vault** for untracked
+   files, and **assembly component status** (where-used tree). Identity/online
+   line ("● Connected · you").
+4. **Phase 4 — TODO:** edit-enforcement — handle SW document events (open +
+   save-pre-notify) to block or force a check-out. The *server* already refuses a
+   check-in without the lock; this closes the in-SW gap. **Not yet built.**
+5. **Phase 5 — IMPLEMENTED, pending live validation:** per-user (no-admin)
+   add-in injector (`src-tauri/src/addin_injector/`, auto-update via versioned
+   staging), Helios minimize-to-tray + auto-start-on-login, DLL bundled as a
+   Tauri resource (`pnpm build:win`). Compiles + unit-tested; needs the Task 0
+   HKCU spike + a live SW pass on the Windows box (see
+   `docs/superpowers/plans/2026-06-01-helios-addin-injector-tray.md`).
 
 ## Where things live
 - Add-in: `solidworks-addin/` (this dir). Branch: **`feat/sw-addin`**.
