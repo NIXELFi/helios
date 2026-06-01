@@ -66,10 +66,10 @@ pub fn run() {
         .manage(pending)
         .manage(cfd::CfdState::default())
         .manage(bridge_state.clone())
-        .setup(move |_app| {
+        .setup(move |app| {
             // Best-effort: a bridge failure (e.g. port bind) must never stop the
             // app from launching. The add-in degrades to "Helios not reachable".
-            if let Err(e) = bridge::start(bridge_state.clone()) {
+            if let Err(e) = bridge::start(app.handle().clone(), bridge_state.clone()) {
                 eprintln!("helios-vault-bridge failed to start: {e}");
             }
             Ok(())
@@ -93,6 +93,7 @@ pub fn run() {
             bridge::bridge_set_session,
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,
+            bridge::bridge_respond,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,

@@ -46,10 +46,10 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         .route("/status", get(status))
         .route("/versions", get(versions))
         .route("/checkout", post(checkout))
-        // Blob ops — forwarded to the running UI in a later commit (reuses the
-        // tested gzip/sha256/atomic-write code). Stubbed 501 until then.
-        .route("/checkin", post(not_implemented))
-        .route("/get-latest", post(not_implemented))
+        // Blob ops — forwarded to the running UI, which has the tested
+        // gzip/sha256/atomic-write code (see the `bridge://op` handler).
+        .route("/checkin", post(checkin))
+        .route("/get-latest", post(get_latest))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -168,17 +168,107 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
         return no_session();
     };
     match supabase::acquire_lock(&state.http, &session, &file.file_id).await {
-        Ok(lock) => Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response(),
+        Ok(lock) => {
+            // Reflect the new lock immediately so the add-in's follow-up /status
+            // shows "checked out by you" without waiting for the frontend's poll.
+            state.mark_locked_by_me(&file.file_id);
+            Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response()
+        }
         Err(e) => supa_error(e),
     }
 }
 
-/// Placeholder for blob endpoints not yet wired up (forwarded to the UI later).
-async fn not_implemented() -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({ "error": "not implemented yet (Phase 2 in progress)" })),
-    )
+/// `POST /checkin {path, comment?}` — check the file in. Blob work (read, gzip,
+/// sha256, upload, RPC) runs in the UI via the existing useCheckIn code; we just
+/// forward and wait.
+async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<CheckinBody>) -> Response {
+    let Some(file) = state.file_by_path(&body.path) else {
+        return not_tracked(&body.path);
+    };
+    if state.session().is_none() {
+        return no_session();
+    }
+    let payload = json!({
+        "op": "checkin",
+        "fileId": file.file_id,
+        "path": body.path,
+        "comment": body.comment,
+    });
+    match forward(&state, payload).await {
+        Ok(v) if op_ok(&v) => {
+            state.clear_lock(&file.file_id); // check-in releases the lock
+            Json(json!({ "ok": true, "fileId": file.file_id, "result": v })).into_response()
+        }
+        Ok(v) => op_failed(&v, "check-in failed"),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+/// `POST /get-latest {path}` — overwrite the local file with the latest version.
+/// Resolves the latest sha, then forwards the download to the UI's
+/// useDownloadVersion (gunzip + verify + atomic write).
+async fn get_latest(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBody>) -> Response {
+    let Some(file) = state.file_by_path(&body.path) else {
+        return not_tracked(&body.path);
+    };
+    let Some(session) = state.session() else {
+        return no_session();
+    };
+    let Some(vid) = file.latest_version_id.clone() else {
+        return (StatusCode::CONFLICT, Json(json!({ "error": "file has no version yet" }))).into_response();
+    };
+    let sha = match supabase::get_version_by_id(&state.http, &session, &vid).await {
+        Ok(v) => v.get("sha256").and_then(|s| s.as_str()).map(str::to_string),
+        Err(e) => return supa_error(e),
+    };
+    let Some(sha) = sha else {
+        return (StatusCode::BAD_GATEWAY, Json(json!({ "error": "could not resolve latest version" }))).into_response();
+    };
+    let payload = json!({ "op": "getLatest", "sha": sha, "destPath": body.path });
+    match forward(&state, payload).await {
+        Ok(v) if op_ok(&v) => Json(json!({ "ok": true, "result": v })).into_response(),
+        Ok(v) => op_failed(&v, "get-latest failed"),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+/// `POST` body for check-in (path + optional comment).
+#[derive(Deserialize)]
+struct CheckinBody {
+    path: String,
+    #[serde(default)]
+    comment: Option<String>,
+}
+
+/// Forward a blob op to the UI and await its reply (the UI runs the actual
+/// upload/download). Times out so a hung/closed UI doesn't wedge the request.
+async fn forward(
+    state: &Arc<BridgeState>,
+    mut payload: serde_json::Value,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let (id, rx) = state.register_pending();
+    payload["id"] = json!(id);
+    if let Err(e) = state.emit("bridge://op", &payload) {
+        state.drop_pending(&id);
+        return Err((StatusCode::SERVICE_UNAVAILABLE, e));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(180), rx).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(_)) => Err((StatusCode::BAD_GATEWAY, "Helios UI dropped the request".into())),
+        Err(_) => {
+            state.drop_pending(&id);
+            Err((StatusCode::GATEWAY_TIMEOUT, "timed out waiting for Helios".into()))
+        }
+    }
+}
+
+fn op_ok(v: &serde_json::Value) -> bool {
+    v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false)
+}
+
+fn op_failed(v: &serde_json::Value, fallback: &str) -> Response {
+    let msg = v.get("error").and_then(|e| e.as_str()).unwrap_or(fallback).to_string();
+    (StatusCode::BAD_GATEWAY, Json(json!({ "error": msg }))).into_response()
 }
 
 // --- shared error responses ------------------------------------------------

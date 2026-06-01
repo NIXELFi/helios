@@ -35,6 +35,7 @@ namespace HeliosVault
         private const int Pad = 16;
 
         private readonly Func<string> _getActivePath;
+        private readonly Action _saveActiveDoc;
         private readonly HeliosBridge _bridge = new HeliosBridge();
 
         private FlowLayoutPanel _flow;
@@ -53,9 +54,10 @@ namespace HeliosVault
         /// by the add-in so the panel can re-query on Refresh without holding a
         /// SOLIDWORKS COM reference itself.
         /// </param>
-        public HeliosVaultControl(Func<string> getActivePath)
+        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc)
         {
             _getActivePath = getActivePath;
+            _saveActiveDoc = saveActiveDoc;
             BuildUi();
         }
 
@@ -99,8 +101,8 @@ namespace HeliosVault
             _refresh = MakeButton("Refresh", topGap: 12);
 
             _checkOut.Click += async (s, e) => await DoCheckOut();
-            _checkIn.Click += (s, e) => Soon("Check In");
-            _getLatest.Click += (s, e) => Soon("Get Latest");
+            _checkIn.Click += async (s, e) => await DoCheckIn();
+            _getLatest.Click += async (s, e) => await DoGetLatest();
             _refresh.Click += async (s, e) => await RefreshStatus();
 
             _flow.Controls.Add(_checkOut);
@@ -250,8 +252,10 @@ namespace HeliosVault
             var latestObj = GetObj(res.Json, "latest");
             var verNum = latestObj != null ? GetLong(latestObj, "versionNum") : null;
             var rev = latestObj != null ? GetLong(latestObj, "revision") : null;
+            var vault = GetStr(res.Json, "vault");
             var verText = verNum.HasValue ? $"v{verNum.Value}" : "no version yet";
             if (rev.HasValue) verText += $" · rev {rev.Value}";
+            if (!string.IsNullOrEmpty(vault)) verText += $" · {vault}";
 
             if (!_checkedOut)
                 ShowStatus($"● Available · {verText}", Green);
@@ -280,6 +284,46 @@ namespace HeliosVault
 
             await RefreshStatus();
         }
+
+        private async Task DoCheckIn()
+        {
+            if (string.IsNullOrEmpty(_activePath)) return;
+            // Check-in reads the file from disk — make sure SOLIDWORKS has saved.
+            _sw_SaveActiveDoc();
+            SetButtonsEnabled(false, false, false);
+            ShowStatus("Checking in…", Dim);
+
+            var res = await _bridge.CheckInAsync(_activePath, null);
+            if (res.Unreachable)
+                ShowStatus("● Helios isn't running — open the Helios app.", Red);
+            else if (!res.Ok)
+                ShowStatus("● " + (res.Error ?? "Check in failed."), Red);
+
+            await RefreshStatus();
+        }
+
+        private async Task DoGetLatest()
+        {
+            if (string.IsNullOrEmpty(_activePath)) return;
+            SetButtonsEnabled(false, false, false);
+            ShowStatus("Getting latest…", Dim);
+
+            var res = await _bridge.GetLatestAsync(_activePath);
+            if (res.Unreachable)
+                ShowStatus("● Helios isn't running — open the Helios app.", Red);
+            else if (!res.Ok)
+                // Common cause: the file is open in SOLIDWORKS so it can't be
+                // overwritten. The message from the bridge explains.
+                ShowStatus("● " + (res.Error ?? "Get latest failed."), Red);
+            else
+                ShowStatus("● Got the latest version.", Green);
+
+            await RefreshStatus();
+        }
+
+        /// <summary>Best-effort save of the active doc before a check-in so the
+        /// on-disk bytes reflect the user's current edits.</summary>
+        private void _sw_SaveActiveDoc() => _saveActiveDoc?.Invoke();
 
         private string SafeGetActivePath()
         {
@@ -313,6 +357,9 @@ namespace HeliosVault
 
         private static bool GetBool(Dictionary<string, object> d, string k) =>
             d != null && d.TryGetValue(k, out var v) && v is bool b && b;
+
+        private static string GetStr(Dictionary<string, object> d, string k) =>
+            (d != null && d.TryGetValue(k, out var v) && v != null) ? Convert.ToString(v) : null;
 
         private static Dictionary<string, object> GetObj(Dictionary<string, object> d, string k) =>
             (d != null && d.TryGetValue(k, out var v)) ? v as Dictionary<string, object> : null;

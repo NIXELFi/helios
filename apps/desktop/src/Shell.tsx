@@ -10,6 +10,7 @@ import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, us
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
+import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -214,6 +215,9 @@ function HeliosShell() {
           }}
         />
       )}
+      {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
+          vault's tested upload/download code. Mounted only when signed in. */}
+      {vaultEnabled && <BridgeOpHandler />}
       <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
       <ChangePasswordModal
         open={changePwOpen}

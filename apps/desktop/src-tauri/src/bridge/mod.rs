@@ -21,11 +21,14 @@
 mod server;
 mod supabase;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::oneshot;
 
 /// The current Supabase session, pushed from the frontend. Holds everything the
 /// Rust side needs to make authenticated REST calls as the signed-in user.
@@ -105,6 +108,10 @@ pub struct BridgeState {
     pub token: String,
     /// Reused HTTP client for native Supabase REST calls (metadata ops).
     pub(crate) http: reqwest::Client,
+    /// App handle, set at startup, used to emit blob-op events to the UI.
+    app: OnceLock<AppHandle>,
+    /// In-flight forwarded blob ops, keyed by request id → reply channel.
+    pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
     inner: RwLock<Inner>,
 }
 
@@ -113,6 +120,8 @@ impl BridgeState {
         Self {
             token: random_token(),
             http: reqwest::Client::new(),
+            app: OnceLock::new(),
+            pending: Mutex::new(HashMap::new()),
             inner: RwLock::new(Inner::default()),
         }
     }
@@ -120,6 +129,64 @@ impl BridgeState {
     /// Clone of the current session, if signed in.
     pub(crate) fn session(&self) -> Option<Session> {
         self.read().session.clone()
+    }
+
+    /// Optimistically mark a file as checked-out-by-me in the snapshot, so a
+    /// `/status` right after a `/checkout` reflects the new lock immediately —
+    /// the frontend only re-pushes lock state on its poll interval, and a
+    /// bridge-initiated check-out doesn't fire the in-app lock bus.
+    pub(crate) fn mark_locked_by_me(&self, file_id: &str) {
+        let Some(session) = self.session() else { return };
+        let mut inner = self.write();
+        if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
+            f.lock = Some(LockInfo { user_id: session.user_id, by_me: true });
+        }
+    }
+
+    /// Optimistically clear a file's lock (check-in releases it).
+    pub(crate) fn clear_lock(&self, file_id: &str) {
+        let mut inner = self.write();
+        if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
+            f.lock = None;
+        }
+    }
+
+    /// Register a forwarded blob op and return its id + reply receiver.
+    pub(crate) fn register_pending(&self) -> (String, oneshot::Receiver<Value>) {
+        let id = random_id();
+        let (tx, rx) = oneshot::channel();
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.clone(), tx);
+        (id, rx)
+    }
+
+    /// Deliver a UI reply to whichever blob op is waiting on `id`.
+    pub(crate) fn resolve_pending(&self, id: &str, value: Value) {
+        if let Some(tx) = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id)
+        {
+            let _ = tx.send(value);
+        }
+    }
+
+    /// Drop a pending op (e.g. on timeout) so the map doesn't leak.
+    pub(crate) fn drop_pending(&self, id: &str) {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+    }
+
+    /// Emit an event to the UI (used to forward blob ops). Errors if the app
+    /// handle isn't set yet (shouldn't happen post-setup).
+    pub(crate) fn emit(&self, event: &str, payload: &Value) -> Result<(), String> {
+        let app = self.app.get().ok_or("bridge: app handle not ready")?;
+        app.emit(event, payload).map_err(|e| e.to_string())
     }
 
     /// Resolve a local filesystem path (what the add-in knows) to the vault file
@@ -155,7 +222,8 @@ impl Default for BridgeState {
 /// Start the bridge: bind a loopback port, advertise it + the token in the
 /// discovery file, and serve the API on a dedicated thread + runtime (kept off
 /// Tauri's runtime so it stays responsive regardless of UI/window state).
-pub fn start(state: Arc<BridgeState>) -> Result<(), String> {
+pub fn start(app: AppHandle, state: Arc<BridgeState>) -> Result<(), String> {
+    let _ = state.app.set(app);
     // Port 0 => the OS hands us a free port; we read it back and advertise it,
     // so there's never a fixed-port clash with another app.
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -242,6 +310,13 @@ fn random_token() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// 16 bytes of OS randomness, hex-encoded — a forwarded-op request id.
+fn random_id() -> String {
+    let mut buf = [0u8; 16];
+    getrandom::getrandom(&mut buf).expect("bridge: getrandom failed");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands — the frontend's push channel into the bridge.
 // ---------------------------------------------------------------------------
@@ -264,4 +339,21 @@ pub fn bridge_clear_session(state: State<'_, Arc<BridgeState>>) {
 #[tauri::command]
 pub fn bridge_set_snapshot(state: State<'_, Arc<BridgeState>>, snapshot: Snapshot) {
     state.write().snapshot = snapshot;
+}
+
+/// The UI's reply to a forwarded blob op (`bridge://op`). `result` is whatever
+/// the handler produced — `{ ok, error?, ... }`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeOpReply {
+    pub id: String,
+    #[serde(default)]
+    pub result: Value,
+}
+
+/// Called by the UI after it runs a forwarded check-in / get-latest, to unblock
+/// the waiting HTTP request.
+#[tauri::command]
+pub fn bridge_respond(state: State<'_, Arc<BridgeState>>, reply: BridgeOpReply) {
+    state.resolve_pending(&reply.id, reply.result);
 }

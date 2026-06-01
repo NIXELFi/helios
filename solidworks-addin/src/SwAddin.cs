@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SolidWorks.Interop.sldworks;
+using SolidWorks.Interop.swconst;
 using SolidWorks.Interop.swpublished;
 
 namespace HeliosVault
@@ -74,7 +75,7 @@ namespace HeliosVault
             // Create the docked Task Pane and host our WinForms control in it.
             // (no custom icon yet — "" uses the default.)
             _taskpane = _sw.CreateTaskpaneView2("", "Helios Vault");
-            _control = new HeliosVaultControl(GetActivePath);
+            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc);
             _taskpane.DisplayWindowFromHandlex64(_control.Handle.ToInt64());
 
             // Show the active doc + its vault status now. (Live document-change
@@ -107,6 +108,20 @@ namespace HeliosVault
         {
             try { return _sw?.IActiveDoc2?.GetPathName(); }
             catch { return null; }
+        }
+
+        /// <summary>Best-effort silent save of the active document, so a check-in
+        /// uploads the user's current edits (check-in reads from disk).</summary>
+        private void SaveActiveDoc()
+        {
+            try
+            {
+                var doc = _sw?.IActiveDoc2;
+                if (doc == null) return;
+                int err = 0, warn = 0;
+                doc.Save3((int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref err, ref warn);
+            }
+            catch { /* best effort — the user can save manually */ }
         }
     }
 }

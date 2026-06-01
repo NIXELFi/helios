@@ -126,6 +126,7 @@ namespace HeliosVault
         }
 
         private static string Enc(string s) => Uri.EscapeDataString(s ?? "");
+        private static string Ser(string s) => new JavaScriptSerializer().Serialize(s ?? "");
 
         public Task<BridgeResult> StatusAsync(string filePath) =>
             SendAsync(HttpMethod.Get, "/status?path=" + Enc(filePath), null);
@@ -133,10 +134,16 @@ namespace HeliosVault
         public Task<BridgeResult> VersionsAsync(string filePath) =>
             SendAsync(HttpMethod.Get, "/versions?path=" + Enc(filePath), null);
 
-        public Task<BridgeResult> CheckoutAsync(string filePath)
+        public Task<BridgeResult> CheckoutAsync(string filePath) =>
+            SendAsync(HttpMethod.Post, "/checkout", "{\"path\":" + Ser(filePath) + "}");
+
+        public Task<BridgeResult> CheckInAsync(string filePath, string comment)
         {
-            var body = "{\"path\":" + new JavaScriptSerializer().Serialize(filePath ?? "") + "}";
-            return SendAsync(HttpMethod.Post, "/checkout", body);
+            var c = comment == null ? "null" : Ser(comment);
+            return SendAsync(HttpMethod.Post, "/checkin", "{\"path\":" + Ser(filePath) + ",\"comment\":" + c + "}");
         }
+
+        public Task<BridgeResult> GetLatestAsync(string filePath) =>
+            SendAsync(HttpMethod.Post, "/get-latest", "{\"path\":" + Ser(filePath) + "}");
     }
 }
