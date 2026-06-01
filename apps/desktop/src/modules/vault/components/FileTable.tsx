@@ -1,5 +1,5 @@
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
-import { matchLocal } from "../data/local-match";
+import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -23,6 +23,13 @@ interface Props {
   // Local folder sync
   localFiles?: LocalFile[] | null;
   versionsByFileId?: Map<FileId, Version[]>;
+  /**
+   * Relative paths (as built by useLocalFolderScan, i.e. folder hierarchy +
+   * filename) of files SolidWorks currently has open for editing — derived
+   * from its `~$` lock sidecars. A row whose relativePath is in this set shows
+   * an informational "Open in SolidWorks" badge. Informational only; no action.
+   */
+  openInSw?: Set<string>;
   // Download support
   vaultRoot?: string | null;
   folders?: Folder[];
@@ -194,6 +201,27 @@ function StatusPill({ info }: { info: RowStateInfo }) {
   );
 }
 
+/**
+ * Informational badge shown next to the status pill when SolidWorks currently
+ * has the file open for editing (a `~$` lock sidecar is present on disk). Uses
+ * the same gold/amber palette as the attention pills, with a filled dot rather
+ * than a glyph so it reads as a live "in use" indicator. No actions.
+ */
+function OpenInSwBadge() {
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs font-medium " +
+        PILL.gold
+      }
+      title="SolidWorks has this file open for editing"
+    >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#FFB800]" />
+      <span>Open in SolidWorks</span>
+    </span>
+  );
+}
+
 export function FileTable({
   files,
   selected,
@@ -212,6 +240,7 @@ export function FileTable({
   vaultRoot,
   folders = [],
   downloadMode = "auto",
+  openInSw,
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
@@ -220,6 +249,13 @@ export function FileTable({
   // useVaultUsers). When absent we use an empty map, which falls through to the
   // generic "Locked by other" label in deriveRowState.
   const holderEmails = holderEmailById ?? new Map<UserId, string>();
+
+  // Normalize the "open in SolidWorks" paths the same way matchLocal compares
+  // (NFC + lowercase), so a row's expected path lines up regardless of case /
+  // Unicode form. Built once per render; empty when the prop is absent.
+  const openInSwNorm = openInSw
+    ? new Set(Array.from(openInSw, (p) => normalizePathForCompare(p)))
+    : null;
 
   return (
     <table className="w-full text-sm">
@@ -267,6 +303,11 @@ export function FileTable({
             localMatch?.status,
             holderEmails,
           );
+          // Open-in-SolidWorks: a `~$` sidecar for this file was seen by the
+          // scan. Compute the row's expected relative path exactly like
+          // matchLocal (vaultRelativePath → normalize) so the key lines up.
+          const isOpenInSw =
+            openInSwNorm?.has(normalizePathForCompare(vaultRelativePath(f, folders))) ?? false;
           return (
             <tr
               key={f.id}
@@ -334,7 +375,10 @@ export function FileTable({
                 </div>
               </td>
               <td className="px-2.5 py-1.5">
-                <StatusPill info={info} />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusPill info={info} />
+                  {isOpenInSw && <OpenInSwBadge />}
+                </div>
               </td>
               <td className="px-2.5 py-1.5">
                 <div className="flex flex-wrap items-center justify-start gap-1.5">

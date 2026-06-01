@@ -27,7 +27,26 @@ export interface VaultFile {
   name: string;
   latest_version_id: VersionId | null;
   created_at: string;
+  /** Latest version embedded directly on the file row (PostgREST
+   *  `versions!files_latest_version_fk(...)`) so the file list carries the sha
+   *  needed to download/check out WITHOUT a separate per-vault version fetch.
+   *  Omitted by code paths / tests that don't request the embed; null when the
+   *  file has no version. `properties` is excluded from the embed (the data
+   *  card fetches that on demand) — see EmbeddedLatest. */
+  latest?: EmbeddedLatest | null;
 }
+
+/** The latest-version fields embedded on a file row — everything on Version
+ *  except the (potentially large) `properties` jsonb. */
+export type EmbeddedLatest = Omit<Version, "properties">;
+
+/** PostgREST select that pulls each file plus its latest version embedded as
+ *  `latest` (one to-one join over files_latest_version_fk). Used by useFiles /
+ *  useAllFiles so the file list carries the download sha with no second pass.
+ *  `properties` is intentionally omitted to keep the payload small at
+ *  thousands-of-files scale. */
+export const FILE_WITH_LATEST_SELECT =
+  "*, latest:versions!files_latest_version_fk(id,file_id,version_num,sha256,size_bytes,author_id,comment,parent_version_id,revision,created_at)";
 
 export interface Version {
   id: VersionId;

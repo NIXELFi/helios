@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FolderId, QueryResult, VaultFile } from "./types";
+import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
 
 export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile[]> {
@@ -27,7 +28,7 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
         // or duplicated at .range() page boundaries; append the PK `id` as a
         // tiebreaker for a deterministic total order (cf. useAllFiles).
         () => (client.from("files") as any)
-          .select("*")
+          .select(FILE_WITH_LATEST_SELECT)
           .eq("folder_id", folder_id)
           .order("name", { ascending: true })
           .order("id", { ascending: true }),

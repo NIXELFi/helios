@@ -128,6 +128,41 @@ describe("useLocalFolderScan", () => {
     expect(vi.mocked(fs.readDir).mock.calls.length).toBeLessThan(100);
   });
 
+  it("excludes ~$ SolidWorks lock files from `files` and surfaces the real file in `openInSw`", async () => {
+    // SolidWorks writes `~$Foo.SLDPRT` next to a file while it's open for
+    // editing. These must never enter the LocalFile list (they'd leak into the
+    // "not in vault" unmatched banner). Instead, capture them as a signal: a
+    // `~$Foo.SLDPRT` in a folder means the real `Foo.SLDPRT` is open.
+    vi.mocked(fs.readDir).mockImplementation(async (p: any) => {
+      if (p === "/root") return [
+        { name: "frame.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+        { name: "~$frame.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+        { name: "sub", isFile: false, isDirectory: true, isSymlink: false },
+      ] as any;
+      if (p === "/root/sub") return [
+        { name: "wheel.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+        { name: "~$wheel.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+      ] as any;
+      return [];
+    });
+    vi.mocked(fs.readFile).mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    const { result } = renderHook(() => useLocalFolderScan("/root"));
+    await waitFor(() => expect(result.current.files).not.toBeNull());
+
+    // The ~$ entries are NOT in the scanned file list.
+    const names = result.current.files!.map((f) => f.basename);
+    expect(names).toEqual(["frame.sldprt", "wheel.sldprt"]);
+    expect(names).not.toContain("~$frame.sldprt");
+    expect(names).not.toContain("~$wheel.sldprt");
+
+    // The REAL files' relative paths are surfaced as "open in SolidWorks".
+    expect(result.current.openInSw).toBeInstanceOf(Set);
+    expect(result.current.openInSw.has("frame.sldprt")).toBe(true);
+    expect(result.current.openInSw.has("sub/wheel.sldprt")).toBe(true);
+    expect(result.current.openInSw.size).toBe(2);
+  });
+
   it("does not commit results if paused flips true during the walk", async () => {
     // A scan started before `paused` flipped true must not commit its
     // (mid-download, partial) results via setFiles — otherwise the file table

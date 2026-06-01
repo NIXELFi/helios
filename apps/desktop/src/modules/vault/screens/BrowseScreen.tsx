@@ -19,7 +19,6 @@ import { TreeContextMenu, type MenuAction } from "../components/TreeContextMenu"
 import type { TreeContextTarget, TreeSelection } from "../components/FolderTree";
 import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
-import { useLatestVersions } from "../data/useLatestVersions";
 import { useAllFiles } from "../data/useAllFiles";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
@@ -103,7 +102,7 @@ export function BrowseScreen() {
   // file table doesn't flicker between modified/synced as bytes land; the
   // explicit rescan from onComplete catches the final state.
   const [syncBusy, setSyncBusy] = useState(false);
-  const { files: localFiles, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
+  const { files: localFiles, openInSw, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
     intervalMs: LOCAL_RESCAN_INTERVAL_MS,
     rescanOnFocus: true,
     watchFs: true,
@@ -167,23 +166,24 @@ export function BrowseScreen() {
     return all.filter((f) => f.folder_id && wanted.has(f.folder_id));
   }, [selectedFolder, allFiles, folders]);
 
-  // Latest versions across the entire vault. The current-folder file table
-  // and the background auto-sync both read from this single source so we
-  // don't duplicate the round-trip.
-  // Latest version per file, fetched directly by the denormalized
-  // latest_version_id pointer (one row per file) — far faster than scanning all
-  // versions. Files with no version yet have a null pointer and are skipped.
-  const latestVersionIds = useMemo(
-    () => (allFiles ?? []).map((f) => f.latest_version_id).filter((x): x is string => x != null),
-    [allFiles],
-  );
-  const { data: latestByFileId, error: latestError, refetch: refetchLatest } = useLatestVersions(latestVersionIds);
-  const versionsByFileId = useMemo(
-    () => new Map<FileId, Version[]>(
-      Array.from(latestByFileId.entries()).map(([id, v]) => [id, [v]]),
-    ),
-    [latestByFileId],
-  );
+  // Latest version per file, read from the `latest` row EMBEDDED by the file
+  // queries (useFiles / useAllFiles) — no separate per-vault version fetch.
+  // Built from BOTH the current folder (fast, scoped) and the vault-wide list
+  // (covers folders the user hasn't opened yet, for auto-sync / bulk download).
+  // The folder query lands first, so on a big vault (SDM25 ≈ 8.6k files) the
+  // current folder's Download buttons appear immediately instead of waiting for
+  // the whole-vault list — the perf fix that motivated v3.8.2.
+  const versionsByFileId = useMemo(() => {
+    const m = new Map<FileId, Version[]>();
+    const add = (list: VaultFile[] | null | undefined) => {
+      for (const f of list ?? []) {
+        if (f.latest) m.set(f.id, [{ ...f.latest, properties: null }]);
+      }
+    };
+    add(allFiles);
+    add(filesInFolder);
+    return m;
+  }, [allFiles, filesInFolder]);
 
   // File-area error/loading state (H1). The file list itself comes from the
   // vault-wide query at root (allFilesError) or the per-folder query inside a
@@ -192,9 +192,8 @@ export function BrowseScreen() {
   // list but must not be swallowed, so we fold all into one banner with a
   // single retry rather than leaving any on a permanent spinner.
   const fileListError = selectedFolder === null ? allFilesError : filesError;
-  const fileAreaError = fileListError ?? locksError ?? latestError;
-  const fileAreaErrorCtx: PgErrorContext =
-    fileListError ? "file" : locksError ? "lock" : "version";
+  const fileAreaError = fileListError ?? locksError;
+  const fileAreaErrorCtx: PgErrorContext = fileListError ? "file" : "lock";
   // At the vault root the list is derived from allFiles (no per-folder spinner);
   // inside a folder it reflects the per-folder query's loading flag.
   const fileListLoading = selectedFolder !== null && filesLoading && filesInFolder === null;
@@ -202,13 +201,12 @@ export function BrowseScreen() {
     refetchFiles();
     refetchAllFiles();
     refetchLocks();
-    refetchLatest();
-  }, [refetchFiles, refetchAllFiles, refetchLocks, refetchLatest]);
+  }, [refetchFiles, refetchAllFiles, refetchLocks]);
 
   // Realtime: when anyone checks in / locks / unlocks / adds a file in this
   // vault, refetch the affected slice. The auto-sync hook below picks up the
   // new version state and downloads the bytes.
-  const onVersion = useCallback(() => { refetchLatest(); refetchAllFiles(); }, [refetchLatest, refetchAllFiles]);
+  const onVersion = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
   const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
@@ -221,9 +219,9 @@ export function BrowseScreen() {
   // local vault stays current with zero user action. Gated on an active vault.
   const poll = useCallback(() => {
     refetchAllFiles();
-    refetchLatest();
+    refetchFiles();
     refetchLocks();
-  }, [refetchAllFiles, refetchLatest, refetchLocks]);
+  }, [refetchAllFiles, refetchFiles, refetchLocks]);
   useInterval(poll, vaultId ? VAULT_POLL_MS : null);
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
@@ -608,6 +606,7 @@ export function BrowseScreen() {
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
                   downloadMode={downloadMode}
+                  openInSw={openInSw}
                 />
               </>
             )}

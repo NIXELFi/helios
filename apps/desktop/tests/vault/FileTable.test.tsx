@@ -398,6 +398,87 @@ describe("<FileTable>", () => {
     expect(onSelect).toHaveBeenCalledWith("f2");
   });
 
+  it("renders an 'Open in SolidWorks' badge for a file whose relativePath is in openInSw", () => {
+    // frame.sldprt (f1) is at root → relativePath "frame.sldprt". A `~$` lock
+    // file for it was seen by the scan, so its path is in openInSw → the badge
+    // renders. wheel.sldprt (f2) is not open → no badge.
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={[]}
+          versionsByFileId={new Map()}
+          folders={[]}
+          openInSw={new Set(["frame.sldprt"])}
+        />,
+      ),
+    );
+    const badges = screen.getAllByText(/open in solidworks/i);
+    expect(badges).toHaveLength(1);
+  });
+
+  it("does not render the 'Open in SolidWorks' badge when openInSw is empty", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={files}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={[]}
+          versionsByFileId={new Map()}
+          folders={[]}
+          openInSw={new Set()}
+        />,
+      ),
+    );
+    expect(screen.queryByText(/open in solidworks/i)).toBeNull();
+  });
+
+  it("does not render the 'Open in SolidWorks' badge when openInSw is omitted", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={files} selected={null} locks={[]} currentUserId="u1" onSelect={() => {}} />,
+      ),
+    );
+    expect(screen.queryByText(/open in solidworks/i)).toBeNull();
+  });
+
+  it("resolves the openInSw key through the folder hierarchy (matches the local-match path)", () => {
+    // A file inside a folder: its relativePath must include the folder name,
+    // built the same way matchLocal derives it (folderPath + name). The badge
+    // keys off that full path, so a bare-basename key would NOT match.
+    const foldersNested = [{ id: "fold1", vault_id: "v", parent_id: null, name: "chassis", created_at: "x" }];
+    const nested = [
+      { id: "f3", vault_id: "v", folder_id: "fold1", name: "rail.sldprt", latest_version_id: null, created_at: "2026-01-01" },
+    ];
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={nested}
+          selected={null}
+          locks={[]}
+          currentUserId="u1"
+          onSelect={() => {}}
+          localFiles={[]}
+          versionsByFileId={new Map()}
+          folders={foldersNested as any}
+          openInSw={new Set(["chassis/rail.sldprt"])}
+        />,
+      ),
+    );
+    expect(screen.getByText(/open in solidworks/i)).toBeInTheDocument();
+  });
+
   it("Get Latest button appears when file is vault-only and vaultRoot + version sha are set", () => {
     // f1 has a version; f2 does not. Neither has a local file → both vault-only.
     // vaultRoot is set → Get Latest should appear for f1 (has sha) but not f2 (no sha).

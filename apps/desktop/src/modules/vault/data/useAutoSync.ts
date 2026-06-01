@@ -211,6 +211,19 @@ export function useAutoSync(input: {
         activeTaskIds.set(t.id, t.name);
         guardedSet((s) => ({ ...s, activeFiles: [...s.activeFiles, t.name] }));
         const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal);
+        // Freeze the just-downloaded file read-only immediately. Auto-sync only
+        // ever downloads clean vault copies — files the user has locked/edited
+        // are held back earlier in this same pass — so freezing here is always
+        // safe and closes the window where a fresh download is briefly writable
+        // before the post-pass reconciliation loop runs. Best-effort: a chmod
+        // failure must never flip ok/failed or abort the pass.
+        if (ok) {
+          try {
+            await setReadonly(t.dest, true);
+          } catch {
+            // chmod failed (permission / platform); reconciliation will retry.
+          }
+        }
         // Count outcomes locally even if we're superseded, so the run's local
         // totals stay consistent — they just won't reach state.
         if (ok) downloaded++; else failed++;
