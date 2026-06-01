@@ -44,8 +44,10 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         // Metadata ops — served natively from the snapshot + Supabase REST, so
         // they answer even while Helios is minimized in the tray.
         .route("/status", get(status))
+        .route("/status-batch", post(status_batch))
         .route("/versions", get(versions))
         .route("/checkout", post(checkout))
+        .route("/add", post(add_to_vault))
         // Blob ops — forwarded to the running UI, which has the tested
         // gzip/sha256/atomic-write code (see the `bridge://op` handler).
         .route("/checkin", post(checkin))
@@ -178,6 +180,54 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
     }
 }
 
+/// `POST /status-batch {paths:[…]}` — resolve many paths at once, snapshot-only
+/// (no per-file version lookup) so it stays fast for a big assembly's component
+/// tree. Each item mirrors `/status` minus `latest`.
+async fn status_batch(State(state): State<Arc<BridgeState>>, Json(body): Json<BatchBody>) -> Response {
+    let items: Vec<serde_json::Value> = body
+        .paths
+        .iter()
+        .map(|p| match state.file_by_path(p) {
+            None => json!({ "path": p, "tracked": false }),
+            Some(f) => json!({
+                "path": p,
+                "tracked": true,
+                "fileId": f.file_id,
+                "name": f.name,
+                "vault": f.vault_name,
+                "checkedOut": f.lock.is_some(),
+                "checkedOutByMe": f.lock.as_ref().map(|l| l.by_me).unwrap_or(false),
+                "lock": f.lock,
+            }),
+        })
+        .collect();
+    Json(json!({ "items": items })).into_response()
+}
+
+/// `POST /add {path}` — add an untracked file to its vault (folder hierarchy +
+/// upload v1 + lock), forwarded to the UI's useAddLocalFile. The UI resolves
+/// which vault the path belongs to from the shared root + vault names.
+async fn add_to_vault(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBody>) -> Response {
+    if state.session().is_none() {
+        return no_session();
+    }
+    if state.file_by_path(&body.path).is_some() {
+        return (StatusCode::CONFLICT, Json(json!({ "error": "already in the vault" }))).into_response();
+    }
+    let payload = json!({ "op": "add", "path": body.path });
+    match forward(&state, payload).await {
+        Ok(v) if op_ok(&v) => Json(json!({ "ok": true, "result": v })).into_response(),
+        Ok(v) => op_failed(&v, "add to vault failed"),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+/// `POST` body for batch status.
+#[derive(Deserialize)]
+struct BatchBody {
+    paths: Vec<String>,
+}
+
 /// `POST /checkin {path, comment?}` — check the file in. Blob work (read, gzip,
 /// sha256, upload, RPC) runs in the UI via the existing useCheckIn code; we just
 /// forward and wait.
@@ -197,6 +247,10 @@ async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<Checkin
     match forward(&state, payload).await {
         Ok(v) if op_ok(&v) => {
             state.clear_lock(&file.file_id); // check-in releases the lock
+            // Point the file at its new latest version so /status is fresh.
+            if let Some(vid) = v.get("versionId").and_then(|s| s.as_str()) {
+                state.set_latest_version_id(&file.file_id, vid);
+            }
             Json(json!({ "ok": true, "fileId": file.file_id, "result": v })).into_response()
         }
         Ok(v) => op_failed(&v, "check-in failed"),

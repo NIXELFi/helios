@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -145,5 +146,15 @@ namespace HeliosVault
 
         public Task<BridgeResult> GetLatestAsync(string filePath) =>
             SendAsync(HttpMethod.Post, "/get-latest", "{\"path\":" + Ser(filePath) + "}");
+
+        public Task<BridgeResult> AddToVaultAsync(string filePath) =>
+            SendAsync(HttpMethod.Post, "/add", "{\"path\":" + Ser(filePath) + "}");
+
+        /// <summary>Resolve many paths at once (an assembly's components).</summary>
+        public Task<BridgeResult> StatusBatchAsync(IEnumerable<string> paths)
+        {
+            var arr = string.Join(",", paths.Select(Ser));
+            return SendAsync(HttpMethod.Post, "/status-batch", "{\"paths\":[" + arr + "]}");
+        }
     }
 }

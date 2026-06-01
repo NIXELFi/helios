@@ -151,6 +151,15 @@ impl BridgeState {
         }
     }
 
+    /// Optimistically point a file at its new latest version (after a check-in),
+    /// so `/status` reports the fresh version before the frontend's next push.
+    pub(crate) fn set_latest_version_id(&self, file_id: &str, version_id: &str) {
+        let mut inner = self.write();
+        if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
+            f.latest_version_id = Some(version_id.to_string());
+        }
+    }
+
     /// Register a forwarded blob op and return its id + reply receiver.
     pub(crate) fn register_pending(&self) -> (String, oneshot::Receiver<Value>) {
         let id = random_id();

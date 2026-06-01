@@ -10,15 +10,14 @@ namespace HeliosVault
     /// <summary>
     /// The contents of the "Helios Vault" Task Pane. Talks to the running Helios
     /// desktop app over its localhost bridge (see HeliosBridge): shows the active
-    /// document's real vault status and drives Check Out. Check In / Get Latest
-    /// are wired in the next step (they forward to the Helios UI's tested
-    /// upload/download code).
+    /// document's real vault status and drives check-out / check-in / get-latest /
+    /// add-to-vault. For an assembly, it also lists each top-level component's
+    /// vault status.
     ///
     /// Layout: a single top-down FlowLayoutPanel so sections stack and never
-    /// overlap, no matter how long a filename wraps. Child widths are sized off
-    /// the (stable) control size — NOT the scroll panel's client size — so the
-    /// appearing scrollbar can't trigger a re-layout loop. Built in code (no
-    /// .Designer.cs) to keep the add-in self-contained.
+    /// overlap. Child widths track the (stable) control size — NOT the scroll
+    /// panel's client size — so the appearing scrollbar can't trigger a layout
+    /// loop. Built in code (no .Designer.cs) to keep the add-in self-contained.
     /// </summary>
     public class HeliosVaultControl : UserControl
     {
@@ -36,28 +35,25 @@ namespace HeliosVault
 
         private readonly Func<string> _getActivePath;
         private readonly Action _saveActiveDoc;
+        private readonly Func<string[]> _getComponents;
         private readonly HeliosBridge _bridge = new HeliosBridge();
 
         private FlowLayoutPanel _flow;
         private Panel _divider;
-        private Label _docLabel, _statusLabel;
-        private Button _checkOut, _checkIn, _getLatest, _refresh;
-        // Controls whose width tracks the pane.
+        private Label _docLabel, _statusLabel, _compsCaption;
+        private Button _checkOut, _checkIn, _getLatest, _addToVault, _refresh;
         private readonly List<Control> _fullWidth = new List<Control>();
         private readonly List<Label> _wrapLabels = new List<Label>();
+        private readonly List<Label> _componentRows = new List<Label>();
 
         private string _activePath;
         private bool _tracked, _checkedOut, _checkedOutByMe;
 
-        /// <param name="getActivePath">
-        /// Returns the SOLIDWORKS active document's full path (or null). Supplied
-        /// by the add-in so the panel can re-query on Refresh without holding a
-        /// SOLIDWORKS COM reference itself.
-        /// </param>
-        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc)
+        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc, Func<string[]> getComponents)
         {
             _getActivePath = getActivePath;
             _saveActiveDoc = saveActiveDoc;
+            _getComponents = getComponents;
             BuildUi();
         }
 
@@ -98,24 +94,30 @@ namespace HeliosVault
             _checkOut = MakeButton("Check Out", primary: true, topGap: 18);
             _checkIn = MakeButton("Check In");
             _getLatest = MakeButton("Get Latest");
+            _addToVault = MakeButton("Add to Vault", primary: true);
             _refresh = MakeButton("Refresh", topGap: 12);
 
             _checkOut.Click += async (s, e) => await DoCheckOut();
             _checkIn.Click += async (s, e) => await DoCheckIn();
             _getLatest.Click += async (s, e) => await DoGetLatest();
+            _addToVault.Click += async (s, e) => await DoAddToVault();
             _refresh.Click += async (s, e) => await RefreshStatus();
 
             _flow.Controls.Add(_checkOut);
             _flow.Controls.Add(_checkIn);
             _flow.Controls.Add(_getLatest);
+            _flow.Controls.Add(_addToVault);
             _flow.Controls.Add(_refresh);
 
+            _compsCaption = MakeCaption("COMPONENTS", new Padding(0, 18, 0, 0));
+            _compsCaption.Visible = false;
+            _flow.Controls.Add(_compsCaption);
+
+            _addToVault.Visible = false;
             SetButtonsEnabled(false, false, false);
             RelayoutWidths();
         }
 
-        // Drive widths off the control size (set by the Task Pane), so changing a
-        // child's width can never feed back into another resize → no layout loop.
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
@@ -125,8 +127,6 @@ namespace HeliosVault
         private void RelayoutWidths()
         {
             if (_flow == null) return;
-            // Leave room for the vertical scrollbar so content never forces a
-            // horizontal one (whose appearance is what caused the old loop).
             int w = ClientSize.Width - (Pad * 2) - SystemInformation.VerticalScrollBarWidth;
             if (w < 60) return;
             foreach (var c in _fullWidth) c.Width = w;
@@ -219,8 +219,17 @@ namespace HeliosVault
                 ShowStatus("Open a part, assembly, or drawing.", Dim);
                 _tracked = _checkedOut = _checkedOutByMe = false;
                 SetButtonsEnabled(false, false, false);
+                _addToVault.Visible = false;
+                ClearComponents();
                 return;
             }
+
+            await RefreshDocStatus();
+            await RefreshComponents();
+        }
+
+        private async Task RefreshDocStatus()
+        {
             _docLabel.Text = Path.GetFileName(_activePath);
             ShowStatus("Checking…", Dim);
 
@@ -230,22 +239,26 @@ namespace HeliosVault
                 ShowStatus("● Helios isn't running — open the Helios app.", Red);
                 _tracked = _checkedOut = _checkedOutByMe = false;
                 SetButtonsEnabled(false, false, false);
+                _addToVault.Visible = false;
                 return;
             }
             if (!res.Ok || res.Json == null)
             {
                 ShowStatus("● " + (res.Error ?? "Couldn't read vault status."), Red);
                 SetButtonsEnabled(false, false, false);
+                _addToVault.Visible = false;
                 return;
             }
 
             _tracked = GetBool(res.Json, "tracked");
             if (!_tracked)
             {
-                ShowStatus("Not in the Helios vault.", Dim);
+                ShowStatus("Not in the Helios vault — add it to start tracking.", Dim);
                 SetButtonsEnabled(false, false, false);
+                _addToVault.Visible = true; // offer to add it
                 return;
             }
+            _addToVault.Visible = false;
 
             _checkedOut = GetBool(res.Json, "checkedOut");
             _checkedOutByMe = GetBool(res.Json, "checkedOutByMe");
@@ -270,6 +283,66 @@ namespace HeliosVault
                 getLatest: _tracked);
         }
 
+        /// <summary>For an assembly, list each top-level component's vault status.</summary>
+        private async Task RefreshComponents()
+        {
+            ClearComponents();
+
+            string[] paths;
+            try { paths = _getComponents?.Invoke() ?? new string[0]; }
+            catch { paths = new string[0]; }
+
+            if (paths.Length == 0)
+            {
+                _compsCaption.Visible = false;
+                return;
+            }
+
+            _compsCaption.Visible = true;
+            _compsCaption.Text = $"COMPONENTS ({paths.Length})";
+
+            var res = await _bridge.StatusBatchAsync(paths);
+            if (!res.Ok || res.Json == null || !(res.Json.TryGetValue("items", out var raw) && raw is object[] items))
+            {
+                AddComponentRow("(couldn't load component status)", Dim);
+                RelayoutWidths();
+                return;
+            }
+
+            foreach (var it in items)
+            {
+                if (!(it is Dictionary<string, object> d)) continue;
+                var name = GetStr(d, "name") ?? Path.GetFileName(GetStr(d, "path") ?? "?");
+                Color color;
+                string mark;
+                if (!GetBool(d, "tracked")) { color = Dim; mark = "○"; }
+                else if (!GetBool(d, "checkedOut")) { color = Green; mark = "●"; }
+                else if (GetBool(d, "checkedOutByMe")) { color = Gold; mark = "●"; }
+                else { color = Red; mark = "●"; }
+                AddComponentRow($"{mark} {name}", color);
+            }
+            RelayoutWidths();
+        }
+
+        private void AddComponentRow(string text, Color color)
+        {
+            var l = MakeLabel(text, color, 8.5f, FontStyle.Regular, new Padding(0, 2, 0, 0));
+            _componentRows.Add(l);
+            _wrapLabels.Add(l);
+            _flow.Controls.Add(l);
+        }
+
+        private void ClearComponents()
+        {
+            foreach (var row in _componentRows)
+            {
+                _flow.Controls.Remove(row);
+                _wrapLabels.Remove(row);
+                row.Dispose();
+            }
+            _componentRows.Clear();
+        }
+
         private async Task DoCheckOut()
         {
             if (string.IsNullOrEmpty(_activePath)) return;
@@ -288,8 +361,7 @@ namespace HeliosVault
         private async Task DoCheckIn()
         {
             if (string.IsNullOrEmpty(_activePath)) return;
-            // Check-in reads the file from disk — make sure SOLIDWORKS has saved.
-            _sw_SaveActiveDoc();
+            _saveActiveDoc?.Invoke(); // check-in reads from disk — save current edits first
             SetButtonsEnabled(false, false, false);
             ShowStatus("Checking in…", Dim);
 
@@ -313,7 +385,7 @@ namespace HeliosVault
                 ShowStatus("● Helios isn't running — open the Helios app.", Red);
             else if (!res.Ok)
                 // Common cause: the file is open in SOLIDWORKS so it can't be
-                // overwritten. The message from the bridge explains.
+                // overwritten — the message from the bridge explains.
                 ShowStatus("● " + (res.Error ?? "Get latest failed."), Red);
             else
                 ShowStatus("● Got the latest version.", Green);
@@ -321,9 +393,22 @@ namespace HeliosVault
             await RefreshStatus();
         }
 
-        /// <summary>Best-effort save of the active doc before a check-in so the
-        /// on-disk bytes reflect the user's current edits.</summary>
-        private void _sw_SaveActiveDoc() => _saveActiveDoc?.Invoke();
+        private async Task DoAddToVault()
+        {
+            if (string.IsNullOrEmpty(_activePath)) return;
+            _saveActiveDoc?.Invoke(); // upload current edits
+            _addToVault.Enabled = false;
+            ShowStatus("Adding to vault…", Dim);
+
+            var res = await _bridge.AddToVaultAsync(_activePath);
+            if (res.Unreachable)
+                ShowStatus("● Helios isn't running — open the Helios app.", Red);
+            else if (!res.Ok)
+                ShowStatus("● " + (res.Error ?? "Add to vault failed."), Red);
+
+            _addToVault.Enabled = true;
+            await RefreshStatus();
+        }
 
         private string SafeGetActivePath()
         {
@@ -342,15 +427,6 @@ namespace HeliosVault
             _checkOut.Enabled = checkOut;
             _checkIn.Enabled = checkIn;
             _getLatest.Enabled = getLatest;
-        }
-
-        private static void Soon(string action)
-        {
-            MessageBox.Show(
-                action + " forwards to the running Helios app's vault code — coming in the next step.",
-                "Helios Vault",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
         }
 
         // --- tiny JSON-dictionary helpers (JavaScriptSerializer shapes) --------

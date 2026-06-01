@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SolidWorks.Interop.sldworks;
@@ -75,7 +76,7 @@ namespace HeliosVault
             // Create the docked Task Pane and host our WinForms control in it.
             // (no custom icon yet — "" uses the default.)
             _taskpane = _sw.CreateTaskpaneView2("", "Helios Vault");
-            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc);
+            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc, GetActiveComponentPaths);
             _taskpane.DisplayWindowFromHandlex64(_control.Handle.ToInt64());
 
             // Show the active doc + its vault status now. (Live document-change
@@ -108,6 +109,36 @@ namespace HeliosVault
         {
             try { return _sw?.IActiveDoc2?.GetPathName(); }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// Top-level component file paths of the active assembly (empty for a
+        /// part/drawing). Lets the Task Pane show each component's vault status.
+        /// Top-level only — drilling into a sub-assembly is just opening it.
+        /// </summary>
+        private string[] GetActiveComponentPaths()
+        {
+            try
+            {
+                var doc = _sw?.IActiveDoc2;
+                if (doc == null || doc.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
+                    return new string[0];
+                if (!(doc is IAssemblyDoc asm)) return new string[0];
+                if (!(asm.GetComponents(true) is object[] comps)) return new string[0];
+
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var o in comps)
+                {
+                    if (!(o is IComponent2 c)) continue;
+                    try { if (c.IsSuppressed()) continue; } catch { /* keep it */ }
+                    var p = c.GetPathName();
+                    if (!string.IsNullOrEmpty(p)) set.Add(p);
+                }
+                var arr = new string[set.Count];
+                set.CopyTo(arr);
+                return arr;
+            }
+            catch { return new string[0]; }
         }
 
         /// <summary>Best-effort silent save of the active document, so a check-in
