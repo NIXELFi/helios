@@ -81,12 +81,15 @@ async fn guard(State(state): State<Arc<BridgeState>>, req: Request, next: Next) 
 /// and whether Helios has a signed-in session / configured vault yet.
 async fn health(State(state): State<Arc<BridgeState>>) -> impl IntoResponse {
     let inner = state.read();
+    // Signed-in identity so the add-in can show "Connected · <name>".
+    let user = inner.session.as_ref().map(|s| {
+        json!({ "displayName": s.display_name, "email": s.email, "userId": s.user_id })
+    });
     Json(json!({
         "ok": true,
         "service": "helios-vault-bridge",
-        // Enough for the add-in to show "connect / sign in to Helios" guidance
-        // without leaking anything sensitive.
         "hasSession": inner.session.is_some(),
+        "user": user,
         "vaultRoot": inner.snapshot.vault_root,
         "files": inner.snapshot.files.len(),
     }))

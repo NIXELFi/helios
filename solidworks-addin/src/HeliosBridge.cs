@@ -129,6 +129,9 @@ namespace HeliosVault
         private static string Enc(string s) => Uri.EscapeDataString(s ?? "");
         private static string Ser(string s) => new JavaScriptSerializer().Serialize(s ?? "");
 
+        public Task<BridgeResult> HealthAsync() =>
+            SendAsync(HttpMethod.Get, "/health", null);
+
         public Task<BridgeResult> StatusAsync(string filePath) =>
             SendAsync(HttpMethod.Get, "/status?path=" + Enc(filePath), null);
 

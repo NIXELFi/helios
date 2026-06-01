@@ -40,7 +40,8 @@ namespace HeliosVault
 
         private FlowLayoutPanel _flow;
         private Panel _divider;
-        private Label _docLabel, _statusLabel, _compsCaption;
+        private Label _docLabel, _statusLabel, _compsCaption, _connLabel;
+        private System.Windows.Forms.Timer _pollTimer;
         private Button _checkOut, _checkIn, _getLatest, _addToVault, _refresh;
         private readonly List<Control> _fullWidth = new List<Control>();
         private readonly List<Label> _wrapLabels = new List<Label>();
@@ -55,6 +56,46 @@ namespace HeliosVault
             _saveActiveDoc = saveActiveDoc;
             _getComponents = getComponents;
             BuildUi();
+
+            // Live connection/identity indicator — polls the bridge /health.
+            _pollTimer = new System.Windows.Forms.Timer { Interval = 4000 };
+            _pollTimer.Tick += async (s, e) => await RefreshConnection();
+            _pollTimer.Start();
+            _ = RefreshConnection();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _pollTimer?.Stop();
+                _pollTimer?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private async Task RefreshConnection()
+        {
+            var res = await _bridge.HealthAsync();
+            if (res.Unreachable || !res.Ok || res.Json == null)
+            {
+                _connLabel.ForeColor = Red;
+                _connLabel.Text = "○ Helios offline — open Helios";
+                return;
+            }
+            var name = GetObj(res.Json, "user") is var u && u != null
+                ? (GetStr(u, "displayName") ?? GetStr(u, "email"))
+                : null;
+            if (GetBool(res.Json, "hasSession") && !string.IsNullOrEmpty(name))
+            {
+                _connLabel.ForeColor = Green;
+                _connLabel.Text = $"● Connected · {name}";
+            }
+            else
+            {
+                _connLabel.ForeColor = Dim;
+                _connLabel.Text = "● Connected · sign in to Helios";
+            }
         }
 
         private void BuildUi()
@@ -76,6 +117,10 @@ namespace HeliosVault
 
             _flow.Controls.Add(MakeLabel("HELIOS VAULT", Gold, 15f, FontStyle.Bold, new Padding(0)));
             _flow.Controls.Add(MakeLabel("Sun Devil Motorsports · Ground Station", Dim, 8.5f, FontStyle.Regular, new Padding(0, 2, 0, 0)));
+
+            _connLabel = MakeLabel("○ Connecting…", Dim, 8.5f, FontStyle.Bold, new Padding(0, 6, 0, 0));
+            _wrapLabels.Add(_connLabel);
+            _flow.Controls.Add(_connLabel);
 
             _divider = new Panel { Height = 2, BackColor = Gold, Margin = new Padding(0, 12, 0, 14) };
             _fullWidth.Add(_divider);

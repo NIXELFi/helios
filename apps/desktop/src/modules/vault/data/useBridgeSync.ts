@@ -60,12 +60,21 @@ export function useBridgeSync(): void {
     }
     const conn = loadConnection();
     if (!conn) return;
+    const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+    const displayName =
+      (meta.display_name as string | undefined) ??
+      (meta.full_name as string | undefined) ??
+      (meta.name as string | undefined) ??
+      user.email ??
+      null;
     void invoke("bridge_set_session", {
       session: {
         supabaseUrl: conn.url,
         anonKey: conn.anonKey,
         accessToken: session.access_token,
         userId: user.id,
+        displayName,
+        email: user.email ?? null,
       },
     }).catch(() => {});
   }, [session?.access_token, user?.id, user]);

@@ -41,6 +41,12 @@ pub struct Session {
     /// The signed-in user's id (auth.uid). Needed to insert lock rows on
     /// check-out, matching the frontend's `useAcquireLock`.
     pub user_id: String,
+    /// Display name + email, surfaced by the add-in so it's obvious who's
+    /// connected. Optional — older frontends may not send them.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// Latest-version facts for a file, enough to answer `/status` without a round
