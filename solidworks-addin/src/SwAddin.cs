@@ -74,10 +74,12 @@ namespace HeliosVault
             // Create the docked Task Pane and host our WinForms control in it.
             // (no custom icon yet — "" uses the default.)
             _taskpane = _sw.CreateTaskpaneView2("", "Helios Vault");
-            _control = new HeliosVaultControl();
+            _control = new HeliosVaultControl(GetActivePath);
             _taskpane.DisplayWindowFromHandlex64(_control.Handle.ToInt64());
 
-            ShowActiveDocument();
+            // Show the active doc + its vault status now. (Live document-change
+            // tracking — auto-refresh on open/switch — lands with Phase 4.)
+            _control.SetActiveDocument(GetActivePath());
             return true;
         }
 
@@ -100,17 +102,11 @@ namespace HeliosVault
             return true;
         }
 
-        private void ShowActiveDocument()
+        /// <summary>Full path of the SOLIDWORKS active document, or null.</summary>
+        private string GetActivePath()
         {
-            try
-            {
-                var doc = _sw.IActiveDoc2;
-                _control?.SetActiveDocument(doc?.GetPathName());
-            }
-            catch
-            {
-                _control?.SetActiveDocument(null);
-            }
+            try { return _sw?.IActiveDoc2?.GetPathName(); }
+            catch { return null; }
         }
     }
 }
