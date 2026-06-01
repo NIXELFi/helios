@@ -1,3 +1,4 @@
+mod addin_injector;
 mod bridge;
 mod cfd;
 mod commands;
@@ -6,6 +7,30 @@ use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
+
+/// Show + focus the main window (from the tray).
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Enable/disable launch-on-login (Settings toggle).
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let a = app.autolaunch();
+    if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())
+}
+
+/// Current launch-on-login state (for the Settings toggle).
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
 
 #[tauri::command]
 fn get_pending_open_files(state: tauri::State<'_, PendingOpenFiles>) -> Vec<String> {
@@ -37,6 +62,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let helios_paths: Vec<String> = extract_helios_paths(argv.into_iter().skip(1));
             if !helios_paths.is_empty() {
@@ -72,7 +102,61 @@ pub fn run() {
             if let Err(e) = bridge::start(app.handle().clone(), bridge_state.clone()) {
                 eprintln!("helios-vault-bridge failed to start: {e}");
             }
+
+            // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
+            // Best-effort; never block launch.
+            let ah = app.handle().clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                addin_injector::run(&ah);
+            }));
+
+            // System tray — keeps Helios resident so the bridge stays live even
+            // when the window is closed-to-tray.
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder};
+                use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+                let open = MenuItemBuilder::with_id("open", "Open Helios").build(app)?;
+                let quit = MenuItemBuilder::with_id("quit", "Quit Helios").build(app)?;
+                let menu = MenuBuilder::new(app).items(&[&open, &quit]).build()?;
+                let mut tray = TrayIconBuilder::with_id("helios")
+                    .tooltip("Helios — Ground Station")
+                    .menu(&menu)
+                    .on_menu_event(|app, e| match e.id().as_ref() {
+                        "open" => show_main(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                            show_main(tray.app_handle());
+                        }
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                let _ = tray.build(app)?;
+            }
+
+            // Auto-start on login (enabled by default; user can disable in
+            // Settings). When launched via autostart (--hidden), go to the tray.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let _ = app.autolaunch().enable();
+            }
+            if std::env::args().any(|a| a == "--hidden") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Close → hide to tray (real quit only from the tray menu), so the
+            // localhost bridge keeps serving the SOLIDWORKS add-in.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .on_page_load(|window, _payload| {
             let app = window.app_handle();
@@ -94,6 +178,8 @@ pub fn run() {
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,
             bridge::bridge_respond,
+            set_autostart,
+            get_autostart,
             get_pending_open_files,
             cfd::commands::cfd_load_config,
             cfd::commands::cfd_save_config,

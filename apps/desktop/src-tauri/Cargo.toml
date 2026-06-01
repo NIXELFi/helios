@@ -12,11 +12,15 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+# Per-user (HKCU) add-in registration written by the injector (no RegAsm/admin).
+winreg = "0.52"
 serde = { workspace = true }
 serde_json = { workspace = true }
 # SOLIDWORKS add-in bridge: a small loopback HTTP server (axum on its own tokio

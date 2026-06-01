@@ -75,3 +75,7 @@ worktrees/agent-*/pending_amend.rejected.json
 
 # Physics agent scratch space (smoke outputs, ad-hoc sweep results)
 /tmp/
+
+# Add-in DLL staged into Tauri resources at build time (copied from the
+# solidworks-addin build output by the release script). Reproducible artifact.
+apps/desktop/src-tauri/resources/addin/

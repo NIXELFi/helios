@@ -44,7 +44,8 @@
     "resources": {
       "../../../docs/channels.yaml": "channels.yaml",
       "resources/cfd/configs/sdm25.json": "cfd/configs/sdm25.json",
-      "resources/cfd/configs/sdm26.json": "cfd/configs/sdm26.json"
+      "resources/cfd/configs/sdm26.json": "cfd/configs/sdm26.json",
+      "resources/addin/HeliosVault.dll": "addin/HeliosVault.dll"
     },
     "fileAssociations": [
       {
