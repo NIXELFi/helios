@@ -22,6 +22,33 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 
 // crypto.randomUUID is available in modern jsdom; nothing to stub today.
 
+// jsdom has no Tauri runtime. Production code mounted by the Shell (useUpdater,
+// getVersion, useBridgeSync, …) calls @tauri-apps/api, which reads
+// window.__TAURI_INTERNALS__ and throws when it's absent — surfacing as
+// *unhandled* errors that fail the whole run even when every assertion passes.
+// Stub a minimal transport: transformCallback hands back an id and invoke
+// resolves to null. Tests that need specific IPC behavior still vi.mock the
+// module directly, which replaces this entirely. Existing keys win so a test
+// can override before importing.
+if (typeof window !== "undefined") {
+  const existing = (window as unknown as { __TAURI_INTERNALS__?: Record<string, unknown> })
+    .__TAURI_INTERNALS__ ?? {};
+  (window as unknown as { __TAURI_INTERNALS__: Record<string, unknown> }).__TAURI_INTERNALS__ = {
+    transformCallback: () => 0,
+    invoke: () => Promise.resolve(null),
+    ...existing,
+  };
+  // @tauri-apps/api/event registers/unregisters listeners through this separate
+  // internal — BridgeOpHandler's listen() cleanup calls unregisterListener on
+  // unmount, which throws (unhandled) without it.
+  const existingEvent = (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__?: Record<string, unknown> })
+    .__TAURI_EVENT_PLUGIN_INTERNALS__ ?? {};
+  (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__: Record<string, unknown> }).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: () => {},
+    ...existingEvent,
+  };
+}
+
 // jsdom does not implement ResizeObserver; stub a no-op so components that
 // observe element size in useEffect/useLayoutEffect don't blow up at render.
 if (typeof globalThis.ResizeObserver === "undefined") {

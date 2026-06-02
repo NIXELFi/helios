@@ -37,6 +37,18 @@ const LOCKS_REFRESH_MS = 30_000; // 30 s — locks change on every check-in/out
 /** Slash-joined folder path via an O(1) id→folder map, with a depth guard so a
  *  malformed parent_id cycle can't stack-overflow (we run this over every
  *  vault's folders at once). */
+/** Fire a bridge IPC command without ever throwing or rejecting. `invoke` can
+ *  throw *synchronously* when the Tauri internals aren't present (non-Tauri
+ *  contexts such as tests), so a plain `.catch()` isn't enough — we also need a
+ *  try/catch around the call itself. The bridge is best-effort by design. */
+function safeInvoke(cmd: string, args?: Record<string, unknown>): void {
+  try {
+    void invoke(cmd, args).catch(() => {});
+  } catch {
+    // Tauri internals absent — ignore (the add-in just won't get this update).
+  }
+}
+
 function folderSub(folderId: string | null, byId: Map<string, Folder>, depth = 0): string {
   if (!folderId || depth > 256) return "";
   const f = byId.get(folderId);
@@ -55,7 +67,7 @@ export function useBridgeSync(): void {
   // Push (or clear) the session on auth change — including token refresh.
   useEffect(() => {
     if (!session?.access_token || !user) {
-      void invoke("bridge_clear_session").catch(() => {});
+      safeInvoke("bridge_clear_session");
       return;
     }
     const conn = loadConnection();
@@ -67,7 +79,7 @@ export function useBridgeSync(): void {
       (meta.name as string | undefined) ??
       user.email ??
       null;
-    void invoke("bridge_set_session", {
+    safeInvoke("bridge_set_session", {
       session: {
         supabaseUrl: conn.url,
         anonKey: conn.anonKey,
@@ -76,7 +88,7 @@ export function useBridgeSync(): void {
         displayName,
         email: user.email ?? null,
       },
-    }).catch(() => {});
+    });
   }, [session?.access_token, user?.id, user]);
 
   // Cross-vault data, fetched directly (not the per-vault hooks).
@@ -85,30 +97,41 @@ export function useBridgeSync(): void {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [locks, setLocks] = useState<Lock[]>([]);
 
+  // Both loaders are best-effort and called from several places (initial mount,
+  // lock-change bus, intervals) — they must never reject, or an unfed bridge
+  // turns into an unhandled rejection. Swallow + log instead.
   const reloadLocks = useCallback(async () => {
     if (!client) return;
-    const { rows } = await fetchAllRows<Lock>(
-      () => (client.from("locks") as any)
-        .select("*")
-        .is("released_at", null)
-        .order("id", { ascending: true }),
-    );
-    setLocks(rows);
+    try {
+      const { rows } = await fetchAllRows<Lock>(
+        () => (client.from("locks") as any)
+          .select("*")
+          .is("released_at", null)
+          .order("id", { ascending: true }),
+      );
+      setLocks(rows);
+    } catch (e) {
+      console.error("useBridgeSync: failed to reload locks", e);
+    }
   }, [client]);
 
   const reloadStructure = useCallback(async () => {
     if (!client) return;
-    const [v, f, fo] = await Promise.all([
-      fetchAllRows<Vault>(() => (client.from("vaults") as any)
-        .select("id,name").order("id", { ascending: true })),
-      fetchAllRows<VaultFile>(() => (client.from("files") as any)
-        .select("id,vault_id,folder_id,name,latest_version_id").order("id", { ascending: true })),
-      fetchAllRows<Folder>(() => (client.from("folders") as any)
-        .select("id,vault_id,parent_id,name").order("id", { ascending: true })),
-    ]);
-    setVaults(v.rows);
-    setFiles(f.rows);
-    setFolders(fo.rows);
+    try {
+      const [v, f, fo] = await Promise.all([
+        fetchAllRows<Vault>(() => (client.from("vaults") as any)
+          .select("id,name").order("id", { ascending: true })),
+        fetchAllRows<VaultFile>(() => (client.from("files") as any)
+          .select("id,vault_id,folder_id,name,latest_version_id").order("id", { ascending: true })),
+        fetchAllRows<Folder>(() => (client.from("folders") as any)
+          .select("id,vault_id,parent_id,name").order("id", { ascending: true })),
+      ]);
+      setVaults(v.rows);
+      setFiles(f.rows);
+      setFolders(fo.rows);
+    } catch (e) {
+      console.error("useBridgeSync: failed to reload vault structure", e);
+    }
   }, [client]);
 
   useEffect(() => { void reloadStructure(); void reloadLocks(); }, [reloadStructure, reloadLocks]);
@@ -162,7 +185,7 @@ export function useBridgeSync(): void {
       const json = JSON.stringify(snapshot);
       if (json === lastPush.current) return;
       lastPush.current = json;
-      void invoke("bridge_set_snapshot", { snapshot }).catch(() => {});
+      safeInvoke("bridge_set_snapshot", { snapshot });
     }, 400);
     return () => clearTimeout(handle);
   }, [built, locks, user?.id]);
