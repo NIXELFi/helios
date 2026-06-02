@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
 import { VaultModule } from "./modules/vault";
 import { CfdModule } from "./modules/cfd";
+import { PmModule } from "./modules/pm";
 import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
@@ -59,6 +60,9 @@ function HeliosShell() {
   // Supabase RLS-protected tables on mount, so rendering it without a session
   // would be a bunch of failed queries. CFD and Logs don't depend on auth.
   const vaultEnabled = user !== null;
+  // PM is gated identically to Vault — it hits RLS-protected pm.* tables on
+  // mount, so it needs a live signed-in session from the main app.
+  const pmEnabled = user !== null;
   // During the boot getSession() window we don't yet KNOW whether a returning
   // user is signed in. Don't present the disabled "Sign in to use Vault" state
   // (it flashes for a signed-in user) and don't bounce off Vault until auth
@@ -100,23 +104,24 @@ function HeliosShell() {
     // briefly `user === null` during boot getSession(), and bouncing/dropping
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
-    if (vaultEnabled) return;
-    if (active === "vault") setActive("logs");
+    if (vaultEnabled) return; // pmEnabled === vaultEnabled
+    if (active === "vault" || active === "pm") setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("vault")) return prev;
+      if (!prev.has("vault") && !prev.has("pm")) return prev;
       const next = new Set(prev);
       next.delete("vault");
+      next.delete("pm");
       return next;
     });
   }, [active, vaultEnabled, authLoading]);
 
   function activate(id: ModuleId) {
-    if (id === "vault" && !vaultEnabled) {
+    if ((id === "vault" && !vaultEnabled) || (id === "pm" && !pmEnabled)) {
       // While auth is still resolving we don't yet know if this is a returning
       // signed-in user; swallow the click rather than prematurely popping the
       // auth modal in front of them.
       if (authLoading) return;
-      // Vault click while logged out routes to the auth modal instead of
+      // Vault/PM click while logged out routes to the auth modal instead of
       // navigating. Other modules navigate normally.
       setAuthModalOpen(true);
       return;
@@ -167,6 +172,7 @@ function HeliosShell() {
         onDisconnect={() => void handleDisconnect()}
         onChangePassword={() => setChangePwOpen(true)}
         vaultEnabled={vaultEnabled}
+        pmEnabled={pmEnabled}
         authLoading={authLoading}
       />
       <main className="relative min-w-0 flex-1">
@@ -195,6 +201,13 @@ function HeliosShell() {
           <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
             <ErrorBoundary label="CFD" compact>
               <CfdModule />
+            </ErrorBoundary>
+          </div>
+        )}
+        {visited.has("pm") && pmEnabled && (
+          <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
+            <ErrorBoundary label="PM" compact>
+              <PmModule />
             </ErrorBoundary>
           </div>
         )}

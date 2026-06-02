@@ -8,7 +8,9 @@
       "@helios/store": ["../../packages/store/src"],
       "@helios/lib": ["../../packages/lib/src"],
       "@helios/ui": ["../../packages/ui/src"],
-      "@helios/widgets": ["../../packages/widgets/src"]
+      "@helios/widgets": ["../../packages/widgets/src"],
+      "@helios/pm-ui": ["../../packages/pm-ui/src"],
+      "@pm/*": ["./src/modules/pm/*"]
     }
   },
   "include": ["src"]

@@ -19,6 +19,8 @@ export default defineConfig({
       "@helios/lib": path.resolve(__dirname, "../../packages/lib/src"),
       "@helios/ui": path.resolve(__dirname, "../../packages/ui/src"),
       "@helios/widgets": path.resolve(__dirname, "../../packages/widgets/src"),
+      "@helios/pm-ui": path.resolve(__dirname, "../../packages/pm-ui/src"),
+      "@pm": path.resolve(__dirname, "src/modules/pm"),
     },
   },
 });

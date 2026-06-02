@@ -3,7 +3,7 @@ import { UpdatesPill } from "../components/UpdatesPill";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 
-export type ModuleId = "logs" | "vault" | "cfd";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm";
 
 // macOS uses `titleBarStyle: "Overlay"` + inset traffic-lights at (14, 14), so
 // the brand header needs ~48 px of top padding to clear them. Windows and Linux
@@ -44,6 +44,9 @@ interface Props {
    *  to a prop so the same gate is shared with click-routing in the
    *  parent Shell. */
   vaultEnabled: boolean;
+  /** True when the user may enter the PM module — same gate as Vault (a live
+   *  signed-in user, since PM hits RLS-protected pm.* tables on mount). */
+  pmEnabled: boolean;
   /** True during boot getSession(), before we know whether a returning user
    *  is signed in. While loading we suppress the disabled "Sign in to use
    *  Vault" presentation so a signed-in user doesn't see it flash. */
@@ -65,12 +68,14 @@ export function ModulePicker(props: Props) {
     onDisconnect,
     onChangePassword,
     vaultEnabled,
+    pmEnabled,
     authLoading = false,
   } = props;
   // While auth is still resolving, don't render Vault as disabled — a returning
   // signed-in user would otherwise see "Sign in to use Vault" flash before
   // their session lands. Treat it as a normal (pending) entry until we know.
   const vaultDisabled = !vaultEnabled && !authLoading;
+  const pmDisabled = !pmEnabled && !authLoading;
   return (
     // Sidebar layout: brand header → nav buttons → spacer → user pill →
     // updater footer. Brand + user + updater live here (not inside any
@@ -106,6 +111,14 @@ export function ModulePicker(props: Props) {
           badge="NEW"
           active={active === "cfd"}
           onClick={() => onSelect("cfd")}
+        />
+        <NavButton
+          label="PM"
+          badge="NEW"
+          active={active === "pm"}
+          onClick={() => onSelect("pm")}
+          disabled={pmDisabled}
+          disabledTitle="Sign in to use PM"
         />
       </div>
 
