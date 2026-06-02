@@ -11,6 +11,7 @@ import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -169,23 +170,32 @@ function HeliosShell() {
         authLoading={authLoading}
       />
       <main className="relative min-w-0 flex-1">
+        {/* Each module gets its own boundary so a crash in one (an unexpected
+            data shape, a render bug) shows a contained error in that pane while
+            the rail + sibling modules stay usable. */}
         {visited.has("logs") && (
           <div className={"absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
-            <LogsApp
-              appVersion={appVersion}
-              playing={logsPlaying}
-              onPlayingChange={setLogsPlaying}
-            />
+            <ErrorBoundary label="Logs" compact>
+              <LogsApp
+                appVersion={appVersion}
+                playing={logsPlaying}
+                onPlayingChange={setLogsPlaying}
+              />
+            </ErrorBoundary>
           </div>
         )}
         {visited.has("vault") && vaultEnabled && (
           <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
-            <VaultModule />
+            <ErrorBoundary label="Vault" compact>
+              <VaultModule />
+            </ErrorBoundary>
           </div>
         )}
         {visited.has("cfd") && (
           <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
-            <CfdModule />
+            <ErrorBoundary label="CFD" compact>
+              <CfdModule />
+            </ErrorBoundary>
           </div>
         )}
       </main>
