@@ -17,10 +17,11 @@ import {
   IconTimeline,
   IconTrash,
   IconTruck,
+  type TablerIcon,
 } from "@tabler/icons-react";
 import { Link } from "@pm/lib/router";
 import { usePathname } from "@pm/lib/router";
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProjectDialog } from "@pm/components/ProjectDialog";
 import { SubteamDialog } from "@pm/components/SubteamDialog";
 import { usePmStore } from "@pm/lib/pmStore";
@@ -41,7 +42,7 @@ import {
   type ViewSegment,
 } from "@pm/lib/nav";
 
-type IconComponent = ComponentType<{ size?: number; strokeWidth?: number }>;
+type IconComponent = TablerIcon;
 
 interface NavItem {
   view: ViewSegment;

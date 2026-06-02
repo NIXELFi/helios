@@ -564,7 +564,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   // react-flow owns the LIVE drag (via useNodesState's onNodesChange). We only
   // persist the final position when the drag ends, so `computedNodes` stays
   // stable during the drag.
-  const onNodeDragStop = useCallback((_e: React.MouseEvent, node: TaskNodeType) => {
+  const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: TaskNodeType) => {
     setPinned((prev) => {
       const next = new Map(prev);
       next.set(node.id, { x: node.position.x, y: node.position.y });

@@ -60,8 +60,8 @@ export function useSearchParams(): URLSearchParams {
 export function useRouter() {
   const { setPath } = useRouterState();
   return {
-    push: (href: string) => setPath(href),
-    replace: (href: string) => setPath(href),
+    push: (href: string, _opts?: { scroll?: boolean }) => setPath(href),
+    replace: (href: string, _opts?: { scroll?: boolean }) => setPath(href),
     back: () => {},
     forward: () => {},
     refresh: () => {},

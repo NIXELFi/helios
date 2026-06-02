@@ -11,13 +11,13 @@ import {
   IconSparkles,
   IconTrash,
   IconUserCircle,
+  type TablerIcon,
 } from "@tabler/icons-react";
 import { formatDistanceToNow, parseISO } from "date-fns";
-import type { ComponentType } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { usePmStore } from "@pm/lib/pmStore";
 
-const ACTION_ICON: Record<ActivityAction, ComponentType<{ size?: number; strokeWidth?: number }>> = {
+const ACTION_ICON: Record<ActivityAction, TablerIcon> = {
   created: IconPlus,
   updated: IconPencil,
   deleted: IconTrash,
