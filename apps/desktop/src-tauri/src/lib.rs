@@ -1,3 +1,6 @@
+// Windows-only: SOLIDWORKS add-in injection + registry (winreg). Gated so
+// helios-desktop still compiles for the macOS/Linux release builds.
+#[cfg(windows)]
 mod addin_injector;
 mod bridge;
 mod cfd;
@@ -37,7 +40,17 @@ fn get_autostart(app: tauri::AppHandle) -> bool {
 /// CLSID stays no-admin. Backs the Settings "Install / repair add-in" action.
 #[tauri::command]
 fn provision_sw_addin(app: tauri::AppHandle) -> Result<(), String> {
-    addin_injector::provision_now(&app)
+    #[cfg(windows)]
+    {
+        addin_injector::provision_now(&app)
+    }
+    // The add-in is a Windows-only SOLIDWORKS integration; on other platforms
+    // the command exists (so the frontend can call it) but is a no-op error.
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("The SOLIDWORKS add-in is only available on Windows.".into())
+    }
 }
 
 #[tauri::command]
@@ -112,11 +125,14 @@ pub fn run() {
             }
 
             // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
-            // Best-effort; never block launch.
-            let ah = app.handle().clone();
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                addin_injector::run(&ah);
-            }));
+            // Best-effort; never block launch. Windows-only (SOLIDWORKS + registry).
+            #[cfg(windows)]
+            {
+                let ah = app.handle().clone();
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    addin_injector::run(&ah);
+                }));
+            }
 
             // System tray — keeps Helios resident so the bridge stays live even
             // when the window is closed-to-tray.
