@@ -2,6 +2,8 @@
 
 import type { TaskRow, TaskStatus, TaskPriority } from "@helios/pm-ui";
 import {
+  STATUS_LABEL,
+  STATUS_DOT,
   TASK_STATUSES,
   TASK_PRIORITIES,
   TypeBadge,
@@ -47,26 +49,6 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
-
-const STATUS_DOT_HEX: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
-
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low", medium: "Medium", high: "High", critical: "Critical",
 };
@@ -74,7 +56,7 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
 const STATUS_OPTIONS: SelectOption<TaskStatus>[] = TASK_STATUSES.map((s) => ({
   value: s,
   label: STATUS_LABEL[s],
-  swatch: STATUS_DOT_HEX[s],
+  swatch: STATUS_DOT[s],
 }));
 
 const PRIORITY_OPTIONS: SelectOption<TaskPriority>[] = TASK_PRIORITIES.map((p) => ({

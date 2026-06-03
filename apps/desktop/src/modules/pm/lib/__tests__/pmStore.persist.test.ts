@@ -45,7 +45,7 @@ function makeTask(id: string): TaskRow {
     title: `task ${id}`,
     description: null,
     type: "general",
-    status: "backlog",
+    status: "not_started",
     priority: "medium",
     owner_id: null,
     start_date: null,

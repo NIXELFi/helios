@@ -1,7 +1,7 @@
 "use client";
 
 import type { TaskRow, TaskStatus } from "@helios/pm-ui";
-import { TASK_STATUSES, TypeBadge, taskOutline } from "@helios/pm-ui";
+import { STATUS_LABEL, TASK_STATUSES, TypeBadge, taskOutline } from "@helios/pm-ui";
 import {
   DndContext,
   DragOverlay,
@@ -43,21 +43,9 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
-
 const STATUS_ACCENT: Record<TaskStatus, string> = {
-  backlog: "border-helios-dim/40",
-  designing: "border-blue-400/40",
-  manufacturing: "border-amber-400/40",
-  testing: "border-violet-400/40",
+  not_started: "border-helios-line",
+  in_progress: "border-blue-400/40",
   needs_review: "border-asu-gold/40",
   blocked: "border-red-400/40",
   done: "border-emerald-400/40",

@@ -10,7 +10,16 @@ import type {
   TaskType,
   User,
 } from "@helios/pm-ui";
-import { TASK_PRIORITIES, TASK_STATUSES, TASK_TYPES, TypeBadge, criticalityFill } from "@helios/pm-ui";
+import {
+  STATUS_DOT,
+  STATUS_LABEL,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  TASK_TYPES,
+  TypeBadge,
+  criticalityFill,
+  taskStatus,
+} from "@helios/pm-ui";
 import { IconArrowLeft, IconArrowRight, IconX } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -23,7 +32,7 @@ import { usePmStore } from "@pm/lib/pmStore";
 const createTaskInput = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
   type: z.enum(["part", "drawing", "simulation", "assembly", "analysis", "test", "general"]),
-  status: z.enum(["backlog", "designing", "manufacturing", "testing", "needs_review", "blocked", "done"]),
+  status: taskStatus,
   subteam_id: z.string().uuid("Pick a subteam"),
   subsystem_id: z.string().uuid().nullable(),
   owner_id: z.string().uuid().nullable(),
@@ -44,26 +53,6 @@ const TYPE_LABEL: Record<TaskType, string> = {
   analysis: "Analysis",
   test: "Test",
   general: "General",
-};
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
 };
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -116,7 +105,7 @@ export function CreateTaskDialog({
   defaultSubteamId = null,
   defaultStartDate = null,
   defaultDueDate = null,
-  defaultStatus = "backlog",
+  defaultStatus = "not_started",
 }: CreateTaskDialogProps) {
   const allTasks = usePmStore((s) => s.tasks);
   const addDependency = usePmStore((s) => s.addDependency);

@@ -1,6 +1,12 @@
 export { TaskTable } from "./TaskTable";
 export type { TaskTableProps } from "./TaskTable";
 export { StatusBadge } from "./statusBadge";
+export {
+  STATUS_LABEL,
+  STATUS_DOT,
+  STATUS_FILL,
+  STATUS_DOT_CLASS,
+} from "./statusMeta";
 export { TypeBadge, TASK_TYPE_LABEL } from "./typeBadge";
 export { computeCriticalPath } from "./criticalPath";
 export {

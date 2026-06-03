@@ -1,30 +1,10 @@
 "use client";
 
 import type { Subteam, TaskStatus, TaskType } from "@helios/pm-ui";
-import { TASK_STATUSES, TASK_TYPES } from "@helios/pm-ui";
+import { STATUS_DOT, STATUS_LABEL, TASK_STATUSES, TASK_TYPES } from "@helios/pm-ui";
 import { IconEye, IconEyeOff, IconX } from "@tabler/icons-react";
 import type { TaskFilters } from "@pm/lib/filters";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
 
 const STATUS_FILTER_OPTIONS: SelectOption<string>[] = [
   { value: "", label: "All" },

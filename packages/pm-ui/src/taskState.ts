@@ -41,7 +41,7 @@ export function taskOutlineState(
       if (days <= window) return "approaching";
     }
   }
-  if (task.status === "backlog") return "backlog";
+  if (task.status === "not_started") return "backlog";
   return "default";
 }
 

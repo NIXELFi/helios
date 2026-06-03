@@ -1,7 +1,7 @@
 "use client";
 
-import type { Subteam, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
-import { TASK_TYPES, computeCriticalPath, taskOutline } from "@helios/pm-ui";
+import type { Subteam, TaskRow, TaskType } from "@helios/pm-ui";
+import { STATUS_DOT, TASK_TYPES, computeCriticalPath, taskOutline } from "@helios/pm-ui";
 import {
   Background,
   Controls,
@@ -65,16 +65,6 @@ function sortComparator(
 function criticalityScore(t: TaskRow, critical: Set<string>): number {
   return (critical.has(t.id) ? 100 : 0) + (PRIORITY_RANK[t.priority] ?? 0);
 }
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
 
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 80;

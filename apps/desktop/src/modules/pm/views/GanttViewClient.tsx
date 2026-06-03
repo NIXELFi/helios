@@ -1,7 +1,7 @@
 "use client";
 
-import type { Milestone, MilestoneType, Subteam, TaskRow, TaskStatus } from "@helios/pm-ui";
-import { computeCriticalPath, taskOutline } from "@helios/pm-ui";
+import type { Milestone, MilestoneType, Subteam, TaskRow } from "@helios/pm-ui";
+import { computeCriticalPath, STATUS_FILL, taskOutline } from "@helios/pm-ui";
 import {
   addDays,
   differenceInCalendarDays,
@@ -64,16 +64,6 @@ const DEFAULT_ROW_HEIGHT = 32;
 const DAY_BOUNDS = { min: 4, max: 48 } as const;
 const ROW_BOUNDS = { min: 20, max: 60 } as const;
 const SUBSYSTEM_HEADER_HEIGHT = 24;
-
-const STATUS_FILL: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
 
 interface BarLayout {
   task: TaskRow;

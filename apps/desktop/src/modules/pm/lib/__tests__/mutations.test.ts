@@ -92,7 +92,7 @@ function makeTask(over: Partial<TaskRow> = {}): TaskRow {
     title: "Design wing",
     description: null,
     type: "general",
-    status: "backlog",
+    status: "not_started",
     priority: "medium",
     owner_id: null,
     start_date: null,

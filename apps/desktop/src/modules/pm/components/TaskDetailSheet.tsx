@@ -2,6 +2,8 @@
 
 import type { TaskPriority, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
 import {
+  STATUS_DOT,
+  STATUS_LABEL,
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_TYPES,
@@ -26,26 +28,6 @@ import { TaskLookup } from "@pm/components/TaskLookup";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
 import { usePmStore } from "@pm/lib/pmStore";
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",

@@ -4,7 +4,7 @@ const LEGEND: { state: TaskOutlineState; color: string; label: string }[] = [
   { state: "past_due", color: "#F87171", label: "Past due" },
   { state: "approaching", color: "#FB923C", label: "Due soon" },
   { state: "done", color: "#34D399", label: "Completed" },
-  { state: "backlog", color: "#A78BFA", label: "Backlog" },
+  { state: "backlog", color: "#A78BFA", label: "Not started" },
 ];
 
 // Shared legend for the status-outline color coding used across views.

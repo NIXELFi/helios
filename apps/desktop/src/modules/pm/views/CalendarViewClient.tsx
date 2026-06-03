@@ -1,6 +1,7 @@
 "use client";
 
-import type { CalendarEvent, Milestone, Subteam, TaskRow, TaskStatus } from "@helios/pm-ui";
+import type { CalendarEvent, Milestone, Subteam, TaskRow } from "@helios/pm-ui";
+import { STATUS_DOT } from "@helios/pm-ui";
 import {
   DndContext,
   DragOverlay,
@@ -61,16 +62,6 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
 
 const FALLBACK_COLOR = "#6B7280";
 

@@ -121,13 +121,11 @@ export function applyFilters(tasks: ReadonlyArray<TaskRow>, filters: TaskFilters
 export function applySort(tasks: ReadonlyArray<TaskRow>, sort: TaskSort): TaskRow[] {
   const priorityRank: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
   const statusRank: Record<string, number> = {
-    backlog: 0,
-    designing: 1,
-    manufacturing: 2,
-    testing: 3,
-    needs_review: 4,
-    blocked: 5,
-    done: 6,
+    not_started: 0,
+    in_progress: 1,
+    needs_review: 2,
+    blocked: 3,
+    done: 4,
   };
   const collator = new Intl.Collator(undefined, { sensitivity: "base" });
   const dir = sort.dir === "asc" ? 1 : -1;

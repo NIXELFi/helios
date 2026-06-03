@@ -1,30 +1,10 @@
 "use client";
 
-import type { TaskRow, TaskStatus } from "@helios/pm-ui";
-import { TypeBadge } from "@helios/pm-ui";
+import type { TaskRow } from "@helios/pm-ui";
+import { STATUS_DOT, STATUS_LABEL, TypeBadge } from "@helios/pm-ui";
 import { IconExternalLink } from "@tabler/icons-react";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { useEffect, useRef } from "react";
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "#9097A0",
-  designing: "#60A5FA",
-  manufacturing: "#FBBF24",
-  testing: "#A78BFA",
-  needs_review: "#FFC627",
-  blocked: "#F87171",
-  done: "#34D399",
-};
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  designing: "Designing",
-  manufacturing: "Manufacturing",
-  testing: "Testing",
-  needs_review: "Needs review",
-  blocked: "Blocked",
-  done: "Done",
-};
 
 const CARD_W = 240;
 

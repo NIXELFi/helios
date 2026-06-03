@@ -11,20 +11,16 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 export const taskStatus = z.enum([
-  "backlog",
-  "designing",
-  "manufacturing",
-  "testing",
+  "not_started",
+  "in_progress",
   "needs_review",
   "blocked",
   "done",
 ]);
 export type TaskStatus = z.infer<typeof taskStatus>;
 export const TASK_STATUSES: readonly TaskStatus[] = [
-  "backlog",
-  "designing",
-  "manufacturing",
-  "testing",
+  "not_started",
+  "in_progress",
   "needs_review",
   "blocked",
   "done",
