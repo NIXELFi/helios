@@ -34,9 +34,30 @@ export interface VaultInsights {
   revisionDist: Column[];
   topContributors: Bar[];
   largestFiles: Bar[];
+  sizeDistribution: Column[];
+  growthFiles: Column[];
+  mostRevised: Bar[];
+  recentlyUpdated: RecentFile[];
+  staleCount: number;
+}
+
+export interface RecentFile {
+  name: string;
+  bytes: number;
+  when: string | null;
 }
 
 const TOP_N = 8;
+const STALE_DAYS = 180;
+const DAY_MS = 86_400_000;
+
+const SIZE_BUCKETS: { label: string; max: number }[] = [
+  { label: "<256K", max: 256 * 1024 },
+  { label: "256K–1M", max: 1024 * 1024 },
+  { label: "1–10M", max: 10 * 1024 * 1024 },
+  { label: "10–50M", max: 50 * 1024 * 1024 },
+  { label: "50M+", max: Infinity },
+];
 
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -96,6 +117,7 @@ export function computeVaultInsights(
   folders: Folder[],
   locks: Lock[],
   users: VaultUser[],
+  nowMs: number = Date.now(),
 ): VaultInsights {
   const folderById = new Map(folders.map((f) => [f.id, f]));
   const userById = new Map(users.map((u) => [u.user_id, u]));
@@ -167,6 +189,46 @@ export function computeVaultInsights(
     .slice(0, TOP_N)
     .map((f) => ({ label: f.name, value: f.latest?.size_bytes ?? 0 }));
 
+  // File-size distribution: count files per size bucket (zero-byte files skip).
+  const sizeDistribution: Column[] = SIZE_BUCKETS.map((b) => ({ label: b.label, value: 0 }));
+  for (const f of files) {
+    const s = f.latest?.size_bytes ?? 0;
+    if (s <= 0) continue;
+    const idx = SIZE_BUCKETS.findIndex((b) => s < b.max);
+    if (idx >= 0) sizeDistribution[idx]!.value += 1;
+  }
+
+  // Cumulative file count over the project's life (running sum of monthly adds).
+  let cum = 0;
+  const growthFiles: Column[] = addedByMonth.map((c) => {
+    cum += c.value;
+    return { label: c.label, value: cum };
+  });
+
+  // Churn leaders: files carrying the most versions (multi-revision only).
+  const mostRevised: Bar[] = [...files]
+    .filter((f) => (f.latest?.version_num ?? 0) >= 2)
+    .sort((a, b) => (b.latest?.version_num ?? 0) - (a.latest?.version_num ?? 0))
+    .slice(0, TOP_N)
+    .map((f) => ({ label: f.name, value: f.latest?.version_num ?? 0 }));
+
+  // Most-recently-updated files (latest version timestamp).
+  const recentlyUpdated: RecentFile[] = [...files]
+    .filter((f) => f.latest?.created_at)
+    .sort((a, b) => (b.latest!.created_at < a.latest!.created_at ? -1 : 1))
+    .slice(0, 6)
+    .map((f) => ({ name: f.name, bytes: f.latest?.size_bytes ?? 0, when: f.latest?.created_at ?? null }));
+
+  // Stale files: untouched (latest version) for longer than STALE_DAYS.
+  const staleBefore = nowMs - STALE_DAYS * DAY_MS;
+  let staleCount = 0;
+  for (const f of files) {
+    const iso = f.latest?.created_at;
+    if (!iso) continue;
+    const t = new Date(iso).getTime();
+    if (!Number.isNaN(t) && t < staleBefore) staleCount += 1;
+  }
+
   return {
     totalFiles: files.length,
     totalBytes,
@@ -181,6 +243,11 @@ export function computeVaultInsights(
     revisionDist,
     topContributors: topNBars(contributor),
     largestFiles,
+    sizeDistribution,
+    growthFiles,
+    mostRevised,
+    recentlyUpdated,
+    staleCount,
   };
 }
 

@@ -108,12 +108,34 @@ describe("computeVaultInsights", () => {
     ]);
   });
 
+  test("counts files per size band", () => {
+    expect(s.sizeDistribution.find((c) => c.label === "<256K")?.value).toBe(4);
+    expect(s.sizeDistribution.find((c) => c.label === "50M+")?.value).toBe(0);
+  });
+
+  test("accumulates cumulative growth and ranks churn leaders", () => {
+    expect(s.growthFiles).toEqual([{ label: "2026-01", value: 4 }]);
+    expect(s.mostRevised.map((b) => b.label)).toEqual(["C.SLDPRT", "A.SLDASM", "notes.txt"]);
+    expect(s.mostRevised[0]!.value).toBe(6); // C has the most versions
+  });
+
   test("empty vault yields zeroed, empty datasets", () => {
     const e = computeVaultInsights([], [], [], []);
     expect(e.totalFiles).toBe(0);
     expect(e.avgBytes).toBe(0);
     expect(e.byType).toEqual([]);
     expect(e.addedByMonth).toEqual([]);
+    expect(e.growthFiles).toEqual([]);
+    expect(e.staleCount).toBe(0);
+  });
+
+  test("recency ordering and stale cutoff honor timestamps + nowMs", () => {
+    const old = file("old.SLDPRT", { size: 10, created_at: "2025-01-01T00:00:00Z" });
+    const fresh = file("new.SLDPRT", { size: 10, created_at: "2026-06-01T00:00:00Z" });
+    const now = new Date("2026-06-02T00:00:00Z").getTime();
+    const r = computeVaultInsights([old, fresh], [], [], [], now);
+    expect(r.recentlyUpdated.map((x) => x.name)).toEqual(["new.SLDPRT", "old.SLDPRT"]);
+    expect(r.staleCount).toBe(1); // old.SLDPRT is >180d before 2026-06-02
   });
 });
 

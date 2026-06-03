@@ -9,10 +9,12 @@ import { useSetSpotlight } from "../data/useSetSpotlight";
 import { folderPath } from "../data/folder-paths";
 import { computeVaultInsights } from "../lib/vaultStats";
 import { formatBytes, formatNumber } from "../lib/chart-utils";
-import { ChartCard, StatCard } from "../components/charts/ChartCard";
+import { ChartCard, StatCard, EmptyChart } from "../components/charts/ChartCard";
 import { Donut } from "../components/charts/Donut";
 import { HBars } from "../components/charts/HBars";
 import { Columns } from "../components/charts/Columns";
+import { AreaLine } from "../components/charts/AreaLine";
+import type { RecentFile } from "../lib/vaultStats";
 import { SpotlightCard } from "../components/SpotlightCard";
 import { SpotlightPicker } from "../components/SpotlightPicker";
 import { holderLabel } from "./WhoHasWhatScreen";
@@ -103,7 +105,7 @@ export function InsightsScreen() {
           ) : null}
 
           {/* KPI row */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
             <StatCard label="Files" value={formatNumber(insights.totalFiles)} />
             <StatCard label="Storage" value={formatBytes(insights.totalBytes)} />
             <StatCard label="Folders" value={formatNumber(insights.folderCount)} />
@@ -114,6 +116,7 @@ export function InsightsScreen() {
               value={formatNumber(insights.revisionedFiles)}
               hint={`avg ${formatBytes(insights.avgBytes)}/file`}
             />
+            <StatCard label="Stale 180d+" value={formatNumber(insights.staleCount)} />
           </div>
 
           {/* Charts grid */}
@@ -141,6 +144,22 @@ export function InsightsScreen() {
             <ChartCard title="Largest files" subtitle="Biggest objects in the vault">
               <HBars data={insights.largestFiles} formatValue={formatBytes} accent="#FF8A65" />
             </ChartCard>
+
+            <ChartCard title="Vault growth" subtitle="Cumulative files over the project's life">
+              <AreaLine data={insights.growthFiles} formatValue={formatNumber} />
+            </ChartCard>
+
+            <ChartCard title="File-size distribution" subtitle="Files per size band">
+              <Columns data={insights.sizeDistribution} accent="#BA68C8" />
+            </ChartCard>
+
+            <ChartCard title="Churn leaders" subtitle="Most-revised files">
+              <HBars data={insights.mostRevised} formatValue={(v) => `${v} ver`} accent="#F06292" />
+            </ChartCard>
+
+            <ChartCard title="Recently updated" subtitle="Latest check-ins">
+              <RecentList items={insights.recentlyUpdated} />
+            </ChartCard>
           </div>
         </div>
       )}
@@ -156,5 +175,22 @@ export function InsightsScreen() {
         />
       ) : null}
     </div>
+  );
+}
+
+function RecentList({ items }: { items: RecentFile[] }) {
+  if (items.length === 0) return <EmptyChart />;
+  return (
+    <ul className="flex flex-col gap-1.5 text-xs">
+      {items.map((r, i) => (
+        <li key={`${r.name}-${i}`} className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-helios-text" title={r.name}>{r.name}</span>
+          <span className="shrink-0 tabular-nums text-helios-dim">{formatBytes(r.bytes)}</span>
+          <span className="w-20 shrink-0 text-right tabular-nums text-helios-dim/70">
+            {r.when ? new Date(r.when).toLocaleDateString() : "—"}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
