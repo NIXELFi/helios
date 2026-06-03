@@ -75,7 +75,10 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       .from("tasks")
       .select(
         "id,project_id,subteam_id,subsystem_id,parent_task_id,title,description,type,status,priority,owner_id,start_date,due_date,estimate_days,mrl,on_critical_path," +
-          "subteam:subteams(id,name,code,slug,color)," +
+          // Pin the PRIMARY subteam embed to the direct tasks.subteam_id FK.
+          // task_subteams adds a SECOND tasks->subteams path, so an unqualified
+          // `subteams` embed is ambiguous ("more than one relationship found").
+          "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color)," +
           "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
           "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color))",
       ),
