@@ -107,7 +107,7 @@ export interface CriticalityFill {
   label: string;
 }
 
-const CRITICALITY_BG: Record<TaskPriority, { hex: string; label: string }> = {
+export const CRITICALITY_BG: Record<TaskPriority, { hex: string; label: string }> = {
   low:      { hex: "#3A3F46", label: "Low" },
   medium:   { hex: "#2563EB", label: "Medium" },
   high:     { hex: "#FFC627", label: "High" },

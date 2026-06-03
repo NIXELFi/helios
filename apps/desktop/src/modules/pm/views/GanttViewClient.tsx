@@ -1,7 +1,18 @@
 "use client";
 
-import type { Milestone, MilestoneType, Subteam, TaskRow } from "@helios/pm-ui";
-import { computeCriticalPath, STATUS_FILL, taskOutline } from "@helios/pm-ui";
+import type {
+  Milestone,
+  MilestoneType,
+  Subteam,
+  TaskColorProperty,
+  TaskRow,
+} from "@helios/pm-ui";
+import {
+  TASK_COLOR_PROPERTY_LABEL,
+  colorForTask,
+  computeCriticalPath,
+  hexToRgba,
+} from "@helios/pm-ui";
 import {
   addDays,
   differenceInCalendarDays,
@@ -12,12 +23,17 @@ import {
   startOfDay,
 } from "date-fns";
 import { IconEye, IconEyeOff, IconMinus, IconPlus } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
+import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { Select } from "@pm/components/ui/Select";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { isManufacturingType } from "@pm/lib/filters";
+import {
+  recallGanttSettings,
+  rememberGanttSettings,
+} from "@pm/lib/ganttSettings";
 import {
   scopeTasksToSubteam,
   usePmStore,
@@ -64,6 +80,21 @@ const DEFAULT_ROW_HEIGHT = 32;
 const DAY_BOUNDS = { min: 4, max: 48 } as const;
 const ROW_BOUNDS = { min: 20, max: 60 } as const;
 const SUBSYSTEM_HEADER_HEIGHT = 24;
+
+// Default bars read as translucent "glass": the resolved property color is laid
+// down at this alpha behind a backdrop blur, with the light text color on top.
+const GLASS_ALPHA = 0.18;
+
+// The four task properties a bar's background / outline can be colored by.
+const COLOR_PROPERTY_OPTIONS: Array<{ value: TaskColorProperty; label: string }> = (
+  ["status", "priority", "subteam", "owner"] as TaskColorProperty[]
+).map((p) => ({ value: p, label: TASK_COLOR_PROPERTY_LABEL[p] }));
+
+// Bar/label font scales with row height so text stays proportional as rows grow
+// or shrink; clamped to stay legible at the minimum row height.
+function barFontPx(rowHeight: number): number {
+  return Math.min(16, Math.max(9, Math.round(rowHeight * 0.34)));
+}
 
 interface BarLayout {
   task: TaskRow;
@@ -121,7 +152,24 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH);
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
   const barHeight = Math.max(10, rowHeight - 14);
+  const barFont = barFontPx(rowHeight);
   const critical = useMemo(() => computeCriticalPath(tasks, deps), [tasks, deps]);
+
+  // Task-detail peek popup (same pattern as CalendarViewClient): clicking a bar
+  // opens a TaskPeekCard anchored at the click; "Open editor" escalates to the
+  // full editor via selectTask.
+  const [peek, setPeek] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  const peekTask = useMemo(
+    () => (peek ? tasks.find((t) => t.id === peek.taskId) ?? null : null),
+    [peek, tasks],
+  );
+
+  // Color-by-property settings, persisted per-scope (see ganttSettings.ts).
+  const [colorSettings, setColorSettings] = useState(() => recallGanttSettings(teamSlug));
+  const { bgProperty, outlineProperty } = colorSettings;
+  useEffect(() => {
+    rememberGanttSettings(teamSlug, colorSettings);
+  }, [teamSlug, colorSettings]);
 
   function toggleCursor(id: string) {
     setHiddenCursors((prev) => {
@@ -249,6 +297,32 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 }))}
               />
             </label>
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Background
+              <Select
+                size="sm"
+                value={bgProperty}
+                ariaLabel="Color bars by"
+                className="min-w-[110px]"
+                onChange={(v) =>
+                  setColorSettings((s) => ({ ...s, bgProperty: v as TaskColorProperty }))
+                }
+                options={COLOR_PROPERTY_OPTIONS}
+              />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Outline
+              <Select
+                size="sm"
+                value={outlineProperty}
+                ariaLabel="Outline bars by"
+                className="min-w-[110px]"
+                onChange={(v) =>
+                  setColorSettings((s) => ({ ...s, outlineProperty: v as TaskColorProperty }))
+                }
+                options={COLOR_PROPERTY_OPTIONS}
+              />
+            </label>
             <ZoomGroup
               label="Time"
               value={dayWidth}
@@ -318,7 +392,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         }}
       >
         <div className="flex">
-          <div className="sticky left-0 z-10 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
+          <div className="sticky left-0 z-30 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
             <div
               className="border-b border-helios-line px-3 text-[10px] font-medium uppercase tracking-widest text-helios-dim"
               style={{ height: headerHeight, lineHeight: `${headerHeight}px` }}
@@ -345,10 +419,10 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     <div
                       key={i}
                       className={
-                        "truncate border-b border-helios-line/60 px-6 text-xs font-normal " +
+                        "truncate border-b border-helios-line/60 px-6 font-normal " +
                         (ext ? "italic text-helios-text/70" : "text-helios-text")
                       }
-                      style={{ height: rowHeight, lineHeight: `${rowHeight}px` }}
+                      style={{ height: rowHeight, lineHeight: `${rowHeight}px`, fontSize: barFont }}
                       title={bar?.task.title}
                     >
                       {bar?.task.title}
@@ -425,8 +499,15 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               })}
             </div>
 
-            {/* Today + milestone cursors */}
-            <div className="pointer-events-none absolute inset-0">
+            {/* Today + milestone cursors. Offset to start BELOW the sticky dates
+                header so no cursor line/label paints up into the header band
+                (the header is opaque + z-10 and would otherwise occlude them).
+                z-20 keeps the lines/labels above the bars; the sticky left task
+                column is z-30 so it still occludes cursors on horizontal scroll. */}
+            <div
+              className="pointer-events-none absolute left-0 right-0 z-20"
+              style={{ top: headerHeight, bottom: 0 }}
+            >
               {(() => {
                 const today = startOfDay(new Date());
                 const tx = differenceInCalendarDays(today, rangeStart) * dayWidth;
@@ -437,7 +518,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     style={{ left: tx }}
                     title={`Today · ${format(today, "MMM d, yyyy")}`}
                   >
-                    <span className="absolute top-1 left-1 whitespace-nowrap rounded bg-asu-maroon/20 px-1 py-0.5 text-[10px] font-medium text-asu-maroon">
+                    <span className="absolute top-1 left-1 z-20 whitespace-nowrap rounded bg-asu-maroon/20 px-1 py-0.5 text-[10px] font-medium text-asu-maroon">
                       Today
                     </span>
                   </div>
@@ -458,7 +539,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     style={{ left: x }}
                     title={`${MILESTONE_TYPE_LABEL[m.type]}: ${m.name} · ${format(day, "MMM d, yyyy")} · ${countdown}`}
                   >
-                    <span className="absolute top-1 left-1 flex flex-col whitespace-nowrap rounded bg-asu-gold/15 px-1 py-0.5 text-[10px] font-medium text-asu-gold">
+                    <span className="absolute top-1 left-1 z-20 flex flex-col whitespace-nowrap rounded bg-asu-gold/15 px-1 py-0.5 text-[10px] font-medium text-asu-gold">
                       <span>{m.name}</span>
                       <span className="font-normal text-asu-gold/70">
                         {MILESTONE_TYPE_LABEL[m.type]} · {countdown}
@@ -474,15 +555,27 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 const isCritical = critical.has(b.task.id);
                 const isExternal = b.relation !== "owned";
                 const dim = showCriticalOnly && !isCritical;
-                const outline = taskOutline(b.task);
                 const top = b.rowIndex * rowHeight + (rowHeight - barHeight) / 2;
+                // Glass background: resolved bg-property color at low alpha behind
+                // a backdrop blur, with light text on top.
+                const bgColor = hexToRgba(colorForTask(b.task, bgProperty), GLASS_ALPHA);
+                // Outline from the outline-property color, then layer the
+                // special-case overrides on top: critical-path keeps its gold
+                // border; external/cross-team keeps its dashed border.
+                const border = isCritical
+                  ? "2px solid #FFC627"
+                  : isExternal
+                    ? "1px dashed rgba(255,255,255,0.6)"
+                    : `2px solid ${colorForTask(b.task, outlineProperty)}`;
                 return (
                   <button
                     key={b.task.id}
                     type="button"
-                    onClick={() => selectTask(b.task.id)}
+                    onClick={(e) =>
+                      setPeek({ taskId: b.task.id, x: e.clientX, y: e.clientY })
+                    }
                     className={
-                      "absolute cursor-pointer rounded text-left text-[10px] font-medium text-helios-base shadow-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
+                      "absolute cursor-pointer rounded text-left font-medium text-helios-text shadow-sm backdrop-blur-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
                       (dim ? "opacity-25" : isExternal ? "opacity-55" : "opacity-100")
                     }
                     style={{
@@ -490,16 +583,13 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                       width: b.widthDays * dayWidth - 2,
                       top,
                       height: barHeight,
-                      backgroundColor: STATUS_FILL[b.task.status],
-                      border: isCritical
-                        ? "2px solid #FFC627"
-                        : isExternal
-                          ? "1px dashed rgba(255,255,255,0.6)"
-                          : `2px solid ${outline.borderColor}`,
+                      fontSize: barFont,
+                      backgroundColor: bgColor,
+                      border,
                     }}
                     title={`${b.task.title} · ${b.task.start_date} → ${b.task.due_date}`}
                   >
-                    <span className="block truncate px-1.5 leading-[18px]">
+                    <span className="block truncate px-1.5 leading-tight">
                       {b.task.title}
                     </span>
                   </button>
@@ -543,6 +633,19 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
           </div>
         </div>
       </div>
+
+      {peek && peekTask ? (
+        <TaskPeekCard
+          task={peekTask}
+          x={peek.x}
+          y={peek.y}
+          onClose={() => setPeek(null)}
+          onOpenEditor={() => {
+            selectTask(peekTask.id);
+            setPeek(null);
+          }}
+        />
+      ) : null}
 
       <CreateTaskDialog
         open={dialogOpen}
