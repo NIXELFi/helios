@@ -1,9 +1,10 @@
 import { VaultSwitcher } from "./VaultSwitcher";
 
-export type VaultScreenId = "browse" | "history" | "who" | "settings" | "admin";
+export type VaultScreenId = "browse" | "insights" | "history" | "who" | "settings" | "admin";
 
 const ENTRIES: { id: VaultScreenId; label: string }[] = [
   { id: "browse", label: "Browse" },
+  { id: "insights", label: "Insights" },
   { id: "history", label: "History" },
   { id: "who", label: "Who has what" },
   { id: "settings", label: "Settings" },

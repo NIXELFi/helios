@@ -10,6 +10,10 @@ export interface Vault {
   name: string;
   created_at: string;
   created_by: UserId;
+  /** Optional flagship file for the vault (the project's master assembly),
+   *  surfaced in the Insights view. DB-stored on pdm.vaults, admin-changeable.
+   *  Null when no spotlight has been chosen. */
+  spotlight_file_id?: FileId | null;
 }
 
 export interface Folder {

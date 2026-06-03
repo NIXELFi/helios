@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavRail, type VaultScreenId } from "./components/NavRail";
 import { DownloadModeWelcome } from "./components/DownloadModeWelcome";
 import { BrowseScreen } from "./screens/BrowseScreen";
+import { InsightsScreen } from "./screens/InsightsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { WhoHasWhatScreen } from "./screens/WhoHasWhatScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
@@ -24,6 +25,7 @@ export function VaultHome() {
       <NavRail active={active} onSelect={setActive} showAdmin={isAdmin} />
       <main className="flex-1 overflow-hidden">
         {active === "browse" ? <BrowseScreen /> : null}
+        {active === "insights" ? <InsightsScreen /> : null}
         {active === "history" ? <HistoryScreen /> : null}
         {active === "who" ? <WhoHasWhatScreen /> : null}
         {active === "settings" ? <SettingsScreen /> : null}
