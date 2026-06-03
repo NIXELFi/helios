@@ -56,6 +56,32 @@ function CurrentView() {
   }
 }
 
+// Surfaces a failed write (optimistic change rolled back) as a dismissible
+// toast. Auto-clears after a few seconds so it never lingers.
+function WriteErrorToast() {
+  const error = usePmStore((s) => s.lastWriteError);
+  const clear = usePmStore((s) => s.clearWriteError);
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(clear, 6000);
+    return () => clearTimeout(t);
+  }, [error, clear]);
+  if (!error) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-md border border-red-500/40 bg-red-950/95 px-4 py-3 text-sm text-red-100 shadow-lg">
+      <div className="font-medium">Change not saved</div>
+      <div className="mt-0.5 break-words text-red-200/80">{error.message}</div>
+      <button
+        type="button"
+        onClick={clear}
+        className="mt-1.5 text-xs text-red-300 underline underline-offset-2 hover:text-red-200"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 // The PM desktop module. Mounted by the Shell only when a user is signed in
 // (same gate as Vault), so the shared Supabase client + session are available.
 // Loads the workspace from the `pm` schema, hydrates the store, then renders the
@@ -83,6 +109,7 @@ export function PmModule() {
           activeProjectId,
           currentUserId: user.id,
           baselineOrg: ws.baselineOrg,
+          client,
         });
         setPhase("ready");
       } catch (e) {
@@ -112,6 +139,7 @@ export function PmModule() {
           <CurrentView />
         </main>
         <TaskDetailSheet />
+        <WriteErrorToast />
       </div>
     </PmRouterProvider>
   );

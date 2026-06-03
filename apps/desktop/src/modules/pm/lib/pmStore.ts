@@ -15,7 +15,9 @@ import type {
   User,
   Vendor,
 } from "@helios/pm-ui";
+import type { SupabaseClient } from "@helios/auth";
 import { create } from "zustand";
+import * as db from "./mutations";
 
 // Per-project snapshot of the working arrays. The store keeps one of these
 // projected into its flat top-level fields (the active project) so every
@@ -48,6 +50,9 @@ interface HydrateInput {
   activeProjectId: string;
   currentUserId: string;
   baselineOrg: BaselineOrg;
+  // The signed-in Supabase client. Stored so mutations can persist back to the
+  // `pm` schema. Null only in tests / when not signed in (mutations stay local).
+  client: SupabaseClient | null;
 }
 
 // Snapshot the active flat fields back into a ProjectData record.
@@ -111,7 +116,8 @@ function emptyProjectData(org: BaselineOrg): ProjectData {
 
 // --- Browser persistence ----------------------------------------------------
 // Only the projects list (names + created), the active project id, and renames
-// persist. Per-project data edits intentionally do not (seed re-hydrates).
+// persist to localStorage. Per-project data (tasks, vendors, …) now persists to
+// the `pm` schema in Supabase via the mutation actions below.
 
 const ACTIVE_PROJECT_KEY = "helios:activeProject";
 const PROJECTS_KEY = "helios:projects";
@@ -168,10 +174,23 @@ export function readPersistedProjects(): Project[] | null {
   }
 }
 
+// A write that failed to persist — surfaced to the user via a toast, cleared
+// on dismiss or the next successful interaction.
+export interface WriteError {
+  message: string;
+  at: number;
+}
+
 interface PmState {
   hydrated: boolean;
   projectId: string;
   currentUserId: string;
+
+  // The signed-in Supabase client used to persist mutations. Null = local only.
+  client: SupabaseClient | null;
+  // Most recent failed write, for the toast. Null when all is well.
+  lastWriteError: WriteError | null;
+  clearWriteError: () => void;
 
   // Multi-project support. The flat fields below mirror the active project.
   projects: Project[];
@@ -276,287 +295,337 @@ function subteamsForTask(task: TaskRow | undefined): string[] {
   return task ? [task.subteam_id] : [];
 }
 
-export const usePmStore = create<PmState>((set) => ({
-  hydrated: false,
-  projectId: "",
-  currentUserId: "",
-  projects: [],
-  activeProjectId: "",
-  projectData: {},
-  baselineOrg: { subteams: [], subsystems: [], users: [] },
-  tasks: [],
-  subteams: [],
-  subsystems: [],
-  users: [],
-  dependencies: [],
-  milestones: [],
-  pages: [],
-  blocks: [],
-  activity: [],
-  vendors: [],
-  comments: [],
-  buildRecords: [],
-  events: [],
+export const usePmStore = create<PmState>((set, get) => {
+  // Optimistic-write helper. The action has already applied its change to the
+  // store; this fires the matching DB write in the background. If it fails, we
+  // restore the captured pre-image (`rollback`) and surface the error. When
+  // there's no client (tests / signed-out) the change simply stays in memory.
+  function persist(
+    run: (client: SupabaseClient) => Promise<void>,
+    rollback: () => void,
+  ): void {
+    const client = get().client;
+    if (!client) return;
+    void run(client).catch((err: unknown) => {
+      rollback();
+      const message = err instanceof Error ? err.message : String(err);
+      set({ lastWriteError: { message, at: Date.now() } });
+    });
+  }
 
-  selectedTaskId: null,
-  selectTask: (id) => set({ selectedTaskId: id }),
+  return {
+    hydrated: false,
+    projectId: "",
+    currentUserId: "",
+    client: null,
+    lastWriteError: null,
+    clearWriteError: () => set({ lastWriteError: null }),
+    projects: [],
+    activeProjectId: "",
+    projectData: {},
+    baselineOrg: { subteams: [], subsystems: [], users: [] },
+    tasks: [],
+    subteams: [],
+    subsystems: [],
+    users: [],
+    dependencies: [],
+    milestones: [],
+    pages: [],
+    blocks: [],
+    activity: [],
+    vendors: [],
+    comments: [],
+    buildRecords: [],
+    events: [],
 
-  selectedMilestoneId: null,
-  selectMilestone: (id) => set({ selectedMilestoneId: id }),
+    selectedTaskId: null,
+    selectTask: (id) => set({ selectedTaskId: id }),
 
-  dimmedMilestoneIds: new Set<string>(),
-  toggleMilestoneDim: (id) =>
-    set((s) => {
-      const next = new Set(s.dimmedMilestoneIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return { dimmedMilestoneIds: next };
-    }),
+    selectedMilestoneId: null,
+    selectMilestone: (id) => set({ selectedMilestoneId: id }),
 
-  hydrate: (input) =>
-    set(() => {
-      const active =
-        input.projectData[input.activeProjectId] ??
-        emptyProjectData(input.baselineOrg);
-      return {
-        hydrated: true,
-        projectId: input.activeProjectId,
-        activeProjectId: input.activeProjectId,
-        currentUserId: input.currentUserId,
-        projects: input.projects.map((p) => ({ ...p })),
-        projectData: input.projectData,
-        baselineOrg: {
-          subteams: [...input.baselineOrg.subteams],
-          subsystems: [...input.baselineOrg.subsystems],
-          users: [...input.baselineOrg.users],
-        },
-        ...loadFlat(active),
-      };
-    }),
+    dimmedMilestoneIds: new Set<string>(),
+    toggleMilestoneDim: (id) =>
+      set((s) => {
+        const next = new Set(s.dimmedMilestoneIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return { dimmedMilestoneIds: next };
+      }),
 
-  setActiveProject: (id) =>
-    set((s) => {
-      if (id === s.activeProjectId) return {};
-      const target = s.projectData[id];
-      if (!target) return {};
-      const projectData = { ...s.projectData, [s.activeProjectId]: snapshotFlat(s) };
-      persistActiveProject(id);
-      return {
-        projectData,
-        activeProjectId: id,
-        projectId: id,
-        selectedTaskId: null,
-        selectedMilestoneId: null,
-        ...loadFlat(target),
-      };
-    }),
-
-  addProject: (name, description) =>
-    set((s) => {
-      const id = crypto.randomUUID();
-      const project: Project = {
-        id,
-        name: name.trim() || "Untitled project",
-        description: description?.trim() || null,
-      };
-      const data = emptyProjectData(s.baselineOrg);
-      const projects = [...s.projects, project];
-      const projectData = {
-        ...s.projectData,
-        [s.activeProjectId]: snapshotFlat(s),
-        [id]: data,
-      };
-      persistProjects(projects);
-      persistActiveProject(id);
-      return {
-        projects,
-        projectData,
-        activeProjectId: id,
-        projectId: id,
-        selectedTaskId: null,
-        selectedMilestoneId: null,
-        ...loadFlat(data),
-      };
-    }),
-
-  renameProject: (id, patch) =>
-    set((s) => {
-      const projects = s.projects.map((p) =>
-        p.id === id ? { ...p, ...patch } : p,
-      );
-      persistProjects(projects);
-      return { projects };
-    }),
-
-  reconcilePersisted: (persisted) =>
-    set((s) => {
-      let projects = s.projects;
-      let projectData = s.projectData;
-
-      if (persisted.projects && persisted.projects.length > 0) {
-        const nextData: Record<string, ProjectData> = { ...s.projectData };
-        const merged: Project[] = [];
-        const seen = new Set<string>();
-        for (const p of persisted.projects) {
-          merged.push({ id: p.id, name: p.name, description: p.description ?? null });
-          seen.add(p.id);
-          if (!nextData[p.id]) {
-            // User-created project (its data is not persisted) → recreate empty.
-            nextData[p.id] = emptyProjectData(s.baselineOrg);
-          }
-        }
-        // Keep any seed projects missing from the persisted list.
-        for (const p of s.projects) {
-          if (!seen.has(p.id)) merged.push(p);
-        }
-        projects = merged;
-        projectData = nextData;
-      }
-
-      const targetId = persisted.activeProjectId;
-      const target = targetId ? projectData[targetId] : undefined;
-      if (targetId && target && targetId !== s.activeProjectId) {
-        const snapshot = { ...projectData, [s.activeProjectId]: snapshotFlat(s) };
+    hydrate: (input) =>
+      set(() => {
+        const active =
+          input.projectData[input.activeProjectId] ??
+          emptyProjectData(input.baselineOrg);
         return {
-          projects,
-          projectData: snapshot,
-          activeProjectId: targetId,
-          projectId: targetId,
+          hydrated: true,
+          projectId: input.activeProjectId,
+          activeProjectId: input.activeProjectId,
+          currentUserId: input.currentUserId,
+          client: input.client,
+          lastWriteError: null,
+          projects: input.projects.map((p) => ({ ...p })),
+          projectData: input.projectData,
+          baselineOrg: {
+            subteams: [...input.baselineOrg.subteams],
+            subsystems: [...input.baselineOrg.subsystems],
+            users: [...input.baselineOrg.users],
+          },
+          ...loadFlat(active),
+        };
+      }),
+
+    setActiveProject: (id) =>
+      set((s) => {
+        if (id === s.activeProjectId) return {};
+        const target = s.projectData[id];
+        if (!target) return {};
+        const projectData = { ...s.projectData, [s.activeProjectId]: snapshotFlat(s) };
+        persistActiveProject(id);
+        return {
+          projectData,
+          activeProjectId: id,
+          projectId: id,
           selectedTaskId: null,
           selectedMilestoneId: null,
           ...loadFlat(target),
         };
-      }
-
-      return { projects, projectData };
-    }),
-
-  addSubteam: (subteam) =>
-    set((s) => ({
-      subteams: [...s.subteams, subteam],
-      activity: logActivity(s, {
-        action: "created",
-        target_type: "subteam",
-        target_id: subteam.id,
-        target_name: subteam.name,
-        subteam_ids: [subteam.id],
-        payload: { code: subteam.code },
       }),
-    })),
 
-  updateSubteam: (id, patch) =>
-    set((s) => {
-      const current = s.subteams.find((x) => x.id === id);
-      if (!current) return {};
-      const next: Subteam = { ...current, ...patch };
-      return {
-        subteams: s.subteams.map((x) => (x.id === id ? next : x)),
-        // Tasks embed a copy of their subteam — re-embed the updated record.
-        tasks: s.tasks.map((t) =>
-          t.subteam_id === id ? { ...t, subteam: next } : t,
-        ),
-        activity: logActivity(s, {
-          action: "updated",
-          target_type: "subteam",
-          target_id: id,
-          target_name: next.name,
-          subteam_ids: [id],
-          payload: patch,
-        }),
-      };
-    }),
+    // Note: project CREATE has no client RLS insert path on pm.projects, so a
+    // new project lives in localStorage only (re-created empty on next load)
+    // until an admin seeds it server-side. Rename DOES persist (see below).
+    addProject: (name, description) =>
+      set((s) => {
+        const id = crypto.randomUUID();
+        const project: Project = {
+          id,
+          name: name.trim() || "Untitled project",
+          description: description?.trim() || null,
+        };
+        const data = emptyProjectData(s.baselineOrg);
+        const projects = [...s.projects, project];
+        const projectData = {
+          ...s.projectData,
+          [s.activeProjectId]: snapshotFlat(s),
+          [id]: data,
+        };
+        persistProjects(projects);
+        persistActiveProject(id);
+        return {
+          projects,
+          projectData,
+          activeProjectId: id,
+          projectId: id,
+          selectedTaskId: null,
+          selectedMilestoneId: null,
+          ...loadFlat(data),
+        };
+      }),
 
-  deleteSubteam: (id) =>
-    set((s) => {
-      const removed = s.subteams.find((x) => x.id === id);
-      if (!removed) return {};
-      const removedTaskIds = new Set(
-        s.tasks.filter((t) => t.subteam_id === id).map((t) => t.id),
+    renameProject: (id, patch) => {
+      const snap = { projects: get().projects };
+      set((s) => {
+        const projects = s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p));
+        persistProjects(projects);
+        return { projects };
+      });
+      persist(
+        (c) => db.patchProject(c, id, patch),
+        () => {
+          set(snap);
+          persistProjects(snap.projects);
+        },
       );
-      return {
-        subteams: s.subteams.filter((x) => x.id !== id),
-        subsystems: s.subsystems.filter((x) => x.subteam_id !== id),
-        tasks: s.tasks.filter((t) => t.subteam_id !== id),
-        dependencies: s.dependencies.filter(
-          (d) =>
-            !removedTaskIds.has(d.predecessor_id) &&
-            !removedTaskIds.has(d.successor_id),
-        ),
-        pages: s.pages.map((p) =>
-          p.subteam_id === id ? { ...p, subteam_id: null } : p,
-        ),
-        activity: logActivity(s, {
-          action: "deleted",
-          target_type: "subteam",
-          target_id: id,
-          target_name: removed.name,
-          subteam_ids: [id],
-          payload: null,
-        }),
-      };
-    }),
+    },
 
-  addTask: (task) =>
-    set((s) => ({
-      tasks: [task, ...s.tasks],
-      activity: logActivity(s, {
-        action: "created",
-        target_type: "task",
-        target_id: task.id,
-        target_name: task.title,
-        subteam_ids: subteamsForTask(task),
-        payload: { type: task.type },
+    reconcilePersisted: (persisted) =>
+      set((s) => {
+        let projects = s.projects;
+        let projectData = s.projectData;
+
+        if (persisted.projects && persisted.projects.length > 0) {
+          const nextData: Record<string, ProjectData> = { ...s.projectData };
+          const merged: Project[] = [];
+          const seen = new Set<string>();
+          for (const p of persisted.projects) {
+            merged.push({ id: p.id, name: p.name, description: p.description ?? null });
+            seen.add(p.id);
+            if (!nextData[p.id]) {
+              // User-created project (its data is not persisted) → recreate empty.
+              nextData[p.id] = emptyProjectData(s.baselineOrg);
+            }
+          }
+          // Keep any seed projects missing from the persisted list.
+          for (const p of s.projects) {
+            if (!seen.has(p.id)) merged.push(p);
+          }
+          projects = merged;
+          projectData = nextData;
+        }
+
+        const targetId = persisted.activeProjectId;
+        const target = targetId ? projectData[targetId] : undefined;
+        if (targetId && target && targetId !== s.activeProjectId) {
+          const snapshot = { ...projectData, [s.activeProjectId]: snapshotFlat(s) };
+          return {
+            projects,
+            projectData: snapshot,
+            activeProjectId: targetId,
+            projectId: targetId,
+            selectedTaskId: null,
+            selectedMilestoneId: null,
+            ...loadFlat(target),
+          };
+        }
+
+        return { projects, projectData };
       }),
-    })),
 
-  updateTask: (id, patch) =>
-    set((s) => {
-      const current = s.tasks.find((t) => t.id === id);
-      if (!current) return {};
-      const next: TaskRow = { ...current, ...patch };
+    addSubteam: (subteam) => {
+      const snap = { subteams: get().subteams, activity: get().activity };
+      set((s) => ({
+        subteams: [...s.subteams, subteam],
+        activity: logActivity(s, {
+          action: "created",
+          target_type: "subteam",
+          target_id: subteam.id,
+          target_name: subteam.name,
+          subteam_ids: [subteam.id],
+          payload: { code: subteam.code },
+        }),
+      }));
+      persist((c) => db.insertSubteam(c, subteam), () => set(snap));
+    },
 
-      if (patch.subteam_id !== undefined) {
-        const st = s.subteams.find((x) => x.id === patch.subteam_id);
-        if (st) next.subteam = st;
-      }
-      if (patch.subsystem_id !== undefined) {
-        next.subsystem = s.subsystems.find((x) => x.id === patch.subsystem_id) ?? null;
-      }
-      if (patch.owner_id !== undefined) {
-        next.owner = s.users.find((x) => x.id === patch.owner_id) ?? null;
-      }
-
-      const tasks = s.tasks.map((t) => (t.id === id ? next : t));
-
-      const statusChanged =
-        patch.status !== undefined && patch.status !== current.status;
-
-      const activity = statusChanged
-        ? logActivity(s, {
-            action: "status_changed",
-            target_type: "task",
-            target_id: id,
-            target_name: next.title,
-            subteam_ids: subteamsForTask(next),
-            payload: { from: current.status, to: next.status },
-          })
-        : logActivity(s, {
+    updateSubteam: (id, patch) => {
+      const current = get().subteams.find((x) => x.id === id);
+      if (!current) return;
+      const snap = { subteams: get().subteams, tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const next: Subteam = { ...current, ...patch };
+        return {
+          subteams: s.subteams.map((x) => (x.id === id ? next : x)),
+          // Tasks embed a copy of their subteam — re-embed the updated record.
+          tasks: s.tasks.map((t) => (t.subteam_id === id ? { ...t, subteam: next } : t)),
+          activity: logActivity(s, {
             action: "updated",
-            target_type: "task",
+            target_type: "subteam",
             target_id: id,
-            target_name: next.title,
-            subteam_ids: subteamsForTask(next),
+            target_name: next.name,
+            subteam_ids: [id],
             payload: patch,
-          });
+          }),
+        };
+      });
+      persist((c) => db.patchSubteam(c, id, patch), () => set(snap));
+    },
 
-      return { tasks, activity };
-    }),
+    deleteSubteam: (id) => {
+      const removed = get().subteams.find((x) => x.id === id);
+      if (!removed) return;
+      const snap = {
+        subteams: get().subteams,
+        subsystems: get().subsystems,
+        tasks: get().tasks,
+        dependencies: get().dependencies,
+        pages: get().pages,
+        activity: get().activity,
+      };
+      set((s) => {
+        const removedTaskIds = new Set(
+          s.tasks.filter((t) => t.subteam_id === id).map((t) => t.id),
+        );
+        return {
+          subteams: s.subteams.filter((x) => x.id !== id),
+          subsystems: s.subsystems.filter((x) => x.subteam_id !== id),
+          tasks: s.tasks.filter((t) => t.subteam_id !== id),
+          dependencies: s.dependencies.filter(
+            (d) =>
+              !removedTaskIds.has(d.predecessor_id) && !removedTaskIds.has(d.successor_id),
+          ),
+          pages: s.pages.map((p) => (p.subteam_id === id ? { ...p, subteam_id: null } : p)),
+          activity: logActivity(s, {
+            action: "deleted",
+            target_type: "subteam",
+            target_id: id,
+            target_name: removed.name,
+            subteam_ids: [id],
+            payload: null,
+          }),
+        };
+      });
+      persist((c) => db.removeSubteam(c, id), () => set(snap));
+    },
 
-  deleteTask: (id) =>
-    set((s) => {
-      const removed = s.tasks.find((t) => t.id === id);
-      if (!removed) return {};
-      return {
+    addTask: (task) => {
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => ({
+        tasks: [task, ...s.tasks],
+        activity: logActivity(s, {
+          action: "created",
+          target_type: "task",
+          target_id: task.id,
+          target_name: task.title,
+          subteam_ids: subteamsForTask(task),
+          payload: { type: task.type },
+        }),
+      }));
+      persist((c) => db.insertTask(c, task), () => set(snap));
+    },
+
+    updateTask: (id, patch) => {
+      const current = get().tasks.find((t) => t.id === id);
+      if (!current) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const next: TaskRow = { ...current, ...patch };
+
+        if (patch.subteam_id !== undefined) {
+          const st = s.subteams.find((x) => x.id === patch.subteam_id);
+          if (st) next.subteam = st;
+        }
+        if (patch.subsystem_id !== undefined) {
+          next.subsystem = s.subsystems.find((x) => x.id === patch.subsystem_id) ?? null;
+        }
+        if (patch.owner_id !== undefined) {
+          next.owner = s.users.find((x) => x.id === patch.owner_id) ?? null;
+        }
+
+        const tasks = s.tasks.map((t) => (t.id === id ? next : t));
+
+        const statusChanged =
+          patch.status !== undefined && patch.status !== current.status;
+
+        const activity = statusChanged
+          ? logActivity(s, {
+              action: "status_changed",
+              target_type: "task",
+              target_id: id,
+              target_name: next.title,
+              subteam_ids: subteamsForTask(next),
+              payload: { from: current.status, to: next.status },
+            })
+          : logActivity(s, {
+              action: "updated",
+              target_type: "task",
+              target_id: id,
+              target_name: next.title,
+              subteam_ids: subteamsForTask(next),
+              payload: patch,
+            });
+
+        return { tasks, activity };
+      });
+      persist((c) => db.patchTask(c, id, patch), () => set(snap));
+    },
+
+    deleteTask: (id) => {
+      const removed = get().tasks.find((t) => t.id === id);
+      if (!removed) return;
+      const snap = { tasks: get().tasks, dependencies: get().dependencies, activity: get().activity };
+      set((s) => ({
         tasks: s.tasks.filter((t) => t.id !== id),
         dependencies: s.dependencies.filter(
           (d) => d.predecessor_id !== id && d.successor_id !== id,
@@ -569,115 +638,125 @@ export const usePmStore = create<PmState>((set) => ({
           subteam_ids: subteamsForTask(removed),
           payload: null,
         }),
-      };
-    }),
+      }));
+      persist((c) => db.removeTask(c, id), () => set(snap));
+    },
 
-  addDependency: (dep) =>
-    set((s) => {
-      if (dep.predecessor_id === dep.successor_id) return {};
-      const exists = s.dependencies.some(
-        (d) =>
-          d.predecessor_id === dep.predecessor_id &&
-          d.successor_id === dep.successor_id,
+    addDependency: (dep) => {
+      if (dep.predecessor_id === dep.successor_id) return;
+      const deps = get().dependencies;
+      const exists = deps.some(
+        (d) => d.predecessor_id === dep.predecessor_id && d.successor_id === dep.successor_id,
       );
-      if (exists) return {};
-      const reverseExists = s.dependencies.some(
-        (d) =>
-          d.predecessor_id === dep.successor_id &&
-          d.successor_id === dep.predecessor_id,
+      if (exists) return;
+      const reverseExists = deps.some(
+        (d) => d.predecessor_id === dep.successor_id && d.successor_id === dep.predecessor_id,
       );
-      if (reverseExists) return {};
+      if (reverseExists) return;
 
-      const pred = s.tasks.find((t) => t.id === dep.predecessor_id);
-      const succ = s.tasks.find((t) => t.id === dep.successor_id);
-      const teams = new Set<string>();
-      if (pred) teams.add(pred.subteam_id);
-      if (succ) teams.add(succ.subteam_id);
+      const snap = { dependencies: get().dependencies, activity: get().activity };
+      set((s) => {
+        const pred = s.tasks.find((t) => t.id === dep.predecessor_id);
+        const succ = s.tasks.find((t) => t.id === dep.successor_id);
+        const teams = new Set<string>();
+        if (pred) teams.add(pred.subteam_id);
+        if (succ) teams.add(succ.subteam_id);
 
-      return {
-        dependencies: [...s.dependencies, dep],
-        activity: logActivity(s, {
-          action: "linked",
-          target_type: "task_dependency",
-          target_id: dep.successor_id,
-          target_name: succ ? succ.title : null,
-          subteam_ids: [...teams],
-          payload: { predecessor: pred?.title ?? null },
-        }),
-      };
-    }),
+        return {
+          dependencies: [...s.dependencies, dep],
+          activity: logActivity(s, {
+            action: "linked",
+            target_type: "task_dependency",
+            target_id: dep.successor_id,
+            target_name: succ ? succ.title : null,
+            subteam_ids: [...teams],
+            payload: { predecessor: pred?.title ?? null },
+          }),
+        };
+      });
+      persist((c) => db.insertDependency(c, dep), () => set(snap));
+    },
 
-  removeDependency: (predecessorId, successorId) =>
-    set((s) => {
-      const exists = s.dependencies.some(
-        (d) =>
-          d.predecessor_id === predecessorId && d.successor_id === successorId,
+    removeDependency: (predecessorId, successorId) => {
+      const exists = get().dependencies.some(
+        (d) => d.predecessor_id === predecessorId && d.successor_id === successorId,
       );
-      if (!exists) return {};
-      const pred = s.tasks.find((t) => t.id === predecessorId);
-      const succ = s.tasks.find((t) => t.id === successorId);
-      const teams = new Set<string>();
-      if (pred) teams.add(pred.subteam_id);
-      if (succ) teams.add(succ.subteam_id);
-      return {
-        dependencies: s.dependencies.filter(
-          (d) =>
-            !(d.predecessor_id === predecessorId && d.successor_id === successorId),
+      if (!exists) return;
+      const snap = { dependencies: get().dependencies, activity: get().activity };
+      set((s) => {
+        const pred = s.tasks.find((t) => t.id === predecessorId);
+        const succ = s.tasks.find((t) => t.id === successorId);
+        const teams = new Set<string>();
+        if (pred) teams.add(pred.subteam_id);
+        if (succ) teams.add(succ.subteam_id);
+        return {
+          dependencies: s.dependencies.filter(
+            (d) => !(d.predecessor_id === predecessorId && d.successor_id === successorId),
+          ),
+          activity: logActivity(s, {
+            action: "unlinked",
+            target_type: "task_dependency",
+            target_id: successorId,
+            target_name: succ ? succ.title : null,
+            subteam_ids: [...teams],
+            payload: { predecessor: pred?.title ?? null },
+          }),
+        };
+      });
+      persist((c) => db.removeDependency(c, predecessorId, successorId), () => set(snap));
+    },
+
+    // Pages/blocks have no live desktop UI yet (ComingSoon), so block edits stay
+    // in memory; wire db.* here when the Pages editor ships.
+    updateBlock: (id, patch) =>
+      set((s) => ({
+        blocks: s.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      })),
+
+    addMilestone: (m) => {
+      const snap = { milestones: get().milestones, activity: get().activity };
+      set((s) => ({
+        milestones: [...s.milestones, m].sort((a, b) =>
+          a.target_date.localeCompare(b.target_date),
         ),
         activity: logActivity(s, {
-          action: "unlinked",
-          target_type: "task_dependency",
-          target_id: successorId,
-          target_name: succ ? succ.title : null,
-          subteam_ids: [...teams],
-          payload: { predecessor: pred?.title ?? null },
-        }),
-      };
-    }),
-
-  updateBlock: (id, patch) =>
-    set((s) => ({
-      blocks: s.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
-    })),
-
-  addMilestone: (m) =>
-    set((s) => ({
-      milestones: [...s.milestones, m].sort((a, b) =>
-        a.target_date.localeCompare(b.target_date),
-      ),
-      activity: logActivity(s, {
-        action: "created",
-        target_type: "milestone",
-        target_id: m.id,
-        target_name: m.name,
-        subteam_ids: [],
-        payload: { date: m.target_date, type: m.type },
-      }),
-    })),
-
-  updateMilestone: (id, patch) =>
-    set((s) => {
-      const current = s.milestones.find((x) => x.id === id);
-      if (!current) return {};
-      const next = { ...current, ...patch };
-      return {
-        milestones: s.milestones.map((m) => (m.id === id ? next : m)),
-        activity: logActivity(s, {
-          action: "updated",
+          action: "created",
           target_type: "milestone",
-          target_id: id,
-          target_name: next.name,
+          target_id: m.id,
+          target_name: m.name,
           subteam_ids: [],
-          payload: patch,
+          payload: { date: m.target_date, type: m.type },
         }),
-      };
-    }),
+      }));
+      persist((c) => db.insertMilestone(c, m), () => set(snap));
+    },
 
-  deleteMilestone: (id) =>
-    set((s) => {
-      const removed = s.milestones.find((x) => x.id === id);
-      if (!removed) return {};
-      return {
+    updateMilestone: (id, patch) => {
+      const current = get().milestones.find((x) => x.id === id);
+      if (!current) return;
+      const snap = { milestones: get().milestones, activity: get().activity };
+      set((s) => {
+        const next = { ...current, ...patch };
+        return {
+          milestones: s.milestones.map((m) => (m.id === id ? next : m)),
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "milestone",
+            target_id: id,
+            target_name: next.name,
+            subteam_ids: [],
+            payload: patch,
+          }),
+        };
+      });
+      persist((c) => db.patchMilestone(c, id, patch), () => set(snap));
+    },
+
+    deleteMilestone: (id) => {
+      const removed = get().milestones.find((x) => x.id === id);
+      if (!removed) return;
+      const snap = { milestones: get().milestones, activity: get().activity };
+      set((s) => ({
         milestones: s.milestones.filter((m) => m.id !== id),
         activity: logActivity(s, {
           action: "deleted",
@@ -687,47 +766,54 @@ export const usePmStore = create<PmState>((set) => ({
           subteam_ids: [],
           payload: null,
         }),
-      };
-    }),
+      }));
+      persist((c) => db.removeMilestone(c, id), () => set(snap));
+    },
 
-  addVendor: (v) =>
-    set((s) => ({
-      vendors: [...s.vendors, v].sort((a, b) => a.name.localeCompare(b.name)),
-      activity: logActivity(s, {
-        action: "created",
-        target_type: "vendor",
-        target_id: v.id,
-        target_name: v.name,
-        subteam_ids: [],
-        payload: { category: v.category },
-      }),
-    })),
-
-  updateVendor: (id, patch) =>
-    set((s) => {
-      const current = s.vendors.find((x) => x.id === id);
-      if (!current) return {};
-      const next = { ...current, ...patch };
-      return {
-        vendors: s.vendors
-          .map((v) => (v.id === id ? next : v))
-          .sort((a, b) => a.name.localeCompare(b.name)),
+    addVendor: (v) => {
+      const snap = { vendors: get().vendors, activity: get().activity };
+      set((s) => ({
+        vendors: [...s.vendors, v].sort((a, b) => a.name.localeCompare(b.name)),
         activity: logActivity(s, {
-          action: "updated",
+          action: "created",
           target_type: "vendor",
-          target_id: id,
-          target_name: next.name,
+          target_id: v.id,
+          target_name: v.name,
           subteam_ids: [],
-          payload: patch,
+          payload: { category: v.category },
         }),
-      };
-    }),
+      }));
+      persist((c) => db.insertVendor(c, v), () => set(snap));
+    },
 
-  deleteVendor: (id) =>
-    set((s) => {
-      const removed = s.vendors.find((x) => x.id === id);
-      if (!removed) return {};
-      return {
+    updateVendor: (id, patch) => {
+      const current = get().vendors.find((x) => x.id === id);
+      if (!current) return;
+      const snap = { vendors: get().vendors, activity: get().activity };
+      set((s) => {
+        const next = { ...current, ...patch };
+        return {
+          vendors: s.vendors
+            .map((v) => (v.id === id ? next : v))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "vendor",
+            target_id: id,
+            target_name: next.name,
+            subteam_ids: [],
+            payload: patch,
+          }),
+        };
+      });
+      persist((c) => db.patchVendor(c, id, patch), () => set(snap));
+    },
+
+    deleteVendor: (id) => {
+      const removed = get().vendors.find((x) => x.id === id);
+      if (!removed) return;
+      const snap = { vendors: get().vendors, activity: get().activity };
+      set((s) => ({
         vendors: s.vendors.filter((v) => v.id !== id),
         activity: logActivity(s, {
           action: "deleted",
@@ -737,78 +823,103 @@ export const usePmStore = create<PmState>((set) => ({
           subteam_ids: [],
           payload: null,
         }),
-      };
-    }),
+      }));
+      persist((c) => db.removeVendor(c, id), () => set(snap));
+    },
 
-  addComment: (c) =>
-    set((s) => ({ comments: [c, ...s.comments] })),
+    addComment: (c) => {
+      const snap = { comments: get().comments };
+      set((s) => ({ comments: [c, ...s.comments] }));
+      persist((client) => db.insertComment(client, c), () => set(snap));
+    },
 
-  deleteComment: (id) =>
-    set((s) => ({ comments: s.comments.filter((c) => c.id !== id) })),
+    deleteComment: (id) => {
+      const snap = { comments: get().comments };
+      set((s) => ({ comments: s.comments.filter((c) => c.id !== id) }));
+      persist((client) => db.removeComment(client, id), () => set(snap));
+    },
 
-  addEvent: (e) =>
-    set((s) => ({
-      events: [...s.events, e].sort((a, b) => a.date.localeCompare(b.date)),
-    })),
+    addEvent: (e) => {
+      const snap = { events: get().events };
+      set((s) => ({
+        events: [...s.events, e].sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+      persist((c) => db.insertEvent(c, e), () => set(snap));
+    },
 
-  updateEvent: (id, patch) =>
-    set((s) => ({
-      events: s.events
-        .map((e) => (e.id === id ? { ...e, ...patch } : e))
-        .sort((a, b) => a.date.localeCompare(b.date)),
-    })),
+    updateEvent: (id, patch) => {
+      const snap = { events: get().events };
+      set((s) => ({
+        events: s.events
+          .map((e) => (e.id === id ? { ...e, ...patch } : e))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+      persist((c) => db.patchEvent(c, id, patch), () => set(snap));
+    },
 
-  deleteEvent: (id) =>
-    set((s) => ({ events: s.events.filter((e) => e.id !== id) })),
+    deleteEvent: (id) => {
+      const snap = { events: get().events };
+      set((s) => ({ events: s.events.filter((e) => e.id !== id) }));
+      persist((c) => db.removeEvent(c, id), () => set(snap));
+    },
 
-  updateBuildRecord: (taskId, patch) =>
-    set((s) => {
-      const exists = s.buildRecords.some((b) => b.task_id === taskId);
-      const buildRecords = exists
-        ? s.buildRecords.map((b) => (b.task_id === taskId ? { ...b, ...patch } : b))
-        : [
-            ...s.buildRecords,
-            {
-              task_id: taskId,
-              part_file: null,
-              drawing_file: null,
-              drawing_review: "not_submitted" as DrawingReview,
-              ...patch,
-            },
-          ];
-      return { buildRecords };
-    }),
+    updateBuildRecord: (taskId, patch) => {
+      const snap = { buildRecords: get().buildRecords };
+      set((s) => {
+        const exists = s.buildRecords.some((b) => b.task_id === taskId);
+        const buildRecords = exists
+          ? s.buildRecords.map((b) => (b.task_id === taskId ? { ...b, ...patch } : b))
+          : [
+              ...s.buildRecords,
+              {
+                task_id: taskId,
+                part_file: null,
+                drawing_file: null,
+                drawing_review: "not_submitted" as DrawingReview,
+                ...patch,
+              },
+            ];
+        return { buildRecords };
+      });
+      const record = get().buildRecords.find((b) => b.task_id === taskId);
+      if (record) persist((c) => db.upsertBuildRecord(c, taskId, record), () => set(snap));
+    },
 
-  reviewDrawing: (taskId, review) =>
-    set((s) => {
-      const task = s.tasks.find((t) => t.id === taskId);
-      const exists = s.buildRecords.some((b) => b.task_id === taskId);
-      const buildRecords = exists
-        ? s.buildRecords.map((b) =>
-            b.task_id === taskId ? { ...b, drawing_review: review } : b,
-          )
-        : [
-            ...s.buildRecords,
-            {
-              task_id: taskId,
-              part_file: null,
-              drawing_file: null,
-              drawing_review: review,
-            },
-          ];
-      return {
-        buildRecords,
-        activity: logActivity(s, {
-          action: "reviewed",
-          target_type: "task",
-          target_id: taskId,
-          target_name: task ? task.title : null,
-          subteam_ids: subteamsForTask(task),
-          payload: { drawing_review: review },
-        }),
-      };
-    }),
-}));
+    reviewDrawing: (taskId, review) => {
+      const snap = { buildRecords: get().buildRecords, activity: get().activity };
+      set((s) => {
+        const task = s.tasks.find((t) => t.id === taskId);
+        const exists = s.buildRecords.some((b) => b.task_id === taskId);
+        const buildRecords = exists
+          ? s.buildRecords.map((b) =>
+              b.task_id === taskId ? { ...b, drawing_review: review } : b,
+            )
+          : [
+              ...s.buildRecords,
+              {
+                task_id: taskId,
+                part_file: null,
+                drawing_file: null,
+                drawing_review: review,
+              },
+            ];
+        return {
+          buildRecords,
+          activity: logActivity(s, {
+            action: "reviewed",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task ? task.title : null,
+            subteam_ids: subteamsForTask(task),
+            payload: { drawing_review: review },
+          }),
+        };
+      });
+      const record = get().buildRecords.find((b) => b.task_id === taskId);
+      if (record) persist((c) => db.upsertBuildRecord(c, taskId, record), () => set(snap));
+    },
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers used by the per-subteam view scope rule:
