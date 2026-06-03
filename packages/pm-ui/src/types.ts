@@ -174,7 +174,12 @@ export const task = z.object({
 export type Task = z.infer<typeof task>;
 
 export const taskRow = task.extend({
+  // The PRIMARY subteam (mirrors subteam_id). Unchanged semantics so every
+  // existing single-chip view keeps reading `subteam`/`subteam_id`.
   subteam: subteam,
+  // The FULL membership list (primary first). A task can belong to multiple
+  // subteams; the first entry is always the primary (id === subteam_id).
+  subteams: z.array(subteam),
   subsystem: subsystem.nullable(),
   owner: user.nullable(),
 });

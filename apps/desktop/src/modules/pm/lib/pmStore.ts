@@ -356,6 +356,11 @@ interface PmState {
   ) => void;
   deleteTask: (id: string) => void;
 
+  // Multi-subteam membership mutations
+  addTaskSubteam: (taskId: string, subteamId: string) => void;
+  removeTaskSubteam: (taskId: string, subteamId: string) => void;
+  setPrimarySubteam: (taskId: string, subteamId: string) => void;
+
   // Dependency mutations
   addDependency: (dep: TaskDependency) => void;
   removeDependency: (predecessorId: string, successorId: string) => void;
@@ -401,8 +406,13 @@ function logActivity(
   return [entry, ...state.activity].slice(0, 250);
 }
 
+// All subteam ids a task is tagged to (every membership, not just the primary)
+// so activity entries surface in EVERY member team's feed. Falls back to the
+// primary subteam_id if the membership list is somehow empty.
 function subteamsForTask(task: TaskRow | undefined): string[] {
-  return task ? [task.subteam_id] : [];
+  if (!task) return [];
+  const ids = (task.subteams ?? []).map((s) => s.id);
+  return ids.length > 0 ? ids : [task.subteam_id];
 }
 
 // Shared re-embed logic used by BOTH updateTask and bulkUpdateTasks so the two
@@ -419,6 +429,17 @@ function embedTaskPatch(
   if (patch.subteam_id !== undefined) {
     const st = state.subteams.find((x) => x.id === patch.subteam_id);
     if (st) next.subteam = st;
+    // Keep the denormalized membership list aligned with the primary mirror: a
+    // direct subteam_id move (bulk "move to team") re-homes the PRIMARY slot.
+    // Replace the old primary entry with the new subteam (or prepend it if it
+    // wasn't already a member) and keep it primary-first. Mirrors the DB trigger
+    // that re-syncs task_subteams' is_primary when subteam_id changes.
+    if (st && patch.subteam_id !== current.subteam_id) {
+      const rest = (current.subteams ?? []).filter(
+        (s) => s.id !== current.subteam_id && s.id !== st.id,
+      );
+      next.subteams = [st, ...rest];
+    }
     // A subsystem belongs to its old subteam, so a real team move drops it —
     // unless the same patch explicitly assigns a new subsystem_id.
     if (patch.subteam_id !== current.subteam_id && patch.subsystem_id === undefined) {
@@ -751,17 +772,61 @@ export const usePmStore = create<PmState>((set, get) => {
         pages: get().pages,
         activity: get().activity,
       };
+
+      // Partition tasks that touch the doomed subteam into:
+      //  - SOLE: the subteam is their only membership → hard-delete the task.
+      //  - REASSIGN: co-owned AND the subteam was the PRIMARY → promote another
+      //    membership to primary (re-homes tasks.subteam_id off the FK target).
+      //  - DEMEMBER: co-owned, non-primary → just drop the membership.
+      const tasksNow = get().tasks;
+      const memberOf = (t: TaskRow) =>
+        (t.subteams ?? []).length > 0
+          ? t.subteams.some((s) => s.id === id)
+          : t.subteam_id === id;
+      const soleTaskIds = new Set<string>();
+      const reassign: Array<{ taskId: string; newPrimaryId: string }> = [];
+      const demember: string[] = []; // co-owned task ids losing this membership
+      for (const t of tasksNow) {
+        if (!memberOf(t)) continue;
+        const members = (t.subteams ?? []).length > 0 ? t.subteams : [t.subteam];
+        const survivors = members.filter((s) => s.id !== id);
+        if (survivors.length === 0) {
+          soleTaskIds.add(t.id);
+        } else {
+          demember.push(t.id);
+          if (t.subteam_id === id) {
+            reassign.push({ taskId: t.id, newPrimaryId: survivors[0]!.id });
+          }
+        }
+      }
+
       set((s) => {
-        const removedTaskIds = new Set(
-          s.tasks.filter((t) => t.subteam_id === id).map((t) => t.id),
-        );
+        const tasks = s.tasks
+          // 1. Drop sole-membership tasks outright.
+          .filter((t) => !soleTaskIds.has(t.id))
+          // 2. Update surviving co-owned tasks: strip the membership and, if it
+          //    was the primary, promote the first survivor.
+          .map((t) => {
+            if (soleTaskIds.has(t.id) || !memberOf(t)) return t;
+            const members = (t.subteams ?? []).length > 0 ? t.subteams : [t.subteam];
+            const survivors = members.filter((x) => x.id !== id);
+            if (t.subteam_id === id) {
+              const promoted = survivors[0]!;
+              return {
+                ...t,
+                subteam_id: promoted.id,
+                subteam: promoted,
+                subteams: survivors,
+              };
+            }
+            return { ...t, subteams: survivors };
+          });
         return {
           subteams: s.subteams.filter((x) => x.id !== id),
           subsystems: s.subsystems.filter((x) => x.subteam_id !== id),
-          tasks: s.tasks.filter((t) => t.subteam_id !== id),
+          tasks,
           dependencies: s.dependencies.filter(
-            (d) =>
-              !removedTaskIds.has(d.predecessor_id) && !removedTaskIds.has(d.successor_id),
+            (d) => !soleTaskIds.has(d.predecessor_id) && !soleTaskIds.has(d.successor_id),
           ),
           pages: s.pages.map((p) => (p.subteam_id === id ? { ...p, subteam_id: null } : p)),
           activity: logActivity(s, {
@@ -774,23 +839,61 @@ export const usePmStore = create<PmState>((set, get) => {
           }),
         };
       });
-      persist((c) => db.removeSubteam(c, id), () => set(snap));
+
+      // Persist order is FK-critical: reassign tasks.subteam_id OFF the doomed
+      // subteam BEFORE removeSubteam (the tasks.subteam_id → subteams FK would
+      // otherwise block the delete). The DB cascade clears task_subteams rows on
+      // subteam delete, but we also explicitly drop the doomed membership from
+      // surviving tasks so the join state is deterministic. Sole-membership tasks
+      // are hard-deleted (which removes their join + dependency rows too).
+      persist(
+        async (c) => {
+          for (const r of reassign) {
+            await db.setPrimarySubteam(c, r.taskId, r.newPrimaryId);
+          }
+          for (const taskId of demember) {
+            await db.removeTaskSubteam(c, taskId, id);
+          }
+          for (const taskId of soleTaskIds) {
+            await db.removeTask(c, taskId);
+          }
+          await db.removeSubteam(c, id);
+        },
+        () => set(snap),
+      );
     },
 
     addTask: (task) => {
+      // Every task carries at least its primary subteam in the membership list.
+      // The dialog may pass `subteams`; default to [primary] so the new row is
+      // valid for scoping/activity even before any additional membership writes.
+      const seeded: TaskRow = {
+        ...task,
+        subteams:
+          task.subteams && task.subteams.length > 0 ? task.subteams : [task.subteam],
+      };
       const snap = { tasks: get().tasks, activity: get().activity };
       set((s) => ({
-        tasks: [task, ...s.tasks],
+        tasks: [seeded, ...s.tasks],
         activity: logActivity(s, {
           action: "created",
           target_type: "task",
-          target_id: task.id,
-          target_name: task.title,
-          subteam_ids: subteamsForTask(task),
-          payload: { type: task.type },
+          target_id: seeded.id,
+          target_name: seeded.title,
+          subteam_ids: subteamsForTask(seeded),
+          payload: { type: seeded.type },
         }),
       }));
-      persist((c) => db.insertTask(c, task), () => set(snap));
+      // The DB auto-seeds the PRIMARY membership from subteam_id on INSERT, so we
+      // only persist any ADDITIONAL memberships the task was created with.
+      const extras = seeded.subteams.filter((s) => s.id !== seeded.subteam_id);
+      persist(
+        async (c) => {
+          await db.insertTask(c, seeded);
+          for (const st of extras) await db.insertTaskSubteam(c, seeded.id, st.id);
+        },
+        () => set(snap),
+      );
     },
 
     updateTask: (id, patch, opts) => {
@@ -917,6 +1020,99 @@ export const usePmStore = create<PmState>((set, get) => {
         }),
       }));
       persist((c) => db.removeTask(c, id), () => set(snap));
+    },
+
+    addTaskSubteam: (taskId, subteamId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      // Already a member → no-op (don't double-insert, which the unique PK rejects).
+      if ((task.subteams ?? []).some((s) => s.id === subteamId)) return;
+      // Resolve the Subteam record from the active org (fall back to baseline).
+      const st =
+        get().subteams.find((x) => x.id === subteamId) ??
+        get().baselineOrg.subteams.find((x) => x.id === subteamId);
+      if (!st) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) =>
+          t.id === taskId ? { ...t, subteams: [...(t.subteams ?? [task.subteam]), st] } : t,
+        );
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: [subteamId],
+            payload: { added_subteam: subteamId },
+          }),
+        };
+      });
+      persist((c) => db.insertTaskSubteam(c, taskId, subteamId), () => set(snap));
+    },
+
+    removeTaskSubteam: (taskId, subteamId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      // GUARD: the primary membership can never be removed directly — reassign
+      // the primary first (via setPrimarySubteam) and then remove.
+      if (subteamId === task.subteam_id) return;
+      if (!(task.subteams ?? []).some((s) => s.id === subteamId)) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) =>
+          t.id === taskId
+            ? { ...t, subteams: (t.subteams ?? []).filter((x) => x.id !== subteamId) }
+            : t,
+        );
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: [subteamId],
+            payload: { removed_subteam: subteamId },
+          }),
+        };
+      });
+      persist((c) => db.removeTaskSubteam(c, taskId, subteamId), () => set(snap));
+    },
+
+    setPrimarySubteam: (taskId, subteamId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      // Must already be a membership — promotion only flips an existing member to
+      // primary; it never adds a brand-new team (use addTaskSubteam for that).
+      if (!(task.subteams ?? []).some((s) => s.id === subteamId)) return;
+      if (subteamId === task.subteam_id) return; // already primary — no-op
+      const st =
+        get().subteams.find((x) => x.id === subteamId) ??
+        get().baselineOrg.subteams.find((x) => x.id === subteamId);
+      if (!st) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          // Reorder primary-first and re-home the embedded primary subteam/id.
+          const rest = (t.subteams ?? []).filter((x) => x.id !== subteamId);
+          return { ...t, subteam_id: subteamId, subteam: st, subteams: [st, ...rest] };
+        });
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: [subteamId],
+            payload: { primary_subteam: subteamId },
+          }),
+        };
+      });
+      persist((c) => db.setPrimarySubteam(c, taskId, subteamId), () => set(snap));
     },
 
     addDependency: (dep) => {
@@ -1220,12 +1416,20 @@ export function scopeTasksToSubteam(
   dependencies: ReadonlyArray<TaskDependency>,
   subteamId: string,
 ): ScopedTask[] {
-  const ownedIds = new Set(tasks.filter((t) => t.subteam_id === subteamId).map((t) => t.id));
+  // A task is "owned" by a subteam if that subteam is ANY of its memberships,
+  // not just the primary. A multi-subteam task therefore appears as owned in
+  // EVERY member team's scoped view. Falls back to the primary subteam_id for
+  // tasks that somehow carry no membership list.
+  const isMember = (t: TaskRow): boolean =>
+    (t.subteams ?? []).length > 0
+      ? t.subteams.some((s) => s.id === subteamId)
+      : t.subteam_id === subteamId;
+  const ownedIds = new Set(tasks.filter(isMember).map((t) => t.id));
 
   const out = new Map<string, ScopedTask>();
   // Own tasks first
   for (const t of tasks) {
-    if (t.subteam_id === subteamId) {
+    if (isMember(t)) {
       out.set(t.id, { task: t, relation: "owned", bridgeTaskIds: [] });
     }
   }

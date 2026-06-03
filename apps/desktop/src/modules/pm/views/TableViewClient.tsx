@@ -32,6 +32,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
   EMPTY_FILTERS,
@@ -573,13 +574,8 @@ function RowFragment({
           <TypeBadge type={task.type} />
         </td>
         <td className="px-3 py-2">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2 rounded-full"
-              style={{ backgroundColor: task.subteam.color ?? "#6B7280" }}
-            />
-            {task.subteam.name}
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <TaskSubteamChips task={task} />
             {task.subsystem ? (
               <span className="text-helios-dim">· {task.subsystem.name}</span>
             ) : null}

@@ -87,6 +87,55 @@ export async function batchPatchTasks(
   );
 }
 
+// --- Task ↔ subteam memberships ---------------------------------------------
+// A task can belong to multiple subteams. `pm.task_subteams` is the join table;
+// `pm.tasks.subteam_id` stays the denormalized PRIMARY mirror, kept in sync by
+// DB triggers. The client only ever writes ADDITIONAL (non-primary) memberships
+// — the primary membership is auto-seeded on task INSERT. Flipping the primary
+// goes through the `set_task_primary_subteam` RPC, which moves the is_primary
+// flag (and re-syncs subteam_id) atomically.
+
+export async function insertTaskSubteam(
+  client: SupabaseClient,
+  taskId: string,
+  subteamId: string,
+): Promise<void> {
+  check(
+    await pm(client)
+      .from("task_subteams")
+      .insert({ task_id: taskId, subteam_id: subteamId, is_primary: false }),
+    "add task subteam",
+  );
+}
+
+export async function removeTaskSubteam(
+  client: SupabaseClient,
+  taskId: string,
+  subteamId: string,
+): Promise<void> {
+  check(
+    await pm(client)
+      .from("task_subteams")
+      .delete()
+      .eq("task_id", taskId)
+      .eq("subteam_id", subteamId),
+    "remove task subteam",
+  );
+}
+
+export async function setPrimarySubteam(
+  client: SupabaseClient,
+  taskId: string,
+  subteamId: string,
+): Promise<void> {
+  check(
+    await client
+      .schema("pm")
+      .rpc("set_task_primary_subteam", { p_task_id: taskId, p_subteam_id: subteamId }),
+    "set primary subteam",
+  );
+}
+
 // --- Dependencies -----------------------------------------------------------
 
 export async function insertDependency(

@@ -17,6 +17,7 @@ import {
   insertMilestone,
   insertSubteam,
   insertTask,
+  insertTaskSubteam,
   insertVendor,
   patchEvent,
   patchMilestone,
@@ -30,7 +31,9 @@ import {
   removeMilestone,
   removeSubteam,
   removeTask,
+  removeTaskSubteam,
   removeVendor,
+  setPrimarySubteam,
   upsertBuildRecord,
 } from "../mutations";
 
@@ -45,10 +48,20 @@ interface Recorded {
   ins: Array<[string, unknown]>;
 }
 
+// `.rpc(name, args)` calls recorded separately from table writes (the RPC path
+// hangs off client.schema(s).rpc(...), not .from()).
+interface RecordedRpc {
+  schema: string;
+  name: string;
+  args: unknown;
+}
+
 // A chainable recorder that mimics the slice of supabase-js the write layer
-// uses: client.schema(s).from(t).insert/update/upsert/delete(...).eq(...).
+// uses: client.schema(s).from(t).insert/update/upsert/delete(...).eq(...) and
+// client.schema(s).rpc(name, args).
 function makeClient(error: { message: string } | null = null) {
   const calls: Recorded[] = [];
+  const rpcs: RecordedRpc[] = [];
   function table(schema: string, table: string) {
     function start(op: Recorded["op"], payload?: unknown, opts?: unknown) {
       const rec: Recorded = { schema, table, op, payload, opts, eqs: [], ins: [] };
@@ -75,10 +88,22 @@ function makeClient(error: { message: string } | null = null) {
       delete: () => start("delete"),
     };
   }
+  function rpc(schema: string, name: string, args: unknown) {
+    const thenable = {
+      then<R>(onF: (v: { data: null; error: typeof error }) => R) {
+        rpcs.push({ schema, name, args });
+        return Promise.resolve({ data: null, error }).then(onF);
+      },
+    };
+    return thenable;
+  }
   const client = {
-    schema: (s: string) => ({ from: (t: string) => table(s, t) }),
+    schema: (s: string) => ({
+      from: (t: string) => table(s, t),
+      rpc: (name: string, args: unknown) => rpc(s, name, args),
+    }),
   } as unknown as SupabaseClient;
-  return { client, calls };
+  return { client, calls, rpcs };
 }
 
 const SUBTEAM: Subteam = {
@@ -163,6 +188,57 @@ describe("task mutations", () => {
     const { client } = makeClient({ message: "permission denied for table tasks" });
     await expect(batchPatchTasks(client, ["t1"], { status: "done" })).rejects.toThrow(
       /update tasks: permission denied/,
+    );
+  });
+});
+
+describe("task ↔ subteam membership mutations", () => {
+  test("insertTaskSubteam inserts a non-primary membership row", async () => {
+    const { client, calls } = makeClient();
+    await insertTaskSubteam(client, "t1", "st2");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!).toMatchObject({ schema: "pm", table: "task_subteams", op: "insert" });
+    expect(calls[0]!.payload).toEqual({
+      task_id: "t1",
+      subteam_id: "st2",
+      is_primary: false,
+    });
+  });
+
+  test("removeTaskSubteam deletes scoped by both task_id and subteam_id", async () => {
+    const { client, calls } = makeClient();
+    await removeTaskSubteam(client, "t1", "st2");
+    expect(calls[0]!).toMatchObject({ table: "task_subteams", op: "delete" });
+    expect(calls[0]!.eqs).toEqual([
+      ["task_id", "t1"],
+      ["subteam_id", "st2"],
+    ]);
+  });
+
+  test("setPrimarySubteam calls the pm.set_task_primary_subteam RPC with the right args", async () => {
+    const { client, rpcs, calls } = makeClient();
+    await setPrimarySubteam(client, "t1", "st2");
+    // It's an RPC, not a table write.
+    expect(calls).toHaveLength(0);
+    expect(rpcs).toHaveLength(1);
+    expect(rpcs[0]!).toEqual({
+      schema: "pm",
+      name: "set_task_primary_subteam",
+      args: { p_task_id: "t1", p_subteam_id: "st2" },
+    });
+  });
+
+  test("insertTaskSubteam surfaces a Postgrest error as a thrown Error", async () => {
+    const { client } = makeClient({ message: "duplicate key value" });
+    await expect(insertTaskSubteam(client, "t1", "st2")).rejects.toThrow(
+      /add task subteam: duplicate key/,
+    );
+  });
+
+  test("setPrimarySubteam surfaces an RPC error as a thrown Error", async () => {
+    const { client } = makeClient({ message: "permission denied for function" });
+    await expect(setPrimarySubteam(client, "t1", "st2")).rejects.toThrow(
+      /set primary subteam: permission denied/,
     );
   });
 });

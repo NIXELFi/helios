@@ -22,9 +22,10 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { TaskLookup } from "@pm/components/TaskLookup";
+import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
 import { usePmStore } from "@pm/lib/pmStore";
@@ -133,6 +134,16 @@ export function TaskDetailSheet() {
   const teamSubsystems = task
     ? subsystems.filter((s) => s.subteam_id === task.subteam_id)
     : [];
+
+  // When the PRIMARY subteam changes (e.g. promoted via the chips), a previously
+  // chosen subsystem may no longer belong to it — clear it, matching the old
+  // single-Select behavior that reset subsystem on a subteam switch.
+  useEffect(() => {
+    if (!task || !task.subsystem_id) return;
+    if (!teamSubsystems.some((s) => s.id === task.subsystem_id)) {
+      updateTask(task.id, { subsystem_id: null });
+    }
+  }, [task, teamSubsystems, updateTask]);
 
   // Tasks already linked (either direction) plus self — excluded from the lookups.
   const depExcludeIds = useMemo(() => {
@@ -266,19 +277,12 @@ export function TaskDetailSheet() {
             </Field>
           </div>
 
-          {/* Subteam + Subsystem */}
+          {/* Subteams (multi, primary-starred) + Subsystem */}
           <div className="mb-4 grid grid-cols-2 gap-3">
-            <Field label="Subteam">
-              <Select
-                value={task.subteam_id}
-                onChange={(v) => updateTask(task.id, { subteam_id: v, subsystem_id: null })}
-                ariaLabel="Subteam"
-                options={subteams.map((s) => ({
-                  value: s.id,
-                  label: s.name,
-                  swatch: s.color ?? "#6B7280",
-                }))}
-              />
+            <Field label="Subteams">
+              <div className="flex min-h-[30px] items-center">
+                <TaskSubteamChips task={task} editable />
+              </div>
             </Field>
             <Field label="Subsystem">
               <Select

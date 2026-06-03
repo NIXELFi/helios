@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { SupabaseClient } from "@helios/auth";
 import type { CalendarEvent, Subteam, TaskRow } from "@helios/pm-ui";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
-import { usePmStore } from "../pmStore";
+import { scopeTasksToSubteam, usePmStore } from "../pmStore";
 
 // Chainable recorder mock — same slice of supabase-js the write layer uses.
 // `error` controls whether every write resolves ok or fails. Each recorded write
@@ -16,8 +16,15 @@ interface Write {
   eqs: Array<[string, unknown]>;
   ins: Array<[string, unknown]>;
 }
+// `.rpc(name, args)` calls recorded separately — the membership-primary flip
+// goes through client.schema('pm').rpc('set_task_primary_subteam', …).
+interface Rpc {
+  name: string;
+  args: unknown;
+}
 function recorderClient(error: { message: string } | null = null) {
   const writes: Write[] = [];
+  const rpcs: Rpc[] = [];
   function tbl(table: string) {
     function start(op: string, payload?: unknown) {
       const rec: Write = { table, op, payload, eqs: [], ins: [] };
@@ -44,10 +51,21 @@ function recorderClient(error: { message: string } | null = null) {
       delete: () => start("delete"),
     };
   }
+  function rpc(name: string, args: unknown) {
+    return {
+      then<R>(onF: (v: { data: null; error: typeof error }) => R) {
+        rpcs.push({ name, args });
+        return Promise.resolve({ data: null, error }).then(onF);
+      },
+    };
+  }
   const client = {
-    schema: () => ({ from: (t: string) => tbl(t) }),
+    schema: () => ({
+      from: (t: string) => tbl(t),
+      rpc: (name: string, args: unknown) => rpc(name, args),
+    }),
   } as unknown as SupabaseClient;
-  return { client, writes };
+  return { client, writes, rpcs };
 }
 
 const SUBTEAM: Subteam = { id: "st1", name: "Aero", code: "AE", slug: "aero", color: null };
@@ -74,6 +92,7 @@ function makeTask(id: string, over: Partial<TaskRow> = {}): TaskRow {
     mrl: null,
     on_critical_path: false,
     subteam: SUBTEAM,
+    subteams: [SUBTEAM],
     subsystem: null,
     owner: null,
     ...over,
@@ -90,6 +109,7 @@ function seed(client: SupabaseClient, tasks: TaskRow[] = []) {
     subteams: [SUBTEAM, SUBTEAM2],
     subsystems: [SUBSYS1],
     users: [USER1],
+    baselineOrg: { subteams: [SUBTEAM, SUBTEAM2], subsystems: [SUBSYS1], users: [USER1] },
     dependencies: [],
     activity: [],
     lastWriteError: null,
@@ -571,5 +591,219 @@ describe("undo / redo command model", () => {
     await flush();
     // The undo's own reversing edit must NOT have created a fresh undo command.
     expect(usePmStore.getState().undoStack.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L6 — multi-subteam memberships (add / remove-with-primary-guard / setPrimary)
+// ---------------------------------------------------------------------------
+describe("multi-subteam memberships", () => {
+  test("addTaskSubteam appends the membership and inserts a non-primary row", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1")]); // primary st1
+    usePmStore.getState().addTaskSubteam("t1", "st2");
+
+    const t = usePmStore.getState().tasks[0]!;
+    expect(t.subteams.map((s) => s.id)).toEqual(["st1", "st2"]); // appended
+    expect(t.subteam_id).toBe("st1"); // primary unchanged
+
+    await flush();
+    expect(usePmStore.getState().lastWriteError).toBeNull();
+    const ins = writes.filter((w) => w.table === "task_subteams" && w.op === "insert");
+    expect(ins).toHaveLength(1);
+    expect(ins[0]!.payload).toEqual({ task_id: "t1", subteam_id: "st2", is_primary: false });
+  });
+
+  test("addTaskSubteam rolls back the membership on a failed write", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [makeTask("t1")]);
+    usePmStore.getState().addTaskSubteam("t1", "st2");
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+
+    await flush();
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1"]); // rolled back
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
+  });
+
+  test("addTaskSubteam is a no-op when the subteam is already a member", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]);
+    usePmStore.getState().addTaskSubteam("t1", "st2");
+    await flush();
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+    expect(writes.filter((w) => w.table === "task_subteams")).toHaveLength(0);
+  });
+
+  test("removeTaskSubteam removes a non-primary membership and deletes its row", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]);
+    usePmStore.getState().removeTaskSubteam("t1", "st2");
+
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1"]);
+    await flush();
+    const del = writes.filter((w) => w.table === "task_subteams" && w.op === "delete");
+    expect(del).toHaveLength(1);
+    expect(del[0]!.eqs).toEqual([
+      ["task_id", "t1"],
+      ["subteam_id", "st2"],
+    ]);
+  });
+
+  test("removeTaskSubteam GUARDS the primary — removing it is a no-op (no write)", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]); // primary st1
+    usePmStore.getState().removeTaskSubteam("t1", "st1"); // attempt to drop primary
+    await flush();
+    // Membership list untouched and NO delete issued.
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+    expect(writes.filter((w) => w.table === "task_subteams")).toHaveLength(0);
+  });
+
+  test("removeTaskSubteam rolls back on a failed write", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]);
+    usePmStore.getState().removeTaskSubteam("t1", "st2");
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1"]); // optimistic
+    await flush();
+    expect(usePmStore.getState().tasks[0]!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]); // restored
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
+  });
+
+  test("setPrimarySubteam promotes an existing membership and calls the RPC", async () => {
+    const { client, rpcs } = recorderClient(null);
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]); // primary st1
+    const before = usePmStore.getState().activity.length;
+
+    usePmStore.getState().setPrimarySubteam("t1", "st2");
+
+    const t = usePmStore.getState().tasks[0]!;
+    expect(t.subteam_id).toBe("st2");
+    expect(t.subteam.id).toBe("st2");
+    expect(t.subteams.map((s) => s.id)).toEqual(["st2", "st1"]); // reordered primary-first
+    // Logs an 'updated' activity.
+    expect(usePmStore.getState().activity.length).toBe(before + 1);
+    expect(usePmStore.getState().activity[0]!.action).toBe("updated");
+
+    await flush();
+    expect(usePmStore.getState().lastWriteError).toBeNull();
+    expect(rpcs).toHaveLength(1);
+    expect(rpcs[0]!).toEqual({
+      name: "set_task_primary_subteam",
+      args: { p_task_id: "t1", p_subteam_id: "st2" },
+    });
+  });
+
+  test("setPrimarySubteam rolls back primary/order on a failed RPC", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [makeTask("t1", { subteams: [SUBTEAM, SUBTEAM2] })]);
+    usePmStore.getState().setPrimarySubteam("t1", "st2");
+    expect(usePmStore.getState().tasks[0]!.subteam_id).toBe("st2"); // optimistic
+
+    await flush();
+    const t = usePmStore.getState().tasks[0]!;
+    expect(t.subteam_id).toBe("st1"); // rolled back
+    expect(t.subteam.id).toBe("st1");
+    expect(t.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
+  });
+
+  test("setPrimarySubteam is a no-op for a non-member subteam (no RPC)", async () => {
+    const { client, rpcs } = recorderClient(null);
+    seed(client, [makeTask("t1")]); // only st1
+    usePmStore.getState().setPrimarySubteam("t1", "st2"); // st2 not a member
+    await flush();
+    expect(usePmStore.getState().tasks[0]!.subteam_id).toBe("st1");
+    expect(rpcs).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L7 — scopeTasksToSubteam treats EVERY membership as "owned"
+// ---------------------------------------------------------------------------
+describe("scopeTasksToSubteam with multi-subteam tasks", () => {
+  test("a 2-subteam task is owned in BOTH member teams' scoped views", () => {
+    const multi = makeTask("tm", { subteam_id: "st1", subteams: [SUBTEAM, SUBTEAM2] });
+    const tasks = [multi];
+
+    const inSt1 = scopeTasksToSubteam(tasks, [], "st1");
+    const inSt2 = scopeTasksToSubteam(tasks, [], "st2");
+
+    const owned = (scoped: ReturnType<typeof scopeTasksToSubteam>) =>
+      scoped.find((s) => s.task.id === "tm" && s.relation === "owned");
+    expect(owned(inSt1)).toBeTruthy(); // owned via primary membership
+    expect(owned(inSt2)).toBeTruthy(); // owned via secondary membership
+  });
+
+  test("a single-subteam task is owned only in its one team", () => {
+    const solo = makeTask("ts", { subteam_id: "st1", subteams: [SUBTEAM] });
+    expect(scopeTasksToSubteam([solo], [], "st1").some((s) => s.relation === "owned")).toBe(true);
+    expect(scopeTasksToSubteam([solo], [], "st2").some((s) => s.relation === "owned")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L8 — deleteSubteam with co-owned tasks (reassign primary, keep co-owned tasks)
+// ---------------------------------------------------------------------------
+describe("deleteSubteam with multi-subteam tasks", () => {
+  test("hard-deletes a sole-membership task but reassigns a co-owned task's primary", async () => {
+    const { client, writes, rpcs } = recorderClient(null);
+    // sole: only belongs to st1 (doomed) → deleted.
+    // coPrimary: st1 is primary but co-owned with st2 → primary reassigned to st2, kept.
+    // coSecondary: st2 primary, st1 secondary → loses st1 membership, kept.
+    seed(client, [
+      makeTask("sole", { subteam_id: "st1", subteams: [SUBTEAM] }),
+      makeTask("coPrimary", { subteam_id: "st1", subteams: [SUBTEAM, SUBTEAM2] }),
+      makeTask("coSecondary", { subteam_id: "st2", subteam: SUBTEAM2, subteams: [SUBTEAM2, SUBTEAM] }),
+    ]);
+
+    usePmStore.getState().deleteSubteam("st1");
+
+    const byId = (id: string) => usePmStore.getState().tasks.find((t) => t.id === id);
+    // Sole-membership task is gone.
+    expect(byId("sole")).toBeUndefined();
+    // Co-owned task with st1 primary → promoted to st2, kept.
+    expect(byId("coPrimary")!.subteam_id).toBe("st2");
+    expect(byId("coPrimary")!.subteam.id).toBe("st2");
+    expect(byId("coPrimary")!.subteams.map((s) => s.id)).toEqual(["st2"]);
+    // Co-owned task with st1 secondary → keeps st2 primary, drops st1.
+    expect(byId("coSecondary")!.subteam_id).toBe("st2");
+    expect(byId("coSecondary")!.subteams.map((s) => s.id)).toEqual(["st2"]);
+    // The subteam itself is removed from the org list.
+    expect(usePmStore.getState().subteams.some((s) => s.id === "st1")).toBe(false);
+
+    await flush();
+    expect(usePmStore.getState().lastWriteError).toBeNull();
+
+    // FK-critical: the primary reassignment RPC fired for the co-owned-primary task.
+    expect(rpcs).toContainEqual({
+      name: "set_task_primary_subteam",
+      args: { p_task_id: "coPrimary", p_subteam_id: "st2" },
+    });
+    // The sole task was hard-deleted.
+    expect(
+      writes.some((w) => w.table === "tasks" && w.op === "delete" && w.eqs.some(([, v]) => v === "sole")),
+    ).toBe(true);
+    // The subteam delete ran.
+    expect(writes.some((w) => w.table === "subteams" && w.op === "delete")).toBe(true);
+  });
+
+  test("rolls everything back if the subteam delete fails", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [
+      makeTask("sole", { subteam_id: "st1", subteams: [SUBTEAM] }),
+      makeTask("coPrimary", { subteam_id: "st1", subteams: [SUBTEAM, SUBTEAM2] }),
+    ]);
+
+    usePmStore.getState().deleteSubteam("st1");
+    expect(usePmStore.getState().tasks.find((t) => t.id === "sole")).toBeUndefined(); // optimistic
+
+    await flush();
+    // Full rollback: both tasks restored to their original membership shape.
+    const byId = (id: string) => usePmStore.getState().tasks.find((t) => t.id === id);
+    expect(byId("sole")).toBeTruthy();
+    expect(byId("coPrimary")!.subteam_id).toBe("st1");
+    expect(byId("coPrimary")!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+    expect(usePmStore.getState().subteams.some((s) => s.id === "st1")).toBe(true);
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
   });
 });

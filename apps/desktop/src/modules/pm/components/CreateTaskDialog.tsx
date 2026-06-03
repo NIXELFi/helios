@@ -20,7 +20,14 @@ import {
   criticalityFill,
   taskStatus,
 } from "@helios/pm-ui";
-import { IconArrowLeft, IconArrowRight, IconX } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconArrowRight,
+  IconPlus,
+  IconStar,
+  IconStarFilled,
+  IconX,
+} from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -109,6 +116,7 @@ export function CreateTaskDialog({
 }: CreateTaskDialogProps) {
   const allTasks = usePmStore((s) => s.tasks);
   const addDependency = usePmStore((s) => s.addDependency);
+  const addTaskSubteam = usePmStore((s) => s.addTaskSubteam);
 
   const initialSubteamId = defaultSubteamId ?? subteams[0]?.id ?? "";
 
@@ -146,8 +154,47 @@ export function CreateTaskDialog({
   // Staged dependencies created after the task itself.
   const [prereqIds, setPrereqIds] = useState<string[]>([]);
   const [dependentIds, setDependentIds] = useState<string[]>([]);
+  // ADDITIONAL (non-primary) subteam memberships staged for after the insert.
+  // The form's `subteam_id` is always the PRIMARY; these are everyone else.
+  const [extraSubteamIds, setExtraSubteamIds] = useState<string[]>([]);
+  const [subteamPickerOpen, setSubteamPickerOpen] = useState(false);
 
   const watchedSubteamId = watch("subteam_id");
+
+  const subteamById = useMemo(() => {
+    const m = new Map<string, Subteam>();
+    for (const s of subteams) m.set(s.id, s);
+    return m;
+  }, [subteams]);
+
+  // The full staged membership list, primary first. The primary is whatever
+  // `subteam_id` holds; the extras follow in selection order.
+  const stagedSubteamIds = useMemo(
+    () => [watchedSubteamId, ...extraSubteamIds.filter((id) => id !== watchedSubteamId)],
+    [watchedSubteamId, extraSubteamIds],
+  );
+
+  const availableSubteams = useMemo(() => {
+    const taken = new Set(stagedSubteamIds);
+    return subteams.filter((s) => !taken.has(s.id));
+  }, [subteams, stagedSubteamIds]);
+
+  // Promote a staged extra to primary: swap the old primary down into extras and
+  // lift the chosen one into `subteam_id`. Subsystem resets via the existing effect.
+  function makePrimary(id: string) {
+    const prevPrimary = watchedSubteamId;
+    setValue("subteam_id", id, { shouldValidate: true });
+    setExtraSubteamIds((prev) => {
+      const withoutNew = prev.filter((x) => x !== id);
+      return prevPrimary && prevPrimary !== id ? [prevPrimary, ...withoutNew] : withoutNew;
+    });
+  }
+
+  function removeStagedSubteam(id: string) {
+    // The primary can't be removed from the staged list (it's a required field).
+    if (id === watchedSubteamId) return;
+    setExtraSubteamIds((prev) => prev.filter((x) => x !== id));
+  }
 
   const teamSubsystems = useMemo(
     () => subsystems.filter((s) => s.subteam_id === watchedSubteamId),
@@ -159,6 +206,8 @@ export function CreateTaskDialog({
       reset(defaults);
       setPrereqIds([]);
       setDependentIds([]);
+      setExtraSubteamIds([]);
+      setSubteamPickerOpen(false);
     }
   }, [open, defaults, reset]);
 
@@ -206,11 +255,22 @@ export function CreateTaskDialog({
       mrl: input.mrl,
       on_critical_path: false,
       subteam,
+      // The insert seeds the PRIMARY membership only; additional memberships are
+      // written below via addTaskSubteam so a team-scope remap in onCreate can't
+      // leave a stale subteams[0].
+      subteams: [subteam],
       subsystem,
       owner,
     };
 
     onCreate(task);
+    // Attach any ADDITIONAL (non-primary) subteams now that the task exists.
+    // addTaskSubteam no-ops on the primary / already-members, so this is safe
+    // even if onCreate re-homed the primary into the current team scope.
+    for (const id of extraSubteamIds) {
+      if (id === subteam.id) continue;
+      addTaskSubteam(task.id, id);
+    }
     // Author staged dependencies now that the task exists in the store.
     for (const pid of prereqIds) {
       addDependency({ predecessor_id: pid, successor_id: task.id, dep_type: "FS", lag_days: 0 });
@@ -221,6 +281,7 @@ export function CreateTaskDialog({
     reset(defaults);
     setPrereqIds([]);
     setDependentIds([]);
+    setExtraSubteamIds([]);
     onClose();
   });
 
@@ -328,7 +389,7 @@ export function CreateTaskDialog({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Subteam" error={errors.subteam_id?.message}>
+          <Field label="Subteams" error={errors.subteam_id?.message}>
             <Controller
               control={control}
               name="subteam_id"
@@ -336,7 +397,7 @@ export function CreateTaskDialog({
                 <Select
                   value={field.value}
                   onChange={field.onChange}
-                  ariaLabel="Subteam"
+                  ariaLabel="Primary subteam"
                   options={subteams.map((s) => ({
                     value: s.id,
                     label: s.name,
@@ -345,6 +406,106 @@ export function CreateTaskDialog({
                 />
               )}
             />
+            {/* Staged membership: primary (starred) + extras, plus an add picker. */}
+            <div className="flex flex-wrap items-center gap-1">
+              {stagedSubteamIds.map((id) => {
+                const s = subteamById.get(id);
+                if (!s) return null;
+                const isPrimary = id === watchedSubteamId;
+                return (
+                  <span
+                    key={id}
+                    className="group/chip inline-flex items-center gap-1 rounded border border-helios-line bg-helios-base/60 px-1.5 py-0.5 text-[11px] leading-none text-helios-text"
+                    title={s.name}
+                  >
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: s.color ?? "#6B7280" }}
+                    />
+                    <span className="font-medium">{s.code}</span>
+                    {isPrimary ? (
+                      <IconStarFilled
+                        size={11}
+                        className="shrink-0 text-asu-gold"
+                        aria-label="Primary subteam"
+                      />
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => makePrimary(id)}
+                          aria-label={`Set ${s.name} as primary`}
+                          title="Set as primary"
+                          className="shrink-0 text-helios-dim opacity-50 transition-opacity hover:text-asu-gold group-hover/chip:opacity-100"
+                        >
+                          <IconStar size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeStagedSubteam(id)}
+                          aria-label={`Remove ${s.name}`}
+                          title="Remove"
+                          className="shrink-0 rounded text-helios-dim hover:text-red-400"
+                        >
+                          <IconX size={11} strokeWidth={1.5} />
+                        </button>
+                      </>
+                    )}
+                  </span>
+                );
+              })}
+              {availableSubteams.length > 0 ? (
+                <span className="relative inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => setSubteamPickerOpen((o) => !o)}
+                    aria-label="Add subteam"
+                    aria-expanded={subteamPickerOpen}
+                    className="inline-flex items-center gap-0.5 rounded border border-dashed border-helios-line px-1.5 py-0.5 text-[11px] leading-none text-helios-dim hover:border-helios-text/40 hover:text-helios-text"
+                  >
+                    <IconPlus size={11} strokeWidth={1.5} />
+                    Add
+                  </button>
+                  {subteamPickerOpen ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Close subteam picker"
+                        onClick={() => setSubteamPickerOpen(false)}
+                        className="fixed inset-0 z-[60] cursor-default"
+                      />
+                      <ul
+                        role="listbox"
+                        className="absolute left-0 top-full z-[70] mt-1 max-h-56 min-w-[10rem] overflow-y-auto rounded-md border border-helios-line bg-helios-panel py-1 shadow-xl"
+                      >
+                        {availableSubteams.map((s) => (
+                          <li key={s.id}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={false}
+                              onClick={() => {
+                                setExtraSubteamIds((prev) => [...prev, s.id]);
+                                setSubteamPickerOpen(false);
+                              }}
+                              className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-helios-text hover:bg-helios-base"
+                            >
+                              <span
+                                aria-hidden
+                                className="size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: s.color ?? "#6B7280" }}
+                              />
+                              <span className="truncate">{s.name}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
           </Field>
           <Field label="Subsystem">
             <Controller

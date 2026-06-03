@@ -28,6 +28,7 @@ import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
   EMPTY_FILTERS,
@@ -436,16 +437,9 @@ function Card({
         <TypeBadge type={task.type} />
         {isExternal ? <RelationChip relation={relation} /> : null}
       </div>
-      <div className="mt-2 flex items-center justify-between text-xs text-helios-dim">
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className="size-2 rounded-full"
-            style={{ backgroundColor: task.subteam.color ?? "#6B7280" }}
-          />
-          {task.subteam.name}
-        </span>
-        <span className="inline-flex items-center gap-1.5">
+      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-helios-dim">
+        <TaskSubteamChips task={task} />
+        <span className="inline-flex shrink-0 items-center gap-1.5">
           <IconUserCircle size={12} strokeWidth={1.5} />
           {task.owner?.name ?? "Unassigned"}
         </span>

@@ -76,7 +76,8 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       .select(
         "id,project_id,subteam_id,subsystem_id,parent_task_id,title,description,type,status,priority,owner_id,start_date,due_date,estimate_days,mrl,on_critical_path," +
           "subteam:subteams(id,name,code,slug,color)," +
-          "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)",
+          "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
+          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color))",
       ),
     sb.from("task_dependencies").select("predecessor_id,successor_id,dep_type,lag_days"),
     sb
@@ -137,6 +138,20 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
   // from the directory, since auth.users can't be embedded cross-schema).
   const tasks: TaskRow[] = tasksRaw.map((t) => {
     const ownerId = (t.owner_id as string | null) ?? null;
+    const primary = t.subteam as Subteam;
+    // The nested membership rows (task_subteams) carry an embedded subteam each;
+    // order them primary-first so views can render the primary chip up front.
+    const memberships = ((t.task_subteams as Array<Record<string, unknown>> | null) ?? [])
+      .map((m) => ({
+        is_primary: Boolean(m.is_primary),
+        subteam: m.subteam as Subteam | null,
+      }))
+      .filter((m): m is { is_primary: boolean; subteam: Subteam } => m.subteam != null);
+    memberships.sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+    // Fall back to the embedded primary subteam if a task has no membership rows
+    // (should not happen post-backfill, but keep reads resilient).
+    const subteams =
+      memberships.length > 0 ? memberships.map((m) => m.subteam) : [primary];
     return {
       id: t.id as string,
       project_id: t.project_id as string,
@@ -154,7 +169,8 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       estimate_days: num(t.estimate_days),
       mrl: num(t.mrl),
       on_critical_path: Boolean(t.on_critical_path),
-      subteam: t.subteam as Subteam,
+      subteam: primary,
+      subteams,
       subsystem: (t.subsystem as Subsystem | null) ?? null,
       owner: ownerId ? userById.get(ownerId) ?? null : null,
     };
