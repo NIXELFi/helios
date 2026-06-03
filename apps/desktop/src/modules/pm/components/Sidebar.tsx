@@ -7,6 +7,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconClipboardList,
+  IconClockExclamation,
   IconColumns3,
   IconFileText,
   IconGraph,
@@ -20,15 +21,30 @@ import {
   type TablerIcon,
 } from "@tabler/icons-react";
 import { Link } from "@pm/lib/router";
-import { usePathname } from "@pm/lib/router";
+import { usePathname, useRouter } from "@pm/lib/router";
 import { useEffect, useRef, useState } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { ProjectDialog } from "@pm/components/ProjectDialog";
 import { SubteamDialog } from "@pm/components/SubteamDialog";
-import { usePmStore } from "@pm/lib/pmStore";
+import { usePmStore, selectIsAdmin } from "@pm/lib/pmStore";
 import {
   BUILD_LABELS,
   BUILD_SEGMENTS,
-  VIEW_SEGMENTS,
+  DEFAULT_VIEW_ORDER,
   WORKSPACES,
   WORKSPACE_LABELS,
   activeBuildSegment,
@@ -36,6 +52,8 @@ import {
   activeViewSegment,
   activeWorkspace,
   rememberScopeView,
+  rememberViewOrder,
+  resolveViewOrder,
   viewHref,
   workspaceHomeHref,
   type BuildSegment,
@@ -77,6 +95,53 @@ const VIEW_ICON: Record<ViewSegment, NavItem["Icon"]> = {
   activity: IconActivity,
 };
 
+// One draggable Views row. The whole row is the drag handle, but the 4px
+// PointerSensor activation distance means a plain click still navigates rather
+// than starting a drag. The PM Link isn't forwardRef-able, so the row is a
+// native <a> wired to the in-memory router (mirroring what Link renders) — that
+// gives dnd-kit a real DOM node for setNodeRef while preserving navigation.
+function SortableViewItem({
+  view,
+  href,
+  active,
+}: {
+  view: ViewSegment;
+  href: string;
+  active: boolean;
+}) {
+  const router = useRouter();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: view });
+  const Icon = VIEW_ICON[view];
+  return (
+    <a
+      ref={setNodeRef}
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        router.push(href);
+      }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      {...attributes}
+      {...listeners}
+      className={
+        "flex cursor-grab touch-none select-none items-center gap-2 rounded px-2 py-1.5 text-sm font-normal transition-colors active:cursor-grabbing " +
+        (active
+          ? "bg-asu-gold/15 text-asu-gold"
+          : "text-helios-dim hover:bg-helios-base/60 hover:text-asu-gold") +
+        (isDragging ? " opacity-60" : "")
+      }
+    >
+      <Icon size={16} strokeWidth={1.5} />
+      {VIEW_LABEL[view]}
+    </a>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   // The Design workspace home href is derived from localStorage (last-used
@@ -85,6 +150,31 @@ export function Sidebar() {
   // mismatch; it updates to the remembered view immediately after mount.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Per-user Views ordering. Initialized to the canonical default so the first
+  // (SSR/hydration) render is deterministic, then synced to the persisted order
+  // on mount — same pattern as the `mounted` flag above.
+  const [viewOrder, setViewOrder] = useState<ViewSegment[]>(() => [
+    ...DEFAULT_VIEW_ORDER,
+  ]);
+  useEffect(() => setViewOrder(resolveViewOrder()), []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+
+  function handleViewDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setViewOrder((prev) => {
+      const from = prev.indexOf(active.id as ViewSegment);
+      const to = prev.indexOf(over.id as ViewSegment);
+      if (from === -1 || to === -1) return prev;
+      const next = arrayMove(prev, from, to);
+      rememberViewOrder(next);
+      return next;
+    });
+  }
   const subteams = usePmStore((s) => s.subteams);
   const projects = usePmStore((s) => s.projects);
   const activeProjectId = usePmStore((s) => s.activeProjectId);
@@ -94,6 +184,10 @@ export function Sidebar() {
   const addSubteam = usePmStore((s) => s.addSubteam);
   const updateSubteam = usePmStore((s) => s.updateSubteam);
   const deleteSubteam = usePmStore((s) => s.deleteSubteam);
+  const setReportOpen = usePmStore((s) => s.setReportOpen);
+  // Deleting a subteam re-homes its sole-membership tasks server-side, which RLS
+  // only permits for admins — gate the whole affordance behind the admin role.
+  const isAdmin = usePmStore(selectIsAdmin);
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
@@ -160,12 +254,37 @@ export function Sidebar() {
   }
 
   function handleDeleteSubteam(s: Subteam) {
+    // Tasks whose ONLY membership is this subteam must land somewhere — the admin
+    // chooses a fallback team and those tasks are reassigned (never deleted).
+    const others = subteams.filter((x) => x.id !== s.id);
+    if (others.length === 0) {
+      window.alert(
+        `Can't remove ${s.name}: it's the only subteam, so there's nowhere to reassign its tasks.`,
+      );
+      return;
+    }
+
+    const menu = others.map((x, i) => `${i + 1}. ${x.name}`).join("\n");
+    const answer = window.prompt(
+      `Remove ${s.name}?\n\n` +
+        `Any task that belongs ONLY to this subteam will be reassigned to a ` +
+        `fallback team (no tasks are deleted). Pick the fallback team by number:\n\n` +
+        menu,
+      "1",
+    );
+    if (answer === null) return; // cancelled
+    const idx = Number.parseInt(answer.trim(), 10) - 1;
+    const fallback = others[idx];
+    if (!fallback) {
+      window.alert("That wasn't a valid choice — nothing was removed.");
+      return;
+    }
     if (
       window.confirm(
-        `Remove ${s.name}? Tasks and subsystems in this subteam will be deleted.`,
+        `Remove ${s.name} and reassign its sole-membership tasks to ${fallback.name}?`,
       )
     ) {
-      deleteSubteam(s.id);
+      deleteSubteam(s.id, fallback.id);
     }
   }
 
@@ -301,29 +420,37 @@ export function Sidebar() {
             )}
           </div>
 
+          <div className="px-2 pt-3">
+            <button
+              type="button"
+              onClick={() => setReportOpen(true)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-normal text-helios-dim transition-colors hover:bg-helios-base/60 hover:text-asu-gold"
+            >
+              <IconClockExclamation size={16} strokeWidth={1.5} />
+              Deadlines report
+            </button>
+          </div>
+
           <nav className="flex flex-col gap-0.5 px-2 py-3">
             <p className="px-2 pb-1.5 text-xs font-medium uppercase tracking-widest text-helios-dim">
               Views
             </p>
-            {VIEW_SEGMENTS.map((view) => {
-              const Icon = VIEW_ICON[view];
-              const active = currentView === view;
-              return (
-                <Link
-                  key={view}
-                  href={viewHref(view, currentTeamSlug)}
-                  className={
-                    "flex items-center gap-2 rounded px-2 py-1.5 text-sm font-normal transition-colors " +
-                    (active
-                      ? "bg-asu-gold/15 text-asu-gold"
-                      : "text-helios-dim hover:bg-helios-base/60 hover:text-asu-gold")
-                  }
-                >
-                  <Icon size={16} strokeWidth={1.5} />
-                  {VIEW_LABEL[view]}
-                </Link>
-              );
-            })}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleViewDragEnd}
+            >
+              <SortableContext items={viewOrder} strategy={verticalListSortingStrategy}>
+                {viewOrder.map((view) => (
+                  <SortableViewItem
+                    key={view}
+                    view={view}
+                    href={viewHref(view, currentTeamSlug)}
+                    active={currentView === view}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
           </nav>
 
           <div className="mt-2 border-t border-helios-line px-2 py-3">
@@ -384,14 +511,16 @@ export function Sidebar() {
                       >
                         <IconPencil size={13} strokeWidth={1.5} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSubteam(s)}
-                        aria-label={`Remove ${s.name}`}
-                        className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-red-400"
-                      >
-                        <IconTrash size={13} strokeWidth={1.5} />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSubteam(s)}
+                          aria-label={`Remove ${s.name}`}
+                          className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-red-400"
+                        >
+                          <IconTrash size={13} strokeWidth={1.5} />
+                        </button>
+                      ) : null}
                     </span>
                   </li>
                 );

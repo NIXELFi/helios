@@ -115,3 +115,60 @@ export function recallScopeView(teamSlug: string | null): ViewSegment | null {
   }
   return null;
 }
+
+// --- View nav ordering ------------------------------------------------------
+// Lets each user drag-reorder the Views nav. VIEW_SEGMENTS stays the canonical
+// source of valid views (and of the ViewSegment type); the saved order is only
+// a presentation preference layered on top of it.
+
+export const DEFAULT_VIEW_ORDER: readonly ViewSegment[] = VIEW_SEGMENTS;
+
+const VIEW_ORDER_KEY = "helios:viewOrder";
+
+export function rememberViewOrder(order: readonly ViewSegment[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VIEW_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
+export function recallViewOrder(): ViewSegment[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(VIEW_ORDER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (v): v is ViewSegment =>
+        typeof v === "string" && (VIEW_SEGMENTS as readonly string[]).includes(v),
+    );
+  } catch {
+    // ignore (malformed JSON, storage failures)
+  }
+  return null;
+}
+
+// The order to render the Views nav in: the saved order (filtered to currently
+// valid views, with duplicates removed), then any VIEW_SEGMENTS not present so
+// newly added views still show up — at the end.
+export function resolveViewOrder(): ViewSegment[] {
+  const saved = recallViewOrder() ?? [];
+  const seen = new Set<ViewSegment>();
+  const order: ViewSegment[] = [];
+  for (const v of saved) {
+    if (!seen.has(v)) {
+      seen.add(v);
+      order.push(v);
+    }
+  }
+  for (const v of VIEW_SEGMENTS) {
+    if (!seen.has(v)) {
+      seen.add(v);
+      order.push(v);
+    }
+  }
+  return order;
+}

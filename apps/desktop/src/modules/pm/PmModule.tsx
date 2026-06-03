@@ -6,6 +6,7 @@ import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
 import { Sidebar } from "@pm/components/Sidebar";
 import { TaskDetailSheet } from "@pm/components/TaskDetailSheet";
+import { DeadlineReportWindow } from "@pm/components/DeadlineReportWindow";
 import { TableViewClient } from "@pm/views/TableViewClient";
 import { BoardViewClient } from "@pm/views/BoardViewClient";
 import { GanttViewClient } from "@pm/views/GanttViewClient";
@@ -110,6 +111,15 @@ function WriteErrorToast() {
       </button>
     </div>
   );
+}
+
+// Mounts the Deadlines report window, driven by the session-only store flag the
+// Sidebar button toggles. Kept as its own subscriber so the rest of PmModule
+// doesn't re-render when the window opens/closes.
+function DeadlineReportHost() {
+  const reportOpen = usePmStore((s) => s.reportOpen);
+  const setReportOpen = usePmStore((s) => s.setReportOpen);
+  return <DeadlineReportWindow open={reportOpen} onClose={() => setReportOpen(false)} />;
 }
 
 // The PM desktop module. Mounted by the Shell only when a user is signed in
@@ -219,6 +229,7 @@ export function PmModule() {
           <CurrentView />
         </main>
         <TaskDetailSheet />
+        <DeadlineReportHost />
         <WriteErrorToast />
         <UndoRedoHotkeys />
       </div>

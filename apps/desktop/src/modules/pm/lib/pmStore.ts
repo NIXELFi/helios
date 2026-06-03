@@ -316,6 +316,10 @@ interface PmState {
   selectedTaskId: string | null;
   selectTask: (id: string | null) => void;
 
+  // UI state: whether the Deadlines report window is open. Session-only.
+  reportOpen: boolean;
+  setReportOpen: (open: boolean) => void;
+
   // Multi-select for bulk edits — session-only, never persisted. The VIEW owns
   // the eligibility rule (owned, non-external rows) and passes the id list in;
   // the store stays dumb about scoping.
@@ -355,7 +359,9 @@ interface PmState {
   // Subteam mutations
   addSubteam: (subteam: Subteam) => void;
   updateSubteam: (id: string, patch: Partial<Subteam>) => void;
-  deleteSubteam: (id: string) => void;
+  // Non-destructive: sole-membership tasks are REASSIGNED to `fallbackId`
+  // instead of being deleted. The caller (Sidebar) must pass a fallback subteam.
+  deleteSubteam: (id: string, fallbackId: string) => void;
 
   // Task mutations
   addTask: (task: TaskRow) => void;
@@ -371,6 +377,9 @@ interface PmState {
   addTaskSubteam: (taskId: string, subteamId: string) => void;
   removeTaskSubteam: (taskId: string, subteamId: string) => void;
   setPrimarySubteam: (taskId: string, subteamId: string) => void;
+  // Re-home the PRIMARY membership onto a DIFFERENT subteam, dropping the old
+  // primary entirely (used to evict the catch-all "Unknown" subteam from a task).
+  reassignPrimarySubteam: (taskId: string, newSubteamId: string) => void;
 
   // Dependency mutations
   addDependency: (dep: TaskDependency) => void;
@@ -578,6 +587,9 @@ export const usePmStore = create<PmState>((set, get) => {
     selectedTaskId: null,
     selectTask: (id) => set({ selectedTaskId: id }),
 
+    reportOpen: false,
+    setReportOpen: (open) => set({ reportOpen: open }),
+
     selectedTaskIds: new Set<string>(),
     setSelection: (ids) => set({ selectedTaskIds: new Set(ids) }),
     toggleSelected: (id) =>
@@ -781,9 +793,16 @@ export const usePmStore = create<PmState>((set, get) => {
       persist((c) => db.patchSubteam(c, id, patch), () => set(snap));
     },
 
-    deleteSubteam: (id) => {
+    deleteSubteam: (id, fallbackId) => {
       const removed = get().subteams.find((x) => x.id === id);
       if (!removed) return;
+      // The fallback must be a real, DIFFERENT subteam — sole-membership tasks
+      // are re-homed onto it so they're never left orphaned (or deleted).
+      if (fallbackId === id) return;
+      const fallback =
+        get().subteams.find((x) => x.id === fallbackId) ??
+        get().baselineOrg.subteams.find((x) => x.id === fallbackId);
+      if (!fallback) return;
       const snap = {
         subteams: get().subteams,
         subsystems: get().subsystems,
@@ -794,16 +813,18 @@ export const usePmStore = create<PmState>((set, get) => {
       };
 
       // Partition tasks that touch the doomed subteam into:
-      //  - SOLE: the subteam is their only membership → hard-delete the task.
+      //  - SOLE: the subteam is their only membership → REASSIGN their primary to
+      //    the fallback subteam (the task survives, just re-homed).
       //  - REASSIGN: co-owned AND the subteam was the PRIMARY → promote another
-      //    membership to primary (re-homes tasks.subteam_id off the FK target).
+      //    existing membership to primary (re-homes tasks.subteam_id off the FK).
       //  - DEMEMBER: co-owned, non-primary → just drop the membership.
       const tasksNow = get().tasks;
       const memberOf = (t: TaskRow) =>
         (t.subteams ?? []).length > 0
           ? t.subteams.some((s) => s.id === id)
           : t.subteam_id === id;
-      const soleTaskIds = new Set<string>();
+      // Sole-membership tasks re-homed onto the fallback subteam.
+      const sole: string[] = [];
       const reassign: Array<{ taskId: string; newPrimaryId: string }> = [];
       const demember: string[] = []; // co-owned task ids losing this membership
       for (const t of tasksNow) {
@@ -811,7 +832,7 @@ export const usePmStore = create<PmState>((set, get) => {
         const members = (t.subteams ?? []).length > 0 ? t.subteams : [t.subteam];
         const survivors = members.filter((s) => s.id !== id);
         if (survivors.length === 0) {
-          soleTaskIds.add(t.id);
+          sole.push(t.id);
         } else {
           demember.push(t.id);
           if (t.subteam_id === id) {
@@ -819,35 +840,48 @@ export const usePmStore = create<PmState>((set, get) => {
           }
         }
       }
+      const soleSet = new Set(sole);
 
       set((s) => {
-        const tasks = s.tasks
-          // 1. Drop sole-membership tasks outright.
-          .filter((t) => !soleTaskIds.has(t.id))
-          // 2. Update surviving co-owned tasks: strip the membership and, if it
-          //    was the primary, promote the first survivor.
-          .map((t) => {
-            if (soleTaskIds.has(t.id) || !memberOf(t)) return t;
-            const members = (t.subteams ?? []).length > 0 ? t.subteams : [t.subteam];
-            const survivors = members.filter((x) => x.id !== id);
-            if (t.subteam_id === id) {
-              const promoted = survivors[0]!;
-              return {
-                ...t,
-                subteam_id: promoted.id,
-                subteam: promoted,
-                subteams: survivors,
-              };
-            }
-            return { ...t, subteams: survivors };
-          });
+        const tasks = s.tasks.map((t) => {
+          if (!memberOf(t)) return t;
+          // 1. Sole-membership task → re-home its single membership to the fallback.
+          if (soleSet.has(t.id)) {
+            return {
+              ...t,
+              subteam_id: fallback.id,
+              subteam: fallback,
+              subteams: [fallback],
+              // The old subteam's subsystem can't belong to the fallback.
+              subsystem_id: null,
+              subsystem: null,
+            };
+          }
+          // 2. Co-owned task → strip the membership; if it was primary, promote
+          //    the first survivor.
+          const members = (t.subteams ?? []).length > 0 ? t.subteams : [t.subteam];
+          const survivors = members.filter((x) => x.id !== id);
+          if (t.subteam_id === id) {
+            const promoted = survivors[0]!;
+            return {
+              ...t,
+              subteam_id: promoted.id,
+              subteam: promoted,
+              subteams: survivors,
+              // The old primary's subsystem can't belong to the promoted subteam
+              // (the doomed subteam's subsystems are removed below + DB cascades).
+              subsystem_id: null,
+              subsystem: null,
+            };
+          }
+          return { ...t, subteams: survivors };
+        });
         return {
           subteams: s.subteams.filter((x) => x.id !== id),
           subsystems: s.subsystems.filter((x) => x.subteam_id !== id),
           tasks,
-          dependencies: s.dependencies.filter(
-            (d) => !soleTaskIds.has(d.predecessor_id) && !soleTaskIds.has(d.successor_id),
-          ),
+          // No tasks are deleted now, so dependencies are untouched.
+          dependencies: s.dependencies,
           pages: s.pages.map((p) => (p.subteam_id === id ? { ...p, subteam_id: null } : p)),
           activity: logActivity(s, {
             action: "deleted",
@@ -855,27 +889,28 @@ export const usePmStore = create<PmState>((set, get) => {
             target_id: id,
             target_name: removed.name,
             subteam_ids: [id],
-            payload: null,
+            payload: { reassigned_to: fallbackId },
           }),
         };
       });
 
       // Persist order is FK-critical: reassign tasks.subteam_id OFF the doomed
       // subteam BEFORE removeSubteam (the tasks.subteam_id → subteams FK would
-      // otherwise block the delete). The DB cascade clears task_subteams rows on
-      // subteam delete, but we also explicitly drop the doomed membership from
-      // surviving tasks so the join state is deterministic. Sole-membership tasks
-      // are hard-deleted (which removes their join + dependency rows too).
+      // otherwise block the delete). For sole-membership tasks we attach+flip the
+      // fallback primary (set_task_primary_subteam) THEN drop the doomed
+      // membership, so the task always retains exactly one membership. Co-owned
+      // tasks promote a survivor / demember as before. No task is ever deleted.
       persist(
         async (c) => {
+          for (const taskId of sole) {
+            await db.setPrimarySubteam(c, taskId, fallbackId);
+            await db.removeTaskSubteam(c, taskId, id);
+          }
           for (const r of reassign) {
             await db.setPrimarySubteam(c, r.taskId, r.newPrimaryId);
           }
           for (const taskId of demember) {
             await db.removeTaskSubteam(c, taskId, id);
-          }
-          for (const taskId of soleTaskIds) {
-            await db.removeTask(c, taskId);
           }
           await db.removeSubteam(c, id);
         },
@@ -1133,6 +1168,63 @@ export const usePmStore = create<PmState>((set, get) => {
         };
       });
       persist((c) => db.setPrimarySubteam(c, taskId, subteamId), () => set(snap));
+    },
+
+    reassignPrimarySubteam: (taskId, newSubteamId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      const oldPrimaryId = task.subteam_id;
+      // No-op if the target already IS the primary — there'd be nothing to evict.
+      if (newSubteamId === oldPrimaryId) return;
+      const st =
+        get().subteams.find((x) => x.id === newSubteamId) ??
+        get().baselineOrg.subteams.find((x) => x.id === newSubteamId);
+      if (!st) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          // The surviving memberships are everything EXCEPT the old primary and
+          // any pre-existing copy of the new subteam; the new subteam leads.
+          const rest = (t.subteams ?? [t.subteam]).filter(
+            (x) => x.id !== oldPrimaryId && x.id !== st.id,
+          );
+          return {
+            ...t,
+            subteam_id: st.id,
+            subteam: st,
+            subteams: [st, ...rest],
+            // The old primary's subsystem can't belong to the new subteam.
+            subsystem_id: null,
+            subsystem: null,
+          };
+        });
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: [newSubteamId, oldPrimaryId],
+            payload: { reassigned_primary_subteam: newSubteamId, dropped_subteam: oldPrimaryId },
+          }),
+        };
+      });
+      // Persist order matters: set_task_primary_subteam on-conflict-attaches the
+      // new subteam (if it wasn't already a member) and flips is_primary onto it,
+      // demoting the old primary to a regular membership. ONLY THEN can we drop
+      // the old catch-all via removeTaskSubteam (which refuses a still-primary id).
+      // This never leaves the task with zero memberships — the new primary is
+      // attached before the old one is removed.
+      persist(
+        async (c) => {
+          await db.setPrimarySubteam(c, taskId, newSubteamId);
+          await db.removeTaskSubteam(c, taskId, oldPrimaryId);
+          if (task.subsystem_id != null) await db.patchTask(c, taskId, { subsystem_id: null });
+        },
+        () => set(snap),
+      );
     },
 
     addDependency: (dep) => {

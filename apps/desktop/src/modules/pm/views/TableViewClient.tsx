@@ -48,6 +48,7 @@ import {
 } from "@pm/lib/filters";
 import {
   scopeTasksToSubteam,
+  selectMyRole,
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
@@ -87,6 +88,9 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
   const toggleSelected = usePmStore((s) => s.toggleSelected);
   const setSelection = usePmStore((s) => s.setSelection);
   const clearSelection = usePmStore((s) => s.clearSelection);
+  // Viewers can't write — mirror their (RLS-rejected) edits by disabling the
+  // inline dropdowns so the value never optimistically flips then snaps back.
+  const isViewer = usePmStore(selectMyRole) === "viewer";
 
   const currentTeam = teamSlug
     ? subteams.find((s) => s.slug === teamSlug) ?? null
@@ -273,6 +277,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         relation={relation}
         dimmed={dimmed}
         users={users}
+        isViewer={isViewer}
         selected={selectedTaskIds.has(task.id)}
         onToggleSelect={() => toggleSelected(task.id)}
         onOpen={() => selectTask(task.id)}
@@ -464,6 +469,7 @@ function RowFragment({
   relation,
   dimmed,
   users,
+  isViewer,
   selected,
   onToggleSelect,
   onOpen,
@@ -484,6 +490,7 @@ function RowFragment({
   relation: CrossTeamRelation;
   dimmed: boolean;
   users: ReadonlyArray<{ id: string; name: string }>;
+  isViewer: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   onOpen: () => void;
@@ -497,6 +504,8 @@ function RowFragment({
   children?: React.ReactNode;
 }) {
   const isExternal = relation !== "owned";
+  // Viewers + external (cross-team) rows are read-only for inline edits.
+  const editsDisabled = isExternal || isViewer;
   const outline = taskOutline(task);
   const days = daysUntilDue(task.due_date);
   return (
@@ -585,7 +594,7 @@ function RowFragment({
           <Select
             size="sm"
             value={task.owner_id ?? ""}
-            disabled={isExternal}
+            disabled={editsDisabled}
             ariaLabel="Owner"
             onChange={(v) => onChangeOwner(v === "" ? null : v)}
             options={[
@@ -598,7 +607,7 @@ function RowFragment({
           <Select
             size="sm"
             value={task.status}
-            disabled={isExternal}
+            disabled={editsDisabled}
             ariaLabel="Status"
             onChange={(v) => onChangeStatus(v)}
             options={STATUS_OPTIONS}
@@ -608,7 +617,7 @@ function RowFragment({
           <Select
             size="sm"
             value={task.priority}
-            disabled={isExternal}
+            disabled={editsDisabled}
             ariaLabel="Priority"
             onChange={(v) => onChangePriority(v)}
             options={PRIORITY_OPTIONS}
@@ -619,7 +628,7 @@ function RowFragment({
             type="date"
             className={selectInline}
             value={task.due_date ?? ""}
-            disabled={isExternal}
+            disabled={editsDisabled}
             onChange={(e) =>
               onChangeDue(e.target.value === "" ? null : e.target.value)
             }

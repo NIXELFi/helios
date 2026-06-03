@@ -12,7 +12,7 @@ import {
 } from "@helios/pm-ui";
 import { IconX } from "@tabler/icons-react";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
-import { usePmStore } from "@pm/lib/pmStore";
+import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -58,6 +58,9 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
   const bulkUpdateTasks = usePmStore((s) => s.bulkUpdateTasks);
   const subteams = usePmStore((s) => s.subteams);
   const users = usePmStore((s) => s.users);
+  // Viewers can't write — disable every bulk action so a rejected write never
+  // optimistically flips values that then snap back on auto-refresh.
+  const isViewer = usePmStore(selectMyRole) === "viewer";
 
   // Effective ids = current selection ∩ this view's selectable set. When no set
   // is supplied (older callers / tests) fall back to the raw selection.
@@ -89,6 +92,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <Select<TaskStatus | typeof ACTION>
             size="sm"
             value={ACTION}
+            disabled={isViewer}
             placeholder="Status…"
             ariaLabel="Set status for selected tasks"
             options={[{ value: ACTION, label: "Status…" }, ...STATUS_OPTIONS]}
@@ -100,6 +104,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <Select<TaskPriority | typeof ACTION>
             size="sm"
             value={ACTION}
+            disabled={isViewer}
             placeholder="Priority…"
             ariaLabel="Set priority for selected tasks"
             options={[{ value: ACTION, label: "Priority…" }, ...PRIORITY_OPTIONS]}
@@ -111,6 +116,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <Select<TaskType | typeof ACTION>
             size="sm"
             value={ACTION}
+            disabled={isViewer}
             placeholder="Type…"
             ariaLabel="Set type for selected tasks"
             options={[{ value: ACTION, label: "Type…" }, ...TYPE_OPTIONS]}
@@ -122,6 +128,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <Select<string>
             size="sm"
             value={ACTION}
+            disabled={isViewer}
             placeholder="Owner…"
             ariaLabel="Set owner for selected tasks"
             options={[
@@ -140,6 +147,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <Select<string>
             size="sm"
             value={ACTION}
+            disabled={isViewer}
             placeholder="Subteam…"
             ariaLabel="Move selected tasks to subteam"
             options={[
@@ -159,7 +167,8 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
           <input
             type="date"
             aria-label="Set due date for selected tasks"
-            className="rounded border border-helios-line bg-helios-base px-1.5 py-1 text-xs text-helios-text focus:border-asu-gold focus:outline-none"
+            disabled={isViewer}
+            className="rounded border border-helios-line bg-helios-base px-1.5 py-1 text-xs text-helios-text focus:border-asu-gold focus:outline-none disabled:opacity-60"
             // Native date inputs fire onChange on every intermediate/scrubbed
             // value (e.g. partial year). Committing on each would spam bulk
             // writes + undo entries — so commit only on blur or Enter, one

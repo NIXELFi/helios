@@ -757,7 +757,7 @@ describe("scopeTasksToSubteam with multi-subteam tasks", () => {
 // L8 — deleteSubteam with co-owned tasks (reassign primary, keep co-owned tasks)
 // ---------------------------------------------------------------------------
 describe("deleteSubteam with multi-subteam tasks", () => {
-  test("hard-deletes a sole-membership task but reassigns a co-owned task's primary", async () => {
+  test("reassigns a sole-membership task to the fallback (non-destructive) and re-homes co-owned tasks", async () => {
     const { client, writes, rpcs } = recorderClient(null);
     // sole: only belongs to st1 (doomed) → deleted.
     // coPrimary: st1 is primary but co-owned with st2 → primary reassigned to st2, kept.
@@ -768,11 +768,13 @@ describe("deleteSubteam with multi-subteam tasks", () => {
       makeTask("coSecondary", { subteam_id: "st2", subteam: SUBTEAM2, subteams: [SUBTEAM2, SUBTEAM] }),
     ]);
 
-    usePmStore.getState().deleteSubteam("st1");
+    usePmStore.getState().deleteSubteam("st1", "st2");
 
     const byId = (id: string) => usePmStore.getState().tasks.find((t) => t.id === id);
-    // Sole-membership task is gone.
-    expect(byId("sole")).toBeUndefined();
+    // Sole-membership task is REASSIGNED to the fallback, not deleted.
+    expect(byId("sole")).toBeTruthy();
+    expect(byId("sole")!.subteam_id).toBe("st2");
+    expect(byId("sole")!.subteams.map((s) => s.id)).toEqual(["st2"]);
     // Co-owned task with st1 primary → promoted to st2, kept.
     expect(byId("coPrimary")!.subteam_id).toBe("st2");
     expect(byId("coPrimary")!.subteam.id).toBe("st2");
@@ -786,16 +788,10 @@ describe("deleteSubteam with multi-subteam tasks", () => {
     await flush();
     expect(usePmStore.getState().lastWriteError).toBeNull();
 
-    // FK-critical: the primary reassignment RPC fired for the co-owned-primary task.
-    expect(rpcs).toContainEqual({
-      name: "set_task_primary_subteam",
-      args: { p_task_id: "coPrimary", p_subteam_id: "st2" },
-    });
-    // The sole task was hard-deleted.
-    expect(
-      writes.some((w) => w.table === "tasks" && w.op === "delete" && w.eqs.some(([, v]) => v === "sole")),
-    ).toBe(true);
-    // The subteam delete ran.
+    // Non-destructive: NO task was hard-deleted.
+    expect(writes.some((w) => w.table === "tasks" && w.op === "delete")).toBe(false);
+    // The reassignment RPC fired and the subteam delete ran.
+    expect(rpcs.some((r) => r.name === "set_task_primary_subteam")).toBe(true);
     expect(writes.some((w) => w.table === "subteams" && w.op === "delete")).toBe(true);
   });
 
@@ -806,13 +802,14 @@ describe("deleteSubteam with multi-subteam tasks", () => {
       makeTask("coPrimary", { subteam_id: "st1", subteams: [SUBTEAM, SUBTEAM2] }),
     ]);
 
-    usePmStore.getState().deleteSubteam("st1");
-    expect(usePmStore.getState().tasks.find((t) => t.id === "sole")).toBeUndefined(); // optimistic
+    usePmStore.getState().deleteSubteam("st1", "st2");
+    expect(usePmStore.getState().tasks.find((t) => t.id === "sole")!.subteam_id).toBe("st2"); // optimistic reassign
 
     await flush();
     // Full rollback: both tasks restored to their original membership shape.
     const byId = (id: string) => usePmStore.getState().tasks.find((t) => t.id === id);
-    expect(byId("sole")).toBeTruthy();
+    expect(byId("sole")!.subteam_id).toBe("st1");
+    expect(byId("sole")!.subteams.map((s) => s.id)).toEqual(["st1"]);
     expect(byId("coPrimary")!.subteam_id).toBe("st1");
     expect(byId("coPrimary")!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
     expect(usePmStore.getState().subteams.some((s) => s.id === "st1")).toBe(true);

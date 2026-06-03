@@ -14,8 +14,16 @@ import {
   type TablerIcon,
 } from "@tabler/icons-react";
 import { formatDistanceToNow, parseISO } from "date-fns";
+import { useMemo, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { usePmStore } from "@pm/lib/pmStore";
+import {
+  ActivityFilterBar,
+  activityFiltersActive,
+  activityMatchesFilters,
+  EMPTY_ACTIVITY_FILTERS,
+  type ActivityFilters,
+} from "@pm/components/ActivityFilterBar";
 
 const ACTION_ICON: Record<ActivityAction, TablerIcon> = {
   created: IconPlus,
@@ -48,13 +56,27 @@ export function ActivityFeedClient({ teamSlug = null }: ActivityFeedClientProps)
   const subteams = usePmStore((s) => s.subteams);
   const users = usePmStore((s) => s.users);
 
+  const [filters, setFilters] = useState<ActivityFilters>(EMPTY_ACTIVITY_FILTERS);
+  const patchFilters = (patch: Partial<ActivityFilters>) =>
+    setFilters((prev) => ({ ...prev, ...patch }));
+  const clearFilters = () => setFilters(EMPTY_ACTIVITY_FILTERS);
+
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
+  const scopedToTeam = currentTeam !== null;
   const subteamById = new Map(subteams.map((s) => [s.id, s] as const));
   const userById = new Map(users.map((u) => [u.id, u] as const));
 
-  const filtered = currentTeam
+  // Team scope (route) first, then the user-driven filter predicate.
+  const teamScoped = currentTeam
     ? activity.filter((a) => a.subteam_ids.includes(currentTeam.id))
     : activity;
+
+  const filtered = useMemo(
+    () => teamScoped.filter((a) => activityMatchesFilters(a, filters)),
+    [teamScoped, filters],
+  );
+
+  const filtersActive = activityFiltersActive(filters);
 
   return (
     <>
@@ -63,10 +85,22 @@ export function ActivityFeedClient({ teamSlug = null }: ActivityFeedClientProps)
         description={`${filtered.length} event${filtered.length === 1 ? "" : "s"} · newest first`}
       />
 
+      <ActivityFilterBar
+        filters={filters}
+        subteams={subteams}
+        users={users}
+        active={filtersActive}
+        scopedToTeam={scopedToTeam}
+        onPatch={patchFilters}
+        onClear={clearFilters}
+      />
+
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         {filtered.length === 0 ? (
           <div className="rounded-md border border-helios-line bg-helios-panel p-8 text-center text-helios-dim">
-            No activity yet. Create, edit, or move a task to populate the feed.
+            {filtersActive
+              ? "No activity matches the current filters."
+              : "No activity yet. Create, edit, or move a task to populate the feed."}
           </div>
         ) : (
           <ol className="divide-y divide-helios-line rounded-md border border-helios-line bg-helios-panel">
@@ -172,6 +206,9 @@ function describePayload(row: Activity): string {
   }
   if (row.action === "created" && typeof p.type === "string") {
     return `${p.type}`;
+  }
+  if (row.action === "deleted" && typeof p.type === "string") {
+    return `${p.type} removed`;
   }
   return "";
 }

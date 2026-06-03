@@ -33,6 +33,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
   const addTaskSubteam = usePmStore((s) => s.addTaskSubteam);
   const removeTaskSubteam = usePmStore((s) => s.removeTaskSubteam);
   const setPrimarySubteam = usePmStore((s) => s.setPrimarySubteam);
+  const reassignPrimarySubteam = usePmStore((s) => s.reassignPrimarySubteam);
 
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -58,16 +59,48 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
       onClick: () => setPrimarySubteam(task.id, menu.subteamId),
       disabledReason: isPrimary ? "Already the primary subteam" : undefined,
     });
-    actions.push({
-      label: "Remove from task",
-      danger: true,
-      onClick: () => removeTaskSubteam(task.id, menu.subteamId),
-      disabledReason: isPrimary
-        ? "The primary subteam can't be removed — set another primary first"
-        : undefined,
-    });
+    if (isPrimary) {
+      // The primary membership can't be removed directly (every task must keep
+      // at least one), so instead offer to REASSIGN the primary onto another org
+      // subteam — which re-homes the task and drops this (catch-all) primary.
+      // The ContextMenu has no nested-submenu support, so the "submenu" is a
+      // flat run of "Reassign primary to <name>" entries, one per candidate.
+      const pool = orgSubteams.length ? orgSubteams : baselineSubteams;
+      const candidates = pool.filter((s) => s.id !== task.subteam_id);
+      if (candidates.length === 0) {
+        actions.push({
+          label: "Reassign primary to…",
+          danger: true,
+          onClick: () => {},
+          disabledReason: "No other subteam to reassign to",
+        });
+      } else {
+        for (const s of candidates) {
+          actions.push({
+            label: `Reassign primary to ${s.name}`,
+            danger: true,
+            onClick: () => reassignPrimarySubteam(task.id, s.id),
+          });
+        }
+      }
+    } else {
+      actions.push({
+        label: "Remove from task",
+        danger: true,
+        onClick: () => removeTaskSubteam(task.id, menu.subteamId),
+      });
+    }
     return actions;
-  }, [menu, task.id, task.subteam_id, setPrimarySubteam, removeTaskSubteam]);
+  }, [
+    menu,
+    task.id,
+    task.subteam_id,
+    orgSubteams,
+    baselineSubteams,
+    setPrimarySubteam,
+    removeTaskSubteam,
+    reassignPrimarySubteam,
+  ]);
 
   return (
     <div className="relative inline-flex flex-wrap items-center gap-1">

@@ -22,13 +22,21 @@ import {
   parseISO,
   startOfDay,
 } from "date-fns";
-import { IconEye, IconEyeOff, IconMinus, IconPlus } from "@tabler/icons-react";
+import {
+  IconEdit,
+  IconEye,
+  IconEyeOff,
+  IconMinus,
+  IconPlus,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
+import { GanttLegend } from "@pm/components/GanttLegend";
+import { MilestoneDialog } from "@pm/components/MilestoneDialog";
 import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { Select } from "@pm/components/ui/Select";
-import { StatusLegend } from "@pm/components/StatusLegend";
 import { isManufacturingType } from "@pm/lib/filters";
 import {
   recallGanttSettings,
@@ -36,6 +44,7 @@ import {
 } from "@pm/lib/ganttSettings";
 import {
   scopeTasksToSubteam,
+  selectIsAdmin,
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
@@ -119,6 +128,10 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   const projectId = usePmStore((s) => s.projectId);
   const selectTask = usePmStore((s) => s.selectTask);
   const addTask = usePmStore((s) => s.addTask);
+  const addMilestone = usePmStore((s) => s.addMilestone);
+  const updateMilestone = usePmStore((s) => s.updateMilestone);
+  const deleteMilestone = usePmStore((s) => s.deleteMilestone);
+  const isAdmin = usePmStore(selectIsAdmin);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
@@ -149,6 +162,9 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [hiddenCursors, setHiddenCursors] = useState<Set<string>>(new Set());
   const [cursorMenuOpen, setCursorMenuOpen] = useState(false);
+  // Milestone create/edit dialog (admin only). `null` milestone = create mode.
+  const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH);
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
   const barHeight = Math.max(10, rowHeight - 14);
@@ -356,6 +372,22 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               milestones={milestones}
               hidden={hiddenCursors}
               onToggle={toggleCursor}
+              isAdmin={isAdmin}
+              onEditMilestone={(m) => {
+                setEditingMilestone(m);
+                setMilestoneDialogOpen(true);
+                setCursorMenuOpen(false);
+              }}
+              onDeleteMilestone={(m) => {
+                if (confirm(`Delete milestone "${m.name}"? This cannot be undone.`)) {
+                  deleteMilestone(m.id);
+                }
+              }}
+              onNewMilestone={() => {
+                setEditingMilestone(null);
+                setMilestoneDialogOpen(true);
+                setCursorMenuOpen(false);
+              }}
             />
             <button
               type="button"
@@ -370,7 +402,12 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       />
 
       <div className="flex items-center gap-4 border-b border-helios-line bg-helios-panel/40 px-4 py-1.5">
-        <StatusLegend />
+        <GanttLegend
+          bgProperty={bgProperty}
+          outlineProperty={outlineProperty}
+          subteams={subteams}
+          users={users}
+        />
         <span className="inline-flex items-center gap-1.5 text-[11px] text-helios-dim">
           <span aria-hidden className="inline-block h-3 w-0.5 bg-asu-maroon" />
           Today
@@ -559,14 +596,14 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 // Glass background: resolved bg-property color at low alpha behind
                 // a backdrop blur, with light text on top.
                 const bgColor = hexToRgba(colorForTask(b.task, bgProperty), GLASS_ALPHA);
-                // Outline from the outline-property color, then layer the
-                // special-case overrides on top: critical-path keeps its gold
-                // border; external/cross-team keeps its dashed border.
-                const border = isCritical
-                  ? "2px solid #FFC627"
-                  : isExternal
-                    ? "1px dashed rgba(255,255,255,0.6)"
-                    : `2px solid ${colorForTask(b.task, outlineProperty)}`;
+                // Outline ALWAYS reflects the chosen outline property so the
+                // legend's "Outline" row stays truthful. The critical-path /
+                // cross-team signal moves to a subtle non-outline cue below
+                // (corner glyph + title suffix) so it no longer hides the color.
+                const border = `2px solid ${colorForTask(b.task, outlineProperty)}`;
+                const titleSuffix =
+                  (isCritical ? " · critical path" : "") +
+                  (isExternal ? " · cross-team" : "");
                 return (
                   <button
                     key={b.task.id}
@@ -575,7 +612,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                       setPeek({ taskId: b.task.id, x: e.clientX, y: e.clientY })
                     }
                     className={
-                      "absolute cursor-pointer rounded text-left font-medium text-helios-text shadow-sm backdrop-blur-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
+                      "absolute cursor-pointer overflow-hidden rounded text-left font-medium text-helios-text shadow-sm backdrop-blur-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
                       (dim ? "opacity-25" : isExternal ? "opacity-55" : "opacity-100")
                     }
                     style={{
@@ -587,11 +624,27 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                       backgroundColor: bgColor,
                       border,
                     }}
-                    title={`${b.task.title} · ${b.task.start_date} → ${b.task.due_date}`}
+                    title={`${b.task.title} · ${b.task.start_date} → ${b.task.due_date}${titleSuffix}`}
                   >
                     <span className="block truncate px-1.5 leading-tight">
                       {b.task.title}
                     </span>
+                    {isCritical ? (
+                      <span
+                        aria-hidden
+                        title="On critical path"
+                        className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-asu-gold shadow-sm"
+                      />
+                    ) : isExternal ? (
+                      <span
+                        aria-hidden
+                        title="Cross-team dependency"
+                        className="absolute right-0.5 top-0 leading-none text-asu-gold/80"
+                        style={{ fontSize: Math.max(8, Math.round(barFont * 0.7)) }}
+                      >
+                        ↗
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -663,6 +716,27 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         users={users}
         defaultSubteamId={currentTeam?.id ?? null}
       />
+
+      {isAdmin ? (
+        <MilestoneDialog
+          open={milestoneDialogOpen}
+          onClose={() => {
+            setMilestoneDialogOpen(false);
+            setEditingMilestone(null);
+          }}
+          onSave={(m) => {
+            if (editingMilestone) updateMilestone(m.id, m);
+            else addMilestone(m);
+          }}
+          onDelete={(m) => {
+            deleteMilestone(m.id);
+            setMilestoneDialogOpen(false);
+            setEditingMilestone(null);
+          }}
+          projectId={projectId}
+          milestone={editingMilestone}
+        />
+      ) : null}
     </>
   );
 }
@@ -673,12 +747,20 @@ function CursorMenu({
   milestones,
   hidden,
   onToggle,
+  isAdmin,
+  onEditMilestone,
+  onDeleteMilestone,
+  onNewMilestone,
 }: {
   open: boolean;
   onToggleOpen: () => void;
   milestones: ReadonlyArray<Milestone>;
   hidden: Set<string>;
   onToggle: (id: string) => void;
+  isAdmin: boolean;
+  onEditMilestone: (m: Milestone) => void;
+  onDeleteMilestone: (m: Milestone) => void;
+  onNewMilestone: () => void;
 }) {
   const shown = milestones.length - hidden.size;
   return (
@@ -708,34 +790,71 @@ function CursorMenu({
               const countdown =
                 days === 0 ? "today" : days > 0 ? `${days}d out` : `${Math.abs(days)}d ago`;
               return (
-                <button
+                <div
                   key={m.id}
-                  type="button"
-                  onClick={() => onToggle(m.id)}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-helios-base"
+                  className="group flex w-full items-center gap-1 rounded pr-1 hover:bg-helios-base"
                 >
-                  {isHidden ? (
-                    <IconEyeOff size={14} strokeWidth={1.5} className="shrink-0 text-helios-dim" />
-                  ) : (
-                    <IconEye size={14} strokeWidth={1.5} className="shrink-0 text-asu-gold" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={
-                        "block truncate text-xs font-normal " +
-                        (isHidden ? "text-helios-dim" : "text-helios-text")
-                      }
-                    >
-                      {m.name}
+                  <button
+                    type="button"
+                    onClick={() => onToggle(m.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left"
+                    title={isHidden ? "Show cursor" : "Hide cursor"}
+                  >
+                    {isHidden ? (
+                      <IconEyeOff size={14} strokeWidth={1.5} className="shrink-0 text-helios-dim" />
+                    ) : (
+                      <IconEye size={14} strokeWidth={1.5} className="shrink-0 text-asu-gold" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={
+                          "block truncate text-xs font-normal " +
+                          (isHidden ? "text-helios-dim" : "text-helios-text")
+                        }
+                      >
+                        {m.name}
+                      </span>
+                      <span className="block truncate text-[10px] text-helios-dim">
+                        {MILESTONE_TYPE_LABEL[m.type]} · {format(parseISO(m.target_date), "MMM d")} · {countdown}
+                      </span>
                     </span>
-                    <span className="block truncate text-[10px] text-helios-dim">
-                      {MILESTONE_TYPE_LABEL[m.type]} · {format(parseISO(m.target_date), "MMM d")} · {countdown}
-                    </span>
-                  </span>
-                </button>
+                  </button>
+                  {isAdmin ? (
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onEditMilestone(m)}
+                        aria-label={`Edit ${m.name}`}
+                        title="Edit milestone"
+                        className="rounded p-1 text-helios-dim hover:bg-helios-panel hover:text-helios-text"
+                      >
+                        <IconEdit size={13} strokeWidth={1.5} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteMilestone(m)}
+                        aria-label={`Delete ${m.name}`}
+                        title="Delete milestone"
+                        className="rounded p-1 text-helios-dim hover:bg-helios-panel hover:text-red-400"
+                      >
+                        <IconTrash size={13} strokeWidth={1.5} />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               );
             })
           )}
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={onNewMilestone}
+              className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-helios-line px-2 py-1.5 text-left text-xs font-normal text-asu-gold hover:bg-helios-base"
+            >
+              <IconPlus size={13} strokeWidth={1.5} />
+              New milestone
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

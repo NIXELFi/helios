@@ -28,7 +28,7 @@ import { TaskLookup } from "@pm/components/TaskLookup";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
-import { usePmStore } from "@pm/lib/pmStore";
+import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -82,6 +82,9 @@ export function TaskDetailSheet() {
   const allComments = usePmStore((s) => s.comments);
   const addComment = usePmStore((s) => s.addComment);
   const currentUserId = usePmStore((s) => s.currentUserId);
+  // Viewers can't write — disable the inline editors so an RLS-rejected write
+  // never optimistically flips the value and then snaps back on auto-refresh.
+  const isViewer = usePmStore(selectMyRole) === "viewer";
 
   const task = selectedTaskId
     ? tasks.find((t) => t.id === selectedTaskId) ?? null
@@ -221,6 +224,7 @@ export function TaskDetailSheet() {
                 value={task.status}
                 onChange={(v) => updateTask(task.id, { status: v })}
                 options={STATUS_OPTIONS}
+                disabled={isViewer}
                 ariaLabel="Status"
               />
             </StatBox>
@@ -236,6 +240,7 @@ export function TaskDetailSheet() {
               <Select
                 value={task.owner_id ?? ""}
                 onChange={(v) => updateTask(task.id, { owner_id: v || null })}
+                disabled={isViewer}
                 ariaLabel="Owner"
                 options={[
                   { value: "", label: "Unassigned" },
@@ -249,6 +254,7 @@ export function TaskDetailSheet() {
                 value={task.priority}
                 onChange={(v) => updateTask(task.id, { priority: v })}
                 options={PRIORITY_OPTIONS}
+                disabled={isViewer}
                 ariaLabel="Priority"
               />
             </Field>
@@ -258,6 +264,7 @@ export function TaskDetailSheet() {
                 value={task.type}
                 onChange={(v) => updateTask(task.id, { type: v })}
                 options={TYPE_OPTIONS}
+                disabled={isViewer}
                 ariaLabel="Type"
               />
             </Field>
@@ -281,14 +288,14 @@ export function TaskDetailSheet() {
           <div className="mb-4 grid grid-cols-2 gap-3">
             <Field label="Subteams">
               <div className="flex min-h-[30px] items-center">
-                <TaskSubteamChips task={task} editable />
+                <TaskSubteamChips task={task} editable={!isViewer} />
               </div>
             </Field>
             <Field label="Subsystem">
               <Select
                 value={task.subsystem_id ?? ""}
                 onChange={(v) => updateTask(task.id, { subsystem_id: v || null })}
-                disabled={teamSubsystems.length === 0}
+                disabled={isViewer || teamSubsystems.length === 0}
                 ariaLabel="Subsystem"
                 options={[
                   { value: "", label: "—" },
