@@ -12,6 +12,7 @@ import type {
   TaskComment,
   TaskDependency,
   TaskRow,
+  TeamRole,
   User,
   Vendor,
 } from "@helios/pm-ui";
@@ -53,6 +54,8 @@ interface HydrateInput {
   // The signed-in Supabase client. Stored so mutations can persist back to the
   // `pm` schema. Null only in tests / when not signed in (mutations stay local).
   client: SupabaseClient | null;
+  // The signed-in user's PM role per project (admin/lead/engineer/viewer).
+  roles: Record<string, TeamRole>;
 }
 
 // Snapshot the active flat fields back into a ProjectData record.
@@ -283,6 +286,11 @@ interface PmState {
   // Number of optimistic writes currently persisting. A background refresh skips
   // while this is > 0 so it never clobbers an in-flight optimistic edit.
   inFlightWrites: number;
+  // Monotonic counter bumped when any persist STARTS — lets the auto-refresh
+  // detect a write that began during its fetch and skip the now-stale re-hydrate.
+  writeEpoch: number;
+  // The signed-in user's PM role per project; drives admin-only UI + edit gating.
+  projectRoles: Record<string, TeamRole>;
 
   // Multi-project support. The flat fields below mirror the active project.
   projects: Project[];
@@ -480,7 +488,7 @@ export const usePmStore = create<PmState>((set, get) => {
   ): void {
     const client = get().client;
     if (!client) return;
-    set((s) => ({ inFlightWrites: s.inFlightWrites + 1 }));
+    set((s) => ({ inFlightWrites: s.inFlightWrites + 1, writeEpoch: s.writeEpoch + 1 }));
     void run(client)
       .catch((err: unknown) => {
         rollback();
@@ -547,6 +555,8 @@ export const usePmStore = create<PmState>((set, get) => {
     lastWriteError: null,
     clearWriteError: () => set({ lastWriteError: null }),
     inFlightWrites: 0,
+    writeEpoch: 0,
+    projectRoles: {},
     projects: [],
     activeProjectId: "",
     projectData: {},
@@ -606,6 +616,7 @@ export const usePmStore = create<PmState>((set, get) => {
           activeProjectId: input.activeProjectId,
           currentUserId: input.currentUserId,
           client: input.client,
+          projectRoles: input.roles,
           lastWriteError: null,
           projects: input.projects.map((p) => ({ ...p })),
           projectData: input.projectData,
@@ -1499,5 +1510,10 @@ export const selectComments = (state: PmState, taskId: string) =>
 
 export const selectBuildRecord = (state: PmState, taskId: string) =>
   state.buildRecords.find((b) => b.task_id === taskId) ?? null;
+
+// The signed-in user's role in the active project, and an admin convenience.
+export const selectMyRole = (state: PmState): TeamRole | null =>
+  state.projectRoles[state.activeProjectId] ?? null;
+export const selectIsAdmin = (state: PmState): boolean => selectMyRole(state) === "admin";
 
 export type { PmState };

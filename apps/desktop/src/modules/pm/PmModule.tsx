@@ -139,6 +139,7 @@ export function PmModule() {
           activeProjectId,
           currentUserId: user.id,
           baselineOrg: ws.baselineOrg,
+          roles: ws.roles,
           client,
         });
         setPhase("ready");
@@ -167,10 +168,13 @@ export function PmModule() {
       const st = usePmStore.getState();
       if (!st.hydrated || st.inFlightWrites > 0 || running) return;
       running = true;
+      const epochBefore = st.writeEpoch;
       try {
         const ws = await loadWorkspace(c);
         const cur = usePmStore.getState();
-        if (cur.inFlightWrites > 0) return; // a write started during the fetch
+        // Abort if any write started (and maybe finished) during the fetch — the
+        // snapshot may predate it, so re-hydrating would clobber that edit.
+        if (cur.inFlightWrites > 0 || cur.writeEpoch !== epochBefore) return;
         const keep =
           cur.activeProjectId && ws.projectData[cur.activeProjectId]
             ? cur.activeProjectId
@@ -181,6 +185,7 @@ export function PmModule() {
           activeProjectId: keep,
           currentUserId: u.id,
           baselineOrg: ws.baselineOrg,
+          roles: ws.roles,
           client: c,
         });
       } catch {

@@ -11,6 +11,7 @@ import type {
   TaskComment,
   TaskDependency,
   TaskRow,
+  TeamRole,
   User,
   Vendor,
 } from "@helios/pm-ui";
@@ -42,6 +43,8 @@ export interface Workspace {
   projects: Project[];
   projectData: Record<string, ProjectData>;
   baselineOrg: BaselineOrg;
+  // The signed-in user's PM team role per project (admin/lead/engineer/viewer).
+  roles: Record<string, TeamRole>;
 }
 
 // Fetch the entire workspace (all projects + the shared org) in one shot and
@@ -63,6 +66,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     buildR,
     eventsR,
     activityR,
+    rolesR,
   ] = await Promise.all([
     sb.from("projects").select("id,name,description,car_code").order("car_code"),
     sb.from("subteams").select("id,name,code,slug,color").order("sort_order"),
@@ -108,6 +112,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       )
       .order("created_at", { ascending: false })
       .limit(250),
+    sb.rpc("my_team_roles"),
   ]);
 
   const projectsRaw = unwrap<
@@ -133,6 +138,12 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
   const comments = unwrap<TaskComment[]>(commentsR, "task_comments");
   const build = unwrap<BuildRecord[]>(buildR, "build_records");
   const events = unwrap<CalendarEvent[]>(eventsR, "calendar_events");
+  const rolesRaw = unwrap<Array<{ project_id: string; team_role: TeamRole }>>(
+    rolesR,
+    "my_team_roles",
+  );
+  const roles: Record<string, TeamRole> = {};
+  for (const r of rolesRaw) roles[r.project_id] = r.team_role;
   const activity = unwrap<Activity[]>(activityR, "activity");
 
   const userById = new Map(users.map((u) => [u.id, u]));
@@ -210,5 +221,5 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     };
   }
 
-  return { projects, projectData, baselineOrg };
+  return { projects, projectData, baselineOrg, roles };
 }
