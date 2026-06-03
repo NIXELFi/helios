@@ -153,6 +153,51 @@ export function PmModule() {
     };
   }, [client, user]);
 
+  // Keep the workspace fresh without a full app reload: re-fetch on window focus
+  // and on a short interval, re-hydrating from the `pm` schema so server-side
+  // changes (the activity-feed trigger, edits from another session, computed
+  // fields) appear. Preserves the active project + UI state, and SKIPS while a
+  // write is in flight so it never clobbers an in-flight optimistic edit.
+  useEffect(() => {
+    if (!client || !user) return;
+    const c = client;
+    const u = user;
+    let running = false;
+    async function refresh() {
+      const st = usePmStore.getState();
+      if (!st.hydrated || st.inFlightWrites > 0 || running) return;
+      running = true;
+      try {
+        const ws = await loadWorkspace(c);
+        const cur = usePmStore.getState();
+        if (cur.inFlightWrites > 0) return; // a write started during the fetch
+        const keep =
+          cur.activeProjectId && ws.projectData[cur.activeProjectId]
+            ? cur.activeProjectId
+            : ws.projects[0]?.id ?? "";
+        usePmStore.getState().hydrate({
+          projects: ws.projects,
+          projectData: ws.projectData,
+          activeProjectId: keep,
+          currentUserId: u.id,
+          baselineOrg: ws.baselineOrg,
+          client: c,
+        });
+      } catch {
+        // transient refresh failure — the next focus/interval retries
+      } finally {
+        running = false;
+      }
+    }
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => void refresh(), 20000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [client, user]);
+
   if (phase === "loading") return <Centered>Loading your projects…</Centered>;
   if (phase === "error")
     return (

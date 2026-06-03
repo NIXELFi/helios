@@ -280,6 +280,9 @@ interface PmState {
   // Most recent failed write, for the toast. Null when all is well.
   lastWriteError: WriteError | null;
   clearWriteError: () => void;
+  // Number of optimistic writes currently persisting. A background refresh skips
+  // while this is > 0 so it never clobbers an in-flight optimistic edit.
+  inFlightWrites: number;
 
   // Multi-project support. The flat fields below mirror the active project.
   projects: Project[];
@@ -477,11 +480,16 @@ export const usePmStore = create<PmState>((set, get) => {
   ): void {
     const client = get().client;
     if (!client) return;
-    void run(client).catch((err: unknown) => {
-      rollback();
-      const message = err instanceof Error ? err.message : String(err);
-      set({ lastWriteError: { message, at: Date.now() } });
-    });
+    set((s) => ({ inFlightWrites: s.inFlightWrites + 1 }));
+    void run(client)
+      .catch((err: unknown) => {
+        rollback();
+        const message = err instanceof Error ? err.message : String(err);
+        set({ lastWriteError: { message, at: Date.now() } });
+      })
+      .finally(() => {
+        set((s) => ({ inFlightWrites: Math.max(0, s.inFlightWrites - 1) }));
+      });
   }
 
   // Replay a command in one direction (undo => `before`, redo => `after`),
@@ -538,6 +546,7 @@ export const usePmStore = create<PmState>((set, get) => {
     client: null,
     lastWriteError: null,
     clearWriteError: () => set({ lastWriteError: null }),
+    inFlightWrites: 0,
     projects: [],
     activeProjectId: "",
     projectData: {},

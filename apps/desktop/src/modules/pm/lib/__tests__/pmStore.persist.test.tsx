@@ -140,6 +140,18 @@ describe("optimistic persistence with rollback", () => {
     expect(writes.some((w) => w.table === "tasks" && w.op === "insert")).toBe(true);
   });
 
+  test("inFlightWrites tracks a pending write (so a background refresh can skip it)", async () => {
+    const { client } = recorderClient(null);
+    seed(client);
+    usePmStore.setState({ inFlightWrites: 0 });
+
+    usePmStore.getState().addTask(makeTask("t1"));
+    expect(usePmStore.getState().inFlightWrites).toBe(1); // persisting
+
+    await flush();
+    expect(usePmStore.getState().inFlightWrites).toBe(0); // settled
+  });
+
   test("addTask rolls the new task back and records an error when the write fails", async () => {
     const { client } = recorderClient({ message: "permission denied for table tasks" });
     seed(client);
