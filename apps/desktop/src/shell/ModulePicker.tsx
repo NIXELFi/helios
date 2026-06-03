@@ -100,7 +100,6 @@ export function ModulePicker(props: Props) {
         />
         <NavButton
           label="Vault"
-          badge="NEW"
           active={active === "vault"}
           onClick={() => onSelect("vault")}
           disabled={vaultDisabled}
@@ -108,7 +107,6 @@ export function ModulePicker(props: Props) {
         />
         <NavButton
           label="CFD"
-          badge="NEW"
           active={active === "cfd"}
           onClick={() => onSelect("cfd")}
         />

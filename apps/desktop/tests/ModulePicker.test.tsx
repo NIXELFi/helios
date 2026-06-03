@@ -18,13 +18,16 @@ const baseProps = {
 };
 
 describe("<ModulePicker>", () => {
-  it("renders Logs (active), Vault, and CFD entries with NEW badges", () => {
+  it("renders Logs (active), Vault, and CFD entries without NEW badges", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: /logs/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /vault/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /cfd/i })).toBeInTheDocument();
-    // Two "NEW" badges now (Vault + CFD).
-    expect(screen.getAllByText(/^new$/i).length).toBeGreaterThanOrEqual(2);
+    const vaultBtn = screen.getByRole("button", { name: /vault/i });
+    const cfdBtn = screen.getByRole("button", { name: /cfd/i });
+    expect(vaultBtn).toBeInTheDocument();
+    expect(cfdBtn).toBeInTheDocument();
+    // The NEW badge was removed from Vault and CFD — they aren't new anymore.
+    expect(vaultBtn).not.toHaveTextContent(/new/i);
+    expect(cfdBtn).not.toHaveTextContent(/new/i);
   });
 
   it("highlights the active module via aria-current", () => {

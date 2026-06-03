@@ -569,6 +569,18 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 const days = differenceInCalendarDays(startOfDay(day), startOfDay(new Date()));
                 const countdown =
                   days === 0 ? "today" : days > 0 ? `${days}d out` : `${Math.abs(days)}d ago`;
+                // Admins can click the on-chart label chip to edit the milestone
+                // (the cursor container is pointer-events-none, so the button
+                // re-enables pointer events for itself). Non-admins get the same
+                // chip as a static, non-interactive label.
+                const chipBody = (
+                  <>
+                    <span>{m.name}</span>
+                    <span className="font-normal text-asu-gold/70">
+                      {MILESTONE_TYPE_LABEL[m.type]} · {countdown}
+                    </span>
+                  </>
+                );
                 return (
                   <div
                     key={m.id}
@@ -576,12 +588,23 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     style={{ left: x }}
                     title={`${MILESTONE_TYPE_LABEL[m.type]}: ${m.name} · ${format(day, "MMM d, yyyy")} · ${countdown}`}
                   >
-                    <span className="absolute top-1 left-1 z-20 flex flex-col whitespace-nowrap rounded bg-asu-gold/15 px-1 py-0.5 text-[10px] font-medium text-asu-gold">
-                      <span>{m.name}</span>
-                      <span className="font-normal text-asu-gold/70">
-                        {MILESTONE_TYPE_LABEL[m.type]} · {countdown}
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingMilestone(m);
+                          setMilestoneDialogOpen(true);
+                        }}
+                        title={`Edit milestone "${m.name}"`}
+                        className="pointer-events-auto absolute top-1 left-1 z-20 flex cursor-pointer flex-col whitespace-nowrap rounded bg-asu-gold/15 px-1 py-0.5 text-left text-[10px] font-medium text-asu-gold transition-colors hover:bg-asu-gold/30 hover:ring-1 hover:ring-asu-gold/50"
+                      >
+                        {chipBody}
+                      </button>
+                    ) : (
+                      <span className="absolute top-1 left-1 z-20 flex flex-col whitespace-nowrap rounded bg-asu-gold/15 px-1 py-0.5 text-[10px] font-medium text-asu-gold">
+                        {chipBody}
                       </span>
-                    </span>
+                    )}
                   </div>
                 );
               })}

@@ -43,6 +43,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { EventDialog } from "@pm/components/EventDialog";
+import { MilestoneDialog } from "@pm/components/MilestoneDialog";
 import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
 import { ViewHeader } from "@pm/components/ViewHeader";
@@ -59,6 +60,7 @@ import {
 } from "@pm/lib/filters";
 import {
   scopeTasksToSubteam,
+  selectIsAdmin,
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
@@ -95,6 +97,11 @@ export function CalendarViewClient({
   const addEvent = usePmStore((s) => s.addEvent);
   const updateEvent = usePmStore((s) => s.updateEvent);
   const deleteEvent = usePmStore((s) => s.deleteEvent);
+  const addMilestone = usePmStore((s) => s.addMilestone);
+  const updateMilestone = usePmStore((s) => s.updateMilestone);
+  const deleteMilestone = usePmStore((s) => s.deleteMilestone);
+  // Milestone create/edit/delete is admin-only (matches the Gantt view).
+  const isAdmin = usePmStore(selectIsAdmin);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
@@ -302,6 +309,14 @@ export function CalendarViewClient({
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [eventPrefillDate, setEventPrefillDate] = useState<string | null>(null);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  // Milestone edit dialog (admin only). Reached from the countdown strip cards.
+  const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+
+  function openEditMilestone(m: Milestone) {
+    setEditingMilestone(m);
+    setMilestoneDialogOpen(true);
+  }
 
   function openCreateMenu(dateKey: string, e: React.MouseEvent) {
     setCreateMenu({ dateKey, x: e.clientX, y: e.clientY });
@@ -412,7 +427,11 @@ export function CalendarViewClient({
         onClear={() => setFilters(EMPTY_FILTERS)}
       />
 
-      <CountdownStrip milestones={milestones} />
+      <CountdownStrip
+        milestones={milestones}
+        canEdit={isAdmin}
+        onEdit={openEditMilestone}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
         {mode === "year" ? (
@@ -514,6 +533,25 @@ export function CalendarViewClient({
         subteams={subteams}
         event={editingEvent}
         defaultDate={eventPrefillDate}
+      />
+
+      <MilestoneDialog
+        open={milestoneDialogOpen}
+        onClose={() => {
+          setMilestoneDialogOpen(false);
+          setEditingMilestone(null);
+        }}
+        onSave={(m) => {
+          if (editingMilestone) updateMilestone(m.id, m);
+          else addMilestone(m);
+        }}
+        onDelete={(m) => {
+          deleteMilestone(m.id);
+          setMilestoneDialogOpen(false);
+          setEditingMilestone(null);
+        }}
+        projectId={projectId}
+        milestone={editingMilestone}
       />
     </>
   );
@@ -1071,7 +1109,15 @@ function competitionYearStart(anchor: Date): Date {
 // Countdown strip
 // ---------------------------------------------------------------------------
 
-function CountdownStrip({ milestones }: { milestones: ReadonlyArray<Milestone> }) {
+function CountdownStrip({
+  milestones,
+  canEdit = false,
+  onEdit,
+}: {
+  milestones: ReadonlyArray<Milestone>;
+  canEdit?: boolean;
+  onEdit?: (m: Milestone) => void;
+}) {
   const today = new Date();
   const upcoming = [...milestones]
     .filter((m) => !isBefore(parseISO(m.target_date), today))
@@ -1086,14 +1132,11 @@ function CountdownStrip({ milestones }: { milestones: ReadonlyArray<Milestone> }
         const d = parseISO(m.target_date);
         const days = differenceInCalendarDays(d, today);
         const isClose = days <= 14;
-        return (
-          <div
-            key={m.id}
-            className={
-              "flex min-w-[10rem] shrink-0 flex-col rounded-md border px-3 py-2 " +
-              (isClose ? "border-asu-gold/60 bg-asu-gold/5" : "border-helios-line bg-helios-base/30")
-            }
-          >
+        const cardClass =
+          "flex min-w-[10rem] shrink-0 flex-col rounded-md border px-3 py-2 " +
+          (isClose ? "border-asu-gold/60 bg-asu-gold/5" : "border-helios-line bg-helios-base/30");
+        const body = (
+          <>
             <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-asu-gold">
               <IconFlag2 size={10} strokeWidth={1.5} />
               {m.name}
@@ -1102,6 +1145,25 @@ function CountdownStrip({ milestones }: { milestones: ReadonlyArray<Milestone> }
               {days} <span className="text-xs font-normal text-helios-dim">days</span>
             </div>
             <div className="text-[11px] tabular-nums text-helios-dim">{format(d, "EEE, MMM d")}</div>
+          </>
+        );
+        // Admins can click a countdown card to edit/delete that milestone.
+        if (canEdit && onEdit) {
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onEdit(m)}
+              title={`Edit milestone "${m.name}"`}
+              className={cardClass + " cursor-pointer text-left transition-colors hover:border-asu-gold hover:bg-asu-gold/10"}
+            >
+              {body}
+            </button>
+          );
+        }
+        return (
+          <div key={m.id} className={cardClass}>
+            {body}
           </div>
         );
       })}

@@ -100,7 +100,7 @@ const VIEW_ICON: Record<ViewSegment, NavItem["Icon"]> = {
 // than starting a drag. The PM Link isn't forwardRef-able, so the row is a
 // native <a> wired to the in-memory router (mirroring what Link renders) — that
 // gives dnd-kit a real DOM node for setNodeRef while preserving navigation.
-function SortableViewItem({
+export function SortableViewItem({
   view,
   href,
   active,
@@ -117,6 +117,16 @@ function SortableViewItem({
     <a
       ref={setNodeRef}
       href={href}
+      // CRITICAL: anchors are natively draggable, and dnd-kit's PointerSensor
+      // only handles pointer events — so Chromium starts a *parallel* native
+      // HTML5 link-drag. In the Tauri webview (dragDropEnabled:false) dropping
+      // that link onto the window performs a full-document navigation to href,
+      // re-bootstrapping the whole app back to the default "logs" module. Kill
+      // the native drag entirely (belt-and-suspenders: attribute + onDragStart)
+      // so only dnd-kit's pointer-driven sort can start. Click-to-nav and the
+      // sortable reorder are unaffected.
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
       onClick={(e) => {
         e.preventDefault();
         router.push(href);
