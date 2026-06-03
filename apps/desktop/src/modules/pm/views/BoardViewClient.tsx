@@ -22,8 +22,10 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
+import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
 import { ViewHeader } from "@pm/components/ViewHeader";
@@ -72,8 +74,17 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
   const addTask = usePmStore((s) => s.addTask);
   const updateTask = usePmStore((s) => s.updateTask);
   const selectTask = usePmStore((s) => s.selectTask);
+  const selectedTaskIds = usePmStore((s) => s.selectedTaskIds);
+  const toggleSelected = usePmStore((s) => s.toggleSelected);
+  const clearSelection = usePmStore((s) => s.clearSelection);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
+
+  // Defense-in-depth: drop any selection when the team scope changes so a stale
+  // (possibly external/RLS-denied) selection can't survive cross-team nav.
+  useEffect(() => {
+    clearSelection();
+  }, [teamSlug, clearSelection]);
 
   const router = useRouter();
   const sp = useSearchParams();
@@ -118,6 +129,17 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
     }
     return out;
   }, [filteredTasks, filters]);
+
+  // The OWNED ids of every card currently rendered. Only these get a checkbox
+  // (external cards are read-only context), so the bulk bar must intersect the
+  // selection against this set before issuing any atomic .in() write.
+  const selectableSet = useMemo(() => {
+    const out = new Set<string>();
+    for (const t of filteredTasks) {
+      if ((relationByTaskId.get(t.id) ?? "owned") === "owned") out.add(t.id);
+    }
+    return out;
+  }, [filteredTasks, relationByTaskId]);
 
   const filtersActive =
     filters.status.length > 0 ||
@@ -215,6 +237,8 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
                 tasks={byStatus.get(status) ?? []}
                 relations={relationByTaskId}
                 dimmedById={dimmedById}
+                selectedIds={selectedTaskIds}
+                onToggleSelect={toggleSelected}
                 onOpen={selectTask}
               />
             ))}
@@ -248,6 +272,8 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         users={users}
         defaultSubteamId={currentTeam?.id ?? null}
       />
+
+      <BulkActionBar selectableIds={selectableSet} />
     </>
   );
 }
@@ -257,12 +283,16 @@ function Column({
   tasks,
   relations,
   dimmedById,
+  selectedIds,
+  onToggleSelect,
   onOpen,
 }: {
   status: TaskStatus;
   tasks: TaskRow[];
   relations: Map<string, CrossTeamRelation>;
   dimmedById: Set<string>;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
   onOpen: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -296,6 +326,8 @@ function Column({
               task={t}
               relation={relations.get(t.id) ?? "owned"}
               dimmed={dimmedById.has(t.id)}
+              selected={selectedIds.has(t.id)}
+              onToggleSelect={() => onToggleSelect(t.id)}
               onOpen={() => onOpen(t.id)}
             />
           ))
@@ -309,11 +341,15 @@ function DraggableCard({
   task,
   relation,
   dimmed,
+  selected,
+  onToggleSelect,
   onOpen,
 }: {
   task: TaskRow;
   relation: CrossTeamRelation;
   dimmed: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onOpen: () => void;
 }) {
   const disabled = relation !== "owned";
@@ -328,7 +364,13 @@ function DraggableCard({
       {...listeners}
       className={(isDragging ? "opacity-30 " : "") + (dimmed ? "opacity-30" : "")}
     >
-      <Card task={task} relation={relation} onOpen={onOpen} />
+      <Card
+        task={task}
+        relation={relation}
+        selected={selected}
+        onToggleSelect={onToggleSelect}
+        onOpen={onOpen}
+      />
     </div>
   );
 }
@@ -337,11 +379,15 @@ function Card({
   task,
   relation,
   dragging = false,
+  selected = false,
+  onToggleSelect,
   onOpen,
 }: {
   task: TaskRow;
   relation: CrossTeamRelation;
   dragging?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   onOpen?: () => void;
 }) {
   const isExternal = relation !== "owned";
@@ -352,14 +398,31 @@ function Card({
       className={
         "rounded border bg-helios-base px-3 py-2 text-sm " +
         (isExternal ? "border-helios-line/60 opacity-70 cursor-pointer " : "border-helios-line cursor-grab ") +
-        (dragging ? "shadow-lg ring-1 ring-asu-gold/60" : !isExternal ? "hover:border-helios-text/30" : "")
+        (dragging ? "shadow-lg ring-1 ring-asu-gold/60" : !isExternal ? "hover:border-helios-text/30" : "") +
+        (selected ? " ring-1 ring-asu-gold" : "")
       }
       style={{ borderLeftWidth: 3, borderLeftColor: outline.borderColor }}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className={"font-normal " + (isExternal ? "italic text-helios-text/80" : "text-helios-text")}>
-          {task.title}
-        </p>
+        <div className="flex min-w-0 items-start gap-2">
+          {/* Pointer-down must not initiate a drag; stop it before dnd-kit sees it. */}
+          {!isExternal && onToggleSelect ? (
+            <span
+              className="mt-0.5"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <SelectCheckbox
+                ariaLabel={`Select task ${task.title}`}
+                checked={selected}
+                onChange={onToggleSelect}
+              />
+            </span>
+          ) : null}
+          <p className={"font-normal " + (isExternal ? "italic text-helios-text/80" : "text-helios-text")}>
+            {task.title}
+          </p>
+        </div>
         {task.priority === "critical" || task.priority === "high" ? (
           <IconFlag
             size={12}

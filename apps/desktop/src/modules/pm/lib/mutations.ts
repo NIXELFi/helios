@@ -72,6 +72,21 @@ export async function removeTask(client: SupabaseClient, id: string): Promise<vo
   check(await pm(client).from("tasks").delete().eq("id", id), "delete task");
 }
 
+// Bulk edit: apply the SAME column patch to many tasks in ONE atomic statement
+// (`UPDATE … WHERE id = ANY($ids)`). PostgREST runs it as a single transaction,
+// so if RLS denies any row the whole write fails — the store rolls the optimistic
+// change back. Callers MUST pre-filter `ids` to rows the member owns.
+export async function batchPatchTasks(
+  client: SupabaseClient,
+  ids: string[],
+  patch: Partial<TaskRow>,
+): Promise<void> {
+  check(
+    await pm(client).from("tasks").update(taskColumns(patch)).in("id", ids),
+    "update tasks",
+  );
+}
+
 // --- Dependencies -----------------------------------------------------------
 
 export async function insertDependency(

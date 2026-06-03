@@ -56,6 +56,36 @@ function CurrentView() {
   }
 }
 
+// Returns true when keyboard focus is inside an editable element, so the global
+// undo/redo shortcut yields to native text-field undo there.
+function isEditableTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return el.isContentEditable;
+}
+
+// Global Cmd/Ctrl+Z (undo) and Cmd/Ctrl+Shift+Z (redo) for task edits. Routed
+// through the store's command stack so it reverses both inline and bulk edits.
+// Mounted once; no UI of its own.
+function UndoRedoHotkeys() {
+  const undo = usePmStore((s) => s.undo);
+  const redo = usePmStore((s) => s.redo);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.key.toLowerCase() !== "z") return;
+      if (isEditableTarget(e.target)) return; // let text fields undo themselves
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+  return null;
+}
+
 // Surfaces a failed write (optimistic change rolled back) as a dismissible
 // toast. Auto-clears after a few seconds so it never lingers.
 function WriteErrorToast() {
@@ -140,6 +170,7 @@ export function PmModule() {
         </main>
         <TaskDetailSheet />
         <WriteErrorToast />
+        <UndoRedoHotkeys />
       </div>
     </PmRouterProvider>
   );

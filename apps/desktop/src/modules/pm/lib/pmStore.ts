@@ -181,6 +181,95 @@ export interface WriteError {
   at: number;
 }
 
+// --- Undo/redo command model ------------------------------------------------
+// Every task edit (single inline edit OR a bulk edit) is recorded as ONE
+// command. Each entry captures, per task, ONLY the columns that actually
+// changed: `before` is the pre-image, `after` is the post-image. Undo replays
+// `before`; redo replays `after`. Capturing only changed columns keeps the
+// inverse minimal and lets the reverse write reuse the same .in() batching.
+export interface TaskPatchEntry {
+  id: string;
+  before: Partial<TaskRow>;
+  after: Partial<TaskRow>;
+}
+export interface BulkPatchCommand {
+  kind: "bulkPatch";
+  entries: TaskPatchEntry[];
+}
+export type PmCommand = BulkPatchCommand;
+
+const UNDO_CAP = 100;
+
+// The columns an undo/redo may carry. Embedded objects are derived, not stored.
+const PATCHABLE_KEYS = [
+  "subteam_id",
+  "subsystem_id",
+  "owner_id",
+  "title",
+  "description",
+  "type",
+  "status",
+  "priority",
+  "start_date",
+  "due_date",
+  "estimate_days",
+  "mrl",
+  "on_critical_path",
+  "parent_task_id",
+] as const;
+
+// Diff a task's current column values against a patch, returning before/after
+// images that contain ONLY the columns the patch actually changes. When
+// `subteam_id` changes we also record the implicit `subsystem_id` -> null move
+// so undo can restore the original subsystem.
+function diffTaskPatch(current: TaskRow, patch: Partial<TaskRow>): TaskPatchEntry | null {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  const cur = current as Record<string, unknown>;
+  for (const key of PATCHABLE_KEYS) {
+    if (!(key in patch)) continue;
+    const nextVal = (patch as Record<string, unknown>)[key];
+    if (cur[key] === nextVal) continue;
+    before[key] = cur[key];
+    after[key] = nextVal;
+  }
+  // Moving subteams nulls the subsystem implicitly — capture it for a faithful undo.
+  if ("subteam_id" in after && !("subsystem_id" in after) && cur.subsystem_id != null) {
+    before.subsystem_id = cur.subsystem_id;
+    after.subsystem_id = null;
+  }
+  if (Object.keys(after).length === 0) return null;
+  return { id: current.id, before, after };
+}
+
+// Push a command onto the undo stack (capped), clearing the redo stack. A fresh
+// edit always invalidates the redo future. Returns a partial state update.
+function pushUndo(
+  s: Pick<PmState, "undoStack">,
+  command: PmCommand,
+): { undoStack: PmCommand[]; redoStack: PmCommand[] } {
+  const undoStack = [...s.undoStack, command].slice(-UNDO_CAP);
+  return { undoStack, redoStack: [] };
+}
+
+// Group entries that share an identical patch so the reverse write can use one
+// .in() batch per distinct patch. Heterogeneous prior values therefore fan out
+// into a handful of grouped writes rather than one-per-id.
+function groupByPatch(
+  entries: TaskPatchEntry[],
+  pick: (e: TaskPatchEntry) => Partial<TaskRow>,
+): Array<{ ids: string[]; patch: Partial<TaskRow> }> {
+  const groups = new Map<string, { ids: string[]; patch: Partial<TaskRow> }>();
+  for (const e of entries) {
+    const patch = pick(e);
+    const key = JSON.stringify(patch);
+    const g = groups.get(key);
+    if (g) g.ids.push(e.id);
+    else groups.set(key, { ids: [e.id], patch });
+  }
+  return [...groups.values()];
+}
+
 interface PmState {
   hydrated: boolean;
   projectId: string;
@@ -216,6 +305,22 @@ interface PmState {
   selectedTaskId: string | null;
   selectTask: (id: string | null) => void;
 
+  // Multi-select for bulk edits — session-only, never persisted. The VIEW owns
+  // the eligibility rule (owned, non-external rows) and passes the id list in;
+  // the store stays dumb about scoping.
+  selectedTaskIds: Set<string>;
+  setSelection: (ids: string[]) => void;
+  toggleSelected: (id: string) => void;
+  clearSelection: () => void;
+  selectAllFiltered: (ids: string[]) => void;
+
+  // Undo/redo — session-only, capped. Both updateTask and bulkUpdateTasks push
+  // a command here so Cmd+Z reverses inline edits too.
+  undoStack: PmCommand[];
+  redoStack: PmCommand[];
+  undo: () => void;
+  redo: () => void;
+
   // Per-view memory of the most recently viewed milestone for the details popover
   selectedMilestoneId: string | null;
   selectMilestone: (id: string | null) => void;
@@ -243,7 +348,12 @@ interface PmState {
 
   // Task mutations
   addTask: (task: TaskRow) => void;
-  updateTask: (id: string, patch: Partial<TaskRow>) => void;
+  updateTask: (id: string, patch: Partial<TaskRow>, opts?: { withHistory?: boolean }) => void;
+  bulkUpdateTasks: (
+    ids: string[],
+    patch: Partial<TaskRow>,
+    opts?: { withHistory?: boolean },
+  ) => void;
   deleteTask: (id: string) => void;
 
   // Dependency mutations
@@ -295,6 +405,46 @@ function subteamsForTask(task: TaskRow | undefined): string[] {
   return task ? [task.subteam_id] : [];
 }
 
+// Shared re-embed logic used by BOTH updateTask and bulkUpdateTasks so the two
+// can never drift. A TaskRow carries embedded subteam/subsystem/owner objects
+// (PostgREST joins on read) that are NOT columns; whenever the corresponding id
+// changes we must re-resolve the embedded object from the org arrays. Moving
+// subteams ALSO nulls subsystem_id + the embedded subsystem.
+function embedTaskPatch(
+  state: Pick<PmState, "subteams" | "subsystems" | "users">,
+  current: TaskRow,
+  patch: Partial<TaskRow>,
+): TaskRow {
+  const next: TaskRow = { ...current, ...patch };
+  if (patch.subteam_id !== undefined) {
+    const st = state.subteams.find((x) => x.id === patch.subteam_id);
+    if (st) next.subteam = st;
+    // A subsystem belongs to its old subteam, so a real team move drops it —
+    // unless the same patch explicitly assigns a new subsystem_id.
+    if (patch.subteam_id !== current.subteam_id && patch.subsystem_id === undefined) {
+      next.subsystem_id = null;
+      next.subsystem = null;
+    }
+  }
+  if (patch.subsystem_id !== undefined) {
+    next.subsystem = state.subsystems.find((x) => x.id === patch.subsystem_id) ?? null;
+  }
+  if (patch.owner_id !== undefined) {
+    next.owner = state.users.find((x) => x.id === patch.owner_id) ?? null;
+  }
+  return next;
+}
+
+// A bulk subteam move implicitly clears subsystem_id (a subsystem belongs to the
+// old subteam). Fold that into the patch so the DB write matches the in-store
+// re-embed — otherwise the row keeps a now-orphaned subsystem_id server-side.
+function withSubteamMove(patch: Partial<TaskRow>): Partial<TaskRow> {
+  if (patch.subteam_id !== undefined && patch.subsystem_id === undefined) {
+    return { ...patch, subsystem_id: null };
+  }
+  return patch;
+}
+
 export const usePmStore = create<PmState>((set, get) => {
   // Optimistic-write helper. The action has already applied its change to the
   // store; this fires the matching DB write in the background. If it fails, we
@@ -311,6 +461,53 @@ export const usePmStore = create<PmState>((set, get) => {
       const message = err instanceof Error ? err.message : String(err);
       set({ lastWriteError: { message, at: Date.now() } });
     });
+  }
+
+  // Replay a command in one direction (undo => `before`, redo => `after`),
+  // optimistically updating the store and issuing the reversing DB writes via
+  // the SAME persist path so the change is durable. Heterogeneous patches are
+  // grouped (one .in() per identical patch) with a per-id patchTask fallback.
+  // `withHistory:false` on the inner edits ensures this replay never spawns a
+  // fresh undo entry — the stack juggling is done by the caller (undo/redo).
+  // `stackSnap` lets undo()/redo() include the pre-images of BOTH stacks in the
+  // rollback. They mutate the stacks synchronously before the (async) reversing
+  // write; if that write fails we must restore the stacks too, otherwise the
+  // command silently jumps from one stack to the other while its data is rolled
+  // back — leaving the stacks inconsistent with the on-screen data.
+  function applyCommand(
+    command: PmCommand,
+    dir: "undo" | "redo",
+    stackSnap?: { undoStack: PmCommand[]; redoStack: PmCommand[] },
+  ): void {
+    const pick = (e: TaskPatchEntry) => (dir === "undo" ? e.before : e.after);
+    const groups = groupByPatch(command.entries, pick);
+    const snap = { tasks: get().tasks, activity: get().activity, ...stackSnap };
+
+    // Optimistic store apply (single set across all groups), no history.
+    set((s) => {
+      let tasks = s.tasks;
+      for (const g of groups) {
+        const idSet = new Set(g.ids);
+        tasks = tasks.map((t) => (idSet.has(t.id) ? embedTaskPatch(s, t, g.patch) : t));
+      }
+      const activity = logActivity(s, {
+        action: "updated",
+        target_type: "task",
+        target_id: command.entries[0]!.id,
+        target_name: null,
+        subteam_ids: [],
+        payload: { [dir]: true, count: command.entries.length },
+      });
+      return { tasks, activity };
+    });
+
+    // Reversing DB writes: one .in() per group, or patchTask for singletons.
+    persist(async (c) => {
+      for (const g of groups) {
+        if (g.ids.length === 1) await db.patchTask(c, g.ids[0]!, g.patch);
+        else await db.batchPatchTasks(c, g.ids, g.patch);
+      }
+    }, () => set(snap));
   }
 
   return {
@@ -340,6 +537,21 @@ export const usePmStore = create<PmState>((set, get) => {
 
     selectedTaskId: null,
     selectTask: (id) => set({ selectedTaskId: id }),
+
+    selectedTaskIds: new Set<string>(),
+    setSelection: (ids) => set({ selectedTaskIds: new Set(ids) }),
+    toggleSelected: (id) =>
+      set((s) => {
+        const next = new Set(s.selectedTaskIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return { selectedTaskIds: next };
+      }),
+    clearSelection: () => set({ selectedTaskIds: new Set<string>() }),
+    selectAllFiltered: (ids) => set({ selectedTaskIds: new Set(ids) }),
+
+    undoStack: [],
+    redoStack: [],
 
     selectedMilestoneId: null,
     selectMilestone: (id) => set({ selectedMilestoneId: id }),
@@ -388,6 +600,12 @@ export const usePmStore = create<PmState>((set, get) => {
           activeProjectId: id,
           projectId: id,
           selectedTaskId: null,
+          selectedTaskIds: new Set<string>(),
+          // The undo/redo history references task ids in the OUTGOING project;
+          // replaying it after a switch would fire DB writes against rows that
+          // are no longer in view. Drop both stacks on every project switch.
+          undoStack: [],
+          redoStack: [],
           selectedMilestoneId: null,
           ...loadFlat(target),
         };
@@ -575,24 +793,15 @@ export const usePmStore = create<PmState>((set, get) => {
       persist((c) => db.insertTask(c, task), () => set(snap));
     },
 
-    updateTask: (id, patch) => {
+    updateTask: (id, patch, opts) => {
       const current = get().tasks.find((t) => t.id === id);
       if (!current) return;
+      const withHistory = opts?.withHistory !== false;
+      // Capture the minimal before/after diff BEFORE mutating, for undo/redo.
+      const entry = diffTaskPatch(current, patch);
       const snap = { tasks: get().tasks, activity: get().activity };
       set((s) => {
-        const next: TaskRow = { ...current, ...patch };
-
-        if (patch.subteam_id !== undefined) {
-          const st = s.subteams.find((x) => x.id === patch.subteam_id);
-          if (st) next.subteam = st;
-        }
-        if (patch.subsystem_id !== undefined) {
-          next.subsystem = s.subsystems.find((x) => x.id === patch.subsystem_id) ?? null;
-        }
-        if (patch.owner_id !== undefined) {
-          next.owner = s.users.find((x) => x.id === patch.owner_id) ?? null;
-        }
-
+        const next = embedTaskPatch(s, current, patch);
         const tasks = s.tasks.map((t) => (t.id === id ? next : t));
 
         const statusChanged =
@@ -616,9 +825,77 @@ export const usePmStore = create<PmState>((set, get) => {
               payload: patch,
             });
 
-        return { tasks, activity };
+        // Record a 1-entry command so a single inline edit is undoable too.
+        const history =
+          withHistory && entry
+            ? pushUndo(s, { kind: "bulkPatch", entries: [entry] })
+            : {};
+        return { tasks, activity, ...history };
       });
       persist((c) => db.patchTask(c, id, patch), () => set(snap));
+    },
+
+    bulkUpdateTasks: (ids, rawPatch, opts) => {
+      const idSet = new Set(ids);
+      const targets = get().tasks.filter((t) => idSet.has(t.id));
+      if (targets.length === 0) return;
+      const withHistory = opts?.withHistory !== false;
+      // A bulk subteam move clears subsystem for ALL selected so the store and
+      // the single atomic DB write agree (we can't differentiate per-row in one
+      // .in() statement). Use the SAME effective patch for diff, embed, write.
+      const patch = withSubteamMove(rawPatch);
+      // Diff each target so undo can restore heterogeneous prior values.
+      const entries = targets
+        .map((t) => diffTaskPatch(t, patch))
+        .filter((e): e is TaskPatchEntry => e !== null);
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) =>
+          idSet.has(t.id) ? embedTaskPatch(s, t, patch) : t,
+        );
+        // ONE summarizing activity entry to avoid flooding the 250-cap feed.
+        const activity = logActivity(s, {
+          action: "updated",
+          target_type: "task",
+          target_id: targets[0]!.id,
+          target_name: null,
+          subteam_ids: [...new Set(targets.map((t) => t.subteam_id))],
+          payload: { patch, count: targets.length },
+        });
+        const history =
+          withHistory && entries.length > 0
+            ? pushUndo(s, { kind: "bulkPatch", entries })
+            : {};
+        return { tasks, activity, ...history };
+      });
+      // ONE atomic .in() write for the whole batch.
+      persist((c) => db.batchPatchTasks(c, ids, patch), () => set(snap));
+    },
+
+    undo: () => {
+      const stack = get().undoStack;
+      const command = stack[stack.length - 1];
+      if (!command) return;
+      // Capture both stacks BEFORE moving the command across them so a failed
+      // reversing write can restore them (keeping the command undoable).
+      const stackSnap = { undoStack: get().undoStack, redoStack: get().redoStack };
+      set((s) => ({
+        undoStack: s.undoStack.slice(0, -1),
+        redoStack: [...s.redoStack, command].slice(-UNDO_CAP),
+      }));
+      applyCommand(command, "undo", stackSnap);
+    },
+
+    redo: () => {
+      const stack = get().redoStack;
+      const command = stack[stack.length - 1];
+      if (!command) return;
+      const stackSnap = { undoStack: get().undoStack, redoStack: get().redoStack };
+      set((s) => ({
+        redoStack: s.redoStack.slice(0, -1),
+        undoStack: [...s.undoStack, command].slice(-UNDO_CAP),
+      }));
+      applyCommand(command, "redo", stackSnap);
     },
 
     deleteTask: (id) => {

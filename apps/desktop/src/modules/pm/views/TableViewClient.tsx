@@ -25,9 +25,11 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
+import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
 import { ViewHeader } from "@pm/components/ViewHeader";
@@ -80,10 +82,21 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
   const updateTask = usePmStore((s) => s.updateTask);
   const deleteTask = usePmStore((s) => s.deleteTask);
   const selectTask = usePmStore((s) => s.selectTask);
+  const selectedTaskIds = usePmStore((s) => s.selectedTaskIds);
+  const toggleSelected = usePmStore((s) => s.toggleSelected);
+  const setSelection = usePmStore((s) => s.setSelection);
+  const clearSelection = usePmStore((s) => s.clearSelection);
 
   const currentTeam = teamSlug
     ? subteams.find((s) => s.slug === teamSlug) ?? null
     : null;
+
+  // Defense-in-depth: a selection made in one team scope must not survive a
+  // cross-team navigation (it could reference rows that are external/RLS-denied
+  // here). Clear it whenever the team scope changes so the bulk bar disappears.
+  useEffect(() => {
+    clearSelection();
+  }, [teamSlug, clearSelection]);
 
   const router = useRouter();
   const sp = useSearchParams();
@@ -175,6 +188,42 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
     return map;
   }, [baseVisible]);
 
+  // The OWNED ids of every row currently RENDERED, for "select all filtered".
+  // A parent's children are only rendered when that parent is expanded, so we
+  // recurse into childrenOf only for expanded rows — otherwise select-all and
+  // the header tri-state would count collapsed/hidden descendants. External/
+  // cross-team rows are excluded so a bulk .in() write never touches an
+  // RLS-denied row (which would roll the whole atomic batch back).
+  const selectableIds = useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const walk = (t: TaskRow) => {
+      if (seen.has(t.id)) return;
+      seen.add(t.id);
+      if ((relationByTaskId.get(t.id) ?? "owned") === "owned") ids.push(t.id);
+      // Only descend into children that are actually on screen (parent open).
+      if (expanded.has(t.id)) {
+        for (const child of childrenOf.get(t.id) ?? []) walk(child);
+      }
+    };
+    for (const root of visibleParents) walk(root);
+    return ids;
+  }, [visibleParents, childrenOf, relationByTaskId, expanded]);
+
+  const selectableSet = useMemo(() => new Set(selectableIds), [selectableIds]);
+  const selectedInView = selectableIds.filter((id) => selectedTaskIds.has(id)).length;
+  const allSelected = selectableIds.length > 0 && selectedInView === selectableIds.length;
+  const someSelected = selectedInView > 0 && !allSelected;
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      // Deselect only the in-view ids; keep any selection outside this view.
+      setSelection([...selectedTaskIds].filter((id) => !selectableSet.has(id)));
+    } else {
+      setSelection([...new Set([...selectedTaskIds, ...selectableIds])]);
+    }
+  }
+
   const filtersActive =
     filters.status.length > 0 ||
     filters.subteamIds.length > 0 ||
@@ -223,6 +272,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         relation={relation}
         dimmed={dimmed}
         users={users}
+        selected={selectedTaskIds.has(task.id)}
+        onToggleSelect={() => toggleSelected(task.id)}
         onOpen={() => selectTask(task.id)}
         onToggle={() => toggleRow(task.id)}
         onChangeStatus={(s) => updateTask(task.id, { status: s })}
@@ -295,6 +346,15 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
           <table className="w-full text-left text-sm text-helios-text">
             <thead className="border-b border-helios-line text-helios-dim">
               <tr>
+                <th className="w-9 px-3 py-2">
+                  <SelectCheckbox
+                    ariaLabel="Select all filtered tasks"
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    disabled={selectableIds.length === 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <SortHeader label="Title"     active={sort.key === "title"}     dir={sort.dir} onClick={() => toggleSort("title")} />
                 <th className="px-3 py-2 font-medium">Type</th>
                 <SortHeader label="Subteam"   active={sort.key === "subsystem"} dir={sort.dir} onClick={() => toggleSort("subsystem")} />
@@ -309,7 +369,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
             <tbody className="divide-y divide-helios-line">
               {visibleParents.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-helios-dim">
+                  <td colSpan={10} className="px-4 py-10 text-center text-helios-dim">
                     No tasks match the current filters.
                   </td>
                 </tr>
@@ -354,6 +414,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         users={users}
         defaultSubteamId={currentTeam?.id ?? null}
       />
+
+      <BulkActionBar selectableIds={selectableSet} />
     </>
   );
 }
@@ -401,6 +463,8 @@ function RowFragment({
   relation,
   dimmed,
   users,
+  selected,
+  onToggleSelect,
   onOpen,
   onToggle,
   onChangeStatus,
@@ -419,6 +483,8 @@ function RowFragment({
   relation: CrossTeamRelation;
   dimmed: boolean;
   users: ReadonlyArray<{ id: string; name: string }>;
+  selected: boolean;
+  onToggleSelect: () => void;
   onOpen: () => void;
   onToggle: () => void;
   onChangeStatus: (s: TaskStatus) => void;
@@ -443,6 +509,14 @@ function RowFragment({
             : "hover:bg-helios-base/40")
         }
       >
+        <td className="w-9 px-3 py-2 align-middle">
+          <SelectCheckbox
+            ariaLabel={`Select task ${task.title}`}
+            checked={selected}
+            disabled={isExternal}
+            onChange={onToggleSelect}
+          />
+        </td>
         <td
           className="px-3 py-2"
           style={{ borderLeft: `3px solid ${outline.borderColor}` }}

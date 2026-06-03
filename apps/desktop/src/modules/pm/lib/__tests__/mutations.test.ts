@@ -10,6 +10,7 @@ import type {
 } from "@helios/pm-ui";
 import type { SupabaseClient } from "@helios/auth";
 import {
+  batchPatchTasks,
   insertComment,
   insertDependency,
   insertEvent,
@@ -40,6 +41,8 @@ interface Recorded {
   payload?: unknown;
   opts?: unknown;
   eqs: Array<[string, unknown]>;
+  // `.in(col, values)` calls — used by the batch (bulk) write path.
+  ins: Array<[string, unknown]>;
 }
 
 // A chainable recorder that mimics the slice of supabase-js the write layer
@@ -48,10 +51,14 @@ function makeClient(error: { message: string } | null = null) {
   const calls: Recorded[] = [];
   function table(schema: string, table: string) {
     function start(op: Recorded["op"], payload?: unknown, opts?: unknown) {
-      const rec: Recorded = { schema, table, op, payload, opts, eqs: [] };
+      const rec: Recorded = { schema, table, op, payload, opts, eqs: [], ins: [] };
       const chain = {
         eq(col: string, val: unknown) {
           rec.eqs.push([col, val]);
+          return chain;
+        },
+        in(col: string, vals: unknown) {
+          rec.ins.push([col, vals]);
           return chain;
         },
         then<R>(onF: (v: { data: null; error: typeof error }) => R) {
@@ -134,6 +141,29 @@ describe("task mutations", () => {
     await removeTask(client, "t1");
     expect(calls[0]!).toMatchObject({ table: "tasks", op: "delete" });
     expect(calls[0]!.eqs).toEqual([["id", "t1"]]);
+  });
+
+  test("batchPatchTasks issues ONE update scoped by an id array with stripped columns", async () => {
+    const { client, calls } = makeClient();
+    await batchPatchTasks(client, ["t1", "t2", "t3"], {
+      priority: "high",
+      subteam: SUBTEAM, // embedded object must be stripped
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!).toMatchObject({ schema: "pm", table: "tasks", op: "update" });
+    const payload = calls[0]!.payload as Record<string, unknown>;
+    expect(payload).toEqual({ priority: "high" });
+    expect(payload).not.toHaveProperty("subteam");
+    // Scoped by .in("id", [...]) — NOT a series of .eq calls.
+    expect(calls[0]!.ins).toEqual([["id", ["t1", "t2", "t3"]]]);
+    expect(calls[0]!.eqs).toEqual([]);
+  });
+
+  test("batchPatchTasks surfaces a Postgrest error as a thrown Error", async () => {
+    const { client } = makeClient({ message: "permission denied for table tasks" });
+    await expect(batchPatchTasks(client, ["t1"], { status: "done" })).rejects.toThrow(
+      /update tasks: permission denied/,
+    );
   });
 });
 
