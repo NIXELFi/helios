@@ -147,6 +147,70 @@ describe("<AdminScreen>", () => {
     expect(revokeSpy).not.toHaveBeenCalledWith("pdm_revoke_user_role", expect.anything());
   });
 
+  it("Delete asks for confirmation before calling pdm_admin_delete_user", async () => {
+    const c = mockClient();
+    const spy = vi.spyOn(c, "rpc");
+    render(
+      <SupabaseAuthProvider client={c}>
+        <AdminScreen />
+      </SupabaseAuthProvider>,
+    );
+    await screen.findByText("bob@sdm.com");
+    const delBtn = screen.getAllByRole("button", { name: /^delete$/i })[0];
+    await act(async () => { fireEvent.click(delBtn); });
+
+    // Destructive: a confirm dialog appears and the RPC has NOT fired.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalledWith("pdm_admin_delete_user", expect.anything());
+
+    const confirmBtn = screen.getByRole("button", { name: /delete account/i });
+    await act(async () => { fireEvent.click(confirmBtn); });
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("pdm_admin_delete_user", { p_target: "u2" }),
+    );
+  });
+
+  it("cancelling the Delete confirm does NOT call the RPC", async () => {
+    const c = mockClient();
+    const spy = vi.spyOn(c, "rpc");
+    render(
+      <SupabaseAuthProvider client={c}>
+        <AdminScreen />
+      </SupabaseAuthProvider>,
+    );
+    await screen.findByText("bob@sdm.com");
+    const delBtn = screen.getAllByRole("button", { name: /^delete$/i })[0];
+    await act(async () => { fireEvent.click(delBtn); });
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i });
+    await act(async () => { fireEvent.click(cancelBtn); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(spy).not.toHaveBeenCalledWith("pdm_admin_delete_user", expect.anything());
+  });
+
+  it("Edit opens a dialog and saves the profile via pdm_admin_update_user", async () => {
+    const c = mockClient();
+    const spy = vi.spyOn(c, "rpc");
+    render(
+      <SupabaseAuthProvider client={c}>
+        <AdminScreen />
+      </SupabaseAuthProvider>,
+    );
+    await screen.findByText("bob@sdm.com");
+    const editBtn = screen.getAllByRole("button", { name: /^edit$/i })[0];
+    await act(async () => { fireEvent.click(editBtn); });
+    const nameInput = screen.getByDisplayValue("Bob");
+    await act(async () => { fireEvent.change(nameInput, { target: { value: "Bobby" } }); });
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    await act(async () => { fireEvent.click(saveBtn); });
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("pdm_admin_update_user", {
+        p_target: "u2",
+        p_display_name: "Bobby",
+        p_subteam: "Aero",
+      }),
+    );
+  });
+
   it("ADMIN-ALL-ROWS: an in-flight role change disables ONLY that row's controls, not every row", async () => {
     // Two editable editors. Changing bob's role (RPC hangs) must leave dave's
     // select + revoke enabled — the old `anyBusy` flag disabled every row.

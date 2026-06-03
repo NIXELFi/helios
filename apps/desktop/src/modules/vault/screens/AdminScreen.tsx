@@ -7,8 +7,11 @@ import { useIsOwner } from "../data/useIsOwner";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useSetUserRole } from "../data/useSetUserRole";
 import { useRevokeUserRole } from "../data/useRevokeUserRole";
+import { useUpdateUser } from "../data/useUpdateUser";
+import { useDeleteUser } from "../data/useDeleteUser";
 import { useSubteams } from "../data/useSubteams";
 import { useManageSubteams } from "../data/useManageSubteams";
+import { EditUserDialog } from "../components/EditUserDialog";
 import type { VaultRole, VaultUser } from "../data/types";
 
 const ASSIGNABLE: Exclude<VaultRole, "owner">[] = ["viewer", "editor", "admin"];
@@ -33,10 +36,16 @@ export function AdminScreen() {
   const { data: users, loading, error, refetch } = useVaultUsers(scopeVaultId);
   const setRole = useSetUserRole();
   const revoke = useRevokeUserRole();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const { data: subteams } = useSubteams();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Pending revoke awaiting confirmation; null when no dialog is open.
   const [confirmRevoke, setConfirmRevoke] = useState<VaultUser | null>(null);
+  // Profile-edit dialog target / delete-confirmation target.
+  const [editingUser, setEditingUser] = useState<VaultUser | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<VaultUser | null>(null);
 
   async function handleSetRole(u: VaultUser, role: Exclude<VaultRole, "owner">) {
     setPendingId(u.user_id);
@@ -54,6 +63,24 @@ export function AdminScreen() {
     setActionError(null);
     const { ok, error: err } = await revoke.run(u.user_id, scopeVaultId);
     if (!ok) setActionError(err?.message ?? "Failed to revoke role.");
+    else refetch();
+    setPendingId(null);
+  }
+
+  async function handleSaveProfile(u: VaultUser, name: string | null, subteam: string | null) {
+    setPendingId(u.user_id);
+    setActionError(null);
+    const { ok, error: err } = await updateUser.run(u.user_id, name, subteam);
+    if (!ok) setActionError(err?.message ?? "Failed to update user.");
+    else { setEditingUser(null); refetch(); }
+    setPendingId(null);
+  }
+
+  async function handleDelete(u: VaultUser) {
+    setPendingId(u.user_id);
+    setActionError(null);
+    const { ok, error: err } = await deleteUser.run(u.user_id);
+    if (!ok) setActionError(err?.message ?? "Failed to delete user.");
     else refetch();
     setPendingId(null);
   }
@@ -114,12 +141,12 @@ export function AdminScreen() {
           <table className="w-full table-fixed text-left text-[12px]">
             <thead className="sticky top-0 bg-helios-base text-[10px] uppercase tracking-wider text-[#5A5F66]">
               <tr className="border-b border-helios-line [&>th]:px-4 [&>th]:py-2 [&>th]:font-normal">
-                <th className="w-[26%]">User</th>
-                <th className="w-[18%]">Name</th>
-                <th className="w-[16%]">Subteam</th>
-                <th className="w-[12%]">Role</th>
-                <th className="w-[12%]">Granted</th>
-                <th className="w-[16%] text-right">Actions</th>
+                <th className="w-[22%]">User</th>
+                <th className="w-[15%]">Name</th>
+                <th className="w-[13%]">Subteam</th>
+                <th className="w-[10%]">Role</th>
+                <th className="w-[10%]">Granted</th>
+                <th className="w-[30%] text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -133,6 +160,8 @@ export function AdminScreen() {
                   busy={pendingId === u.user_id}
                   onSetRole={handleSetRole}
                   onRevoke={(user) => setConfirmRevoke(user)}
+                  onEdit={(user) => setEditingUser(user)}
+                  onDelete={(user) => setConfirmDelete(user)}
                 />
               ))}
               {(users ?? []).length === 0 && (
@@ -168,6 +197,39 @@ export function AdminScreen() {
             handleRevoke(u);
           }}
           onClose={() => setConfirmRevoke(null)}
+        />
+      )}
+
+      {editingUser && (
+        <EditUserDialog
+          user={editingUser}
+          subteams={subteams ?? []}
+          saving={pendingId === editingUser.user_id}
+          onSave={(name, subteam) => handleSaveProfile(editingUser, name, subteam)}
+          onClose={() => setEditingUser(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete account"
+          body={
+            <>
+              Permanently delete <span className="font-semibold">{confirmDelete.email ?? confirmDelete.user_id}</span>?
+              This removes their account and access for good, releases any files they have checked out, and
+              un-assigns work they created. Authorship history is preserved (shown as an unknown user).
+              <span className="mt-2 block text-red-300">This cannot be undone.</span>
+            </>
+          }
+          confirmLabel="Delete account"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            const u = confirmDelete;
+            setConfirmDelete(null);
+            handleDelete(u);
+          }}
+          onClose={() => setConfirmDelete(null)}
         />
       )}
     </div>
@@ -283,8 +345,10 @@ function UserRow(props: {
   busy: boolean;
   onSetRole: (u: VaultUser, role: Exclude<VaultRole, "owner">) => void;
   onRevoke: (u: VaultUser) => void;
+  onEdit: (u: VaultUser) => void;
+  onDelete: (u: VaultUser) => void;
 }) {
-  const { u, isMe, isOwner, isAdmin, busy, onSetRole, onRevoke } = props;
+  const { u, isMe, isOwner, isAdmin, busy, onSetRole, onRevoke, onEdit, onDelete } = props;
 
   // Editing rules (mirror the server RPCs):
   //  - your own row: never editable here (prevents self-lockout footguns).
@@ -295,6 +359,18 @@ function UserRow(props: {
   const isAdminRow = u.role === "admin";
   const lockedByOwnership = isOwnerRow || (isAdminRow && !isOwner);
   const editable = isAdmin && !isMe && !lockedByOwnership;
+  // Deletion mirrors the server guards: admins only, never yourself or the
+  // owner, and an admin row can only be deleted by the owner.
+  const deletable = isAdmin && !isMe && !isOwnerRow && (!isAdminRow || isOwner);
+  const deleteReason = isMe
+    ? "You can't delete your own account."
+    : isOwnerRow
+      ? "The owner account can't be deleted here."
+      : isAdminRow && !isOwner
+        ? "Only the owner can delete an admin."
+        : !isAdmin
+          ? "Only admins can delete users."
+          : "Permanently delete this account.";
 
   // Explain WHY a row's controls are disabled so the locked state isn't a
   // mystery (V17). Empty string when the row is editable.
@@ -327,7 +403,7 @@ function UserRow(props: {
         {u.granted_at ? new Date(u.granted_at).toLocaleDateString() : "—"}
       </td>
       <td>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           <select
             aria-label={`Set role for ${u.email ?? u.user_id}`}
             value={u.role ?? ""}
@@ -361,6 +437,24 @@ function UserRow(props: {
             }
           >
             {busy ? "…" : "Revoke"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onEdit(u)}
+            disabled={!isAdmin || busy}
+            title="Edit name & subteam"
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-asu-gold hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(u)}
+            disabled={!deletable || busy}
+            title={deleteReason}
+            className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
+          >
+            Delete
           </button>
         </div>
       </td>
