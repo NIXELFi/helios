@@ -584,7 +584,8 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
             : "Two-finger swipe to pan · ctrl + scroll (or pinch) to zoom · drag between handles to author dependencies"
         }
         actions={
-          <div className="flex items-center gap-3">
+          // Wrap on narrow screens so the toolbar doesn't clip its right-edge buttons.
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
               Sort
               <Select

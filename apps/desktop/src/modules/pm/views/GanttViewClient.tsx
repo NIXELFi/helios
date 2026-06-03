@@ -298,7 +298,9 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
           "ctrl + scroll to zoom time · ctrl + shift + scroll to zoom rows"
         }
         actions={
-          <div className="flex items-center gap-3">
+          // Wrap on narrow screens — this toolbar packs 8 controls, and a single
+          // non-wrapping row clipped the "New task" button on smaller windows.
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
               Sort
               <Select

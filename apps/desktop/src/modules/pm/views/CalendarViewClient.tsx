@@ -381,7 +381,8 @@ export function CalendarViewClient({
             : "Tasks on their start and due dates; click a chip for details, drag to reschedule, click a day to add."
         }
         actions={
-          <div className="flex items-center gap-3">
+          // Wrap on narrow screens so the toolbar doesn't clip its right-edge buttons.
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <SortControl sort={sort} onChange={setSort} />
             <ModeToggle mode={mode} onChange={setMode} />
             <div className="flex items-center gap-1">
