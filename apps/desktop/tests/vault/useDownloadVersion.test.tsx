@@ -5,6 +5,13 @@ import { useDownloadVersion, downloadVersionOnce } from "../../src/modules/vault
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Several retry tests below exercise REAL exponential-backoff sleeps (500·2^n,
+// ~1.5s total for the give-up case). On heavily-loaded Windows CI runners the
+// whole suite ran ~12x slower and these tipped past vitest's 5s default,
+// flaking an otherwise-green release build. Give them ample headroom so a slow
+// runner can't fail the release; nominal runtime is unchanged (~1.5s).
+vi.setConfig({ testTimeout: 20000 });
+
 vi.mock("@tauri-apps/plugin-fs", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
