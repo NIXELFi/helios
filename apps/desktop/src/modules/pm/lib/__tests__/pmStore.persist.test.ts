@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import type { SupabaseClient } from "@helios/auth";
-import type { Subteam, TaskRow } from "@helios/pm-ui";
+import type { CalendarEvent, Subteam, TaskRow } from "@helios/pm-ui";
 import { usePmStore } from "../pmStore";
 
 // Chainable recorder mock — same slice of supabase-js the write layer uses.
@@ -139,5 +139,27 @@ describe("optimistic persistence with rollback", () => {
     await flush();
     expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeTruthy();
     expect(usePmStore.getState().lastWriteError).toBeNull();
+  });
+
+  test("deleteEvent removes optimistically and rolls back on a failed write", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    const ev: CalendarEvent = {
+      id: "e1",
+      project_id: "p1",
+      title: "Comp",
+      date: "2026-05-01",
+      all_subteams: true,
+      subteam_ids: [],
+      type_tags: [],
+      description: null,
+    };
+    usePmStore.setState({ client, events: [ev], lastWriteError: null });
+
+    usePmStore.getState().deleteEvent("e1");
+    expect(usePmStore.getState().events.find((e) => e.id === "e1")).toBeFalsy(); // optimistic
+
+    await flush();
+    expect(usePmStore.getState().events.find((e) => e.id === "e1")).toBeTruthy(); // rolled back
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
   });
 });

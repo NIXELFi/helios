@@ -103,6 +103,7 @@ export function CalendarViewClient({
   const selectTask = usePmStore((s) => s.selectTask);
   const addEvent = usePmStore((s) => s.addEvent);
   const updateEvent = usePmStore((s) => s.updateEvent);
+  const deleteEvent = usePmStore((s) => s.deleteEvent);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
@@ -511,6 +512,12 @@ export function CalendarViewClient({
         onSave={(ev) => {
           if (editingEvent) updateEvent(ev.id, ev);
           else addEvent(ev);
+        }}
+        onDelete={(ev) => {
+          deleteEvent(ev.id);
+          setEventDialogOpen(false);
+          setEditingEvent(null);
+          setEventPrefillDate(null);
         }}
         projectId={projectId}
         subteams={subteams}

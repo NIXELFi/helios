@@ -1,7 +1,7 @@
 "use client";
 
 import type { CalendarEvent, Subteam } from "@helios/pm-ui";
-import { IconX } from "@tabler/icons-react";
+import { IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 
@@ -13,6 +13,7 @@ export interface EventDialogProps {
   open: boolean;
   onClose: () => void;
   onSave: (event: CalendarEvent) => void;
+  onDelete?: (event: CalendarEvent) => void;
   projectId: string;
   subteams: ReadonlyArray<Subteam>;
   event?: CalendarEvent | null;
@@ -23,6 +24,7 @@ export function EventDialog({
   open,
   onClose,
   onSave,
+  onDelete,
   projectId,
   subteams,
   event = null,
@@ -89,23 +91,44 @@ export function EventDialog({
       initialWidth={480}
       initialHeight={560}
       footer={
-        <>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-helios-line bg-transparent px-3 py-1.5 text-sm font-normal text-helios-dim hover:bg-helios-base hover:text-helios-text"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!canSave}
-            className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-black hover:bg-asu-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Save event
-          </button>
-        </>
+        <div className="flex w-full items-center justify-between">
+          <div>
+            {event && onDelete ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    event &&
+                    confirm(`Delete event "${event.title}"? This cannot be undone.`)
+                  ) {
+                    onDelete(event);
+                  }
+                }}
+                className="inline-flex items-center gap-1 rounded border border-helios-line bg-transparent px-2.5 py-1.5 text-sm font-normal text-helios-dim hover:border-red-400/40 hover:bg-helios-base hover:text-red-400"
+              >
+                <IconTrash size={14} strokeWidth={1.5} />
+                Delete
+              </button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-helios-line bg-transparent px-3 py-1.5 text-sm font-normal text-helios-dim hover:bg-helios-base hover:text-helios-text"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!canSave}
+              className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-black hover:bg-asu-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save event
+            </button>
+          </div>
+        </div>
       }
     >
       <div className="flex flex-col gap-4 p-5">
