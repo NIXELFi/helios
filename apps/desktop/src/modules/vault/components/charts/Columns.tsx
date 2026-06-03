@@ -27,7 +27,7 @@ export function Columns({
           <div key={d.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
             <div className="flex w-full flex-1 items-end">
               <div
-                className="w-full rounded-t-sm transition-all hover:opacity-80"
+                className="w-full transition-all hover:opacity-80"
                 style={{ height: `${Math.max(h, d.value > 0 ? 3 : 0)}%`, backgroundColor: accent }}
                 title={`${d.label}: ${formatValue(d.value)}`}
               />

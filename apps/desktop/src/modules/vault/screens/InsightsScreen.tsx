@@ -17,6 +17,8 @@ import { AreaLine } from "../components/charts/AreaLine";
 import type { RecentFile } from "../lib/vaultStats";
 import { SpotlightCard } from "../components/SpotlightCard";
 import { SpotlightPicker } from "../components/SpotlightPicker";
+import { DeepAnalytics } from "../components/DeepAnalytics";
+import { useVaultInsightsExtra } from "../data/useVaultInsightsExtra";
 import { holderLabel } from "./WhoHasWhatScreen";
 import type { VaultFile } from "../data/types";
 
@@ -28,6 +30,7 @@ export function InsightsScreen() {
   const { data: users } = useVaultUsers(); // admin-gated; errors ignored (fallback below)
   const isAdmin = useIsAdmin();
   const setSpotlight = useSetSpotlight();
+  const { data: extra, loading: extraLoading } = useVaultInsightsExtra(vaultId ?? undefined);
   const [picking, setPicking] = useState(false);
 
   const folderList = useMemo(() => folders ?? [], [folders]);
@@ -58,6 +61,20 @@ export function InsightsScreen() {
     return u ? holderLabel(u) : null;
   }, [spotlightFile, userList]);
 
+  // id -> label resolvers for the deep-analytics section (RPC returns raw ids).
+  const userMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of userList) {
+      const l = holderLabel(u);
+      if (l) m.set(u.user_id, l);
+    }
+    return m;
+  }, [userList]);
+  const fileById = useMemo(() => new Map(fileList.map((f) => [f.id, f])), [fileList]);
+  const authorName = (id: string | null) => (id ? userMap.get(id) ?? `${id.slice(0, 8)}…` : "Imported");
+  const fileNameOf = (id: string) => fileById.get(id)?.name ?? `${id.slice(0, 8)}…`;
+  const holderName = (id: string) => userMap.get(id) ?? `${id.slice(0, 8)}…`;
+
   async function pickSpotlight(fileId: string | null) {
     if (!vaultId) return;
     const ok = await setSpotlight.run(vaultId, fileId);
@@ -83,7 +100,7 @@ export function InsightsScreen() {
       </header>
 
       {filesError ? (
-        <div className="m-5 rounded border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
+        <div className="m-5 border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
           Couldn't load vault data: {filesError.message}
         </div>
       ) : filesLoading && !files ? (
@@ -99,7 +116,7 @@ export function InsightsScreen() {
             onChange={() => setPicking(true)}
           />
           {setSpotlight.error ? (
-            <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-200">
+            <div className="border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-200">
               Couldn't update spotlight: {setSpotlight.error.message}
             </div>
           ) : null}
@@ -161,6 +178,14 @@ export function InsightsScreen() {
               <RecentList items={insights.recentlyUpdated} />
             </ChartCard>
           </div>
+
+          <DeepAnalytics
+            extra={extra}
+            loading={extraLoading}
+            fileName={fileNameOf}
+            authorName={authorName}
+            holderName={holderName}
+          />
         </div>
       )}
 

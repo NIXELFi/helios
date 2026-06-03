@@ -72,16 +72,16 @@ export function SpotlightPicker({
         aria-modal="true"
         aria-label="Choose spotlight file"
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[70vh] w-[36rem] max-w-[92vw] flex-col rounded-lg border border-helios-line bg-helios-panel shadow-xl"
+        className="flex max-h-[70vh] w-[36rem] max-w-[92vw] flex-col border border-helios-line bg-helios-panel shadow-xl"
       >
         <div className="flex items-center justify-between border-b border-helios-line px-4 py-3">
           <h3 className="text-sm font-semibold text-helios-text">Choose spotlight file</h3>
-          <button type="button" onClick={onClose} className="rounded p-1 text-helios-dim hover:bg-helios-line hover:text-helios-text">
+          <button type="button" onClick={onClose} className="p-1 text-helios-dim hover:bg-helios-line hover:text-helios-text">
             <IconX size={16} />
           </button>
         </div>
         <div className="border-b border-helios-line p-3">
-          <div className="flex items-center gap-2 rounded border border-helios-line bg-helios-base px-2">
+          <div className="flex items-center gap-2 border border-helios-line bg-helios-base px-2">
             <IconSearch size={14} className="text-helios-dim" />
             <input
               ref={inputRef}
@@ -106,7 +106,7 @@ export function SpotlightPicker({
                       disabled={saving}
                       onClick={() => onPick(f.id)}
                       className={
-                        "flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm transition-colors disabled:opacity-50 " +
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors disabled:opacity-50 " +
                         (isCurrent ? "bg-asu-gold/10 text-asu-gold" : "text-helios-text hover:bg-helios-base")
                       }
                     >

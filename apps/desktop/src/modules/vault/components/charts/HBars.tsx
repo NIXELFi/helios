@@ -27,9 +27,9 @@ export function HBars({
             <span className="w-32 shrink-0 truncate text-helios-text" title={d.sublabel ? `${d.label} — ${d.sublabel}` : d.label}>
               {d.label}
             </span>
-            <span className="relative h-3.5 flex-1 overflow-hidden rounded-sm bg-helios-base">
+            <span className="relative h-3.5 flex-1 overflow-hidden bg-helios-base">
               <span
-                className="absolute inset-y-0 left-0 rounded-sm"
+                className="absolute inset-y-0 left-0"
                 style={{ width: `${pct}%`, backgroundColor: color }}
               />
             </span>

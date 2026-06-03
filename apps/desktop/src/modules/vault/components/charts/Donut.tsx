@@ -63,7 +63,7 @@ export function Donut({
           const pct = Math.round((s.value / total) * 100);
           return (
             <li key={s.label} className="flex items-center gap-2">
-              <span aria-hidden className="size-2.5 shrink-0 rounded-sm" style={{ backgroundColor: colorAt(i) }} />
+              <span aria-hidden className="size-2.5 shrink-0" style={{ backgroundColor: colorAt(i) }} />
               <span className="min-w-0 flex-1 truncate text-helios-text" title={s.label}>{s.label}</span>
               <span className="shrink-0 tabular-nums text-helios-dim">
                 {s.value}
