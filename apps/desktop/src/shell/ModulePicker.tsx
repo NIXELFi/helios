@@ -146,9 +146,7 @@ export function ModulePicker(props: Props) {
             <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">
               {/* `appVersion` starts as "dev" until getVersion() resolves; show a
                   neutral placeholder instead of flashing "vdev" on every boot. */}
-              {appVersion && appVersion !== "dev"
-                ? `v${appVersion} · ground-station`
-                : "ground-station"}
+              {appVersion && appVersion !== "dev" ? `v${appVersion}` : ""}
             </div>
           </div>
         )}

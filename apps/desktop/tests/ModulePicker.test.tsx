@@ -48,9 +48,9 @@ describe("<ModulePicker>", () => {
   it("renders the HELIOS wordmark and app version in the sidebar header", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} />);
     expect(screen.getByText("HELIOS")).toBeInTheDocument();
-    // Version appears in two spots — the sidebar header subtitle and the
-    // UpdatesPill ("✓ v3.7.0"). The subtitle is the persistent label.
-    expect(screen.getByText(/v3\.7\.0 · ground-station/i)).toBeInTheDocument();
+    // Version appears in two spots — the sidebar header subtitle ("v3.7.0") and
+    // the UpdatesPill ("✓ v3.7.0"). Exact-match the persistent subtitle label.
+    expect(screen.getByText("v3.7.0")).toBeInTheDocument();
   });
 
   it("invokes onUpdaterClick when the updates pill is clicked", () => {
@@ -145,18 +145,16 @@ describe("<ModulePicker>", () => {
     expect(vaultBtn.className).toMatch(/cursor-pointer/);
   });
 
-  // S9: the version subtitle truncates and shows a placeholder (not "vdev")
-  // while the real version is still loading.
-  it("shows a version placeholder instead of 'vdev' while loading (S9)", () => {
+  // S9: while the real version is still loading ("dev") the subtitle stays
+  // empty rather than leaking a bare "vdev".
+  it("hides the version instead of showing 'vdev' while loading (S9)", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} appVersion="dev" />);
     expect(screen.queryByText(/vdev/i)).not.toBeInTheDocument();
-    // The persistent label still names the station.
-    expect(screen.getByText(/ground-station/i)).toBeInTheDocument();
   });
 
   it("the version subtitle truncates a real version (S9)", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} appVersion="3.7.0" />);
-    const line = screen.getByText(/v3\.7\.0 · ground-station/i);
+    const line = screen.getByText("v3.7.0");
     expect(line.className).toMatch(/truncate/);
   });
 
