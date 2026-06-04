@@ -46,13 +46,12 @@ namespace HeliosVault
 
         private FlowLayoutPanel _flow;
         private Panel _divider;
-        private Label _docLabel, _statusLabel, _compsCaption, _connLabel;
+        private Label _docLabel, _statusLabel, _connLabel;
         private System.Windows.Forms.Timer _pollTimer;
         private Button _checkOut, _checkIn, _cancelCheckout, _getLatest, _addToVault, _refresh;
         private VaultTreePanel _treePanel;
         private readonly List<Control> _fullWidth = new List<Control>();
         private readonly List<Label> _wrapLabels = new List<Label>();
-        private readonly List<Label> _componentRows = new List<Label>();
 
         private string _activePath;
         private bool _tracked, _checkedOut, _checkedOutByMe;
@@ -182,10 +181,6 @@ namespace HeliosVault
             _flow.Controls.Add(_getLatest);
             _flow.Controls.Add(_addToVault);
             _flow.Controls.Add(_refresh);
-
-            _compsCaption = MakeCaption("COMPONENTS", new Padding(0, 18, 0, 0));
-            _compsCaption.Visible = false;
-            _flow.Controls.Add(_compsCaption);
 
             // Interactive vault + open-assembly tree: browse folders / components
             // and check files in/out from any node (supersedes the flat list).
@@ -372,66 +367,6 @@ namespace HeliosVault
                 checkOut: _tracked && !_checkedOut,
                 checkIn: _tracked && _checkedOutByMe,
                 getLatest: _tracked);
-        }
-
-        /// <summary>For an assembly, list each top-level component's vault status.</summary>
-        private async Task RefreshComponents()
-        {
-            ClearComponents();
-
-            string[] paths;
-            try { paths = _getComponents?.Invoke() ?? new string[0]; }
-            catch { paths = new string[0]; }
-
-            if (paths.Length == 0)
-            {
-                _compsCaption.Visible = false;
-                return;
-            }
-
-            _compsCaption.Visible = true;
-            _compsCaption.Text = $"COMPONENTS ({paths.Length})";
-
-            var res = await _bridge.StatusBatchAsync(paths);
-            if (!res.Ok || res.Json == null || !(res.Json.TryGetValue("items", out var raw) && raw is object[] items))
-            {
-                AddComponentRow("(couldn't load component status)", Dim);
-                RelayoutWidths();
-                return;
-            }
-
-            foreach (var it in items)
-            {
-                if (!(it is Dictionary<string, object> d)) continue;
-                var name = GetStr(d, "name") ?? Path.GetFileName(GetStr(d, "path") ?? "?");
-                Color color;
-                string mark;
-                if (!GetBool(d, "tracked")) { color = Dim; mark = "○"; }
-                else if (!GetBool(d, "checkedOut")) { color = Green; mark = "●"; }
-                else if (GetBool(d, "checkedOutByMe")) { color = Gold; mark = "●"; }
-                else { color = Red; mark = "●"; }
-                AddComponentRow($"{mark} {name}", color);
-            }
-            RelayoutWidths();
-        }
-
-        private void AddComponentRow(string text, Color color)
-        {
-            var l = MakeLabel(text, color, 8.5f, FontStyle.Regular, new Padding(0, 2, 0, 0));
-            _componentRows.Add(l);
-            _wrapLabels.Add(l);
-            _flow.Controls.Add(l);
-        }
-
-        private void ClearComponents()
-        {
-            foreach (var row in _componentRows)
-            {
-                _flow.Controls.Remove(row);
-                _wrapLabels.Remove(row);
-                row.Dispose();
-            }
-            _componentRows.Clear();
         }
 
         private async Task DoCheckOut()

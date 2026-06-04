@@ -69,14 +69,11 @@ namespace HeliosShell
         // ---- single-file menu (full verb set, state-aware) --------------------
         private void BuildSingle(ToolStripMenuItem root, string path)
         {
-            var res = Bridge.Status(path);
-            if (res.Unreachable)
-            {
-                root.DropDownItems.Add(Disabled("Helios isn't reachable"));
-                return;
-            }
-            bool tracked = res.Ok && Bridge.GetBool(res.Json, "tracked");
-            if (!tracked)
+            // Build from the cached shell-state — NEVER a blocking HTTP call on
+            // Explorer's UI thread (that would freeze Explorer if the bridge is
+            // slow). The cache is refreshed by the bridge on every lock change.
+            var state = ShellState.StateFor(path);
+            if (state == null)
             {
                 if (ShellState.IsUnderVault(path))
                     root.DropDownItems.Add(Item("Add to Vault", () => Run("Add to Vault", path, () => Bridge.Add(path))));
@@ -85,8 +82,8 @@ namespace HeliosShell
                 return;
             }
 
-            bool outAny = Bridge.GetBool(res.Json, "checkedOut");
-            bool outMe = Bridge.GetBool(res.Json, "checkedOutByMe");
+            bool outMe = state == "out-me";
+            bool outAny = outMe || state == "out-other";
             string statusText = outMe ? "● Checked out by you"
                 : outAny ? "● Checked out by another member"
                 : "● Available";
@@ -123,36 +120,41 @@ namespace HeliosShell
 
         private void Run(string verb, string path, Func<Bridge.Result> action)
         {
-            Cursor.Current = Cursors.WaitCursor;
-            Bridge.Result r;
-            try { r = action(); }
-            finally { Cursor.Current = Cursors.Default; }
-            RefreshIcon(path);
-            if (r.Unreachable)
-                HeliosUi.Error(verb, "Helios isn't running — open the Helios app.");
-            else if (!r.Ok)
-                HeliosUi.Error(verb, r.Error ?? (verb + " failed."));
+            // Off the UI thread: a slow/forwarded bridge op (e.g. a large
+            // check-in) must never freeze Explorer. The menu closes immediately;
+            // a failure surfaces when the op finishes.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                Bridge.Result r;
+                try { r = action(); }
+                catch (Exception ex) { r = new Bridge.Result { Error = ex.Message }; }
+                RefreshIcon(path);
+                if (r.Unreachable)
+                    HeliosUi.Error(verb, "Helios isn't running — open the Helios app.");
+                else if (!r.Ok)
+                    HeliosUi.Error(verb, r.Error ?? (verb + " failed."));
+            });
         }
 
         private void RunMany(string verb, List<string> paths, Func<string, Bridge.Result> action)
         {
             if (paths.Count == 0) return;
-            Cursor.Current = Cursors.WaitCursor;
-            int ok = 0;
-            var errors = new List<string>();
-            try
+            System.Threading.Tasks.Task.Run(() =>
             {
+                int ok = 0;
+                var errors = new List<string>();
                 foreach (var p in paths)
                 {
-                    var r = action(p);
+                    Bridge.Result r;
+                    try { r = action(p); }
+                    catch (Exception ex) { r = new Bridge.Result { Error = ex.Message }; }
                     RefreshIcon(p);
                     if (r.Ok) ok++;
                     else errors.Add($"{System.IO.Path.GetFileName(p)}: {r.Error ?? "failed"}");
                 }
-            }
-            finally { Cursor.Current = Cursors.Default; }
-            if (errors.Count > 0)
-                HeliosUi.Error(verb, $"{ok}/{paths.Count} succeeded.\n\n" + string.Join("\n", errors.Take(10)));
+                if (errors.Count > 0)
+                    HeliosUi.Error(verb, $"{ok}/{paths.Count} succeeded.\n\n" + string.Join("\n", errors.Take(10)));
+            });
         }
 
         // ---- menu-item helpers ------------------------------------------------

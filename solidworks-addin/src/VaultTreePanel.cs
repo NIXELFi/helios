@@ -148,15 +148,22 @@ namespace HeliosVault
 
         private async void OnBeforeExpand(object sender, TreeViewCancelEventArgs e)
         {
-            if (e.Node == _vaultRootNode && _model == null && !_vaultLoading)
+            // async void event handler → swallow everything so a bridge/parse
+            // error can never crash SOLIDWORKS's UI thread.
+            try
             {
-                await LoadVaultModel();
-                PopulateChildren(_vaultRootNode, _model);
+                if (e.Node == _vaultRootNode && _model == null && !_vaultLoading)
+                {
+                    _vaultLoading = true; // set BEFORE the await, to bar a re-entrant double-load
+                    await LoadVaultModel();
+                    if (_model != null) PopulateChildren(_vaultRootNode, _model);
+                }
+                else if (e.Node.Tag is Node n && !n.IsFile && IsPlaceholder(e.Node))
+                {
+                    PopulateChildren(e.Node, n);
+                }
             }
-            else if (e.Node.Tag is Node n && !n.IsFile && IsPlaceholder(e.Node))
-            {
-                PopulateChildren(e.Node, n);
-            }
+            catch { /* best-effort tree fill */ }
         }
 
         private async Task LoadVaultModel()
@@ -274,18 +281,24 @@ namespace HeliosVault
 
         private async void Do(string verb, Node n, Func<Task<HeliosBridge.BridgeResult>> action)
         {
-            HeliosBridge.BridgeResult r;
-            try { r = await action(); }
-            catch (Exception ex) { r = new HeliosBridge.BridgeResult { Error = ex.Message }; }
+            // async void → fully guarded; an unobserved throw here would tear
+            // down SOLIDWORKS's UI thread.
+            try
+            {
+                HeliosBridge.BridgeResult r;
+                try { r = await action(); }
+                catch (Exception ex) { r = new HeliosBridge.BridgeResult { Error = ex.Message }; }
 
-            if (r.Unreachable)
-                MessageBox.Show("Helios isn't running — open the Helios app.", "Helios — " + verb, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            else if (!r.Ok)
-                MessageBox.Show(r.Error ?? (verb + " failed."), "Helios — " + verb, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (r.Unreachable)
+                    MessageBox.Show("Helios isn't running — open the Helios app.", "Helios — " + verb, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else if (!r.Ok)
+                    MessageBox.Show(r.Error ?? (verb + " failed."), "Helios — " + verb, MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
-            // Refresh both branches so the node's status reflects the change.
-            InvalidateVault();
-            await RefreshActiveAsync();
+                // Refresh both branches so the node's status reflects the change.
+                InvalidateVault();
+                await RefreshActiveAsync();
+            }
+            catch { /* best-effort */ }
         }
 
         // --- helpers -----------------------------------------------------------
