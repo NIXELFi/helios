@@ -31,6 +31,15 @@ function localTarget(ctx: LocalCtx): string | null {
     : null;
 }
 
+/** Read a file path into an ArrayBuffer, normalizing the Uint8Array view. */
+async function readArrayBuffer(path: string): Promise<ArrayBuffer> {
+  const fileBytes = await readFile(path);
+  return fileBytes.buffer.slice(
+    fileBytes.byteOffset,
+    fileBytes.byteOffset + fileBytes.byteLength,
+  ) as ArrayBuffer;
+}
+
 interface ActionProps extends LocalCtx {
   fileId: FileId;
   onDone?: () => void;
@@ -106,22 +115,27 @@ export function CheckInButton({
   const pathRef = useRef<string | null>(null);
 
   async function readBytes(): Promise<ArrayBuffer | null> {
-    if (localFile) {
-      pathRef.current = localFile.absolutePath;
-      const fileBytes = await readFile(localFile.absolutePath);
-      return fileBytes.buffer.slice(
-        fileBytes.byteOffset,
-        fileBytes.byteOffset + fileBytes.byteLength,
-      ) as ArrayBuffer;
+    // Prefer the scan-matched local file, but fall back to the canonical vault
+    // working-copy path (vaultRoot + sanitized folder/name) when the scan didn't
+    // match one. The background scan legitimately misses files — open in
+    // SOLIDWORKS, a rescan still in flight, or a name that needed sanitizing —
+    // and we must NOT then make the user hunt for a file that's already on disk.
+    // Only prompt with a manual picker if neither candidate yields bytes.
+    const candidate =
+      localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
+    if (candidate) {
+      try {
+        const buf = await readArrayBuffer(candidate);
+        pathRef.current = candidate;
+        return buf;
+      } catch {
+        // Canonical copy missing / unreadable — fall through to the picker.
+      }
     }
     const path = await openFileDialog({ multiple: false });
     if (!path || Array.isArray(path)) return null;
     pathRef.current = path;
-    const fileBytes = await readFile(path);
-    return fileBytes.buffer.slice(
-      fileBytes.byteOffset,
-      fileBytes.byteOffset + fileBytes.byteLength,
-    ) as ArrayBuffer;
+    return readArrayBuffer(path);
   }
 
   async function handleClick(e: React.MouseEvent) {

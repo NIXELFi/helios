@@ -1,7 +1,7 @@
 import type { Folder, VaultFile, Version } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import type { LocalStatus } from "../components/LocalStatusBadge";
-import { folderPath } from "./folder-paths";
+import { folderPath, sanitizePathSegment } from "./folder-paths";
 
 export interface LocalMatch {
   status: LocalStatus;
@@ -11,7 +11,13 @@ export interface LocalMatch {
 /** Compute the expected relative path of a vault file within the local folder. */
 export function vaultRelativePath(file: VaultFile, folders: Folder[]): string {
   const sub = folderPath(file.folder_id, folders);
-  return sub ? `${sub}/${file.name}` : file.name;
+  // Sanitize the file name exactly like localDestPath does when it writes the
+  // working copy to disk, so a name that needs sanitizing (e.g. an embedded
+  // path separator) still matches its on-disk copy instead of looking
+  // "vault-only" and re-downloading on every sync. Ordinary names are
+  // unchanged, so this is a no-op for the common case.
+  const name = sanitizePathSegment(file.name);
+  return sub ? `${sub}/${name}` : name;
 }
 
 /**
