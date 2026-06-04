@@ -6,7 +6,8 @@ import * as lockEvents from "../../src/modules/vault/data/lock-events";
 import type { ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-let capturedId: any = null;
+let capturedFn: any = null;
+let capturedArgs: any = null;
 
 function mockClient(error: any = null): SupabaseClient {
   return {
@@ -17,18 +18,12 @@ function mockClient(error: any = null): SupabaseClient {
       }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
-    from: (table: string) => {
-      if (table === "files") {
-        return {
-          delete: () => ({
-            eq: (col: string, val: string) => {
-              capturedId = val;
-              return Promise.resolve({ data: null, error });
-            },
-          }),
-        };
-      }
-      return { select: () => Promise.resolve({ data: [], error: null }) };
+    // Soft delete goes through the pdm_delete_file RPC (sets deleted_at) rather
+    // than a hard DELETE on the files table.
+    rpc: (fn: string, args: any) => {
+      capturedFn = fn;
+      capturedArgs = args;
+      return Promise.resolve({ data: null, error });
     },
   } as any;
 }
@@ -38,8 +33,9 @@ const wrap = (c: SupabaseClient) =>
     <SupabaseAuthProvider client={c}>{children}</SupabaseAuthProvider>;
 
 describe("useDeleteFile", () => {
-  it("calls files.delete().eq('id', file_id) and returns true on success", async () => {
-    capturedId = null;
+  it("calls rpc('pdm_delete_file', { p_file_id }) and returns true on success", async () => {
+    capturedFn = null;
+    capturedArgs = null;
     const c = mockClient();
     const { result } = renderHook(() => useDeleteFile(), { wrapper: wrap(c) });
     let returnValue: boolean | undefined;
@@ -47,7 +43,8 @@ describe("useDeleteFile", () => {
       returnValue = await result.current.run("fi1");
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(capturedId).toBe("fi1");
+    expect(capturedFn).toBe("pdm_delete_file");
+    expect(capturedArgs).toEqual({ p_file_id: "fi1" });
     expect(returnValue).toBe(true);
     expect(result.current.error).toBeNull();
   });

@@ -49,7 +49,8 @@ function buildMockClient(isAdmin = false): SupabaseClient {
       if (table === "files") return {
         select: () => ({
           eq: () => ({
-            order: () => {
+            // useFiles/useAllFiles add .is("deleted_at", null) before .order().
+            is: () => {
               const node: any = {
                 order: () => node,
                 range: (from: number, to: number) => Promise.resolve({
@@ -112,7 +113,7 @@ function buildFoldersErrorClient(): SupabaseClient {
       };
       if (table === "files") return {
         select: () => ({
-          eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
+          eq: () => ({ is: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
         }),
       };
       if (table === "locks") return { select: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
@@ -164,7 +165,8 @@ function buildLockHolderClient(): SupabaseClient {
       if (table === "files") return {
         select: () => ({
           eq: () => ({
-            order: () => {
+            // useFiles/useAllFiles add .is("deleted_at", null) before .order().
+            is: () => {
               const node: any = {
                 order: () => node,
                 range: (from: number, to: number) => Promise.resolve({ data: [rootFile].slice(from, to + 1), error: null }),
@@ -208,9 +210,16 @@ function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
     },
     from: vi.fn().mockImplementation((table: string) => {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [], error: null }) };
-      if (table === "folders" || table === "files") return {
+      // folders: .select().eq().order().order().range() (no soft-delete filter).
+      if (table === "folders") return {
         select: () => ({
           eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
+        }),
+      };
+      // files: useFiles/useAllFiles add .is("deleted_at", null) before .order().
+      if (table === "files") return {
+        select: () => ({
+          eq: () => ({ is: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
         }),
       };
       if (table === "locks") return { select: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };

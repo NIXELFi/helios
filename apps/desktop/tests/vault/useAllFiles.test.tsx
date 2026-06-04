@@ -24,11 +24,14 @@ function mockClient(files: any[] = FILES): SupabaseClient {
         return {
           select: () => ({
             eq: (_col: string, _val: string) => ({
-              order: (_orderCol: string, _opts: { ascending: boolean }) => ({
-                // Pagination via .range() — return all rows once; fetchAllRows
-                // exits when a page is smaller than its page-size cap (1000).
-                range: (from: number, to: number) =>
-                  Promise.resolve({ data: files.slice(from, to + 1), error: null }),
+              // Soft-delete filter: .is("deleted_at", null) precedes .order().
+              is: (_isCol: string, _isVal: any) => ({
+                order: (_orderCol: string, _opts: { ascending: boolean }) => ({
+                  // Pagination via .range() — return all rows once; fetchAllRows
+                  // exits when a page is smaller than its page-size cap (1000).
+                  range: (from: number, to: number) =>
+                    Promise.resolve({ data: files.slice(from, to + 1), error: null }),
+                }),
               }),
             }),
           }),

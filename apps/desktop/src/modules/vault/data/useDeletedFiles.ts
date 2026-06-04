@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { FolderId, QueryResult, VaultFile } from "./types";
+import type { QueryResult, VaultFile, VaultId } from "./types";
 import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
 
-export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile[]> {
+/**
+ * Fetches the soft-deleted files in a vault (the recycle bin) — every row whose
+ * `deleted_at` is non-null, most-recently-deleted first. Mirror of useAllFiles
+ * with the delete filter inverted (useFiles/useAllFiles exclude these rows).
+ *
+ * Paginated via .range() (see paginate.ts) since a long-lived vault's recycle
+ * bin can exceed PostgREST's default 1000-row cap.
+ */
+export function useDeletedFiles(vault_id: VaultId | undefined): QueryResult<VaultFile[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<VaultFile[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -12,7 +20,7 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!folder_id) {
+    if (!vault_id) {
       setData(null);
       setLoading(false);
       setError(null);
@@ -23,15 +31,13 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
     setError(null);
     (async () => {
       const { rows, error: err } = await fetchAllRows<VaultFile>(
-        // Stable, UNIQUE ORDER BY is required for safe pagination — see
-        // paginate.ts. `name` alone is not unique, so rows could be skipped
-        // or duplicated at .range() page boundaries; append the PK `id` as a
-        // tiebreaker for a deterministic total order (cf. useAllFiles).
+        // `deleted_at` is not unique, so append the PK `id` as a tiebreaker for
+        // a deterministic total order across .range() pages (cf. useFiles).
         () => (client.from("files") as any)
           .select(FILE_WITH_LATEST_SELECT)
-          .eq("folder_id", folder_id)
-          .is("deleted_at", null) // soft-deleted files live in the recycle bin
-          .order("name", { ascending: true })
+          .eq("vault_id", vault_id)
+          .not("deleted_at", "is", null)
+          .order("deleted_at", { ascending: false })
           .order("id", { ascending: true }),
       );
       if (!mounted) return;
@@ -46,7 +52,7 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
     return () => {
       mounted = false;
     };
-  }, [client, folder_id, tick]);
+  }, [client, vault_id, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
   return { data, loading, error, refetch };

@@ -82,7 +82,8 @@ function mockResolvedClient(
         return {
           select: () => ({
             eq: () => ({
-              order: () => {
+              // useAllFiles adds .is("deleted_at", null) before .order().
+              is: () => {
                 const node: any = { order: () => node, range: (from: number, to: number) =>
                   filesHang
                     ? new Promise(() => {})

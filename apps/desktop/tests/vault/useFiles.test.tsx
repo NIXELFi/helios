@@ -26,6 +26,9 @@ function mockClient(
             // .order() is chainable so a unique tiebreaker can be appended;
             // it also exposes .range() so pagination terminates the chain.
             const makeChain = () => ({
+              // Soft-delete filter: .is("deleted_at", null) sits between .eq()
+              // and the .order() pair, returning the same chain object.
+              is: (_col: string, _val: any) => makeChain(),
               order: (orderCol: string, opts: { ascending: boolean }) => {
                 orderCalls?.push([orderCol, opts]);
                 return makeChain();
@@ -131,6 +134,7 @@ describe("useFiles", () => {
         select: (sel: string) => {
           observedSelect = sel;
           const makeChain = () => ({
+            is: () => makeChain(),
             order: () => makeChain(),
             range: (from: number) => Promise.resolve({ data: from === 0 ? [row] : [], error: null }),
           });

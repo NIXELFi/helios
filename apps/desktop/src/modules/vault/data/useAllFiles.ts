@@ -39,6 +39,9 @@ export function useAllFiles(vault_id: VaultId | undefined): QueryResult<VaultFil
         () => (client.from("files") as any)
           .select(FILE_WITH_LATEST_SELECT)
           .eq("vault_id", vault_id)
+          // Hide soft-deleted files from the normal list; the recycle bin
+          // (useDeletedFiles) fetches them, and the reaper removes local copies.
+          .is("deleted_at", null)
           .order("id", { ascending: true }),
       );
       if (!mounted) return;

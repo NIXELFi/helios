@@ -46,6 +46,13 @@ function mockClient(opts: Opts = {}): SupabaseClient {
       eq: () => ({ order: () => { const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: data.slice(from, to + 1), error: null }) }; return node; } }),
     }),
   });
+  // useFiles adds .is("deleted_at", null) between .eq() and .order() — folders
+  // and versions don't, so the files table gets its own chain.
+  const filesChain = (data: any[]) => ({
+    select: () => ({
+      eq: () => ({ is: () => { const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: data.slice(from, to + 1), error: null }) }; return node; } }),
+    }),
+  });
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
@@ -71,7 +78,7 @@ function mockClient(opts: Opts = {}): SupabaseClient {
         }
         return okChain(folders);
       }
-      if (table === "files") return okChain(files);
+      if (table === "files") return filesChain(files);
       if (table === "versions") return okChain(versions);
       return okChain([]);
     }),

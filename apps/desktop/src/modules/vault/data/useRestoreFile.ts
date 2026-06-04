@@ -4,7 +4,10 @@ import type { FileId } from "./types";
 import { friendlyPgError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
 
-export function useDeleteFile() {
+/** Restore a soft-deleted file via pdm_restore_file (clears deleted_at). Inverse
+ *  of useDeleteFile. Authorization (only the deleter or a vault admin) is
+ *  enforced server-side in the SECURITY DEFINER function. */
+export function useRestoreFile() {
   const client = useSupabaseClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -12,18 +15,14 @@ export function useDeleteFile() {
   const run = useCallback(async (file_id: FileId): Promise<boolean> => {
     setLoading(true);
     setError(null);
-    // Soft delete: pdm_delete_file sets deleted_at (recoverable from the recycle
-    // bin) instead of a hard DELETE. Auth (lock holder or admin) is enforced
-    // server-side in the SECURITY DEFINER function.
-    const { error: err } = await client.rpc("pdm_delete_file", { p_file_id: file_id });
+    const { error: err } = await client.rpc("pdm_restore_file", { p_file_id: file_id });
     setLoading(false);
     if (err) {
       setError(new Error(friendlyPgError(err, "file").message));
       return false;
     }
-    // Deleting a file removes any lock on it; broadcast so lock views
-    // (WhoHasWhat) reconcile a deleted-while-locked file immediately rather
-    // than waiting on the realtime channel. Mirrors useReleaseLock.
+    // Restoring brings the file (and its history) back; lock state is unchanged
+    // (delete released it), but broadcast so lock views refresh promptly.
     notifyLockChange();
     return true;
   }, [client]);

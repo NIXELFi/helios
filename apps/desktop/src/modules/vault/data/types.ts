@@ -38,6 +38,11 @@ export interface VaultFile {
    *  file has no version. `properties` is excluded from the embed (the data
    *  card fetches that on demand) — see EmbeddedLatest. */
   latest?: EmbeddedLatest | null;
+  /** Soft-delete metadata (pdm.files.deleted_at / deleted_by). Non-null
+   *  deleted_at = the file is in the recycle bin: excluded from the normal
+   *  browse list, listed by useDeletedFiles, recoverable via pdm_restore_file. */
+  deleted_at?: string | null;
+  deleted_by?: UserId | null;
 }
 
 /** The latest-version fields embedded on a file row — everything on Version

@@ -5,6 +5,7 @@ import { BrowseScreen } from "./screens/BrowseScreen";
 import { InsightsScreen } from "./screens/InsightsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { WhoHasWhatScreen } from "./screens/WhoHasWhatScreen";
+import { RecycleScreen } from "./screens/RecycleScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { AdminScreen } from "./screens/AdminScreen";
 import { useIsAdmin } from "./data/useIsAdmin";
@@ -28,6 +29,7 @@ export function VaultHome() {
         {active === "insights" ? <InsightsScreen /> : null}
         {active === "history" ? <HistoryScreen /> : null}
         {active === "who" ? <WhoHasWhatScreen /> : null}
+        {active === "deleted" ? <RecycleScreen /> : null}
         {active === "settings" ? <SettingsScreen /> : null}
         {active === "admin" && isAdmin ? <AdminScreen /> : null}
       </main>
