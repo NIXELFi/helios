@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 }));
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: (...args: any[]) => setReadonlyMock(...args),
+  flipSwReadonly: vi.fn(),
 }));
 
 function delFile(id: string, name: string, folder_id: string | null = null): VaultFile {

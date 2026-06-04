@@ -33,6 +33,7 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
     readonlyCalls.push({ path, readonly });
     return Promise.resolve();
   },
+  flipSwReadonly: vi.fn(),
 }));
 
 function resolveDownload(sha: string, ok = true): void {

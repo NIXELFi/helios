@@ -21,6 +21,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: vi.fn().mockResolvedValue(undefined),
+  flipSwReadonly: vi.fn(),
 }));
 
 // Deterministic UUID so tests can assert the exact temp path the unique-name

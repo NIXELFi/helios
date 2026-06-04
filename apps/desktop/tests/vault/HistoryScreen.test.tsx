@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: vi.fn().mockResolvedValue(undefined),
+  flipSwReadonly: vi.fn(),
 }));
 
 interface Opts {

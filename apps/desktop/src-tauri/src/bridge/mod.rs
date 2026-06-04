@@ -182,28 +182,14 @@ impl BridgeState {
     /// Inner of [`write_shell_state`] taking an explicit dir, so tests don't have
     /// to mutate the process-global `LOCALAPPDATA`.
     fn write_shell_state_to(&self, dir: &std::path::Path) {
-        let inner = self.read();
-        let mut states = serde_json::Map::with_capacity(inner.snapshot.files.len());
-        for f in &inner.snapshot.files {
-            states.insert(
-                norm_path(&f.local_path),
-                serde_json::json!({
-                    "state": shell_state_for(f),
-                    "name": f.name,
-                    "fileId": f.file_id,
-                    "vault": f.vault_name,
-                    // Holder's auth uid when checked out by someone else (the
-                    // snapshot doesn't carry display names — the context menu
-                    // resolves the friendly name on demand via /status).
-                    "by": f.lock.as_ref().filter(|l| !l.by_me).map(|l| l.user_id.clone()),
-                }),
-            );
-        }
-        let body = serde_json::json!({
-            "vaultRoot": inner.snapshot.vault_root,
-            "files": states,
-        });
-        drop(inner);
+        // Build the JSON under the read lock, then drop the lock before touching
+        // the filesystem. The build itself lives in the free `build_shell_state`
+        // so it can be unit-tested without constructing a `BridgeState` (which
+        // would link the bridge's reqwest/HTTP stack into the test binary).
+        let body = {
+            let inner = self.read();
+            build_shell_state(&inner.snapshot)
+        };
         let path = dir.join("shell-state.json");
         let _ = std::fs::create_dir_all(dir);
         match serde_json::to_vec(&body) {
@@ -384,6 +370,35 @@ pub(crate) fn shell_state_for(f: &SnapshotFile) -> &'static str {
     }
 }
 
+/// Build the shell-state document (vault root + per-file overlay/status state),
+/// keyed by normalized path (forward slashes + lowercase) so the C# shell side
+/// looks up with the same normalization. Pure (no `self`, no I/O) so it can be
+/// unit-tested without constructing a `BridgeState` — constructing one pulls the
+/// bridge's reqwest/HTTP stack into the test binary, which on Windows then fails
+/// to launch as a bare test executable (`STATUS_ENTRYPOINT_NOT_FOUND`).
+pub(crate) fn build_shell_state(snapshot: &Snapshot) -> Value {
+    let mut states = serde_json::Map::with_capacity(snapshot.files.len());
+    for f in &snapshot.files {
+        states.insert(
+            norm_path(&f.local_path),
+            serde_json::json!({
+                "state": shell_state_for(f),
+                "name": f.name,
+                "fileId": f.file_id,
+                "vault": f.vault_name,
+                // Holder's auth uid when checked out by someone else (the
+                // snapshot doesn't carry display names — the context menu
+                // resolves the friendly name on demand via /status).
+                "by": f.lock.as_ref().filter(|l| !l.by_me).map(|l| l.user_id.clone()),
+            }),
+        );
+    }
+    serde_json::json!({
+        "vaultRoot": snapshot.vault_root,
+        "files": states,
+    })
+}
+
 /// 32 bytes of OS randomness, hex-encoded — the per-launch bridge secret.
 fn random_token() -> String {
     let mut buf = [0u8; 32];
@@ -458,25 +473,21 @@ mod tests {
 
     #[test]
     fn shell_state_maps_lock_to_state_by_normalized_path() {
-        let tmp = std::env::temp_dir().join(format!("helios_shellstate_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        // Build straight from a Snapshot via the pure `build_shell_state` — no
+        // BridgeState, no filesystem. Constructing a BridgeState would link the
+        // bridge's reqwest/HTTP stack into the lib test binary, which on Windows
+        // then can't launch as a bare test exe (STATUS_ENTRYPOINT_NOT_FOUND) and
+        // fails `cargo test --workspace` for the whole crate.
+        let snapshot = Snapshot {
+            vault_root: Some("C:/Vault".into()),
+            files: vec![
+                sf("a", "C:/Vault/SDM26/Part.SLDPRT", Some(LockInfo { user_id: "me".into(), by_me: true })),
+                sf("b", "C:\\Vault\\SDM26\\Other.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false })),
+                sf("c", "C:/Vault/SDM26/Free.SLDPRT", None),
+            ],
+        };
 
-        let state = BridgeState::new();
-        {
-            let mut inner = state.write();
-            inner.snapshot = Snapshot {
-                vault_root: Some("C:/Vault".into()),
-                files: vec![
-                    sf("a", "C:/Vault/SDM26/Part.SLDPRT", Some(LockInfo { user_id: "me".into(), by_me: true })),
-                    sf("b", "C:\\Vault\\SDM26\\Other.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false })),
-                    sf("c", "C:/Vault/SDM26/Free.SLDPRT", None),
-                ],
-            };
-        }
-        state.write_shell_state_to(&tmp);
-
-        let txt = std::fs::read_to_string(tmp.join("shell-state.json")).unwrap();
-        let v: Value = serde_json::from_str(&txt).unwrap();
+        let v = build_shell_state(&snapshot);
         let files = &v["files"];
         // Keys are normalized (backslash→/, lowercased) so the C# side matches.
         assert_eq!(files["c:/vault/sdm26/part.sldprt"]["state"], "out-me");
@@ -485,7 +496,5 @@ mod tests {
         assert_eq!(files["c:/vault/sdm26/other.sldprt"]["by"], "him");
         assert_eq!(files["c:/vault/sdm26/free.sldprt"]["state"], "available");
         assert_eq!(v["vaultRoot"], "C:/Vault");
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
