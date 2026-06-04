@@ -8,6 +8,7 @@ import {
   TASK_STATUSES,
   TASK_TYPES,
   TypeBadge,
+  computeCriticalPath,
   criticalityFill,
   daysUntilDue,
   taskOutline,
@@ -89,6 +90,10 @@ export function TaskDetailSheet() {
   const task = selectedTaskId
     ? tasks.find((t) => t.id === selectedTaskId) ?? null
     : null;
+
+  // Live critical-path set — the DB `on_critical_path` flag is never populated,
+  // so compute it from the same DAG the Gantt/Graph use (single source of truth).
+  const criticalSet = useMemo(() => computeCriticalPath(tasks, deps), [tasks, deps]);
 
   const [subtaskDialogOpen, setSubtaskDialogOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
@@ -560,7 +565,7 @@ export function TaskDetailSheet() {
 
         <footer className="flex items-center justify-between border-t border-helios-line bg-helios-base/40 px-5 py-3">
           <span className="text-[10px] text-helios-dim">
-            {task.on_critical_path ? <span className="inline-flex items-center gap-1 text-asu-gold"><IconFlag size={10} strokeWidth={1.5} />On critical path</span> : null}
+            {criticalSet.has(task.id) ? <span className="inline-flex items-center gap-1 text-asu-gold"><IconFlag size={10} strokeWidth={1.5} />On critical path</span> : null}
           </span>
           <button
             type="button"
