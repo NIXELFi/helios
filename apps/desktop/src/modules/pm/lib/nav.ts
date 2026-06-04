@@ -172,3 +172,27 @@ export function resolveViewOrder(): ViewSegment[] {
   }
   return order;
 }
+
+// --- PM sidebar collapse ----------------------------------------------------
+// Whether the PM left sidebar is collapsed to a thin rail (to reclaim horizontal
+// space). Persisted per user so the choice sticks across restarts.
+
+const SIDEBAR_COLLAPSE_KEY = "helios:pmSidebarCollapsed";
+
+export function rememberSidebarCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
+export function recallSidebarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}

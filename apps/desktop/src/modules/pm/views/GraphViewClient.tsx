@@ -33,9 +33,10 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 
-type GraphSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
+type GraphSort = "dependency_tree" | "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GraphSort, string> = {
+  dependency_tree: "Dependency trees",
   criticality: "Most critical",
   upcoming: "Upcoming deadline",
   subteam_asc: "Subteam A→Z",
@@ -50,6 +51,10 @@ function sortComparator(
   critical: Set<string>,
 ): (a: TaskRow, b: TaskRow) => number {
   switch (sort) {
+    case "dependency_tree":
+      // The tree layout orders tasks within each tree by criticality; reuse that
+      // here so the per-rank ordering is consistent.
+      return (a, b) => criticalityScore(b, critical) - criticalityScore(a, critical);
     case "criticality":
       return (a, b) => criticalityScore(b, critical) - criticalityScore(a, critical);
     case "upcoming":
@@ -229,6 +234,81 @@ function layeredLayout(
   return positions;
 }
 
+// "Dependency trees" layout: split the tasks into connected components (each an
+// independent work stream — e.g. "intake design" before it merges into the
+// engine tree) and lay each out as its own left→right tree via layeredLayout,
+// then STACK the trees vertically so unrelated subsystems stop interleaving in
+// the same columns (the "jumbled" complaint). Each tree's convergence/"trunk"
+// sits on the right (prerequisites lay out left of dependents = the timeline
+// end). Trees that touch the critical path sort to the top; isolated singletons
+// fall to the bottom.
+function treeLayout(
+  tasks: ReadonlyArray<TaskRow>,
+  edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
+  critical: Set<string>,
+) {
+  const ids = new Set(tasks.map((t) => t.id));
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+
+  // Bidirectional adjacency → connected components via iterative DFS.
+  const adj = new Map<string, string[]>();
+  for (const t of tasks) adj.set(t.id, []);
+  for (const e of edges) {
+    if (ids.has(e.predecessor_id) && ids.has(e.successor_id)) {
+      adj.get(e.predecessor_id)!.push(e.successor_id);
+      adj.get(e.successor_id)!.push(e.predecessor_id);
+    }
+  }
+  const seen = new Set<string>();
+  const components: TaskRow[][] = [];
+  for (const t of tasks) {
+    if (seen.has(t.id)) continue;
+    const comp: TaskRow[] = [];
+    const stack = [t.id];
+    seen.add(t.id);
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      const node = taskById.get(id);
+      if (node) comp.push(node);
+      for (const n of adj.get(id) ?? []) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          stack.push(n);
+        }
+      }
+    }
+    components.push(comp);
+  }
+
+  // Critical trees first, then larger trees, isolated singletons last.
+  components.sort((a, b) => {
+    const ac = a.some((t) => critical.has(t.id)) ? 1 : 0;
+    const bc = b.some((t) => critical.has(t.id)) ? 1 : 0;
+    if (ac !== bc) return bc - ac;
+    const aSingle = a.length === 1 ? 1 : 0;
+    const bSingle = b.length === 1 ? 1 : 0;
+    if (aSingle !== bSingle) return aSingle - bSingle;
+    return b.length - a.length;
+  });
+
+  const cmp = sortComparator("criticality", critical);
+  const COMPONENT_GAP = ROW_GAP * 1.5;
+  const positions = new Map<string, { x: number; y: number }>();
+  let yOffset = 0;
+  for (const comp of components) {
+    // layeredLayout filters `edges` to this component's task set, so it lays out
+    // just this tree (relative to y=0); offset it into the stacked band.
+    const sub = layeredLayout(comp, edges, cmp);
+    let maxY = 0;
+    for (const [id, p] of sub) {
+      positions.set(id, { x: p.x, y: p.y + yOffset });
+      if (p.y > maxY) maxY = p.y;
+    }
+    yOffset += maxY + ROW_GAP + COMPONENT_GAP;
+  }
+  return positions;
+}
+
 function ancestors(rootId: string, edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>) {
   const out = new Set<string>();
   const stack = [rootId];
@@ -352,7 +432,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   const [pinned, setPinned] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<TaskNodeType>([]);
   const [filters, setFilters] = useState<GraphFilters>(EMPTY_FILTERS);
-  const [sort, setSort] = useState<GraphSort>("criticality");
+  const [sort, setSort] = useState<GraphSort>("dependency_tree");
   const [dialogOpen, setDialogOpen] = useState(false);
 
   // Apply filters: returns set of task IDs considered "in scope" by filters.
@@ -392,7 +472,10 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   const critical = useMemo(() => computeCriticalPath(tasks, deps), [tasks, deps]);
 
   const autoPositions = useMemo(
-    () => layeredLayout(effectiveTasks, effectiveDeps, sortComparator(sort, critical)),
+    () =>
+      sort === "dependency_tree"
+        ? treeLayout(effectiveTasks, effectiveDeps, critical)
+        : layeredLayout(effectiveTasks, effectiveDeps, sortComparator(sort, critical)),
     [effectiveTasks, effectiveDeps, sort, critical],
   );
 

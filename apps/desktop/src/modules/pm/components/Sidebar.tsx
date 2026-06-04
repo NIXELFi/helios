@@ -6,6 +6,8 @@ import {
   IconCalendar,
   IconCheck,
   IconChevronDown,
+  IconChevronsLeft,
+  IconChevronsRight,
   IconClipboardList,
   IconClockExclamation,
   IconColumns3,
@@ -51,7 +53,9 @@ import {
   activeTeamSlug,
   activeViewSegment,
   activeWorkspace,
+  recallSidebarCollapsed,
   rememberScopeView,
+  rememberSidebarCollapsed,
   rememberViewOrder,
   resolveViewOrder,
   viewHref,
@@ -308,8 +312,45 @@ export function Sidebar() {
   // The view a scope link should open: carry whatever view is active now.
   const carryView: ViewSegment = currentView ?? "table";
 
+  // Collapsed sidebar (reclaim horizontal space). Persisted per user.
+  const [collapsed, setCollapsed] = useState(() => recallSidebarCollapsed());
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      rememberSidebarCollapsed(next);
+      return next;
+    });
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r border-helios-line bg-helios-panel py-2">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+          className="rounded p-1.5 text-helios-dim transition-colors hover:bg-helios-base hover:text-helios-text"
+        >
+          <IconChevronsRight size={18} strokeWidth={1.5} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-helios-line bg-helios-panel">
+      <div className="flex justify-end border-b border-helios-line px-2 py-1">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
+          className="rounded p-1 text-helios-dim transition-colors hover:bg-helios-base hover:text-helios-text"
+        >
+          <IconChevronsLeft size={16} strokeWidth={1.5} />
+        </button>
+      </div>
       {/* Project switcher */}
       <div ref={switcherRef} className="relative border-b border-helios-line">
         <button
