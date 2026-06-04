@@ -20,6 +20,8 @@ import type { TreeContextTarget, TreeSelection } from "../components/FolderTree"
 import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useAllFiles } from "../data/useAllFiles";
+import { useDeletedFiles } from "../data/useDeletedFiles";
+import { useDeletedFileReaper } from "../data/useDeletedFileReaper";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useInterval } from "../data/useInterval";
@@ -112,6 +114,20 @@ export function BrowseScreen() {
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
   const { data: allFiles, error: allFilesError, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
+  // Soft-deleted files (the recycle bin). Threaded into the realtime/poll
+  // refetch below so a delete by another member lands here promptly, and fed to
+  // the reaper that removes their local working copies on this machine.
+  const { data: deletedFiles, refetch: refetchDeleted } = useDeletedFiles(vaultId ?? undefined);
+  // Propagate deletes to disk: remove the local copy of any soft-deleted file.
+  // Only in auto-sync mode — in manual mode the user owns their local files and
+  // we never delete them out from under them.
+  useDeletedFileReaper({
+    enabled: autoSyncEnabled,
+    deletedFiles,
+    localFiles,
+    folders: folders ?? [],
+    onReaped: rescan,
+  });
   // Lock-holder names: map each user id → email (fall back to display name) so
   // the FileTable can render "Locked by <person>" instead of "Locked by other".
   // useVaultUsers errors for non-admins (the RPC is admin-gated); that's fine —
@@ -208,7 +224,7 @@ export function BrowseScreen() {
   // new version state and downloads the bytes.
   const onVersion = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
-  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
+  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); refetchDeleted(); }, [refetchAllFiles, refetchFiles, refetchDeleted]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
 
   // Periodic safety-net poll. Realtime (above) is the fast path, but if its
@@ -221,7 +237,8 @@ export function BrowseScreen() {
     refetchAllFiles();
     refetchFiles();
     refetchLocks();
-  }, [refetchAllFiles, refetchFiles, refetchLocks]);
+    refetchDeleted();
+  }, [refetchAllFiles, refetchFiles, refetchLocks, refetchDeleted]);
   useInterval(poll, vaultId ? VAULT_POLL_MS : null);
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status

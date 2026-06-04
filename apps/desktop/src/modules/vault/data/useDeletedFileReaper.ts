@@ -1,0 +1,84 @@
+import { useEffect, useRef } from "react";
+import { remove } from "@tauri-apps/plugin-fs";
+import type { Folder, VaultFile } from "./types";
+import type { LocalFile } from "./useLocalFolderScan";
+import { vaultRelativePath, normalizePathForCompare } from "./local-match";
+import { setReadonly } from "./fs-readonly";
+
+/**
+ * Reaper: removes the LOCAL working copy of soft-deleted vault files on this
+ * machine. When a file is soft-deleted (deleted_at set) it leaves the browse
+ * list; this deletes its on-disk copy so a delete propagates to everyone's
+ * machine. The DB row and every version survive, so restoring it (which clears
+ * deleted_at) drops it back into the normal vault list and auto-sync
+ * re-downloads it.
+ *
+ * Deliberately SEPARATE from useAutoSync's download / generation / abort
+ * machinery: this only ever REMOVES files, never downloads, so it needs none of
+ * that race choreography. It can only ever target a deleted file's OWN local
+ * copy because it matches with the exact same `vaultRelativePath` +
+ * `normalizePathForCompare` the rest of the vault uses (no path guessing).
+ * Best-effort: a failed remove (file open elsewhere / permission / already
+ * gone) is simply retried on the next pass and never throws.
+ *
+ * Gated on `enabled` (auto-sync / download mode) so it only runs when the app is
+ * the one managing the local working copy — in manual mode the user owns their
+ * files and we never delete them out from under them.
+ */
+export function useDeletedFileReaper(input: {
+  enabled: boolean;
+  deletedFiles: VaultFile[] | null | undefined;
+  localFiles: LocalFile[] | null;
+  folders: Folder[];
+  /** Called after at least one local copy was removed (e.g. to trigger a
+   *  local rescan so the removed files leave the scan promptly). */
+  onReaped?: () => void;
+}): void {
+  const { enabled, deletedFiles, localFiles, folders, onReaped } = input;
+
+  // Keep the callback in a ref so a fresh identity each render doesn't re-fire
+  // the reap effect.
+  const onReapedRef = useRef(onReaped);
+  useEffect(() => {
+    onReapedRef.current = onReaped;
+  }, [onReaped]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (!deletedFiles || deletedFiles.length === 0) return;
+    if (!localFiles || localFiles.length === 0) return;
+
+    // Index local files by their normalized relative path — the SAME key the
+    // rest of the vault uses to match a DB file row to a file on disk, so a
+    // deleted file can only ever resolve to its own copy.
+    const localByRel = new Map<string, LocalFile>();
+    for (const l of localFiles) {
+      localByRel.set(normalizePathForCompare(l.relativePath), l);
+    }
+
+    let cancelled = false;
+    (async () => {
+      let removedAny = false;
+      for (const f of deletedFiles) {
+        if (cancelled) return;
+        const key = normalizePathForCompare(vaultRelativePath(f, folders));
+        const local = localByRel.get(key);
+        if (!local) continue; // no local copy of this deleted file → nothing to do
+        try {
+          // Vault working copies are kept read-only; clear the bit first or
+          // remove() fails on Windows (can't delete a read-only file).
+          await setReadonly(local.absolutePath, false);
+          await remove(local.absolutePath);
+          removedAny = true;
+        } catch (e) {
+          console.warn(`[vault] reaper: couldn't remove ${local.absolutePath}:`, e);
+        }
+      }
+      if (removedAny && !cancelled) onReapedRef.current?.();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, deletedFiles, localFiles, folders]);
+}
