@@ -196,6 +196,7 @@ pub fn run() {
             commands::load_csv::load_csv,
             commands::restart::helios_relaunch,
             commands::set_readonly::set_path_readonly,
+            commands::set_readonly::sw_flip_readonly,
             commands::parse_refs::parse_sw_refs,
             commands::parse_refs::parse_sw_properties,
             bridge::bridge_set_session,

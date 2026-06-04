@@ -247,6 +247,12 @@ impl BridgeState {
             .remove(id);
     }
 
+    /// The app handle, once startup has set it (used to resolve bundled
+    /// resources like the SW read-only helper).
+    pub(crate) fn app_handle(&self) -> Option<&AppHandle> {
+        self.app.get()
+    }
+
     /// Emit an event to the UI (used to forward blob ops). Errors if the app
     /// handle isn't set yet (shouldn't happen post-setup).
     pub(crate) fn emit(&self, event: &str, payload: &Value) -> Result<(), String> {

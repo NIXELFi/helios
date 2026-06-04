@@ -21,7 +21,7 @@ vi.mock("../../data/useReleaseLock", () => ({ useReleaseLock: () => ({ run: vi.f
 vi.mock("../../data/useDownloadVersion", () => ({ useDownloadVersion: () => ({ run: vi.fn(), loading: false, error: null }) }));
 vi.mock("../../data/useRecordRefs", () => ({ useRecordRefs: () => ({ run: vi.fn() }) }));
 vi.mock("../../data/useRecordProperties", () => ({ useRecordProperties: () => ({ run: vi.fn() }) }));
-vi.mock("../../data/fs-readonly", () => ({ setReadonly: vi.fn() }));
+vi.mock("../../data/fs-readonly", () => ({ setReadonly: vi.fn(), flipSwReadonly: vi.fn() }));
 
 import { CheckInButton } from "../RowActions";
 

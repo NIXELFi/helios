@@ -8,7 +8,7 @@ import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
 import { useRecordProperties } from "../data/useRecordProperties";
 import { localDestPath } from "../data/folder-paths";
-import { setReadonly } from "../data/fs-readonly";
+import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, FolderId, Folder, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
@@ -74,6 +74,7 @@ export function CheckOutButton({
         (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
       if (latestSha && stale) await download.run(latestSha, dest);
       await setReadonly(dest, false);
+      flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
     }
     onDone?.();
   }
@@ -158,7 +159,7 @@ export function CheckInButton({
       // local copy read-only (real-vault). Prefer the actual file we read; fall
       // back to the computed vault path.
       const dest = localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
-      if (dest) await setReadonly(dest, true);
+      if (dest) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
       // Record this version's assembly references (best-effort, fire-and-forget
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
@@ -528,7 +529,7 @@ export function CancelButton({
       // held-back rule protecting it. A read-only-but-dirty file would look like
       // a clean stale copy and get clobbered on the next pass.
       const restored = await download.run(latestSha, dest);
-      if (restored) await setReadonly(dest, true);
+      if (restored) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
     }
     onDone?.();
   }
