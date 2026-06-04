@@ -141,6 +141,11 @@ namespace HeliosVault
         public Task<BridgeResult> CheckoutAsync(string filePath) =>
             SendAsync(HttpMethod.Post, "/checkout", "{\"path\":" + Ser(filePath) + "}");
 
+        /// <summary>Release the caller's lock without checking in (no new version) —
+        /// the undo of a check-out.</summary>
+        public Task<BridgeResult> CancelCheckoutAsync(string filePath) =>
+            SendAsync(HttpMethod.Post, "/cancel-checkout", "{\"path\":" + Ser(filePath) + "}");
+
         public Task<BridgeResult> CheckInAsync(string filePath, string comment)
         {
             var c = comment == null ? "null" : Ser(comment);

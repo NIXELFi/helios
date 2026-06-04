@@ -148,6 +148,37 @@ pub async fn acquire_lock(
     }
 }
 
+/// `POST /rest/v1/rpc/pdm_cancel_checkout {p_file_id}` — release the caller's
+/// own lock WITHOUT checking in (no new version): the undo of a check-out.
+/// Mirrors the in-app `useReleaseLock`. The RPC raises if the caller doesn't
+/// hold the lock; that message is surfaced to the add-in.
+pub async fn cancel_checkout(
+    http: &reqwest::Client,
+    s: &Session,
+    file_id: &str,
+) -> SupaResult {
+    let url = format!("{}/rest/v1/rpc/pdm_cancel_checkout", s.supabase_url.trim_end_matches('/'));
+    let mut headers = base_headers(s)?;
+    // RPC POST: select the `pdm` schema for the function.
+    headers.insert(
+        reqwest::header::HeaderName::from_static("content-profile"),
+        HeaderValue::from_static("pdm"),
+    );
+
+    let body = json!({ "p_file_id": file_id });
+    let resp = http
+        .post(&url)
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| SupaError::new(502, format!("cancel-checkout request failed: {e}")))?;
+
+    // The function returns void (empty body on success) — parse_json maps that to
+    // Value::Null, which the caller treats as success.
+    parse_json(resp).await
+}
+
 /// Turn a PostgREST response into JSON, mapping non-2xx into a `SupaError` that
 /// carries the upstream status + body so the add-in can show a real message.
 async fn parse_json(resp: reqwest::Response) -> SupaResult {

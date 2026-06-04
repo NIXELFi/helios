@@ -48,7 +48,7 @@ namespace HeliosVault
         private Panel _divider;
         private Label _docLabel, _statusLabel, _compsCaption, _connLabel;
         private System.Windows.Forms.Timer _pollTimer;
-        private Button _checkOut, _checkIn, _getLatest, _addToVault, _refresh;
+        private Button _checkOut, _checkIn, _cancelCheckout, _getLatest, _addToVault, _refresh;
         private readonly List<Control> _fullWidth = new List<Control>();
         private readonly List<Label> _wrapLabels = new List<Label>();
         private readonly List<Label> _componentRows = new List<Label>();
@@ -163,18 +163,21 @@ namespace HeliosVault
 
             _checkOut = MakeButton("Check Out", primary: true, topGap: 18);
             _checkIn = MakeButton("Check In");
+            _cancelCheckout = MakeButton("Cancel Check-Out");
             _getLatest = MakeButton("Get Latest");
             _addToVault = MakeButton("Add to Vault", primary: true);
             _refresh = MakeButton("Refresh", topGap: 12);
 
             _checkOut.Click += async (s, e) => await DoCheckOut();
             _checkIn.Click += async (s, e) => await DoCheckIn();
+            _cancelCheckout.Click += async (s, e) => await DoCancelCheckout();
             _getLatest.Click += async (s, e) => await DoGetLatest();
             _addToVault.Click += async (s, e) => await DoAddToVault();
             _refresh.Click += async (s, e) => await RefreshStatus();
 
             _flow.Controls.Add(_checkOut);
             _flow.Controls.Add(_checkIn);
+            _flow.Controls.Add(_cancelCheckout);
             _flow.Controls.Add(_getLatest);
             _flow.Controls.Add(_addToVault);
             _flow.Controls.Add(_refresh);
@@ -478,6 +481,49 @@ namespace HeliosVault
             await RefreshStatus();
         }
 
+        private async Task DoCancelCheckout()
+        {
+            if (string.IsNullOrEmpty(_activePath)) return;
+
+            // Releasing the lock is the undo of a check-out — for when you checked
+            // a file out but made no edits. If you DID save changes, the local
+            // bytes stay on disk but can't be checked in again without checking
+            // out, so confirm first (default = No).
+            var choice = MessageBox.Show(
+                "Cancel your check-out of this file?\n\nThis releases your lock without saving a new "
+                    + "version. Any edits you made won't be added to the vault.",
+                "Cancel Check-Out",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (choice != DialogResult.Yes) return;
+
+            SetButtonsEnabled(false, false, false);
+            ShowStatus("Cancelling check-out…", Dim);
+
+            var res = await _bridge.CancelCheckoutAsync(_activePath);
+            if (res.Unreachable)
+                ShowStatus("● Helios isn't running — open the Helios app.", Red);
+            else if (!res.Ok)
+                ShowStatus("● " + (res.Error ?? "Cancel check-out failed."), Red);
+            else if (_makeActiveReadonly != null)
+            {
+                // Lock released → no longer checked out. The bridge re-set the
+                // on-disk read-only bit; mirror that in SOLIDWORKS so the open doc
+                // goes back to read-only. Marshal to the SW/UI thread.
+                try
+                {
+                    if (IsHandleCreated && InvokeRequired)
+                        BeginInvoke(_makeActiveReadonly);
+                    else
+                        _makeActiveReadonly();
+                }
+                catch { /* control tearing down */ }
+            }
+
+            await RefreshStatus();
+        }
+
         private async Task DoGetLatest()
         {
             if (string.IsNullOrEmpty(_activePath)) return;
@@ -559,6 +605,9 @@ namespace HeliosVault
         {
             _checkOut.Enabled = checkOut;
             _checkIn.Enabled = checkIn;
+            // Cancel Check-Out applies in exactly the same state as Check In — you
+            // can only release a check-out you currently hold.
+            _cancelCheckout.Enabled = checkIn;
             _getLatest.Enabled = getLatest;
         }
 

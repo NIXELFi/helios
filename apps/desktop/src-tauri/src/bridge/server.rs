@@ -47,6 +47,7 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         .route("/status-batch", post(status_batch))
         .route("/versions", get(versions))
         .route("/checkout", post(checkout))
+        .route("/cancel-checkout", post(cancel_checkout))
         .route("/add", post(add_to_vault))
         // Blob ops — forwarded to the running UI, which has the tested
         // gzip/sha256/atomic-write code (see the `bridge://op` handler).
@@ -186,6 +187,34 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
                 eprintln!("bridge: clear read-only on checkout failed: {e}");
             }
             Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response()
+        }
+        Err(e) => supa_error(e),
+    }
+}
+
+/// `POST /cancel-checkout {path}` — release the caller's lock WITHOUT checking
+/// in (no new version): the undo of a check-out. Mirrors the in-app
+/// useReleaseLock, then re-protects the local copy (read-only again) like a
+/// check-in, since the file is no longer checked out.
+async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBody>) -> Response {
+    let Some(file) = state.file_by_path(&body.path) else {
+        return not_tracked(&body.path);
+    };
+    let Some(session) = state.session() else {
+        return no_session();
+    };
+    match supabase::cancel_checkout(&state.http, &session, &file.file_id).await {
+        Ok(_) => {
+            // Reflect the released lock immediately so a follow-up /status shows
+            // "available" without waiting for the frontend's poll.
+            state.clear_lock(&file.file_id);
+            // Re-protect the local copy: with the lock gone it must be read-only
+            // again so nobody edits without checking out (mirrors check-in).
+            // Best-effort — the DB lock release is the real change.
+            if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), true) {
+                eprintln!("bridge: restore read-only on cancel-checkout failed: {e}");
+            }
+            Json(json!({ "ok": true, "fileId": file.file_id })).into_response()
         }
         Err(e) => supa_error(e),
     }
