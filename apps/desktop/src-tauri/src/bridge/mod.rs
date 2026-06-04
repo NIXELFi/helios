@@ -166,6 +166,56 @@ impl BridgeState {
         }
     }
 
+    /// Write the path→state cache the Windows Explorer shell extensions read for
+    /// overlay icons / status columns / context-menu enablement. Keyed by
+    /// normalized path (forward slashes + lowercase) so the C# side can look up
+    /// with the same normalization. Best-effort + cheap (it runs on every
+    /// snapshot/lock change); failures are logged, never fatal.
+    ///
+    /// Takes a read lock, so callers MUST NOT hold the write lock when calling
+    /// it (that would deadlock the RwLock) — call it after the mutating method
+    /// returns.
+    pub(crate) fn write_shell_state(&self) {
+        self.write_shell_state_to(&discovery_dir());
+    }
+
+    /// Inner of [`write_shell_state`] taking an explicit dir, so tests don't have
+    /// to mutate the process-global `LOCALAPPDATA`.
+    fn write_shell_state_to(&self, dir: &std::path::Path) {
+        let inner = self.read();
+        let mut states = serde_json::Map::with_capacity(inner.snapshot.files.len());
+        for f in &inner.snapshot.files {
+            states.insert(
+                norm_path(&f.local_path),
+                serde_json::json!({
+                    "state": shell_state_for(f),
+                    "name": f.name,
+                    "fileId": f.file_id,
+                    "vault": f.vault_name,
+                    // Holder's auth uid when checked out by someone else (the
+                    // snapshot doesn't carry display names — the context menu
+                    // resolves the friendly name on demand via /status).
+                    "by": f.lock.as_ref().filter(|l| !l.by_me).map(|l| l.user_id.clone()),
+                }),
+            );
+        }
+        let body = serde_json::json!({
+            "vaultRoot": inner.snapshot.vault_root,
+            "files": states,
+        });
+        drop(inner);
+        let path = dir.join("shell-state.json");
+        let _ = std::fs::create_dir_all(dir);
+        match serde_json::to_vec(&body) {
+            Ok(bytes) => {
+                if let Err(e) = std::fs::write(&path, bytes) {
+                    eprintln!("bridge: write shell-state failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("bridge: serialize shell-state failed: {e}"),
+        }
+    }
+
     /// Register a forwarded blob op and return its id + reply receiver.
     pub(crate) fn register_pending(&self) -> (String, oneshot::Receiver<Value>) {
         let id = random_id();
@@ -318,6 +368,16 @@ pub(crate) fn norm_path(p: &str) -> String {
     p.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
+/// Map a file's lock state to the compact state string the shell extensions key
+/// their overlay icons / status text off of.
+pub(crate) fn shell_state_for(f: &SnapshotFile) -> &'static str {
+    match &f.lock {
+        Some(l) if l.by_me => "out-me",
+        Some(_) => "out-other",
+        None => "available",
+    }
+}
+
 /// 32 bytes of OS randomness, hex-encoded — the per-launch bridge secret.
 fn random_token() -> String {
     let mut buf = [0u8; 32];
@@ -354,6 +414,9 @@ pub fn bridge_clear_session(state: State<'_, Arc<BridgeState>>) {
 #[tauri::command]
 pub fn bridge_set_snapshot(state: State<'_, Arc<BridgeState>>, snapshot: Snapshot) {
     state.write().snapshot = snapshot;
+    // Refresh the Explorer shell-extension cache so overlay icons / columns
+    // track the vault without each shell handler hitting the HTTP API.
+    state.write_shell_state();
 }
 
 /// The UI's reply to a forwarded blob op (`bridge://op`). `result` is whatever
@@ -371,4 +434,52 @@ pub struct BridgeOpReply {
 #[tauri::command]
 pub fn bridge_respond(state: State<'_, Arc<BridgeState>>, reply: BridgeOpReply) {
     state.resolve_pending(&reply.id, reply.result);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sf(id: &str, path: &str, lock: Option<LockInfo>) -> SnapshotFile {
+        SnapshotFile {
+            file_id: id.into(),
+            local_path: path.into(),
+            name: path.rsplit(['/', '\\']).next().unwrap_or(path).into(),
+            lock,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shell_state_maps_lock_to_state_by_normalized_path() {
+        let tmp = std::env::temp_dir().join(format!("helios_shellstate_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let state = BridgeState::new();
+        {
+            let mut inner = state.write();
+            inner.snapshot = Snapshot {
+                vault_root: Some("C:/Vault".into()),
+                files: vec![
+                    sf("a", "C:/Vault/SDM26/Part.SLDPRT", Some(LockInfo { user_id: "me".into(), by_me: true })),
+                    sf("b", "C:\\Vault\\SDM26\\Other.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false })),
+                    sf("c", "C:/Vault/SDM26/Free.SLDPRT", None),
+                ],
+            };
+        }
+        state.write_shell_state_to(&tmp);
+
+        let txt = std::fs::read_to_string(tmp.join("shell-state.json")).unwrap();
+        let v: Value = serde_json::from_str(&txt).unwrap();
+        let files = &v["files"];
+        // Keys are normalized (backslash→/, lowercased) so the C# side matches.
+        assert_eq!(files["c:/vault/sdm26/part.sldprt"]["state"], "out-me");
+        assert!(files["c:/vault/sdm26/part.sldprt"]["by"].is_null()); // mine → no holder shown
+        assert_eq!(files["c:/vault/sdm26/other.sldprt"]["state"], "out-other");
+        assert_eq!(files["c:/vault/sdm26/other.sldprt"]["by"], "him");
+        assert_eq!(files["c:/vault/sdm26/free.sldprt"]["state"], "available");
+        assert_eq!(v["vaultRoot"], "C:/Vault");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

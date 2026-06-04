@@ -45,6 +45,7 @@ pub fn router(state: Arc<BridgeState>) -> Router {
         // they answer even while Helios is minimized in the tray.
         .route("/status", get(status))
         .route("/status-batch", post(status_batch))
+        .route("/files", get(files))
         .route("/versions", get(versions))
         .route("/checkout", post(checkout))
         .route("/cancel-checkout", post(cancel_checkout))
@@ -178,6 +179,7 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
             // Reflect the new lock immediately so the add-in's follow-up /status
             // shows "checked out by you" without waiting for the frontend's poll.
             state.mark_locked_by_me(&file.file_id);
+            state.write_shell_state(); // refresh Explorer overlays/columns
             // Make the local working copy writable — checking out is exactly when
             // the user gains the right to edit (mirrors the in-app checkout, which
             // calls set_path_readonly(dest, false)). Best-effort: the DB lock is
@@ -208,6 +210,7 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
             // Reflect the released lock immediately so a follow-up /status shows
             // "available" without waiting for the frontend's poll.
             state.clear_lock(&file.file_id);
+            state.write_shell_state(); // refresh Explorer overlays/columns
             // Re-protect the local copy: with the lock gone it must be read-only
             // again so nobody edits without checking out (mirrors check-in).
             // Best-effort — the DB lock release is the real change.
@@ -218,6 +221,31 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
         }
         Err(e) => supa_error(e),
     }
+}
+
+/// `GET /files` — the full vault snapshot as a flat list (path + name + vault +
+/// lock state), so the SOLIDWORKS add-in can build a check-in/out file tree
+/// over every vault the user can see, not just the active document. Snapshot-
+/// only (no per-file version lookup) so it stays fast at tens of thousands of
+/// files; the add-in resolves a version on demand via `/versions` when needed.
+async fn files(State(state): State<Arc<BridgeState>>) -> Response {
+    let inner = state.read();
+    let items: Vec<serde_json::Value> = inner
+        .snapshot
+        .files
+        .iter()
+        .map(|f| {
+            json!({
+                "path": f.local_path,
+                "name": f.name,
+                "vault": f.vault_name,
+                "fileId": f.file_id,
+                "checkedOut": f.lock.is_some(),
+                "checkedOutByMe": f.lock.as_ref().map(|l| l.by_me).unwrap_or(false),
+            })
+        })
+        .collect();
+    Json(json!({ "vaultRoot": inner.snapshot.vault_root, "files": items })).into_response()
 }
 
 /// `POST /status-batch {paths:[…]}` — resolve many paths at once, snapshot-only
@@ -287,6 +315,7 @@ async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<Checkin
     match forward(&state, payload).await {
         Ok(v) if op_ok(&v) => {
             state.clear_lock(&file.file_id); // check-in releases the lock
+            state.write_shell_state(); // refresh Explorer overlays/columns
             // Point the file at its new latest version so /status is fresh.
             if let Some(vid) = v.get("versionId").and_then(|s| s.as_str()) {
                 state.set_latest_version_id(&file.file_id, vid);
