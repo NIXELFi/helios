@@ -8,6 +8,7 @@
 //! best-effort: any failure logs and returns, never blocking app launch.
 
 pub mod registry;
+pub mod shell;
 pub mod staging;
 pub mod sw_detect;
 
@@ -21,10 +22,49 @@ fn bundled_dll(app: &AppHandle) -> Option<std::path::PathBuf> {
         .filter(|p| p.exists())
 }
 
+/// Resolve the bundled Explorer shell-extension DLL (`resources/shell/`).
+fn bundled_shell_dll(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .resolve("shell/HeliosShell.dll", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|p| p.exists())
+}
+
+/// Provision the Explorer shell extension: stage the bundled DLL into a
+/// version folder + register the per-user CLSID + context-menu handler. Picked
+/// up by Explorer on the next right-click (no restart for the context menu).
+/// Best-effort — any failure logs and returns, never blocking launch.
+fn provision_shell(app: &AppHandle) {
+    let Some(dll) = bundled_shell_dll(app) else { return };
+    let Some(version) = staging::dll_file_version(&dll) else {
+        eprintln!("injector: couldn't read shell-ext DLL version");
+        return;
+    };
+    let changed = shell::staged_version().as_deref() != Some(version.as_str());
+    let staged = match shell::stage(&dll, &version) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("injector: shell-ext stage failed: {e}");
+            return;
+        }
+    };
+    if changed || !shell::already_registered(&staged) {
+        match shell::register_shell_per_user(&staged, &version) {
+            Ok(()) => eprintln!("injector: shell extension registered -> v{version}"),
+            Err(e) => eprintln!("injector: shell-ext register failed: {e}"),
+        }
+    }
+    shell::gc(&version);
+}
+
 /// Provision the add-in. Returns true if a (re)registration happened this run.
 pub fn run(app: &AppHandle) -> bool {
+    // The Explorer shell extension is independent of SOLIDWORKS — provision it
+    // every launch regardless of whether SW is installed.
+    provision_shell(app);
+
     if sw_detect::solidworks_install_dir().is_none() {
-        return false; // SW not installed — nothing to do.
+        return false; // SW not installed — no add-in to provision.
     }
     let Some(dll) = bundled_dll(app) else {
         eprintln!("injector: bundled add-in DLL not found (skipping)");

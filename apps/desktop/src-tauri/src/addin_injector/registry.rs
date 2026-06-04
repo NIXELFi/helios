@@ -21,7 +21,7 @@ const CLASS: &str = "HeliosVault.SwAddin";
 const TITLE: &str = "Helios Vault";
 const DESCRIPTION: &str = "Sun Devil Motorsports - Helios PDM";
 
-fn code_base(dll: &Path) -> String {
+pub(crate) fn code_base(dll: &Path) -> String {
     format!("file:///{}", dll.display().to_string().replace('\\', "/"))
 }
 
