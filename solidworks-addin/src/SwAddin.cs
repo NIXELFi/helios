@@ -80,7 +80,7 @@ namespace HeliosVault
             // Create the docked Task Pane and host our WinForms control in it.
             // (no custom icon yet — "" uses the default.)
             _taskpane = _sw.CreateTaskpaneView2("", "Helios Vault");
-            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc, GetActiveComponentPaths, MakeActiveDocWritable);
+            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc, GetActiveComponentPaths, MakeActiveDocWritable, MakeActiveDocReadOnly);
             _taskpane.DisplayWindowFromHandlex64(_control.Handle.ToInt64());
 
             // Show the active doc + its vault status now...
@@ -201,9 +201,13 @@ namespace HeliosVault
         /// Make the active document read-write after a check-out. SOLIDWORKS keeps
         /// a document read-only for its entire open session even once the file's
         /// on-disk read-only attribute is cleared (which the Helios bridge does on
-        /// check-out), so the user would still be blocked from editing. We reload
-        /// the document from disk — now writable — so it reopens read-write. Safe:
-        /// a read-only document can't have unsaved edits to lose.
+        /// check-out), so the user would still be blocked from editing (the title
+        /// bar keeps showing "[Read-Only]" and Save is disabled).
+        ///
+        /// `SetReadOnlyState(false)` flips that session state IN PLACE — no reload,
+        /// no view/feature-tree disruption. (`ReloadOrReplace` did not reliably
+        /// clear the read-only flag.) If for some reason it can't, fall back to
+        /// reloading from the now-writable file on disk.
         /// Must be called on the SOLIDWORKS (main) thread.
         /// </summary>
         private void MakeActiveDocWritable()
@@ -216,13 +220,46 @@ namespace HeliosVault
                 try { readOnly = doc.IsOpenedReadOnly(); }
                 catch { readOnly = true; }
                 if (!readOnly) return; // already writable
-                var path = doc.GetPathName();
-                if (string.IsNullOrEmpty(path)) return; // unsaved doc — nothing on disk
-                // Reload (not replace) from the same path; override user settings so
-                // it doesn't silently reopen read-only again.
-                doc.ReloadOrReplace(true, path, true);
+
+                bool ok;
+                try { ok = doc.SetReadOnlyState(false); }
+                catch { ok = false; }
+
+                if (!ok)
+                {
+                    // Fallback: reload from disk (now writable) so it reopens
+                    // read-write. Override user settings so it doesn't silently
+                    // reopen read-only again.
+                    var path = doc.GetPathName();
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        try { doc.ReloadOrReplace(true, path, true); } catch { /* best effort */ }
+                    }
+                }
             }
             catch { /* best effort — the file is writable on disk regardless */ }
+        }
+
+        /// <summary>
+        /// Restore the active document to read-only after a check-in. Mirror of
+        /// MakeActiveDocWritable: the bridge re-sets the file's on-disk read-only
+        /// bit on check-in, and this flips SOLIDWORKS's session state to match so
+        /// the user can't keep editing/saving a file that's no longer checked out.
+        /// Must be called on the SOLIDWORKS (main) thread.
+        /// </summary>
+        private void MakeActiveDocReadOnly()
+        {
+            try
+            {
+                var doc = _sw?.IActiveDoc2;
+                if (doc == null) return;
+                bool readOnly;
+                try { readOnly = doc.IsOpenedReadOnly(); }
+                catch { readOnly = false; }
+                if (readOnly) return; // already read-only
+                try { doc.SetReadOnlyState(true); } catch { /* best effort */ }
+            }
+            catch { /* best effort */ }
         }
 
         /// <summary>Best-effort silent save of the active document, so a check-in

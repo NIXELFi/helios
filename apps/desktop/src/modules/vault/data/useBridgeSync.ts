@@ -134,7 +134,11 @@ export function useBridgeSync(): void {
     }
   }, [client]);
 
-  useEffect(() => { void reloadStructure(); void reloadLocks(); }, [reloadStructure, reloadLocks]);
+  // Re-fetch on sign-in (user?.id), not only on mount: the first mount can fire
+  // BEFORE the session is restored from storage, so the queries return 0 rows
+  // under RLS and the bridge snapshot would otherwise stay empty until the 5-min
+  // interval — making the add-in see every file as "not in vault".
+  useEffect(() => { void reloadStructure(); void reloadLocks(); }, [reloadStructure, reloadLocks, user?.id]);
   useEffect(() => subscribeLockChanges(() => { void reloadLocks(); }), [reloadLocks]);
   useInterval(reloadStructure, client ? FILES_REFRESH_MS : null);
   useInterval(reloadLocks, client ? LOCKS_REFRESH_MS : null);

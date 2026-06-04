@@ -39,6 +39,9 @@ namespace HeliosVault
         // Make the open active document read-write (SOLIDWORKS keeps it read-only
         // for its whole open session even after the on-disk bit clears).
         private readonly Action _makeActiveWritable;
+        // Restore the open document to read-only after a check-in — it's no longer
+        // checked out, and the bridge has re-set the on-disk read-only bit.
+        private readonly Action _makeActiveReadonly;
         private readonly HeliosBridge _bridge = new HeliosBridge();
 
         private FlowLayoutPanel _flow;
@@ -52,13 +55,20 @@ namespace HeliosVault
 
         private string _activePath;
         private bool _tracked, _checkedOut, _checkedOutByMe;
+        // Baseline for detecting EXTERNAL lock changes (check-out/in from the
+        // Helios app, or a force-unlock) so SOLIDWORKS's read-only state can be
+        // synced. Reset when the active doc changes; we react only to changes
+        // while a given doc stays open, never to its initial open state.
+        private string _syncedPath;
+        private bool _syncedCheckedOutByMe;
 
-        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc, Func<string[]> getComponents, Action makeActiveWritable = null)
+        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc, Func<string[]> getComponents, Action makeActiveWritable = null, Action makeActiveReadonly = null)
         {
             _getActivePath = getActivePath;
             _saveActiveDoc = saveActiveDoc;
             _getComponents = getComponents;
             _makeActiveWritable = makeActiveWritable;
+            _makeActiveReadonly = makeActiveReadonly;
             BuildUi();
 
             // Live connection/identity indicator — polls the bridge /health.
@@ -69,7 +79,11 @@ namespace HeliosVault
             _pollTimer.Tick += async (s, e) =>
             {
                 await RefreshConnection();
-                MaybeRefreshOnDocChange();
+                // Quietly re-read the active doc's status every tick. This is how the
+                // pane — and SOLIDWORKS's read-only state — pick up a check-out or
+                // check-in performed from the HELIOS APP (or a force-unlock), not just
+                // from this add-in; it also covers a missed SW doc-change event.
+                await RefreshStatus(quiet: true);
             };
             _pollTimer.Start();
             _ = RefreshConnection();
@@ -264,7 +278,7 @@ namespace HeliosVault
             _ = RefreshStatus();
         }
 
-        private async Task RefreshStatus()
+        private async Task RefreshStatus(bool quiet = false)
         {
             var latest = SafeGetActivePath();
             if (latest != null) _activePath = latest;
@@ -276,18 +290,20 @@ namespace HeliosVault
                 _tracked = _checkedOut = _checkedOutByMe = false;
                 SetButtonsEnabled(false, false, false);
                 _addToVault.Visible = false;
-                ClearComponents();
+                if (!quiet) ClearComponents();
                 return;
             }
 
-            await RefreshDocStatus();
-            await RefreshComponents();
+            await RefreshDocStatus(quiet);
+            // Components change rarely; skip the (flicker-prone) rebuild on the
+            // quiet poll — a doc-change / manual refresh re-reads them.
+            if (!quiet) await RefreshComponents();
         }
 
-        private async Task RefreshDocStatus()
+        private async Task RefreshDocStatus(bool quiet = false)
         {
             _docLabel.Text = Path.GetFileName(_activePath);
-            ShowStatus("Checking…", Dim);
+            if (!quiet) ShowStatus("Checking…", Dim);
 
             var res = await _bridge.StatusAsync(_activePath);
             if (res.Unreachable)
@@ -318,6 +334,9 @@ namespace HeliosVault
 
             _checkedOut = GetBool(res.Json, "checkedOut");
             _checkedOutByMe = GetBool(res.Json, "checkedOutByMe");
+            // Keep SOLIDWORKS's read-only state in sync if the lock changed
+            // externally (Helios app / force-unlock) while this doc stayed open.
+            SyncReadOnlyToLock();
             var latestObj = GetObj(res.Json, "latest");
             var verNum = latestObj != null ? GetLong(latestObj, "versionNum") : null;
             var rev = latestObj != null ? GetLong(latestObj, "revision") : null;
@@ -441,6 +460,20 @@ namespace HeliosVault
                 ShowStatus("● Helios isn't running — open the Helios app.", Red);
             else if (!res.Ok)
                 ShowStatus("● " + (res.Error ?? "Check in failed."), Red);
+            else if (_makeActiveReadonly != null)
+            {
+                // Checked in → no longer checked out. The bridge re-set the on-disk
+                // read-only bit; mirror that in SOLIDWORKS so the doc goes back to
+                // read-only. Marshal to the SW/UI thread (continuation may be off it).
+                try
+                {
+                    if (IsHandleCreated && InvokeRequired)
+                        BeginInvoke(_makeActiveReadonly);
+                    else
+                        _makeActiveReadonly();
+                }
+                catch { /* control tearing down */ }
+            }
 
             await RefreshStatus();
         }
@@ -487,14 +520,33 @@ namespace HeliosVault
             catch { return null; }
         }
 
-        /// <summary>Poll-driven fallback: if the active document path changed since
-        /// the last status read, refresh. Cheap (a string compare) on the ticks
-        /// where nothing changed.</summary>
-        private void MaybeRefreshOnDocChange()
+        /// <summary>
+        /// Sync SOLIDWORKS's session read-only state to the lock when it changes
+        /// EXTERNALLY (check-out/in from the Helios app, or a force-unlock):
+        /// writable iff checked out by me. Only acts on a transition for the SAME
+        /// open doc — its initial open state is authoritative, so we never flip on
+        /// first sight. The make-writable / make-read-only actions are idempotent
+        /// and marshal themselves to the SOLIDWORKS (UI) thread.
+        /// </summary>
+        private void SyncReadOnlyToLock()
         {
-            var latest = SafeGetActivePath() ?? "";
-            if (!string.Equals(latest, _activePath ?? "", StringComparison.OrdinalIgnoreCase))
-                _ = RefreshStatus();
+            // New active doc → adopt its current state as the baseline; don't flip.
+            if (!string.Equals(_syncedPath ?? "", _activePath ?? "", StringComparison.OrdinalIgnoreCase))
+            {
+                _syncedPath = _activePath;
+                _syncedCheckedOutByMe = _checkedOutByMe;
+                return;
+            }
+            if (_checkedOutByMe == _syncedCheckedOutByMe) return; // no change
+            _syncedCheckedOutByMe = _checkedOutByMe;
+            var action = _checkedOutByMe ? _makeActiveWritable : _makeActiveReadonly;
+            if (action == null) return;
+            try
+            {
+                if (IsHandleCreated && InvokeRequired) BeginInvoke(action);
+                else action();
+            }
+            catch { /* control tearing down */ }
         }
 
         private void ShowStatus(string text, Color color)
