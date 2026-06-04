@@ -177,6 +177,14 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
             // Reflect the new lock immediately so the add-in's follow-up /status
             // shows "checked out by you" without waiting for the frontend's poll.
             state.mark_locked_by_me(&file.file_id);
+            // Make the local working copy writable — checking out is exactly when
+            // the user gains the right to edit (mirrors the in-app checkout, which
+            // calls set_path_readonly(dest, false)). Best-effort: the DB lock is
+            // the real guarantee, so a read-only-bit failure shouldn't fail the
+            // checkout.
+            if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), false) {
+                eprintln!("bridge: clear read-only on checkout failed: {e}");
+            }
             Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response()
         }
         Err(e) => supa_error(e),
@@ -253,6 +261,12 @@ async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<Checkin
             // Point the file at its new latest version so /status is fresh.
             if let Some(vid) = v.get("versionId").and_then(|s| s.as_str()) {
                 state.set_latest_version_id(&file.file_id, vid);
+            }
+            // Re-protect the local copy: with the lock released it must be
+            // read-only again so nobody edits without checking out (mirrors the
+            // in-app check-in). Best-effort.
+            if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), true) {
+                eprintln!("bridge: restore read-only on checkin failed: {e}");
             }
             Json(json!({ "ok": true, "fileId": file.file_id, "result": v })).into_response()
         }

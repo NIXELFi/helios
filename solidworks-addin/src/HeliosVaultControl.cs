@@ -36,6 +36,9 @@ namespace HeliosVault
         private readonly Func<string> _getActivePath;
         private readonly Action _saveActiveDoc;
         private readonly Func<string[]> _getComponents;
+        // Make the open active document read-write (SOLIDWORKS keeps it read-only
+        // for its whole open session even after the on-disk bit clears).
+        private readonly Action _makeActiveWritable;
         private readonly HeliosBridge _bridge = new HeliosBridge();
 
         private FlowLayoutPanel _flow;
@@ -50,16 +53,24 @@ namespace HeliosVault
         private string _activePath;
         private bool _tracked, _checkedOut, _checkedOutByMe;
 
-        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc, Func<string[]> getComponents)
+        public HeliosVaultControl(Func<string> getActivePath, Action saveActiveDoc, Func<string[]> getComponents, Action makeActiveWritable = null)
         {
             _getActivePath = getActivePath;
             _saveActiveDoc = saveActiveDoc;
             _getComponents = getComponents;
+            _makeActiveWritable = makeActiveWritable;
             BuildUi();
 
             // Live connection/identity indicator — polls the bridge /health.
+            // Also a safety net for document changes: if SOLIDWORKS's doc-change
+            // events don't reach the add-in (varies by edition), noticing the
+            // active path changed here still refreshes the pane within a tick.
             _pollTimer = new System.Windows.Forms.Timer { Interval = 4000 };
-            _pollTimer.Tick += async (s, e) => await RefreshConnection();
+            _pollTimer.Tick += async (s, e) =>
+            {
+                await RefreshConnection();
+                MaybeRefreshOnDocChange();
+            };
             _pollTimer.Start();
             _ = RefreshConnection();
         }
@@ -399,6 +410,21 @@ namespace HeliosVault
                 ShowStatus("● Helios isn't running — open the Helios app.", Red);
             else if (!res.Ok)
                 ShowStatus("● " + (res.Error ?? "Check out failed."), Red);
+            else if (_makeActiveWritable != null)
+            {
+                // The bridge cleared the on-disk read-only bit; now drop SOLIDWORKS's
+                // session read-only state so the open doc is editable. COM calls
+                // must run on SOLIDWORKS's (this control's) UI thread, but this
+                // continuation may be on a thread-pool thread — marshal back.
+                try
+                {
+                    if (IsHandleCreated && InvokeRequired)
+                        BeginInvoke(_makeActiveWritable);
+                    else
+                        _makeActiveWritable();
+                }
+                catch { /* control tearing down */ }
+            }
 
             await RefreshStatus();
         }
@@ -459,6 +485,16 @@ namespace HeliosVault
         {
             try { return _getActivePath?.Invoke(); }
             catch { return null; }
+        }
+
+        /// <summary>Poll-driven fallback: if the active document path changed since
+        /// the last status read, refresh. Cheap (a string compare) on the ticks
+        /// where nothing changed.</summary>
+        private void MaybeRefreshOnDocChange()
+        {
+            var latest = SafeGetActivePath() ?? "";
+            if (!string.Equals(latest, _activePath ?? "", StringComparison.OrdinalIgnoreCase))
+                _ = RefreshStatus();
         }
 
         private void ShowStatus(string text, Color color)

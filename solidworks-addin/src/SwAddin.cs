@@ -26,6 +26,10 @@ namespace HeliosVault
     public class SwAddin : ISwAddin
     {
         private ISldWorks _sw;
+        // Same object as _sw, typed as the coclass so we can subscribe to its
+        // document-change notifications (the event interface lives on SldWorks,
+        // not ISldWorks).
+        private SldWorks _swEvents;
         private int _cookie;
         private ITaskpaneView _taskpane;
         private HeliosVaultControl _control;
@@ -76,17 +80,69 @@ namespace HeliosVault
             // Create the docked Task Pane and host our WinForms control in it.
             // (no custom icon yet — "" uses the default.)
             _taskpane = _sw.CreateTaskpaneView2("", "Helios Vault");
-            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc, GetActiveComponentPaths);
+            _control = new HeliosVaultControl(GetActivePath, SaveActiveDoc, GetActiveComponentPaths, MakeActiveDocWritable);
             _taskpane.DisplayWindowFromHandlex64(_control.Handle.ToInt64());
 
-            // Show the active doc + its vault status now. (Live document-change
-            // tracking — auto-refresh on open/switch — lands with Phase 4.)
+            // Show the active doc + its vault status now...
             _control.SetActiveDocument(GetActivePath());
+
+            // ...and keep it live: re-read the active document whenever the user
+            // opens or switches files. Without this the pane only ever reflects
+            // whatever was active when the add-in loaded (usually nothing, at
+            // SOLIDWORKS startup), so freshly-opened vault files wrongly show as
+            // "not in the vault" until you hit Refresh. `as` (not a hard cast) so
+            // a wrapper that doesn't expose the event interface just degrades to
+            // the control's poll-based fallback instead of failing to load.
+            _swEvents = ThisSW as SldWorks;
+            if (_swEvents != null)
+            {
+                _swEvents.ActiveModelDocChangeNotify += OnActiveModelDocChange;
+                _swEvents.FileOpenPostNotify += OnFileOpenPost;
+            }
             return true;
+        }
+
+        // Active document changed (opened / switched / closed) → refresh the pane.
+        private int OnActiveModelDocChange()
+        {
+            RefreshActiveDoc();
+            return 0; // 0 = handled OK; never abort SOLIDWORKS's own handling
+        }
+
+        private int OnFileOpenPost(string fileName)
+        {
+            RefreshActiveDoc();
+            return 0;
+        }
+
+        /// <summary>Re-point the Task Pane at the current active document, marshaled
+        /// to the control's UI thread.</summary>
+        private void RefreshActiveDoc()
+        {
+            var ctrl = _control;
+            if (ctrl == null) return;
+            try
+            {
+                if (ctrl.IsHandleCreated && ctrl.InvokeRequired)
+                    ctrl.BeginInvoke((Action)(() => ctrl.SetActiveDocument(GetActivePath())));
+                else
+                    ctrl.SetActiveDocument(GetActivePath());
+            }
+            catch { /* control is tearing down */ }
         }
 
         public bool DisconnectFromSW()
         {
+            if (_swEvents != null)
+            {
+                try
+                {
+                    _swEvents.ActiveModelDocChangeNotify -= OnActiveModelDocChange;
+                    _swEvents.FileOpenPostNotify -= OnFileOpenPost;
+                }
+                catch { /* SW already torn down */ }
+                _swEvents = null;
+            }
             if (_taskpane != null)
             {
                 _taskpane.DeleteView();
@@ -139,6 +195,34 @@ namespace HeliosVault
                 return arr;
             }
             catch { return new string[0]; }
+        }
+
+        /// <summary>
+        /// Make the active document read-write after a check-out. SOLIDWORKS keeps
+        /// a document read-only for its entire open session even once the file's
+        /// on-disk read-only attribute is cleared (which the Helios bridge does on
+        /// check-out), so the user would still be blocked from editing. We reload
+        /// the document from disk — now writable — so it reopens read-write. Safe:
+        /// a read-only document can't have unsaved edits to lose.
+        /// Must be called on the SOLIDWORKS (main) thread.
+        /// </summary>
+        private void MakeActiveDocWritable()
+        {
+            try
+            {
+                var doc = _sw?.IActiveDoc2;
+                if (doc == null) return;
+                bool readOnly;
+                try { readOnly = doc.IsOpenedReadOnly(); }
+                catch { readOnly = true; }
+                if (!readOnly) return; // already writable
+                var path = doc.GetPathName();
+                if (string.IsNullOrEmpty(path)) return; // unsaved doc — nothing on disk
+                // Reload (not replace) from the same path; override user settings so
+                // it doesn't silently reopen read-only again.
+                doc.ReloadOrReplace(true, path, true);
+            }
+            catch { /* best effort — the file is writable on disk regardless */ }
         }
 
         /// <summary>Best-effort silent save of the active document, so a check-in
