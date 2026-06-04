@@ -49,6 +49,7 @@ namespace HeliosVault
         private Label _docLabel, _statusLabel, _compsCaption, _connLabel;
         private System.Windows.Forms.Timer _pollTimer;
         private Button _checkOut, _checkIn, _cancelCheckout, _getLatest, _addToVault, _refresh;
+        private VaultTreePanel _treePanel;
         private readonly List<Control> _fullWidth = new List<Control>();
         private readonly List<Label> _wrapLabels = new List<Label>();
         private readonly List<Label> _componentRows = new List<Label>();
@@ -186,6 +187,17 @@ namespace HeliosVault
             _compsCaption.Visible = false;
             _flow.Controls.Add(_compsCaption);
 
+            // Interactive vault + open-assembly tree: browse folders / components
+            // and check files in/out from any node (supersedes the flat list).
+            _flow.Controls.Add(MakeCaption("VAULT & ASSEMBLY", new Padding(0, 18, 0, 6)));
+            _treePanel = new VaultTreePanel(_bridge, _getComponents, SafeGetActivePath)
+            {
+                Height = 380,
+                Margin = new Padding(0, 0, 0, 8),
+            };
+            _fullWidth.Add(_treePanel);
+            _flow.Controls.Add(_treePanel);
+
             _addToVault.Visible = false;
             SetButtonsEnabled(false, false, false);
             RelayoutWidths();
@@ -293,14 +305,15 @@ namespace HeliosVault
                 _tracked = _checkedOut = _checkedOutByMe = false;
                 SetButtonsEnabled(false, false, false);
                 _addToVault.Visible = false;
-                if (!quiet) ClearComponents();
+                if (!quiet && _treePanel != null) await _treePanel.RefreshActiveAsync();
                 return;
             }
 
             await RefreshDocStatus(quiet);
-            // Components change rarely; skip the (flicker-prone) rebuild on the
-            // quiet poll — a doc-change / manual refresh re-reads them.
-            if (!quiet) await RefreshComponents();
+            // The tree's "Open in SOLIDWORKS" branch tracks the active doc +
+            // components; refresh it on a doc change / manual refresh, not the
+            // quiet status poll (which would flicker the tree).
+            if (!quiet && _treePanel != null) await _treePanel.RefreshActiveAsync();
         }
 
         private async Task RefreshDocStatus(bool quiet = false)

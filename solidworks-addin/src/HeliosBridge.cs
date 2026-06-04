@@ -164,5 +164,10 @@ namespace HeliosVault
             var arr = string.Join(",", paths.Select(Ser));
             return SendAsync(HttpMethod.Post, "/status-batch", "{\"paths\":[" + arr + "]}");
         }
+
+        /// <summary>The full vault file list (path/name/vault/lock state) so the
+        /// pane can build a browse-and-check-in/out tree across every vault.</summary>
+        public Task<BridgeResult> FilesAsync() =>
+            SendAsync(HttpMethod.Get, "/files", null);
     }
 }
