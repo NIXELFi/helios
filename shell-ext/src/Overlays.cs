@@ -50,20 +50,24 @@ namespace HeliosShell
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.Clear(Color.Transparent);
-                    var badge = new Rectangle(0, 6, 10, 10);
+                    // Bottom-left badge with a soft shadow so it reads on light OR
+                    // dark thumbnails, a colored disc, and a dark contrast ring.
+                    var badge = new RectangleF(0.8f, 4.4f, 10.6f, 10.6f);
+                    using (var sh = new SolidBrush(Color.FromArgb(90, 0, 0, 0)))
+                        g.FillEllipse(sh, badge.X + 0.5f, badge.Y + 0.9f, badge.Width, badge.Height);
                     using (var b = new SolidBrush(fill)) g.FillEllipse(b, badge);
-                    using (var p = new Pen(Color.FromArgb(230, 24, 24, 26), 1.4f)) g.DrawEllipse(p, badge);
-                    using (var wp = new Pen(Color.White, 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    using (var p = new Pen(Color.FromArgb(235, 18, 18, 20), 1.3f)) g.DrawEllipse(p, badge);
+
+                    float cx = badge.X + badge.Width / 2f, cy = badge.Y + badge.Height / 2f;
+                    using (var wp = new Pen(Color.White, 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                    using (var wb = new SolidBrush(Color.White))
                     {
                         if (glyph == Glyph.Check)
-                        {
-                            g.DrawLines(wp, new[] { new Point(2, 11), new Point(4, 13), new Point(8, 8) });
-                        }
+                            g.DrawLines(wp, new[] { new PointF(cx - 2.4f, cy + 0.2f), new PointF(cx - 0.7f, cy + 1.9f), new PointF(cx + 2.5f, cy - 2.1f) });
                         else // a tiny padlock: shackle arc + body
                         {
-                            g.DrawArc(wp, new Rectangle(3, 8, 4, 4), 180, 180);
-                            using (var wb = new SolidBrush(Color.White))
-                                g.FillRectangle(wb, new Rectangle(2, 10, 6, 4));
+                            g.DrawArc(wp, cx - 1.8f, cy - 2.7f, 3.6f, 3.8f, 180, 180);
+                            g.FillRectangle(wb, cx - 2.4f, cy - 0.3f, 4.8f, 3.3f);
                         }
                     }
                 }

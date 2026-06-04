@@ -24,8 +24,8 @@
          FileVersion is bumped per change and is what the injector compares to
          decide whether to re-stage. -->
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.2.0</FileVersion>
-    <Version>1.0.2.0</Version>
+    <FileVersion>1.0.3.0</FileVersion>
+    <Version>1.0.3.0</Version>
     <!-- Only the specific handler classes opt into COM visibility. -->
     <ComVisible>false</ComVisible>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
