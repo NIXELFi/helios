@@ -1,9 +1,45 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  IconArchive,
+  IconChartLine,
+  IconChevronsLeft,
+  IconChevronsRight,
+  IconClipboardList,
+  IconUserCircle,
+  IconWind,
+  type TablerIcon,
+} from "@tabler/icons-react";
 import { UpdatesPill } from "../components/UpdatesPill";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 
 export type ModuleId = "logs" | "vault" | "cfd" | "pm";
+
+// Per-module glyphs for the rail — shown beside the label, and the only thing
+// shown when the rail is collapsed to an icon strip.
+const MODULE_ICON: Record<ModuleId, TablerIcon> = {
+  logs: IconChartLine,
+  vault: IconArchive,
+  cfd: IconWind,
+  pm: IconClipboardList,
+};
+
+// Collapsed/expanded preference for the module rail, persisted per machine.
+const RAIL_COLLAPSE_KEY = "helios:moduleRailCollapsed";
+function readRailCollapsed(): boolean {
+  try {
+    return localStorage.getItem(RAIL_COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeRailCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(RAIL_COLLAPSE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // ignore (private mode / quota)
+  }
+}
 
 // macOS uses `titleBarStyle: "Overlay"` + inset traffic-lights at (14, 14), so
 // the brand header needs ~48 px of top padding to clear them. Windows and Linux
@@ -76,30 +112,73 @@ export function ModulePicker(props: Props) {
   // their session lands. Treat it as a normal (pending) entry until we know.
   const vaultDisabled = !vaultEnabled && !authLoading;
   const pmDisabled = !pmEnabled && !authLoading;
+
+  // Rail collapse — shrink to an icon-only strip to reclaim horizontal space.
+  const [collapsed, setCollapsed] = useState(readRailCollapsed);
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      writeRailCollapsed(next);
+      return next;
+    });
+  }
+
   return (
     // Sidebar layout: brand header → nav buttons → spacer → user pill →
     // updater footer. Brand + user + updater live here (not inside any
     // module) so they persist across Log / Vault / CFD.
-    <nav className="flex w-44 flex-col border-r border-helios-line bg-helios-base">
-      <div className={"border-b border-helios-line px-3 pb-3 " + BRAND_HEADER_TOP_PADDING}>
-        <div className="font-helios text-xl leading-none text-asu-gold">HELIOS</div>
-        <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">
-          {/* `appVersion` starts as "dev" until getVersion() resolves; show a
-              neutral placeholder instead of flashing "vdev" on every boot. */}
-          {appVersion && appVersion !== "dev"
-            ? `v${appVersion} · ground-station`
-            : "ground-station"}
-        </div>
+    <nav
+      className={
+        "flex flex-col border-r border-helios-line bg-helios-base " +
+        (collapsed ? "w-14" : "w-44")
+      }
+    >
+      <div
+        className={
+          "flex items-center border-b border-helios-line pb-3 " +
+          BRAND_HEADER_TOP_PADDING +
+          (collapsed ? " justify-center px-1" : " justify-between px-3")
+        }
+      >
+        {collapsed ? null : (
+          <div className="min-w-0">
+            <div className="font-helios text-xl leading-none text-asu-gold">HELIOS</div>
+            <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">
+              {/* `appVersion` starts as "dev" until getVersion() resolves; show a
+                  neutral placeholder instead of flashing "vdev" on every boot. */}
+              {appVersion && appVersion !== "dev"
+                ? `v${appVersion} · ground-station`
+                : "ground-station"}
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="rounded-sm p-1 text-helios-dim transition-colors hover:bg-helios-panel hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        >
+          {collapsed ? (
+            <IconChevronsRight size={16} strokeWidth={1.5} />
+          ) : (
+            <IconChevronsLeft size={16} strokeWidth={1.5} />
+          )}
+        </button>
       </div>
 
       <div className="flex flex-col gap-1 p-2">
         <NavButton
           label="Logs"
+          Icon={MODULE_ICON.logs}
+          collapsed={collapsed}
           active={active === "logs"}
           onClick={() => onSelect("logs")}
         />
         <NavButton
           label="Vault"
+          Icon={MODULE_ICON.vault}
+          collapsed={collapsed}
           active={active === "vault"}
           onClick={() => onSelect("vault")}
           disabled={vaultDisabled}
@@ -107,11 +186,15 @@ export function ModulePicker(props: Props) {
         />
         <NavButton
           label="CFD"
+          Icon={MODULE_ICON.cfd}
+          collapsed={collapsed}
           active={active === "cfd"}
           onClick={() => onSelect("cfd")}
         />
         <NavButton
           label="PM"
+          Icon={MODULE_ICON.pm}
+          collapsed={collapsed}
           badge="NEW"
           active={active === "pm"}
           onClick={() => onSelect("pm")}
@@ -127,6 +210,7 @@ export function ModulePicker(props: Props) {
           label={userLabel}
           subteam={userSubteam}
           role={userRole}
+          collapsed={collapsed}
           onOpenAuth={onOpenAuth}
           onSignOut={onSignOut}
           onDisconnect={onDisconnect}
@@ -134,22 +218,26 @@ export function ModulePicker(props: Props) {
         />
       </div>
 
-      <div className="border-t border-helios-line p-2">
-        <UpdatesPill state={updaterState} onClick={onUpdaterClick} />
-      </div>
+      {collapsed ? null : (
+        <div className="border-t border-helios-line p-2">
+          <UpdatesPill state={updaterState} onClick={onUpdaterClick} />
+        </div>
+      )}
     </nav>
   );
 }
 
 function NavButton(props: {
   label: string;
+  Icon: TablerIcon;
+  collapsed?: boolean;
   badge?: string;
   active: boolean;
   onClick: () => void;
   disabled?: boolean;
   disabledTitle?: string;
 }) {
-  const { label, badge, active, onClick, disabled, disabledTitle } = props;
+  const { label, Icon, collapsed = false, badge, active, onClick, disabled, disabledTitle } = props;
   // We render disabled nav entries as a button with aria-disabled (not the
   // `disabled` attribute), so clicking still fires onClick. The parent
   // Shell uses that click to surface the auth modal — see the Vault wiring
@@ -162,11 +250,14 @@ function NavButton(props: {
       type="button"
       aria-current={!disabled && active ? "page" : undefined}
       aria-disabled={disabled || undefined}
+      // When collapsed the label is hidden, so name the button for a11y/tests.
+      aria-label={collapsed ? label : undefined}
       onClick={onClick}
-      title={disabled ? disabledTitle : undefined}
+      title={collapsed ? label : disabled ? disabledTitle : undefined}
       className={
-        "flex items-center justify-between rounded-sm border px-3 py-1.5 text-left text-sm transition-colors " +
+        "flex items-center rounded-sm border text-sm transition-colors " +
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+        (collapsed ? "justify-center p-2 " : "justify-between px-3 py-1.5 text-left ") +
         (disabled
           ? "cursor-pointer border-helios-line bg-helios-panel/60 text-helios-text/70 hover:border-asu-gold hover:text-helios-text"
           : active
@@ -174,20 +265,29 @@ function NavButton(props: {
             : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
       }
     >
-      <span>{label}</span>
-      {badge && (
-        <span
-          className={
-            "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
-            (disabled
-              ? "bg-helios-line text-helios-text/80"
-              : active
-                ? "bg-helios-base text-asu-gold"
-                : "bg-asu-gold text-helios-base")
-          }
-        >
-          {badge}
-        </span>
+      {collapsed ? (
+        <Icon size={18} strokeWidth={1.5} />
+      ) : (
+        <>
+          <span className="flex min-w-0 items-center gap-2">
+            <Icon size={16} strokeWidth={1.5} className="shrink-0" />
+            <span className="truncate">{label}</span>
+          </span>
+          {badge && (
+            <span
+              className={
+                "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
+                (disabled
+                  ? "bg-helios-line text-helios-text/80"
+                  : active
+                    ? "bg-helios-base text-asu-gold"
+                    : "bg-asu-gold text-helios-base")
+              }
+            >
+              {badge}
+            </span>
+          )}
+        </>
       )}
     </button>
   );
@@ -197,12 +297,13 @@ function UserPill(props: {
   label: string | null;
   subteam: string | null;
   role: string | null;
+  collapsed: boolean;
   onOpenAuth: () => void;
   onSignOut: () => void;
   onDisconnect: () => void;
   onChangePassword: () => void;
 }) {
-  const { label, subteam, role, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
+  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -277,6 +378,19 @@ function UserPill(props: {
     // Logged out (or no connection configured). Single pill that opens the
     // auth modal; the modal itself decides whether to start on the Connect
     // step or the Sign-in step based on connection state.
+    if (collapsed) {
+      return (
+        <button
+          type="button"
+          onClick={onOpenAuth}
+          aria-label="Sign in"
+          title="Sign in"
+          className="flex w-full items-center justify-center rounded-sm border border-helios-line bg-helios-panel p-2 text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        >
+          <IconUserCircle size={18} strokeWidth={1.5} />
+        </button>
+      );
+    }
     return (
       <button
         type="button"
@@ -307,24 +421,37 @@ function UserPill(props: {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex w-full flex-col gap-0.5 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        aria-label={collapsed ? label : undefined}
+        title={collapsed ? label : undefined}
+        className={
+          "rounded-sm border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (collapsed
+            ? "flex w-full items-center justify-center p-2"
+            : "flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs")
+        }
       >
-        <span className="flex w-full items-center justify-between gap-1">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span
-              aria-hidden
-              className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-asu-gold"
-            />
-            <span className="truncate" title={label}>{label}</span>
-          </span>
-          <span aria-hidden className="ml-1 text-[10px] text-helios-dim">▾</span>
-        </span>
-        {(subteam || role) && (
-          <span className="truncate pl-3 text-[10px] text-helios-dim">
-            {subteam && <span>{subteam}</span>}
-            {subteam && role && <span className="text-[#5A5F66]"> · </span>}
-            {role && <span className="uppercase tracking-wider text-asu-gold/80">{role}</span>}
-          </span>
+        {collapsed ? (
+          <IconUserCircle size={18} strokeWidth={1.5} />
+        ) : (
+          <>
+            <span className="flex w-full items-center justify-between gap-1">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-asu-gold"
+                />
+                <span className="truncate" title={label}>{label}</span>
+              </span>
+              <span aria-hidden className="ml-1 text-[10px] text-helios-dim">▾</span>
+            </span>
+            {(subteam || role) && (
+              <span className="truncate pl-3 text-[10px] text-helios-dim">
+                {subteam && <span>{subteam}</span>}
+                {subteam && role && <span className="text-[#5A5F66]"> · </span>}
+                {role && <span className="uppercase tracking-wider text-asu-gold/80">{role}</span>}
+              </span>
+            )}
+          </>
         )}
       </button>
       {open && (
@@ -333,7 +460,7 @@ function UserPill(props: {
           role="menu"
           aria-label="Account"
           onKeyDown={onMenuKeyDown}
-          className="absolute bottom-full left-0 mb-1 w-full rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text shadow-lg"
+          className="absolute bottom-full left-0 mb-1 min-w-[11rem] rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text shadow-lg"
         >
           <button
             type="button"
