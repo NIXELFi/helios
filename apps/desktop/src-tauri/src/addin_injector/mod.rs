@@ -126,6 +126,21 @@ pub fn provision_now(app: &AppHandle) -> Result<(), String> {
     registry::register_per_user(&staged, &version).map_err(|e| e.to_string())?;
     registry::register_hklm_list_elevated()?;
     staging::set_hklm_attempted(true);
+
+    // Also enable the Explorer icon overlays — their ShellIconOverlayIdentifiers
+    // entry is HKLM-only, so it needs the same elevated "repair" gesture (never
+    // the auto-startup path, which can't pop a UAC unattended). Per-user CLSIDs
+    // are already registered at launch by provision_shell. The user must restart
+    // Explorer afterward for the overlays to appear.
+    if let Some(sdll) = bundled_shell_dll(app) {
+        if let Some(sv) = staging::dll_file_version(&sdll) {
+            let sstaged = shell::stage(&sdll, &sv).map_err(|e| e.to_string())?;
+            shell::register_shell_per_user(&sstaged, &sv).map_err(|e| e.to_string())?;
+            if !shell::overlay_hklm_present() {
+                shell::register_overlays_hklm_elevated()?;
+            }
+        }
+    }
     Ok(())
 }
 
