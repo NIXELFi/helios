@@ -14,6 +14,7 @@ export const BRICK_H = 16;
 export const BRICK_TOP = 40;
 const LEVEL_BONUS = 50;
 const SPEEDUP = 1.1;
+const MAX_VX = 600; // px/s — fast but can't skip a 48px brick column per step
 
 export interface BreakoutState {
   x: number; y: number; vx: number; vy: number; // ball
@@ -36,6 +37,7 @@ export function step(s: BreakoutState, dt: number, paddleX: number): BreakoutSta
   let { x, y, vx, vy, score, level } = s;
   let bricks = s.bricks;
 
+  const prevY = y;
   x += vx * dt;
   y += vy * dt;
 
@@ -43,15 +45,19 @@ export function step(s: BreakoutState, dt: number, paddleX: number): BreakoutSta
   if (x + BALL_R > W) { x = W - BALL_R; vx = -vx; }
   if (y - BALL_R < 0) { y = BALL_R; vy = -vy; }
 
-  // Paddle: reflect + "english" — offset from paddle center skews vx so the
-  // player can aim.
+  // Paddle: plane-crossing check (not a positional window) so fast balls at
+  // the clamped max dt can't tunnel through the 10px paddle band. "english" —
+  // offset from paddle center skews vx so the player can aim.
   if (
     vy > 0 &&
-    y + BALL_R >= PADDLE_Y && y + BALL_R <= PADDLE_Y + PADDLE_H &&
+    prevY + BALL_R <= PADDLE_Y &&
+    y + BALL_R >= PADDLE_Y &&
     x >= paddleX && x <= paddleX + PADDLE_W
   ) {
+    y = PADDLE_Y - BALL_R; // snap to surface
     vy = -vy;
     vx += ((x - (paddleX + PADDLE_W / 2)) / (PADDLE_W / 2)) * 80;
+    vx = Math.sign(vx) * Math.min(Math.abs(vx), MAX_VX);
   }
 
   // Brick under the ball center?
@@ -59,7 +65,6 @@ export function step(s: BreakoutState, dt: number, paddleX: number): BreakoutSta
   const row = Math.floor((y - BRICK_TOP) / BRICK_H);
   if (row >= 0 && row < ROWS && col >= 0 && col < COLS && bricks[row * COLS + col]) {
     bricks = bricks.slice();
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     bricks[row * COLS + col] = false; // index provably in-bounds: row<ROWS, col<COLS
     score += 10;
     vy = -vy;

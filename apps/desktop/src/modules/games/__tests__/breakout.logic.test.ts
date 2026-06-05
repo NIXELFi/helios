@@ -55,4 +55,23 @@ describe("breakout", () => {
     const s = { ...createInitialState(), x: W / 2, y: H + BALL_R + 1, vx: 0, vy: 200 };
     expect(step(s, DT, 0).gameOver).toBe(true);
   });
+
+  it("does not tunnel through the paddle at the clamped max dt", () => {
+    // Level-2 speed (220 px/s) at dt=1/20 travels 11px — more than the 10px
+    // paddle band. The crossing check must still catch it.
+    const paddleX = W / 2 - PADDLE_W / 2;
+    const s = { ...createInitialState(), x: W / 2, y: PADDLE_Y - BALL_R - 2, vx: 0, vy: 220 };
+    const n = step(s, 1 / 20, paddleX);
+    expect(n.vy).toBeLessThan(0);
+  });
+
+  it("caps english so vx cannot grow without bound", () => {
+    // x starts 10px inside the right edge so after dt=1/60 with vx=590 it
+    // lands at ~paddleX+PADDLE_W-0.2 — still inside the paddle span, so the
+    // bounce fires and english (+~80) would push vx to ~670; clamp must cap at 600.
+    const paddleX = W / 2 - PADDLE_W / 2;
+    const s = { ...createInitialState(), x: paddleX + PADDLE_W - 10, y: PADDLE_Y - BALL_R, vx: 590, vy: 200 };
+    const n = step(s, DT, paddleX);
+    expect(Math.abs(n.vx)).toBeLessThanOrEqual(600);
+  });
 });
