@@ -4,7 +4,8 @@ import { stat, readFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
-import { localDestPath } from "./folder-paths";
+import { localDestPath, vaultRelPathFor } from "./folder-paths";
+import { ledgerRecord } from "./sync-ledger";
 import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
 
@@ -75,6 +76,10 @@ export function useBulkDownload(opts: {
   /** Active vault's display name — used to nest each vault into its own
    *  subfolder under heliosRoot. If null, no vault subfolder is applied. */
   vaultName: string | null;
+  /** Active vault id — records each successful download in the sync ledger so
+   *  a later local delete is distinguishable from "never downloaded". Null
+   *  disables ledger recording (manual download still works). */
+  vaultId?: string | null;
   folders: Folder[];
   versionsByFileId: Map<FileId, Version[]>;
   /** If we have to prompt the user for a destination (heliosRoot was null),
@@ -83,7 +88,7 @@ export function useBulkDownload(opts: {
   onPickedRoot?: (root: string) => void;
   onDone?: () => void;
 }): BulkDownloadAPI {
-  const { heliosRoot, vaultName, folders, versionsByFileId, onPickedRoot, onDone } = opts;
+  const { heliosRoot, vaultName, vaultId, folders, versionsByFileId, onPickedRoot, onDone } = opts;
   const client = useSupabaseClient();
   const [running, setRunning] = useState(false);
   const [open, setOpen] = useState(false);
@@ -255,6 +260,13 @@ export function useBulkDownload(opts: {
           // read-only (real-vault model), so it holds even in manual mode where
           // auto-sync's reconciliation never runs.
           await setReadonly(dest, true);
+          // Record the materialization in the sync ledger (T6). Fire-and-forget;
+          // a ledger IO failure must not affect the download. Only meaningful
+          // when downloading into the canonical vault layout (we have a vaultId
+          // and the dest is under the vault root).
+          if (vaultId) {
+            void ledgerRecord(vaultId, vaultRelPathFor(file.folder_id, file.name, folders), version.sha256);
+          }
           bytesDoneRef.current += version.size_bytes ?? 0;
           setDone((d) => d + 1);
         } else {
@@ -275,7 +287,7 @@ export function useBulkDownload(opts: {
       // abort a future controller.
       if (abortRef.current === myAbort) abortRef.current = null;
     }
-  }, [heliosRoot, vaultName, folders, versionsByFileId, client, onPickedRoot, onDone]);
+  }, [heliosRoot, vaultName, vaultId, folders, versionsByFileId, client, onPickedRoot, onDone]);
 
   const cancel = useCallback(() => {
     // Bumping the generation immediately invalidates every in-flight worker.

@@ -5,6 +5,7 @@ import type { FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { gzipBytes } from "./compression";
 import { notifyLockChange } from "./lock-events";
+import { ledgerRecord } from "./sync-ledger";
 
 /**
  * Result of a single useAddLocalFile().run(...) call.
@@ -242,6 +243,13 @@ export function useAddLocalFile() {
         };
         const lockAcquired = rpc.lock_id != null;
         const alreadyExisted = rpc.created === false;
+
+        // Record the materialization in the sync ledger (T6): the local file is
+        // now in the vault at this sha, so a later local delete of it should be
+        // recognised as a deletion (not "never downloaded"). local.relativePath
+        // is the vault-relative path the rest of the vault keys on. Fire-and-
+        // forget; a ledger IO failure must not fail the add the user completed.
+        void ledgerRecord(vaultId, local.relativePath, sha);
 
         // Broadcast so useLocks() consumers (and the auto-sync reconciliation
         // pass) pick up the new checkout immediately rather than waiting on the

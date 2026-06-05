@@ -127,6 +127,7 @@ export function BrowseScreen() {
     deletedFiles,
     localFiles,
     folders: folders ?? [],
+    vaultId: vaultId ?? null,
     onReaped: rescan,
   });
   // Materialize the vault folder scaffolding locally in BOTH download modes —
@@ -309,6 +310,7 @@ export function BrowseScreen() {
   const bulk = useBulkDownload({
     heliosRoot,
     vaultName: vault?.name ?? null,
+    vaultId: vaultId ?? null,
     folders: folders ?? [],
     versionsByFileId,
     onPickedRoot: setHeliosRoot,
@@ -481,6 +483,7 @@ export function BrowseScreen() {
                   currentUserId={user?.id ?? null}
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
+                  vaultId={vaultId ?? null}
                   onComplete={onAutoSyncComplete}
                   onBusyChange={onAutoSyncBusy}
                   onRescan={rescan}
@@ -611,6 +614,7 @@ export function BrowseScreen() {
                   versionsByFileId={versionsByFileId}
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
+                  vaultId={vaultId ?? null}
                   locks={locks ?? []}
                   currentUserId={user?.id ?? null}
                 />
@@ -631,6 +635,7 @@ export function BrowseScreen() {
                   versionsByFileId={versionsByFileId}
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
+                  vaultId={vaultId ?? null}
                   downloadMode={downloadMode}
                   openInSw={openInSw}
                 />
@@ -773,6 +778,7 @@ function VaultSyncSection(props: {
   currentUserId: string | null;
   vaultRoot: string | null;
   folders: import("../data/types").Folder[];
+  vaultId: string | null;
   onComplete: () => void;
   onBusyChange: (busy: boolean) => void;
   onRescan: () => void;
@@ -786,6 +792,7 @@ function VaultSyncSection(props: {
     currentUserId: props.currentUserId,
     vaultRoot: props.vaultRoot,
     folders: props.folders,
+    vaultId: props.vaultId,
     onComplete: props.onComplete,
   });
   const onBusyChange = props.onBusyChange;

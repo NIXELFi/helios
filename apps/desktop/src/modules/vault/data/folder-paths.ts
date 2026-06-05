@@ -68,3 +68,22 @@ export function localDestPath(
   const name = sanitizePathSegment(fileName);
   return sub ? `${vaultRoot}/${sub}/${name}` : `${vaultRoot}/${name}`;
 }
+
+/**
+ * Compute the VAULT-RELATIVE path (no root prefix) for a file given its folder
+ * id + name. This is exactly the suffix `localDestPath` appends to the root, and
+ * it matches `vaultRelativePath(file, folders)` for the same file — both sanitize
+ * each segment identically, so a path recorded here keys the sync ledger the same
+ * way the auto-sync scan looks it up. Use this at materialization call sites that
+ * have a (folderId, fileName) pair but not a full VaultFile in scope (RowActions,
+ * useBulkDownload).
+ */
+export function vaultRelPathFor(
+  folderId: FolderId | null,
+  fileName: string,
+  folders: Folder[],
+): string {
+  const sub = folderPath(folderId, folders);
+  const name = sanitizePathSegment(fileName);
+  return sub ? `${sub}/${name}` : name;
+}

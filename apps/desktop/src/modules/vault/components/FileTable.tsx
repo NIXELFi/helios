@@ -33,6 +33,10 @@ interface Props {
   // Download support
   vaultRoot?: string | null;
   folders?: Folder[];
+  /** Active vault id — threaded to the row actions so a successful per-row
+   *  download / get-latest / check-in records the materialization in the sync
+   *  ledger (T6). Optional; null disables ledger recording. */
+  vaultId?: string | null;
   /**
    * Per-vault download mode. In "manual" mode every server file with a known
    * latest version shows a "Download" action regardless of localMatch status,
@@ -239,6 +243,7 @@ export function FileTable({
   versionsByFileId,
   vaultRoot,
   folders = [],
+  vaultId,
   downloadMode = "auto",
   openInSw,
 }: Props) {
@@ -390,6 +395,7 @@ export function FileTable({
                       folderId={f.folder_id}
                       fileName={f.name}
                       folders={folders}
+                      vaultId={vaultId ?? null}
                       latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                       localFile={localMatch?.local}
                     />
@@ -404,6 +410,7 @@ export function FileTable({
                         folderId={f.folder_id}
                         fileName={f.name}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                       />
                       <CancelButton
                         fileId={f.id}
@@ -412,6 +419,7 @@ export function FileTable({
                         folderId={f.folder_id}
                         fileName={f.name}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                       />
                     </>
@@ -439,6 +447,7 @@ export function FileTable({
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                         vaultRoot={vaultRoot ?? null}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                         onDone={onActionComplete}
                         variant={downloadMode}
                       />

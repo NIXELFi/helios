@@ -4,6 +4,7 @@ import type { Folder, VaultFile } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { vaultRelativePath, normalizePathForCompare } from "./local-match";
 import { setReadonly } from "./fs-readonly";
+import { ledgerRemove } from "./sync-ledger";
 
 /**
  * Reaper: removes the LOCAL working copy of soft-deleted vault files on this
@@ -30,11 +31,15 @@ export function useDeletedFileReaper(input: {
   deletedFiles: VaultFile[] | null | undefined;
   localFiles: LocalFile[] | null;
   folders: Folder[];
+  /** Active vault id — when set, each successful local removal also drops the
+   *  file's sync-ledger entry so a re-download (after restore) re-stamps it
+   *  fresh rather than instantly looking "locally-deleted". Null disables it. */
+  vaultId?: string | null;
   /** Called after at least one local copy was removed (e.g. to trigger a
    *  local rescan so the removed files leave the scan promptly). */
   onReaped?: () => void;
 }): void {
-  const { enabled, deletedFiles, localFiles, folders, onReaped } = input;
+  const { enabled, deletedFiles, localFiles, folders, vaultId, onReaped } = input;
 
   // Keep the callback in a ref so a fresh identity each render doesn't re-fire
   // the reap effect.
@@ -61,7 +66,8 @@ export function useDeletedFileReaper(input: {
       let removedAny = false;
       for (const f of deletedFiles) {
         if (cancelled) return;
-        const key = normalizePathForCompare(vaultRelativePath(f, folders));
+        const rel = vaultRelativePath(f, folders);
+        const key = normalizePathForCompare(rel);
         const local = localByRel.get(key);
         if (!local) continue; // no local copy of this deleted file → nothing to do
         try {
@@ -70,6 +76,12 @@ export function useDeletedFileReaper(input: {
           await setReadonly(local.absolutePath, false);
           await remove(local.absolutePath);
           removedAny = true;
+          // Drop the ledger entry: this local copy is gone because the VAULT
+          // deleted the file, not the user. Removing it means a later restore +
+          // re-download re-stamps a fresh entry (the worker's ledgerRecord),
+          // rather than the file looking "locally-deleted" the instant it
+          // returns. Fire-and-forget; best-effort like all ledger IO.
+          if (vaultId) void ledgerRemove(vaultId, rel);
         } catch (e) {
           console.warn(`[vault] reaper: couldn't remove ${local.absolutePath}:`, e);
         }
@@ -80,5 +92,5 @@ export function useDeletedFileReaper(input: {
     return () => {
       cancelled = true;
     };
-  }, [enabled, deletedFiles, localFiles, folders]);
+  }, [enabled, deletedFiles, localFiles, folders, vaultId]);
 }
