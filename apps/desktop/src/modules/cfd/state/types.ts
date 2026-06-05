@@ -40,6 +40,9 @@ export interface CycleStats {
   brakeTorqueNm: number;
   wheelTorqueNm: number;
   egtMean: number;
+  // Livengood-Wu knock integral (max over cycle). Wire-present on new
+  // studies; optional so old persisted (pre-knock) studies still type-check.
+  knockIntegral?: number;
 }
 
 export interface ConfigSummary {

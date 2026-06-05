@@ -4,11 +4,20 @@ import type {
   ConfigSummary,
   CycleStats,
   LoadedConfig,
+  ObjectiveSpec,
+  OptimizationParams,
+  OptimizationStudy,
+  OptimizationTrial,
   SingleRpmParams,
   SingleRpmStudy,
+  SweepParams,
+  SweepPoint,
+  SweepStudy,
 } from "../../state/types";
 
 export function makeCycleStats(overrides: Partial<CycleStats> = {}): CycleStats {
+  // knockIntegral is intentionally NOT defaulted: old persisted studies lack
+  // it, so the field is opt-in via overrides (e.g. makeCycleStats({ knockIntegral: 0.4 })).
   return {
     cycle: 1,
     massTotal: 1e-3,
@@ -84,6 +93,133 @@ export function makeStudy(overrides: Partial<SingleRpmStudy> = {}): SingleRpmStu
     startedAt: 1_700_000_000_000,
     params: makeParams(),
     cycles: [],
+    ...overrides,
+  };
+}
+
+// ---- Sweep fixtures ----
+
+export function makeSweepParams(overrides: Partial<SweepParams> = {}): SweepParams {
+  return {
+    rpmList: [8000, 10000, 12000],
+    nCyclesMax: 25,
+    junctionKind: "stagnation",
+    convergenceTolImep: 1e-3,
+    convergenceMinCycles: 5,
+    captureWaves: false,
+    capturePvLoops: false,
+    capturePipeProfiles: false,
+    ...overrides,
+  };
+}
+
+/** One completed sweep point. `lastCycle` accepts a PARTIAL CycleStats so
+ *  callers can shape peak curves with just the metrics they care about; the
+ *  rest fall back to the makeCycleStats base. */
+export function makeSweepPoint(
+  overrides: Partial<Omit<SweepPoint, "lastCycle">> & { lastCycle?: Partial<CycleStats> } = {},
+): SweepPoint {
+  const { lastCycle, ...rest } = overrides;
+  return {
+    rpm: 10000,
+    convergedCycle: 12,
+    nCyclesRun: 15,
+    lastCycle: makeCycleStats(lastCycle),
+    nonconservationMax: 1e-6,
+    wallTimeS: 4.2,
+    stepCount: 100_000,
+    cycles: [],
+    ...rest,
+  };
+}
+
+export function makeSweepStudy(overrides: Partial<SweepStudy> = {}): SweepStudy {
+  return {
+    id: "sweep-1",
+    kind: "sweep",
+    status: "done",
+    configPath: "C:/configs/sdm26.json",
+    startedAt: 1_700_000_000_000,
+    finishedAt: 1_700_000_100_000,
+    params: makeSweepParams(),
+    points: [
+      makeSweepPoint({ rpm: 8000, lastCycle: { brakePowerKW: 50, brakeTorqueNm: 59.7, veAtm: 0.90 } }),
+      makeSweepPoint({ rpm: 10000, lastCycle: { brakePowerKW: 64, brakeTorqueNm: 61.1, veAtm: 0.96 } }),
+      makeSweepPoint({ rpm: 12000, lastCycle: { brakePowerKW: 58, brakeTorqueNm: 46.2, veAtm: 0.88 } }),
+    ],
+    ...overrides,
+  };
+}
+
+// ---- Optimization fixtures ----
+
+export function makeObjective(overrides: Partial<ObjectiveSpec> = {}): ObjectiveSpec {
+  return {
+    metric: "brake_power_k_w",
+    aggregator: { kind: "max" },
+    rpmList: [8000, 10000, 12000],
+    direction: "maximize",
+    ...overrides,
+  };
+}
+
+export function makeOptimizationParams(
+  overrides: Partial<OptimizationParams> = {},
+): OptimizationParams {
+  return {
+    tunables: [
+      { path: "runner_length", min: 0.2, max: 0.4, step: null },
+      { path: "plenum_volume_l", min: 1.0, max: 2.5, step: null },
+    ],
+    objective: makeObjective(),
+    nTrials: 20,
+    sampler: "lhs",
+    seed: 42,
+    nCyclesMax: 25,
+    junctionKind: "stagnation",
+    convergenceTolImep: 1e-3,
+    convergenceMinCycles: 5,
+    lockedPairs: [],
+    ...overrides,
+  };
+}
+
+/** A single optimization trial. Defaults to a completed, finite trial; pass
+ *  `status`/`objectiveValue` overrides for pending/running/error/non-finite
+ *  cases. `parameterValues` defaults cover the makeOptimizationParams paths. */
+export function makeTrial(overrides: Partial<OptimizationTrial> = {}): OptimizationTrial {
+  return {
+    trialIdx: 0,
+    parameterValues: { runner_length: 0.3, plenum_volume_l: 1.5 },
+    status: "done",
+    objectiveValue: 60,
+    sweepPoints: null,
+    wallTimeS: 4.0,
+    ...overrides,
+  };
+}
+
+export function makeOptimizationStudy(
+  overrides: Partial<OptimizationStudy> = {},
+): OptimizationStudy {
+  const params = overrides.params ?? makeOptimizationParams();
+  return {
+    id: "opt-1",
+    kind: "optimization",
+    status: "done",
+    configPath: "C:/configs/sdm26.json",
+    startedAt: 1_700_000_000_000,
+    finishedAt: 1_700_000_200_000,
+    params,
+    trials: [
+      makeTrial({ trialIdx: 0, objectiveValue: 55, parameterValues: { runner_length: 0.25, plenum_volume_l: 1.2 } }),
+      makeTrial({ trialIdx: 1, objectiveValue: 64, parameterValues: { runner_length: 0.32, plenum_volume_l: 1.8 } }),
+      makeTrial({ trialIdx: 2, objectiveValue: 60, parameterValues: { runner_length: 0.30, plenum_volume_l: 1.5 } }),
+    ],
+    bestTrialIdx: 1,
+    bestObjectiveValue: 64,
+    parameterPaths: ["runner_length", "plenum_volume_l"],
+    objectiveDirection: params.objective.direction,
     ...overrides,
   };
 }
