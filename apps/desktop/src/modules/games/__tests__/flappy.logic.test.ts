@@ -14,6 +14,7 @@ describe("flappy", () => {
     const s1 = step(s0, DT, true, rng);
     expect(s1.started).toBe(true);
     expect(s1.vy).toBe(FLAP_VY);
+    expect(s1.y).toBeLessThan(s0.y); // flap impulse moves the bird on the same frame
   });
 
   it("applies gravity each step", () => {

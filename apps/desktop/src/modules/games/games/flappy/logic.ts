@@ -10,7 +10,7 @@ export const PIPE_SPEED = 140; // px/s
 export const PIPE_W = 60;
 export const GAP_H = 170;
 export const PIPE_SPACING = 220;
-const GAP_MARGIN = 40; // min distance of gap edge from world edge
+export const GAP_MARGIN = 40; // min distance of gap edge from world edge
 
 export type Rng = () => number;
 
@@ -37,8 +37,13 @@ export function collides(y: number, p: Pipe): boolean {
 export function step(s: FlappyState, dt: number, flap: boolean, rng: Rng): FlappyState {
   if (s.dead) return s;
   if (!s.started) {
-    return flap ? { ...s, started: true, vy: FLAP_VY } : s;
+    if (!flap) return s;
+    // Fall through with flap=true so the impulse also advances y this frame.
+    return { ...step({ ...s, started: true, vy: 0 }, dt, true, rng) };
   }
+  // Semi-implicit Euler: advance vy first so the flap impulse applies
+  // immediately on flap frames (tight input feel). Safe with the rAF dt
+  // clamp (<= 1/20 s).
   const vy = flap ? FLAP_VY : s.vy + GRAVITY * dt;
   const y = s.y + vy * dt;
 
