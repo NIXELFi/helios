@@ -39,7 +39,7 @@ create or replace function games.stamp_score_identity()
 returns trigger
 language plpgsql
 security definer
-set search_path = ''
+set search_path = games, public, auth
 as $$
 declare
   meta jsonb;
@@ -77,6 +77,7 @@ grant usage on schema games to authenticated;
 grant select, insert on games.scores to authenticated;
 -- No update/delete for anyone but service role; nothing for anon.
 revoke all on games.scores from anon;
+revoke usage on schema games from anon;
 
 -- =============================================================================
 -- LEADERBOARD VIEWS (security_invoker: RLS on games.scores gates access)
