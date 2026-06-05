@@ -48,13 +48,15 @@ interface BoardRow {
 }
 
 function toEntries(rows: BoardRow[]): LeaderboardEntry[] {
-  return rows.map((r, i) => ({
-    userId: r.user_id,
-    displayName: r.display_name ?? "Unknown",
-    subteam: r.subteam,
-    best: Number(r.best),
-    rank: i + 1,
-  }));
+  return [...rows]
+    .sort((a, b) => Number(b.best) - Number(a.best))
+    .map((r, i) => ({
+      userId: r.user_id,
+      displayName: r.display_name ?? "Unknown",
+      subteam: r.subteam,
+      best: Number(r.best),
+      rank: i + 1,
+    }));
 }
 
 async function fetchBoard(
@@ -86,7 +88,8 @@ export async function fetchSubteams(client: SupabaseClient): Promise<SubteamRank
     await client
       .schema("games")
       .from("leaderboard_subteams")
-      .select("subteam,game_id,subtotal"),
+      .select("subteam,game_id,subtotal")
+      .limit(200),
     "subteam ranking",
   );
   const by = new Map<string, SubteamRanking>();

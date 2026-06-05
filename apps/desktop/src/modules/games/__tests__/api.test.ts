@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SupabaseClient } from "@helios/auth";
 import { fetchAllTime, fetchSubteams, submitScore } from "../api";
+// fetchWeekly is a view-name alias over the same fetchBoard path as fetchAllTime — intentionally not separately tested.
 
 // Minimal chainable stub for client.schema("games").from(...)
 function stubClient(result: { data: unknown; error: { message: string } | null }) {
@@ -11,7 +13,7 @@ function stubClient(result: { data: unknown; error: { message: string } | null }
   const insert = vi.fn().mockResolvedValue(result);
   const from = vi.fn().mockReturnValue({ ...chain, insert });
   const schema = vi.fn().mockReturnValue({ from });
-  return { client: { schema } as unknown as import("@helios/auth").SupabaseClient, schema, from, insert, chain };
+  return { client: { schema } as unknown as SupabaseClient, schema, from, insert, chain };
 }
 
 describe("submitScore", () => {
