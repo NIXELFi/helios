@@ -156,8 +156,14 @@ export function BrowseScreen() {
   // manual mode and the time before the first pass.
   useEffect(() => {
     if (!vaultFolderPath || !folders || folders.length === 0) return;
+    // Vault-switch race guard: vaultFolderPath updates the instant the active
+    // vault changes (it's derived from the vault name), but `folders` keeps
+    // the PREVIOUS vault's rows until its refetch lands — materializing in
+    // that window builds vault A's tree inside vault B's local dir. Only
+    // proceed once every folder row actually belongs to the active vault.
+    if (!vaultId || folders.some((f) => f.vault_id !== vaultId)) return;
     void ensureLocalFolderTree(folders, vaultFolderPath);
-  }, [folders, vaultFolderPath]);
+  }, [folders, vaultFolderPath, vaultId]);
   // Lock-holder names: map each user id → email (fall back to display name) so
   // the FileTable can render "Locked by <person>" instead of "Locked by other".
   // useVaultUsers errors for non-admins (the RPC is admin-gated); that's fine —

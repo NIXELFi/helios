@@ -9,11 +9,16 @@ pub fn reveal_in_explorer(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // `explorer /select,<path>` opens the parent folder with the file
-        // highlighted. Explorer wants backslashes.
+        // `explorer /select,"<path>"` opens the parent folder with the file
+        // highlighted. Explorer wants backslashes — and the argument must be
+        // passed RAW: std's Command quotes the whole arg when it contains
+        // spaces (`"/select,C:\a b\f.txt"`), which Explorer misparses and
+        // falls back to opening a default folder. raw_arg lets us quote just
+        // the path portion the way Explorer expects.
+        use std::os::windows::process::CommandExt;
         let win = path.replace('/', "\\");
         std::process::Command::new("explorer")
-            .arg(format!("/select,{win}"))
+            .raw_arg(format!("/select,\"{win}\""))
             .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());

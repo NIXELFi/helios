@@ -152,6 +152,15 @@ export function useAutoSync(input: {
 
   const run = useCallback(async () => {
     if (!enabled || !vaultRoot || !files || !localFiles) return;
+    // Vault-switch race guard: on an active-vault change, vaultRoot updates
+    // synchronously (derived from the vault name) while files/folders keep the
+    // PREVIOUS vault's rows until their refetches land. A pass in that window
+    // would materialize vault A's folder tree (and write file downloads) into
+    // vault B's local dir. Skip until every row matches; the dep-change when
+    // the fresh data lands re-triggers a clean pass.
+    if (vaultId && (files.some((f) => f.vault_id !== vaultId) || folders.some((f) => f.vault_id !== vaultId))) {
+      return;
+    }
     // Re-entrancy guard: another run is already authoritative.
     if (activeGenRef.current !== 0) return;
     const myGen = ++generationSeq.current;
