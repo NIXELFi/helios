@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
   fetchAllTime, fetchSubteams, fetchWeekly,
@@ -6,7 +6,7 @@ import {
 } from "../api";
 import { GAMES } from "../registry";
 
-/* Shared standings toolkit — one data hook + the visual atoms used by both
+/* Shared standings toolkit — one data store + the visual atoms used by both
  * standings layouts (LobbyStandings on the picker screen, GameStandings
  * wrapped around an active game). */
 
@@ -17,10 +17,91 @@ interface BoardData {
   subteams: SubteamRanking[] | null;
 }
 
-/** Standings data source with a stale-while-revalidate cache: switching
- *  tabs/games shows the last-known board instantly and refreshes it in the
- *  background — the skeleton only ever appears on a cold (never-fetched)
- *  board, so the UI never flashes empty on a tab switch. */
+/* Module-level stale-while-revalidate board cache. Shared by every hook
+ * instance and survives view switches/remounts, so a board fetched once
+ * (including by the mount-time prefetch) renders instantly everywhere.
+ * `token` records which refreshToken a board was fetched under — a bump
+ * (score submitted) makes every board refetch in the background while the
+ * old data stays on screen. */
+interface CacheEntry { data: BoardData; token: number }
+const cache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<void>>();
+let cacheVersion = 0;
+const listeners = new Set<() => void>();
+let cacheClient: SupabaseClient | null = null;
+
+function notify() {
+  cacheVersion++;
+  listeners.forEach((l) => l());
+}
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+const getVersion = () => cacheVersion;
+
+function keyFor(tab: Tab, gameId: GameId): string {
+  // The subteams board spans all games, so it gets one cache slot.
+  return tab === "subteams" ? "subteams" : `${tab}:${gameId}`;
+}
+
+/** Fetch a board into the cache unless it's already fresh for `token`.
+ *  Deduplicates concurrent requests per board. */
+function ensureBoard(
+  client: SupabaseClient,
+  tab: Tab,
+  gameId: GameId,
+  token: number,
+): Promise<void> {
+  // Boards are global, but a different Supabase connection is a different
+  // world — drop everything if the client identity changes.
+  if (cacheClient !== client) {
+    cacheClient = client;
+    cache.clear();
+    inflight.clear();
+    notify();
+  }
+  const key = keyFor(tab, gameId);
+  const hit = cache.get(key);
+  if (hit && hit.token >= token) return Promise.resolve();
+  const existing = inflight.get(key);
+  if (existing) return existing;
+  const load: Promise<BoardData> =
+    tab === "subteams"
+      ? fetchSubteams(client).then((r) => ({ entries: null, subteams: r }))
+      : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) => ({
+          entries: r,
+          subteams: null,
+        }));
+  const p = load
+    .then((data) => {
+      cache.set(key, { data, token });
+      notify();
+    })
+    .finally(() => {
+      inflight.delete(key);
+    });
+  inflight.set(key, p);
+  return p;
+}
+
+/** Warm every board (all-time + weekly per game, plus subteams) so the first
+ *  click on any tab/chip is instant. Called when the Games module mounts and
+ *  again on every refreshToken bump; errors are swallowed here — a board that
+ *  failed to prefetch simply cold-loads (with visible error/retry) when it's
+ *  actually viewed. */
+export function prefetchBoards(client: SupabaseClient, token: number): void {
+  for (const tab of ["alltime", "weekly"] as const) {
+    for (const g of GAMES) {
+      void ensureBoard(client, tab, g.id, token).catch(() => {});
+    }
+  }
+  void ensureBoard(client, "subteams", GAMES[0]!.id, token).catch(() => {});
+}
+
+/** Standings data source over the shared cache: switching tabs/games shows
+ *  the last-known board instantly and refreshes it in the background — the
+ *  skeleton only ever appears on a cold (never-fetched) board. */
 export function useLeaderboardData(
   client: SupabaseClient,
   tab: Tab,
@@ -34,45 +115,26 @@ export function useLeaderboardData(
   error: string | null;
   retry: () => void;
 } {
-  // The subteams board spans all games, so it gets one cache slot.
-  const key = tab === "subteams" ? "subteams" : `${tab}:${gameId}`;
-  const cacheRef = useRef(new Map<string, BoardData>());
-  const [, bump] = useState(0); // re-render after a background refresh lands
-  const [loadingKey, setLoadingKey] = useState<string | null>(key);
+  const key = keyFor(tab, gameId);
+  useSyncExternalStore(subscribe, getVersion);
   const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let stale = false;
     setError(null);
-    setLoadingKey(key);
-    const store = (data: BoardData) => {
-      if (stale) return;
-      cacheRef.current.set(key, data);
-      setLoadingKey(null);
-      bump((n) => n + 1);
-    };
-    const load =
-      tab === "subteams"
-        ? fetchSubteams(client).then((r) => store({ entries: null, subteams: r }))
-        : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) =>
-            store({ entries: r, subteams: null }),
-          );
-    load.catch((e: unknown) => {
-      if (!stale) {
-        setLoadingKey(null);
-        setError(e instanceof Error ? e.message : String(e));
-      }
+    ensureBoard(client, tab, gameId, refreshToken).catch((e: unknown) => {
+      if (!stale) setError(e instanceof Error ? e.message : String(e));
     });
     return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, tab, gameId, refreshToken, retryToken]);
+  }, [client, key, refreshToken, retryToken]);
 
-  const cached = cacheRef.current.get(key);
+  const hit = cache.get(key);
   return {
-    entries: cached?.entries ?? null,
-    subteams: cached?.subteams ?? null,
-    loading: loadingKey === key && !cached,
+    entries: hit?.data.entries ?? null,
+    subteams: hit?.data.subteams ?? null,
+    loading: !hit && !error,
     error,
     retry: () => setRetryToken((n) => n + 1),
   };

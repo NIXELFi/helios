@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
+import { prefetchBoards } from "./components/standings";
 import { submitScore, type GameId } from "./api";
 import { GAMES, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
@@ -30,6 +31,13 @@ export function GamesModule({ paused }: GamesModuleProps) {
       return GAMES[0]!.id;
     }
   });
+
+  // Warm every standings board on mount (and re-warm after each submit) so
+  // the first click on any tab or game chip renders instantly from cache
+  // instead of cold-loading.
+  useEffect(() => {
+    if (client) prefetchBoards(client, refreshToken);
+  }, [client, refreshToken]);
 
   /** Lobby board game switch — persisted like play() so the choice sticks. */
   function selectBoard(g: GameId) {
