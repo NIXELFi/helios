@@ -185,27 +185,26 @@ export function OptimizationResults({ study }: Props) {
     const arr = [...study.trials];
     const rankOf = (t: OptimizationTrial) =>
       live.rankByIdx.get(t.trialIdx) ?? Number.POSITIVE_INFINITY;
+    // The sorted quantity for a trial, or null when the trial doesn't carry it
+    // (pending/running rows have no objective; pending rows have no params).
+    // Rows WITHOUT the quantity always partition to the BOTTOM regardless of
+    // asc/desc — otherwise an ascending objective sort floats a block of empty
+    // "—" rows above the actual results mid-run.
+    const valueOf = (t: OptimizationTrial): number | null => {
+      if (sortKey === "rank") return Number.isFinite(rankOf(t)) ? rankOf(t) : null;
+      if (sortKey === "obj") return t.objectiveValue;
+      if (sortKey === "wall") return t.wallTimeS;
+      if (sortKey === "trial") return t.trialIdx;
+      return t.parameterValues[sortKey] ?? null;
+    };
     const cmp = (a: OptimizationTrial, b: OptimizationTrial): number => {
-      let d: number;
-      if (sortKey === "rank") {
-        d = rankOf(a) - rankOf(b);
-        if (d === 0) d = a.trialIdx - b.trialIdx;
-      } else if (sortKey === "obj") {
-        const av = a.objectiveValue ?? Number.NEGATIVE_INFINITY;
-        const bv = b.objectiveValue ?? Number.NEGATIVE_INFINITY;
-        d = av - bv;
-      } else if (sortKey === "wall") {
-        const av = a.wallTimeS ?? Number.POSITIVE_INFINITY;
-        const bv = b.wallTimeS ?? Number.POSITIVE_INFINITY;
-        d = av - bv;
-      } else if (sortKey === "trial") {
-        d = a.trialIdx - b.trialIdx;
-      } else {
-        // Parameter path.
-        const av = a.parameterValues[sortKey] ?? Number.NEGATIVE_INFINITY;
-        const bv = b.parameterValues[sortKey] ?? Number.NEGATIVE_INFINITY;
-        d = av - bv;
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      if (av == null || bv == null) {
+        if (av == null && bv == null) return a.trialIdx - b.trialIdx;
+        return av == null ? 1 : -1; // missing → last, in either direction
       }
+      let d = av - bv;
       if (d === 0) d = a.trialIdx - b.trialIdx;
       return sortDir === "asc" ? d : -d;
     };

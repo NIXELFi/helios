@@ -6,7 +6,8 @@
 // WriteErrorToast idiom — replicated locally, NOT imported from pm) that
 // auto-dismisses after 4 s. Esc and outside-click close the popover.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface ExportMenuItem {
   id: string;
@@ -32,14 +33,30 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // Fixed-position coords for the portaled popover, derived from the trigger's
+  // bounding rect. Portaling to document.body means no overflow-auto ancestor
+  // (e.g. the StudiesScreen table scroller) can clip the lower menu items.
+  const [menuPos, setMenuPos] = useState<{ top: number; left?: number; right?: number }>({ top: 0 });
 
-  // Close on outside-click + Escape while the popover is open.
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current) return;
+    const rect = rootRef.current.getBoundingClientRect();
+    setMenuPos(
+      align === "left"
+        ? { top: rect.bottom + 4, left: rect.left }
+        : { top: rect.bottom + 4, right: Math.max(0, window.innerWidth - rect.right) },
+    );
+  }, [open, align]);
+
+  // Close on outside-click + Escape while the popover is open. The popover is
+  // portaled, so "inside" means inside the trigger OR inside the menu.
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -85,52 +102,55 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
         {triggerLabel} ▾
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          className={
-            "absolute z-50 mt-1 min-w-[180px] rounded-sm border border-[#2A2C32] bg-[#0E0E10] py-1 shadow-xl " +
-            (align === "left" ? "left-0" : "right-0")
-          }
-        >
-          {items.map((item) => {
-            const busy = busyId === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                role="menuitem"
-                disabled={busyId != null}
-                className="block w-full px-3 py-1.5 text-left text-[11px] text-[#D8DCE2] hover:bg-[#16171B] hover:text-[#FFC627] disabled:opacity-50"
-                onClick={() => void runItem(item)}
-              >
-                {busy ? `${item.label}…` : item.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {toast && (
-        <div
-          role="status"
-          className={
-            "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border px-4 py-3 text-sm shadow-lg " +
-            (toast.ok
-              ? "border-[#FFC627]/40 bg-[#16171B] text-[#D8DCE2]"
-              : "border-red-500/40 bg-red-950/95 text-red-100")
-          }
-        >
-          <div className="break-words">{toast.message}</div>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="mt-1.5 text-xs text-[#9097A0] underline underline-offset-2 hover:text-[#D8DCE2]"
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: "fixed", top: menuPos.top, left: menuPos.left, right: menuPos.right }}
+            className="z-50 min-w-[180px] rounded-sm border border-[#2A2C32] bg-[#0E0E10] py-1 shadow-xl"
           >
-            Dismiss
-          </button>
-        </div>
-      )}
+            {items.map((item) => {
+              const busy = busyId === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={busyId != null}
+                  className="block w-full px-3 py-1.5 text-left text-[11px] text-[#D8DCE2] hover:bg-[#16171B] hover:text-[#FFC627] disabled:opacity-50"
+                  onClick={() => void runItem(item)}
+                >
+                  {busy ? `${item.label}…` : item.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+
+      {toast &&
+        createPortal(
+          <div
+            role="status"
+            className={
+              "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border px-4 py-3 text-sm shadow-lg " +
+              (toast.ok
+                ? "border-[#FFC627]/40 bg-[#16171B] text-[#D8DCE2]"
+                : "border-red-500/40 bg-red-950/95 text-red-100")
+            }
+          >
+            <div className="break-words">{toast.message}</div>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="mt-1.5 text-xs text-[#9097A0] underline underline-offset-2 hover:text-[#D8DCE2]"
+            >
+              Dismiss
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

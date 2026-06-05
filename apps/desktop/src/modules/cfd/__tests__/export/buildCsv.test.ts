@@ -272,3 +272,54 @@ describe("buildTrialsTsv", () => {
     expect(out.length).toBe(3); // 1 header + 2 trials (NO units row)
   });
 });
+
+// --- tiny-magnitude fidelity ------------------------------------------------
+// Review finding: toFixed(6) flattened sub-1e-6 magnitudes to "0.000000" while
+// the screens render them exponentially. num() now falls back to exponential
+// for 0 < |v| < 10^-decimals so the file matches the screen.
+
+describe("tiny-magnitude formatting (exponential fallback)", () => {
+  it("serializes a ~1e-7 minimize objective exponentially, never 0.000000", () => {
+    const study = optStudy(
+      [
+        trial({ trialIdx: 0, objectiveValue: 1.23e-7 }),
+        trial({ trialIdx: 1, objectiveValue: 2.5e-7 }),
+      ],
+      { objectiveDirection: "minimize", bestTrialIdx: 0, bestObjectiveValue: 1.23e-7 },
+    );
+    const csv = buildOptimizationTrialsCsv(study);
+    const header = csv.split("\n")[0]!.split(",");
+    const objCol = header.indexOf("objective");
+    const dataRows = csv.split("\n").slice(2); // names + units rows
+    // Every objective cell is exponential — toFixed would have flattened both
+    // to "0.000000". (delta_to_best of the BEST trial is a legitimate exact 0.)
+    for (const r of dataRows) {
+      expect(r.split(",")[objCol]).toMatch(/e-7$/);
+    }
+    // delta_to_best for trial 1 = 1.27e-7 — also exponential, not zero.
+    expect(csv).toMatch(/1\.270*e-7/);
+
+    const tsv = buildTrialsTsv(study);
+    expect(tsv).toMatch(/1\.230*e-7/);
+    expect(tsv).toMatch(/2\.50*e-7/);
+  });
+
+  it("serializes tiny conservation diagnostics exponentially and -0 as plain 0", () => {
+    const study: SingleRpmStudy = {
+      id: "s-tiny",
+      kind: "single-rpm",
+      status: "done",
+      configPath: "C:/configs/sdm26.json",
+      startedAt: 1,
+      params: {
+        rpm: 8000, nCyclesMax: 25, junctionKind: "stagnation",
+        convergenceTolImep: 1e-3, convergenceMinCycles: 5,
+        captureWaves: false, capturePvLoops: false, capturePipeProfiles: false,
+      },
+      cycles: [cyc({ nonconservation: 1e-7, massDrift: -0 })],
+    };
+    const csv = buildSingleRpmCsv(study);
+    expect(csv).toMatch(/1\.0*e-7/);    // nonconservation survives
+    expect(csv).not.toContain("-0.000000"); // signed-zero artifact guarded
+  });
+});

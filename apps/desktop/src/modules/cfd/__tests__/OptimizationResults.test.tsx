@@ -202,6 +202,24 @@ describe("OptimizationResults — sortable table", () => {
     fireEvent.click(screen.getByRole("button", { name: "#" }));
     expect(tableRows().map((r) => r[1])).toEqual(["0", "1", "2"]);
   });
+
+  it("partitions rows without the sorted quantity to the bottom in BOTH directions", () => {
+    // Review finding: asc obj sort used to float null-objective pending rows
+    // to the top (null → -Infinity). They must sink regardless of direction.
+    const study = makeOptimizationStudy({
+      status: "running",
+      trials: [
+        makeTrial({ trialIdx: 0, objectiveValue: 50 }),
+        makeTrial({ trialIdx: 1, status: "pending", objectiveValue: null }),
+        makeTrial({ trialIdx: 2, objectiveValue: 64 }),
+      ],
+    });
+    render(<OptimizationResults study={study} />);
+    fireEvent.click(screen.getByRole("button", { name: /^obj/ })); // desc
+    expect(tableRows().map((r) => r[1])).toEqual(["2", "0", "1"]);
+    fireEvent.click(screen.getByRole("button", { name: /^obj/ })); // asc
+    expect(tableRows().map((r) => r[1])).toEqual(["0", "2", "1"]); // pending still last
+  });
 });
 
 describe("OptimizationResults — exports", () => {
@@ -263,6 +281,25 @@ describe("OptimizationResults — selection + inspector", () => {
     const payload = copyText.mock.calls[0]![0];
     expect(payload).toContain("runner_length\t");
     expect(payload).toContain("\n");
+  });
+
+  it("labels a tied rank-2 trial with a Δ line, never 'best'", () => {
+    // Review finding: deltaToBest === 0 used to short-circuit to "best" for a
+    // tied rank-2 trial, contradicting its own #2 badge and the podium.
+    const study = makeOptimizationStudy({
+      trials: [
+        makeTrial({ trialIdx: 0, objectiveValue: 64 }),
+        makeTrial({ trialIdx: 1, objectiveValue: 64 }), // tie → rank 2 by trialIdx
+        makeTrial({ trialIdx: 2, objectiveValue: 60 }),
+      ],
+      bestTrialIdx: 0,
+      bestObjectiveValue: 64,
+    });
+    render(<OptimizationResults study={study} />);
+    fireEvent.click(screen.getByText("trial #1").closest("button")!);
+    const aside = document.querySelector("aside")!;
+    expect(within(aside as HTMLElement).queryByText("best")).toBeNull();
+    expect(within(aside as HTMLElement).getByText(/Δ 0\.00/)).toBeInTheDocument();
   });
 
   it("running rows show a pulse dot + 'running' label", () => {

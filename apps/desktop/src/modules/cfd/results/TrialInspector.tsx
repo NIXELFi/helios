@@ -116,8 +116,12 @@ export function TrialInspector({
         </div>
         {rank != null && (
           <div className="mt-0.5 font-mono text-[10px] text-[#5A5F66]">
-            {rank === 1 || deltaToBest == null || deltaToBest === 0
-              ? "best"
+            {/* "best" is gated on rank ONLY (matching podium + table): a tied
+                rank-2 trial has deltaToBest === 0 but is NOT the best. */}
+            {rank === 1 || deltaToBest == null
+              ? rank === 1
+                ? "best"
+                : "—"
               : `Δ ${deltaToBest > 0 ? "+" : ""}${deltaToBest.toPrecision(3)}${objUnit ? " " + objUnit : ""}` +
                 (pctOfBest != null
                   ? ` (${pctOfBest > 0 ? "+" : ""}${pctOfBest.toFixed(1)}%)`

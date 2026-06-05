@@ -1,6 +1,6 @@
 // SchematicView.tsx
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sampleColormap } from "./colormaps";
 import { computeMach, CYL_FIELD_IDX, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -32,10 +32,16 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField, on
 
   // Combined callback-ref: keep the internal ref wired for draw effects AND
   // surface the element to the parent (for PNG capture) in the same assignment.
-  const setCanvas = (el: HTMLCanvasElement | null) => {
-    canvasRef.current = el;
-    onCanvasRef?.(el);
-  };
+  // useCallback keeps the ref identity stable across renders — a fresh inline
+  // arrow makes React detach/reattach (null → el) on EVERY render, i.e. two
+  // redundant parent setState calls per animation frame during playback.
+  const setCanvas = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      canvasRef.current = el;
+      onCanvasRef?.(el);
+    },
+    [onCanvasRef],
+  );
 
   // Precompute stroke-per-frame per cylinder from V curve + x_b combustion
   // marker. The simulator does not reset x_b during intake — it stays at

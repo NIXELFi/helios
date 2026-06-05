@@ -1,6 +1,6 @@
 // WaterfallView.tsx
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { COLORMAPS } from "./colormaps";
 import { computeMach, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -32,10 +32,15 @@ function WaterfallTile({ packed, pipeIdx, field, onCanvasRef }: TileProps) {
 
   // Combined callback-ref: keep the internal ref wired for the draw effect AND
   // surface the element to the parent (only the first tile passes onCanvasRef).
-  const setCanvas = (el: HTMLCanvasElement | null) => {
-    canvasRef.current = el;
-    onCanvasRef?.(el);
-  };
+  // useCallback keeps the ref identity stable so React doesn't detach/reattach
+  // (null → el) on every re-render of the tile.
+  const setCanvas = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      canvasRef.current = el;
+      onCanvasRef?.(el);
+    },
+    [onCanvasRef],
+  );
 
   // Render heatmap on (packed, pipeIdx, field) change.
   useEffect(() => {

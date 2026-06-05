@@ -25,10 +25,20 @@ function csvCell(s: string): string {
 
 /** Format a number to `decimals`, or empty string when non-finite. The empty
  *  cell is deliberate — old persisted studies and pending trials carry holes
- *  we never want to serialize as "NaN". */
+ *  we never want to serialize as "NaN".
+ *
+ *  Magnitudes that toFixed would flatten to 0 (|v| < 10^-decimals — e.g. a
+ *  ~1e-7 nonconservation objective, or the kg-scale mass-drift columns the
+ *  screens render via toExponential) fall back to exponential so the file
+ *  matches what the screen shows instead of lying "0.000000". */
 function num(v: number | null | undefined, decimals: number): string {
   if (v == null || !Number.isFinite(v)) return "";
-  return v.toFixed(Math.max(0, Math.min(8, decimals)));
+  if (Object.is(v, -0)) v = 0; // avoid the "-0.000000" signed-zero artifact
+  const d = Math.max(0, Math.min(8, decimals));
+  if (v !== 0 && Math.abs(v) < Math.pow(10, -d)) {
+    return v.toExponential(Math.min(d, 6));
+  }
+  return v.toFixed(d);
 }
 
 /** Join one row's already-formatted cells, quoting as needed. */
