@@ -17,6 +17,9 @@ export interface ExportMenuItem {
 interface Props {
   items: ExportMenuItem[];
   align?: "left" | "right";
+  /** Trigger button text (the ▾ caret is appended). Defaults to "Export";
+   *  compact row triggers pass e.g. "Export" or a shorter label. */
+  triggerLabel?: string;
 }
 
 interface Toast {
@@ -24,7 +27,7 @@ interface Toast {
   message: string;
 }
 
-export function ExportMenu({ items, align = "right" }: Props) {
+export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: Props) {
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -79,7 +82,7 @@ export function ExportMenu({ items, align = "right" }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        Export ▾
+        {triggerLabel} ▾
       </button>
 
       {open && (

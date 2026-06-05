@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { SchematicView } from "./SchematicView";
 import { WaterfallView } from "./WaterfallView";
 import { useWaveCapture } from "./useWaveCapture";
+import { buildWaveFrameCsv } from "../../lib/export/buildWaveCsv";
+import { fileTimestamp, savePngFile, saveTextFile } from "../../lib/export/io";
 import type {
   WaveCylField,
   WaveField,
@@ -54,6 +56,30 @@ function WaveViewerModalBody(props: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameIdx, setFrameIdx] = useState(0);
 
+  // Live canvas of whichever view is mounted (Schematic OR Waterfall's first
+  // tile). Kept in a ref for capture + a state flag so the PNG button's
+  // disabled state re-renders when the canvas mounts/unmounts. The view-switch
+  // unmounts one view (callback fires null) and mounts the other.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [hasCanvas, setHasCanvas] = useState(false);
+  const setActiveCanvas = (el: HTMLCanvasElement | null) => {
+    canvasRef.current = el;
+    setHasCanvas(el != null);
+  };
+
+  // Small inline transient feedback ('Saved' / 'Cancelled' / error) next to the
+  // export buttons, matching the modal's minimal style. Auto-clears.
+  const [exportMsg, setExportMsg] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const exportMsgTimer = useRef<number | null>(null);
+  const flashExport = (text: string, tone: "ok" | "error") => {
+    setExportMsg({ text, tone });
+    if (exportMsgTimer.current != null) window.clearTimeout(exportMsgTimer.current);
+    exportMsgTimer.current = window.setTimeout(() => setExportMsg(null), 4000);
+  };
+  useEffect(() => () => {
+    if (exportMsgTimer.current != null) window.clearTimeout(exportMsgTimer.current);
+  }, []);
+
   useEffect(() => { setFrameIdx(0); setIsPlaying(false); }, [rpmInt]);
 
   const rafRef = useRef<number | null>(null);
@@ -92,6 +118,47 @@ function WaveViewerModalBody(props: Props) {
   }, [onClose]);
 
   const frameInt = Math.max(0, Math.min(data ? data.manifest.frameCount - 1 : 0, Math.floor(frameIdx)));
+
+  const canExportPng = !!data && hasCanvas;
+  const canExportCsv = !!data;
+
+  async function handleExportPng() {
+    const canvas = canvasRef.current;
+    if (!data || !canvas) return;
+    // jsdom (and some WebView backends) may lack toBlob — guard and report.
+    if (typeof canvas.toBlob !== "function") {
+      flashExport("PNG capture unavailable", "error");
+      return;
+    }
+    try {
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/png"),
+      );
+      if (!blob) {
+        flashExport("Capture failed", "error");
+        return;
+      }
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const name = `cfd-wave-${rpmInt}rpm-f${frameInt}-${field}-${fileTimestamp()}`;
+      const path = await savePngFile(name, bytes);
+      flashExport(path ? "Saved" : "Cancelled", "ok");
+    } catch (err) {
+      flashExport(String(err), "error");
+    }
+  }
+
+  async function handleExportCsv() {
+    if (!data) return;
+    try {
+      const csv = buildWaveFrameCsv(data, frameInt);
+      const name = `cfd-wave-${rpmInt}rpm-f${frameInt}-${field}-${fileTimestamp()}`;
+      const path = await saveTextFile(name, "csv", csv);
+      flashExport(path ? "Saved" : "Cancelled", "ok");
+    } catch (err) {
+      flashExport(String(err), "error");
+    }
+  }
+
   const headerInfo = data ? (
     <>
       RPM <span className="text-[#D8DCE2]">{data.manifest.rpm.toFixed(0)}</span>
@@ -120,6 +187,31 @@ function WaveViewerModalBody(props: Props) {
             <div className="mt-0.5 text-[10px] text-[#5A5F66]">{headerInfo}</div>
           </div>
           <div className="ml-auto" />
+          {exportMsg && (
+            <span
+              role="status"
+              className={
+                "text-[10px] " +
+                (exportMsg.tone === "error" ? "text-red-300" : "text-helios-dim")
+              }
+            >{exportMsg.text}</span>
+          )}
+          <button
+            type="button"
+            aria-label="Export PNG"
+            disabled={!canExportPng}
+            className={transportBtnClass + " disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-helios-line"}
+            onClick={handleExportPng}
+            title="Export active view as PNG"
+          >PNG</button>
+          <button
+            type="button"
+            aria-label="Export CSV frame"
+            disabled={!canExportCsv}
+            className={transportBtnClass + " disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-helios-line"}
+            onClick={handleExportCsv}
+            title="Export current frame as CSV"
+          >CSV (frame)</button>
           <button
             type="button"
             aria-label="Close"
@@ -245,12 +337,14 @@ function WaveViewerModalBody(props: Props) {
               field={field}
               sizeField={sizeField}
               cylField={cylField}
+              onCanvasRef={setActiveCanvas}
             />
           )}
           {state === "ready" && data && view === "waterfall" && (
             <WaterfallView
               packed={data}
               field={field}
+              onCanvasRef={setActiveCanvas}
             />
           )}
         </div>

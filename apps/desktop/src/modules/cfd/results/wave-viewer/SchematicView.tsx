@@ -20,11 +20,22 @@ interface Props {
   field: WaveField;
   sizeField: WaveSizeField;
   cylField: WaveCylField;
+  /** Reports the live canvas element (for PNG capture in the parent modal).
+   *  Called with the element on mount and null on unmount, alongside the
+   *  internal ref assignment — no rendering behavior changes. */
+  onCanvasRef?: (el: HTMLCanvasElement | null) => void;
 }
 
-export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: Props) {
+export function SchematicView({ packed, frameIdx, field, sizeField, cylField, onCanvasRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [layout, setLayout] = useState<SchematicLayout | null>(null);
+
+  // Combined callback-ref: keep the internal ref wired for draw effects AND
+  // surface the element to the parent (for PNG capture) in the same assignment.
+  const setCanvas = (el: HTMLCanvasElement | null) => {
+    canvasRef.current = el;
+    onCanvasRef?.(el);
+  };
 
   // Precompute stroke-per-frame per cylinder from V curve + x_b combustion
   // marker. The simulator does not reset x_b during intake — it stays at
@@ -72,7 +83,7 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
 
   return (
     <div className="h-full w-full bg-helios-base">
-      <canvas ref={canvasRef} className="block" />
+      <canvas ref={setCanvas} className="block" />
     </div>
   );
 }

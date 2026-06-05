@@ -1,7 +1,12 @@
 // Parallel-coordinates plot, hand-rolled SVG. Each polyline is one trial;
 // axes are scaled to the visible data range. Click-to-select bubbles up
-// via `onTrialClick`. The best-trial polyline is amber; the selected
-// polyline is white-on-top so it stays visible.
+// via `onTrialClick`. Podium trials (rank 1/2/3) are gold/silver/bronze;
+// the selected polyline is white-on-top so it stays visible.
+//
+// Two highlight inputs coexist for back-compat: the legacy `bestTrial`
+// boolean (still honored — renders as the gold rank-1 stroke) and the newer
+// `rank` field (1/2/3 gold/silver/bronze). When both are present `rank` wins;
+// `bestTrial` is treated as rank 1.
 
 import { useMemo } from "react";
 
@@ -10,7 +15,21 @@ export interface ParallelCoordsTrial {
   /** length = axes.length - 1 (last axis is the objective) */
   values: number[];
   objective: number;
+  /** Legacy single-best flag. Kept for back-compat: equivalent to rank 1. */
   bestTrial?: boolean;
+  /** Podium rank (1/2/3 colored, others neutral). null/undefined = unranked. */
+  rank?: number | null;
+}
+
+// Podium stroke colors + widths. Rank 1 reuses the legacy best-trial gold so
+// existing visuals are pixel-identical.
+const RANK_STROKE: Record<number, string> = { 1: "#fbbf24", 2: "#C0C7D1", 3: "#CD7F32" };
+
+/** Effective rank of a trial: explicit `rank` wins, else legacy bestTrial = 1. */
+function effectiveRank(t: ParallelCoordsTrial): number | null {
+  if (t.rank != null && RANK_STROKE[t.rank]) return t.rank;
+  if (t.bestTrial) return 1;
+  return null;
 }
 
 interface Props {
@@ -112,9 +131,9 @@ export function ParallelCoordsPlot({
         </g>
       ))}
 
-      {/* Non-selected, non-best trials first (drawn under). */}
+      {/* Neutral (unranked, non-selected) trials first — drawn under. */}
       {trials.map((t, idx) => {
-        if (selectedTrialIdx === t.trialIdx || t.bestTrial) return null;
+        if (selectedTrialIdx === t.trialIdx || effectiveRank(t) != null) return null;
         const points = (allValues[idx] ?? [])
           .map((v, i) => `${axisX(i)},${yOf(i, v)}`)
           .join(" ");
@@ -131,24 +150,28 @@ export function ParallelCoordsPlot({
         );
       })}
 
-      {/* Best trial on top, but under selected. */}
-      {trials.map((t, idx) => {
-        if (!t.bestTrial || selectedTrialIdx === t.trialIdx) return null;
-        const points = (allValues[idx] ?? [])
-          .map((v, i) => `${axisX(i)},${yOf(i, v)}`)
-          .join(" ");
-        return (
-          <polyline
-            key={`best-${t.trialIdx}`}
-            points={points}
-            fill="none"
-            stroke="#fbbf24"
-            strokeWidth={2}
-            style={{ cursor: onTrialClick ? "pointer" : "default" }}
-            onClick={() => onTrialClick?.(t.trialIdx)}
-          />
-        );
-      })}
+      {/* Podium trials above neutral, below selected. Draw 3 → 1 so the gold
+          rank-1 stroke ends up topmost within the podium layer. */}
+      {[3, 2, 1].flatMap((rank) =>
+        trials.map((t, idx) => {
+          if (selectedTrialIdx === t.trialIdx) return null;
+          if (effectiveRank(t) !== rank) return null;
+          const points = (allValues[idx] ?? [])
+            .map((v, i) => `${axisX(i)},${yOf(i, v)}`)
+            .join(" ");
+          return (
+            <polyline
+              key={`rank${rank}-${t.trialIdx}`}
+              points={points}
+              fill="none"
+              stroke={RANK_STROKE[rank]}
+              strokeWidth={2}
+              style={{ cursor: onTrialClick ? "pointer" : "default" }}
+              onClick={() => onTrialClick?.(t.trialIdx)}
+            />
+          );
+        }),
+      )}
 
       {/* Selected on very top. */}
       {trials.map((t, idx) => {

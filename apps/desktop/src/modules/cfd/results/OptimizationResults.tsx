@@ -1,43 +1,164 @@
-// Top-level results screen for optimization studies. Left pane: header,
-// parallel-coords plot, trial table. Right pane: TrialInspector for the
-// currently-selected trial. Selecting via plot or table both flow through
-// `selectedIdx` state. Best trial is highlighted amber in plot + table.
+// Top-level results screen for optimization studies — the headline live view.
+//
+// Left pane (top → bottom): header (live best + ETA + elapsed + Cancel +
+// ExportMenu), podium row (top-3 cards), charts row (convergence scatter +
+// objective-vs-parameter scatter with a param selector), the parallel-coords
+// plot, and a sortable ranked trial table. Right pane: TrialInspector for the
+// selected trial. Selection flows through `selectedIdx` from every surface
+// (podium card, scatter point, parallel-coords line, table row).
+//
+// All ranking/ETA/history is derived ONCE via useOptimizationLive — a pure
+// display-side selector layered over the reducer. The elapsed clock ticks in a
+// separate gated interval so it never re-runs the heavy memo. After the job
+// finishes, ranked[0] equals study.bestTrialIdx (same direction; first-best on
+// ties) — verified in tests.
 
 import { useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
+import { useOptimizationLive, useElapsedSeconds } from "../state/useOptimizationLive";
 import { basename } from "../lib/cfdPath";
+import { objectiveUnit } from "../lib/metricMeta";
+import { exportActionsFor } from "../lib/export/exportStudy";
+import { buildTrialsTsv } from "../lib/export/buildCsv";
+import { copyText } from "../lib/export/io";
+import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
+import { ScatterPlot, type ScatterPt } from "../components/charts/ScatterPlot";
 import { ParallelCoordsPlot, type ParallelCoordsTrial } from "../components/charts/ParallelCoordsPlot";
 import { TrialInspector } from "./TrialInspector";
-import type { OptimizationStudy } from "../state/types";
+import type { OptimizationStudy, OptimizationTrial } from "../state/types";
 
 interface Props {
   study: OptimizationStudy;
 }
 
-export function OptimizationResults({ study }: Props) {
-  const { cancelStudy } = useCfd();
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+type SortKey = "rank" | "obj" | "wall" | "trial" | string; // string => a param path
+type SortDir = "asc" | "desc";
 
-  const doneTrials = useMemo(
-    () => study.trials.filter((t) => t.status === "done" && t.objectiveValue !== null),
-    [study.trials],
+const PODIUM: Record<number, { border: string; chip: string }> = {
+  1: { border: "border-l-[#FFC627]", chip: "border-[#FFC627]/60 text-[#FFC627]" },
+  2: { border: "border-l-[#C0C7D1]", chip: "border-[#C0C7D1]/60 text-[#C0C7D1]" },
+  3: { border: "border-l-[#CD7F32]", chip: "border-[#CD7F32]/60 text-[#CD7F32]" },
+};
+
+const PODIUM_TEXT: Record<number, string> = {
+  1: "text-[#FFC627]",
+  2: "text-[#C0C7D1]",
+  3: "text-[#CD7F32]",
+};
+
+/** Format ETA seconds as a coarse "~Xm est." / "~Xs est." string. */
+function formatEta(seconds: number): string {
+  if (seconds >= 90) return `~${Math.round(seconds / 60)}m est.`;
+  return `~${Math.round(seconds)}s est.`;
+}
+
+export function OptimizationResults({ study }: Props) {
+  const { cancelStudy, bridge } = useCfd();
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [paramForScatter, setParamForScatter] = useState<string>(
+    study.parameterPaths[0] ?? "",
+  );
+  const [sortKey, setSortKey] = useState<SortKey>("rank");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const live = useOptimizationLive(study);
+  const elapsed = useElapsedSeconds(study);
+
+  const objUnit = objectiveUnit(study.params.objective);
+  const isRunning = study.status === "running";
+  const showEta = isRunning && live.nDone >= 3 && live.eta != null;
+
+  // ---- Export menu items ---------------------------------------------------
+  const exportItems: ExportMenuItem[] = useMemo(() => {
+    const actions = exportActionsFor(study, {
+      getSchema: (configPath) => bridge.getParameterSchema(configPath),
+    });
+    const fromAction = (label: string, run: () => Promise<string | null>): ExportMenuItem["run"] =>
+      async () => {
+        const path = await run();
+        // null = user cancelled the save dialog. ExportMenu shows no toast for
+        // an empty message; we surface "Cancelled" so the click feels acked.
+        if (path == null) return { ok: true, message: "Cancelled" };
+        const seg = path.split(/[\\/]/).pop() ?? path;
+        return { ok: true, message: `Exported → ${seg}` };
+      };
+
+    const items: ExportMenuItem[] = actions.map((a) => ({
+      id: a.id,
+      label: a.label,
+      run: fromAction(a.label, a.run),
+    }));
+
+    // Clipboard variants — not disk actions, so they live alongside the file
+    // exports rather than in exportActionsFor.
+    items.push({
+      id: "opt-copy-tsv",
+      label: "Copy table (TSV)",
+      run: async () => {
+        await copyText(buildTrialsTsv(study));
+        return { ok: true, message: "Copied!" };
+      },
+    });
+    items.push({
+      id: "opt-copy-recipe",
+      label: "Copy best recipe",
+      run: async () => {
+        const best = live.ranked[0]?.trial;
+        if (!best) return { ok: false, message: "No best trial yet" };
+        const lines = study.parameterPaths.map((p) => {
+          const v = best.parameterValues[p];
+          return `${p}\t${v !== undefined ? v : ""}`;
+        });
+        await copyText(lines.join("\n"));
+        return { ok: true, message: "Copied!" };
+      },
+    });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study, bridge, live.ranked]);
+
+  // ---- Charts: convergence + objective-vs-parameter ------------------------
+  const convergencePoints: ScatterPt[] = useMemo(
+    () =>
+      live.done.map((t) => ({
+        id: t.trialIdx,
+        x: t.trialIdx,
+        y: t.objectiveValue as number,
+        rank: live.rankByIdx.get(t.trialIdx) ?? null,
+      })),
+    [live.done, live.rankByIdx],
   );
 
-  // Axes: one per parameter path + final axis for the objective. We use
-  // the actual data extent so the axes adapt as trials come in. If we
-  // only have 0–1 trials the axes degenerate; the plot's safe-divide
-  // guards handle that visually.
+  const convergenceStep = useMemo(
+    () => live.history.map((h) => ({ x: h.trialIdx, y: h.bestSoFar })),
+    [live.history],
+  );
+
+  const paramScatterPoints: ScatterPt[] = useMemo(
+    () =>
+      live.done
+        .filter((t) => Number.isFinite(t.parameterValues[paramForScatter]))
+        .map((t) => ({
+          id: t.trialIdx,
+          x: t.parameterValues[paramForScatter] as number,
+          y: t.objectiveValue as number,
+          rank: live.rankByIdx.get(t.trialIdx) ?? null,
+        })),
+    [live.done, live.rankByIdx, paramForScatter],
+  );
+
+  // ---- Parallel-coords plot ------------------------------------------------
   const axes = useMemo(() => {
     const paramAxes = study.parameterPaths.map((p) => {
-      const vals = doneTrials
+      const vals = live.done
         .map((t) => t.parameterValues[p])
         .filter((v): v is number => v !== undefined && Number.isFinite(v));
       const min = vals.length ? Math.min(...vals) : 0;
       const max = vals.length ? Math.max(...vals) : 1;
       return { label: p, min, max };
     });
-    const objVals = doneTrials
+    const objVals = live.done
       .map((t) => t.objectiveValue!)
       .filter((v) => Number.isFinite(v));
     const objMin = objVals.length ? Math.min(...objVals) : 0;
@@ -46,25 +167,73 @@ export function OptimizationResults({ study }: Props) {
       ...paramAxes,
       { label: `objective (${study.objectiveDirection})`, min: objMin, max: objMax },
     ];
-  }, [study.parameterPaths, study.objectiveDirection, doneTrials]);
+  }, [study.parameterPaths, study.objectiveDirection, live.done]);
 
   const trialsForPlot: ParallelCoordsTrial[] = useMemo(
     () =>
-      doneTrials.map((t) => ({
+      live.done.map((t) => ({
         trialIdx: t.trialIdx,
         values: study.parameterPaths.map((p) => t.parameterValues[p] ?? Number.NaN),
         objective: t.objectiveValue!,
-        bestTrial: study.bestTrialIdx === t.trialIdx,
+        rank: live.rankByIdx.get(t.trialIdx) ?? null,
       })),
-    [doneTrials, study.parameterPaths, study.bestTrialIdx],
+    [live.done, study.parameterPaths, live.rankByIdx],
   );
 
+  // ---- Sortable trial table ------------------------------------------------
+  const sortedTrials = useMemo(() => {
+    const arr = [...study.trials];
+    const rankOf = (t: OptimizationTrial) =>
+      live.rankByIdx.get(t.trialIdx) ?? Number.POSITIVE_INFINITY;
+    const cmp = (a: OptimizationTrial, b: OptimizationTrial): number => {
+      let d: number;
+      if (sortKey === "rank") {
+        d = rankOf(a) - rankOf(b);
+        if (d === 0) d = a.trialIdx - b.trialIdx;
+      } else if (sortKey === "obj") {
+        const av = a.objectiveValue ?? Number.NEGATIVE_INFINITY;
+        const bv = b.objectiveValue ?? Number.NEGATIVE_INFINITY;
+        d = av - bv;
+      } else if (sortKey === "wall") {
+        const av = a.wallTimeS ?? Number.POSITIVE_INFINITY;
+        const bv = b.wallTimeS ?? Number.POSITIVE_INFINITY;
+        d = av - bv;
+      } else if (sortKey === "trial") {
+        d = a.trialIdx - b.trialIdx;
+      } else {
+        // Parameter path.
+        const av = a.parameterValues[sortKey] ?? Number.NEGATIVE_INFINITY;
+        const bv = b.parameterValues[sortKey] ?? Number.NEGATIVE_INFINITY;
+        d = av - bv;
+      }
+      if (d === 0) d = a.trialIdx - b.trialIdx;
+      return sortDir === "asc" ? d : -d;
+    };
+    return arr.sort(cmp);
+  }, [study.trials, live.rankByIdx, sortKey, sortDir]);
+
+  function onSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "rank" || key === "trial" ? "asc" : "desc");
+    }
+  }
+
+  const arrow = (key: SortKey) =>
+    key === sortKey ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+
+  // ---- Selected trial (right pane) -----------------------------------------
   const selectedTrial =
     selectedIdx !== null
-      ? study.trials.find((t) => t.trialIdx === selectedIdx)
+      ? study.trials.find((t) => t.trialIdx === selectedIdx) ?? null
       : null;
-
-  const elapsed = ((study.finishedAt ?? Date.now()) - study.startedAt) / 1000;
+  const selectedRanked =
+    selectedIdx !== null
+      ? live.ranked.find((r) => r.trial.trialIdx === selectedIdx) ?? null
+      : null;
+  const bestTrial = live.ranked[0]?.trial ?? null;
 
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
@@ -74,16 +243,22 @@ export function OptimizationResults({ study }: Props) {
           <p className="text-[10px] text-[#5A5F66]">
             <span className="text-[#D8DCE2]">{basename(study.configPath)}</span>
             {" · "}
-            {doneTrials.length}/{study.params.nTrials} trials done
-            {study.bestTrialIdx !== null && study.bestObjectiveValue !== null && (
+            {live.nDone}/{study.params.nTrials} trials done
+            {live.ranked[0] && (
               <span className="ml-2 text-amber-300">
-                best #{study.bestTrialIdx} = {study.bestObjectiveValue.toPrecision(5)}
+                best #{live.ranked[0].trial.trialIdx} ={" "}
+                {(live.ranked[0].trial.objectiveValue as number).toPrecision(5)}
+                {objUnit && <span className="ml-0.5 text-[#9097A0]">{objUnit}</span>}
               </span>
+            )}
+            {showEta && (
+              <span className="ml-2 text-[#9097A0]">{formatEta(live.eta as number)}</span>
             )}
             <span className="ml-2">{elapsed.toFixed(1)} s</span>
           </p>
         </div>
-        {study.status === "running" && (
+        <ExportMenu items={exportItems} />
+        {isRunning && (
           <button
             type="button"
             onClick={() => cancelStudy(study.id)}
@@ -96,72 +271,199 @@ export function OptimizationResults({ study }: Props) {
 
       <div className="grid flex-1 min-h-0 grid-cols-[1fr_360px] gap-3 overflow-hidden p-3">
         <div className="flex min-h-0 flex-col gap-3 overflow-auto">
-          {doneTrials.length === 0 ? (
+          {/* Podium row — 3 cards, fills in rank order; dashed placeholders. */}
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((slot) => {
+              const r = live.top3[slot];
+              if (!r) {
+                return (
+                  <div
+                    key={slot}
+                    className="flex h-[64px] items-center justify-center rounded-sm border border-dashed border-[#2A2C32] text-[18px] text-[#3A3D44]"
+                  >
+                    —
+                  </div>
+                );
+              }
+              const t = r.trial;
+              const podium = PODIUM[r.rank]!;
+              const selected = selectedIdx === t.trialIdx;
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  onClick={() => setSelectedIdx(t.trialIdx)}
+                  className={
+                    "flex flex-col rounded-sm border border-l-4 border-[#2A2C32] bg-[#0E0E10] px-2 py-1.5 text-left " +
+                    podium.border +
+                    (selected ? " ring-1 ring-[#FFC627]/40" : " hover:bg-[#16171B]")
+                  }
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={
+                        "rounded-sm border px-1 py-[1px] text-[9px] uppercase tracking-wider " +
+                        podium.chip
+                      }
+                    >
+                      #{r.rank}
+                    </span>
+                    <span className="text-[9px] text-[#5A5F66]">trial #{t.trialIdx}</span>
+                  </div>
+                  <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
+                    {(t.objectiveValue as number).toPrecision(5)}
+                    {objUnit && <span className="ml-1 text-[10px] text-[#9097A0]">{objUnit}</span>}
+                  </div>
+                  <div className="font-mono text-[9px] text-[#5A5F66]">
+                    {r.rank === 1
+                      ? "best"
+                      : `Δ ${r.deltaToBest > 0 ? "+" : ""}${r.deltaToBest.toPrecision(3)}` +
+                        (r.pctOfBest != null
+                          ? ` (${r.pctOfBest > 0 ? "+" : ""}${r.pctOfBest.toFixed(1)}%)`
+                          : "")}
+                    {t.wallTimeS !== null && <span className="ml-2">{t.wallTimeS.toFixed(1)} s</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {live.nDone === 0 ? (
             <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
               Waiting for first trial…
             </div>
           ) : (
-            <div className="overflow-auto">
-              <ParallelCoordsPlot
-                axes={axes}
-                trials={trialsForPlot}
-                onTrialClick={setSelectedIdx}
-                selectedTrialIdx={selectedIdx}
-              />
-            </div>
+            <>
+              {/* Charts row — convergence + objective vs parameter. */}
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                <div className="overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                  <ScatterPlot
+                    title="convergence (objective vs trial)"
+                    points={convergencePoints}
+                    xLabel="trial"
+                    yLabel="objective"
+                    stepLine={convergenceStep}
+                    selectedId={selectedIdx}
+                    onPointClick={setSelectedIdx}
+                  />
+                </div>
+                <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                  <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
+                    {study.parameterPaths.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setParamForScatter(p)}
+                        className={
+                          "rounded-sm border px-1.5 py-0.5 text-[9px] " +
+                          (p === paramForScatter
+                            ? "border-[#FFC627] text-[#FFC627]"
+                            : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
+                        }
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="overflow-auto">
+                    <ScatterPlot
+                      title={`objective vs ${paramForScatter}`}
+                      points={paramScatterPoints}
+                      xLabel={paramForScatter}
+                      yLabel="objective"
+                      selectedId={selectedIdx}
+                      onPointClick={setSelectedIdx}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-auto">
+                <ParallelCoordsPlot
+                  axes={axes}
+                  trials={trialsForPlot}
+                  onTrialClick={setSelectedIdx}
+                  selectedTrialIdx={selectedIdx}
+                />
+              </div>
+            </>
           )}
 
-          <table className="w-full text-left font-mono text-[10px]">
-            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
-              <tr className="border-b border-[#2A2C32] [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
-                <th>#</th>
-                <th>status</th>
-                <th className="text-right">obj</th>
-                <th className="text-right">wall (s)</th>
-                {study.parameterPaths.map((p) => (
-                  <th key={p}>{p}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {study.trials.map((t) => {
-                const isSelected = selectedIdx === t.trialIdx;
-                const isBest = study.bestTrialIdx === t.trialIdx;
-                const baseCls = isBest
-                  ? "text-amber-300"
-                  : t.status === "done"
-                  ? "text-[#D8DCE2]"
-                  : "text-[#5A5F66]";
-                return (
-                  <tr
-                    key={t.trialIdx}
-                    onClick={() => setSelectedIdx(t.trialIdx)}
-                    className={
-                      "cursor-pointer border-t border-[#16171B] " +
-                      (isSelected ? "bg-[#16171B] " : "hover:bg-[#16171B]/50 ") +
-                      baseCls
-                    }
-                  >
-                    <td className="px-2 py-0.5">{t.trialIdx}</td>
-                    <td className="px-2 py-0.5">{t.status}</td>
-                    <td className="px-2 py-0.5 text-right">
-                      {t.objectiveValue !== null ? t.objectiveValue.toPrecision(5) : "—"}
-                    </td>
-                    <td className="px-2 py-0.5 text-right">
-                      {t.wallTimeS !== null ? t.wallTimeS.toFixed(2) : "—"}
-                    </td>
-                    {study.parameterPaths.map((p) => (
-                      <td key={p} className="px-2 py-0.5">
-                        {t.parameterValues[p] !== undefined
-                          ? t.parameterValues[p]!.toPrecision(4)
+          {/* Sortable ranked trial table. */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left font-mono text-[10px]">
+              <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+                <tr className="border-b border-[#2A2C32] [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
+                  <SortTh label="rank" k="rank" onSort={onSort} arrow={arrow} />
+                  <SortTh label="#" k="trial" onSort={onSort} arrow={arrow} />
+                  <th>status</th>
+                  <SortTh label="obj" k="obj" align="right" onSort={onSort} arrow={arrow} />
+                  <th className="text-right">Δ best</th>
+                  <SortTh label="wall (s)" k="wall" align="right" onSort={onSort} arrow={arrow} />
+                  {study.parameterPaths.map((p) => (
+                    <SortTh key={p} label={p} k={p} onSort={onSort} arrow={arrow} />
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedTrials.map((t) => {
+                  const isSelected = selectedIdx === t.trialIdx;
+                  const rank = live.rankByIdx.get(t.trialIdx) ?? null;
+                  const rankedRow = live.ranked.find((r) => r.trial.trialIdx === t.trialIdx);
+                  const podiumText = rank != null ? PODIUM_TEXT[rank] : undefined;
+                  const baseCls = podiumText
+                    ? podiumText
+                    : t.status === "done"
+                    ? "text-[#D8DCE2]"
+                    : "text-[#5A5F66]";
+                  return (
+                    <tr
+                      key={t.trialIdx}
+                      onClick={() => setSelectedIdx(t.trialIdx)}
+                      className={
+                        "cursor-pointer border-t border-[#16171B] " +
+                        (isSelected ? "bg-[#16171B] " : "hover:bg-[#16171B]/50 ") +
+                        baseCls
+                      }
+                    >
+                      <td className="px-2 py-0.5">{rank ?? "—"}</td>
+                      <td className="px-2 py-0.5">{t.trialIdx}</td>
+                      <td className="px-2 py-0.5">
+                        {t.status === "running" ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#FFC627]" />
+                            running
+                          </span>
+                        ) : (
+                          t.status
+                        )}
+                      </td>
+                      <td className="px-2 py-0.5 text-right">
+                        {t.objectiveValue !== null ? t.objectiveValue.toPrecision(5) : "—"}
+                      </td>
+                      <td className="px-2 py-0.5 text-right">
+                        {rankedRow
+                          ? rankedRow.rank === 1
+                            ? "best"
+                            : `${rankedRow.deltaToBest > 0 ? "+" : ""}${rankedRow.deltaToBest.toPrecision(3)}`
                           : "—"}
                       </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <td className="px-2 py-0.5 text-right">
+                        {t.wallTimeS !== null ? t.wallTimeS.toFixed(2) : "—"}
+                      </td>
+                      {study.parameterPaths.map((p) => (
+                        <td key={p} className="px-2 py-0.5">
+                          {t.parameterValues[p] !== undefined
+                            ? t.parameterValues[p]!.toPrecision(4)
+                            : "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <aside className="min-h-0 overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
@@ -169,6 +471,12 @@ export function OptimizationResults({ study }: Props) {
             <TrialInspector
               trial={selectedTrial}
               parameterPaths={study.parameterPaths}
+              configPath={study.configPath}
+              objective={study.params.objective}
+              rank={selectedRanked?.rank ?? null}
+              deltaToBest={selectedRanked?.deltaToBest ?? null}
+              pctOfBest={selectedRanked?.pctOfBest ?? null}
+              bestTrial={bestTrial}
             />
           ) : (
             <p className="text-[11px] text-[#5A5F66]">Click a trial to inspect.</p>
@@ -176,5 +484,33 @@ export function OptimizationResults({ study }: Props) {
         </aside>
       </div>
     </div>
+  );
+}
+
+/** Sortable header cell — clickable, shows the active-sort arrow glyph. */
+function SortTh({
+  label,
+  k,
+  align,
+  onSort,
+  arrow,
+}: {
+  label: string;
+  k: SortKey;
+  align?: "right";
+  onSort: (k: SortKey) => void;
+  arrow: (k: SortKey) => string;
+}) {
+  return (
+    <th className={align === "right" ? "text-right" : undefined}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className="cursor-pointer uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+      >
+        {label}
+        {arrow(k)}
+      </button>
+    </th>
   );
 }
