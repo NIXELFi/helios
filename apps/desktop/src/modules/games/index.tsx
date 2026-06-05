@@ -4,7 +4,7 @@ import { useHeliosAuth } from "../../auth/AuthShell";
 import { submitScore, type GameId } from "./api";
 import { GAMES, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
-import { LeaderboardPanel } from "./components/LeaderboardPanel";
+import { LobbyStandings } from "./components/LobbyStandings";
 import { GameStandings } from "./components/GameStandings";
 import { GameOverOverlay, type SubmitStatus } from "./components/GameOverOverlay";
 
@@ -30,6 +30,16 @@ export function GamesModule({ paused }: GamesModuleProps) {
       return GAMES[0]!.id;
     }
   });
+
+  /** Lobby board game switch — persisted like play() so the choice sticks. */
+  function selectBoard(g: GameId) {
+    setBoardGame(g);
+    try {
+      localStorage.setItem(LAST_GAME_KEY, g);
+    } catch {
+      // ignore (private mode / quota)
+    }
+  }
 
   function play(game: GameDef) {
     setActive(game);
@@ -105,7 +115,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
             </GameStandings>
           </div>
         ) : (
-          <div className="w-full max-w-2xl">
+          /* Lobby: one centered column — header, cabinet grid, and the
+           * standings board beneath at the same width (with its own game
+           * switcher), instead of a side tower fighting for horizontal room. */
+          <div className="max-h-full w-full max-w-2xl overflow-y-auto px-1">
             <div className="mb-6">
               <div className="games-hazard mb-3 h-1 w-12 rounded-sm" />
               <h1 className="games-display-heavy text-2xl tracking-[0.22em] text-asu-gold">ARCADE</h1>
@@ -116,14 +129,17 @@ export function GamesModule({ paused }: GamesModuleProps) {
                 <GameCard key={g.id} game={g} index={i} onPlay={() => play(g)} />
               ))}
             </div>
+            <div className="mt-4 pb-2">
+              <LobbyStandings
+                client={client}
+                game={boardGame}
+                onGameChange={selectBoard}
+                refreshToken={refreshToken}
+              />
+            </div>
           </div>
         )}
       </div>
-      {/* Side tower only in the lobby — in-game the standings wrap the
-          surface via GameStandings instead. */}
-      {!active && (
-        <LeaderboardPanel client={client} gameId={boardGame} refreshToken={refreshToken} />
-      )}
     </div>
   );
 }
