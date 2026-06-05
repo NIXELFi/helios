@@ -22,6 +22,7 @@ import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useAllFiles } from "../data/useAllFiles";
 import { useDeletedFiles } from "../data/useDeletedFiles";
 import { useDeletedFileReaper } from "../data/useDeletedFileReaper";
+import { ensureLocalFolderTree } from "../data/ensureLocalFolderTree";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useInterval } from "../data/useInterval";
@@ -128,6 +129,14 @@ export function BrowseScreen() {
     folders: folders ?? [],
     onReaped: rescan,
   });
+  // Materialize the vault folder scaffolding locally in BOTH download modes —
+  // empty folders included — so the local tree always mirrors the vault
+  // (spec 2a). Auto mode also runs this per sync pass; this effect covers
+  // manual mode and the time before the first pass.
+  useEffect(() => {
+    if (!vaultFolderPath || !folders || folders.length === 0) return;
+    void ensureLocalFolderTree(folders, vaultFolderPath);
+  }, [folders, vaultFolderPath]);
   // Lock-holder names: map each user id → email (fall back to display name) so
   // the FileTable can render "Locked by <person>" instead of "Locked by other".
   // useVaultUsers errors for non-admins (the RPC is admin-gated); that's fine —

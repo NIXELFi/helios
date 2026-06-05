@@ -32,7 +32,9 @@ function mockClient(
             range: (from: number, _to: number) =>
               Promise.resolve({ data: from === 0 ? rows : [], error: null }),
           });
-          return makeChain();
+          // useFolders adds .is("deleted_at", null) before the .order() chain
+          // to exclude soft-deleted folders.
+          return { is: () => makeChain() };
         },
       }),
     }),

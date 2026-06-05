@@ -5,6 +5,7 @@ import { matchLocal } from "./local-match";
 import { localDestPath } from "./folder-paths";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
+import { ensureLocalFolderTree } from "./ensureLocalFolderTree";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -39,7 +40,9 @@ export interface AutoSyncStatus {
  * Background syncer for the Vault. Whenever vault rows or local-scan results
  * change, a pass runs that downloads every file the user hasn't locked and
  * doesn't already have at the latest version. Locked-by-me files are skipped
- * — overwriting them would clobber the user's in-progress edits.
+ * — overwriting them would clobber the user's in-progress edits. Each pass also
+ * materializes the full vault folder scaffolding locally (empty folders
+ * included) via ensureLocalFolderTree so the local tree mirrors the vault.
  *
  * Re-entrancy: each pass captures a "generation" id when it starts. New passes
  * can't begin while a generation is active, and any state writes from an in-
@@ -131,6 +134,10 @@ export function useAutoSync(input: {
       setStatus((s) => (activeGenRef.current === myGen ? updater(s) : s));
     };
     guardedSet((s) => ({ ...s, busy: true }));
+
+    // Materialize the vault's folder scaffolding locally (empty folders too) so
+    // the local tree mirrors the vault before any file download. Best-effort.
+    await ensureLocalFolderTree(folders, vaultRoot);
 
     let downloaded = 0, skipped = 0, failed = 0;
     const myLocks = new Set(

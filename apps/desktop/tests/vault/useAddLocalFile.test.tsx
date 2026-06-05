@@ -84,17 +84,20 @@ function buildHappyClient(): SupabaseClient {
       }
       if (table === "folders") {
         return {
+          // Chain: select → eq(vault_id) → is(deleted_at,null) → eq(name) → {is|eq}(parent_id)
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                is: () => {
-                  callLog.push("folders.lookup");
-                  return Promise.resolve({ data: [], error: null });
-                },
-                eq: () => {
-                  callLog.push("folders.lookup");
-                  return Promise.resolve({ data: [], error: null });
-                },
+              is: () => ({
+                eq: () => ({
+                  is: () => {
+                    callLog.push("folders.lookup");
+                    return Promise.resolve({ data: [], error: null });
+                  },
+                  eq: () => {
+                    callLog.push("folders.lookup");
+                    return Promise.resolve({ data: [], error: null });
+                  },
+                }),
               }),
             }),
           }),
@@ -331,18 +334,20 @@ describe("useAddLocalFile", () => {
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                is: () => {
-                  callLog.push("folders.lookup");
-                  // First lookup is for Engine (parent_id is null) → return existing
-                  lookupCount++;
-                  return Promise.resolve({ data: [{ id: "engine-existing" }], error: null });
-                },
-                eq: () => {
-                  callLog.push("folders.lookup");
-                  lookupCount++;
-                  return Promise.resolve({ data: [], error: null });
-                },
+              is: () => ({
+                eq: () => ({
+                  is: () => {
+                    callLog.push("folders.lookup");
+                    // First lookup is for Engine (parent_id is null) → return existing
+                    lookupCount++;
+                    return Promise.resolve({ data: [{ id: "engine-existing" }], error: null });
+                  },
+                  eq: () => {
+                    callLog.push("folders.lookup");
+                    lookupCount++;
+                    return Promise.resolve({ data: [], error: null });
+                  },
+                }),
               }),
             }),
           }),
@@ -402,19 +407,21 @@ describe("useAddLocalFile", () => {
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                is: () => {
-                  callLog.push("folders.lookup");
-                  // 1st call: initial lookup — folder doesn't exist yet → []
-                  // 2nd call: post-INSERT retry — another caller created it,
-                  //           so it now exists.
-                  lookupRound++;
-                  if (lookupRound === 1) return Promise.resolve({ data: [], error: null });
-                  return Promise.resolve({ data: [{ id: "race-created" }], error: null });
-                },
-                // Same as above for non-null parent — unused in this test
-                // because we use a single-segment relative path.
-                eq: () => Promise.resolve({ data: [], error: null }),
+              is: () => ({
+                eq: () => ({
+                  is: () => {
+                    callLog.push("folders.lookup");
+                    // 1st call: initial lookup — folder doesn't exist yet → []
+                    // 2nd call: post-INSERT retry — another caller created it,
+                    //           so it now exists.
+                    lookupRound++;
+                    if (lookupRound === 1) return Promise.resolve({ data: [], error: null });
+                    return Promise.resolve({ data: [{ id: "race-created" }], error: null });
+                  },
+                  // Same as above for non-null parent — unused in this test
+                  // because we use a single-segment relative path.
+                  eq: () => Promise.resolve({ data: [], error: null }),
+                }),
               }),
             }),
           }),
@@ -470,9 +477,11 @@ describe("useAddLocalFile", () => {
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                is: () => Promise.resolve({ data: [], error: null }),
-                eq: () => Promise.resolve({ data: [], error: null }),
+              is: () => ({
+                eq: () => ({
+                  is: () => Promise.resolve({ data: [], error: null }),
+                  eq: () => Promise.resolve({ data: [], error: null }),
+                }),
               }),
             }),
           }),

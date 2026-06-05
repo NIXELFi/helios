@@ -66,14 +66,17 @@ function mockResolvedClient(
       if (table === "folders") {
         return {
           select: () => ({
+            // useFolders adds .is("deleted_at", null) before the .order() chain.
             eq: () => ({
-              order: () => {
-                const node: any = { order: () => node, range: (from: number, to: number) =>
-                  foldersError
-                    ? Promise.resolve({ data: null, error: foldersError })
-                    : Promise.resolve({ data: folders.slice(from, to + 1), error: null }) };
-                return node;
-              },
+              is: () => ({
+                order: () => {
+                  const node: any = { order: () => node, range: (from: number, to: number) =>
+                    foldersError
+                      ? Promise.resolve({ data: null, error: foldersError })
+                      : Promise.resolve({ data: folders.slice(from, to + 1), error: null }) };
+                  return node;
+                },
+              }),
             }),
           }),
         };

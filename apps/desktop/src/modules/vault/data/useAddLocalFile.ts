@@ -105,6 +105,7 @@ async function ensureFolderHierarchy(
       .from("folders")
       .select("*")
       .eq("vault_id", vaultId)
+      .is("deleted_at", null)
       .eq("name", seg);
     q = parentId === null ? q.is("parent_id", null) : q.eq("parent_id", parentId);
     const { data: existing, error: lookupErr } = await q;
@@ -124,6 +125,7 @@ async function ensureFolderHierarchy(
           .from("folders")
           .select("*")
           .eq("vault_id", vaultId)
+          .is("deleted_at", null)
           .eq("name", seg);
         raceQ = parentId === null ? raceQ.is("parent_id", null) : raceQ.eq("parent_id", parentId);
         const { data: race } = await raceQ;
