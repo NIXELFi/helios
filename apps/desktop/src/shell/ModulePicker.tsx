@@ -5,6 +5,7 @@ import {
   IconChevronsLeft,
   IconChevronsRight,
   IconClipboardList,
+  IconDeviceGamepad2,
   IconUserCircle,
   IconWind,
   type TablerIcon,
@@ -13,7 +14,7 @@ import { UpdatesPill } from "../components/UpdatesPill";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -22,6 +23,7 @@ const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   vault: IconArchive,
   cfd: IconWind,
   pm: IconClipboardList,
+  games: IconDeviceGamepad2,
 };
 
 // Collapsed/expanded preference for the module rail, persisted per machine.
@@ -83,6 +85,9 @@ interface Props {
   /** True when the user may enter the PM module — same gate as Vault (a live
    *  signed-in user, since PM hits RLS-protected pm.* tables on mount). */
   pmEnabled: boolean;
+  /** True when the user may enter the Games module — same gate as Vault/PM
+   *  (leaderboards hit RLS-protected games.* tables). */
+  gamesEnabled: boolean;
   /** True during boot getSession(), before we know whether a returning user
    *  is signed in. While loading we suppress the disabled "Sign in to use
    *  Vault" presentation so a signed-in user doesn't see it flash. */
@@ -105,6 +110,7 @@ export function ModulePicker(props: Props) {
     onChangePassword,
     vaultEnabled,
     pmEnabled,
+    gamesEnabled,
     authLoading = false,
   } = props;
   // While auth is still resolving, don't render Vault as disabled — a returning
@@ -112,6 +118,7 @@ export function ModulePicker(props: Props) {
   // their session lands. Treat it as a normal (pending) entry until we know.
   const vaultDisabled = !vaultEnabled && !authLoading;
   const pmDisabled = !pmEnabled && !authLoading;
+  const gamesDisabled = !gamesEnabled && !authLoading;
 
   // Rail collapse — shrink to an icon-only strip to reclaim horizontal space.
   const [collapsed, setCollapsed] = useState(readRailCollapsed);
@@ -198,6 +205,16 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("pm")}
           disabled={pmDisabled}
           disabledTitle="Sign in to use PM"
+        />
+        <NavButton
+          label="Games"
+          Icon={MODULE_ICON.games}
+          collapsed={collapsed}
+          badge="NEW"
+          active={active === "games"}
+          onClick={() => onSelect("games")}
+          disabled={gamesDisabled}
+          disabledTitle="Sign in to use Games"
         />
       </div>
 

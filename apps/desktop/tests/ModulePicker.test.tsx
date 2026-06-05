@@ -15,6 +15,8 @@ const baseProps = {
   onDisconnect: () => {},
   onChangePassword: () => {},
   vaultEnabled: true,
+  pmEnabled: true,
+  gamesEnabled: true,
 };
 
 describe("<ModulePicker>", () => {
