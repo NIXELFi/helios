@@ -106,7 +106,7 @@ function HeliosShell() {
     // briefly `user === null` during boot getSession(), and bouncing/dropping
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
-    if (vaultEnabled) return; // pmEnabled === vaultEnabled === gamesEnabled
+    if (vaultEnabled && pmEnabled && gamesEnabled) return;
     if (active === "vault" || active === "pm" || active === "games") setActive("logs");
     setVisited((prev) => {
       if (!prev.has("vault") && !prev.has("pm") && !prev.has("games")) return prev;
@@ -116,7 +116,7 @@ function HeliosShell() {
       next.delete("games");
       return next;
     });
-  }, [active, vaultEnabled, authLoading]);
+  }, [active, vaultEnabled, pmEnabled, gamesEnabled, authLoading]);
 
   function activate(id: ModuleId) {
     if (

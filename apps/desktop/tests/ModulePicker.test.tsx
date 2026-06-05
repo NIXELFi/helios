@@ -131,6 +131,20 @@ describe("<ModulePicker>", () => {
     expect(onSelect).toHaveBeenCalledWith("vault");
   });
 
+  it("greys out the Games button when gamesEnabled is false and still fires onSelect (Shell routes to auth)", () => {
+    const onSelect = vi.fn();
+    render(
+      <ModulePicker {...baseProps} active="logs" onSelect={onSelect} gamesEnabled={false} />,
+    );
+    const gamesBtn = screen.getByRole("button", { name: /games/i });
+    expect(gamesBtn).toHaveAttribute("aria-disabled", "true");
+    // aria-current is never set on a disabled entry.
+    expect(gamesBtn).not.toHaveAttribute("aria-current", "page");
+    // Click still fires onSelect — the Shell turns this into "open auth modal".
+    fireEvent.click(gamesBtn);
+    expect(onSelect).toHaveBeenCalledWith("games");
+  });
+
   // S9: the disabled-but-clickable Vault entry must show a real hover cue
   // (it opens sign-in) — not a no-op hover equal to its base border, and not
   // the default cursor that implies "dead".
