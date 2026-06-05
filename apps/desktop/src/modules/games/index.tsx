@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { submitScore, type GameId } from "./api";
 import { GAMES, type GameDef } from "./registry";
@@ -67,16 +68,16 @@ export function GamesModule({ paused }: GamesModuleProps) {
   const ActiveGame = active?.component;
 
   return (
-    <div className="flex h-full bg-helios-base">
+    <div className="games-root games-bg flex h-full">
       <div className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-4">
         {active && ActiveGame ? (
           <>
             <div className="flex w-full max-w-xl items-center justify-between">
-              <div className="text-sm font-semibold text-helios-text">{active.title}</div>
+              <div className="games-display text-sm text-helios-text">{active.title}</div>
               <button
                 type="button"
                 onClick={() => { setActive(null); setOver(null); }}
-                className="rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-xs text-helios-text hover:border-asu-gold"
+                className="rounded-sm px-2 py-1 text-xs text-helios-dim transition-colors hover:text-asu-gold"
               >
                 ← All games
               </button>
@@ -98,10 +99,17 @@ export function GamesModule({ paused }: GamesModuleProps) {
             </div>
           </>
         ) : (
-          <div className="grid w-full max-w-xl grid-cols-2 gap-3">
-            {GAMES.map((g) => (
-              <GameCard key={g.id} game={g} onPlay={() => play(g)} />
-            ))}
+          <div className="w-full max-w-2xl">
+            <div className="mb-6">
+              <div className="games-hazard mb-3 h-1 w-12 rounded-sm" />
+              <h1 className="games-display-heavy text-2xl tracking-[0.22em] text-asu-gold">ARCADE</h1>
+              <p className="mt-1 text-xs text-helios-dim">Sun Devil Motorsports · after hours</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {GAMES.map((g, i) => (
+                <GameCard key={g.id} game={g} index={i} onPlay={() => play(g)} />
+              ))}
+            </div>
           </div>
         )}
       </div>

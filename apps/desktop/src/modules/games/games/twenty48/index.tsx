@@ -15,6 +15,35 @@ const KEY_DIR: Record<string, Dir> = {
   ArrowRight: "right",
 };
 
+// Deliberate 11-step tile ramp (2 → 2048+). Greys warm to bronze, then amber,
+// then full glowing gold; values beyond 2048 fall into the maroon "beyond" tier.
+const TILE_STYLES: Record<number, string> = {
+  2: "bg-helios-panel text-helios-dim",
+  4: "bg-[#1e1f24] text-helios-text",
+  8: "bg-[#2a2718] text-[#e6c97a]",
+  16: "bg-[#3a3422] text-[#f0d488]",
+  32: "bg-[#4d3d1c] text-[#ffd766]",
+  64: "bg-[#6b4f1a] text-[#ffdf7a]",
+  128: "bg-[#9c7415] text-helios-base",
+  256: "bg-[#c79412] text-helios-base",
+  512: "bg-[#e2ad11] text-helios-base",
+  1024: "bg-asu-gold text-helios-base shadow-[0_0_18px_rgba(255,198,39,0.45)]",
+  2048: "bg-asu-gold text-helios-base shadow-[0_0_18px_rgba(255,198,39,0.45)]",
+};
+const TILE_BEYOND = "bg-asu-maroon text-asu-gold shadow-[0_0_18px_rgba(140,29,64,0.55)]";
+
+function tileClass(v: number): string {
+  if (v > 2048) return TILE_BEYOND;
+  return TILE_STYLES[v] ?? "bg-helios-panel text-helios-text";
+}
+
+// 4-digit values (1024+) use smaller type so they never overflow the cell.
+function tileTextSize(v: number): string {
+  if (v >= 1024) return "text-base";
+  if (v >= 128) return "text-lg";
+  return "text-xl";
+}
+
 export function Twenty48Game({ onGameOver, paused }: GameProps) {
   const [game, setGame] = useState<GameState>(() => ({
     board: createInitialBoard(Math.random),
@@ -56,25 +85,41 @@ export function Twenty48Game({ onGameOver, paused }: GameProps) {
   }, [paused, onGameOver]);
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="text-sm text-helios-dim">Score {game.score}</div>
-      <div role="grid" aria-label="2048 board" className="grid grid-cols-4 gap-2 p-3 rounded-sm border border-helios-line bg-helios-panel">
-        {game.board.map((v, i) => (
-          <div
-            key={i}
-            className="flex h-16 w-16 items-center justify-center rounded-sm text-lg font-bold"
-            style={
-              v === 0
-                ? { backgroundColor: "rgba(22,23,27,1)" }
-                : {
-                    backgroundColor: `rgba(255,198,39,${Math.min(0.25 + Math.log2(v) * 0.075, 1)})`,
-                    color: "#16171B",
-                  }
-            }
-          >
-            {v !== 0 ? v : null}
-          </div>
-        ))}
+    <div className="games-crt">
+      <div className="flex flex-col items-stretch gap-3">
+        {/* Score line — micro-label + tabular value, right-aligned over grid */}
+        <div className="flex items-baseline justify-end gap-2 px-1">
+          <span className="games-display text-[10px] text-helios-dim">SCORE</span>
+          <span className="games-num text-lg font-bold text-asu-gold">{game.score}</span>
+        </div>
+
+        <div
+          role="grid"
+          aria-label="2048 board"
+          className={`grid grid-cols-4 gap-2 rounded-sm transition-opacity duration-300 ${
+            game.over ? "opacity-40" : "opacity-100"
+          }`}
+        >
+          {game.board.map((v, i) =>
+            v === 0 ? (
+              <div
+                key={i}
+                className="h-16 w-16 rounded-sm bg-helios-base shadow-inner"
+              />
+            ) : (
+              // Key by index+value so a cell whose value changes remounts and
+              // pops; unchanged cells keep their key and don't re-animate.
+              <div
+                key={`${i}-${v}`}
+                className={`games-pop flex h-16 w-16 items-center justify-center rounded-sm font-bold ${tileTextSize(
+                  v,
+                )} ${tileClass(v)}`}
+              >
+                {v}
+              </div>
+            ),
+          )}
+        </div>
       </div>
     </div>
   );

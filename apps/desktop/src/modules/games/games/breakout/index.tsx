@@ -12,6 +12,7 @@ export function BreakoutGame({ onGameOver, paused }: GameProps) {
   const paddleX = useRef((W - PADDLE_W) / 2);
   const ended = useRef(false);
   const keys = useRef<Set<string>>(new Set());
+  const trail = useRef<{ x: number; y: number }[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -56,7 +57,13 @@ export function BreakoutGame({ onGameOver, paused }: GameProps) {
     }
 
     state.current = step(state.current, dt, paddleX.current);
-    draw(canvasRef.current, state.current, paddleX.current);
+
+    // Update ball motion trail (reuse array; cap at 5 points).
+    const tr = trail.current;
+    tr.push({ x: state.current.x, y: state.current.y });
+    if (tr.length > 5) tr.shift();
+
+    draw(canvasRef.current, state.current, paddleX.current, tr);
 
     if (state.current.gameOver && !ended.current) {
       ended.current = true;
@@ -69,48 +76,129 @@ export function BreakoutGame({ onGameOver, paused }: GameProps) {
   }, paused);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={W}
-      height={H}
-      className="rounded-sm border border-helios-line bg-helios-panel"
-      role="img"
-      aria-label="Breakout game"
-    />
+    <div className="games-crt">
+      <canvas
+        ref={canvasRef}
+        width={W}
+        height={H}
+        role="img"
+        aria-label="Breakout game"
+      />
+    </div>
   );
 }
 
-function draw(canvas: HTMLCanvasElement | null, s: BreakoutState, paddleX: number) {
+// Per-row color ramp: maroon #8C1D40 (top) → gold #FFC627 (bottom), RGB lerp.
+// Precomputed once at module load — ROWS is constant.
+function lerpColor(t: number): string {
+  const r = Math.round(0x8c + (0xff - 0x8c) * t);
+  const g = Math.round(0x1d + (0xc6 - 0x1d) * t);
+  const b = Math.round(0x40 + (0x27 - 0x40) * t);
+  return `rgb(${r},${g},${b})`;
+}
+const ROW_COLORS: string[] = Array.from({ length: ROWS }, (_, i) =>
+  lerpColor(ROWS > 1 ? i / (ROWS - 1) : 0),
+);
+// Slightly darker variant for the bottom-edge depth line.
+const ROW_EDGES: string[] = Array.from({ length: ROWS }, (_, i) => {
+  const t = ROWS > 1 ? i / (ROWS - 1) : 0;
+  const r = Math.round((0x8c + (0xff - 0x8c) * t) * 0.6);
+  const g = Math.round((0x1d + (0xc6 - 0x1d) * t) * 0.6);
+  const b = Math.round((0x40 + (0x27 - 0x40) * t) * 0.6);
+  return `rgb(${r},${g},${b})`;
+});
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number) {
+  const rad = Math.min(radius, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+function draw(
+  canvas: HTMLCanvasElement | null,
+  s: BreakoutState,
+  paddleX: number,
+  trail: { x: number; y: number }[],
+) {
   const ctx = canvas?.getContext("2d");
   if (!ctx) return;
 
-  // Background
-  ctx.fillStyle = "#16171B"; // helios-panel
+  // Flat dark surface (bezel supplies the vignette).
+  ctx.fillStyle = "#101114";
   ctx.fillRect(0, 0, W, H);
 
-  // Bricks
-  ctx.fillStyle = "#FFC627"; // asu-gold
+  // Bricks: row color ramp, rounded with a darker bottom-edge for depth.
+  const gap = 2;
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
       if (!s.bricks[row * COLS + col]) continue;
-      const bx = col * BRICK_W + 1;
-      const by = BRICK_TOP + row * BRICK_H + 1;
-      ctx.fillRect(bx, by, BRICK_W - 2, BRICK_H - 2);
+      const bx = col * BRICK_W + gap;
+      const by = BRICK_TOP + row * BRICK_H + gap;
+      const bw = BRICK_W - gap * 2;
+      const bh = BRICK_H - gap * 2;
+      // bottom-edge depth line
+      ctx.fillStyle = ROW_EDGES[row]!;
+      roundRect(ctx, bx, by + 1, bw, bh, 3);
+      ctx.fill();
+      // face
+      ctx.fillStyle = ROW_COLORS[row]!;
+      roundRect(ctx, bx, by, bw, bh - 1, 3);
+      ctx.fill();
     }
   }
 
-  // Paddle
-  ctx.fillStyle = "#D8DCE2"; // helios-text
-  ctx.fillRect(paddleX, PADDLE_Y, PADDLE_W, PADDLE_H);
+  // Ball trail: fading white circles, oldest → newest (alpha 0.1 → 0.5).
+  for (let i = 0; i < trail.length; i++) {
+    const p = trail[i]!;
+    const a = 0.1 + (0.4 * i) / Math.max(1, trail.length - 1);
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, BALL_R * (0.5 + 0.4 * (i / Math.max(1, trail.length))), 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Ball
+  // Paddle: gold capsule with a slight glow.
+  ctx.save();
+  ctx.shadowColor = "#FFC627";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "#FFC627";
+  roundRect(ctx, paddleX, PADDLE_Y, PADDLE_W, PADDLE_H, PADDLE_H / 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Ball: white core.
   ctx.fillStyle = "#FFFFFF";
   ctx.beginPath();
   ctx.arc(s.x, s.y, BALL_R, 0, Math.PI * 2);
   ctx.fill();
 
-  // Score + level
-  ctx.fillStyle = "#9097A0"; // helios-dim
-  ctx.font = "12px sans-serif";
-  ctx.fillText(`Score ${s.score}  Level ${s.level}`, 8, 16);
+  // HUD: SCORE (top-left) + LVL (top-right), Orbitron microlabels.
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.font = "700 9px Orbitron, sans-serif";
+  ctx.fillStyle = "#9097A0";
+  ctx.fillText("SCORE", 10, 18);
+  ctx.font = "700 16px Orbitron, sans-serif";
+  ctx.fillStyle = "#D8DCE2";
+  ctx.fillText(String(s.score), 10, 34);
+
+  ctx.textAlign = "right";
+  ctx.font = "700 9px Orbitron, sans-serif";
+  ctx.fillStyle = "#9097A0";
+  ctx.fillText("LVL", W - 10, 18);
+  ctx.font = "700 16px Orbitron, sans-serif";
+  ctx.fillStyle = "#D8DCE2";
+  ctx.fillText(String(s.level), W - 10, 34);
+  ctx.textAlign = "left";
+
+  // Dim on game over so the overlay pops.
+  if (s.gameOver) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, W, H);
+  }
 }

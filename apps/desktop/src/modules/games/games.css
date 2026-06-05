@@ -1,0 +1,179 @@
+/* Games module — "race-night arcade" skin.
+ *
+ * One shared visual language for the picker, leaderboard, overlay, and game
+ * surfaces: blueprint-grid atmosphere, CRT-flavored canvases, Orbitron
+ * scoreboard type (already loaded for the HELIOS wordmark), motorsport
+ * details (grid positions, hazard stripes, podium metals). Everything stays
+ * inside the Helios palette — this is the same app after hours, not a
+ * different one.
+ */
+
+/* ---------------------------------------------------------------- tokens */
+.games-root {
+  --g-gold: #ffc627;
+  --g-gold-dim: rgba(255, 198, 39, 0.55);
+  --g-gold-glow: rgba(255, 198, 39, 0.12);
+  --g-silver: #c0c7d1;
+  --g-bronze: #b87333;
+  --g-line: #2a2c32;
+  --g-panel: #16171b;
+  --g-base: #0e0e10;
+  --g-text: #d8dce2;
+  --g-dim: #9097a0;
+}
+
+/* ------------------------------------------------------------ atmosphere */
+/* Blueprint graph-paper over the base: a fine 24px grid with a heavier
+ * 120px major line, plus a faint gold radial up top so the room has a
+ * light source. Sits behind everything in the module. */
+.games-bg {
+  background-color: var(--g-base);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -10%, var(--g-gold-glow), transparent 70%),
+    linear-gradient(to right, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
+    linear-gradient(to right, rgba(42, 44, 50, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(42, 44, 50, 0.28) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    120px 120px,
+    120px 120px,
+    24px 24px,
+    24px 24px;
+}
+
+/* ------------------------------------------------------------ typography */
+/* Scoreboard display type. Orbitron is loaded in index.html for the brand
+ * wordmark; reusing it makes the arcade unmistakably Helios. */
+.games-display {
+  font-family: "Orbitron", system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+}
+.games-display-heavy {
+  font-family: "Orbitron", system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  font-weight: 900;
+}
+/* Tabular numerals for anything that counts. */
+.games-num {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------- CRT surface */
+/* Wrapper around a game canvas: bezel ring, inner vignette, soft gold
+ * ambient glow. The canvas itself stays untouched — depth comes from the
+ * frame. */
+.games-crt {
+  position: relative;
+  border-radius: 6px;
+  padding: 10px;
+  background: linear-gradient(180deg, #1a1b20 0%, #121317 100%);
+  border: 1px solid var(--g-line);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 18px 50px -18px rgba(0, 0, 0, 0.9),
+    0 0 36px -6px var(--g-gold-glow);
+}
+.games-crt::after {
+  /* scanlines + corner vignette, over the canvas but under pointer events */
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 3px;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.16) 0px,
+      rgba(0, 0, 0, 0.16) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(ellipse 105% 105% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.4) 100%);
+}
+
+/* -------------------------------------------------------------- hazard */
+/* Diagonal caution-stripe ribbon — used as a thin accent strip on cards
+ * and headers. Gold on dark, kept low-contrast so it reads as trim. */
+.games-hazard {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--g-gold-dim) 0px,
+    var(--g-gold-dim) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* --------------------------------------------------------------- podium */
+.games-rank-1 { color: var(--g-gold); }
+.games-rank-2 { color: var(--g-silver); }
+.games-rank-3 { color: var(--g-bronze); }
+
+/* --------------------------------------------------------------- motion */
+/* Staggered entrance for the picker grid: cards rise and settle. Apply
+ * .games-rise plus an inline animation-delay per index. */
+@keyframes games-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.games-rise {
+  opacity: 0;
+  animation: games-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Slow ambient pulse for glowing accents (food dot, live indicator). */
+@keyframes games-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.games-pulse { animation: games-pulse 1.8s ease-in-out infinite; }
+
+/* 2048 tile pop-in. */
+@keyframes games-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.games-pop { animation: games-pop 0.16s ease-out; }
+
+/* GAME OVER marquee flicker — one-shot, restrained, like a tube warming up. */
+@keyframes games-flicker {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  12% { opacity: 0.35; }
+  18% { opacity: 1; }
+  24% { opacity: 0.6; }
+  32%, 100% { opacity: 1; }
+}
+.games-flicker { animation: games-flicker 0.9s linear forwards; }
+
+/* Overlay backdrop fade + card drop-in. */
+@keyframes games-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.games-overlay-in { animation: games-overlay-in 0.22s ease-out forwards; }
+@keyframes games-card-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.games-card-in { animation: games-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* House rule (styles.css): decorative continuous animations stop under
+ * reduced motion; short discrete transitions may stay. Entrances snap to
+ * their final state. */
+@media (prefers-reduced-motion: reduce) {
+  .games-rise,
+  .games-overlay-in,
+  .games-card-in,
+  .games-flicker {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .games-pulse { animation: none; }
+  .games-pop { animation: none; }
+}
