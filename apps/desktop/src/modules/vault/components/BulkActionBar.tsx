@@ -6,8 +6,9 @@ import { useDeleteFile } from "../data/useDeleteFile";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useCheckIn } from "../data/useCheckIn";
 import { useDownloadVersion } from "../data/useDownloadVersion";
-import { matchLocal } from "../data/local-match";
+import { matchLocal, vaultRelativePath } from "../data/local-match";
 import { localDestPath } from "../data/folder-paths";
+import { ledgerRecord } from "../data/sync-ledger";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -22,6 +23,9 @@ interface Props {
   // Download support (optional)
   vaultRoot?: string | null;
   folders?: Folder[];
+  /** Active vault id — records successful bulk get-latest / check-in
+   *  materializations in the sync ledger (T6). Optional; null disables it. */
+  vaultId?: string | null;
   // Lock state. When supplied, bulk actions gate per-row so e.g. Check Out
   // skips files already locked by other users (silently failing the RPC and
   // surfacing a cryptic count). Without these, the bar runs un-gated.
@@ -38,6 +42,7 @@ export function BulkActionBar({
   versionsByFileId = new Map(),
   vaultRoot,
   folders = [],
+  vaultId = null,
   locks = [],
   currentUserId = null,
 }: Props) {
@@ -170,7 +175,11 @@ export function BulkActionBar({
         ) as ArrayBuffer;
         const r = await checkIn.run(id, ab, "bulk check-in");
         if (signal.aborted) return;
-        if (r) ok++; else fail++;
+        if (r) {
+          ok++;
+          // Record the just-checked-in content in the ledger (T6).
+          if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), r.sha256);
+        } else fail++;
       } catch {
         if (signal.aborted) return;
         fail++;
@@ -205,7 +214,11 @@ export function BulkActionBar({
       const dest = localDestPath(vaultRoot!, file.folder_id, file.name, folders);
       const r = await download.run(ver.sha256, dest, signal);
       if (signal.aborted) return;
-      if (r) ok++; else fail++;
+      if (r) {
+        ok++;
+        // Record the freshly-downloaded latest version in the ledger (T6).
+        if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
+      } else fail++;
     }
     if (signal.aborted) return;
     setStatus(

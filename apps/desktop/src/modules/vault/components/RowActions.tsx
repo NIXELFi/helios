@@ -7,8 +7,9 @@ import { useReleaseLock } from "../data/useReleaseLock";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
 import { useRecordProperties } from "../data/useRecordProperties";
-import { localDestPath } from "../data/folder-paths";
+import { localDestPath, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
+import { ledgerRecord } from "../data/sync-ledger";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, FolderId, Folder, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
@@ -22,6 +23,23 @@ interface LocalCtx {
   fileName?: string;
   folders?: Folder[];
   latestSha?: string | null;
+  /** Active vault id — when set, a successful materialization here (download on
+   *  checkout, get-latest, undo-checkout restore, or check-in) records the
+   *  file in the sync ledger so a later local delete is detectable (T6). */
+  vaultId?: string | null;
+}
+
+/** The vault-relative path for this file (folder hierarchy + sanitized name),
+ *  or null if we lack a file name. Matches the key the sync ledger uses. */
+function relForCtx(ctx: LocalCtx): string | null {
+  return ctx.fileName ? vaultRelPathFor(ctx.folderId ?? null, ctx.fileName, ctx.folders ?? []) : null;
+}
+
+/** Record a successful materialization in the sync ledger. Fire-and-forget;
+ *  no-op without both a vaultId and a known sha. */
+function recordLedger(ctx: LocalCtx, sha: string | null | undefined): void {
+  const rel = relForCtx(ctx);
+  if (ctx.vaultId && rel && sha) void ledgerRecord(ctx.vaultId, rel, sha);
 }
 
 /** The local working-copy path for this file, or null if no vault folder. */
@@ -53,7 +71,7 @@ interface CheckInButtonProps extends LocalCtx {
 }
 
 export function CheckOutButton({
-  fileId, onDone, vaultRoot, folderId, fileName, folders, latestSha, localFile,
+  fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha, localFile,
 }: ActionProps) {
   const acquireLock = useAcquireLock();
   const download = useDownloadVersion();
@@ -72,7 +90,11 @@ export function CheckOutButton({
       const stale =
         !localFile ||
         (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
-      if (latestSha && stale) await download.run(latestSha, dest);
+      if (latestSha && stale) {
+        const ok = await download.run(latestSha, dest);
+        // Record the freshly-downloaded latest version in the ledger (T6).
+        if (ok) recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+      }
       await setReadonly(dest, false);
       flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
     }
@@ -103,7 +125,7 @@ export function CheckOutButton({
 }
 
 export function CheckInButton({
-  fileId, localFile, onDone, vaultRoot, folderId, fileName, folders,
+  fileId, localFile, onDone, vaultRoot, folderId, fileName, folders, vaultId,
 }: CheckInButtonProps) {
   const checkIn = useCheckIn();
   const recordRefs = useRecordRefs();
@@ -160,6 +182,9 @@ export function CheckInButton({
       // back to the computed vault path.
       const dest = localFile?.absolutePath ?? localTarget({ vaultRoot, folderId, fileName, folders });
       if (dest) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
+      // Record the just-checked-in content in the ledger (T6): the local copy
+      // now matches result.sha256, so a later local delete is detectable.
+      recordLedger({ folderId, fileName, folders, vaultId }, result.sha256);
       // Record this version's assembly references (best-effort, fire-and-forget
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
@@ -323,6 +348,8 @@ interface GetLatestButtonProps {
   latestSha: string | null;
   vaultRoot: string | null;
   folders: Folder[];
+  /** Active vault id — records a successful into-vault download in the ledger. */
+  vaultId?: string | null;
   onDone?: () => void;
   /**
    * Visual + behavioral variant.
@@ -345,6 +372,7 @@ export function GetLatestButton({
   latestSha,
   vaultRoot,
   folders,
+  vaultId,
   onDone,
   variant = "auto",
 }: GetLatestButtonProps) {
@@ -376,7 +404,12 @@ export function GetLatestButton({
       // read-only (real-vault), even in manual mode where auto-sync's
       // reconciliation never runs. Don't touch a user-chosen save-dialog path
       // outside the vault.
-      if (intoVault) await setReadonly(dest, true);
+      if (intoVault) {
+        await setReadonly(dest, true);
+        // Only an into-vault download materializes the canonical local copy the
+        // ledger tracks — a save-dialog path elsewhere isn't a vault copy (T6).
+        recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+      }
       onDone?.();
     }
   }
@@ -508,7 +541,7 @@ export function GetVersionButton({
 }
 
 export function CancelButton({
-  fileId, onDone, vaultRoot, folderId, fileName, folders, latestSha,
+  fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha,
 }: ActionProps) {
   const releaseLock = useReleaseLock();
   const download = useDownloadVersion();
@@ -529,7 +562,12 @@ export function CancelButton({
       // held-back rule protecting it. A read-only-but-dirty file would look like
       // a clean stale copy and get clobbered on the next pass.
       const restored = await download.run(latestSha, dest);
-      if (restored) { await setReadonly(dest, true); flipSwReadonly(dest, true); }
+      if (restored) {
+        await setReadonly(dest, true); flipSwReadonly(dest, true);
+        // Undo-checkout restored the latest vaulted version locally → record it
+        // (T6): the local copy now matches latestSha and is ledger-tracked.
+        recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+      }
     }
     onDone?.();
   }

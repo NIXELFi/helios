@@ -199,6 +199,7 @@ pub fn run() {
             commands::set_readonly::sw_flip_readonly,
             commands::parse_refs::parse_sw_refs,
             commands::parse_refs::parse_sw_properties,
+            commands::reveal::reveal_in_explorer,
             bridge::bridge_set_session,
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,

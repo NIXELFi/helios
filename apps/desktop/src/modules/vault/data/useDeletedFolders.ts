@@ -3,7 +3,15 @@ import { useSupabaseClient } from "@helios/auth";
 import type { Folder, QueryResult, VaultId } from "./types";
 import { fetchAllRows } from "./paginate";
 
-export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]> {
+/**
+ * Fetches the soft-deleted folders in a vault (the recycle bin) — every row
+ * whose `deleted_at` is non-null, most-recently-deleted first. Mirror of
+ * useFolders with the delete filter inverted (useFolders excludes these rows).
+ *
+ * Paginated via .range() (see paginate.ts) since a long-lived vault's recycle
+ * bin can exceed PostgREST's default 1000-row cap.
+ */
+export function useDeletedFolders(vault_id: VaultId | undefined): QueryResult<Folder[]> {
   const client = useSupabaseClient();
   const [data, setData] = useState<Folder[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -22,17 +30,13 @@ export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]>
     setError(null);
     (async () => {
       const { rows, error: err } = await fetchAllRows<Folder>(
-        // Explicit stable order: PostgREST does not guarantee a stable order
-        // across .range() pages without an ORDER BY, so chunks of a paginated
-        // response could duplicate or skip rows. `name` is not unique, so it
-        // alone is insufficient — append the PK `id` as a tiebreaker for a
-        // deterministic total order. Sorting by name also gives the
-        // FolderTree a predictable initial order.
+        // `deleted_at` is not unique, so append the PK `id` as a tiebreaker for
+        // a deterministic total order across .range() pages (cf. useDeletedFiles).
         () => (client.from("folders") as any)
           .select("*")
           .eq("vault_id", vault_id)
-          .is("deleted_at", null)
-          .order("name", { ascending: true })
+          .not("deleted_at", "is", null)
+          .order("deleted_at", { ascending: false })
           .order("id", { ascending: true }),
       );
       if (!mounted) return;

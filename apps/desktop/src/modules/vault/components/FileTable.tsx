@@ -1,5 +1,7 @@
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
 import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
+import { revealInExplorer } from "../data/reveal";
+import { FILE_MANAGER } from "../../../lib/platform";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -33,6 +35,10 @@ interface Props {
   // Download support
   vaultRoot?: string | null;
   folders?: Folder[];
+  /** Active vault id — threaded to the row actions so a successful per-row
+   *  download / get-latest / check-in records the materialization in the sync
+   *  ledger (T6). Optional; null disables ledger recording. */
+  vaultId?: string | null;
   /**
    * Per-vault download mode. In "manual" mode every server file with a known
    * latest version shows a "Download" action regardless of localMatch status,
@@ -239,6 +245,7 @@ export function FileTable({
   versionsByFileId,
   vaultRoot,
   folders = [],
+  vaultId,
   downloadMode = "auto",
   openInSw,
 }: Props) {
@@ -371,7 +378,25 @@ export function FileTable({
               >
                 <div className="flex items-center gap-2">
                   <FileTypeIcon name={f.name} />
-                  <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                  {localMatch?.local ? (
+                    // Local copy exists — name is a button that reveals it in
+                    // Explorer. stopPropagation prevents the row's onSelect from
+                    // also firing (row stays selected where it already was).
+                    <button
+                      id={`file-row-name-${f.id}`}
+                      type="button"
+                      title={`Reveal in ${FILE_MANAGER}`}
+                      className="block max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void revealInExplorer(localMatch.local!.absolutePath);
+                      }}
+                    >
+                      {f.name}
+                    </button>
+                  ) : (
+                    <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                  )}
                 </div>
               </td>
               <td className="px-2.5 py-1.5">
@@ -390,6 +415,7 @@ export function FileTable({
                       folderId={f.folder_id}
                       fileName={f.name}
                       folders={folders}
+                      vaultId={vaultId ?? null}
                       latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                       localFile={localMatch?.local}
                     />
@@ -404,6 +430,7 @@ export function FileTable({
                         folderId={f.folder_id}
                         fileName={f.name}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                       />
                       <CancelButton
                         fileId={f.id}
@@ -412,6 +439,7 @@ export function FileTable({
                         folderId={f.folder_id}
                         fileName={f.name}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                       />
                     </>
@@ -439,6 +467,7 @@ export function FileTable({
                         latestSha={versionsMap.get(f.id)?.[0]?.sha256 ?? null}
                         vaultRoot={vaultRoot ?? null}
                         folders={folders}
+                        vaultId={vaultId ?? null}
                         onDone={onActionComplete}
                         variant={downloadMode}
                       />

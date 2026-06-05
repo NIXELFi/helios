@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Folder, VaultFile, Version, Lock } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
-import { matchLocal } from "./local-match";
+import { matchLocal, vaultRelativePath } from "./local-match";
 import { localDestPath } from "./folder-paths";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
+import { ensureLocalFolderTree } from "./ensureLocalFolderTree";
+import {
+  classifyMissing,
+  emptyLedger,
+  ledgerRecord,
+  ledgerRemove,
+  loadLedger,
+} from "./sync-ledger";
+import {
+  notifyLocalDeleteBlocked,
+  notifyLocalDeletesPropagated,
+} from "./local-delete-events";
+import { useSupabaseClient } from "@helios/auth";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -39,7 +52,28 @@ export interface AutoSyncStatus {
  * Background syncer for the Vault. Whenever vault rows or local-scan results
  * change, a pass runs that downloads every file the user hasn't locked and
  * doesn't already have at the latest version. Locked-by-me files are skipped
- * — overwriting them would clobber the user's in-progress edits.
+ * — overwriting them would clobber the user's in-progress edits. Each pass also
+ * materializes the full vault folder scaffolding locally (empty folders
+ * included) via ensureLocalFolderTree so the local tree mirrors the vault.
+ *
+ * Local-deletion detection (spec 2c) is the THIRD bucket each pass partitions
+ * into, alongside "download" and "skip". For a file that's live in the vault
+ * but missing from the local scan, the per-vault sync ledger tells us whether
+ * THIS machine ever materialized it:
+ *   - locked-by-me + in-ledger + gone from disk → the user deleted their
+ *     checked-out copy ⇒ propagate as a soft-delete (pdm_delete_file) and drop
+ *     the ledger entry. Surfaced via notifyLocalDeletesPropagated.
+ *   - NOT locked + in-ledger + gone from disk → the user deleted a copy they
+ *     weren't checked out for ⇒ re-download it (restoring it) AND warn once via
+ *     notifyLocalDeleteBlocked. The re-download's own ledgerRecord (below)
+ *     refreshes the stamp, so the NEXT pass classifies it "present" — one
+ *     warning per deletion, not one per sync pass.
+ *   - in-vault + NOT in ledger + gone → never downloaded here ⇒ a normal
+ *     download (vault-only), untouched by deletion logic.
+ * The ledger is also RECORDED into on every successful download below so these
+ * classifications stay accurate. All of this is gated on a non-null vaultId; an
+ * empty/missing ledger degrades to "we've downloaded nothing", which can only
+ * cause redundant re-downloads, never a false vault delete.
  *
  * Re-entrancy: each pass captures a "generation" id when it starts. New passes
  * can't begin while a generation is active, and any state writes from an in-
@@ -60,13 +94,18 @@ export function useAutoSync(input: {
   currentUserId: string | null | undefined;
   vaultRoot: string | null;
   folders: Folder[];
+  /** Active vault id. Required for ledger recording + local-deletion detection;
+   *  null disables both (the pass still downloads + reconciles as before). */
+  vaultId: string | null;
   onComplete?: () => void;
 }): AutoSyncStatus {
   const {
     enabled, files, localFiles, versionsByFileId, locks,
-    currentUserId, vaultRoot, folders, onComplete,
+    currentUserId, vaultRoot, folders, vaultId, onComplete,
   } = input;
   const download = useDownloadVersion();
+  // Used to propagate local deletions of checked-out files (pdm_delete_file).
+  const client = useSupabaseClient();
 
   // Monotonic generation counter. Bumped at the start of every run; the value
   // captured by a given run is checked before every state write to detect when
@@ -113,6 +152,15 @@ export function useAutoSync(input: {
 
   const run = useCallback(async () => {
     if (!enabled || !vaultRoot || !files || !localFiles) return;
+    // Vault-switch race guard: on an active-vault change, vaultRoot updates
+    // synchronously (derived from the vault name) while files/folders keep the
+    // PREVIOUS vault's rows until their refetches land. A pass in that window
+    // would materialize vault A's folder tree (and write file downloads) into
+    // vault B's local dir. Skip until every row matches; the dep-change when
+    // the fresh data lands re-triggers a clean pass.
+    if (vaultId && (files.some((f) => f.vault_id !== vaultId) || folders.some((f) => f.vault_id !== vaultId))) {
+      return;
+    }
     // Re-entrancy guard: another run is already authoritative.
     if (activeGenRef.current !== 0) return;
     const myGen = ++generationSeq.current;
@@ -132,6 +180,10 @@ export function useAutoSync(input: {
     };
     guardedSet((s) => ({ ...s, busy: true }));
 
+    // Materialize the vault's folder scaffolding locally (empty folders too) so
+    // the local tree mirrors the vault before any file download. Best-effort.
+    await ensureLocalFolderTree(folders, vaultRoot);
+
     let downloaded = 0, skipped = 0, failed = 0;
     const myLocks = new Set(
       currentUserId
@@ -142,20 +194,59 @@ export function useAutoSync(input: {
     // (writable + unlocked + differs from latest). Surfaced via lastHeldBack.
     const heldBack: string[] = [];
 
+    // Local-deletion ledger, loaded ONCE per pass (best-effort; empty when no
+    // vaultId or on any IO error). Drives the third partition bucket below.
+    const ledger = vaultId ? await loadLedger(vaultId) : emptyLedger();
+    // Checked-out files the user deleted locally → propagate as a soft-delete
+    // AFTER the worker pool settles (sequential pdm_delete_file calls).
+    const toPropagate: Array<{ fileId: string; name: string; rel: string }> = [];
+    // Non-checked-out files the user deleted locally → re-downloaded below AND
+    // warned about once (the re-download's ledgerRecord refreshes the stamp).
+    const deleteBlocked: string[] = [];
+
     // Partition into "needs download" vs "skip" upfront so the worker pool
     // only races on actual downloads. Each task gets a stable id used as the
     // dedup key in `activeFiles` — never the basename, since two files in
-    // different folders can share a name.
-    type Task = { id: number; sha: string; dest: string; name: string; size: number };
+    // different folders can share a name. `relPath`/`vaultId` ride along so the
+    // worker can record a successful download in the sync ledger (T6).
+    type Task = {
+      id: number; sha: string; dest: string; name: string; size: number;
+      relPath: string; vaultId: string | null;
+    };
     const tasks: Task[] = [];
     for (const file of files) {
       // Don't clobber in-progress edits. If the user holds the lock, they may
-      // have unsaved local changes that don't match the latest sha yet.
-      if (myLocks.has(file.id)) { skipped++; continue; }
+      // have unsaved local changes that don't match the latest sha yet — EXCEPT
+      // when the ledger shows we materialized it and it's now gone from disk,
+      // which means the user deleted their checked-out copy: propagate it as a
+      // soft-delete (spec 2c). Either way the file is skipped from downloading.
+      if (myLocks.has(file.id)) {
+        if (vaultId) {
+          const m0 = matchLocal(file, localFiles, versionsByFileId, folders);
+          const rel = vaultRelativePath(file, folders);
+          if (!m0.local && classifyMissing(ledger, rel, false) === "locally-deleted") {
+            toPropagate.push({ fileId: file.id, name: file.name, rel });
+          }
+        }
+        skipped++;
+        continue;
+      }
       const ver = versionsByFileId.get(file.id)?.[0];
       if (!ver) { skipped++; continue; }
       const m = matchLocal(file, localFiles, versionsByFileId, folders);
       if (m.status === "synced") { skipped++; continue; }
+      // Third bucket (spec 2c), NOT-locked side: the vault has it, the ledger
+      // says we materialized it locally, but the scan can't find it ⇒ the user
+      // deleted a copy they weren't checked out for. We re-download it (the task
+      // push below restores it) AND warn once — the worker's ledgerRecord
+      // refreshes the stamp so the next pass sees a fresh materialization, not a
+      // repeat deletion (warn-once). m.status === "vault-only" ⇒ !m.local.
+      if (vaultId && m.status === "vault-only") {
+        const rel = vaultRelativePath(file, folders);
+        if (classifyMissing(ledger, rel, false) === "locally-deleted") {
+          deleteBlocked.push(file.name);
+        }
+      }
       // Present locally but differs from the latest version. The read-only bit
       // is our "clean copy" marker (reconciliation only ever sets a SYNCED file
       // read-only), so:
@@ -178,6 +269,8 @@ export function useAutoSync(input: {
         dest: localDestPath(vaultRoot, file.folder_id, file.name, folders),
         name: file.name,
         size: ver.size_bytes,
+        relPath: vaultRelativePath(file, folders),
+        vaultId,
       });
     }
 
@@ -223,6 +316,13 @@ export function useAutoSync(input: {
           } catch {
             // chmod failed (permission / platform); reconciliation will retry.
           }
+          // Record the materialization in the sync ledger so a later local
+          // delete of this file is distinguishable from "never downloaded"
+          // (T6). Fire-and-forget + serialized per vault inside ledgerRecord;
+          // a ledger IO failure must never affect the download outcome. This
+          // is ALSO what gives the third bucket warn-once semantics: a
+          // re-download of a `deleteBlocked` file refreshes its stamp here.
+          if (t.vaultId) void ledgerRecord(t.vaultId, t.relPath, t.sha);
         }
         // Count outcomes locally even if we're superseded, so the run's local
         // totals stay consistent — they just won't reach state.
@@ -273,6 +373,24 @@ export function useAutoSync(input: {
         }
       }
 
+      // Propagate local deletions of CHECKED-OUT files (spec 2c). Done after
+      // the worker pool so a download in-flight can't race the soft-delete, and
+      // sequentially so each pdm_delete_file settles before the next. Each
+      // success drops the ledger entry (so the now-deleted file isn't seen as
+      // "locally-deleted" again) and collects the name for the success event.
+      // Guarded by isCurrent() per iteration like every other write in the pass.
+      const propagated: string[] = [];
+      if (vaultId && toPropagate.length > 0) {
+        for (const p of toPropagate) {
+          if (!isCurrent()) break;
+          const { error } = await client.rpc("pdm_delete_file", { p_file_id: p.fileId });
+          if (!error) {
+            await ledgerRemove(vaultId, p.rel);
+            propagated.push(p.name);
+          }
+        }
+      }
+
       // Final commit — only if we're still the authoritative generation. If a
       // newer run took over (e.g. deps changed mid-pass), the new run owns the
       // status and will publish its own results.
@@ -292,7 +410,16 @@ export function useAutoSync(input: {
           lastRunAt: new Date().toISOString(),
           activeFiles: [],
         }));
-        if (downloaded > 0) onCompleteRef.current?.();
+        // Notify the UI of propagated soft-deletes (success toast/banner) and
+        // of blocked deletions (restored-from-vault warning). The blocked
+        // files' ledger stamps were already refreshed by their re-download's
+        // ledgerRecord in the worker above, so no extra write is needed here.
+        if (propagated.length > 0) notifyLocalDeletesPropagated(propagated);
+        if (deleteBlocked.length > 0) notifyLocalDeleteBlocked(deleteBlocked);
+        // Trigger the refetch machinery when EITHER bytes landed OR a deletion
+        // propagated — a propagation with zero downloads still needs the file
+        // list / recycle bin to refresh.
+        if (downloaded > 0 || propagated.length > 0) onCompleteRef.current?.();
       }
     } finally {
       // Reset run-owned bookkeeping regardless of whether we're still current.
@@ -306,7 +433,7 @@ export function useAutoSync(input: {
       if (activeAbortRef.current === myAbort) activeAbortRef.current = null;
       lastFinishedAt.current = Date.now();
     }
-  }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders]);
+  }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders, vaultId, client]);
 
   // Unmount cleanup: abort any in-flight pass so its writeFile doesn't fire
   // after the consumer is gone.
