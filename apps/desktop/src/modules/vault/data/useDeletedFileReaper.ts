@@ -63,6 +63,18 @@ export function useDeletedFileReaper(input: {
 
   useEffect(() => {
     if (!enabled) return;
+    // Vault-switch race guard (mirrors useAutoSync): on an active-vault change
+    // the local-path inputs update before the row queries refetch, so vault
+    // A's deleted rows could transiently pair with vault B's local scan. Only
+    // reap once every row belongs to the active vault.
+    if (
+      vaultId &&
+      ((deletedFiles ?? []).some((f) => f.vault_id !== vaultId) ||
+        (deletedFolders ?? []).some((f) => f.vault_id !== vaultId) ||
+        folders.some((f) => f.vault_id !== vaultId))
+    ) {
+      return;
+    }
     // Proceed even if deletedFiles is empty when there are deleted folders to
     // reap — the file-reap loop is gated on its own early-exit below.
     const hasDeletedFiles = deletedFiles && deletedFiles.length > 0;
