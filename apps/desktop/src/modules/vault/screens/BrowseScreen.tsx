@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 import { useUser } from "@helios/auth";
+import { FILE_MANAGER } from "../../../lib/platform";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
 import { useFiles } from "../data/useFiles";
@@ -822,7 +823,7 @@ export function BrowseScreen() {
             },
           });
           actions.push({
-            label: "Reveal in Explorer",
+            label: `Reveal in ${FILE_MANAGER}`,
             disabledReason: vaultFolderPath ? undefined : "No local folder set",
             onClick: () => {
               if (vaultFolderPath) {
@@ -922,7 +923,7 @@ export function BrowseScreen() {
               onClick: () => { void navigator.clipboard.writeText(f.name); },
             });
             actions.push({
-              label: "Reveal in Explorer",
+              label: `Reveal in ${FILE_MANAGER}`,
               disabledReason: localPath ? undefined : "No local copy of this file",
               onClick: () => { if (localPath) void revealInExplorer(localPath); },
             });

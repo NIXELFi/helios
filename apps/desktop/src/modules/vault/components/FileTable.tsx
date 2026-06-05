@@ -1,6 +1,7 @@
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
 import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
 import { revealInExplorer } from "../data/reveal";
+import { FILE_MANAGER } from "../../../lib/platform";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -384,7 +385,7 @@ export function FileTable({
                     <button
                       id={`file-row-name-${f.id}`}
                       type="button"
-                      title="Reveal in File Explorer"
+                      title={`Reveal in ${FILE_MANAGER}`}
                       className="block max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
                       onClick={(e) => {
                         e.stopPropagation();
