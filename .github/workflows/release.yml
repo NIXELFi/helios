@@ -115,6 +115,14 @@ jobs:
           GITHUB_REF_NAME: ${{ steps.version.outputs.tag }}
         run: node scripts/check-versions.mjs
 
+      # The C# binaries (HeliosVault.dll add-in, HeliosShell.dll + SharpShell.dll
+      # Explorer ext, HeliosSwReadonly.exe helper) are NOT built here — they ship
+      # from committed apps/desktop/src-tauri/resources/. Fail loudly + audit the
+      # shipped bytes (sha256) if any is missing/empty. See the script header and
+      # apps/desktop/src-tauri/resources/README.md for the rebuild-before-tag step.
+      - name: Verify bundled resources present
+        run: node scripts/check-bundled-resources.mjs
+
       - name: Run Rust tests
         run: cargo test --workspace --locked
 
