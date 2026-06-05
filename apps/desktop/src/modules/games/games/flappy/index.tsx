@@ -55,6 +55,8 @@ export function FlappyGame({ onGameOver, paused }: GameProps) {
       width={WORLD.w}
       height={WORLD.h}
       className="rounded-sm border border-helios-line bg-helios-panel"
+      role="img"
+      aria-label="Flappy game"
     />
   );
 }

@@ -53,6 +53,8 @@ export function SnakeGame({ onGameOver, paused }: GameProps) {
       width={GRID * CELL}
       height={GRID * CELL}
       className="rounded-sm border border-helios-line bg-helios-panel"
+      role="img"
+      aria-label="Snake game"
     />
   );
 }

@@ -74,6 +74,8 @@ export function BreakoutGame({ onGameOver, paused }: GameProps) {
       width={W}
       height={H}
       className="rounded-sm border border-helios-line bg-helios-panel"
+      role="img"
+      aria-label="Breakout game"
     />
   );
 }

@@ -194,6 +194,7 @@ function HeliosShell() {
                 appVersion={appVersion}
                 playing={logsPlaying}
                 onPlayingChange={setLogsPlaying}
+                keyboardShortcutsEnabled={active === "logs"}
               />
             </ErrorBoundary>
           </div>

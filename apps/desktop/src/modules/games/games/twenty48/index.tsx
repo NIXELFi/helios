@@ -22,18 +22,25 @@ export function Twenty48Game({ onGameOver, paused }: GameProps) {
     over: false,
   }));
   const ended = useRef(false);
+  // Mirror game state into a ref so the keydown handler can read the latest
+  // board/score/over without being re-registered on every move. Previously
+  // `game` was a dep, which tore down and re-added the window listener after
+  // every arrow key press (listener churn). With the ref the handler closure
+  // is stable; deps reduce to [paused, onGameOver].
+  const gameRef = useRef(game);
+  gameRef.current = game;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const dir = KEY_DIR[e.key];
-      if (!dir || paused || game.over) return;
+      if (!dir || paused || gameRef.current.over) return;
       e.preventDefault();
 
-      const result = move(game.board, dir);
+      const result = move(gameRef.current.board, dir);
       if (!result.moved) return;
 
       const newBoard = addRandomTile(result.board, Math.random);
-      const newScore = game.score + result.gained;
+      const newScore = gameRef.current.score + result.gained;
       const over = !canMove(newBoard);
 
       if (over && !ended.current) {
@@ -46,12 +53,12 @@ export function Twenty48Game({ onGameOver, paused }: GameProps) {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [game, paused, onGameOver]);
+  }, [paused, onGameOver]);
 
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="text-sm text-helios-dim">Score {game.score}</div>
-      <div className="grid grid-cols-4 gap-2 p-3 rounded-sm border border-helios-line bg-helios-panel">
+      <div role="grid" aria-label="2048 board" className="grid grid-cols-4 gap-2 p-3 rounded-sm border border-helios-line bg-helios-panel">
         {game.board.map((v, i) => (
           <div
             key={i}
