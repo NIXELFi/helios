@@ -33,7 +33,8 @@ export function placeFood(occupied: Point[], rng: Rng): Point {
       if (!taken.has(y * GRID + x)) free.push({ x, y });
     }
   }
-  // free is guaranteed non-empty in normal play (grid >> snake length)
+  // free is guaranteed non-empty: step() returns the win branch before calling
+  // placeFood when the board is full, so this array is always non-empty here.
   return free[Math.floor(rng() * free.length)]!;
 }
 
@@ -62,5 +63,9 @@ export function step(state: SnakeState, want: Dir | null, rng: Rng): SnakeState 
   }
   const snake = [next, ...body];
   if (!eats) return { ...state, dir, snake };
+  if (snake.length === GRID * GRID) {
+    // Board full — perfect game. No free cell for food; end the run as a win.
+    return { ...state, dir, snake, score: state.score + 1, gameOver: true };
+  }
   return { dir, snake, score: state.score + 1, food: placeFood(snake, rng), gameOver: false };
 }
