@@ -168,7 +168,12 @@ left alone (never delete data the vault doesn't own).
   resolves to that folder, else the currently selected folder.
 - Drop handling: for each dropped file, run the existing `useAddLocalFile`
   flow into the target folder (same draft + checkout semantics as Add
-  today; idempotent on duplicate SHA). Dropped *directories* are walked
+  today; idempotent on duplicate SHA). NOTE: `useAddLocalFile.run()` has no
+  target-folder parameter today — it derives the hierarchy from
+  `local.relativePath` rooted at the vault root. The implementation must
+  either prepend the target folder's vault path to the synthesized
+  relativePath or add an explicit target-folder parameter to the hook
+  (planner's choice; the prepend keeps the hook's signature stable). Dropped *directories* are walked
   recursively and their relative structure is created via the existing
   `ensureFolderHierarchy`. Unsupported/failed items are reported in a
   per-item result list; a progress indicator shows during multi-file
@@ -195,7 +200,8 @@ Extend the existing `TreeContextMenu` action builders (Browse screen):
   capability (or `navigator.clipboard` if already in use).
 - Existing actions (check-out/in, get-latest, cancel, history, add) are
   untouched.
-- The Deleted screen gains folder rows with Restore (calls
+- The Deleted screen (component: `screens/RecycleScreen.tsx`, data:
+  `useDeletedFiles.ts`) gains folder rows with Restore (calls
   `pdm_restore_folder`), shown alongside deleted files.
 
 ### 4c. Reveal in Explorer
