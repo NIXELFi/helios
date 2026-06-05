@@ -77,6 +77,16 @@ chrome: start/restart, score submission, leaderboards. Game state resets
 on restart by remounting the component (`key` bump) — games need no
 external reset API.
 
+Notes:
+
+- No existing module receives a visibility signal (the shell hides
+  modules with CSS, keeping them mounted). `paused` must be derived in
+  `Shell.tsx` from `active !== "games"` and threaded down
+  `GamesModule → active game`.
+- The 2048 folder is `twenty48` (JS identifiers can't start with a
+  digit) but the registry `id` — and everything that touches the DB —
+  uses the string `'2048'` to match the `game_id` check constraint.
+
 ### UX flow
 
 1. Tab opens on the picker grid (4 GameCards) with the leaderboard panel
@@ -128,7 +138,8 @@ create index on games.scores (game_id, created_at);
 3. **`games.leaderboard_subteams`** — per game, each member's personal
    best; sum bests within a subteam per game; subteam total = sum across
    the four games. View returns per-game subtotals + grand total so the
-   UI can show a breakdown.
+   UI can show a breakdown. Members with no scores contribute nothing
+   (they are simply absent from the aggregation).
 
 Views are `security_invoker`; RLS on the base table gates access.
 Grants: `select` to `authenticated` only.
