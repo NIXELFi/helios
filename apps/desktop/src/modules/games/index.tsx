@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { submitScore, type GameId } from "./api";
 import { GAMES, type GameDef } from "./registry";
@@ -53,6 +53,15 @@ export function GamesModule({ paused }: GamesModuleProps) {
     }
   }
 
+  // Keep the latest closure in a ref but hand the games a stable identity, so
+  // a GamesModule re-render (e.g. leaderboard refresh) can't churn their
+  // input-listener effects mid-play.
+  const handleGameOverRef = useRef(handleGameOver);
+  handleGameOverRef.current = handleGameOver;
+  const stableOnGameOver = useRef((score: number) => {
+    void handleGameOverRef.current(score);
+  }).current;
+
   if (!client) return null; // module is auth-gated by the shell; belt-and-braces
 
   const ActiveGame = active?.component;
@@ -66,14 +75,14 @@ export function GamesModule({ paused }: GamesModuleProps) {
               <div className="text-sm font-semibold text-helios-text">{active.title}</div>
               <button
                 type="button"
-                onClick={() => setActive(null)}
+                onClick={() => { setActive(null); setOver(null); }}
                 className="rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-xs text-helios-text hover:border-asu-gold"
               >
                 ← All games
               </button>
             </div>
             <div className="relative">
-              <ActiveGame key={run} onGameOver={(s) => void handleGameOver(s)} paused={paused} />
+              <ActiveGame key={run} onGameOver={stableOnGameOver} paused={paused} />
               {over && (
                 <GameOverOverlay
                   score={over.score}
@@ -83,7 +92,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                     setOver(null);
                     setRun((n) => n + 1);
                   }}
-                  onBack={() => setActive(null)}
+                  onBack={() => { setActive(null); setOver(null); }}
                 />
               )}
             </div>
