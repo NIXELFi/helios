@@ -21,6 +21,7 @@ import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useAllFiles } from "../data/useAllFiles";
 import { useDeletedFiles } from "../data/useDeletedFiles";
+import { useDeletedFolders } from "../data/useDeletedFolders";
 import { useDeletedFileReaper } from "../data/useDeletedFileReaper";
 import { ensureLocalFolderTree } from "../data/ensureLocalFolderTree";
 import { useAutoSync } from "../data/useAutoSync";
@@ -33,6 +34,7 @@ import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
+import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
@@ -119,7 +121,13 @@ export function BrowseScreen() {
   // refetch below so a delete by another member lands here promptly, and fed to
   // the reaper that removes their local working copies on this machine.
   const { data: deletedFiles, refetch: refetchDeleted } = useDeletedFiles(vaultId ?? undefined);
-  // Propagate deletes to disk: remove the local copy of any soft-deleted file.
+  // Soft-deleted folders — fed to the reaper so it can clean up their local
+  // directories, and also re-fetched wherever refetchDeleted is called so
+  // folder deletions propagate to this machine promptly.
+  const { data: deletedFolders, refetch: refetchDeletedFolders } = useDeletedFolders(vaultId ?? undefined);
+  // Propagate deletes to disk: remove the local copy of any soft-deleted file
+  // and attempt to remove the local directory of any soft-deleted folder
+  // (non-recursive — a dir still containing untracked files fails safely).
   // Only in auto-sync mode — in manual mode the user owns their local files and
   // we never delete them out from under them.
   useDeletedFileReaper({
@@ -127,6 +135,8 @@ export function BrowseScreen() {
     deletedFiles,
     localFiles,
     folders: folders ?? [],
+    deletedFolders,
+    vaultRoot: vaultFolderPath,
     vaultId: vaultId ?? null,
     onReaped: rescan,
   });
@@ -234,7 +244,7 @@ export function BrowseScreen() {
   // new version state and downloads the bytes.
   const onVersion = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
-  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); refetchDeleted(); }, [refetchAllFiles, refetchFiles, refetchDeleted]);
+  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); refetchDeleted(); refetchDeletedFolders(); }, [refetchAllFiles, refetchFiles, refetchDeleted, refetchDeletedFolders]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
 
   // Periodic safety-net poll. Realtime (above) is the fast path, but if its
@@ -248,7 +258,8 @@ export function BrowseScreen() {
     refetchFiles();
     refetchLocks();
     refetchDeleted();
-  }, [refetchAllFiles, refetchFiles, refetchLocks, refetchDeleted]);
+    refetchDeletedFolders();
+  }, [refetchAllFiles, refetchFiles, refetchLocks, refetchDeleted, refetchDeletedFolders]);
   useInterval(poll, vaultId ? VAULT_POLL_MS : null);
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
@@ -417,6 +428,7 @@ export function BrowseScreen() {
           rescan();
         }}
       />
+      <LocalDeleteBanner />
       <div className="flex min-h-0 flex-1">
       <div className="flex w-64 flex-col border-r border-helios-line bg-helios-base">
         <header className="flex items-center justify-between border-b border-helios-line px-3 py-2">

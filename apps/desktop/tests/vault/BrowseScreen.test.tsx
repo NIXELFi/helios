@@ -33,19 +33,21 @@ function buildMockClient(isAdmin = false): SupabaseClient {
       if (table === "folders") return {
         select: () => ({
           // useFolders adds .is("deleted_at", null) before the .order() chain.
+          // useDeletedFolders uses .not("deleted_at","is",null) instead.
           eq: () => ({
             is: () => ({
-            order: () => {
-              const node: any = {
-                order: () => node,
-                range: (from: number, to: number) => Promise.resolve({
-                  data: [{ id: "f1", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" }].slice(from, to + 1),
-                  error: null,
-                }),
-              };
-              return node;
-            },
+              order: () => {
+                const node: any = {
+                  order: () => node,
+                  range: (from: number, to: number) => Promise.resolve({
+                    data: [{ id: "f1", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" }].slice(from, to + 1),
+                    error: null,
+                  }),
+                };
+                return node;
+              },
             }),
+            not: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; },
           }),
         }),
       };
@@ -107,14 +109,15 @@ function buildFoldersErrorClient(): SupabaseClient {
         select: () => ({
           eq: () => ({
             is: () => ({
-            order: () => {
-              const node: any = {
-                order: () => node,
-                range: () => Promise.resolve({ data: null, error: { message: "boom: folders unavailable" } }),
-              };
-              return node;
-            },
+              order: () => {
+                const node: any = {
+                  order: () => node,
+                  range: () => Promise.resolve({ data: null, error: { message: "boom: folders unavailable" } }),
+                };
+                return node;
+              },
             }),
+            not: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; },
           }),
         }),
       };
@@ -169,7 +172,10 @@ function buildLockHolderClient(): SupabaseClient {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [{ id: "v1", name: "sdm26", created_at: "x", created_by: "u1" }], error: null }) };
       if (table === "folders") return {
         select: () => ({
-          eq: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }),
+          eq: () => ({
+            is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
+            not: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; },
+          }),
         }),
       };
       if (table === "files") return {
@@ -223,9 +229,13 @@ function buildEmptyVaultClient(isAdmin: boolean): SupabaseClient {
     from: vi.fn().mockImplementation((table: string) => {
       if (table === "vaults") return { select: () => Promise.resolve({ data: [], error: null }) };
       // folders: .select().eq().is("deleted_at",null).order().order().range().
+      // useDeletedFolders uses .eq().not("deleted_at","is",null).order()... instead.
       if (table === "folders") return {
         select: () => ({
-          eq: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }),
+          eq: () => ({
+            is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }),
+            not: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; },
+          }),
         }),
       };
       // files: useFiles/useAllFiles add .is("deleted_at", null) before .order().

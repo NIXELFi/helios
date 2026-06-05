@@ -131,4 +131,70 @@ describe("useDeletedFileReaper", () => {
     );
     await waitFor(() => expect(onReaped).toHaveBeenCalledTimes(1));
   });
+
+  // ── Folder-dir reaping (T9) ──────────────────────────────────────────────
+
+  function delFolder(id: string, name: string, parent_id: string | null = null): Folder {
+    return {
+      id, vault_id: "v1", parent_id, name, created_at: "x",
+      deleted_at: "2026-06-05T00:00:00Z",
+    } as Folder;
+  }
+
+  it("removes an empty deleted-folder dir (non-recursive)", async () => {
+    const deletedFolder = delFolder("fd1", "OldParts");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [],
+        folders: [],
+        deletedFolders: [deletedFolder],
+        vaultRoot: "C:/vault/SDM25",
+      }),
+    );
+    await waitFor(() => expect(removeMock).toHaveBeenCalledTimes(1));
+    expect(removeMock).toHaveBeenCalledWith("C:/vault/SDM25/OldParts", { recursive: false });
+  });
+
+  it("leaves non-empty deleted-folder dir when remove() throws (safe skip)", async () => {
+    // Simulate the dir being non-empty — remove() rejects.
+    removeMock.mockRejectedValueOnce(new Error("ENOTEMPTY"));
+    const deletedFolder = delFolder("fd1", "OldParts");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [],
+        folders: [],
+        deletedFolders: [deletedFolder],
+        vaultRoot: "C:/vault/SDM25",
+      }),
+    );
+    await settle();
+    // remove was attempted but failed — onReaped must NOT have been called.
+    expect(removeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes child folder before parent (deepest-first ordering)", async () => {
+    // parent: "Chassis", child: "Chassis/Frame"
+    const parent = delFolder("fd-parent", "Chassis");
+    const child = delFolder("fd-child", "Frame", "fd-parent");
+    // Both live in deletedFolders; combined lookup resolves child's path.
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [],
+        folders: [],
+        deletedFolders: [parent, child],
+        vaultRoot: "C:/vault/SDM25",
+      }),
+    );
+    await waitFor(() => expect(removeMock).toHaveBeenCalledTimes(2));
+    // child (depth 2) must be attempted before parent (depth 1).
+    const calls = removeMock.mock.calls.map((c) => c[0] as string);
+    expect(calls[0]).toBe("C:/vault/SDM25/Chassis/Frame");
+    expect(calls[1]).toBe("C:/vault/SDM25/Chassis");
+  });
 });
