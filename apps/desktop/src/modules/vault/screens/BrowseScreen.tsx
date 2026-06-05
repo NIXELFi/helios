@@ -7,8 +7,15 @@ import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useMyRole } from "../data/useMyRole";
-import { useCanEditVault } from "../data/useVaultRole";
+import { useCanEditVault, useIsVaultAdmin } from "../data/useVaultRole";
 import { useCreateFolder } from "../data/useCreateFolder";
+import { useDeleteFolder } from "../data/useDeleteFolder";
+import { useDeleteFile } from "../data/useDeleteFile";
+import { useVaultDropImport } from "../data/useVaultDropImport";
+import { folderPath } from "../data/folder-paths";
+import { matchLocal } from "../data/local-match";
+import { revealInExplorer } from "../data/reveal";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { useCreateFile } from "../data/useCreateFile";
 import { useVaultFolder } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
@@ -62,6 +69,9 @@ export function BrowseScreen() {
   const myRole = useMyRole();
   const canEdit =
     useCanEditVault(vaultId) || isAdmin || myRole === "editor" || myRole === "owner";
+  // Per-vault admin, unioned with the global admin role — same shape as
+  // `canEdit` above. Gates deleting a folder that still contains live files.
+  const isVaultAdmin = useIsVaultAdmin(vaultId) || isAdmin;
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -353,11 +363,35 @@ export function BrowseScreen() {
 
   const createFolder = useCreateFolder();
   const createFile = useCreateFile();
+  const deleteFolder = useDeleteFolder();
+  const deleteFile = useDeleteFile();
+
+  // Right-click "New folder…" parents the new folder at the clicked folder
+  // rather than the navigation selection. Set when opening the prompt from the
+  // folder context menu; reset to null whenever the prompt closes so a later
+  // toolbar "+ Folder" parents at `selectedFolder` as before.
+  const [promptParent, setPromptParent] = useState<FolderId | null>(null);
+
+  // Generic confirm dialog for destructive context-menu actions (delete folder
+  // / delete files). Held as a render-prop bundle so one <ConfirmDialog> serves
+  // every call site. `error` surfaces an RPC failure message inline afterward.
+  const [confirm, setConfirm] = useState<
+    | { title: string; body: string; confirmLabel: string; onConfirm: () => void | Promise<void> }
+    | null
+  >(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Tauri's webview doesn't render window.prompt(), so we use an in-app modal.
   const [prompt, setPrompt] = useState<{ kind: "folder" | "file" } | null>(null);
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
+
+  // Reset the right-click "New folder…" parent override whenever the prompt
+  // closes, so a subsequent toolbar "+ Folder" parents at the navigation
+  // selection rather than a stale clicked-folder id.
+  useEffect(() => {
+    if (!prompt) setPromptParent(null);
+  }, [prompt]);
 
   async function handlePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -365,7 +399,10 @@ export function BrowseScreen() {
     if (!name || !vaultId || !prompt) return;
     setPromptError(null);
     if (prompt.kind === "folder") {
-      const r = await createFolder.run(vaultId, name, selectedFolder);
+      // A right-click "New folder…" sets promptParent to the clicked folder;
+      // the toolbar button leaves it null → parent at the navigation selection.
+      const parent = promptParent ?? selectedFolder;
+      const r = await createFolder.run(vaultId, name, parent);
       if (r) {
         refetchFolders();
         setPrompt(null);
@@ -397,6 +434,25 @@ export function BrowseScreen() {
     refetchAllFiles();
     rescan();
   }
+
+  // Drag-and-drop import (T13). Active only for editors with an active vault.
+  // The hook registers the OS drag-drop listener, exposes the hover-highlight
+  // target for the tree, runs the sequential import, and reports per-item
+  // results for the strip below. On batch completion it refreshes everything
+  // (folders may have been created; files added as locked drafts) + rescans.
+  const dropImport = useVaultDropImport({
+    enabled: canEdit && !!vaultId,
+    vaultId: vaultId ?? null,
+    folders: folders ?? [],
+    selectedFolder,
+    onComplete: () => {
+      refetchFolders();
+      refetchAllFiles();
+      refetchFiles();
+      refetchLocks();
+      rescan();
+    },
+  });
 
   // No active vault — either the user has no vaults at all, or vaults are
   // still loading. Vault creation now lives in the NavRail switcher, so
@@ -469,6 +525,7 @@ export function BrowseScreen() {
               treeSelection={treeSelection}
               onTreeSelectionChange={setTreeSelection}
               onContextMenu={handleTreeContextMenu}
+              dropHoverId={dropImport.hoverFolderId}
             />
           ) : foldersLoading ? (
             <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
@@ -663,6 +720,57 @@ export function BrowseScreen() {
       {/* Bulk-download progress modal shared by ManualDownloadAll and the
           right-click context menu. */}
       <BulkDownloadModal api={bulk} />
+      {/* Drag-and-drop import progress / result strip (T13). Mirrors the
+          BulkActionBar visual language. Shows a live "Importing…" state while
+          files land, then a per-item result list with errors + a dismiss. */}
+      {(dropImport.importing || dropImport.results.length > 0) && (
+        <div className="fixed bottom-3 right-3 z-40 w-80 rounded-lg border border-helios-line bg-helios-panel p-3 text-xs shadow-xl">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-semibold text-helios-text">
+              {dropImport.importing
+                ? "Importing dropped files…"
+                : (() => {
+                    const ok = dropImport.results.filter((r) => r.ok).length;
+                    const total = dropImport.results.length;
+                    const failed = total - ok;
+                    return `Imported ${ok}/${total}${failed ? ` (${failed} failed)` : ""}`;
+                  })()}
+            </span>
+            {!dropImport.importing && (
+              <button
+                type="button"
+                onClick={dropImport.clearResults}
+                className="rounded px-1.5 py-0.5 text-helios-dim hover:bg-helios-line hover:text-helios-text"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+          {dropImport.importing && (
+            <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-helios-line">
+              <div className="h-full w-1/3 animate-pulse bg-yellow-400" />
+            </div>
+          )}
+          {dropImport.results.length > 0 && (
+            <ul className="max-h-40 space-y-0.5 overflow-auto">
+              {dropImport.results.map((r, i) => (
+                <li
+                  key={i}
+                  title={r.error ?? r.name}
+                  className={
+                    "flex items-center gap-1.5 truncate font-mono-num text-[11px] " +
+                    (r.ok ? "text-helios-dim" : "text-[#EF5350]")
+                  }
+                >
+                  <span className={"inline-block h-1.5 w-1.5 shrink-0 rounded-full " + (r.ok ? "bg-green-400" : "bg-[#EF5350]")} />
+                  <span className="truncate">{r.name}</span>
+                  {!r.ok && r.error && <span className="ml-auto shrink-0 text-[10px]">failed</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {/* Right-click context menu on tree rows. Folder → download every file
           under it; files → download the current multi-selection. */}
       {ctxMenu && (() => {
@@ -672,13 +780,77 @@ export function BrowseScreen() {
         // instead of re-narrowing ctxMenu.target.kind (which could drift), and
         // we guard bulk.start so an empty list never opens an empty progress
         // modal (V9).
+        // Run a destructive action then refresh the affected slices, surfacing
+        // any RPC failure inline (the RPC's own message passes through).
+        const afterMutate = () => {
+          refetchFolders();
+          refetchAllFiles();
+          refetchFiles();
+          refetchDeleted();
+          refetchDeletedFolders();
+          refetchLocks();
+          rescan();
+        };
+
         if (ctxMenu.target.kind === "folder") {
+          const folder = ctxMenu.target.folder;
           const targetFiles = ctxMenu.target.descendantFiles;
           const n = targetFiles.length;
           actions.push({
-            label: `Download ${n} file${n === 1 ? "" : "s"} in ${ctxMenu.target.folder.name}`,
+            label: `Download ${n} file${n === 1 ? "" : "s"} in ${folder.name}`,
             disabledReason: n === 0 ? "Folder has no files" : undefined,
             onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
+          });
+          actions.push({
+            label: "New folder…",
+            disabledReason: canEdit ? undefined : "You don't have edit access",
+            onClick: () => {
+              setPromptParent(folder.id);
+              openPrompt("folder");
+            },
+          });
+          actions.push({
+            label: "Copy vault path",
+            onClick: () => {
+              void navigator.clipboard.writeText(folderPath(folder.id, folders ?? []));
+            },
+          });
+          actions.push({
+            label: "Reveal in Explorer",
+            disabledReason: vaultFolderPath ? undefined : "No local folder set",
+            onClick: () => {
+              if (vaultFolderPath) {
+                void revealInExplorer(`${vaultFolderPath}/${folderPath(folder.id, folders ?? [])}`);
+              }
+            },
+          });
+          // Delete-folder gating: an empty subtree (0 live descendant files) is
+          // deletable by any editor; a non-empty one needs a vault admin (else
+          // the user must check out + delete the files first to empty it).
+          let deleteReason: string | undefined;
+          if (n === 0) deleteReason = canEdit ? undefined : "You don't have edit access";
+          else deleteReason = isVaultAdmin ? undefined : "Contains files — admins only (or empty it first)";
+          actions.push({
+            label: "Delete folder",
+            danger: true,
+            disabledReason: deleteReason,
+            onClick: () => {
+              setActionError(null);
+              setConfirm({
+                title: "Delete folder",
+                body: `Move '${folder.name}' and everything in it to Deleted? (${n} file${n === 1 ? "" : "s"})`,
+                confirmLabel: "Delete folder",
+                onConfirm: async () => {
+                  const ok = await deleteFolder.run(folder.id);
+                  if (ok) {
+                    if (selectedFolder === folder.id) setSelectedFolder(null);
+                    afterMutate();
+                  } else {
+                    setActionError(deleteFolder.error?.message ?? "Couldn't delete the folder.");
+                  }
+                },
+              });
+            },
           });
         } else {
           const targetFiles = ctxMenu.target.files;
@@ -688,6 +860,67 @@ export function BrowseScreen() {
             disabledReason: n === 0 ? "Nothing selected" : undefined,
             onClick: () => { if (targetFiles.length > 0) bulk.start(targetFiles); },
           });
+          // Delete gating mirrors BulkActionBar: a file is deletable when the
+          // current user holds its lock, or is an admin. Enabled only when EVERY
+          // selected file qualifies.
+          const liveLockByFile = new Map<FileId, UserId>();
+          for (const l of locks ?? []) {
+            if (l.released_at === null) liveLockByFile.set(l.file_id, l.user_id);
+          }
+          const everyDeletable =
+            n > 0 &&
+            targetFiles.every(
+              (f) => isAdmin || liveLockByFile.get(f.id) === (user?.id ?? ""),
+            );
+          actions.push({
+            label: `Delete ${n} file${n === 1 ? "" : "s"}`,
+            danger: true,
+            disabledReason:
+              n === 0
+                ? "Nothing selected"
+                : everyDeletable
+                  ? undefined
+                  : "Only files you have checked out (or admins) can be deleted",
+            onClick: () => {
+              setActionError(null);
+              setConfirm({
+                title: `Delete ${n} file${n === 1 ? "" : "s"}`,
+                body: `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`,
+                confirmLabel: "Delete",
+                onConfirm: async () => {
+                  let failed = 0;
+                  for (const f of targetFiles) {
+                    const ok = await deleteFile.run(f.id);
+                    if (!ok) failed++;
+                  }
+                  if (failed > 0) {
+                    setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                  }
+                  afterMutate();
+                },
+              });
+            },
+          });
+          // Single-file local affordances. matchLocal resolves the on-disk copy.
+          if (n === 1) {
+            const f = targetFiles[0]!;
+            const m = matchLocal(f, localFiles ?? null, versionsByFileId, folders ?? []);
+            const localPath = m.local?.absolutePath ?? null;
+            actions.push({
+              label: "Copy local path",
+              disabledReason: localPath ? undefined : "No local copy of this file",
+              onClick: () => { if (localPath) void navigator.clipboard.writeText(localPath); },
+            });
+            actions.push({
+              label: "Copy name",
+              onClick: () => { void navigator.clipboard.writeText(f.name); },
+            });
+            actions.push({
+              label: "Reveal in Explorer",
+              disabledReason: localPath ? undefined : "No local copy of this file",
+              onClick: () => { if (localPath) void revealInExplorer(localPath); },
+            });
+          }
         }
         return (
           <TreeContextMenu
@@ -698,6 +931,41 @@ export function BrowseScreen() {
           />
         );
       })()}
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          body={confirm.body}
+          confirmLabel={confirm.confirmLabel}
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => { void confirm.onConfirm(); }}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+      {actionError && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setActionError(null)}
+        >
+          <div
+            role="alert"
+            className="w-80 space-y-3 rounded-lg border border-[#EF5350]/50 bg-helios-panel p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-helios-text">Action failed</h3>
+            <p className="text-xs text-red-200">{actionError}</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                className="rounded bg-asu-gold px-3 py-1 text-xs text-white hover:bg-asu-gold/90"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {prompt && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"

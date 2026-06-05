@@ -49,6 +49,13 @@ interface Props {
    * Parent renders a context menu (e.g. TreeContextMenu) at the coords.
    */
   onContextMenu?: (target: TreeContextTarget, x: number, y: number) => void;
+  /**
+   * Drag-and-drop import hover target (a folder id, or "" for vault root). The
+   * matching row gets a gold ring while a dragged OS file is over it. Rows also
+   * carry `data-folder-id` so the drop hit-test (resolveDropFolder) can find
+   * them. null = nothing hovered.
+   */
+  dropHoverId?: string | null;
 }
 
 interface FolderNode {
@@ -168,6 +175,7 @@ export function FolderTree({
   treeSelection,
   onTreeSelectionChange,
   onContextMenu,
+  dropHoverId,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Pre-compute O(1) indexes from the folders array. Without these the tree
@@ -484,6 +492,7 @@ export function FolderTree({
           aria-current={isSelected ? "page" : undefined}
           data-row-kind="folder"
           data-row-id={node.folder.id}
+          data-folder-id={node.folder.id}
           onClick={(e) => {
             const isShift = e.shiftKey;
             const isMeta = e.metaKey || e.ctrlKey;
@@ -528,7 +537,8 @@ export function FolderTree({
               ? "border-asu-gold/70 bg-asu-gold/10 text-helios-text"
               : isSelected
                 ? "border-asu-gold bg-helios-line text-helios-text"
-                : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text")
+                : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text") +
+            (dropHoverId === node.folder.id ? " ring-1 ring-asu-gold bg-asu-gold/10" : "")
           }
           style={{ paddingLeft: 6 + depth * 14 }}
         >
@@ -662,6 +672,7 @@ export function FolderTree({
   return (
     <div
       ref={containerRef}
+      data-folder-id=""
       className="relative flex select-none flex-col gap-0.5 py-2"
       onMouseDown={onContainerMouseDown}
     >
@@ -684,6 +695,7 @@ export function FolderTree({
         tabIndex={0}
         aria-current={selected === null ? "page" : undefined}
         data-row-kind="root"
+        data-folder-id=""
         onClick={() => onSelect(null)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -705,7 +717,8 @@ export function FolderTree({
           "focus-visible:ring-1 focus-visible:ring-asu-gold " +
           (selected === null
             ? "border-asu-gold bg-helios-line text-helios-text"
-            : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
+            : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text") +
+          (dropHoverId === "" ? " ring-1 ring-asu-gold bg-asu-gold/10" : "")
         }
       >
         <span className="inline-block w-4 shrink-0" />

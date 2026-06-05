@@ -164,7 +164,18 @@ export function useAddLocalFile() {
    * error (ultrareview 2026-05-11, finding H13). The RPC fixes that.
    */
   const run = useCallback(
-    async (vaultId: VaultId, local: LocalFile): Promise<AddLocalFileResult> => {
+    async (
+      vaultId: VaultId,
+      local: LocalFile,
+      // Optional vault-folder prefix (slash-joined UNSANITIZED DB folder names,
+      // from folderNamePath) under which to land this import. When provided, the
+      // effective relativePath used for BOTH folder-hierarchy creation and the
+      // final file name becomes `${targetPrefix}/${local.relativePath}` — so a
+      // drag-drop onto folder "Chassis" of a dropped "frame/x.sldprt" creates
+      // Chassis/frame and names the file there. Backward compatible: omitting it
+      // (or passing "") preserves the prior root-relative behavior verbatim.
+      targetPrefix?: string,
+    ): Promise<AddLocalFileResult> => {
       if (!user) {
         const msg = "not authenticated";
         setError(new Error(msg));
@@ -174,7 +185,11 @@ export function useAddLocalFile() {
       setError(null);
       try {
         // 1. Resolve folder hierarchy. e.g. "Chassis/Subframe/x.sldprt" → ["Chassis","Subframe"]
-        const segments = local.relativePath.split("/");
+        //    A targetPrefix re-parents the whole import beneath it.
+        const effectiveRelPath = targetPrefix
+          ? `${targetPrefix}/${local.relativePath}`
+          : local.relativePath;
+        const segments = effectiveRelPath.split("/");
         const fileName = segments[segments.length - 1];
         const dirSegments = segments.slice(0, -1);
         const folderId = await ensureFolderHierarchy(client, vaultId, dirSegments);
@@ -246,10 +261,11 @@ export function useAddLocalFile() {
 
         // Record the materialization in the sync ledger (T6): the local file is
         // now in the vault at this sha, so a later local delete of it should be
-        // recognised as a deletion (not "never downloaded"). local.relativePath
-        // is the vault-relative path the rest of the vault keys on. Fire-and-
-        // forget; a ledger IO failure must not fail the add the user completed.
-        void ledgerRecord(vaultId, local.relativePath, sha);
+        // recognised as a deletion (not "never downloaded"). The EFFECTIVE
+        // relative path (prefix-adjusted) is the vault-relative path the rest of
+        // the vault keys on. Fire-and-forget; a ledger IO failure must not fail
+        // the add the user completed.
+        void ledgerRecord(vaultId, effectiveRelPath, sha);
 
         // Broadcast so useLocks() consumers (and the auto-sync reconciliation
         // pass) pick up the new checkout immediately rather than waiting on the
