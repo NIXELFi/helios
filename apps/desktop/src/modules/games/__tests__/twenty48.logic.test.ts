@@ -49,6 +49,18 @@ describe("move", () => {
     const board = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     expect(move(board, "left").moved).toBe(false);
   });
+  it("moves right", () => {
+    const r = move([4, 4, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "right");
+    expect(r.board.slice(0, 4)).toEqual([0, 0, 8, 4]);
+    expect(r.gained).toBe(12);
+  });
+  it("moves down", () => {
+    const r = move([2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0], "down");
+    expect(r.board[12]).toBe(4);
+    expect(r.board[8]).toBe(4);
+    expect(r.board[0]).toBe(0);
+    expect(r.gained).toBe(4);
+  });
 });
 
 describe("board lifecycle", () => {
@@ -63,6 +75,11 @@ describe("board lifecycle", () => {
     let i = 0;
     const board = createInitialBoard(() => seq[i++ % seq.length]!);
     expect(board.filter((v) => v !== 0)).toHaveLength(2);
+  });
+  it("places a 4-tile when the value roll is >= 0.9", () => {
+    let call = 0;
+    const board = addRandomTile(Array(16).fill(0), () => (call++ === 0 ? 0 : 0.95));
+    expect(board[0]).toBe(4);
   });
   it("canMove detects merges on a full board", () => {
     const stuck = [2, 4, 2, 4, 4, 2, 4, 2, 2, 4, 2, 4, 4, 2, 4, 2];

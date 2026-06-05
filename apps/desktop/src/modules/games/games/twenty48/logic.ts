@@ -66,9 +66,9 @@ export function canMove(board: Board): boolean {
   if (board.includes(0)) return true;
   for (let y = 0; y < 4; y++) {
     for (let x = 0; x < 4; x++) {
-      const v = board[y * 4 + x]; // y*4+x in [0,15] — provably in range
-      if (x < 3 && board[y * 4 + x + 1] === v) return true;
-      if (y < 3 && board[(y + 1) * 4 + x] === v) return true;
+      const v = board[y * 4 + x]!; // y*4+x in [0,15] — provably in range
+      if (x < 3 && board[y * 4 + x + 1]! === v) return true;
+      if (y < 3 && board[(y + 1) * 4 + x]! === v) return true;
     }
   }
   return false;
