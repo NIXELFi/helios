@@ -44,7 +44,7 @@ export function GameOverOverlay({ score, status, onRetrySubmit, onRestart, onBac
   const shown = useCountUp(score);
 
   return (
-    {/* rounded-md so the backdrop hugs the .games-crt bezel's radius */}
+    // rounded-md so the backdrop hugs the .games-crt bezel's radius
     <div className="games-overlay-in absolute inset-0 flex items-center justify-center rounded-md bg-helios-base/85 backdrop-blur-sm">
       <div className="games-card-in relative w-72 overflow-hidden rounded-md border border-helios-line bg-helios-panel text-center shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)] ring-1 ring-black/60">
         {/* Hazard trim along the top edge */}

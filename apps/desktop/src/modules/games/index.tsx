@@ -5,6 +5,7 @@ import { submitScore, type GameId } from "./api";
 import { GAMES, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
 import { LeaderboardPanel } from "./components/LeaderboardPanel";
+import { GameStandings } from "./components/GameStandings";
 import { GameOverOverlay, type SubmitStatus } from "./components/GameOverOverlay";
 
 export interface GamesModuleProps {
@@ -71,8 +72,11 @@ export function GamesModule({ paused }: GamesModuleProps) {
     <div className="games-root games-bg flex h-full">
       <div className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-4">
         {active && ActiveGame ? (
-          <>
-            <div className="flex w-full max-w-xl items-center justify-between">
+          /* In-game the standings wrap the surface vertically (podium strip
+           * above, rest of the field below) instead of a side tower — the
+           * games are small, so the vertical room is where the space is. */
+          <div className="flex h-full min-h-0 w-fit max-w-full flex-col justify-center gap-2">
+            <div className="flex shrink-0 items-center justify-between">
               <div className="games-display text-sm text-helios-text">{active.title}</div>
               <button
                 type="button"
@@ -82,22 +86,24 @@ export function GamesModule({ paused }: GamesModuleProps) {
                 ← All games
               </button>
             </div>
-            <div className="relative">
-              <ActiveGame key={run} onGameOver={stableOnGameOver} paused={paused} />
-              {over && (
-                <GameOverOverlay
-                  score={over.score}
-                  status={over.status}
-                  onRetrySubmit={() => void handleGameOver(over.score)}
-                  onRestart={() => {
-                    setOver(null);
-                    setRun((n) => n + 1);
-                  }}
-                  onBack={() => { setActive(null); setOver(null); }}
-                />
-              )}
-            </div>
-          </>
+            <GameStandings client={client} gameId={active.id} refreshToken={refreshToken}>
+              <div className="relative shrink-0 self-center">
+                <ActiveGame key={run} onGameOver={stableOnGameOver} paused={paused} />
+                {over && (
+                  <GameOverOverlay
+                    score={over.score}
+                    status={over.status}
+                    onRetrySubmit={() => void handleGameOver(over.score)}
+                    onRestart={() => {
+                      setOver(null);
+                      setRun((n) => n + 1);
+                    }}
+                    onBack={() => { setActive(null); setOver(null); }}
+                  />
+                )}
+              </div>
+            </GameStandings>
+          </div>
         ) : (
           <div className="w-full max-w-2xl">
             <div className="mb-6">
@@ -113,7 +119,11 @@ export function GamesModule({ paused }: GamesModuleProps) {
           </div>
         )}
       </div>
-      <LeaderboardPanel client={client} gameId={boardGame} refreshToken={refreshToken} />
+      {/* Side tower only in the lobby — in-game the standings wrap the
+          surface via GameStandings instead. */}
+      {!active && (
+        <LeaderboardPanel client={client} gameId={boardGame} refreshToken={refreshToken} />
+      )}
     </div>
   );
 }

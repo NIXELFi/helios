@@ -6,7 +6,7 @@ import {
 } from "../api";
 import { GAMES } from "../registry";
 
-type Tab = "alltime" | "weekly" | "subteams";
+export type Tab = "alltime" | "weekly" | "subteams";
 
 interface Props {
   client: SupabaseClient;
@@ -15,8 +15,86 @@ interface Props {
   refreshToken: number;
 }
 
+/** Shared standings data source — used by the side tower (picker view) and
+ *  the split strips around an active game (GameStandings). One fetch per
+ *  (tab, game, refresh); stale-guarded. */
+export function useLeaderboardData(
+  client: SupabaseClient,
+  tab: Tab,
+  gameId: GameId,
+  refreshToken: number,
+): {
+  entries: LeaderboardEntry[] | null;
+  subteams: SubteamRanking[] | null;
+  error: string | null;
+  retry: () => void;
+} {
+  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  const [subteams, setSubteams] = useState<SubteamRanking[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+
+  useEffect(() => {
+    let stale = false;
+    setError(null);
+    setEntries(null);
+    setSubteams(null);
+    const load =
+      tab === "subteams"
+        ? fetchSubteams(client).then((r) => { if (!stale) setSubteams(r); })
+        : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) => {
+            if (!stale) setEntries(r);
+          });
+    load.catch((e: unknown) => {
+      if (!stale) setError(e instanceof Error ? e.message : String(e));
+    });
+    return () => { stale = true; };
+  }, [client, tab, gameId, refreshToken, retryToken]);
+
+  return { entries, subteams, error, retry: () => setRetryToken((n) => n + 1) };
+}
+
+/** Segmented tab control. `compact` renders the slim Orbitron variant used in
+ *  the in-game podium strip. */
+export function SegmentedTabs({
+  tab,
+  onSelect,
+  compact = false,
+}: {
+  tab: Tab;
+  onSelect: (t: Tab) => void;
+  compact?: boolean;
+}) {
+  const items = compact
+    ? ([["alltime", "ALL"], ["weekly", "WEEK"], ["subteams", "TEAMS"]] as const)
+    : ([["alltime", "All-time"], ["weekly", "Weekly"], ["subteams", "Subteams"]] as const);
+  return (
+    <div className="flex shrink-0 overflow-hidden rounded-sm border border-helios-line">
+      {items.map(([id, label], idx) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onSelect(id)}
+          className={
+            (compact
+              ? "games-display px-2 py-1 text-[9px] tracking-wider "
+              : "flex-1 px-2 py-1 text-[11px] ") +
+            "transition-colors " +
+            (idx > 0 ? "border-l border-helios-line " : "") +
+            (tab === id
+              ? "bg-asu-gold font-semibold text-helios-base"
+              : "bg-helios-panel text-helios-text hover:bg-helios-line/40")
+          }
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Podium medal chip for ranks 1–3; plain dim numeral for 4+. */
-function RankChip({ rank }: { rank: number }) {
+export function RankChip({ rank }: { rank: number }) {
   if (rank <= 3) {
     return (
       <span
@@ -39,27 +117,7 @@ function RankChip({ rank }: { rank: number }) {
 
 export function LeaderboardPanel({ client, gameId, refreshToken }: Props) {
   const [tab, setTab] = useState<Tab>("alltime");
-  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
-  const [subteams, setSubteams] = useState<SubteamRanking[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    let stale = false;
-    setError(null);
-    setEntries(null);
-    setSubteams(null);
-    const load =
-      tab === "subteams"
-        ? fetchSubteams(client).then((r) => { if (!stale) setSubteams(r); })
-        : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) => {
-            if (!stale) setEntries(r);
-          });
-    load.catch((e: unknown) => {
-      if (!stale) setError(e instanceof Error ? e.message : String(e));
-    });
-    return () => { stale = true; };
-  }, [client, tab, gameId, refreshToken, retry]);
+  const { entries, subteams, error, retry } = useLeaderboardData(client, tab, gameId, refreshToken);
 
   const gameTitle = GAMES.find((g) => g.id === gameId)?.title ?? gameId;
 
@@ -72,26 +130,7 @@ export function LeaderboardPanel({ client, gameId, refreshToken }: Props) {
       <div className="games-hazard h-[3px] w-full rounded-full opacity-70" />
 
       {/* Segmented tab control */}
-      <div className="flex overflow-hidden rounded-sm border border-helios-line">
-        {(
-          [["alltime", "All-time"], ["weekly", "Weekly"], ["subteams", "Subteams"]] as const
-        ).map(([id, label], idx) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={
-              "flex-1 px-2 py-1 text-[11px] transition-colors " +
-              (idx > 0 ? "border-l border-helios-line " : "") +
-              (tab === id
-                ? "bg-asu-gold font-semibold text-helios-base"
-                : "bg-helios-panel text-helios-text hover:bg-helios-line/40")
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs tab={tab} onSelect={setTab} />
 
       <div className="text-[10px] uppercase tracking-wider text-helios-dim">
         {tab === "subteams" ? "All games · sum of bests" : gameTitle}
@@ -100,7 +139,7 @@ export function LeaderboardPanel({ client, gameId, refreshToken }: Props) {
       {error ? (
         <div className="text-xs text-red-300">
           {error}{" "}
-          <button type="button" className="underline" onClick={() => setRetry((n) => n + 1)}>
+          <button type="button" className="underline" onClick={retry}>
             Retry
           </button>
         </div>
@@ -171,7 +210,7 @@ export function LeaderboardPanel({ client, gameId, refreshToken }: Props) {
 }
 
 /** Three pulsing placeholder bars, sized to match real rows (no layout shift). */
-function SkeletonRows() {
+export function SkeletonRows() {
   return (
     <div className="flex flex-col gap-1" aria-hidden>
       {[0, 1, 2].map((i) => (
@@ -184,7 +223,7 @@ function SkeletonRows() {
   );
 }
 
-function EmptyState() {
+export function EmptyState() {
   return (
     <div className="flex flex-col items-center gap-1 py-6 text-center">
       <div className="games-display text-base text-helios-line">—</div>
