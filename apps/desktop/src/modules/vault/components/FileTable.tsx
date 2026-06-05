@@ -1,5 +1,6 @@
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
 import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
+import { revealInExplorer } from "../data/reveal";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -376,7 +377,25 @@ export function FileTable({
               >
                 <div className="flex items-center gap-2">
                   <FileTypeIcon name={f.name} />
-                  <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                  {localMatch?.local ? (
+                    // Local copy exists — name is a button that reveals it in
+                    // Explorer. stopPropagation prevents the row's onSelect from
+                    // also firing (row stays selected where it already was).
+                    <button
+                      id={`file-row-name-${f.id}`}
+                      type="button"
+                      title="Reveal in File Explorer"
+                      className="block max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void revealInExplorer(localMatch.local!.absolutePath);
+                      }}
+                    >
+                      {f.name}
+                    </button>
+                  ) : (
+                    <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                  )}
                 </div>
               </td>
               <td className="px-2.5 py-1.5">
