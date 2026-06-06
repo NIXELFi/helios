@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { loadWorkspace } from "@pm/lib/data";
 import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
+import { subscribePmRealtime } from "@pm/lib/pm-realtime";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
@@ -24,6 +25,10 @@ const PM_PROBE_MS = 20_000;
 // cheap change signal) while the window stays focused but idle. Window focus
 // also forces a full refresh, so an active user never waits this long.
 const PM_BACKSTOP_MS = 180_000;
+// Coalesce a burst of realtime events (e.g. a multi-row edit, or tasks +
+// task_subteams firing together) into one re-hydrate. Short enough to still feel
+// instant.
+const PM_REALTIME_DEBOUNCE_MS = 150;
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -180,9 +185,11 @@ export function PmModule() {
   // state, and SKIPS while a write is in flight so it never clobbers an
   // in-flight optimistic edit.
   //
-  // Freshness comes from three signals instead of a blind 20s full re-pull:
+  // Freshness comes from four signals instead of a blind 20s full re-pull:
+  //   - REALTIME on the published pm tables (subscribePmRealtime) — the live
+  //     path, so a teammate's task/milestone/comment edit lands near-instantly,
   //   - a cheap task/activity change-probe (fetchPmCursor) every PM_PROBE_MS —
-  //     runs the heavy refresh only when tasks actually changed,
+  //     covers the UNpublished tables + any missed realtime event,
   //   - window focus — a full refresh (catches the long tail instantly), and
   //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
   //     the window stays focused but idle.
@@ -254,10 +261,29 @@ export function PmModule() {
     window.addEventListener("focus", onFocus);
     const probeInterval = window.setInterval(() => void probe(), PM_PROBE_MS);
     const backstopInterval = window.setInterval(fullRefresh, PM_BACKSTOP_MS);
+
+    // Realtime is the live path: the published pm tables (tasks, comments,
+    // dependencies, task_subteams, milestones, calendar_events, subteams) push
+    // changes instantly, so a teammate's edit appears in well under a second
+    // instead of waiting up to PM_PROBE_MS. Debounced into one guarded refresh()
+    // so a burst coalesces; the probe/focus/backstop above remain the safety net
+    // for the UNpublished tables and any missed events.
+    let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
+    const onRealtime = () => {
+      if (realtimeDebounce) clearTimeout(realtimeDebounce);
+      realtimeDebounce = setTimeout(() => {
+        realtimeDebounce = null;
+        fullRefresh();
+      }, PM_REALTIME_DEBOUNCE_MS);
+    };
+    const unsubscribeRealtime = subscribePmRealtime(c, onRealtime);
+
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearInterval(probeInterval);
       window.clearInterval(backstopInterval);
+      if (realtimeDebounce) clearTimeout(realtimeDebounce);
+      unsubscribeRealtime();
     };
   }, [client, user]);
 
