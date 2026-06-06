@@ -3,10 +3,10 @@ import { useSupabaseClient } from "@helios/auth";
 import type { VaultId } from "./types";
 
 /**
- * Subscribe to Supabase realtime events on the pdm tables that drive auto-sync
- * (versions, locks, files). Each event type calls the matching callback so the
- * caller can refetch the right slice. RLS gates which rows we receive — the
- * subscription mirrors what the user can SELECT.
+ * Subscribe to Supabase realtime events on the pdm tables that drive the vault
+ * UI (versions, locks, files, folders). Each event type calls the matching
+ * callback so the caller can apply/refetch the right slice. RLS gates which rows
+ * we receive — the subscription mirrors what the user can SELECT.
  *
  * One channel per vault keeps payload volume bounded; cross-vault events are
  * filtered out by the caller via vaultId checks where relevant.
@@ -21,6 +21,7 @@ export function useVaultRealtime(
     onVersion?: (payload?: unknown) => void;
     onLock?: (payload?: unknown) => void;
     onFile?: (payload?: unknown) => void;
+    onFolder?: (payload?: unknown) => void;
   },
 ) {
   const client = useSupabaseClient();
@@ -72,6 +73,7 @@ export function useVaultRealtime(
         .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, (payload) => cbRef.current.onVersion?.(payload))
         .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, (payload) => cbRef.current.onLock?.(payload))
         .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, (payload) => cbRef.current.onFile?.(payload))
+        .on("postgres_changes", { event: "*", schema: "pdm", table: "folders" }, (payload) => cbRef.current.onFolder?.(payload))
         .subscribe((status: string, err?: unknown) => {
           if (disposed) return;
           if (status === "SUBSCRIBED") {

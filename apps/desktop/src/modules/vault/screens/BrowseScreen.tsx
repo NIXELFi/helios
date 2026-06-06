@@ -292,11 +292,15 @@ export function BrowseScreen() {
       patchFiles((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.folder_id === selectedFolder && f.deleted_at == null }));
     }
     patchDeleted((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.deleted_at != null }));
-    // Deleted FOLDERS aren't realtime-tracked (folders aren't subscribed); keep
-    // the cheap refetch so a folder-cascade delete updates the recycle bin.
-    refetchDeletedFolders();
+    // A folder-cascade delete soft-deletes child files (fires file events,
+    // handled above) but the deleted FOLDERS list is refreshed by onFolder.
   }, [vaultId, selectedFolder, refetchAllFiles, refetchFiles, refetchDeleted, refetchDeletedFolders, patchAllFiles, patchFiles, patchDeleted]);
-  useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
+  // Folder create/rename/move/delete by anyone. The folder set is small, so a
+  // refetch feels instant — no incremental apply needed. Without this, folder
+  // changes weren't realtime at all (folders weren't subscribed), and a rename
+  // never propagated (the cursor count can't see it) until reload.
+  const onFolder = useCallback(() => { refetchFolders(); refetchDeletedFolders(); }, [refetchFolders, refetchDeletedFolders]);
+  useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile, onFolder });
 
   // Full reconcile of the vault metadata — the heavy path that re-pulls the
   // file catalog, locks and recycle-bin lists. Triggered by realtime (the fast
@@ -304,10 +308,11 @@ export function BrowseScreen() {
   const reconcile = useCallback(() => {
     refetchAllFiles();
     refetchFiles();
+    refetchFolders();
     refetchLocks();
     refetchDeleted();
     refetchDeletedFolders();
-  }, [refetchAllFiles, refetchFiles, refetchLocks, refetchDeleted, refetchDeletedFolders]);
+  }, [refetchAllFiles, refetchFiles, refetchFolders, refetchLocks, refetchDeleted, refetchDeletedFolders]);
   // Periodic safety net behind realtime, but WITHOUT a per-cycle full re-pull.
   // If realtime's channel drops, the app was backgrounded, or an event is
   // missed, the old code re-fetched the entire catalog (~MBs) every 15s to find

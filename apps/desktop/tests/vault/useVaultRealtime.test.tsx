@@ -62,14 +62,14 @@ describe("useVaultRealtime", () => {
     expect(channelMock.subscribe).not.toHaveBeenCalled();
   });
 
-  it("subscribes once on mount with a `vault:<id>`-prefixed channel and the three table listeners", () => {
+  it("subscribes once on mount with a `vault:<id>`-prefixed channel and the four table listeners", () => {
     const { client, fireEvent: _, getChannelName, channelMock, subscribeMock } = realtimeClient();
-    const cb = { onVersion: vi.fn(), onLock: vi.fn(), onFile: vi.fn() };
+    const cb = { onVersion: vi.fn(), onLock: vi.fn(), onFile: vi.fn(), onFolder: vi.fn() };
     renderHook(() => useVaultRealtime("v1", cb), { wrapper: wrap(client) });
     // Name carries the vault id (so it's debuggable) plus a per-instance
     // suffix so concurrent subscribers don't collide on topic name.
     expect(getChannelName()).toMatch(/^vault:v1:/);
-    expect(channelMock.on).toHaveBeenCalledTimes(3);
+    expect(channelMock.on).toHaveBeenCalledTimes(4); // versions, locks, files, folders
     expect(subscribeMock).toHaveBeenCalledTimes(1);
     // A status callback must be supplied (for logging + reconnect).
     expect(subscribeMock.mock.calls[0]![0]).toBeTypeOf("function");
@@ -161,17 +161,19 @@ describe("useVaultRealtime", () => {
 
   it("invokes the correct callback when a postgres_changes event fires for that table", () => {
     const { client, fireEvent } = realtimeClient();
-    const cb = { onVersion: vi.fn(), onLock: vi.fn(), onFile: vi.fn() };
+    const cb = { onVersion: vi.fn(), onLock: vi.fn(), onFile: vi.fn(), onFolder: vi.fn() };
     renderHook(() => useVaultRealtime("v1", cb), { wrapper: wrap(client) });
 
     fireEvent("versions");
     fireEvent("versions");
     fireEvent("locks");
     fireEvent("files");
+    fireEvent("folders");
 
     expect(cb.onVersion).toHaveBeenCalledTimes(2);
     expect(cb.onLock).toHaveBeenCalledTimes(1);
     expect(cb.onFile).toHaveBeenCalledTimes(1);
+    expect(cb.onFolder).toHaveBeenCalledTimes(1);
   });
 
   it("forwards the postgres_changes payload to the callback (for incremental apply)", () => {
@@ -201,7 +203,7 @@ describe("useVaultRealtime", () => {
     rerender({ cb: { onVersion: fresh } });
 
     // No re-subscribe; channel was built once.
-    expect(channelMock.on).toHaveBeenCalledTimes(3);
+    expect(channelMock.on).toHaveBeenCalledTimes(4);
     expect(subscribeMock).toHaveBeenCalledTimes(1);
 
     fireEvent("versions");
@@ -223,8 +225,8 @@ describe("useVaultRealtime", () => {
     rerender({ id: "v2" });
     expect(getChannelName()).toMatch(/^vault:v2:/);
     expect((client.removeChannel as any).mock.calls.length).toBe(1);
-    // .on was called 3 more times (3 for v1 + 3 for v2 = 6).
-    expect(channelMock.on).toHaveBeenCalledTimes(6);
+    // .on was called 4 more times (4 for v1 + 4 for v2 = 8).
+    expect(channelMock.on).toHaveBeenCalledTimes(8);
   });
 
   it("removes the channel on unmount", () => {
