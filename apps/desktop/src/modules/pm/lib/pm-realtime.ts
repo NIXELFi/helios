@@ -6,8 +6,9 @@ import type { SupabaseClient } from "@helios/auth";
  * UI can update in well under a second instead of waiting for the cursor probe.
  *
  * The UNpublished tables (projects, vendors, pages, blocks, subsystems,
- * build_records, activity) are intentionally not here — PmModule's cursor probe
- * + window-focus refresh + slow backstop cover those.
+ * build_records) are intentionally not here — PmModule's cursor probe +
+ * window-focus refresh + slow backstop cover those. `activity` was added to the
+ * publication (migration 20260606120000) so the activity feed updates live too.
  */
 export const PM_REALTIME_TABLES = [
   "tasks",
@@ -17,6 +18,7 @@ export const PM_REALTIME_TABLES = [
   "milestones",
   "calendar_events",
   "subteams",
+  "activity",
 ] as const;
 
 const BASE_BACKOFF_MS = 5000;

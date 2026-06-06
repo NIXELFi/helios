@@ -48,6 +48,8 @@ describe("subscribePmRealtime", () => {
     expect(h.subscribeMock).toHaveBeenCalledTimes(1);
     // tasks is the most important one — make sure it's covered.
     expect(PM_REALTIME_TABLES).toContain("tasks");
+    // activity is published (migration 20260606120000) so the feed is live.
+    expect(PM_REALTIME_TABLES).toContain("activity");
   });
 
   it("calls onEvent when any subscribed table fires", () => {
