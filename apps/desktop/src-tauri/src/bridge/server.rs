@@ -74,7 +74,16 @@ async fn guard(State(state): State<Arc<BridgeState>>, req: Request, next: Next) 
         .and_then(|h| h.strip_prefix("Bearer "));
 
     match presented {
-        Some(tok) if tok == state.token => next.run(req).await,
+        Some(tok) if tok == state.token => {
+            // Record add-in liveness. On a fresh connection (first request, or
+            // after the add-in had gone idle) ask the UI to push a snapshot now,
+            // so the add-in doesn't see stale/empty data while it waits for the
+            // next periodic refresh.
+            if state.touch_activity() {
+                let _ = state.emit("bridge://addin-connected", &json!({}));
+            }
+            next.run(req).await
+        }
         _ => (StatusCode::UNAUTHORIZED, "bad or missing bearer token").into_response(),
     }
 }

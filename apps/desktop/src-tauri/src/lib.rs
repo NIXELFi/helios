@@ -204,6 +204,7 @@ pub fn run() {
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,
             bridge::bridge_respond,
+            bridge::bridge_addin_active,
             set_autostart,
             get_autostart,
             provision_sw_addin,
