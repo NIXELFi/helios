@@ -17,6 +17,7 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconCornerDownRight,
+  IconCornerLeftUp,
   IconFlag,
   IconPlus,
   IconSend,
@@ -46,6 +47,9 @@ const TYPE_LABEL: Record<TaskType, string> = {
   analysis: "Analysis",
   test: "Test",
   general: "General",
+  mfg_laser: "MFG-LZR",
+  mfg_machine: "MFG-MCH",
+  mfg_weld: "MFG-WELD",
 };
 
 const STATUS_OPTIONS: SelectOption<TaskStatus>[] = TASK_STATUSES.map((s) => ({
@@ -118,6 +122,35 @@ export function TaskDetailSheet() {
     () => (task ? tasks.filter((t) => t.parent_task_id === task.id) : []),
     [tasks, task],
   );
+  const parentTask = useMemo(
+    () => (task?.parent_task_id ? tasks.find((t) => t.id === task.parent_task_id) ?? null : null),
+    [tasks, task],
+  );
+  // Tasks that can't be chosen as this task's parent: itself plus its whole
+  // subtask subtree (choosing one would create a cycle).
+  const parentExcludeIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!task) return set;
+    set.add(task.id);
+    const childrenOf = new Map<string, string[]>();
+    for (const t of tasks) {
+      if (!t.parent_task_id) continue;
+      const arr = childrenOf.get(t.parent_task_id) ?? [];
+      arr.push(t.id);
+      childrenOf.set(t.parent_task_id, arr);
+    }
+    const stack = [task.id];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const c of childrenOf.get(id) ?? []) {
+        if (!set.has(c)) {
+          set.add(c);
+          stack.push(c);
+        }
+      }
+    }
+    return set;
+  }, [tasks, task]);
   const predecessors = useMemo(
     () =>
       task
@@ -361,6 +394,44 @@ export function TaskDetailSheet() {
               />
             </Field>
           </div>
+
+          {/* Parent task */}
+          <Section title="Parent task">
+            {parentTask ? (
+              <div className="flex items-center gap-2 rounded border border-helios-line bg-helios-base/40 px-2 py-1.5 text-xs">
+                <IconCornerLeftUp size={12} strokeWidth={1.5} className="text-helios-dim" />
+                <span
+                  aria-hidden
+                  className="size-1.5 rounded-full"
+                  style={{ backgroundColor: STATUS_DOT[parentTask.status] }}
+                />
+                <button
+                  type="button"
+                  onClick={() => selectTask(parentTask.id)}
+                  className="flex-1 truncate text-left text-helios-text hover:underline"
+                  title="Open parent task"
+                >
+                  {parentTask.title}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateTask(task.id, { parent_task_id: null })}
+                  className="shrink-0 rounded p-0.5 text-helios-dim hover:bg-helios-base hover:text-red-400"
+                  aria-label="Detach from parent"
+                  title="Detach from parent"
+                >
+                  <IconX size={12} strokeWidth={1.5} />
+                </button>
+              </div>
+            ) : (
+              <TaskLookup
+                tasks={tasks}
+                excludeIds={parentExcludeIds}
+                onSelect={(id) => updateTask(task.id, { parent_task_id: id })}
+                placeholder="Make this a subtask of… (pick a parent)"
+              />
+            )}
+          </Section>
 
           {/* Subtasks */}
           <Section

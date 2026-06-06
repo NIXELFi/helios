@@ -78,3 +78,32 @@ export function hexToRgba(hex: string, alpha: number): string {
   if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return hex;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
+
+// A border surface can also be "none" (no border drawn).
+export type TaskBorderProperty = TaskColorProperty | "none";
+
+// Dark translucent fill for the Done special-case below.
+const DARK_GLASS = "rgba(18, 19, 24, 0.72)";
+
+// Single source of truth for resolving a task marker's BODY fill + BORDER color
+// from a body/border color-by-property pairing, used by every view that colors
+// task markers (Gantt bars, Calendar chips/squares, Graph nodes). Applies the
+// shared body/border special-cases — both gated on a Done status:
+//   A) body=status + border=priority, Done → hide the (priority) border.
+//   B) body=priority + border=status, Done → dark-glass body.
+// `bodyAlpha` sets the translucency of the normal (non-dark-glass) glass fill.
+// `borderColor` is null when no border should be drawn.
+export function resolveMarkerColors(
+  task: TaskRow,
+  body: TaskColorProperty,
+  border: TaskBorderProperty,
+  bodyAlpha: number,
+): { background: string; borderColor: string | null } {
+  const isDone = task.status === "done";
+  const effBorder: TaskBorderProperty =
+    body === "status" && border === "priority" && isDone ? "none" : border;
+  const darkGlass = body === "priority" && border === "status" && isDone;
+  const background = darkGlass ? DARK_GLASS : hexToRgba(colorForTask(task, body), bodyAlpha);
+  const borderColor = effBorder === "none" ? null : colorForTask(task, effBorder);
+  return { background, borderColor };
+}

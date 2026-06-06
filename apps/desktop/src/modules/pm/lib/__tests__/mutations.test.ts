@@ -369,6 +369,8 @@ describe("calendar event mutations", () => {
     title: "Comp",
     date: "2026-05-01",
     all_subteams: true,
+    recurrence: "none",
+    recurrence_end: null,
     subteam_ids: [],
     type_tags: [],
     description: null,

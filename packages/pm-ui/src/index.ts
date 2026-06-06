@@ -7,7 +7,7 @@ export {
   STATUS_FILL,
   STATUS_DOT_CLASS,
 } from "./statusMeta";
-export { TypeBadge, TASK_TYPE_LABEL } from "./typeBadge";
+export { TypeBadge, TASK_TYPE_LABEL, TASK_TYPE_SHORT } from "./typeBadge";
 export { computeCriticalPath } from "./criticalPath";
 export {
   taskOutline,
@@ -28,6 +28,8 @@ export {
   ownerColor,
   colorForTask,
   hexToRgba,
+  resolveMarkerColors,
   type TaskColorProperty,
+  type TaskBorderProperty,
 } from "./taskColors";
 export * from "./types";

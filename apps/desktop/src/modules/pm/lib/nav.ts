@@ -2,7 +2,7 @@
 // inside that subteam. When at the project root, the view nav points to global
 // /[view] routes.
 
-export const VIEW_SEGMENTS = ["table", "board", "calendar", "gantt", "graph", "pages", "activity"] as const;
+export const VIEW_SEGMENTS = ["dashboard", "table", "board", "calendar", "gantt", "graph", "pages", "activity"] as const;
 export type ViewSegment = (typeof VIEW_SEGMENTS)[number];
 
 // --- Workspaces -------------------------------------------------------------

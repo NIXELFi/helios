@@ -7,6 +7,7 @@ import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav"
 import { Sidebar } from "@pm/components/Sidebar";
 import { TaskDetailSheet } from "@pm/components/TaskDetailSheet";
 import { DeadlineReportWindow } from "@pm/components/DeadlineReportWindow";
+import { DashboardViewClient } from "@pm/views/DashboardViewClient";
 import { TableViewClient } from "@pm/views/TableViewClient";
 import { BoardViewClient } from "@pm/views/BoardViewClient";
 import { GanttViewClient } from "@pm/views/GanttViewClient";
@@ -39,6 +40,8 @@ function CurrentView() {
   if (ws === "compete") return <ComingSoon label="Competition planning" />;
 
   switch (view) {
+    case "dashboard":
+      return <DashboardViewClient teamSlug={teamSlug} />;
     case "board":
       return <BoardViewClient teamSlug={teamSlug} />;
     case "gantt":

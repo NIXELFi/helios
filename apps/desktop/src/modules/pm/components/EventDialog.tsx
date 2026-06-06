@@ -1,6 +1,7 @@
 "use client";
 
-import type { CalendarEvent, Subteam } from "@helios/pm-ui";
+import type { CalendarEvent, EventRecurrence, Subteam } from "@helios/pm-ui";
+import { EVENT_RECURRENCES } from "@helios/pm-ui";
 import { IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
@@ -8,6 +9,13 @@ import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 const inputClass =
   "rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm text-helios-text " +
   "placeholder:text-helios-dim focus:border-asu-gold focus:outline-none";
+
+const RECURRENCE_LABEL: Record<EventRecurrence, string> = {
+  none: "Does not repeat",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+};
 
 export interface EventDialogProps {
   open: boolean;
@@ -37,6 +45,8 @@ export function EventDialog({
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   const [description, setDescription] = useState("");
+  const [recurrence, setRecurrence] = useState<EventRecurrence>("none");
+  const [recurrenceEnd, setRecurrenceEnd] = useState("");
 
   // Initialise on open (edit vs create).
   useEffect(() => {
@@ -48,6 +58,8 @@ export function EventDialog({
     setTags(event ? [...event.type_tags] : []);
     setTagDraft("");
     setDescription(event?.description ?? "");
+    setRecurrence(event?.recurrence ?? "none");
+    setRecurrenceEnd(event?.recurrence_end ?? "");
   }, [open, event, defaultDate]);
 
   function toggleSubteam(id: string) {
@@ -77,6 +89,8 @@ export function EventDialog({
       subteam_ids: allSubteams ? [] : subteamIds,
       type_tags: tags,
       description: description.trim() === "" ? null : description.trim(),
+      recurrence,
+      recurrence_end: recurrence === "none" || recurrenceEnd === "" ? null : recurrenceEnd,
     });
     onClose();
   }
@@ -143,7 +157,7 @@ export function EventDialog({
           />
         </Field>
 
-        <Field label="Date">
+        <Field label={recurrence === "none" ? "Date" : "Start date"}>
           <input
             type="date"
             value={date}
@@ -151,6 +165,33 @@ export function EventDialog({
             className={inputClass}
           />
         </Field>
+
+        <div className="flex gap-3">
+          <Field label="Repeats">
+            <select
+              value={recurrence}
+              onChange={(e) => setRecurrence(e.target.value as EventRecurrence)}
+              className={inputClass}
+            >
+              {EVENT_RECURRENCES.map((r) => (
+                <option key={r} value={r}>
+                  {RECURRENCE_LABEL[r]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {recurrence !== "none" ? (
+            <Field label="Ends (optional)">
+              <input
+                type="date"
+                value={recurrenceEnd}
+                min={date || undefined}
+                onChange={(e) => setRecurrenceEnd(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+          ) : null}
+        </div>
 
         <Field label="Subteams">
           <div className="flex flex-wrap items-center gap-1.5">
