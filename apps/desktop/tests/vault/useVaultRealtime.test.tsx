@@ -174,6 +174,16 @@ describe("useVaultRealtime", () => {
     expect(cb.onFile).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards the postgres_changes payload to the callback (for incremental apply)", () => {
+    const { client, channelMock } = realtimeClient();
+    const onFile = vi.fn();
+    renderHook(() => useVaultRealtime("v1", { onFile }), { wrapper: wrap(client) });
+    const payload = { eventType: "UPDATE", new: { id: "f1", deleted_at: "now" }, old: { id: "f1" } };
+    const reg = (channelMock.on as any).mock.calls.find((c: any[]) => c[1].table === "files");
+    reg[2](payload);
+    expect(onFile).toHaveBeenCalledWith(payload);
+  });
+
   it("calls the LATEST callback identity even when caller re-renders with a new inline arrow", () => {
     // Regression guard for the 2026-05-25 audit fix: the cb ref must be
     // updated inside an effect, not during render. The behavior we care

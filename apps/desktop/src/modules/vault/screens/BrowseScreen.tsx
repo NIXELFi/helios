@@ -29,6 +29,7 @@ import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
 import { useAllFiles } from "../data/useAllFiles";
 import { useDeletedFiles } from "../data/useDeletedFiles";
+import { applyFileEvent, applyVersionEvent, type RowEvent } from "../data/apply-events";
 import { useDeletedFolders } from "../data/useDeletedFolders";
 import { useDeletedFileReaper } from "../data/useDeletedFileReaper";
 import { ensureLocalFolderTree } from "../data/ensureLocalFolderTree";
@@ -56,6 +57,14 @@ const LOCAL_RESCAN_INTERVAL_MS = 30_000;
 // full reconcile only runs when the signature actually moves.
 const VAULT_POLL_MS = 15_000;
 
+// Apply realtime payloads incrementally (patch the changed row into the list)
+// instead of re-pulling the whole vault on every event. Makes a teammate's
+// check-in/add/delete/rename appear in the next React commit instead of after a
+// full refetch (noticeable at the vault root on big vaults). Any unusable
+// payload falls back to a refetch (REFETCH sentinel), and the useVaultCursor
+// count poll self-heals drift — flip to false for the pure-refetch behavior.
+const VAULT_INCREMENTAL_APPLY = true;
+
 export function BrowseScreen() {
   const user = useUser();
   // Global admin — used only for truly global affordances (e.g. "you can
@@ -78,7 +87,7 @@ export function BrowseScreen() {
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
-  const { data: filesInFolder, loading: filesLoading, error: filesError, refetch: refetchFiles } = useFiles(selectedFolder ?? undefined);
+  const { data: filesInFolder, loading: filesLoading, error: filesError, refetch: refetchFiles, patch: patchFiles } = useFiles(selectedFolder ?? undefined);
   const { data: locks, error: locksError, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
@@ -128,11 +137,11 @@ export function BrowseScreen() {
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
-  const { data: allFiles, error: allFilesError, refetch: refetchAllFiles } = useAllFiles(vaultId ?? undefined);
+  const { data: allFiles, error: allFilesError, refetch: refetchAllFiles, patch: patchAllFiles } = useAllFiles(vaultId ?? undefined);
   // Soft-deleted files (the recycle bin). Threaded into the realtime/poll
   // refetch below so a delete by another member lands here promptly, and fed to
   // the reaper that removes their local working copies on this machine.
-  const { data: deletedFiles, refetch: refetchDeleted } = useDeletedFiles(vaultId ?? undefined);
+  const { data: deletedFiles, refetch: refetchDeleted, patch: patchDeleted } = useDeletedFiles(vaultId ?? undefined);
   // Soft-deleted folders — fed to the reaper so it can clean up their local
   // directories, and also re-fetched wherever refetchDeleted is called so
   // folder deletions propagate to this machine promptly.
@@ -258,11 +267,35 @@ export function BrowseScreen() {
   }, [refetchFiles, refetchAllFiles, refetchLocks]);
 
   // Realtime: when anyone checks in / locks / unlocks / adds a file in this
-  // vault, refetch the affected slice. The auto-sync hook below picks up the
-  // new version state and downloads the bytes.
-  const onVersion = useCallback(() => { refetchAllFiles(); refetchFiles(); }, [refetchAllFiles, refetchFiles]);
+  // vault, update the affected slice. With VAULT_INCREMENTAL_APPLY we patch the
+  // changed row straight from the payload (instant, no round trip); otherwise —
+  // or for any payload we can't apply safely (the patch updater returns REFETCH
+  // and the hook refetches that list) — we fall back to a full refetch. The
+  // auto-sync hook below picks up the new version state and downloads the bytes.
+  const onVersion = useCallback((payload?: unknown) => {
+    if (!VAULT_INCREMENTAL_APPLY || !payload) { refetchAllFiles(); refetchFiles(); return; }
+    const ev = payload as RowEvent<Version>;
+    patchAllFiles((rows) => applyVersionEvent(rows, ev));
+    patchFiles((rows) => applyVersionEvent(rows, ev));
+  }, [refetchAllFiles, refetchFiles, patchAllFiles, patchFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
-  const onFile = useCallback(() => { refetchAllFiles(); refetchFiles(); refetchDeleted(); refetchDeletedFolders(); }, [refetchAllFiles, refetchFiles, refetchDeleted, refetchDeletedFolders]);
+  const onFile = useCallback((payload?: unknown) => {
+    if (!VAULT_INCREMENTAL_APPLY || !payload || !vaultId) {
+      refetchAllFiles(); refetchFiles(); refetchDeleted(); refetchDeletedFolders(); return;
+    }
+    const ev = payload as RowEvent<VaultFile>;
+    // Each list's `belongs` predicate mirrors its query WHERE clause; a single
+    // soft-delete UPDATE thus drops the row from `allFiles` AND adds it to
+    // `deletedFiles` (and vice-versa on restore).
+    patchAllFiles((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.deleted_at == null }));
+    if (selectedFolder !== null) {
+      patchFiles((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.folder_id === selectedFolder && f.deleted_at == null }));
+    }
+    patchDeleted((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.deleted_at != null }));
+    // Deleted FOLDERS aren't realtime-tracked (folders aren't subscribed); keep
+    // the cheap refetch so a folder-cascade delete updates the recycle bin.
+    refetchDeletedFolders();
+  }, [vaultId, selectedFolder, refetchAllFiles, refetchFiles, refetchDeleted, refetchDeletedFolders, patchAllFiles, patchFiles, patchDeleted]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile });
 
   // Full reconcile of the vault metadata — the heavy path that re-pulls the

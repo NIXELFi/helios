@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { QueryResult, VaultFile, VaultId } from "./types";
 import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
+import { REFETCH, type RefetchSignal } from "./apply-events";
+
+/** A list hook that also exposes `patch` for incremental realtime updates. */
+export type PatchableFiles = QueryResult<VaultFile[]> & {
+  /** Apply an in-memory update. `updater` returns the next array, the same
+   *  reference for a no-op, or REFETCH to fall back to a full refetch. No-ops
+   *  before the first load (the in-flight/next fetch covers it). */
+  patch: (updater: (rows: VaultFile[]) => VaultFile[] | RefetchSignal) => void;
+};
 
 /**
  * Fetches ALL files across every folder in a vault. Used by the unmatched-
@@ -14,12 +23,18 @@ import { fetchAllRows } from "./paginate";
  * how the SDM26 import (4,446 files) showed up missing in the file table on
  * 2026-05-25.
  */
-export function useAllFiles(vault_id: VaultId | undefined): QueryResult<VaultFile[]> {
+export function useAllFiles(vault_id: VaultId | undefined): PatchableFiles {
   const client = useSupabaseClient();
   const [data, setData] = useState<VaultFile[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
+  // Mirror `data` so patch() can read the latest list synchronously (realtime
+  // events fire between renders, and several can land in one tick).
+  const dataRef = useRef<VaultFile[] | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   useEffect(() => {
     if (!vault_id) {
@@ -59,5 +74,17 @@ export function useAllFiles(vault_id: VaultId | undefined): QueryResult<VaultFil
   }, [client, vault_id, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
-  return { data, loading, error, refetch };
+  const patch = useCallback((updater: (rows: VaultFile[]) => VaultFile[] | RefetchSignal) => {
+    const prev = dataRef.current;
+    if (prev === null) return; // not loaded yet — the in-flight/next fetch covers it
+    const next = updater(prev);
+    if (next === REFETCH) {
+      setTick((t) => t + 1);
+      return;
+    }
+    if (next === prev) return; // no-op → no re-render
+    dataRef.current = next;
+    setData(next);
+  }, []);
+  return { data, loading, error, refetch, patch };
 }

@@ -14,9 +14,13 @@ import type { VaultId } from "./types";
 export function useVaultRealtime(
   vaultId: VaultId | undefined,
   cb: {
-    onVersion?: () => void;
-    onLock?: () => void;
-    onFile?: () => void;
+    // The supabase-js postgres_changes payload is forwarded so callers can apply
+    // the change incrementally (FULL replica identity → full new/old row). Typed
+    // as unknown here to keep this hook dependency-light; callers cast to the
+    // RowEvent shape from apply-events.ts.
+    onVersion?: (payload?: unknown) => void;
+    onLock?: (payload?: unknown) => void;
+    onFile?: (payload?: unknown) => void;
   },
 ) {
   const client = useSupabaseClient();
@@ -65,9 +69,9 @@ export function useVaultRealtime(
       teardown();
       current = client
         .channel(`vault:${vaultId}:${instanceId}`)
-        .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, () => cbRef.current.onVersion?.())
-        .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, () => cbRef.current.onLock?.())
-        .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, () => cbRef.current.onFile?.())
+        .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, (payload) => cbRef.current.onVersion?.(payload))
+        .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, (payload) => cbRef.current.onLock?.(payload))
+        .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, (payload) => cbRef.current.onFile?.(payload))
         .subscribe((status: string, err?: unknown) => {
           if (disposed) return;
           if (status === "SUBSCRIBED") {
