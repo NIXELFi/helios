@@ -23,7 +23,9 @@ mod supabase;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -107,6 +109,34 @@ pub struct Inner {
     pub snapshot: Snapshot,
 }
 
+/// How long after the last authenticated add-in request we still consider the
+/// add-in "connected". The add-in polls /health well within this window; once it
+/// stops (SOLIDWORKS closed, add-in disabled), activity goes stale and the
+/// frontend stops the expensive vault-structure refresh — the snapshot is only
+/// consumed by the add-in, so nothing observes the staleness while it's gone.
+const ADDIN_IDLE_MS: u64 = 90_000;
+
+/// Wall-clock millis since the Unix epoch (matches JS `Date.now()`).
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Is the add-in currently connected, given the last-seen request time? `last==0`
+/// means "no request ever seen" → not active.
+fn is_active(last_ms: u64, now: u64, idle_ms: u64) -> bool {
+    last_ms != 0 && now.saturating_sub(last_ms) < idle_ms
+}
+
+/// Does a request at `now` represent a fresh connection (vs. an already-active
+/// add-in)? True on the very first request and whenever the add-in had gone
+/// idle — the caller fires an immediate snapshot refresh on these.
+fn reconnected(prev_ms: u64, now: u64, idle_ms: u64) -> bool {
+    prev_ms == 0 || now.saturating_sub(prev_ms) >= idle_ms
+}
+
 /// Shared bridge state: an immutable per-launch auth `token` for the loopback
 /// API plus the mutable [`Inner`] the frontend keeps current.
 pub struct BridgeState {
@@ -118,6 +148,10 @@ pub struct BridgeState {
     app: OnceLock<AppHandle>,
     /// In-flight forwarded blob ops, keyed by request id → reply channel.
     pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    /// Wall-clock millis of the last authenticated add-in request, or 0 if none
+    /// yet. Updated by the request guard; read by the frontend (via
+    /// `bridge_addin_active`) to gate the expensive vault-structure refresh.
+    last_activity: AtomicU64,
     inner: RwLock<Inner>,
 }
 
@@ -128,8 +162,26 @@ impl BridgeState {
             http: reqwest::Client::new(),
             app: OnceLock::new(),
             pending: Mutex::new(HashMap::new()),
+            last_activity: AtomicU64::new(0),
             inner: RwLock::new(Inner::default()),
         }
+    }
+
+    /// Record an authenticated add-in request and report whether it's a fresh
+    /// connection (first ever, or after the add-in had gone idle). The request
+    /// guard calls this on every authed request and, on a reconnect, emits
+    /// `bridge://addin-connected` so the frontend pushes a snapshot immediately.
+    pub(crate) fn touch_activity(&self) -> bool {
+        let now = now_ms();
+        let prev = self.last_activity.swap(now, Ordering::Relaxed);
+        reconnected(prev, now, ADDIN_IDLE_MS)
+    }
+
+    /// Is the add-in currently connected (an authed request within the idle
+    /// window)? The frontend polls this to decide whether the periodic
+    /// vault-structure refresh is worth doing.
+    pub(crate) fn addin_active(&self) -> bool {
+        is_active(self.last_activity.load(Ordering::Relaxed), now_ms(), ADDIN_IDLE_MS)
     }
 
     /// Clone of the current session, if signed in.
@@ -457,6 +509,14 @@ pub fn bridge_respond(state: State<'_, Arc<BridgeState>>, reply: BridgeOpReply) 
     state.resolve_pending(&reply.id, reply.result);
 }
 
+/// Is the SOLIDWORKS add-in currently connected? The frontend gates the
+/// expensive vault-structure refresh on this so an idle session (no add-in)
+/// stops re-pulling every file from Supabase on a timer.
+#[tauri::command]
+pub fn bridge_addin_active(state: State<'_, Arc<BridgeState>>) -> bool {
+    state.addin_active()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,5 +556,29 @@ mod tests {
         assert_eq!(files["c:/vault/sdm26/other.sldprt"]["by"], "him");
         assert_eq!(files["c:/vault/sdm26/free.sldprt"]["state"], "available");
         assert_eq!(v["vaultRoot"], "C:/Vault");
+    }
+
+    #[test]
+    fn addin_activity_window() {
+        let idle = 90_000;
+        // Never seen a request → not active.
+        assert!(!is_active(0, 1_000_000, idle));
+        // Seen recently → active.
+        assert!(is_active(1_000_000, 1_000_000 + 30_000, idle));
+        // Last request older than the window → idle again.
+        assert!(!is_active(1_000_000, 1_000_000 + idle, idle));
+        assert!(!is_active(1_000_000, 1_000_000 + idle + 1, idle));
+    }
+
+    #[test]
+    fn reconnect_detection() {
+        let idle = 90_000;
+        // First request ever is a (re)connect — triggers the immediate snapshot.
+        assert!(reconnected(0, 1_000_000, idle));
+        // A steady stream of requests is NOT a reconnect each time.
+        assert!(!reconnected(1_000_000, 1_000_000 + 30_000, idle));
+        // Coming back after going idle IS a reconnect.
+        assert!(reconnected(1_000_000, 1_000_000 + idle, idle));
+        assert!(reconnected(1_000_000, 1_000_000 + 5 * idle, idle));
     }
 }
