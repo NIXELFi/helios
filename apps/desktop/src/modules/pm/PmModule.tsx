@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { loadWorkspace } from "@pm/lib/data";
+import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
@@ -14,6 +15,15 @@ import { GraphViewClient } from "@pm/views/GraphViewClient";
 import { CalendarViewClient } from "@pm/views/CalendarViewClient";
 import { ActivityFeedClient } from "@pm/views/ActivityFeedClient";
 import "./pm.css";
+
+// Cheap task-change probe cadence — keeps task churn feeling live (~20s)
+// without re-pulling the whole workspace every cycle.
+const PM_PROBE_MS = 20_000;
+// Slow full re-hydrate backstop. The cheap probe only tracks tasks/activity, so
+// this catches the long tail (milestone/vendor/event/page edits, which have no
+// cheap change signal) while the window stays focused but idle. Window focus
+// also forces a full refresh, so an active user never waits this long.
+const PM_BACKSTOP_MS = 180_000;
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -164,11 +174,18 @@ export function PmModule() {
     };
   }, [client, user]);
 
-  // Keep the workspace fresh without a full app reload: re-fetch on window focus
-  // and on a short interval, re-hydrating from the `pm` schema so server-side
-  // changes (the activity-feed trigger, edits from another session, computed
-  // fields) appear. Preserves the active project + UI state, and SKIPS while a
-  // write is in flight so it never clobbers an in-flight optimistic edit.
+  // Keep the workspace fresh without a full app reload, re-hydrating from the
+  // `pm` schema so server-side changes (the activity-feed trigger, edits from
+  // another session, computed fields) appear. Preserves the active project + UI
+  // state, and SKIPS while a write is in flight so it never clobbers an
+  // in-flight optimistic edit.
+  //
+  // Freshness comes from three signals instead of a blind 20s full re-pull:
+  //   - a cheap task/activity change-probe (fetchPmCursor) every PM_PROBE_MS —
+  //     runs the heavy refresh only when tasks actually changed,
+  //   - window focus — a full refresh (catches the long tail instantly), and
+  //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
+  //     the window stays focused but idle.
   useEffect(() => {
     if (!client || !user) return;
     const c = client;
@@ -204,12 +221,43 @@ export function PmModule() {
         running = false;
       }
     }
-    const onFocus = () => void refresh();
+    // Cheap baseline for the change-probe. A full refresh (focus/backstop)
+    // resets it to null so the next probe re-baselines instead of firing a
+    // redundant refresh for a change the full pull already captured.
+    let prevCursor: PmCursor | null = null;
+    async function probe() {
+      const st = usePmStore.getState();
+      // Mirror refresh()'s guards: don't probe before hydration, mid-write, or
+      // while a refresh is already running.
+      if (!st.hydrated || st.inFlightWrites > 0 || running) return;
+      try {
+        const next = await fetchPmCursor(c);
+        if (pmCursorChanged(prevCursor, next)) {
+          prevCursor = next;
+          void refresh();
+        } else {
+          prevCursor = next;
+        }
+      } catch {
+        // Probe failed — fall back to a full refresh so the safety net holds,
+        // and re-baseline on the next good probe.
+        prevCursor = null;
+        void refresh();
+      }
+    }
+    const fullRefresh = () => {
+      prevCursor = null;
+      void refresh();
+    };
+
+    const onFocus = fullRefresh;
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void refresh(), 20000);
+    const probeInterval = window.setInterval(() => void probe(), PM_PROBE_MS);
+    const backstopInterval = window.setInterval(fullRefresh, PM_BACKSTOP_MS);
     return () => {
       window.removeEventListener("focus", onFocus);
-      window.clearInterval(interval);
+      window.clearInterval(probeInterval);
+      window.clearInterval(backstopInterval);
     };
   }, [client, user]);
 
