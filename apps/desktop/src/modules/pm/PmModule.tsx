@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
-import { loadWorkspace } from "@pm/lib/data";
+import { loadWorkspace, type Workspace } from "@pm/lib/data";
 import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
 import { subscribePmRealtime } from "@pm/lib/pm-realtime";
+import { loadSnapshot, saveSnapshot } from "@pm/lib/workspace-snapshot";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
@@ -149,29 +150,49 @@ export function PmModule() {
 
   useEffect(() => {
     if (!client || !user) return;
+    const c = client;
+    const u = user;
     let active = true;
+
+    const hydrateFrom = (ws: Workspace) => {
+      const persisted = readPersistedActiveProject();
+      const firstId = ws.projects[0]?.id ?? "";
+      const activeProjectId = persisted && ws.projectData[persisted] ? persisted : firstId;
+      usePmStore.getState().hydrate({
+        projects: ws.projects,
+        projectData: ws.projectData,
+        activeProjectId,
+        currentUserId: u.id,
+        baselineOrg: ws.baselineOrg,
+        roles: ws.roles,
+        client: c,
+      });
+    };
+
+    // 1. Stale-while-revalidate: paint instantly from the cached snapshot so PM
+    //    cold-launch shows the last workspace sub-frame instead of a spinner.
+    const cached = loadSnapshot(u.id);
+    if (cached) {
+      hydrateFrom(cached);
+      setPhase("ready");
+    }
+
+    // 2. Revalidate from the network, then refresh the cache for next launch.
     void (async () => {
       try {
-        const ws = await loadWorkspace(client);
+        const ws = await loadWorkspace(c);
         if (!active) return;
-        const persisted = readPersistedActiveProject();
-        const firstId = ws.projects[0]?.id ?? "";
-        const activeProjectId =
-          persisted && ws.projectData[persisted] ? persisted : firstId;
-        usePmStore.getState().hydrate({
-          projects: ws.projects,
-          projectData: ws.projectData,
-          activeProjectId,
-          currentUserId: user.id,
-          baselineOrg: ws.baselineOrg,
-          roles: ws.roles,
-          client,
-        });
+        hydrateFrom(ws);
+        saveSnapshot(ws, u.id, new Date().toISOString());
         setPhase("ready");
       } catch (e) {
         if (!active) return;
-        setError(e instanceof Error ? e.message : String(e));
-        setPhase("error");
+        // Already painted from cache → keep it rather than wiping the screen on
+        // a transient failure. Only hard-error on a cold start with no cache.
+        if (!cached) {
+          setError(e instanceof Error ? e.message : String(e));
+          setPhase("error");
+        }
       }
     })();
     return () => {
@@ -222,6 +243,9 @@ export function PmModule() {
           roles: ws.roles,
           client: c,
         });
+        // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
+        // huge workspace just isn't persisted rather than janking the write.
+        saveSnapshot(ws, u.id, new Date().toISOString());
       } catch {
         // transient refresh failure — the next focus/interval retries
       } finally {
