@@ -34,7 +34,7 @@ describe("useForceUnlock", () => {
     const { result } = renderHook(() => useForceUnlock(), { wrapper: wrap(c) });
     let returnValue: boolean | undefined;
     await act(async () => {
-      returnValue = await result.current.run("lock1", "admin override");
+      returnValue = await result.current.run("lock1", "file1", "admin override");
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(capturedArgs).toEqual({
@@ -50,7 +50,7 @@ describe("useForceUnlock", () => {
     const { result } = renderHook(() => useForceUnlock(), { wrapper: wrap(c) });
     let returnValue: boolean | undefined;
     await act(async () => {
-      returnValue = await result.current.run("lock1", "reason");
+      returnValue = await result.current.run("lock1", "file1", "reason");
     });
     expect(returnValue).toBe(false);
     expect(result.current.error?.message).toContain("not an admin");

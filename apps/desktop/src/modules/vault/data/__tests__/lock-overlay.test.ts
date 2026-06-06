@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyOverlay, entriesToClear, type OverlayEntry } from "../lock-overlay";
+import {
+  applyOverlay,
+  entriesToClear,
+  getLockOverlay,
+  resetLockOverlay,
+  setLockOverlay,
+  type OverlayEntry,
+} from "../lock-overlay";
 import type { FileId, Lock } from "../types";
 
 function lock(p: Partial<Lock> = {}): Lock {
@@ -66,5 +73,15 @@ describe("entriesToClear", () => {
   it("treats a released lock as not-held (released_at set)", () => {
     const overlay = ov(["f1", { kind: "remove" }]);
     expect(entriesToClear(overlay, [lock({ file_id: "f1", released_at: "t" })])).toEqual(["f1"]);
+  });
+});
+
+describe("resetLockOverlay (module store)", () => {
+  it("drops all optimistic entries (sign-out / vault-switch / test isolation)", () => {
+    setLockOverlay("f1", { kind: "remove" });
+    setLockOverlay("f2", { kind: "add", lock: lock({ file_id: "f2" }) });
+    expect(getLockOverlay().size).toBe(2);
+    resetLockOverlay();
+    expect(getLockOverlay().size).toBe(0);
   });
 });

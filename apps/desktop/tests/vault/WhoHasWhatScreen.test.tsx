@@ -1,9 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { WhoHasWhatScreen } from "../../src/modules/vault/screens/WhoHasWhatScreen";
+import { resetLockOverlay } from "../../src/modules/vault/data/lock-overlay";
+
+// The optimistic lock overlay is a module singleton; a force-unlock in one test
+// leaves an entry that would hide the lock row in the next. Reset between tests.
+beforeEach(() => resetLockOverlay());
 
 function mockClient(rows: any[], isAdmin = false): SupabaseClient {
   // Minimal mock: only the locks query is exercised, no active vault is

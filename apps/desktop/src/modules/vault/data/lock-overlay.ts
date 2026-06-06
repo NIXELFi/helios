@@ -44,6 +44,15 @@ export function clearLockOverlay(fileId: FileId): void {
   if (overlay.delete(fileId)) notifyOverlay();
 }
 
+/** Drop ALL optimistic entries. Intended for sign-out / vault-switch (stale
+ *  optimistic state from a prior session/vault shouldn't bleed across), and for
+ *  test isolation (the overlay is a module singleton). */
+export function resetLockOverlay(): void {
+  if (overlay.size === 0) return;
+  overlay.clear();
+  notifyOverlay();
+}
+
 /** Drop overlay entries the canonical list now agrees with. Called from
  *  useLocks when a fresh fetch lands (which already re-renders), so it notifies
  *  only the OTHER subscribers when it actually changed something. */
