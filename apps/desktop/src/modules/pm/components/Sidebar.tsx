@@ -13,6 +13,7 @@ import {
   IconColumns3,
   IconFileText,
   IconGraph,
+  IconLayoutDashboard,
   IconListDetails,
   IconPencil,
   IconPlus,
@@ -80,6 +81,7 @@ const BUILD_ICON: Record<BuildSegment, IconComponent> = {
 };
 
 const VIEW_LABEL: Record<ViewSegment, string> = {
+  dashboard: "Dashboard",
   table: "Table",
   board: "Board",
   calendar: "Calendar",
@@ -90,6 +92,7 @@ const VIEW_LABEL: Record<ViewSegment, string> = {
 };
 
 const VIEW_ICON: Record<ViewSegment, NavItem["Icon"]> = {
+  dashboard: IconLayoutDashboard,
   table: IconListDetails,
   board: IconColumns3,
   calendar: IconCalendar,

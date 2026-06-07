@@ -1,7 +1,13 @@
 "use client";
 
-import type { Subteam, TaskRow, TaskType } from "@helios/pm-ui";
-import { STATUS_DOT, TASK_TYPES, computeCriticalPath, taskOutline } from "@helios/pm-ui";
+import type { Subteam, TaskColorProperty, TaskRow, TaskType } from "@helios/pm-ui";
+import {
+  STATUS_DOT,
+  TASK_COLOR_PROPERTY_LABEL,
+  TASK_TYPES,
+  computeCriticalPath,
+  resolveMarkerColors,
+} from "@helios/pm-ui";
 import {
   Background,
   Controls,
@@ -14,6 +20,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -22,13 +29,16 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { IconEye, IconEyeOff, IconFilter, IconPlus, IconRefresh } from "@tabler/icons-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { Select } from "@pm/components/ui/Select";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
-  scopeTasksToSubteam,
+  recallGraphSettings,
+  rememberGraphSettings,
+} from "@pm/lib/graphSettings";
+import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
@@ -81,7 +91,12 @@ interface TaskNodeData extends Record<string, unknown> {
   dimmed: boolean;
   highlightCritical: boolean;
   relation: CrossTeamRelation;
+  bgProperty: TaskColorProperty;
+  outlineProperty: TaskColorProperty;
 }
+
+// Match the Gantt's translucent "glass" bar fill so the two views read the same.
+const NODE_GLASS_ALPHA = 0.4;
 
 type TaskNodeType = Node<TaskNodeData, "task">;
 type FilterMode = "dim" | "hide";
@@ -101,32 +116,35 @@ const EMPTY_FILTERS: GraphFilters = {
 const nodeTypes = { task: TaskNode };
 
 function TaskNode({ data }: NodeProps<TaskNodeType>) {
-  const { task, isCritical, inSelectedChain, dimmed, highlightCritical, relation } = data;
+  const { task, isCritical, inSelectedChain, dimmed, highlightCritical, relation, bgProperty, outlineProperty } = data;
   const selectTask = usePmStore((s) => s.selectTask);
   const showCritical = highlightCritical && isCritical;
   const isExternal = relation !== "owned";
-  const outline = taskOutline(task);
 
-  // Highlighted states (chain / critical) win; otherwise the main border shows
-  // the status-outline state (past due, due soon, done, backlog).
+  // Match the Gantt: glass background colored by the chosen bg property, border
+  // colored by the chosen outline property. Highlighted states (chain/critical)
+  // still win on the border so the selected chain stays legible.
   const highlighted = inSelectedChain || showCritical;
   const borderClass = inSelectedChain
     ? "border-asu-gold ring-2 ring-asu-gold/40"
     : showCritical
       ? "border-asu-gold"
       : "";
+  // Shared #23 rules (border-hide / dark-glass), consistent with Gantt/Calendar.
+  const marker = resolveMarkerColors(task, bgProperty, outlineProperty, NODE_GLASS_ALPHA);
 
   return (
     <div
       className={
-        "relative rounded border-2 bg-helios-panel px-3 py-2 transition-opacity " +
+        "relative rounded border-2 px-3 py-2 backdrop-blur-sm transition-opacity " +
         (dimmed ? "opacity-15 " : isExternal ? "opacity-70 " : "opacity-100 ") +
         borderClass
       }
       style={{
         width: NODE_WIDTH,
         minHeight: NODE_HEIGHT,
-        borderColor: highlighted ? undefined : outline.borderColor,
+        backgroundColor: marker.background,
+        borderColor: highlighted ? undefined : marker.borderColor ?? "transparent",
         borderLeftWidth: 6,
         borderLeftColor: task.subteam.color ?? "#6B7280",
       }}
@@ -149,7 +167,7 @@ function TaskNode({ data }: NodeProps<TaskNodeType>) {
       <p
         onClick={() => selectTask(task.id)}
         className={
-          "mt-1 cursor-pointer text-xs font-normal leading-snug hover:underline " +
+          "mt-1 line-clamp-2 cursor-pointer overflow-hidden text-xs font-normal leading-snug hover:underline " +
           (isExternal ? "italic text-helios-text/80" : "text-helios-text")
         }
         title="Open task details"
@@ -173,10 +191,52 @@ const handleStyle = {
 
 const COL_GAP = NODE_WIDTH + 110;
 const ROW_GAP = NODE_HEIGHT + 28;
+// Gap between two adjacent column-mates that are NOT in the same dependency
+// component — spread unrelated/isolated tasks out by ~2 task cards so they read
+// as separate. Connected tasks stay at the normal ROW_GAP.
+const UNRELATED_ROW_GAP = ROW_GAP * 2;
+
+// In a SPECIFIC subteam's graph, cross-team prerequisite/dependent tasks are
+// shown only up to this many dependency hops from the subteam's own tasks;
+// anything farther removed is hidden.
+const SUBTEAM_GRAPH_MAX_HOPS = 2;
+
+// Subtasks are nested under their parent as an indented outline: each depth level
+// shifts right by SUBTASK_INDENT, and stacked subtasks step down by SUBTASK_ROW_GAP.
+const SUBTASK_INDENT = 48;
+const SUBTASK_ROW_GAP = NODE_HEIGHT + 14;
+
+const GRAPH_MIN_ZOOM = 0.15;
+const GRAPH_MAX_ZOOM = 2.5;
+
+// A task is a "convergence hub" once this many dependency chains feed into it
+// (in-degree). The Dependency-trees layout treats the branches that converge on
+// a hub as SEPARATE trees: their convergence edges are cut for grouping (so e.g.
+// the whole Uprights chain becomes its own tree) and then drawn as long leader
+// lines into the hub instead of merging everything into one jumbled component.
+const HUB_IN_DEGREE = 3;
+
+// IDs of tasks that ≥ HUB_IN_DEGREE dependencies converge into, within `tasks`.
+function convergenceHubIds(
+  tasks: ReadonlyArray<TaskRow>,
+  edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
+): Set<string> {
+  const ids = new Set(tasks.map((t) => t.id));
+  const indeg = new Map<string, number>();
+  for (const e of edges) {
+    if (ids.has(e.predecessor_id) && ids.has(e.successor_id)) {
+      indeg.set(e.successor_id, (indeg.get(e.successor_id) ?? 0) + 1);
+    }
+  }
+  const hubs = new Set<string>();
+  for (const [id, n] of indeg) if (n >= HUB_IN_DEGREE) hubs.add(id);
+  return hubs;
+}
 
 // Layered left-to-right layout. The x position of each task is its longest-path
 // dependency depth (so prerequisites sit left of dependents). Within each depth
-// column, tasks are ordered top-to-bottom by the active sort comparator.
+// column, tasks are ordered top-to-bottom by a barycenter sweep (seeded by the
+// active sort comparator) so tasks feeding the same dependent stack together.
 function layeredLayout(
   tasks: ReadonlyArray<TaskRow>,
   edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
@@ -216,32 +276,96 @@ function layeredLayout(
   }
   for (const t of tasks) if (!rank.has(t.id)) rank.set(t.id, 0); // cycle fallback
 
+  const preds = new Map<string, string[]>();
+  for (const t of tasks) preds.set(t.id, []);
+  for (const e of edges) {
+    if (ids.has(e.predecessor_id) && ids.has(e.successor_id)) {
+      preds.get(e.successor_id)!.push(e.predecessor_id);
+    }
+  }
+
+  const ranks = [...new Set(tasks.map((t) => rank.get(t.id)!))].sort((a, b) => a - b);
   const byRank = new Map<number, TaskRow[]>();
-  for (const t of tasks) {
-    const r = rank.get(t.id)!;
-    const arr = byRank.get(r) ?? [];
-    arr.push(t);
-    byRank.set(r, arr);
+  for (const r of ranks) byRank.set(r, []);
+  for (const t of tasks) byRank.get(rank.get(t.id)!)!.push(t);
+
+  // Initial within-rank order = the active comparator.
+  const orderOf = new Map<string, number>();
+  for (const r of ranks) {
+    const arr = byRank.get(r)!;
+    arr.sort(compare);
+    arr.forEach((t, i) => orderOf.set(t.id, i));
+  }
+
+  // Barycenter sweeps: reorder each column by the mean position of the nodes it
+  // connects to. The UP sweep (order by SUCCESSORS) stacks tasks that feed the
+  // SAME dependent together and lines them up with it — a single-successor task
+  // takes exactly that dependent's position, so co-prerequisites become
+  // contiguous. The DOWN sweep (order by PREDECESSORS) keeps things stable and
+  // reduces crossings. The comparator breaks ties so order stays deterministic.
+  const barycenter = (t: TaskRow, neighbors: string[]): number => {
+    if (neighbors.length === 0) return orderOf.get(t.id)!;
+    let sum = 0;
+    for (const n of neighbors) sum += orderOf.get(n) ?? 0;
+    return sum / neighbors.length;
+  };
+  const reorderBy = (arr: TaskRow[], pick: (t: TaskRow) => string[]) => {
+    const key = new Map(arr.map((t) => [t.id, barycenter(t, pick(t))]));
+    arr.sort((a, b) => key.get(a.id)! - key.get(b.id)! || compare(a, b));
+    arr.forEach((t, i) => orderOf.set(t.id, i));
+  };
+  for (let sweep = 0; sweep < 4; sweep++) {
+    for (let i = ranks.length - 1; i >= 0; i--) reorderBy(byRank.get(ranks[i]!)!, (t) => succs.get(t.id) ?? []);
+    for (let i = 0; i < ranks.length; i++) reorderBy(byRank.get(ranks[i]!)!, (t) => preds.get(t.id) ?? []);
+  }
+
+  // Weakly-connected component per task (union-find over the edges). Two adjacent
+  // column-mates in DIFFERENT components are "not related by any dependency", so
+  // they get the wider UNRELATED_ROW_GAP; same-component (same tree) stays tight.
+  const parent = new Map<string, string>();
+  for (const t of tasks) parent.set(t.id, t.id);
+  const find = (x: string): string => {
+    let root = x;
+    while (parent.get(root)! !== root) root = parent.get(root)!;
+    while (parent.get(x)! !== root) {
+      const next = parent.get(x)!;
+      parent.set(x, root);
+      x = next;
+    }
+    return root;
+  };
+  for (const e of edges) {
+    if (!ids.has(e.predecessor_id) || !ids.has(e.successor_id)) continue;
+    const a = find(e.predecessor_id);
+    const b = find(e.successor_id);
+    if (a !== b) parent.set(a, b);
   }
 
   const positions = new Map<string, { x: number; y: number }>();
-  for (const [r, arr] of byRank) {
-    arr.sort(compare);
-    arr.forEach((t, i) => {
-      positions.set(t.id, { x: r * COL_GAP, y: i * ROW_GAP });
-    });
+  for (const r of ranks) {
+    const arr = byRank.get(r)!;
+    let y = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const t = arr[i]!;
+      if (i > 0) {
+        const related = find(arr[i - 1]!.id) === find(t.id);
+        y += related ? ROW_GAP : UNRELATED_ROW_GAP;
+      }
+      positions.set(t.id, { x: r * COL_GAP, y });
+    }
   }
   return positions;
 }
 
-// "Dependency trees" layout: split the tasks into connected components (each an
-// independent work stream — e.g. "intake design" before it merges into the
-// engine tree) and lay each out as its own left→right tree via layeredLayout,
-// then STACK the trees vertically so unrelated subsystems stop interleaving in
-// the same columns (the "jumbled" complaint). Each tree's convergence/"trunk"
-// sits on the right (prerequisites lay out left of dependents = the timeline
-// end). Trees that touch the critical path sort to the top; isolated singletons
-// fall to the bottom.
+// "Dependency trees" layout: split the tasks into separate trees and stack them
+// vertically so unrelated subsystems stop interleaving in the same columns (the
+// "jumbled" complaint). Grouping uses connected components AFTER cutting the
+// convergence edges that feed a hub (a task ≥ HUB_IN_DEGREE chains converge on),
+// so e.g. the whole Uprights chain becomes its own tree instead of being pulled
+// into the chassis tree just because it eventually feeds Outboard Corners
+// Assembly. The cut edges still render (as dashed leader lines) between the
+// separated trees. Each tree lays out left→right via layeredLayout (prerequisites
+// left of dependents). Critical trees sort to the top; isolated singletons last.
 function treeLayout(
   tasks: ReadonlyArray<TaskRow>,
   edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
@@ -250,14 +374,20 @@ function treeLayout(
   const ids = new Set(tasks.map((t) => t.id));
   const taskById = new Map(tasks.map((t) => [t.id, t]));
 
-  // Bidirectional adjacency → connected components via iterative DFS.
+  // Cut the edges that converge INTO a hub before grouping, so each branch that
+  // feeds a hub falls into its own connected component (its own tree). The cut
+  // edges still exist in the dependency set, so they render as long leader lines
+  // between the separated trees.
+  const hubs = convergenceHubIds(tasks, edges);
+
+  // Bidirectional adjacency (minus cut convergence edges) → connected components.
   const adj = new Map<string, string[]>();
   for (const t of tasks) adj.set(t.id, []);
   for (const e of edges) {
-    if (ids.has(e.predecessor_id) && ids.has(e.successor_id)) {
-      adj.get(e.predecessor_id)!.push(e.successor_id);
-      adj.get(e.successor_id)!.push(e.predecessor_id);
-    }
+    if (!ids.has(e.predecessor_id) || !ids.has(e.successor_id)) continue;
+    if (hubs.has(e.successor_id)) continue; // cut: don't let branches merge at the hub
+    adj.get(e.predecessor_id)!.push(e.successor_id);
+    adj.get(e.successor_id)!.push(e.predecessor_id);
   }
   const seen = new Set<string>();
   const components: TaskRow[][] = [];
@@ -293,20 +423,194 @@ function treeLayout(
 
   const cmp = sortComparator("criticality", critical);
   const COMPONENT_GAP = ROW_GAP * 1.5;
-  const positions = new Map<string, { x: number; y: number }>();
-  let yOffset = 0;
-  for (const comp of components) {
-    // layeredLayout filters `edges` to this component's task set, so it lays out
-    // just this tree (relative to y=0); offset it into the stacked band.
-    const sub = layeredLayout(comp, edges, cmp);
-    let maxY = 0;
-    for (const [id, p] of sub) {
-      positions.set(id, { x: p.x, y: p.y + yOffset });
-      if (p.y > maxY) maxY = p.y;
-    }
-    yOffset += maxY + ROW_GAP + COMPONENT_GAP;
+
+  // Lay out each tree internally (prerequisites left of dependents within the
+  // tree) and measure its width.
+  const subs = components.map((comp) => layeredLayout(comp, edges, cmp));
+  const widths = subs.map((sub) => {
+    let maxX = 0;
+    for (const p of sub.values()) maxX = Math.max(maxX, p.x);
+    return maxX + NODE_WIDTH;
+  });
+
+  // Build the component DAG from the cross-tree (cut) edges — every edge that
+  // crosses trees is a hub leader line, predComp → succComp. Then x-offset each
+  // tree by a longest-path sweep so a DEPENDENT tree always sits to the RIGHT of
+  // every one of its prerequisite trees (the rule: prerequisites left of their
+  // dependent, even across leader lines). Cycle-safe via an in-progress guard.
+  const compOf = new Map<string, number>();
+  components.forEach((comp, i) => {
+    for (const t of comp) compOf.set(t.id, i);
+  });
+  const compPreds = components.map(() => new Set<number>());
+  for (const e of edges) {
+    const a = compOf.get(e.predecessor_id);
+    const b = compOf.get(e.successor_id);
+    if (a === undefined || b === undefined || a === b) continue;
+    compPreds[b]!.add(a); // b depends on a → a must be left of b
   }
+  const xOffset = new Array<number>(components.length).fill(-1);
+  const inProgress = new Set<number>();
+  const computeX = (c: number): number => {
+    if (xOffset[c]! >= 0) return xOffset[c]!;
+    if (inProgress.has(c)) return 0; // cycle fallback
+    inProgress.add(c);
+    let off = 0;
+    for (const p of compPreds[c]!) {
+      off = Math.max(off, computeX(p) + widths[p]! + COL_GAP);
+    }
+    inProgress.delete(c);
+    xOffset[c] = off;
+    return off;
+  };
+  for (let i = 0; i < components.length; i++) computeX(i);
+
+  // --- Vertical placement -----------------------------------------------------
+  // Group the feeder trees that converge on the SAME hub right next to each other
+  // (same inter-tree spacing as everything else), then place the hub (the common
+  // task) at the vertical MIDPOINT of the leader lines leaving the upper- and
+  // lower-most feeder trees, so the leaders fan in symmetrically.
+  const compHeight = subs.map((sub) => {
+    let maxY = 0;
+    for (const p of sub.values()) maxY = Math.max(maxY, p.y);
+    return maxY + NODE_HEIGHT;
+  });
+  // For each hub component: the convergence task, and the feeder task that leads
+  // into it from each feeder component (where its leader line departs).
+  const hubTaskOf = new Array<string | null>(components.length).fill(null);
+  const feederLeaf = components.map(() => new Map<number, string>());
+  for (const e of edges) {
+    const a = compOf.get(e.predecessor_id);
+    const b = compOf.get(e.successor_id);
+    if (a === undefined || b === undefined || a === b) continue;
+    hubTaskOf[b] = e.successor_id;
+    if (!feederLeaf[b]!.has(a)) feederLeaf[b]!.set(a, e.predecessor_id);
+  }
+
+  const yTop = new Array<number | null>(components.length).fill(null);
+  let cursor = 0;
+  const placeLinear = (c: number) => {
+    if (yTop[c] !== null) return;
+    yTop[c] = cursor;
+    cursor += compHeight[c]! + COMPONENT_GAP;
+  };
+
+  for (let c = 0; c < components.length; c++) {
+    if (yTop[c] !== null) continue;
+    const feeders = [...compPreds[c]!];
+    if (feeders.length < 2) {
+      placeLinear(c);
+      continue;
+    }
+    // Stack this hub's feeder trees consecutively.
+    for (const f of feeders) placeLinear(f);
+    // Midpoint of the leader lines leaving the upper- & lower-most feeders.
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const f of feeders) {
+      const leaf = feederLeaf[c]!.get(f);
+      const leafY =
+        leaf && subs[f]!.has(leaf)
+          ? yTop[f]! + subs[f]!.get(leaf)!.y + NODE_HEIGHT / 2
+          : yTop[f]! + compHeight[f]! / 2;
+      minY = Math.min(minY, leafY);
+      maxY = Math.max(maxY, leafY);
+    }
+    const center = (minY + maxY) / 2;
+    const hubTask = hubTaskOf[c];
+    const hubLocalY = hubTask && subs[c]!.has(hubTask) ? subs[c]!.get(hubTask)!.y : 0;
+    // Offset the hub component (it's shifted right in x, so overlapping the
+    // feeders' y band is fine) so the common task lands on the midpoint.
+    yTop[c] = center - hubLocalY - NODE_HEIGHT / 2;
+  }
+  for (let c = 0; c < components.length; c++) if (yTop[c] === null) placeLinear(c);
+
+  const positions = new Map<string, { x: number; y: number }>();
+  components.forEach((_comp, i) => {
+    const sub = subs[i]!;
+    for (const [id, p] of sub) {
+      positions.set(id, { x: p.x + xOffset[i]!, y: p.y + yTop[i]! });
+    }
+  });
   return positions;
+}
+
+// Final safety pass: shift whole subtask-units downward until no two task cards
+// overlap. A "unit" is a top-level task plus its entire nested subtask outline,
+// moved together so the indentation stays intact. Only units whose x-ranges
+// overlap interact, so separate columns are untouched.
+function removeCardOverlaps(
+  pos: Map<string, { x: number; y: number }>,
+  tasks: ReadonlyArray<TaskRow>,
+  displayed: Set<string>,
+): void {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const rootOf = (id: string): string => {
+    let cur = id;
+    for (let g = 0; g < 1000; g++) {
+      const pid = byId.get(cur)?.parent_task_id ?? null;
+      if (pid && displayed.has(pid)) cur = pid;
+      else break;
+    }
+    return cur;
+  };
+  const groups = new Map<string, string[]>();
+  for (const t of tasks) {
+    if (!pos.has(t.id)) continue;
+    const r = rootOf(t.id);
+    const arr = groups.get(r);
+    if (arr) arr.push(t.id);
+    else groups.set(r, [t.id]);
+  }
+  interface Unit {
+    ids: string[];
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  }
+  const units: Unit[] = [];
+  for (const ids of groups.values()) {
+    let top = Infinity;
+    let bottom = -Infinity;
+    let left = Infinity;
+    let right = -Infinity;
+    for (const id of ids) {
+      const p = pos.get(id)!;
+      top = Math.min(top, p.y);
+      bottom = Math.max(bottom, p.y + NODE_HEIGHT);
+      left = Math.min(left, p.x);
+      right = Math.max(right, p.x + NODE_WIDTH);
+    }
+    units.push({ ids, top, bottom, left, right });
+  }
+  units.sort((a, b) => a.top - b.top || a.left - b.left);
+  const MARGIN = 16;
+  const placed: Unit[] = [];
+  for (const u of units) {
+    let bumped = true;
+    let guard = 0;
+    while (bumped && guard++ < 4000) {
+      bumped = false;
+      for (const p of placed) {
+        const xOverlap = u.left < p.right && p.left < u.right;
+        const yOverlap = u.top < p.bottom + MARGIN && p.top < u.bottom + MARGIN;
+        if (xOverlap && yOverlap) {
+          const delta = p.bottom + MARGIN - u.top;
+          if (delta > 0) {
+            u.top += delta;
+            u.bottom += delta;
+            for (const id of u.ids) {
+              const q = pos.get(id)!;
+              pos.set(id, { x: q.x, y: q.y + delta });
+            }
+            bumped = true;
+          }
+        }
+      }
+    }
+    placed.push(u);
+  }
 }
 
 function ancestors(rootId: string, edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>) {
@@ -393,6 +697,36 @@ export function GraphViewClient(props: GraphViewClientProps) {
 }
 
 function GraphInner({ teamSlug }: { teamSlug: string | null }) {
+  const rf = useReactFlow();
+  // Two-finger scroll pans (panOnScroll). Pinch / ctrl+scroll = ZOOM toward the
+  // cursor, via a NON-passive, CAPTURE-phase wheel listener that runs before (and
+  // stops) ReactFlow's pan handler.
+  const zoomCleanup = useRef<(() => void) | null>(null);
+  const zoomPaneRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      zoomCleanup.current?.();
+      zoomCleanup.current = null;
+      if (!node) return;
+      const onWheel = (e: WheelEvent) => {
+        if (!e.ctrlKey) return; // plain two-finger scroll → let ReactFlow pan
+        e.preventDefault();
+        e.stopPropagation();
+        const { x, y, zoom } = rf.getViewport();
+        const next = Math.min(GRAPH_MAX_ZOOM, Math.max(GRAPH_MIN_ZOOM, zoom * Math.exp(-e.deltaY * 0.0016)));
+        if (next === zoom) return;
+        const rect = node.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const fx = (px - x) / zoom;
+        const fy = (py - y) / zoom;
+        rf.setViewport({ x: px - fx * next, y: py - fy * next, zoom: next });
+      };
+      node.addEventListener("wheel", onWheel, { passive: false, capture: true });
+      zoomCleanup.current = () =>
+        node.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
+    },
+    [rf],
+  );
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const subsystems = usePmStore((s) => s.subsystems);
@@ -413,7 +747,54 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
         bridgeTaskIds: [] as string[],
       }));
     }
-    return scopeTasksToSubteam(tasks, deps, currentTeam.id);
+    // Subteam scope: owned tasks + cross-team prerequisites/dependents within
+    // SUBTEAM_GRAPH_MAX_HOPS dependency hops. Tasks farther removed than that are
+    // hidden so the graph stays focused on the subteam's immediate neighborhood.
+    const teamId = currentTeam.id;
+    const isMember = (t: TaskRow) =>
+      (t.subteams ?? []).length > 0
+        ? t.subteams.some((s) => s.id === teamId)
+        : t.subteam_id === teamId;
+    const ownedIds = new Set(tasks.filter(isMember).map((t) => t.id));
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const preds = new Map<string, string[]>();
+    const succs = new Map<string, string[]>();
+    for (const t of tasks) {
+      preds.set(t.id, []);
+      succs.set(t.id, []);
+    }
+    for (const d of deps) {
+      succs.get(d.predecessor_id)?.push(d.successor_id);
+      preds.get(d.successor_id)?.push(d.predecessor_id);
+    }
+    const rel = new Map<string, CrossTeamRelation>();
+    for (const id of ownedIds) rel.set(id, "owned");
+    // Directed BFS outward from owned tasks, capped at SUBTEAM_GRAPH_MAX_HOPS.
+    const expand = (adj: Map<string, string[]>, relation: CrossTeamRelation) => {
+      const dist = new Map<string, number>();
+      for (const id of ownedIds) dist.set(id, 0);
+      let frontier = [...ownedIds];
+      for (let hop = 1; hop <= SUBTEAM_GRAPH_MAX_HOPS; hop++) {
+        const next: string[] = [];
+        for (const id of frontier) {
+          for (const n of adj.get(id) ?? []) {
+            if (dist.has(n)) continue;
+            dist.set(n, hop);
+            if (!ownedIds.has(n) && !rel.has(n)) rel.set(n, relation);
+            next.push(n);
+          }
+        }
+        frontier = next;
+      }
+    };
+    expand(preds, "prerequisite_of_team"); // upstream prerequisites
+    expand(succs, "dependent_on_team"); // downstream dependents
+    const out: { task: TaskRow; relation: CrossTeamRelation; bridgeTaskIds: string[] }[] = [];
+    for (const [id, relation] of rel) {
+      const t = byId.get(id);
+      if (t) out.push({ task: t, relation, bridgeTaskIds: [] });
+    }
+    return out;
   }, [tasks, deps, currentTeam]);
 
   const visibleTasks = useMemo(() => scopedRows.map((r) => r.task), [scopedRows]);
@@ -434,6 +815,13 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   const [filters, setFilters] = useState<GraphFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<GraphSort>("dependency_tree");
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Color-by-property settings, persisted per-scope (mirrors the Gantt).
+  const [colorSettings, setColorSettings] = useState(() => recallGraphSettings(teamSlug));
+  const { bgProperty, outlineProperty } = colorSettings;
+  useEffect(() => {
+    rememberGraphSettings(teamSlug, colorSettings);
+  }, [teamSlug, colorSettings]);
 
   // Apply filters: returns set of task IDs considered "in scope" by filters.
   // Empty filter selection means "all in scope".
@@ -471,13 +859,55 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   // Critical path computed against full graph for correctness
   const critical = useMemo(() => computeCriticalPath(tasks, deps), [tasks, deps]);
 
-  const autoPositions = useMemo(
-    () =>
-      sort === "dependency_tree"
-        ? treeLayout(effectiveTasks, effectiveDeps, critical)
-        : layeredLayout(effectiveTasks, effectiveDeps, sortComparator(sort, critical)),
-    [effectiveTasks, effectiveDeps, sort, critical],
+  // Convergence hubs (≥ HUB_IN_DEGREE prerequisites). In the Dependency-trees
+  // layout their incoming edges are the cross-tree "leader lines".
+  const hubIds = useMemo(
+    () => convergenceHubIds(effectiveTasks, effectiveDeps),
+    [effectiveTasks, effectiveDeps],
   );
+
+  const autoPositions = useMemo(() => {
+    // Subtasks are laid out as an indented outline UNDER their parent rather than
+    // by their own dependencies: lay out only the top-level (non-subtask) tasks
+    // via the dependency layout, then stack each parent's subtask subtree below
+    // it, indented one step per depth.
+    const displayed = new Set(effectiveTasks.map((t) => t.id));
+    const isSubtask = (t: TaskRow) =>
+      t.parent_task_id != null && displayed.has(t.parent_task_id);
+    const childrenOf = new Map<string, string[]>();
+    for (const t of effectiveTasks) {
+      if (isSubtask(t)) {
+        const arr = childrenOf.get(t.parent_task_id!) ?? [];
+        arr.push(t.id);
+        childrenOf.set(t.parent_task_id!, arr);
+      }
+    }
+    const topLevel = effectiveTasks.filter((t) => !isSubtask(t));
+    const base =
+      sort === "dependency_tree"
+        ? treeLayout(topLevel, effectiveDeps, critical)
+        : layeredLayout(topLevel, effectiveDeps, sortComparator(sort, critical));
+
+    const pos = new Map(base);
+    const seen = new Set<string>();
+    const placeSubtree = (id: string, x: number, y: number): number => {
+      pos.set(id, { x, y });
+      seen.add(id);
+      let cursor = y;
+      for (const k of childrenOf.get(id) ?? []) {
+        if (seen.has(k)) continue; // guard against malformed parent cycles
+        cursor = placeSubtree(k, x + SUBTASK_INDENT, cursor + SUBTASK_ROW_GAP);
+      }
+      return cursor;
+    };
+    for (const t of topLevel) {
+      const p = base.get(t.id);
+      if (p && (childrenOf.get(t.id)?.length ?? 0) > 0) placeSubtree(t.id, p.x, p.y);
+    }
+    // Guarantee no two cards overlap.
+    removeCardOverlaps(pos, effectiveTasks, displayed);
+    return pos;
+  }, [effectiveTasks, effectiveDeps, sort, critical]);
 
   useEffect(() => {
     const ids = new Set(effectiveTasks.map((t) => t.id));
@@ -527,12 +957,14 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
             dimmed,
             highlightCritical,
             relation: relationByTaskId.get(t.id) ?? "owned",
+            bgProperty,
+            outlineProperty,
           },
           draggable: true,
           selectable: true,
         };
       }),
-    [effectiveTasks, pinned, autoPositions, critical, chain, highlightCritical, relationByTaskId, anyFilterActive, filters.mode, filterInScope],
+    [effectiveTasks, pinned, autoPositions, critical, chain, highlightCritical, relationByTaskId, anyFilterActive, filters.mode, filterInScope, bgProperty, outlineProperty],
   );
 
   // Push the derived nodes into react-flow's own node state. This runs only
@@ -573,6 +1005,11 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
 
         const strokeWidth = inChain || (highlightCritical && onCritical) ? 2.5 : crossTeam ? 1.75 : 1.25;
 
+        // In the Dependency-trees layout, an edge into a hub is a cross-tree
+        // "leader line" connecting two separated trees — dash it so it reads as
+        // a convergence link rather than an in-tree dependency.
+        const isLeader = sort === "dependency_tree" && hubIds.has(d.successor_id);
+
         return {
           id: `${d.predecessor_id}-${d.successor_id}`,
           source: d.predecessor_id,
@@ -583,12 +1020,17 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           labelBgBorderRadius: 3,
           labelBgStyle: { fill: "#16171B", stroke: "#2A2C32" },
           labelStyle: { fill: "#9097A0", fontSize: 9, fontWeight: 500 },
-          style: { stroke, strokeWidth, opacity: dimmed ? 0.1 : 1 },
+          style: {
+            stroke,
+            strokeWidth,
+            opacity: dimmed ? 0.1 : 1,
+            ...(isLeader ? { strokeDasharray: "7 4" } : {}),
+          },
           markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 18, height: 18 },
           animated: inChain,
         };
       }),
-    [reducedDeps, effectiveTasks, chain, critical, highlightCritical, anyFilterActive, filters.mode, filterInScope],
+    [reducedDeps, effectiveTasks, chain, critical, highlightCritical, anyFilterActive, filters.mode, filterInScope, sort, hubIds],
   );
 
   // Clamp panning to the bounding box of the laid-out tasks (plus padding) so
@@ -686,6 +1128,38 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
                 }))}
               />
             </label>
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Fill
+              <Select
+                size="sm"
+                value={bgProperty}
+                ariaLabel="Node background color by"
+                className="min-w-[110px]"
+                onChange={(v) =>
+                  setColorSettings((s) => ({ ...s, bgProperty: v as TaskColorProperty }))
+                }
+                options={(Object.keys(TASK_COLOR_PROPERTY_LABEL) as TaskColorProperty[]).map((k) => ({
+                  value: k,
+                  label: TASK_COLOR_PROPERTY_LABEL[k],
+                }))}
+              />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Outline
+              <Select
+                size="sm"
+                value={outlineProperty}
+                ariaLabel="Node outline color by"
+                className="min-w-[110px]"
+                onChange={(v) =>
+                  setColorSettings((s) => ({ ...s, outlineProperty: v as TaskColorProperty }))
+                }
+                options={(Object.keys(TASK_COLOR_PROPERTY_LABEL) as TaskColorProperty[]).map((k) => ({
+                  value: k,
+                  label: TASK_COLOR_PROPERTY_LABEL[k],
+                }))}
+              />
+            </label>
             <label className="inline-flex items-center gap-2 text-xs font-normal text-helios-dim">
               <input
                 type="checkbox"
@@ -717,7 +1191,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
         }
       />
 
-      <div className="relative" style={{ height: "calc(100vh - 73px)" }}>
+      <div ref={zoomPaneRef} className="relative" style={{ height: "calc(100vh - 73px)" }}>
         <ReactFlow
           nodes={rfNodes}
           edges={edges}
@@ -737,11 +1211,16 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           translateExtent={translateExtent}
           proOptions={{ hideAttribution: true }}
           deleteKeyCode={["Backspace", "Delete"]}
-          // Trackpad: two-finger drag = pan, pinch (ctrl+wheel) = zoom
+          // Two-finger scroll = pan; pinch / ctrl+scroll = zoom (handled manually
+          // via zoomPaneRef, capture phase). ReactFlow's own scroll/pinch zoom is
+          // off so it doesn't fight the pan or the manual zoom.
           panOnScroll
           panOnScrollMode={PanOnScrollMode.Free}
           zoomOnScroll={false}
-          zoomOnPinch
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          minZoom={GRAPH_MIN_ZOOM}
+          maxZoom={GRAPH_MAX_ZOOM}
           panOnDrag
           style={{ backgroundColor: "#0E0E10" }}
           defaultEdgeOptions={{ type: "smoothstep" }}

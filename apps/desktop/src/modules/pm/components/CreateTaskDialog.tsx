@@ -60,6 +60,9 @@ const TYPE_LABEL: Record<TaskType, string> = {
   analysis: "Analysis",
   test: "Test",
   general: "General",
+  mfg_laser: "MFG-LZR",
+  mfg_machine: "MFG-MCH",
+  mfg_weld: "MFG-WELD",
 };
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {

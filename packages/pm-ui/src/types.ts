@@ -38,6 +38,9 @@ export const taskType = z.enum([
   "analysis",
   "test",
   "general",
+  "mfg_laser",
+  "mfg_machine",
+  "mfg_weld",
 ]);
 export type TaskType = z.infer<typeof taskType>;
 export const TASK_TYPES: readonly TaskType[] = [
@@ -48,6 +51,9 @@ export const TASK_TYPES: readonly TaskType[] = [
   "analysis",
   "test",
   "general",
+  "mfg_laser",
+  "mfg_machine",
+  "mfg_weld",
 ];
 
 export const teamRole = z.enum(["admin", "lead", "engineer", "viewer"]);
@@ -205,15 +211,29 @@ export type Milestone = z.infer<typeof milestone>;
 
 // A calendar event is not a task: it has no start/end (a single day), can be
 // tagged to one, many, or all subteams, and carries free-text type tags.
+export const eventRecurrence = z.enum(["none", "daily", "weekly", "monthly"]);
+export type EventRecurrence = z.infer<typeof eventRecurrence>;
+export const EVENT_RECURRENCES: readonly EventRecurrence[] = [
+  "none",
+  "daily",
+  "weekly",
+  "monthly",
+];
+
 export const calendarEvent = z.object({
   id: z.string().uuid(),
   project_id: z.string().uuid(),
   title: z.string(),
-  date: z.string(), // single ISO day (YYYY-MM-DD)
+  date: z.string(), // series start / single ISO day (YYYY-MM-DD)
   all_subteams: z.boolean(), // when true, subteam_ids is ignored
   subteam_ids: z.array(z.string().uuid()),
   type_tags: z.array(z.string()), // free-text tags
   description: z.string().nullable(),
+  // Recurrence (#24): "none" = a one-off on `date`. Otherwise occurrences repeat
+  // from `date` at this frequency through `recurrence_end` (inclusive; null =
+  // open-ended, bounded only by the visible range). Defaults keep older rows valid.
+  recurrence: eventRecurrence.default("none"),
+  recurrence_end: z.string().nullable().default(null),
 });
 export type CalendarEvent = z.infer<typeof calendarEvent>;
 

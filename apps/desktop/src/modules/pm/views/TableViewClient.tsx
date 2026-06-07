@@ -21,6 +21,7 @@ import {
   IconChevronRight,
   IconCornerDownRight,
   IconFlag,
+  IconLinkPlus,
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
@@ -28,6 +29,8 @@ import { useRouter, useSearchParams } from "@pm/lib/router";
 import { useEffect, useMemo, useState } from "react";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
+import { TaskLookup } from "@pm/components/TaskLookup";
+import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
@@ -112,6 +115,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createParentId, setCreateParentId] = useState<string | null>(null);
+  // When set, the "add existing subtask" picker is open for this parent task id.
+  const [linkParentId, setLinkParentId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [subsystemFilter, setSubsystemFilter] = useState<string | null>(null);
 
@@ -290,6 +295,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
           setCreateParentId(task.id);
           setDialogOpen(true);
         }}
+        onAddExisting={() => setLinkParentId(task.id)}
         onDelete={() => {
           if (confirm(`Delete task "${task.title}"? This cannot be undone.`))
             deleteTask(task.id);
@@ -421,6 +427,51 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         defaultSubteamId={currentTeam?.id ?? null}
       />
 
+      {linkParentId
+        ? (() => {
+            const parent = tasks.find((t) => t.id === linkParentId);
+            if (!parent) return null;
+            // Forbid picking the parent itself or any of its ancestors (cycle-safe).
+            const byId = new Map(tasks.map((t) => [t.id, t]));
+            const exclude = new Set<string>([linkParentId]);
+            let cur: string | null = parent.parent_task_id;
+            while (cur && !exclude.has(cur)) {
+              exclude.add(cur);
+              cur = byId.get(cur)?.parent_task_id ?? null;
+            }
+            return (
+              <FloatingWindow
+                open
+                title="Add existing subtask"
+                onClose={() => setLinkParentId(null)}
+                initialWidth={420}
+                initialHeight={300}
+              >
+                <div className="p-3">
+                  <p className="mb-2 text-xs text-helios-dim">
+                    Pick an existing task to make it a subtask of{" "}
+                    <span className="text-helios-text">{parent.title}</span>.
+                  </p>
+                  <TaskLookup
+                    tasks={tasks}
+                    excludeIds={exclude}
+                    onSelect={(id) => {
+                      updateTask(id, { parent_task_id: linkParentId });
+                      setExpanded((prev) => {
+                        const next = new Set(prev);
+                        next.add(linkParentId);
+                        return next;
+                      });
+                      setLinkParentId(null);
+                    }}
+                    placeholder="Search tasks by title…"
+                  />
+                </div>
+              </FloatingWindow>
+            );
+          })()
+        : null}
+
       <BulkActionBar selectableIds={selectableSet} />
     </>
   );
@@ -479,6 +530,7 @@ function RowFragment({
   onChangeDue,
   onChangePriority,
   onAddSubtask,
+  onAddExisting,
   onDelete,
   children,
 }: {
@@ -500,6 +552,7 @@ function RowFragment({
   onChangeDue: (d: string | null) => void;
   onChangePriority: (p: TaskPriority) => void;
   onAddSubtask: () => void;
+  onAddExisting: () => void;
   onDelete: () => void;
   children?: React.ReactNode;
 }) {
@@ -645,10 +698,19 @@ function RowFragment({
                   type="button"
                   onClick={onAddSubtask}
                   className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-helios-text"
-                  title="Add subtask"
-                  aria-label="Add subtask"
+                  title="Add new subtask"
+                  aria-label="Add new subtask"
                 >
                   <IconPlus size={14} strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  onClick={onAddExisting}
+                  className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-helios-text"
+                  title="Add existing task as subtask"
+                  aria-label="Add existing task as subtask"
+                >
+                  <IconLinkPlus size={14} strokeWidth={1.5} />
                 </button>
                 <button
                   type="button"

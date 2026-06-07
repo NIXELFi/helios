@@ -1,7 +1,7 @@
 "use client";
 
-import type { CalendarEvent, Milestone, Subteam, TaskRow } from "@helios/pm-ui";
-import { STATUS_DOT } from "@helios/pm-ui";
+import type { CalendarEvent, Milestone, Subteam, TaskColorProperty, TaskRow } from "@helios/pm-ui";
+import { STATUS_DOT, TASK_COLOR_PROPERTY_LABEL } from "@helios/pm-ui";
 import {
   DndContext,
   DragOverlay,
@@ -19,8 +19,12 @@ import {
   IconCalendarEvent,
   IconChevronLeft,
   IconChevronRight,
+  IconEye,
+  IconEyeOff,
   IconFlag2,
+  IconPencil,
   IconPlus,
+  IconTrash,
 } from "@tabler/icons-react";
 import {
   addDays,
@@ -49,6 +53,14 @@ import { TaskFilterBar } from "@pm/components/TaskFilterBar";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
 import {
+  CALENDAR_BODY_PROPS,
+  CALENDAR_BORDER_PROPS,
+  calendarMarkerColors,
+  recallCalendarSettings,
+  rememberCalendarSettings,
+  type CalendarBorderProperty,
+} from "@pm/lib/calendarSettings";
+import {
   EMPTY_FILTERS,
   applyHardFilters,
   applySort,
@@ -68,6 +80,56 @@ import {
 const FALLBACK_COLOR = "#6B7280";
 
 type CalendarMode = "week" | "month" | "year";
+
+// Stable empty map reused when events are hidden (#25) so gridProps identity is
+// not churned every render.
+const EMPTY_EVENTS_BY_DATE = new Map<string, CalendarEvent[]>();
+
+// Expand events (incl. recurring) into a date-keyed map within [rangeStart,
+// rangeEnd]. Occurrences reference the original event object so editing one
+// edits the series. Dense frequencies fast-forward to the window; a guard caps
+// the loop defensively.
+function expandEventsByDate(
+  events: ReadonlyArray<CalendarEvent>,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Map<string, CalendarEvent[]> {
+  const m = new Map<string, CalendarEvent[]>();
+  const push = (key: string, e: CalendarEvent) => {
+    const arr = m.get(key) ?? [];
+    arr.push(e);
+    m.set(key, arr);
+  };
+  for (const e of events) {
+    const start = parseISO(e.date);
+    const rec = e.recurrence ?? "none";
+    if (rec === "none") {
+      if (!isBefore(start, rangeStart) && !isBefore(rangeEnd, start)) push(e.date, e);
+      continue;
+    }
+    const seriesEnd = e.recurrence_end
+      ? minDate([parseISO(e.recurrence_end), rangeEnd])
+      : rangeEnd;
+    let cur = start;
+    // Fast-forward dense frequencies to the first occurrence on/after rangeStart.
+    if (isBefore(cur, rangeStart)) {
+      if (rec === "daily") {
+        cur = addDays(cur, differenceInCalendarDays(rangeStart, cur));
+      } else if (rec === "weekly") {
+        cur = addDays(cur, Math.floor(differenceInCalendarDays(rangeStart, cur) / 7) * 7);
+      }
+      // monthly: the loop below advances month-by-month (cheap enough).
+    }
+    let guard = 0;
+    while (!isBefore(seriesEnd, cur) && guard < 800) {
+      if (!isBefore(cur, rangeStart)) push(format(cur, "yyyy-MM-dd"), e);
+      cur =
+        rec === "daily" ? addDays(cur, 1) : rec === "weekly" ? addDays(cur, 7) : addMonths(cur, 1);
+      guard++;
+    }
+  }
+  return m;
+}
 
 export interface CalendarViewClientProps {
   teamSlug?: string | null;
@@ -200,16 +262,6 @@ export function CalendarViewClient({
     });
   }, [events, filters.search, filters.subteamIds]);
 
-  const eventsByDate = useMemo(() => {
-    const m = new Map<string, CalendarEvent[]>();
-    for (const e of filteredEvents) {
-      const arr = m.get(e.date) ?? [];
-      arr.push(e);
-      m.set(e.date, arr);
-    }
-    return m;
-  }, [filteredEvents]);
-
   const milestonesByDate = useMemo(() => {
     const m = new Map<string, Milestone[]>();
     for (const ms of milestones) {
@@ -222,6 +274,18 @@ export function CalendarViewClient({
 
   // --- View state ------------------------------------------------------------
   const [mode, setMode] = useState<CalendarMode>("month");
+  // Show/hide calendar events (#25) and the collapsible milestones menu (#21).
+  const [showEvents, setShowEvents] = useState(true);
+  const [milestonesMenuOpen, setMilestonesMenuOpen] = useState(false);
+
+  // Per-mode, per-scope body/border color settings (#22). The active mode's
+  // choice drives both the week/month chips and the year squares.
+  const [calColors, setCalColors] = useState(() =>
+    recallCalendarSettings(teamSlug, currentTeam === null),
+  );
+  useEffect(() => {
+    rememberCalendarSettings(teamSlug, calColors);
+  }, [teamSlug, calColors]);
 
   const seedAnchor = useMemo(() => {
     const candidates: string[] = [];
@@ -232,6 +296,15 @@ export function CalendarViewClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [anchor, setAnchor] = useState<Date>(seedAnchor);
+
+  // Events expanded into per-date occurrences (#24). Recurring events repeat from
+  // their start date through recurrence_end, bounded to a window around the
+  // anchor so occurrence counts stay small. Each occurrence references the
+  // ORIGINAL event, so clicking one edits the whole series (its real start date).
+  const eventsByDate = useMemo(
+    () => expandEventsByDate(filteredEvents, addYears(anchor, -1), addYears(anchor, 1)),
+    [filteredEvents, anchor],
+  );
 
   // --- Selection + peek ------------------------------------------------------
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -353,13 +426,15 @@ export function CalendarViewClient({
     today,
     startByDate,
     dueByDate,
-    eventsByDate,
+    eventsByDate: showEvents ? eventsByDate : EMPTY_EVENTS_BY_DATE,
     milestonesByDate,
     relationByTaskId,
     dimmedById,
     subteams,
     selectedTaskId,
     selectedSpan,
+    bodyProperty: calColors[mode].body,
+    borderProperty: calColors[mode].border,
     onChipClick: handleChipClick,
     onEventClick: openEditEvent,
     onDayClick: openCreateMenu,
@@ -383,8 +458,60 @@ export function CalendarViewClient({
         actions={
           // Wrap on narrow screens so the toolbar doesn't clip its right-edge buttons.
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+            <button
+              type="button"
+              onClick={() => setShowEvents((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded border border-helios-line bg-transparent px-2 py-1 text-xs font-normal text-helios-dim hover:bg-helios-base hover:text-helios-text"
+              title={showEvents ? "Hide events" : "Show events"}
+            >
+              {showEvents ? <IconEye size={14} strokeWidth={1.5} /> : <IconEyeOff size={14} strokeWidth={1.5} />}
+              Events
+            </button>
+            <button
+              type="button"
+              onClick={() => setMilestonesMenuOpen((v) => !v)}
+              className={
+                "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-normal " +
+                (milestonesMenuOpen
+                  ? "border-asu-gold/60 bg-asu-gold/10 text-asu-gold"
+                  : "border-helios-line bg-transparent text-helios-dim hover:bg-helios-base hover:text-helios-text")
+              }
+              title="Milestones"
+            >
+              <IconFlag2 size={14} strokeWidth={1.5} />
+              Milestones
+            </button>
             <SortControl sort={sort} onChange={setSort} />
             <ModeToggle mode={mode} onChange={setMode} />
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Body
+              <Select
+                size="sm"
+                value={calColors[mode].body}
+                ariaLabel={`${mode} body color by`}
+                className="min-w-[100px]"
+                onChange={(v) =>
+                  setCalColors((s) => ({ ...s, [mode]: { ...s[mode], body: v as TaskColorProperty } }))
+                }
+                options={CALENDAR_BODY_PROPS.map((k) => ({ value: k, label: TASK_COLOR_PROPERTY_LABEL[k] }))}
+              />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Border
+              <Select
+                size="sm"
+                value={calColors[mode].border}
+                ariaLabel={`${mode} border color by`}
+                className="min-w-[100px]"
+                onChange={(v) =>
+                  setCalColors((s) => ({ ...s, [mode]: { ...s[mode], border: v as CalendarBorderProperty } }))
+                }
+                options={CALENDAR_BORDER_PROPS.map((k) => ({
+                  value: k,
+                  label: k === "none" ? "None" : TASK_COLOR_PROPERTY_LABEL[k],
+                }))}
+              />
+            </label>
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -428,11 +555,21 @@ export function CalendarViewClient({
         onClear={() => setFilters(EMPTY_FILTERS)}
       />
 
-      <CountdownStrip
-        milestones={milestones}
-        canEdit={isAdmin}
-        onEdit={openEditMilestone}
-      />
+      {milestonesMenuOpen ? (
+        <MilestonesMenu
+          milestones={milestones}
+          canEdit={isAdmin}
+          onEdit={openEditMilestone}
+          onCreate={() => {
+            setEditingMilestone(null);
+            setMilestoneDialogOpen(true);
+          }}
+          onDelete={(m) => {
+            if (confirm(`Delete milestone "${m.name}"? This cannot be undone.`))
+              deleteMilestone(m.id);
+          }}
+        />
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
         {mode === "year" ? (
@@ -441,6 +578,8 @@ export function CalendarViewClient({
             today={today}
             dueByDate={dueByDate}
             milestonesByDate={milestonesByDate}
+            body={calColors.year.body}
+            border={calColors.year.border}
             onPickMonth={(d) => {
               setAnchor(d);
               setMode("month");
@@ -573,6 +712,8 @@ interface GridShared {
   subteams: ReadonlyArray<Subteam>;
   selectedTaskId: string | null;
   selectedSpan: DaySpan | null;
+  bodyProperty: TaskColorProperty;
+  borderProperty: CalendarBorderProperty;
   onChipClick: (task: TaskRow, e: React.MouseEvent) => void;
   onEventClick: (ev: CalendarEvent) => void;
   onDayClick: (dateKey: string, e: React.MouseEvent) => void;
@@ -739,6 +880,8 @@ function DayCell({
   dimmedById,
   subteams,
   selectedTaskId,
+  bodyProperty,
+  borderProperty,
   onChipClick,
   onEventClick,
   onDayClick,
@@ -818,6 +961,8 @@ function DayCell({
             relation={relationByTaskId.get(t.id) ?? "owned"}
             dimmed={dimmedById.has(t.id)}
             selected={selectedTaskId === t.id}
+            bodyProperty={bodyProperty}
+            borderProperty={borderProperty}
             onClick={onChipClick}
           />
         ))}
@@ -829,6 +974,8 @@ function DayCell({
             relation={relationByTaskId.get(t.id) ?? "owned"}
             dimmed={dimmedById.has(t.id)}
             selected={selectedTaskId === t.id}
+            bodyProperty={bodyProperty}
+            borderProperty={borderProperty}
             onClick={onChipClick}
           />
         ))}
@@ -847,6 +994,8 @@ function TaskChip({
   relation,
   dimmed,
   selected,
+  bodyProperty,
+  borderProperty,
   onClick,
 }: {
   task: TaskRow;
@@ -854,6 +1003,8 @@ function TaskChip({
   relation: CrossTeamRelation;
   dimmed: boolean;
   selected: boolean;
+  bodyProperty: TaskColorProperty;
+  borderProperty: CalendarBorderProperty;
   onClick: (task: TaskRow, e: React.MouseEvent) => void;
 }) {
   const disabled = relation !== "owned";
@@ -872,7 +1023,14 @@ function TaskChip({
       }}
       className={(isDragging ? "opacity-30 " : "") + (dimmed ? "opacity-40 " : "") + (disabled ? "cursor-pointer " : "cursor-grab ")}
     >
-      <TaskChipFace task={task} kind={kind} external={relation !== "owned"} selected={selected} />
+      <TaskChipFace
+        task={task}
+        kind={kind}
+        external={relation !== "owned"}
+        selected={selected}
+        bodyProperty={bodyProperty}
+        borderProperty={borderProperty}
+      />
     </div>
   );
 }
@@ -883,23 +1041,36 @@ function TaskChipFace({
   external = false,
   selected = false,
   dragging = false,
+  bodyProperty = "status",
+  borderProperty = "subteam",
 }: {
   task: TaskRow;
   kind: "start" | "due";
   external?: boolean;
   selected?: boolean;
   dragging?: boolean;
+  bodyProperty?: TaskColorProperty;
+  borderProperty?: CalendarBorderProperty;
 }) {
+  // Body fill + (optional) left-border color resolved from the per-mode color
+  // choice, applying the #23 rules. External tasks stay muted/italic.
+  const { background, borderColor } = calendarMarkerColors(task, bodyProperty, borderProperty);
   return (
     <span
       className={
         "inline-flex w-full items-center gap-1.5 truncate rounded px-1.5 py-0.5 text-[11px] font-normal " +
-        (external ? "bg-helios-base/30 italic text-helios-text/70 " : "bg-helios-base/60 text-helios-text ") +
+        (external ? "italic text-helios-text/70 " : "text-helios-text ") +
         (selected ? "ring-1 ring-asu-gold/70 " : "") +
         (dragging ? "shadow-lg ring-1 ring-asu-gold/60 " : "")
       }
       title={`${task.title}${external ? ` · ${task.subteam.name}` : ""}`}
-      style={{ borderLeftWidth: 4, borderLeftStyle: "solid", borderLeftColor: task.subteam.color ?? FALLBACK_COLOR }}
+      style={{
+        backgroundColor: background,
+        opacity: external ? 0.7 : 1,
+        ...(borderColor
+          ? { borderLeftWidth: 4, borderLeftStyle: "solid", borderLeftColor: borderColor }
+          : {}),
+      }}
     >
       {kind === "start" ? (
         <IconArrowRight size={11} strokeWidth={1.5} className="shrink-0 text-helios-dim" />
@@ -1110,64 +1281,105 @@ function competitionYearStart(anchor: Date): Date {
 // Countdown strip
 // ---------------------------------------------------------------------------
 
-function CountdownStrip({
+// Collapsible milestones menu (#21): lists every milestone with its description
+// and countdown. Create/edit/delete controls render only for admins (chief
+// engineer / owner); everyone else gets a read-only list.
+function MilestonesMenu({
   milestones,
   canEdit = false,
   onEdit,
+  onCreate,
+  onDelete,
 }: {
   milestones: ReadonlyArray<Milestone>;
   canEdit?: boolean;
   onEdit?: (m: Milestone) => void;
+  onCreate?: () => void;
+  onDelete?: (m: Milestone) => void;
 }) {
   const today = new Date();
-  const upcoming = [...milestones]
-    .filter((m) => !isBefore(parseISO(m.target_date), today))
-    .sort((a, b) => a.target_date.localeCompare(b.target_date))
-    .slice(0, 6);
-
-  if (upcoming.length === 0) return null;
+  const sorted = [...milestones].sort((a, b) => a.target_date.localeCompare(b.target_date));
 
   return (
-    <div className="flex gap-3 overflow-x-auto border-b border-helios-line bg-helios-panel/40 px-6 py-3">
-      {upcoming.map((m) => {
-        const d = parseISO(m.target_date);
-        const days = differenceInCalendarDays(d, today);
-        const isClose = days <= 14;
-        const cardClass =
-          "flex min-w-[10rem] shrink-0 flex-col rounded-md border px-3 py-2 " +
-          (isClose ? "border-asu-gold/60 bg-asu-gold/5" : "border-helios-line bg-helios-base/30");
-        const body = (
-          <>
-            <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-asu-gold">
-              <IconFlag2 size={10} strokeWidth={1.5} />
-              {m.name}
-            </div>
-            <div className="mt-1 text-lg font-medium tabular-nums text-helios-text">
-              {days} <span className="text-xs font-normal text-helios-dim">days</span>
-            </div>
-            <div className="text-[11px] tabular-nums text-helios-dim">{format(d, "EEE, MMM d")}</div>
-          </>
-        );
-        // Admins can click a countdown card to edit/delete that milestone.
-        if (canEdit && onEdit) {
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onEdit(m)}
-              title={`Edit milestone "${m.name}"`}
-              className={cardClass + " cursor-pointer text-left transition-colors hover:border-asu-gold hover:bg-asu-gold/10"}
-            >
-              {body}
-            </button>
-          );
-        }
-        return (
-          <div key={m.id} className={cardClass}>
-            {body}
-          </div>
-        );
-      })}
+    <div className="border-b border-helios-line bg-helios-panel/40 px-6 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-helios-dim">
+          <IconFlag2 size={12} strokeWidth={1.5} /> Milestones · {sorted.length}
+        </h3>
+        {canEdit && onCreate ? (
+          <button
+            type="button"
+            onClick={onCreate}
+            className="inline-flex items-center gap-1 rounded border border-helios-line bg-transparent px-2 py-0.5 text-[11px] font-normal text-helios-dim hover:bg-helios-base hover:text-helios-text"
+          >
+            <IconPlus size={12} strokeWidth={1.5} /> New milestone
+          </button>
+        ) : null}
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-helios-dim">No milestones.</p>
+      ) : (
+        <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+          {sorted.map((m) => {
+            const d = parseISO(m.target_date);
+            const days = differenceInCalendarDays(d, today);
+            const past = days < 0;
+            return (
+              <li
+                key={m.id}
+                className="flex items-start gap-2 rounded border border-helios-line bg-helios-base/30 px-3 py-2"
+              >
+                <IconFlag2 size={12} strokeWidth={1.5} className="mt-0.5 shrink-0 text-asu-gold" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="truncate text-xs font-medium text-helios-text">{m.name}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-helios-dim">
+                      {format(d, "EEE, MMM d, yyyy")}
+                    </span>
+                    <span
+                      className={
+                        "shrink-0 text-[11px] tabular-nums " +
+                        (past ? "text-helios-dim" : days <= 14 ? "text-asu-gold" : "text-helios-text")
+                      }
+                    >
+                      {past ? `${Math.abs(days)}d ago` : `in ${days}d`}
+                    </span>
+                  </div>
+                  {m.description ? (
+                    <p className="mt-0.5 text-[11px] leading-snug text-helios-dim">{m.description}</p>
+                  ) : null}
+                </div>
+                {canEdit ? (
+                  <div className="flex shrink-0 items-center gap-1">
+                    {onEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(m)}
+                        aria-label={`Edit milestone ${m.name}`}
+                        title="Edit"
+                        className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-helios-text"
+                      >
+                        <IconPencil size={13} strokeWidth={1.5} />
+                      </button>
+                    ) : null}
+                    {onDelete ? (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(m)}
+                        aria-label={`Delete milestone ${m.name}`}
+                        title="Delete"
+                        className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-red-400"
+                      >
+                        <IconTrash size={13} strokeWidth={1.5} />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -1181,12 +1393,16 @@ function YearOverview({
   today,
   dueByDate,
   milestonesByDate,
+  body,
+  border,
   onPickMonth,
 }: {
   anchor: Date;
   today: Date;
   dueByDate: Map<string, TaskRow[]>;
   milestonesByDate: Map<string, Milestone[]>;
+  body: TaskColorProperty;
+  border: CalendarBorderProperty;
   onPickMonth: (m: Date) => void;
 }) {
   const start = competitionYearStart(anchor);
@@ -1201,6 +1417,8 @@ function YearOverview({
           today={today}
           dueByDate={dueByDate}
           milestonesByDate={milestonesByDate}
+          body={body}
+          border={border}
           onPick={() => onPickMonth(m)}
         />
       ))}
@@ -1213,12 +1431,16 @@ function YearMonth({
   today,
   dueByDate,
   milestonesByDate,
+  body,
+  border,
   onPick,
 }: {
   monthStart: Date;
   today: Date;
   dueByDate: Map<string, TaskRow[]>;
   milestonesByDate: Map<string, Milestone[]>;
+  body: TaskColorProperty;
+  border: CalendarBorderProperty;
   onPick: () => void;
 }) {
   const gridStart = startOfWeek(monthStart);
@@ -1254,18 +1476,19 @@ function YearMonth({
           const isToday = isSameDay(d, today);
           const dateKey = format(d, "yyyy-MM-dd");
           const hasMilestone = milestonesByDate.has(dateKey);
-          const taskN = dueByDate.get(dateKey)?.length ?? 0;
+          const dayTasks = dueByDate.get(dateKey) ?? [];
+          const taskN = dayTasks.length;
           return (
             <div
               key={dateKey}
               className={
-                "relative flex aspect-square items-center justify-center rounded text-[9px] tabular-nums " +
+                "relative flex aspect-square flex-col items-center justify-center gap-0.5 rounded text-[9px] tabular-nums " +
                 (isToday
                   ? "bg-asu-maroon text-white "
                   : hasMilestone
                     ? "bg-asu-gold/15 text-asu-gold "
                     : taskN > 0
-                      ? "bg-helios-base/60 text-helios-text "
+                      ? "bg-helios-base/40 text-helios-text "
                       : inMonth
                         ? "text-helios-text/70 "
                         : "text-helios-dim/40 ")
@@ -1278,7 +1501,24 @@ function YearMonth({
                     : undefined
               }
             >
-              {format(d, "d")}
+              <span className="leading-none">{format(d, "d")}</span>
+              {taskN > 0 ? (
+                <span className="flex max-w-full flex-wrap justify-center gap-px leading-none">
+                  {dayTasks.slice(0, 6).map((t, i) => {
+                    const { background, borderColor } = calendarMarkerColors(t, body, border);
+                    return (
+                      <span
+                        key={`${t.id}-${i}`}
+                        className="size-[3px] rounded-[1px]"
+                        style={{
+                          backgroundColor: background,
+                          ...(borderColor ? { boxShadow: `0 0 0 0.5px ${borderColor}` } : {}),
+                        }}
+                      />
+                    );
+                  })}
+                </span>
+              ) : null}
             </div>
           );
         })}

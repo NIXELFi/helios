@@ -8,6 +8,25 @@ const LABEL: Record<TaskType, string> = {
   analysis: "Analysis",
   test: "Test",
   general: "General",
+  mfg_laser: "MFG-LZR",
+  mfg_machine: "MFG-MCH",
+  mfg_weld: "MFG-WELD",
+};
+
+// Compact labels for space-constrained surfaces (e.g. Gantt bars). Shorthand is
+// only applied where the full label is > 4 letters; shorter labels are kept as
+// is. The MFG-* codes are already compact.
+const SHORT: Record<TaskType, string> = {
+  part: "Part",
+  drawing: "DRAW",
+  simulation: "SIM",
+  assembly: "ASSY",
+  analysis: "ANLS",
+  test: "Test",
+  general: "GEN",
+  mfg_laser: "MFG-LZR",
+  mfg_machine: "MFG-MCH",
+  mfg_weld: "MFG-WELD",
 };
 
 const TONE: Record<TaskType, string> = {
@@ -18,6 +37,9 @@ const TONE: Record<TaskType, string> = {
   analysis: "border-orange-400/40 text-orange-300",
   test: "border-pink-400/40 text-pink-300",
   general: "border-helios-line text-helios-dim",
+  mfg_laser: "border-cyan-400/40 text-cyan-300",
+  mfg_machine: "border-amber-400/40 text-amber-300",
+  mfg_weld: "border-orange-400/40 text-orange-300",
 };
 
 export function TypeBadge({ type }: { type: TaskType }) {
@@ -34,3 +56,4 @@ export function TypeBadge({ type }: { type: TaskType }) {
 }
 
 export const TASK_TYPE_LABEL = LABEL;
+export const TASK_TYPE_SHORT = SHORT;

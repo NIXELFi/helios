@@ -5,7 +5,14 @@ export type FilterShowMode = "dim" | "hide";
 
 // The task types that represent physical fabrication work. The Build workspace's
 // calendar and gantt are scoped to these.
-export const MANUFACTURING_TYPES: ReadonlyArray<TaskType> = ["part", "assembly", "drawing"];
+export const MANUFACTURING_TYPES: ReadonlyArray<TaskType> = [
+  "part",
+  "assembly",
+  "drawing",
+  "mfg_laser",
+  "mfg_machine",
+  "mfg_weld",
+];
 
 export function isManufacturingType(t: TaskType): boolean {
   return MANUFACTURING_TYPES.includes(t);

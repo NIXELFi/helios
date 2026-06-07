@@ -104,7 +104,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     sb.from("build_records").select("task_id,part_file,drawing_file,drawing_review"),
     sb
       .from("calendar_events")
-      .select("id,project_id,title,date,all_subteams,subteam_ids,type_tags,description"),
+      .select("id,project_id,title,date,all_subteams,subteam_ids,type_tags,description,recurrence,recurrence_end"),
     sb
       .from("activity")
       .select(

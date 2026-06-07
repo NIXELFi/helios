@@ -9,9 +9,11 @@ import type {
 } from "@helios/pm-ui";
 import {
   TASK_COLOR_PROPERTY_LABEL,
+  TASK_TYPE_SHORT,
   colorForTask,
   computeCriticalPath,
   hexToRgba,
+  resolveMarkerColors,
 } from "@helios/pm-ui";
 import {
   addDays,
@@ -30,7 +32,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { GanttLegend } from "@pm/components/GanttLegend";
@@ -92,7 +94,9 @@ const SUBSYSTEM_HEADER_HEIGHT = 24;
 
 // Default bars read as translucent "glass": the resolved property color is laid
 // down at this alpha behind a backdrop blur, with the light text color on top.
-const GLASS_ALPHA = 0.18;
+// Raised from 0.18 so the status/property color reads clearly while keeping the
+// glass feel.
+const GLASS_ALPHA = 0.4;
 
 // The four task properties a bar's background / outline can be colored by.
 const COLOR_PROPERTY_OPTIONS: Array<{ value: TaskColorProperty; label: string }> = (
@@ -103,6 +107,64 @@ const COLOR_PROPERTY_OPTIONS: Array<{ value: TaskColorProperty; label: string }>
 // or shrink; clamped to stay legible at the minimum row height.
 function barFontPx(rowHeight: number): number {
   return Math.min(16, Math.max(9, Math.round(rowHeight * 0.34)));
+}
+
+// Canvas-backed text metrics so Gantt card sizing matches real word-wrapping:
+// words wrap only at spaces (NEVER mid-word). A single word that's wider than the
+// card would otherwise overflow/clip, so we also measure the widest word and let
+// the card grow wide enough to fit it.
+let measureCtx: CanvasRenderingContext2D | null = null;
+let measureFontFamily = "";
+let measureReady = false;
+function ensureMeasure(fontSizePx: number): CanvasRenderingContext2D | null {
+  if (!measureReady && typeof document !== "undefined") {
+    measureReady = true;
+    measureCtx = document.createElement("canvas").getContext("2d");
+    try {
+      measureFontFamily = getComputedStyle(document.body).fontFamily || "sans-serif";
+    } catch {
+      measureFontFamily = "sans-serif";
+    }
+  }
+  if (measureCtx) measureCtx.font = `500 ${fontSizePx}px ${measureFontFamily}`;
+  return measureCtx;
+}
+// Widest single word in px (the minimum line width needed to avoid a mid-word clip).
+function widestWordPx(text: string, fontSizePx: number): number {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+  const ctx = ensureMeasure(fontSizePx);
+  if (!ctx) {
+    let chars = 0;
+    for (const w of words) chars = Math.max(chars, w.length);
+    return chars * fontSizePx * 0.6;
+  }
+  let max = 0;
+  for (const w of words) max = Math.max(max, ctx.measureText(w).width);
+  return max;
+}
+// How many lines `text` wraps to in a `maxWidth`-px line at this font size.
+function wrappedLineCount(text: string, maxWidth: number, fontSizePx: number): number {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+  if (maxWidth <= 0) return words.length;
+  const ctx = ensureMeasure(fontSizePx);
+  if (!ctx) {
+    const perLine = Math.max(1, Math.floor(maxWidth / (fontSizePx * 0.58)));
+    return Math.max(1, Math.ceil(text.length / perLine));
+  }
+  let lines = 1;
+  let cur = "";
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (cur === "" || ctx.measureText(test).width <= maxWidth) {
+      cur = test;
+    } else {
+      lines++;
+      cur = w;
+    }
+  }
+  return lines;
 }
 
 interface BarLayout {
@@ -203,6 +265,26 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     setRowHeight((v) => Math.min(ROW_BOUNDS.max, Math.max(ROW_BOUNDS.min, v + delta)));
   }
 
+  // ctrl+wheel / trackpad-pinch zoom. React's onWheel is registered passive, so
+  // preventDefault() there is ignored and the browser zooms the whole webview
+  // instead. Attach a NON-passive native listener via a callback ref so pinch
+  // actually zooms the chart (day width; +shift = row height).
+  const wheelCleanup = useRef<(() => void) | null>(null);
+  const scrollRef = useCallback((node: HTMLDivElement | null) => {
+    wheelCleanup.current?.();
+    wheelCleanup.current = null;
+    if (!node) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return; // without ctrl, let normal scroll/pan happen
+      e.preventDefault();
+      const dir = e.deltaY < 0 ? 1 : -1; // up/zoom-in
+      if (e.shiftKey) setRowHeight((v) => Math.min(ROW_BOUNDS.max, Math.max(ROW_BOUNDS.min, v + dir * 2)));
+      else setDayWidth((v) => Math.min(DAY_BOUNDS.max, Math.max(DAY_BOUNDS.min, v + dir * 2)));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
   const layout = useMemo(() => {
     const dates: Date[] = [];
     for (const t of visibleTasks) {
@@ -281,6 +363,55 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   const { days, totalDays, totalRows, bars, groupSpans, rangeStart } = layout;
   const timelineWidth = totalDays * dayWidth;
   const headerHeight = 36;
+
+  // ---- Per-row geometry --------------------------------------------------
+  // One height per rowIndex, covering both subteam-header rows and task rows,
+  // so the left labels, grid stripes, bars, and arrow midpoints all share a
+  // single source of truth. Long task titles wrap and grow only their own card
+  // (taller row); everything below shifts down to match. The line count is a
+  // width-based estimate biased slightly tall so text doesn't clip.
+  const lineH = Math.round(barFont * 1.35);
+  const MAX_TITLE_LINES = 8;
+  const barHeights = new Map<string, number>();
+  const barWidths = new Map<string, number>();
+  const rowHeights: number[] = new Array(totalRows).fill(rowHeight);
+  for (const g of groupSpans) rowHeights[g.headerRow] = SUBSYSTEM_HEADER_HEIGHT;
+  for (const b of bars) {
+    const durationW = b.widthDays * dayWidth - 2; // width from the task's dates
+    const small = Math.max(7, Math.round(barFont * 0.78));
+    // Type chip (shrink-0) + the px-1.5 gutter (12) + a couple px of safety.
+    const chipW = TASK_TYPE_SHORT[b.task.type].length * small * 0.62 + 12;
+    const wordMax = widestWordPx(b.task.title, barFont);
+    // The card must be at least wide enough that its widest word fits on one line
+    // (so we never have to break a word or clip it). Grow rightward past the
+    // duration only when needed.
+    const finalW = Math.max(durationW, Math.ceil(wordMax + chipW + 14));
+    const showType = finalW >= 46;
+    const usable = finalW - 12 - (showType ? chipW : 0) - 2;
+    const lines = Math.min(MAX_TITLE_LINES, wrappedLineCount(b.task.title, usable, barFont));
+    const barH = Math.max(barHeight, lines * lineH + 8);
+    barWidths.set(b.task.id, finalW);
+    barHeights.set(b.task.id, barH);
+    rowHeights[b.rowIndex] = barH + 14;
+  }
+  const rowTops: number[] = new Array(totalRows).fill(0);
+  for (let i = 1; i < totalRows; i++) {
+    rowTops[i] = (rowTops[i - 1] ?? 0) + (rowHeights[i - 1] ?? rowHeight);
+  }
+  const contentHeight =
+    totalRows > 0 ? (rowTops[totalRows - 1] ?? 0) + (rowHeights[totalRows - 1] ?? rowHeight) : 0;
+  const rowTopAt = (i: number) => rowTops[i] ?? 0;
+  const rowHeightAt = (i: number) => rowHeights[i] ?? rowHeight;
+  const clamp = (v: number, lo: number, hi: number) =>
+    Math.max(lo, Math.min(hi, v));
+  // Pixel rect of a bar, derived from the shared row geometry.
+  const barRect = (b: BarLayout) => {
+    const h = barHeights.get(b.task.id) ?? barHeight;
+    const top = rowTopAt(b.rowIndex) + (rowHeightAt(b.rowIndex) - h) / 2;
+    const left = b.startDayIndex * dayWidth;
+    const right = left + (barWidths.get(b.task.id) ?? b.widthDays * dayWidth - 2);
+    return { left, right, top, bottom: top + h, cy: rowTopAt(b.rowIndex) + rowHeightAt(b.rowIndex) / 2 };
+  };
   const barByTaskId = new Map<string, BarLayout>(bars.map((b) => [b.task.id, b]));
 
   return (
@@ -420,16 +551,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         </span>
       </div>
 
-      <div
-        className="min-h-0 flex-1 overflow-auto"
-        onWheel={(e) => {
-          if (!e.ctrlKey) return; // Without ctrl, let normal scroll/pan happen
-          e.preventDefault();
-          const dir = e.deltaY < 0 ? 1 : -1; // scroll up = zoom in
-          if (e.shiftKey) bumpRowHeight(dir * 2);
-          else bumpDayWidth(dir * 2);
-        }}
-      >
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div className="flex">
           <div className="sticky left-0 z-30 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
             <div
@@ -454,6 +576,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 {Array.from({ length: g.taskRows }).map((_, i) => {
                   const bar = bars.find((b) => b.rowIndex === g.headerRow + 1 + i);
                   const ext = bar && bar.relation !== "owned";
+                  const rh = rowHeightAt(g.headerRow + 1 + i);
                   return (
                     <div
                       key={i}
@@ -461,7 +584,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                         "truncate border-b border-helios-line/60 px-6 font-normal " +
                         (ext ? "italic text-helios-text/70" : "text-helios-text")
                       }
-                      style={{ height: rowHeight, lineHeight: `${rowHeight}px`, fontSize: barFont }}
+                      style={{ height: rh, lineHeight: `${rh}px`, fontSize: barFont }}
                       title={bar?.task.title}
                     >
                       {bar?.task.title}
@@ -474,7 +597,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
 
           <div
             className="relative bg-helios-panel/40"
-            style={{ width: timelineWidth, minHeight: totalRows * rowHeight + headerHeight }}
+            style={{ width: timelineWidth, minHeight: contentHeight + headerHeight }}
           >
             <div
               className="sticky top-0 z-10 flex border-b border-helios-line bg-helios-panel"
@@ -517,7 +640,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     <div
                       key={i}
                       className="border-b border-helios-line/40"
-                      style={{ height: rowHeight }}
+                      style={{ height: rowHeightAt(g.headerRow + 1 + i) }}
                     />
                   ))}
                 </div>
@@ -617,15 +740,20 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                 const isCritical = critical.has(b.task.id);
                 const isExternal = b.relation !== "owned";
                 const dim = showCriticalOnly && !isCritical;
-                const top = b.rowIndex * rowHeight + (rowHeight - barHeight) / 2;
-                // Glass background: resolved bg-property color at low alpha behind
-                // a backdrop blur, with light text on top.
-                const bgColor = hexToRgba(colorForTask(b.task, bgProperty), GLASS_ALPHA);
-                // Outline ALWAYS reflects the chosen outline property so the
-                // legend's "Outline" row stays truthful. The critical-path /
-                // cross-team signal moves to a subtle non-outline cue below
-                // (corner glyph + title suffix) so it no longer hides the color.
-                const border = `2px solid ${colorForTask(b.task, outlineProperty)}`;
+                const barH = barHeights.get(b.task.id) ?? barHeight;
+                const top = rowTopAt(b.rowIndex) + (rowHeightAt(b.rowIndex) - barH) / 2;
+                // Card width grows past the task's duration when needed so the
+                // widest word always fits without breaking or clipping.
+                const widthPx = barWidths.get(b.task.id) ?? b.widthDays * dayWidth - 2;
+                const showType = widthPx >= 46;
+                // Glass background + outline resolved through the shared marker
+                // rules (#23): body=status + border=priority hides the priority
+                // border; body=priority + border=status on a Done task → dark
+                // glass. The critical-path / cross-team signal is a subtle
+                // non-outline cue below (corner glyph + title suffix).
+                const marker = resolveMarkerColors(b.task, bgProperty, outlineProperty, GLASS_ALPHA);
+                const bgColor = marker.background;
+                const border = marker.borderColor ? `2px solid ${marker.borderColor}` : "none";
                 const titleSuffix =
                   (isCritical ? " · critical path" : "") +
                   (isExternal ? " · cross-team" : "");
@@ -636,23 +764,43 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     onClick={(e) =>
                       setPeek({ taskId: b.task.id, x: e.clientX, y: e.clientY })
                     }
+                    onDoubleClick={() => {
+                      // Double-click escalates straight to the full editor; close
+                      // any peek opened by the preceding single click.
+                      setPeek(null);
+                      selectTask(b.task.id);
+                    }}
                     className={
-                      "absolute cursor-pointer overflow-hidden rounded text-left font-medium text-helios-text shadow-sm backdrop-blur-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
+                      "absolute flex cursor-pointer flex-col justify-center overflow-hidden rounded text-left font-medium text-helios-text shadow-sm backdrop-blur-sm hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-asu-gold " +
                       (dim ? "opacity-25" : isExternal ? "opacity-55" : "opacity-100")
                     }
                     style={{
                       left: b.startDayIndex * dayWidth,
-                      width: b.widthDays * dayWidth - 2,
+                      width: widthPx,
                       top,
-                      height: barHeight,
+                      height: barH,
                       fontSize: barFont,
                       backgroundColor: bgColor,
                       border,
                     }}
                     title={`${b.task.title} · ${b.task.start_date} → ${b.task.due_date}${titleSuffix}`}
                   >
-                    <span className="block truncate px-1.5 leading-tight">
-                      {b.task.title}
+                    <span
+                      className="flex items-center gap-1 px-1.5"
+                      style={{ lineHeight: `${lineH}px` }}
+                    >
+                      {showType ? (
+                        <span
+                          aria-hidden
+                          className="shrink-0 self-start rounded-sm bg-black/30 px-1 font-semibold uppercase tracking-wide text-helios-text/90"
+                          style={{ fontSize: Math.max(7, Math.round(barFont * 0.78)) }}
+                        >
+                          {TASK_TYPE_SHORT[b.task.type]}
+                        </span>
+                      ) : null}
+                      {/* Wrap at spaces only (never mid-word); the row geometry
+                          measured this exact wrapping and reserved the height. */}
+                      <span className="min-w-0 whitespace-normal break-normal">{b.task.title}</span>
                     </span>
                     {isCritical ? (
                       <span
@@ -677,7 +825,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               <svg
                 className="pointer-events-none absolute inset-0"
                 width={timelineWidth}
-                height={totalRows * rowHeight}
+                height={contentHeight}
               >
                 <defs>
                   <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -688,12 +836,35 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                   const pred = barByTaskId.get(d.predecessor_id);
                   const succ = barByTaskId.get(d.successor_id);
                   if (!pred || !succ) return null;
-                  const x1 = (pred.startDayIndex + pred.widthDays) * dayWidth - 2;
-                  const y1 = pred.rowIndex * rowHeight + rowHeight / 2;
-                  const x2 = succ.startDayIndex * dayWidth;
-                  const y2 = succ.rowIndex * rowHeight + rowHeight / 2;
-                  const midX = x2 - 6;
-                  const path = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+                  const P = barRect(pred);
+                  const S = barRect(succ);
+                  let path: string;
+                  if (pred.rowIndex === succ.rowIndex) {
+                    // Same row: a straight hop edge-to-edge.
+                    path = `M ${P.right} ${P.cy} L ${S.left} ${S.cy}`;
+                  } else {
+                    // Different rows: leave the predecessor from its TOP or BOTTOM
+                    // edge (toward the successor), drop into the row gap just beside
+                    // the successor, slide horizontally in that gap, then enter the
+                    // successor's near edge — so the line routes around boxes rather
+                    // than cutting through their centers.
+                    const gap = 7;
+                    const down = S.cy >= P.cy;
+                    const exitY = down ? P.bottom : P.top;
+                    const enterY = down ? S.top : S.bottom;
+                    const channelY = down ? S.top - gap : S.bottom + gap;
+                    // Exit near the predecessor edge that faces the successor.
+                    const exitX =
+                      S.left >= P.left
+                        ? clamp(P.right - 4, P.left + 2, P.right - 2)
+                        : clamp(P.left + 4, P.left + 2, P.right - 2);
+                    // Enter near the successor edge that faces the predecessor.
+                    const enterX =
+                      P.right <= S.right
+                        ? clamp(S.left + 4, S.left + 2, S.right - 2)
+                        : clamp(S.right - 4, S.left + 2, S.right - 2);
+                    path = `M ${exitX} ${exitY} L ${exitX} ${channelY} L ${enterX} ${channelY} L ${enterX} ${enterY}`;
+                  }
                   return (
                     <path
                       key={`${d.predecessor_id}-${d.successor_id}`}
