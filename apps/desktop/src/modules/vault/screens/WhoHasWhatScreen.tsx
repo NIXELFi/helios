@@ -109,7 +109,9 @@ export function WhoHasWhatScreen() {
     setReasonFor(null);
     if (!lockId || reason.trim() === "") return;
     setUnlockingId(lockId);
-    const ok = await forceUnlock.run(lockId, reason.trim());
+    // Pass the lock's file_id so the optimistic overlay can clear its pill.
+    const fileId = locks?.find((l) => l.id === lockId)?.file_id ?? "";
+    const ok = await forceUnlock.run(lockId, fileId, reason.trim());
     setUnlockingId(null);
     if (ok) refetch();
   }

@@ -3,6 +3,7 @@ import { useSupabaseClient, useUser } from "@helios/auth";
 import type { FileId, Lock } from "./types";
 import { friendlyPgError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
+import { setLockOverlay, clearLockOverlay } from "./lock-overlay";
 
 export function useAcquireLock() {
   const client = useSupabaseClient();
@@ -22,6 +23,20 @@ export function useAcquireLock() {
       }
       setLoading(true);
       setError(null);
+      // Optimistic: show "locked by me" on the pill this frame, before the
+      // insert round-trips. reconcile (in useLocks) drops it once the canonical
+      // row confirms it; the catch below reverts it on failure.
+      setLockOverlay(file_id, {
+        kind: "add",
+        lock: {
+          id: `optimistic:${file_id}`,
+          file_id,
+          user_id: user.id,
+          acquired_at: new Date().toISOString(),
+          released_at: null,
+          force_released_by: null,
+        },
+      });
       const { data, error: err } = await (client.from("locks") as any)
         .insert({ file_id, user_id: user.id })
         .select()
@@ -32,6 +47,7 @@ export function useAcquireLock() {
         // (by someone, possibly this user holding a stale lock)" — friendly
         // mapping gives a readable string instead of a raw FK / unique
         // constraint violation.
+        clearLockOverlay(file_id); // revert the optimistic pill
         setError(new Error(friendlyPgError(err, "lock").message));
         return null;
       }

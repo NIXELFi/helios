@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
-import { loadWorkspace } from "@pm/lib/data";
+import { loadWorkspace, type Workspace } from "@pm/lib/data";
+import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
+import { subscribePmRealtime } from "@pm/lib/pm-realtime";
+import { loadSnapshot, saveSnapshot } from "@pm/lib/workspace-snapshot";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
@@ -15,6 +18,19 @@ import { GraphViewClient } from "@pm/views/GraphViewClient";
 import { CalendarViewClient } from "@pm/views/CalendarViewClient";
 import { ActivityFeedClient } from "@pm/views/ActivityFeedClient";
 import "./pm.css";
+
+// Cheap task-change probe cadence — keeps task churn feeling live (~20s)
+// without re-pulling the whole workspace every cycle.
+const PM_PROBE_MS = 20_000;
+// Slow full re-hydrate backstop. The cheap probe only tracks tasks/activity, so
+// this catches the long tail (milestone/vendor/event/page edits, which have no
+// cheap change signal) while the window stays focused but idle. Window focus
+// also forces a full refresh, so an active user never waits this long.
+const PM_BACKSTOP_MS = 180_000;
+// Coalesce a burst of realtime events (e.g. a multi-row edit, or tasks +
+// task_subteams firing together) into one re-hydrate. Short enough to still feel
+// instant.
+const PM_REALTIME_DEBOUNCE_MS = 150;
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -137,29 +153,49 @@ export function PmModule() {
 
   useEffect(() => {
     if (!client || !user) return;
+    const c = client;
+    const u = user;
     let active = true;
+
+    const hydrateFrom = (ws: Workspace) => {
+      const persisted = readPersistedActiveProject();
+      const firstId = ws.projects[0]?.id ?? "";
+      const activeProjectId = persisted && ws.projectData[persisted] ? persisted : firstId;
+      usePmStore.getState().hydrate({
+        projects: ws.projects,
+        projectData: ws.projectData,
+        activeProjectId,
+        currentUserId: u.id,
+        baselineOrg: ws.baselineOrg,
+        roles: ws.roles,
+        client: c,
+      });
+    };
+
+    // 1. Stale-while-revalidate: paint instantly from the cached snapshot so PM
+    //    cold-launch shows the last workspace sub-frame instead of a spinner.
+    const cached = loadSnapshot(u.id);
+    if (cached) {
+      hydrateFrom(cached);
+      setPhase("ready");
+    }
+
+    // 2. Revalidate from the network, then refresh the cache for next launch.
     void (async () => {
       try {
-        const ws = await loadWorkspace(client);
+        const ws = await loadWorkspace(c);
         if (!active) return;
-        const persisted = readPersistedActiveProject();
-        const firstId = ws.projects[0]?.id ?? "";
-        const activeProjectId =
-          persisted && ws.projectData[persisted] ? persisted : firstId;
-        usePmStore.getState().hydrate({
-          projects: ws.projects,
-          projectData: ws.projectData,
-          activeProjectId,
-          currentUserId: user.id,
-          baselineOrg: ws.baselineOrg,
-          roles: ws.roles,
-          client,
-        });
+        hydrateFrom(ws);
+        saveSnapshot(ws, u.id, new Date().toISOString());
         setPhase("ready");
       } catch (e) {
         if (!active) return;
-        setError(e instanceof Error ? e.message : String(e));
-        setPhase("error");
+        // Already painted from cache → keep it rather than wiping the screen on
+        // a transient failure. Only hard-error on a cold start with no cache.
+        if (!cached) {
+          setError(e instanceof Error ? e.message : String(e));
+          setPhase("error");
+        }
       }
     })();
     return () => {
@@ -167,11 +203,20 @@ export function PmModule() {
     };
   }, [client, user]);
 
-  // Keep the workspace fresh without a full app reload: re-fetch on window focus
-  // and on a short interval, re-hydrating from the `pm` schema so server-side
-  // changes (the activity-feed trigger, edits from another session, computed
-  // fields) appear. Preserves the active project + UI state, and SKIPS while a
-  // write is in flight so it never clobbers an in-flight optimistic edit.
+  // Keep the workspace fresh without a full app reload, re-hydrating from the
+  // `pm` schema so server-side changes (the activity-feed trigger, edits from
+  // another session, computed fields) appear. Preserves the active project + UI
+  // state, and SKIPS while a write is in flight so it never clobbers an
+  // in-flight optimistic edit.
+  //
+  // Freshness comes from four signals instead of a blind 20s full re-pull:
+  //   - REALTIME on the published pm tables (subscribePmRealtime) — the live
+  //     path, so a teammate's task/milestone/comment edit lands near-instantly,
+  //   - a cheap task/activity change-probe (fetchPmCursor) every PM_PROBE_MS —
+  //     covers the UNpublished tables + any missed realtime event,
+  //   - window focus — a full refresh (catches the long tail instantly), and
+  //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
+  //     the window stays focused but idle.
   useEffect(() => {
     if (!client || !user) return;
     const c = client;
@@ -201,18 +246,71 @@ export function PmModule() {
           roles: ws.roles,
           client: c,
         });
+        // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
+        // huge workspace just isn't persisted rather than janking the write.
+        saveSnapshot(ws, u.id, new Date().toISOString());
       } catch {
         // transient refresh failure — the next focus/interval retries
       } finally {
         running = false;
       }
     }
-    const onFocus = () => void refresh();
+    // Cheap baseline for the change-probe. A full refresh (focus/backstop)
+    // resets it to null so the next probe re-baselines instead of firing a
+    // redundant refresh for a change the full pull already captured.
+    let prevCursor: PmCursor | null = null;
+    async function probe() {
+      const st = usePmStore.getState();
+      // Mirror refresh()'s guards: don't probe before hydration, mid-write, or
+      // while a refresh is already running.
+      if (!st.hydrated || st.inFlightWrites > 0 || running) return;
+      try {
+        const next = await fetchPmCursor(c);
+        if (pmCursorChanged(prevCursor, next)) {
+          prevCursor = next;
+          void refresh();
+        } else {
+          prevCursor = next;
+        }
+      } catch {
+        // Probe failed — fall back to a full refresh so the safety net holds,
+        // and re-baseline on the next good probe.
+        prevCursor = null;
+        void refresh();
+      }
+    }
+    const fullRefresh = () => {
+      prevCursor = null;
+      void refresh();
+    };
+
+    const onFocus = fullRefresh;
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void refresh(), 20000);
+    const probeInterval = window.setInterval(() => void probe(), PM_PROBE_MS);
+    const backstopInterval = window.setInterval(fullRefresh, PM_BACKSTOP_MS);
+
+    // Realtime is the live path: the published pm tables (tasks, comments,
+    // dependencies, task_subteams, milestones, calendar_events, subteams) push
+    // changes instantly, so a teammate's edit appears in well under a second
+    // instead of waiting up to PM_PROBE_MS. Debounced into one guarded refresh()
+    // so a burst coalesces; the probe/focus/backstop above remain the safety net
+    // for the UNpublished tables and any missed events.
+    let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
+    const onRealtime = () => {
+      if (realtimeDebounce) clearTimeout(realtimeDebounce);
+      realtimeDebounce = setTimeout(() => {
+        realtimeDebounce = null;
+        fullRefresh();
+      }, PM_REALTIME_DEBOUNCE_MS);
+    };
+    const unsubscribeRealtime = subscribePmRealtime(c, onRealtime);
+
     return () => {
       window.removeEventListener("focus", onFocus);
-      window.clearInterval(interval);
+      window.clearInterval(probeInterval);
+      window.clearInterval(backstopInterval);
+      if (realtimeDebounce) clearTimeout(realtimeDebounce);
+      unsubscribeRealtime();
     };
   }, [client, user]);
 

@@ -47,7 +47,8 @@
       "resources/cfd/configs/sdm26.json": "cfd/configs/sdm26.json",
       "resources/addin/HeliosVault.dll": "addin/HeliosVault.dll",
       "resources/shell/HeliosShell.dll": "shell/HeliosShell.dll",
-      "resources/shell/SharpShell.dll": "shell/SharpShell.dll"
+      "resources/shell/SharpShell.dll": "shell/SharpShell.dll",
+      "resources/swhelper/HeliosSwReadonly.exe": "swhelper/HeliosSwReadonly.exe"
     },
     "fileAssociations": [
       {

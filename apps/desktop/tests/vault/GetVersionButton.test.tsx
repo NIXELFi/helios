@@ -9,6 +9,7 @@ import { GetVersionButton } from "../../src/modules/vault/components/RowActions"
 const roCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: (path: string, readonly: boolean) => { roCalls.push({ path, readonly }); return Promise.resolve(); },
+  flipSwReadonly: vi.fn(),
 }));
 const dlCalls = vi.hoisted(() => [] as Array<{ sha: string; dest: string }>);
 const dlResult = vi.hoisted(() => ({ ok: true }));

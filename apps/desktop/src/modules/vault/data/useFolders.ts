@@ -31,6 +31,7 @@ export function useFolders(vault_id: VaultId | undefined): QueryResult<Folder[]>
         () => (client.from("folders") as any)
           .select("*")
           .eq("vault_id", vault_id)
+          .is("deleted_at", null)
           .order("name", { ascending: true })
           .order("id", { ascending: true }),
       );

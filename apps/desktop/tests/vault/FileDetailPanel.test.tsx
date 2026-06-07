@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: vi.fn().mockResolvedValue(undefined),
+  flipSwReadonly: vi.fn(),
 }));
 // The panel renders ReferencesPanel (Contains / Where-Used); stub the data
 // hooks so this suite's lightweight mock client doesn't need the refs chains.

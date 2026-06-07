@@ -1,64 +1,192 @@
 // Per-trial detail pane shown to the right of the parallel-coords plot.
-// Displays parameter values + the per-RPM brake torque / power / IMEP
-// curves from this trial's stored sweep points. We reuse the shared
-// LinePlot uPlot wrapper, matching the SweepResults call shape.
+// Header carries a podium rank badge + Δ-to-best line. A "recipe" card lists
+// every parameter path with its sampled value and (when the schema resolves)
+// its unit, plus a Copy button that puts `path\tvalue` TSV lines on the
+// clipboard. Below that we draw this trial's per-RPM brake torque / power /
+// IMEP curves from its stored sweep points; when inspecting a NON-best trial we
+// overlay the best trial's curves in muted grey (the sweep-compare idiom) so
+// the gap to the leader is visible at a glance.
+
+import { useState } from "react";
 
 import { LinePlot } from "../components/charts/LinePlot";
-import type { OptimizationTrial } from "../state/types";
+import { useParameterSchema } from "../lib/useParameterSchema";
+import { copyText } from "../lib/export/io";
+import { objectiveUnit } from "../lib/metricMeta";
+import type {
+  ObjectiveSpec,
+  OptimizationTrial,
+  ParameterMeta,
+} from "../state/types";
 
 interface Props {
   trial: OptimizationTrial;
   parameterPaths: string[];
+  /** Config path used to resolve parameter units (best-effort). */
+  configPath: string;
+  /** Objective spec — drives the objective unit shown next to obj/Δ. */
+  objective: ObjectiveSpec;
+  /** This trial's 1-based rank, or null when it isn't rankable yet. */
+  rank: number | null;
+  /** Signed objective gap to the best trial (0 for rank 1; null when n/a). */
+  deltaToBest: number | null;
+  /** Percentage gap to best (null when best === 0 or n/a). */
+  pctOfBest: number | null;
+  /** The best trial, for the overlay curves (null when this IS the best). */
+  bestTrial: OptimizationTrial | null;
 }
 
-export function TrialInspector({ trial, parameterPaths }: Props) {
+const RANK_BADGE: Record<number, { label: string; cls: string }> = {
+  1: { label: "#1", cls: "border-[#FFC627]/60 text-[#FFC627]" },
+  2: { label: "#2", cls: "border-[#C0C7D1]/60 text-[#C0C7D1]" },
+  3: { label: "#3", cls: "border-[#CD7F32]/60 text-[#CD7F32]" },
+};
+
+/** Unit for a parameter path, from the resolved schema ('' when unknown). */
+function unitForPath(schema: ParameterMeta[] | null, path: string): string {
+  return schema?.find((p) => p.path === path)?.unit ?? "";
+}
+
+export function TrialInspector({
+  trial,
+  parameterPaths,
+  configPath,
+  objective,
+  rank,
+  deltaToBest,
+  pctOfBest,
+  bestTrial,
+}: Props) {
+  const { schema } = useParameterSchema(configPath);
+  const [copied, setCopied] = useState(false);
+
   const points = trial.sweepPoints ?? [];
   const rpms = points.map((p) => p.rpm);
   const torque = points.map((p) => p.lastCycle.brakeTorqueNm);
   const power = points.map((p) => p.lastCycle.brakePowerKW);
   const imep = points.map((p) => p.lastCycle.imepBar);
 
+  // Overlay the best trial's curves only when this is NOT the best trial.
+  const overlay = bestTrial && bestTrial.trialIdx !== trial.trialIdx ? bestTrial : null;
+  const overlayPoints = overlay?.sweepPoints ?? [];
+  const overlayRpms = overlayPoints.map((p) => p.rpm);
+
+  const objUnit = objectiveUnit(objective);
+  const badge = rank != null ? RANK_BADGE[rank] : undefined;
+
+  async function copyRecipe() {
+    const lines = parameterPaths.map((p) => {
+      const v = trial.parameterValues[p];
+      return `${p}\t${v !== undefined ? v : ""}`;
+    });
+    await copyText(lines.join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
   return (
     <div className="space-y-3">
       <header className="text-[11px]">
-        <div className="text-[10px] uppercase tracking-wider text-[#FFC627]">
-          Trial #{trial.trialIdx}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">
+            Trial #{trial.trialIdx}
+          </span>
+          {badge && (
+            <span
+              className={
+                "rounded-sm border px-1.5 py-[1px] text-[9px] uppercase tracking-wider " +
+                badge.cls
+              }
+            >
+              {badge.label}
+            </span>
+          )}
+          {rank != null && rank > 3 && (
+            <span className="rounded-sm border border-[#2A2C32] px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-[#9097A0]">
+              #{rank}
+            </span>
+          )}
         </div>
         <div className="mt-1 font-mono text-[#9097A0]">
           obj = {trial.objectiveValue !== null ? trial.objectiveValue.toPrecision(5) : "—"}
+          {objUnit && <span className="ml-1 text-[#5A5F66]">{objUnit}</span>}
           {trial.wallTimeS !== null && (
             <span className="ml-2 text-[#5A5F66]">{trial.wallTimeS.toFixed(2)} s</span>
           )}
         </div>
+        {rank != null && (
+          <div className="mt-0.5 font-mono text-[10px] text-[#5A5F66]">
+            {/* "best" is gated on rank ONLY (matching podium + table): a tied
+                rank-2 trial has deltaToBest === 0 but is NOT the best. */}
+            {rank === 1 || deltaToBest == null
+              ? rank === 1
+                ? "best"
+                : "—"
+              : `Δ ${deltaToBest > 0 ? "+" : ""}${deltaToBest.toPrecision(3)}${objUnit ? " " + objUnit : ""}` +
+                (pctOfBest != null
+                  ? ` (${pctOfBest > 0 ? "+" : ""}${pctOfBest.toFixed(1)}%)`
+                  : "")}
+          </div>
+        )}
       </header>
 
       <div>
-        <h4 className="mb-1 text-[10px] uppercase tracking-wider text-[#5A5F66]">
-          Parameter values
-        </h4>
+        <div className="mb-1 flex items-center justify-between">
+          <h4 className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Recipe</h4>
+          <button
+            type="button"
+            onClick={() => void copyRecipe()}
+            className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
         <table className="w-full text-[11px]">
           <tbody className="font-mono">
-            {parameterPaths.map((p) => (
-              <tr key={p} className="border-t border-[#16171B]">
-                <td className="px-2 py-0.5 text-[#9097A0]">{p}</td>
-                <td className="px-2 py-0.5 text-right text-[#D8DCE2]">
-                  {trial.parameterValues[p] !== undefined
-                    ? trial.parameterValues[p]!.toPrecision(5)
-                    : "—"}
-                </td>
-              </tr>
-            ))}
+            {parameterPaths.map((p) => {
+              const unit = unitForPath(schema, p);
+              return (
+                <tr key={p} className="border-t border-[#16171B]">
+                  <td className="px-2 py-0.5 text-[#9097A0]">{p}</td>
+                  <td className="px-2 py-0.5 text-right text-[#D8DCE2]">
+                    {trial.parameterValues[p] !== undefined
+                      ? trial.parameterValues[p]!.toPrecision(5)
+                      : "—"}
+                    {unit && trial.parameterValues[p] !== undefined && (
+                      <span className="ml-1 text-[#5A5F66]">{unit}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {points.length > 0 && (
         <div className="space-y-2">
+          {overlay && (
+            <p className="text-[9px] text-[#5A5F66]">
+              <span className="mr-1 inline-block h-[2px] w-3 align-middle bg-[#5A5F66]" />
+              best (#{overlay.trialIdx}) overlaid
+            </p>
+          )}
           <div className="h-[160px]">
             <LinePlot
               title="brake torque vs RPM"
               xs={rpms}
-              series={[{ label: "Nm", y: torque, color: "#FFC627", showPoints: true }]}
+              series={[
+                ...(overlay
+                  ? [{
+                      label: "best",
+                      xs: overlayRpms,
+                      y: overlayPoints.map((p) => p.lastCycle.brakeTorqueNm),
+                      color: "#5A5F66",
+                      showPoints: false,
+                    }]
+                  : []),
+                { label: "Nm", y: torque, color: "#FFC627", showPoints: true },
+              ]}
               xLabel="rpm"
               yLabel="Nm"
               height={160}
@@ -68,7 +196,18 @@ export function TrialInspector({ trial, parameterPaths }: Props) {
             <LinePlot
               title="brake power vs RPM"
               xs={rpms}
-              series={[{ label: "kW", y: power, color: "#A5D6A7", showPoints: true }]}
+              series={[
+                ...(overlay
+                  ? [{
+                      label: "best",
+                      xs: overlayRpms,
+                      y: overlayPoints.map((p) => p.lastCycle.brakePowerKW),
+                      color: "#5A5F66",
+                      showPoints: false,
+                    }]
+                  : []),
+                { label: "kW", y: power, color: "#A5D6A7", showPoints: true },
+              ]}
               xLabel="rpm"
               yLabel="kW"
               height={160}
@@ -78,7 +217,18 @@ export function TrialInspector({ trial, parameterPaths }: Props) {
             <LinePlot
               title="IMEP vs RPM"
               xs={rpms}
-              series={[{ label: "bar", y: imep, color: "#4FC3F7", showPoints: true }]}
+              series={[
+                ...(overlay
+                  ? [{
+                      label: "best",
+                      xs: overlayRpms,
+                      y: overlayPoints.map((p) => p.lastCycle.imepBar),
+                      color: "#5A5F66",
+                      showPoints: false,
+                    }]
+                  : []),
+                { label: "bar", y: imep, color: "#4FC3F7", showPoints: true },
+              ]}
               xLabel="rpm"
               yLabel="bar"
               height={160}

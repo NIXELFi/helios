@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: vi.fn().mockResolvedValue(undefined),
+  flipSwReadonly: vi.fn(),
 }));
 
 interface Opts {
@@ -46,8 +47,8 @@ function mockClient(opts: Opts = {}): SupabaseClient {
       eq: () => ({ order: () => { const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: data.slice(from, to + 1), error: null }) }; return node; } }),
     }),
   });
-  // useFiles adds .is("deleted_at", null) between .eq() and .order() — folders
-  // and versions don't, so the files table gets its own chain.
+  // useFiles AND useFolders add .is("deleted_at", null) between .eq() and
+  // .order() — versions don't, so they share their own chain shape.
   const filesChain = (data: any[]) => ({
     select: () => ({
       eq: () => ({ is: () => { const node: any = { order: () => node, range: (from: number, to: number) => Promise.resolve({ data: data.slice(from, to + 1), error: null }) }; return node; } }),
@@ -70,13 +71,14 @@ function mockClient(opts: Opts = {}): SupabaseClient {
         };
       }
       if (table === "folders") {
+        // useFolders: .select().eq(vault_id).is(deleted_at,null).order().order().range()
         if (foldersHang) {
-          return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => new Promise(() => {}) }; return node; } }) }) };
+          return { select: () => ({ eq: () => ({ is: () => { const node: any = { order: () => node, range: () => new Promise(() => {}) }; return node; } }) }) };
         }
         if (foldersError) {
-          return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: null, error: foldersError }) }; return node; } }) }) };
+          return { select: () => ({ eq: () => ({ is: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: null, error: foldersError }) }; return node; } }) }) };
         }
-        return okChain(folders);
+        return filesChain(folders);
       }
       if (table === "files") return filesChain(files);
       if (table === "versions") return okChain(versions);

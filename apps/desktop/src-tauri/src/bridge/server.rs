@@ -74,7 +74,16 @@ async fn guard(State(state): State<Arc<BridgeState>>, req: Request, next: Next) 
         .and_then(|h| h.strip_prefix("Bearer "));
 
     match presented {
-        Some(tok) if tok == state.token => next.run(req).await,
+        Some(tok) if tok == state.token => {
+            // Record add-in liveness. On a fresh connection (first request, or
+            // after the add-in had gone idle) ask the UI to push a snapshot now,
+            // so the add-in doesn't see stale/empty data while it waits for the
+            // next periodic refresh.
+            if state.touch_activity() {
+                let _ = state.emit("bridge://addin-connected", &json!({}));
+            }
+            next.run(req).await
+        }
         _ => (StatusCode::UNAUTHORIZED, "bad or missing bearer token").into_response(),
     }
 }
@@ -188,6 +197,11 @@ async fn checkout(State(state): State<Arc<BridgeState>>, Json(body): Json<PathBo
             if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), false) {
                 eprintln!("bridge: clear read-only on checkout failed: {e}");
             }
+            // Also flip an already-open SOLIDWORKS doc writable — works without
+            // the in-process add-in (handles disabled/broken/uninstalled add-ins).
+            if let Some(app) = state.app_handle() {
+                crate::commands::set_readonly::flip_sw_readonly(app, &body.path, false);
+            }
             Json(json!({ "ok": true, "fileId": file.file_id, "lock": lock })).into_response()
         }
         Err(e) => supa_error(e),
@@ -216,6 +230,9 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
             // Best-effort — the DB lock release is the real change.
             if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), true) {
                 eprintln!("bridge: restore read-only on cancel-checkout failed: {e}");
+            }
+            if let Some(app) = state.app_handle() {
+                crate::commands::set_readonly::flip_sw_readonly(app, &body.path, true);
             }
             Json(json!({ "ok": true, "fileId": file.file_id })).into_response()
         }
@@ -325,6 +342,9 @@ async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<Checkin
             // in-app check-in). Best-effort.
             if let Err(e) = crate::commands::set_readonly::set_path_readonly(body.path.clone(), true) {
                 eprintln!("bridge: restore read-only on checkin failed: {e}");
+            }
+            if let Some(app) = state.app_handle() {
+                crate::commands::set_readonly::flip_sw_readonly(app, &body.path, true);
             }
             Json(json!({ "ok": true, "fileId": file.file_id, "result": v })).into_response()
         }

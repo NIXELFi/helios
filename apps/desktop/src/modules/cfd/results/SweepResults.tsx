@@ -1,15 +1,64 @@
+// Sweep results screen: per-RPM curves, a roll-up summary band, the per-RPM
+// table, expandable capture rows + wave viewer, and an overlay-compare strip.
+//
+// Analytics + export grafts (v1): a summary band above the charts (peaks +
+// powerband, with interpolated rpm marked "~"), a brake-torque-vs-RPM chart,
+// a knock-integral-vs-RPM chart (only when ≥1 point carries knockIntegral), an
+// ExportMenu in the header (per-RPM CSV / Cycles CSV / Study JSON + Copy
+// summary), and τ_brake / KI columns in the table. The summary numbers come
+// from summarizeSweep(); the band's Copy button and the menu's "Copy summary"
+// both build the same one-line text via copyText.
+
 import { Fragment, useMemo, useState } from "react";
 
 import { LinePlot } from "../components/charts/LinePlot";
+import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { PvLoopView } from "./PvLoopView";
 import { PipeProfileView } from "./PipeProfileView";
 import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
+import { summarizeSweep, type PeakInfo, type SweepSummary } from "../lib/analytics/sweepStats";
+import { exportActionsFor, type ExportAction } from "../lib/export/exportStudy";
+import { copyText } from "../lib/export/io";
 import type { SweepStudy } from "../state/types";
 
 interface Props {
   study: SweepStudy;
+}
+
+/** Round-to-int rpm with a thousands separator, e.g. 11480 → "11,480". */
+function fmtRpm(rpm: number): string {
+  return Math.round(rpm).toLocaleString();
+}
+
+/** A peak phrase: "64.2 kW @ 11,480" — the rpm gets a leading "~" when the
+ *  parabolic-vertex estimate moved off the sampled point (interpolated). */
+function peakPhrase(peak: PeakInfo, unit: string, valueDecimals: number): string {
+  const interp = peak.rpmInterp !== peak.rpm;
+  const rpmStr = (interp ? "~" : "") + fmtRpm(peak.rpmInterp);
+  return `${peak.valueInterp.toFixed(valueDecimals)} ${unit} @ ${rpmStr}`;
+}
+
+/** Build the one-line summary string shared by the band Copy button and the
+ *  ExportMenu "Copy summary" item. Mirrors the on-screen band. */
+function summaryLine(summary: SweepSummary): string {
+  const parts: string[] = [];
+  if (summary.peakPower) parts.push(`Peak P ${peakPhrase(summary.peakPower, "kW", 1)}`);
+  if (summary.peakTorque) parts.push(`Peak τ ${peakPhrase(summary.peakTorque, "Nm", 1)}`);
+  if (summary.peakVe) {
+    const interp = summary.peakVe.rpmInterp !== summary.peakVe.rpm;
+    const rpmStr = (interp ? "~" : "") + fmtRpm(summary.peakVe.rpmInterp);
+    parts.push(`Peak VE ${(summary.peakVe.valueInterp * 100).toFixed(1)}% @ ${rpmStr}`);
+  }
+  if (summary.powerband) {
+    const { fromRpm, toRpm, widthRpm } = summary.powerband;
+    parts.push(`Powerband ${fmtRpm(fromRpm)}–${fmtRpm(toRpm)} (${fmtRpm(widthRpm)})`);
+  }
+  if (summary.maxKnockIntegral != null) {
+    parts.push(`KI max ${summary.maxKnockIntegral.toFixed(2)}`);
+  }
+  return parts.join(" · ");
 }
 
 export function SweepResults({ study }: Props) {
@@ -57,6 +106,54 @@ export function SweepResults({ study }: Props) {
     [compare],
   );
 
+  // Roll-up summary (peaks, powerband, KI). Shown once ≥2 points exist.
+  const summary = useMemo(() => summarizeSweep(points), [points]);
+  const showSummary = points.length >= 2;
+  const hasKnock = summary.maxKnockIntegral != null;
+
+  // ExportMenu items: the per-kind export actions + a "Copy summary" item.
+  // Adapt each ExportAction → ExportMenuItem: a written path becomes an
+  // "Exported → <file>" toast, a cancelled save (null) a "Cancelled" toast
+  // (ExportMenu shows a box even for an empty message, so don't emit one),
+  // a throw an error toast.
+  const exportItems = useMemo<ExportMenuItem[]>(() => {
+    const actions: ExportAction[] = exportActionsFor(study);
+    const fromActions: ExportMenuItem[] = actions.map((a) => ({
+      id: a.id,
+      label: a.label,
+      run: async () => {
+        try {
+          const path = await a.run();
+          if (path == null) return { ok: true, message: "Cancelled" };
+          return { ok: true, message: `Exported → ${basename(path)}` };
+        } catch (err) {
+          return { ok: false, message: String(err) };
+        }
+      },
+    }));
+    fromActions.push({
+      id: "sweep-copy-summary",
+      label: "Copy summary",
+      run: async () => {
+        try {
+          await copyText(summaryLine(summary));
+          return { ok: true, message: "Copied!" };
+        } catch (err) {
+          return { ok: false, message: String(err) };
+        }
+      },
+    });
+    return fromActions;
+  }, [study, summary]);
+
+  async function copySummary() {
+    try {
+      await copyText(summaryLine(summary));
+    } catch {
+      // Clipboard failures are non-fatal here; the menu item surfaces a toast.
+    }
+  }
+
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header */}
@@ -87,6 +184,7 @@ export function SweepResults({ study }: Props) {
             </div>
           )}
         </div>
+        <ExportMenu items={exportItems} />
         {study.status === "running" && (
           <button type="button"
             className="rounded-sm border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] uppercase tracking-wider text-red-200 hover:bg-red-500/20"
@@ -139,6 +237,47 @@ export function SweepResults({ study }: Props) {
           </div>
         ) : (
           <>
+            {/* Summary band — peaks + powerband, interpolated rpm marked "~". */}
+            {showSummary && (
+              <section
+                className="m-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border border-[#2A2C32] bg-[#0E0E10] px-3 py-2 text-[11px] text-[#D8DCE2]"
+                aria-label="Sweep summary"
+              >
+                {summary.peakPower && (
+                  <SummaryStat label="Peak P">{peakPhrase(summary.peakPower, "kW", 1)}</SummaryStat>
+                )}
+                {summary.peakTorque && (
+                  <SummaryStat label="Peak τ">{peakPhrase(summary.peakTorque, "Nm", 1)}</SummaryStat>
+                )}
+                {summary.peakVe && (
+                  <SummaryStat label="Peak VE">
+                    {(summary.peakVe.valueInterp * 100).toFixed(1)}% @{" "}
+                    {(summary.peakVe.rpmInterp !== summary.peakVe.rpm ? "~" : "") + fmtRpm(summary.peakVe.rpmInterp)}
+                  </SummaryStat>
+                )}
+                {summary.powerband && (
+                  <SummaryStat label="Powerband">
+                    {fmtRpm(summary.powerband.fromRpm)}–{fmtRpm(summary.powerband.toRpm)} ({fmtRpm(summary.powerband.widthRpm)})
+                  </SummaryStat>
+                )}
+                {summary.maxKnockIntegral != null && (
+                  <span
+                    className="rounded-sm border border-[#FF8A65]/50 px-1.5 py-[1px] text-[10px] text-[#FF8A65]"
+                    title="Max Livengood-Wu knock integral over the sweep"
+                  >
+                    KI max {summary.maxKnockIntegral.toFixed(2)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+                  onClick={() => void copySummary()}
+                >
+                  Copy
+                </button>
+              </section>
+            )}
+
             {/* Curves grid */}
             <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
               <ChartCard>
@@ -196,6 +335,34 @@ export function SweepResults({ study }: Props) {
                   xLabel="rpm" yLabel="kW" height={260}
                 />
               </ChartCard>
+              <ChartCard>
+                <LinePlot
+                  title="Brake torque (Nm) vs RPM"
+                  xs={points.map((p) => p.rpm)}
+                  series={[
+                    { label: "τ_brake", y: points.map((p) => p.lastCycle.brakeTorqueNm), color: "#FF8A65", showPoints: true },
+                    ...(compare ? [
+                      { label: "τ_brake (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.brakeTorqueNm), color: "#5A5F66", showPoints: false },
+                    ] : []),
+                  ]}
+                  xLabel="rpm" yLabel="Nm" height={260}
+                />
+              </ChartCard>
+              {hasKnock && (
+                <ChartCard>
+                  <LinePlot
+                    title="Knock integral vs RPM"
+                    xs={points.map((p) => p.rpm)}
+                    series={[
+                      { label: "KI", y: points.map((p) => p.lastCycle.knockIntegral ?? NaN), color: "#F48FB1", showPoints: true },
+                      ...(compare ? [
+                        { label: "KI (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.knockIntegral ?? NaN), color: "#5A5F66", showPoints: false },
+                      ] : []),
+                    ]}
+                    xLabel="rpm" yLabel="KI" height={260}
+                  />
+                </ChartCard>
+              )}
             </div>
 
             {/* Per-RPM table */}
@@ -215,6 +382,8 @@ export function SweepResults({ study }: Props) {
                       <th className="text-right">VE</th>
                       <th className="text-right">EGT</th>
                       <th className="text-right">P_ind</th>
+                      <th className="text-right">τ_brake</th>
+                      {hasKnock && <th className="text-right">KI</th>}
                       <th className="text-right">nonc.max</th>
                       <th className="text-right">wall t</th>
                       <th>captures</th>
@@ -240,6 +409,12 @@ export function SweepResults({ study }: Props) {
                             <td className="px-2 py-1 text-right tabular-nums">{(p.lastCycle.veAtm * 100).toFixed(2)}%</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.lastCycle.egtMean.toFixed(0)}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.lastCycle.indicatedPowerKW.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-right tabular-nums">{p.lastCycle.brakeTorqueNm.toFixed(2)}</td>
+                            {hasKnock && (
+                              <td className="px-2 py-1 text-right tabular-nums">
+                                {p.lastCycle.knockIntegral != null ? p.lastCycle.knockIntegral.toFixed(3) : "—"}
+                              </td>
+                            )}
                             <td className="px-2 py-1 text-right tabular-nums">{p.nonconservationMax.toExponential(2)}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.wallTimeS.toFixed(2)}s</td>
                             <td className="px-2 py-1 text-[10px] text-[#5A5F66]">
@@ -255,7 +430,7 @@ export function SweepResults({ study }: Props) {
                           </tr>
                           {open && (
                             <tr className="border-t border-[#16171B] bg-[#0B0B0D]">
-                              <td colSpan={11} className="p-3">
+                              <td colSpan={hasKnock ? 13 : 12} className="p-3">
                                 {p.captureDir && study.params.capturePvLoops && (
                                   <PvLoopView jobId={study.id} studyKind="sweep" rpmInt={Math.round(p.rpm)} />
                                 )}
@@ -303,6 +478,15 @@ export function SweepResults({ study }: Props) {
         />
       )}
     </div>
+  );
+}
+
+function SummaryStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-baseline gap-1">
+      <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{label}</span>
+      <span className="font-mono tabular-nums text-[#D8DCE2]">{children}</span>
+    </span>
   );
 }
 

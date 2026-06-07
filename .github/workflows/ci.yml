@@ -31,6 +31,12 @@ jobs:
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
 
+      # CI never rebuilds the committed C# binaries (no SOLIDWORKS / dotnet on the
+      # runner). Catch a missing/empty bundled DLL early; the release workflow
+      # runs the same check as a release gate.
+      - name: Verify bundled resources present
+        run: node scripts/check-bundled-resources.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

@@ -1,0 +1,15 @@
+-- Publish pm.activity to Supabase Realtime so the PM activity feed updates live
+-- (it was waiting up to PM_PROBE_MS behind the cursor probe). The other core pm
+-- tables are already published; activity was the gap.
+--
+-- No REPLICA IDENTITY FULL: pm.activity is append-only (INSERT-only, no UPDATE or
+-- DELETE paths/triggers). Postgres delivers the full NEW row on INSERT under the
+-- default PK replica identity; FULL only matters for old-row capture on
+-- UPDATE/DELETE, which never happen here.
+--
+-- RLS: the realtime subscription mirrors the SELECT policy, which keys on
+-- project_id (present in the INSERT payload), so authorized rows deliver and
+-- unauthorized ones never arrive — no extra policy work.
+--
+-- Rollback: ALTER PUBLICATION supabase_realtime DROP TABLE pm.activity;
+ALTER PUBLICATION supabase_realtime ADD TABLE pm.activity;

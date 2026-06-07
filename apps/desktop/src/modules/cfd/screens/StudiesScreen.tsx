@@ -1,24 +1,110 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { OptimizationParamsModal } from "../components/optimization/OptimizationParamsModal";
 import { basename } from "../lib/cfdPath";
 import { parseRpmList } from "../lib/rpmList";
+import { rankTrials } from "../lib/analytics/optimizationStats";
+import { summarizeSweep } from "../lib/analytics/sweepStats";
+import { type ExportAction, exportActionsFor } from "../lib/export/exportStudy";
+import { buildWorkspaceJson } from "../lib/export/buildJson";
+import { saveTextFile, fileTimestamp } from "../lib/export/io";
 import type { JunctionKind, ParameterOverride, SingleRpmParams, Study, SweepParams } from "../state/types";
+import type { CfdBridge } from "../lib/tauriBridge";
 import { PresetPicker } from "../components/PresetPicker";
 import { DEFAULT_PRESET_ID, findPreset } from "../lib/presets";
 
+// Last path segment of a written path, for the export toast. Handles both
+// "/" and "\" separators (Tauri returns native paths).
+function pathBasename(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p;
+}
+
+// Adapt the kind-agnostic ExportAction list (run → written path | null) into
+// ExportMenuItem results (run → {ok, message}). A written path surfaces an
+// "Exported → <file>" toast; a null means the user cancelled the save dialog —
+// ExportMenu always renders a toast for a returned result, so an empty message
+// would still flash an empty toast; we say "Cancelled" instead.
+function toMenuItems(actions: ExportAction[]): ExportMenuItem[] {
+  return actions.map((a) => ({
+    id: a.id,
+    label: a.label,
+    run: async () => {
+      const path = await a.run();
+      return path === null
+        ? { ok: true, message: "Cancelled" }
+        : { ok: true, message: "Exported → " + pathBasename(path) };
+    },
+  }));
+}
+
+// Best/Peak summary cell text for a study. Em-dash when there's no data to
+// summarize yet (works mid-run for optimization + sweep — partial snapshots).
+const EM_DASH = "—";
+function bestPeakText(study: Study): string {
+  if (study.kind === "optimization") {
+    const ranked = rankTrials(study.trials, study.objectiveDirection);
+    const top = ranked[0];
+    if (!top) return EM_DASH;
+    const value = top.trial.objectiveValue as number;
+    return `best ${value.toPrecision(4)} (#${top.trial.trialIdx})`;
+  }
+  if (study.kind === "sweep") {
+    const peak = summarizeSweep(study.points).peakPower;
+    if (!peak) return EM_DASH;
+    return `~${peak.value.toFixed(1)} kW @ ${Math.round(peak.rpmInterp)}`;
+  }
+  // single-rpm
+  const last = study.cycles[study.cycles.length - 1];
+  if (!last) return EM_DASH;
+  return `IMEP ${last.imepBar.toFixed(2)}`;
+}
+
 export function StudiesScreen() {
-  const { state, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
+  const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
   const [optimizationOpen, setOptimizationOpen] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [exportAllBusy, setExportAllBusy] = useState(false);
+  const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
 
   const studies = Object.values(state.studies).sort((a, b) => b.startedAt - a.startedAt);
   const noConfig = !state.loadedConfig;
+
+  // Export-all writes a single workspace bundle (every study's self-describing
+  // JSON). Disabled with no studies. Surfaces a transient toast on success /
+  // failure (a null path means the user cancelled the save dialog).
+  async function exportAllJson() {
+    if (exportAllBusy || studies.length === 0) return;
+    setExportAllBusy(true);
+    try {
+      const path = await saveTextFile(
+        `cfd-workspace-${fileTimestamp()}`,
+        "json",
+        buildWorkspaceJson(studies),
+      );
+      setToast(
+        path === null
+          ? { ok: true, message: "Cancelled" }
+          : { ok: true, message: "Exported → " + pathBasename(path) },
+      );
+    } catch (e) {
+      setToast({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setExportAllBusy(false);
+    }
+  }
+
+  // Auto-dismiss the export-all toast after 4 s (ExportMenu toast idiom).
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   function openNewStudy() {
     setStartError(null);
@@ -50,6 +136,14 @@ export function StudiesScreen() {
         </div>
         <button
           type="button"
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+          disabled={studies.length === 0 || exportAllBusy}
+          onClick={() => void exportAllJson()}
+        >
+          {exportAllBusy ? "Export all (JSON)…" : "Export all (JSON)"}
+        </button>
+        <button
+          type="button"
           className="rounded-sm bg-[#FFC627] px-2 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300 disabled:opacity-50"
           disabled={noConfig}
           onClick={openNewStudy}
@@ -77,6 +171,7 @@ export function StudiesScreen() {
                 <th>Config</th>
                 <th>Params</th>
                 <th>Status</th>
+                <th>Best/Peak</th>
                 <th className="text-right">Cycles</th>
                 <th>Started</th>
                 <th className="text-right">Actions</th>
@@ -86,6 +181,7 @@ export function StudiesScreen() {
               {studies.map((s) => <StudyRow
                 key={s.id}
                 study={s}
+                bridge={bridge}
                 isActive={state.activeStudyId === s.id}
                 onCancel={() => cancelStudy(s.id)}
                 onDelete={() => deleteStudy(s.id)}
@@ -153,19 +249,47 @@ export function StudiesScreen() {
           }
         }}
       />
+
+      {toast && (
+        <div
+          role="status"
+          className={
+            "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border px-4 py-3 text-sm shadow-lg " +
+            (toast.ok
+              ? "border-[#FFC627]/40 bg-[#16171B] text-[#D8DCE2]"
+              : "border-red-500/40 bg-red-950/95 text-red-100")
+          }
+        >
+          <div className="break-words">{toast.message}</div>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="mt-1.5 text-xs text-[#9097A0] underline underline-offset-2 hover:text-[#D8DCE2]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 function StudyRow({
-  study, isActive, onCancel, onDelete, onView,
+  study, bridge, isActive, onCancel, onDelete, onView,
 }: {
   study: Study;
+  bridge: CfdBridge;
   isActive: boolean;
   onCancel: () => void;
   onDelete: () => void;
   onView: () => void;
 }) {
+  // Every study is exportable, regardless of status — a running study yields a
+  // partial snapshot (the export builders never block or warn on partial data).
+  const exportItems = toMenuItems(
+    exportActionsFor(study, { getSchema: bridge.getParameterSchema }),
+  );
+
   let kindLabel: string;
   let paramsText: string;
   let progressText: string;
@@ -195,16 +319,20 @@ function StudyRow({
       <td className="px-3 py-1.5">
         <StatusBadge status={study.status} />
       </td>
+      <td className="px-3 py-1.5 tabular-nums text-[#D8DCE2]">{bestPeakText(study)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums">{progressText}</td>
       <td className="px-3 py-1.5 text-[#5A5F66]">{new Date(study.startedAt).toLocaleTimeString()}</td>
       <td className="px-3 py-1.5 text-right text-[10px] uppercase tracking-wider">
-        <button type="button" className="px-1 text-[#FFC627] hover:underline" onClick={onView}>View</button>
-        {study.status === "running" && (
-          <button type="button" className="ml-2 px-1 text-red-300 hover:underline" onClick={onCancel}>Cancel</button>
-        )}
-        {study.status !== "running" && study.status !== "cancelling" && (
-          <button type="button" className="ml-2 px-1 text-[#5A5F66] hover:text-[#9097A0] hover:underline" onClick={onDelete}>Delete</button>
-        )}
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" className="px-1 text-[#FFC627] hover:underline" onClick={onView}>View</button>
+          {study.status === "running" && (
+            <button type="button" className="px-1 text-red-300 hover:underline" onClick={onCancel}>Cancel</button>
+          )}
+          {study.status !== "running" && study.status !== "cancelling" && (
+            <button type="button" className="px-1 text-[#5A5F66] hover:text-[#9097A0] hover:underline" onClick={onDelete}>Delete</button>
+          )}
+          <ExportMenu items={exportItems} align="right" triggerLabel="Export" />
+        </div>
       </td>
     </tr>
   );

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { SupabaseAuthProvider } from "@helios/auth";
+import type { ReactNode } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useAutoSync } from "../../src/modules/vault/data/useAutoSync";
+import { onLocalDeleteBlocked, onLocalDeletesPropagated } from "../../src/modules/vault/data/local-delete-events";
 import type { Folder, Lock, VaultFile, Version } from "../../src/modules/vault/data/types";
 import type { LocalFile } from "../../src/modules/vault/data/useLocalFolderScan";
 
@@ -33,6 +37,45 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
     readonlyCalls.push({ path, readonly });
     return Promise.resolve();
   },
+  flipSwReadonly: vi.fn(),
+}));
+
+// Mock the sync ledger so tests can seed "we materialized this relpath locally"
+// (loadLedger) and observe ledger writes. The pure classify/record/remove logic
+// is unit-tested separately in sync-ledger.test.ts; here we only need to drive
+// the three-bucket partition deterministically (the real IO half resolves to an
+// empty ledger under the jsdom Tauri stub, which would make propagation
+// untestable). `seedLedgerRels` lists relpaths the ledger should report present.
+const seededRels = new Set<string>();
+const ledgerRecordCalls: Array<{ vaultId: string; rel: string; sha: string }> = [];
+const ledgerRemoveCalls: Array<{ vaultId: string; rel: string }> = [];
+function seedLedger(...rels: string[]) {
+  for (const r of rels) seededRels.add(r.normalize("NFC").toLowerCase());
+}
+vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
+  emptyLedger: () => ({ entries: {} }),
+  loadLedger: vi.fn(async () => {
+    const entries: Record<string, { sha256: string; recordedAt: string }> = {};
+    for (const r of seededRels) entries[r] = { sha256: "x", recordedAt: "t" };
+    return { entries };
+  }),
+  classifyMissing: (
+    ledger: { entries: Record<string, unknown> },
+    relPath: string,
+    presentLocally: boolean,
+  ) => {
+    if (presentLocally) return "present";
+    const key = relPath.normalize("NFC").toLowerCase();
+    return key in ledger.entries ? "locally-deleted" : "never-downloaded";
+  },
+  ledgerRecord: vi.fn((vaultId: string, rel: string, sha: string) => {
+    ledgerRecordCalls.push({ vaultId, rel, sha });
+    return Promise.resolve();
+  }),
+  ledgerRemove: vi.fn((vaultId: string, rel: string) => {
+    ledgerRemoveCalls.push({ vaultId, rel });
+    return Promise.resolve();
+  }),
 }));
 
 function resolveDownload(sha: string, ok = true): void {
@@ -41,6 +84,30 @@ function resolveDownload(sha: string, ok = true): void {
   downloadResolvers.delete(sha);
   r(ok);
 }
+
+// Mock Supabase client: the hook calls useSupabaseClient() (needs a provider)
+// and client.rpc("pdm_delete_file") to propagate local deletions of checked-out
+// files. Capture rpc calls; let tests control the error result.
+const rpcCalls: Array<{ name: string; args: unknown }> = [];
+let rpcError: unknown = null;
+function makeClient(): SupabaseClient {
+  return {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    rpc: (name: string, args: unknown) => {
+      rpcCalls.push({ name, args });
+      return Promise.resolve({ data: null, error: rpcError });
+    },
+  } as unknown as SupabaseClient;
+}
+const wrap =
+  (c: SupabaseClient) =>
+  ({ children }: { children: ReactNode }) =>
+    <SupabaseAuthProvider client={c}>{children}</SupabaseAuthProvider>;
+/** Default wrapper used by every renderHook so useSupabaseClient() resolves. */
+const wrapper = wrap(makeClient());
 
 function makeFile(id: string, name: string, folderId: string | null = null): VaultFile {
   return {
@@ -72,6 +139,11 @@ describe("useAutoSync", () => {
     downloadCalls.length = 0;
     downloadResolvers.clear();
     readonlyCalls.length = 0;
+    rpcCalls.length = 0;
+    rpcError = null;
+    seededRels.clear();
+    ledgerRecordCalls.length = 0;
+    ledgerRemoveCalls.length = 0;
     localStorage.clear(); // reset the per-vault read-only migration flag
   });
 
@@ -105,8 +177,9 @@ describe("useAutoSync", () => {
     const { result } = renderHook(() =>
       useAutoSync({
         enabled: true, files, localFiles, versionsByFileId, locks,
-        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
       }),
+      { wrapper },
     );
     await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
     expect(downloadCalls).toHaveLength(0);
@@ -126,8 +199,9 @@ describe("useAutoSync", () => {
     const { result } = renderHook(() =>
       useAutoSync({
         enabled: true, files, localFiles, versionsByFileId, locks: EMPTY_LOCKS,
-        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
       }),
+      { wrapper },
     );
     await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
     expect(downloadCalls.find((c) => c.sha === "sha-latest")).toBeUndefined(); // not overwritten
@@ -145,8 +219,9 @@ describe("useAutoSync", () => {
     const { result } = renderHook(() =>
       useAutoSync({
         enabled: true, files, localFiles, versionsByFileId, locks: EMPTY_LOCKS,
-        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
       }),
+      { wrapper },
     );
     await waitFor(() => { expect(downloadResolvers.has("sha-latest")).toBe(true); });
     await act(async () => { resolveDownload("sha-latest", true); });
@@ -166,8 +241,9 @@ describe("useAutoSync", () => {
     const { result } = renderHook(() =>
       useAutoSync({
         enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
-        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
       }),
+      { wrapper },
     );
     await waitFor(() => { expect(downloadResolvers.has("sha-fresh")).toBe(true); });
     await act(async () => { resolveDownload("sha-fresh", true); });
@@ -183,8 +259,9 @@ describe("useAutoSync", () => {
     const { result } = renderHook(() =>
       useAutoSync({
         enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
-        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, onComplete: () => {},
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
       }),
+      { wrapper },
     );
     await waitFor(() => { expect(downloadResolvers.has("sha-fail")).toBe(true); });
     await act(async () => { resolveDownload("sha-fail", false); });
@@ -210,11 +287,13 @@ describe("useAutoSync", () => {
       locks: EMPTY_LOCKS,
       currentUserId: "u1",
       vaultRoot: "/tmp/vault",
+      vaultId: null,
       folders: EMPTY_FOLDERS,
       onComplete: () => {},
     };
 
     const { rerender } = renderHook(({ inp }) => useAutoSync(inp), {
+      wrapper,
       initialProps: { inp: input },
     });
     // Trigger a couple of cheap re-renders with the SAME object identities;
@@ -255,9 +334,11 @@ describe("useAutoSync", () => {
         locks: EMPTY_LOCKS,
         currentUserId: "u1",
         vaultRoot: "/tmp/vault",
+      vaultId: null,
         folders,
         onComplete: () => {},
       }),
+      { wrapper },
     );
 
     // Both workers should start (concurrency=2, exactly 2 tasks).
@@ -308,6 +389,7 @@ describe("useAutoSync", () => {
       locks: EMPTY_LOCKS,
       currentUserId: "u1",
       vaultRoot: "/tmp/vault",
+      vaultId: null,
       folders: EMPTY_FOLDERS,
       onComplete: () => {},
     };
@@ -315,7 +397,7 @@ describe("useAutoSync", () => {
     const { result, rerender } = renderHook(
       ({ files, versionsByFileId }) =>
         useAutoSync({ ...baseInput, files, versionsByFileId }),
-      { initialProps: { files: filesA, versionsByFileId: versionsA } },
+      { wrapper, initialProps: { files: filesA, versionsByFileId: versionsA } },
     );
 
     // Wait until the gen-N run is actually downloading sha-old.
@@ -377,6 +459,7 @@ describe("useAutoSync", () => {
       locks: EMPTY_LOCKS,
       currentUserId: "u1",
       vaultRoot: "/tmp/vault",
+      vaultId: null,
       folders: EMPTY_FOLDERS,
       onComplete: () => {},
     };
@@ -384,7 +467,7 @@ describe("useAutoSync", () => {
     const { rerender } = renderHook(
       ({ files, versionsByFileId }) =>
         useAutoSync({ ...baseInput, files, versionsByFileId }),
-      { initialProps: { files: filesA, versionsByFileId: versionsA } },
+      { wrapper, initialProps: { files: filesA, versionsByFileId: versionsA } },
     );
 
     // Wait until run-1 dispatched the download with a signal.
@@ -445,6 +528,7 @@ describe("useAutoSync", () => {
         locks: EMPTY_LOCKS,
         currentUserId: "u1",
         vaultRoot: "/tmp/vault",
+      vaultId: null,
         folders: EMPTY_FOLDERS,
         onComplete: () => {},
       };
@@ -452,7 +536,7 @@ describe("useAutoSync", () => {
       const { rerender } = renderHook(
         ({ files, versionsByFileId }) =>
           useAutoSync({ ...baseInput, files, versionsByFileId }),
-        { initialProps: { files: filesA, versionsByFileId: versionsA } },
+        { wrapper, initialProps: { files: filesA, versionsByFileId: versionsA } },
       );
 
       // gen-1's trigger timer fires (wait=0 since lastFinishedAt starts at 0).
@@ -493,5 +577,149 @@ describe("useAutoSync", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── T7: local-deletion detection + propagation (third bucket) ──────────────
+
+  it("propagates a locally-deleted CHECKED-OUT file: pdm_delete_file + ledgerRemove + event", async () => {
+    // File is locked by me, in the ledger, missing from disk → I deleted my
+    // checked-out copy. The pass soft-deletes it in the vault and drops the
+    // ledger entry. No download happens.
+    const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    seedLedger("frame.sldprt");
+    const propagated: string[] = [];
+    const unsub = onLocalDeletesPropagated((names) => propagated.push(...names));
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    // No download for a locked-by-me file.
+    expect(downloadCalls).toHaveLength(0);
+    // Soft-deleted in the vault.
+    expect(rpcCalls).toContainEqual({ name: "pdm_delete_file", args: { p_file_id: "f1" } });
+    // Ledger entry dropped.
+    expect(ledgerRemoveCalls).toContainEqual({ vaultId: "v1", rel: "frame.sldprt" });
+    // Event fired with the file name.
+    expect(propagated).toEqual(["frame.sldprt"]);
+    unsub();
+  });
+
+  it("does NOT propagate when the lock is held by ANOTHER user (propagation needs MY lock)", async () => {
+    // In ledger + missing from disk, but locked by someone else → NOT my
+    // deletion to propagate. It's not in myLocks, so it's treated like the
+    // not-checked-out case: re-downloaded (restored), NOT soft-deleted. The
+    // all-three-conditions guard means pdm_delete_file never fires here.
+    const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u2", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    seedLedger("frame.sldprt");
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    // It's re-downloaded (restored), not propagated.
+    await waitFor(() => { expect(downloadResolvers.has("sha-1")).toBe(true); });
+    await act(async () => { resolveDownload("sha-1", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    expect(ledgerRemoveCalls).toHaveLength(0);
+  });
+
+  it("does NOT propagate when the file is NOT in the ledger (never downloaded here)", async () => {
+    // Locked by me + missing from disk, but the ledger has no record → we never
+    // materialized it locally. Not a deletion; nothing to propagate.
+    const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    // No seedLedger → ledger empty.
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    expect(ledgerRemoveCalls).toHaveLength(0);
+  });
+
+  it("warn-once: a blocked (not-checked-out) local delete is BOTH warned about AND re-downloaded in one pass", async () => {
+    // File is in the ledger, missing from disk, NOT locked by me → I deleted a
+    // copy I wasn't checked out for. The pass must (a) warn via the blocked
+    // event AND (b) re-download it to restore it. The re-download's ledgerRecord
+    // refreshes the stamp so the NEXT pass classifies it "present" (warn-once).
+    const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
+    seedLedger("frame.sldprt");
+    const blocked: string[] = [];
+    const unsub = onLocalDeleteBlocked((names) => blocked.push(...names));
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    // (b) It IS pushed as a download task this pass.
+    await waitFor(() => { expect(downloadResolvers.has("sha-1")).toBe(true); });
+    await act(async () => { resolveDownload("sha-1", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    expect(result.current.lastDownloaded).toBe(1);
+
+    // (a) It was warned about (blocked event) in the SAME pass.
+    expect(blocked).toEqual(["frame.sldprt"]);
+    // The re-download recorded a fresh ledger stamp → next pass sees "present".
+    expect(ledgerRecordCalls).toContainEqual({ vaultId: "v1", rel: "frame.sldprt", sha: "sha-1" });
+    // Not propagated (it wasn't checked out).
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    unsub();
+  });
+
+  it("does nothing special when vaultId is null (ledger/propagation disabled)", async () => {
+    // Even with a lock + a missing file, a null vaultId disables the ledger and
+    // the third bucket entirely — the pass behaves like the legacy syncer.
+    const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
+    const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    seedLedger("frame.sldprt");
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: null, onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    expect(ledgerRemoveCalls).toHaveLength(0);
+    expect(ledgerRecordCalls).toHaveLength(0);
   });
 });

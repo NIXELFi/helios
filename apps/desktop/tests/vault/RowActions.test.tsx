@@ -9,6 +9,7 @@ import { CheckInButton, CheckOutButton, CancelButton } from "../../src/modules/v
 const roCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
 vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   setReadonly: (path: string, readonly: boolean) => { roCalls.push({ path, readonly }); return Promise.resolve(); },
+  flipSwReadonly: vi.fn(),
 }));
 // CheckInButton now records assembly refs after a successful check-in (it
 // parses the file via the parse_sw_refs Tauri command). There's no Tauri

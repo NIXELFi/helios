@@ -56,9 +56,17 @@ export interface LogsAppProps {
    *  mid-playback even when the user is currently viewing Vault or CFD. */
   playing: boolean;
   onPlayingChange: (playing: boolean) => void;
+  /**
+   * When false, ALL of Logs' global window-level keyboard shortcuts are
+   * suppressed. The Shell sets this to `active === "logs"` so that shortcuts
+   * like Space (play/pause) and M/R/[/] can't fire while another module —
+   * e.g. the Games tab — has focus. Without this gate, Flappy Bird's Space
+   * bar would silently toggle hidden Logs playback on every flap.
+   */
+  keyboardShortcutsEnabled: boolean;
 }
 
-export default function App({ appVersion, playing, onPlayingChange }: LogsAppProps) {
+export default function App({ appVersion, playing, onPlayingChange, keyboardShortcutsEnabled }: LogsAppProps) {
   // Load workspaces from storage exactly once at boot. Previously both
   // useState initializers below called loadWorkspaces() independently, which
   // re-ran the side-effecting schema migrations twice. We derive both the
@@ -91,6 +99,13 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
   // instead of whatever was captured in their closure when the handler ran.
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  // Mirror keyboardShortcutsEnabled into a ref so the long-lived window
+  // keydown listener (attached once with empty deps) always sees the current
+  // value without needing to be torn down and re-registered on every tab
+  // switch. The listener uses this ref to bail out when Logs is not the
+  // active module (see: HIDDEN-MODULE-SHORTCUTS gate below).
+  const keyboardShortcutsEnabledRef = useRef(keyboardShortcutsEnabled);
+  keyboardShortcutsEnabledRef.current = keyboardShortcutsEnabled;
   const [primaryId, setPrimaryId] = useState<string | null>(null);
   const primaryIdRef = useRef(primaryId);
   primaryIdRef.current = primaryId;
@@ -319,6 +334,17 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
         openHelp();
         return;
       }
+      // HIDDEN-MODULE-SHORTCUTS — when Logs is not the active shell module
+      // (keyboardShortcutsEnabled === false), suppress ALL remaining Logs-specific
+      // shortcuts. ⌘K and F1 above are intentionally universal; everything below
+      // (⌘1-9 workspace jump, ⌘E edit mode, ⌘O open file, ?, M/R lap pin,
+      // [/] lap step) is Logs-only and must not fire while e.g. the Games tab is
+      // active. The canonical trigger case: Flappy Bird's Space would otherwise
+      // silently toggle hidden Logs playback on every flap — but this handler
+      // covers the non-Space shortcuts; Space is gated separately in
+      // PlaybackControls via its own keyboardShortcutsEnabled ref.
+      if (!keyboardShortcutsEnabledRef.current) return;
+
       // SHORTCUTS-UNDER-MODAL — when any modal/overlay is open, the remaining
       // app-level shortcuts (⌘E, ⌘1-9, ⌘O, ?, M/R, [, ]) must NOT fire
       // underneath it. Without this guard, pressing `?` over an open dialog
@@ -1273,7 +1299,7 @@ export default function App({ appVersion, playing, onPlayingChange }: LogsAppPro
           )}
           {!editMode && (
             <>
-              <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={onPlayingChange} />
+              <PlaybackControls emitter={emitter} viewState={viewState} ext={ext} playing={playing} onPlayingChange={onPlayingChange} keyboardShortcutsEnabled={keyboardShortcutsEnabled} />
               <span className="font-mono-num"><CursorClock emitter={emitter} /></span>
             </>
           )}
@@ -1612,13 +1638,16 @@ function EditMoreMenu({ onSnapToGrid, onResetAll }: {
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
 
 function PlaybackControls({
-  emitter, viewState, ext, playing, onPlayingChange,
+  emitter, viewState, ext, playing, onPlayingChange, keyboardShortcutsEnabled,
 }: {
   emitter: CursorEmitter;
   viewState: ViewStateEmitter;
   ext: { startUs: number; endUs: number };
   playing: boolean;
   onPlayingChange: (p: boolean) => void;
+  /** Forwarded from LogsAppProps — suppresses the Space shortcut when Logs is
+   *  not the active module. See the HIDDEN-MODULE-SHORTCUTS comment in App. */
+  keyboardShortcutsEnabled: boolean;
 }) {
   const setPlaying = onPlayingChange;
   const [speed, setSpeed] = useState<number>(1);
@@ -1695,8 +1724,18 @@ function PlaybackControls({
   // the ref gives us the same "latest value" guarantee.
   const playingRef = useRef(playing);
   playingRef.current = playing;
+  // Mirror keyboardShortcutsEnabled into a ref for the same reason — the
+  // listener is long-lived (empty deps) and must read the latest value on each
+  // keypress without being re-registered. See HIDDEN-MODULE-SHORTCUTS in App.
+  const kbEnabledRef = useRef(keyboardShortcutsEnabled);
+  kbEnabledRef.current = keyboardShortcutsEnabled;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // HIDDEN-MODULE-SHORTCUTS: bail out when Logs is not the active module so
+      // other modules' Space usage (e.g. Flappy Bird flap) doesn't silently
+      // toggle hidden Logs playback. The ref is updated on every render, so
+      // this always reflects the current active-module state.
+      if (!kbEnabledRef.current) return;
       if (e.code !== "Space") return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;

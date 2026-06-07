@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useSession, useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { loadConnection } from "../../../auth/connection";
 import { sanitizePathSegment } from "./folder-paths";
@@ -134,14 +135,70 @@ export function useBridgeSync(): void {
     }
   }, [client]);
 
+  // Is the SOLIDWORKS add-in currently connected? The bridge snapshot (and its
+  // locks) are consumed ONLY by the add-in, so with no add-in we skip the
+  // periodic Supabase pulls entirely — that's where the idle-session egress
+  // went. `invoke` can throw synchronously off Tauri (tests); treat any failure
+  // as "not connected".
+  const addinActive = useCallback(async (): Promise<boolean> => {
+    try {
+      return (await invoke("bridge_addin_active")) === true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Re-fetch on sign-in (user?.id), not only on mount: the first mount can fire
   // BEFORE the session is restored from storage, so the queries return 0 rows
-  // under RLS and the bridge snapshot would otherwise stay empty until the 5-min
-  // interval — making the add-in see every file as "not in vault".
-  useEffect(() => { void reloadStructure(); void reloadLocks(); }, [reloadStructure, reloadLocks, user?.id]);
+  // under RLS. Gated on the add-in being connected — with no add-in there's
+  // nothing to feed, and a (re)connect fires an immediate refresh via the event
+  // below, so the snapshot still populates the moment it's needed.
+  useEffect(() => {
+    void (async () => {
+      if (await addinActive()) {
+        void reloadStructure();
+        void reloadLocks();
+      }
+    })();
+  }, [reloadStructure, reloadLocks, addinActive, user?.id]);
+
+  // The bridge asks for an immediate snapshot the moment the add-in (re)connects
+  // (see the guard in bridge/server.rs), so it never waits a whole interval for
+  // data after SOLIDWORKS opens.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const un = await listen("bridge://addin-connected", () => {
+          void reloadStructure();
+          void reloadLocks();
+        });
+        if (cancelled) un();
+        else unlisten = un;
+      } catch {
+        // Not running under Tauri (tests) — no event channel.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [reloadStructure, reloadLocks]);
+
   useEffect(() => subscribeLockChanges(() => { void reloadLocks(); }), [reloadLocks]);
-  useInterval(reloadStructure, client ? FILES_REFRESH_MS : null);
-  useInterval(reloadLocks, client ? LOCKS_REFRESH_MS : null);
+
+  // Periodic refreshes, but only while the add-in is connected — an idle session
+  // (no SOLIDWORKS) does zero bridge network traffic. The cheap addinActive()
+  // check is a local IPC call, not a network request.
+  useInterval(
+    () => void (async () => { if (await addinActive()) void reloadStructure(); })(),
+    client ? FILES_REFRESH_MS : null,
+  );
+  useInterval(
+    () => void (async () => { if (await addinActive()) void reloadLocks(); })(),
+    client ? LOCKS_REFRESH_MS : null,
+  );
 
   // Expensive path resolution, memoized on the structural inputs only — so a
   // lock change (frequent) does NOT recompute every path.

@@ -1,6 +1,6 @@
 // WaterfallView.tsx
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { COLORMAPS } from "./colormaps";
 import { computeMach, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -12,18 +12,35 @@ import type {
 interface Props {
   packed: WaveCapturePacked;
   field: WaveField;
+  /** Reports the FIRST tile's canvas element (for PNG capture in the parent
+   *  modal). Called with the element on mount and null on unmount, alongside
+   *  the internal ref assignment — no rendering behavior changes. */
+  onCanvasRef?: (el: HTMLCanvasElement | null) => void;
 }
 
 interface TileProps {
   packed: WaveCapturePacked;
   pipeIdx: number;
   field: WaveField;
+  onCanvasRef?: (el: HTMLCanvasElement | null) => void;
 }
 
-function WaterfallTile({ packed, pipeIdx, field }: TileProps) {
+function WaterfallTile({ packed, pipeIdx, field, onCanvasRef }: TileProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const meta = packed.manifest.pipes[pipeIdx]!;
+
+  // Combined callback-ref: keep the internal ref wired for the draw effect AND
+  // surface the element to the parent (only the first tile passes onCanvasRef).
+  // useCallback keeps the ref identity stable so React doesn't detach/reattach
+  // (null → el) on every re-render of the tile.
+  const setCanvas = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      canvasRef.current = el;
+      onCanvasRef?.(el);
+    },
+    [onCanvasRef],
+  );
 
   // Render heatmap on (packed, pipeIdx, field) change.
   useEffect(() => {
@@ -96,25 +113,36 @@ function WaterfallTile({ packed, pipeIdx, field }: TileProps) {
         {meta.label} <span className="text-[#5A5F66]">[{meta.nCells} cells · {lengthMm} mm]</span>
       </div>
       <div ref={wrapRef} className="relative min-h-[60px] flex-1 bg-helios-base">
-        <canvas ref={canvasRef} className="absolute inset-0" />
+        <canvas ref={setCanvas} className="absolute inset-0" />
       </div>
     </div>
   );
 }
 
-export function WaterfallView({ packed, field }: Props) {
+export function WaterfallView({ packed, field, onCanvasRef }: Props) {
   // Group pipes by role for grid layout.
   const byRole: Record<string, number[]> = { plenum: [], runner: [], primary: [], secondary: [], collector: [] };
   packed.manifest.pipes.forEach((p, i) => {
     if (byRole[p.role]) byRole[p.role]!.push(i);
   });
 
+  // The FIRST tile in render order (rows are emitted plenum→collector, so the
+  // first non-empty role's first pipe is the first canvas painted). Only that
+  // tile reports its canvas up to the parent for PNG capture.
+  const firstPipeIdx = [
+    ...byRole.plenum!,
+    ...byRole.runner!,
+    ...byRole.primary!,
+    ...byRole.secondary!,
+    ...byRole.collector!,
+  ][0];
+
   return (
     <div className="flex h-full w-full flex-col gap-2 overflow-auto p-2">
       {byRole.plenum!.length > 0 && (
         <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
           {byRole.plenum!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} onCanvasRef={i === firstPipeIdx ? onCanvasRef : undefined} />
           ))}
         </div>
       )}
@@ -124,7 +152,7 @@ export function WaterfallView({ packed, field }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.runner!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.runner!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} onCanvasRef={i === firstPipeIdx ? onCanvasRef : undefined} />
           ))}
         </div>
       )}
@@ -134,7 +162,7 @@ export function WaterfallView({ packed, field }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.primary!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.primary!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} onCanvasRef={i === firstPipeIdx ? onCanvasRef : undefined} />
           ))}
         </div>
       )}
@@ -144,14 +172,14 @@ export function WaterfallView({ packed, field }: Props) {
           style={{ gridTemplateColumns: `repeat(${byRole.secondary!.length}, minmax(0, 1fr))`, height: "20%" }}
         >
           {byRole.secondary!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} onCanvasRef={i === firstPipeIdx ? onCanvasRef : undefined} />
           ))}
         </div>
       )}
       {byRole.collector!.length > 0 && (
         <div className="grid grid-cols-1 gap-1" style={{ height: "12%" }}>
           {byRole.collector!.map((i) => (
-            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} />
+            <WaterfallTile key={i} packed={packed} pipeIdx={i} field={field} onCanvasRef={i === firstPipeIdx ? onCanvasRef : undefined} />
           ))}
         </div>
       )}

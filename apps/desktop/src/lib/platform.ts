@@ -19,3 +19,8 @@ export function shortcut(key: string | number): string {
 
 /** What to call "this computer" in user copy: "Mac" / "PC" / "computer". */
 export const DEVICE_NOUN = IS_MAC ? "Mac" : IS_WINDOWS ? "PC" : "computer";
+
+/** What to call the OS file manager in user copy: "Finder" on macOS,
+ *  "File Explorer" elsewhere. Backs the vault's reveal actions (the Rust
+ *  `reveal_in_explorer` command handles both platforms). */
+export const FILE_MANAGER = IS_MAC ? "Finder" : "File Explorer";

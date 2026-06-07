@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { FolderId, QueryResult, VaultFile } from "./types";
+import type { FolderId, VaultFile } from "./types";
 import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
+import { REFETCH, type RefetchSignal } from "./apply-events";
+import type { PatchableFiles } from "./useAllFiles";
 
-export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile[]> {
+export function useFiles(folder_id: FolderId | undefined): PatchableFiles {
   const client = useSupabaseClient();
   const [data, setData] = useState<VaultFile[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
+  const dataRef = useRef<VaultFile[] | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   useEffect(() => {
     if (!folder_id) {
@@ -49,5 +55,17 @@ export function useFiles(folder_id: FolderId | undefined): QueryResult<VaultFile
   }, [client, folder_id, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
-  return { data, loading, error, refetch };
+  const patch = useCallback((updater: (rows: VaultFile[]) => VaultFile[] | RefetchSignal) => {
+    const prev = dataRef.current;
+    if (prev === null) return;
+    const next = updater(prev);
+    if (next === REFETCH) {
+      setTick((t) => t + 1);
+      return;
+    }
+    if (next === prev) return;
+    dataRef.current = next;
+    setData(next);
+  }, []);
+  return { data, loading, error, refetch, patch };
 }

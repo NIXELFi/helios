@@ -4,6 +4,7 @@ import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
 import { VaultModule } from "./modules/vault";
 import { CfdModule } from "./modules/cfd";
 import { PmModule } from "./modules/pm";
+import { GamesModule } from "./modules/games";
 import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
@@ -63,6 +64,7 @@ function HeliosShell() {
   // PM is gated identically to Vault — it hits RLS-protected pm.* tables on
   // mount, so it needs a live signed-in session from the main app.
   const pmEnabled = user !== null;
+  const gamesEnabled = user !== null;
   // During the boot getSession() window we don't yet KNOW whether a returning
   // user is signed in. Don't present the disabled "Sign in to use Vault" state
   // (it flashes for a signed-in user) and don't bounce off Vault until auth
@@ -104,19 +106,24 @@ function HeliosShell() {
     // briefly `user === null` during boot getSession(), and bouncing/dropping
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
-    if (vaultEnabled) return; // pmEnabled === vaultEnabled
-    if (active === "vault" || active === "pm") setActive("logs");
+    if (vaultEnabled && pmEnabled && gamesEnabled) return;
+    if (active === "vault" || active === "pm" || active === "games") setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("vault") && !prev.has("pm")) return prev;
+      if (!prev.has("vault") && !prev.has("pm") && !prev.has("games")) return prev;
       const next = new Set(prev);
       next.delete("vault");
       next.delete("pm");
+      next.delete("games");
       return next;
     });
-  }, [active, vaultEnabled, authLoading]);
+  }, [active, vaultEnabled, pmEnabled, gamesEnabled, authLoading]);
 
   function activate(id: ModuleId) {
-    if ((id === "vault" && !vaultEnabled) || (id === "pm" && !pmEnabled)) {
+    if (
+      (id === "vault" && !vaultEnabled) ||
+      (id === "pm" && !pmEnabled) ||
+      (id === "games" && !gamesEnabled)
+    ) {
       // While auth is still resolving we don't yet know if this is a returning
       // signed-in user; swallow the click rather than prematurely popping the
       // auth modal in front of them.
@@ -173,6 +180,7 @@ function HeliosShell() {
         onChangePassword={() => setChangePwOpen(true)}
         vaultEnabled={vaultEnabled}
         pmEnabled={pmEnabled}
+        gamesEnabled={gamesEnabled}
         authLoading={authLoading}
       />
       <main className="relative min-w-0 flex-1">
@@ -186,6 +194,7 @@ function HeliosShell() {
                 appVersion={appVersion}
                 playing={logsPlaying}
                 onPlayingChange={setLogsPlaying}
+                keyboardShortcutsEnabled={active === "logs"}
               />
             </ErrorBoundary>
           </div>
@@ -208,6 +217,13 @@ function HeliosShell() {
           <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
             <ErrorBoundary label="PM" compact>
               <PmModule />
+            </ErrorBoundary>
+          </div>
+        )}
+        {visited.has("games") && gamesEnabled && (
+          <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
+            <ErrorBoundary label="Games" compact>
+              <GamesModule paused={active !== "games"} />
             </ErrorBoundary>
           </div>
         )}

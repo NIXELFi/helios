@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
-import type { QueryResult, VaultFile, VaultId } from "./types";
+import type { VaultFile, VaultId } from "./types";
 import { FILE_WITH_LATEST_SELECT } from "./types";
 import { fetchAllRows } from "./paginate";
+import { REFETCH, type RefetchSignal } from "./apply-events";
+import type { PatchableFiles } from "./useAllFiles";
 
 /**
  * Fetches the soft-deleted files in a vault (the recycle bin) — every row whose
@@ -12,12 +14,16 @@ import { fetchAllRows } from "./paginate";
  * Paginated via .range() (see paginate.ts) since a long-lived vault's recycle
  * bin can exceed PostgREST's default 1000-row cap.
  */
-export function useDeletedFiles(vault_id: VaultId | undefined): QueryResult<VaultFile[]> {
+export function useDeletedFiles(vault_id: VaultId | undefined): PatchableFiles {
   const client = useSupabaseClient();
   const [data, setData] = useState<VaultFile[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [tick, setTick] = useState(0);
+  const dataRef = useRef<VaultFile[] | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   useEffect(() => {
     if (!vault_id) {
@@ -55,5 +61,17 @@ export function useDeletedFiles(vault_id: VaultId | undefined): QueryResult<Vaul
   }, [client, vault_id, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
-  return { data, loading, error, refetch };
+  const patch = useCallback((updater: (rows: VaultFile[]) => VaultFile[] | RefetchSignal) => {
+    const prev = dataRef.current;
+    if (prev === null) return;
+    const next = updater(prev);
+    if (next === REFETCH) {
+      setTick((t) => t + 1);
+      return;
+    }
+    if (next === prev) return;
+    dataRef.current = next;
+    setData(next);
+  }, []);
+  return { data, loading, error, refetch, patch };
 }

@@ -22,6 +22,12 @@ export interface Folder {
   parent_id: FolderId | null;
   name: string;
   created_at: string;
+  /** Soft-delete metadata (pdm.folders.deleted_at / deleted_by / delete_batch).
+   *  Non-null deleted_at = in the recycle bin: excluded from the browse tree,
+   *  listed by useDeletedFolders, recoverable via pdm_restore_folder. */
+  deleted_at?: string | null;
+  deleted_by?: UserId | null;
+  delete_batch?: string | null;
 }
 
 export interface VaultFile {
@@ -43,6 +49,9 @@ export interface VaultFile {
    *  browse list, listed by useDeletedFiles, recoverable via pdm_restore_file. */
   deleted_at?: string | null;
   deleted_by?: UserId | null;
+  /** delete_batch uuid stamped when a folder delete soft-deletes this file as
+   *  part of a subtree, so a folder restore brings back exactly that batch. */
+  delete_batch?: string | null;
 }
 
 /** The latest-version fields embedded on a file row — everything on Version

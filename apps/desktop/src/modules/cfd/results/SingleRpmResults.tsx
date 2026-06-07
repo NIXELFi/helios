@@ -1,15 +1,43 @@
 import { useMemo, useState } from "react";
 
 import { CycleChart } from "../components/charts/CycleChart";
+import { LinePlot } from "../components/charts/LinePlot";
+import { ExportMenu } from "../components/ExportMenu";
+import type { ExportMenuItem } from "../components/ExportMenu";
 import { PvLoopView } from "./PvLoopView";
 import { PipeProfileView } from "./PipeProfileView";
 import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
+import { imepDeltaSeries, covLastN, maxKnockIntegral } from "../lib/analytics/cycleStats";
+import type { ExportAction } from "../lib/export/exportStudy";
+import { exportActionsFor } from "../lib/export/exportStudy";
+import { copyText } from "../lib/export/io";
 import type { SingleRpmStudy } from "../state/types";
 
 interface Props {
   study: SingleRpmStudy;
+}
+
+/** Adapt an ExportAction (resolves to a written path / null on cancel) into the
+ *  ExportMenuItem shape the generic menu wants ({ok, message}). A written path
+ *  becomes a success toast; a cancelled save dialog (null) shows "Cancelled"
+ *  (the menu surfaces a toast for any non-empty message); a throw is an error
+ *  toast. */
+function actionToMenuItem(action: ExportAction): ExportMenuItem {
+  return {
+    id: action.id,
+    label: action.label,
+    run: async () => {
+      try {
+        const path = await action.run();
+        if (path == null) return { ok: true, message: "Cancelled" };
+        return { ok: true, message: `Exported → ${basename(path)}` };
+      } catch (err) {
+        return { ok: false, message: String(err) };
+      }
+    },
+  };
 }
 
 export function SingleRpmResults({ study }: Props) {
@@ -17,6 +45,7 @@ export function SingleRpmResults({ study }: Props) {
   const [showPv, setShowPv] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [showWaveViewer, setShowWaveViewer] = useState(false);
+  const [showConvergence, setShowConvergence] = useState(false);
   const last = study.cycles[study.cycles.length - 1];
   const elapsed = useMemo(() => {
     const end = study.finishedAt ?? Date.now();
@@ -24,6 +53,48 @@ export function SingleRpmResults({ study }: Props) {
   }, [study.finishedAt, study.startedAt]);
   const hasCaptures = !!study.summary?.captureDir;
   const rpmInt = Math.round(study.params.rpm);
+
+  // Summary analytics — all DISPLAY-ONLY. The convergence verdict is the
+  // backend's summary.convergedCycle (never re-derived); the IMEP-delta series
+  // and CoV are visualization aids only.
+  const kiMax = useMemo(() => maxKnockIntegral(study.cycles), [study.cycles]);
+  const covImep = useMemo(() => covLastN(study.cycles, "imepBar", 5), [study.cycles]);
+  const deltas = useMemo(() => imepDeltaSeries(study.cycles), [study.cycles]);
+  const convergedCycle =
+    study.summary && study.summary.convergedCycle >= 0 ? study.summary.convergedCycle : null;
+  const tolPct = study.params.convergenceTolImep * 100;
+
+  // One-line summary text for the Copy button + Copy-summary export item.
+  const summaryLine = useMemo(() => {
+    if (!last) return "";
+    const parts = [
+      `IMEP ${last.imepBar.toFixed(3)} bar`,
+      `VE ${(last.veAtm * 100).toFixed(2)}%`,
+      `P_brake ${last.brakePowerKW.toFixed(2)} kW`,
+      `τ_brake ${last.brakeTorqueNm.toFixed(2)} Nm`,
+      `EGT ${last.egtMean.toFixed(0)} K`,
+    ];
+    if (kiMax != null) parts.push(`KI max ${kiMax.toFixed(3)}`);
+    if (convergedCycle != null) parts.push(`conv @ ${convergedCycle}`);
+    if (covImep != null) parts.push(`CoV(IMEP, last 5) ${(covImep * 100).toFixed(2)}%`);
+    return parts.join(" · ");
+  }, [last, kiMax, convergedCycle, covImep]);
+
+  // Export menu items: per-kind ExportActions + a Copy-summary clipboard item.
+  const exportItems = useMemo<ExportMenuItem[]>(() => {
+    const items = exportActionsFor(study).map(actionToMenuItem);
+    if (summaryLine) {
+      items.push({
+        id: "single-copy-summary",
+        label: "Copy summary",
+        run: async () => {
+          await copyText(summaryLine);
+          return { ok: true, message: "Copied!" };
+        },
+      });
+    }
+    return items;
+  }, [study, summaryLine]);
 
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
@@ -50,6 +121,7 @@ export function SingleRpmResults({ study }: Props) {
             </div>
           )}
         </div>
+        <ExportMenu items={exportItems} />
         {study.status === "running" && (
           <button
             type="button"
@@ -60,6 +132,42 @@ export function SingleRpmResults({ study }: Props) {
           </button>
         )}
       </header>
+
+      {/* Summary card — final-cycle headline metrics + convergence / variation
+          chips. Sits directly under the header so the key numbers are always
+          visible without scrolling past the charts. */}
+      {last && (
+        <section aria-label="Run summary" className="flex-shrink-0 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#9097A0]">
+            <SummaryStat label="IMEP" value={last.imepBar.toFixed(3)} unit="bar" />
+            <SummaryStat label="VE" value={(last.veAtm * 100).toFixed(2)} unit="%" />
+            <SummaryStat label="P_brake" value={last.brakePowerKW.toFixed(2)} unit="kW" />
+            <SummaryStat label="τ_brake" value={last.brakeTorqueNm.toFixed(2)} unit="Nm" />
+            <SummaryStat label="EGT" value={last.egtMean.toFixed(0)} unit="K" />
+            {kiMax != null && (
+              <span className="rounded-sm border border-[#FFC627]/40 px-1.5 py-[1px] text-[10px] text-[#FFC627]" title="Livengood-Wu knock integral (max over cycles)">
+                KI max {kiMax.toFixed(3)}
+              </span>
+            )}
+            {convergedCycle != null && (
+              <span className="rounded-sm border border-green-500/40 px-1.5 py-[1px] text-[10px] text-green-300" title="Backend convergence verdict">
+                conv @ {convergedCycle}
+              </span>
+            )}
+            {covImep != null && (
+              <SummaryStat label="CoV(IMEP, last 5)" value={(covImep * 100).toFixed(2)} unit="%" />
+            )}
+            <button
+              type="button"
+              className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+              onClick={() => void copyText(summaryLine)}
+              title="Copy the summary line to the clipboard"
+            >
+              Copy line
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Captures bar — sits below the header so the wave-viewer / P-V /
           profiles buttons are always reachable without scrolling past the
@@ -109,6 +217,69 @@ export function SingleRpmResults({ study }: Props) {
           </div>
         ) : (
           <>
+            {/* Convergence panel — collapsible. Plots the per-cycle relative
+                IMEP change (display-only) against the configured tolerance so
+                the user can eyeball how the run settled. The authoritative
+                convergence verdict is the backend's convergedCycle. */}
+            <section className="m-2 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#9097A0]">
+                  Convergence
+                  {convergedCycle != null && (
+                    <span className="text-[#5A5F66] normal-case tracking-normal">
+                      backend converged @ cycle {convergedCycle}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={
+                    "rounded-sm border px-2 py-0.5 text-[10px] uppercase tracking-wider " +
+                    (showConvergence
+                      ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]"
+                      : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                  }
+                  onClick={() => setShowConvergence((v) => !v)}
+                >
+                  {showConvergence ? "Hide convergence" : "Show convergence"}
+                </button>
+              </div>
+              {showConvergence && (
+                <div className="p-2">
+                  {deltas.length === 0 ? (
+                    <div className="px-2 py-6 text-center text-[11px] text-[#5A5F66]">
+                      Need at least two cycles to chart convergence.
+                    </div>
+                  ) : (
+                    <LinePlot
+                      title={
+                        "IMEP Δ% vs cycle" +
+                        (convergedCycle != null ? ` (backend converged @ ${convergedCycle})` : "")
+                      }
+                      xs={deltas.map((d) => d.cycle)}
+                      series={[
+                        {
+                          label: "|ΔIMEP|%",
+                          y: deltas.map((d) => d.deltaPct * 100),
+                          color: "#FFC627",
+                          showPoints: true,
+                        },
+                        {
+                          label: "tol",
+                          y: deltas.map(() => tolPct),
+                          color: "#5A5F66",
+                          showPoints: false,
+                        },
+                      ]}
+                      xLabel="cycle"
+                      yLabel="%"
+                      height={240}
+                    />
+                  )}
+                </div>
+              )}
+            </section>
+
             {/* Charts grid — each card constrains its own height so charts
                 cannot push the table or each other. Min row height is
                 large enough that uPlot axis labels never clip into the
@@ -262,6 +433,16 @@ export function SingleRpmResults({ study }: Props) {
         />
       )}
     </div>
+  );
+}
+
+function SummaryStat({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <span className="flex items-baseline gap-1">
+      <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">{label}</span>
+      <span className="font-mono tabular-nums text-[#D8DCE2]">{value}</span>
+      <span className="text-[10px] text-[#5A5F66]">{unit}</span>
+    </span>
   );
 }
 

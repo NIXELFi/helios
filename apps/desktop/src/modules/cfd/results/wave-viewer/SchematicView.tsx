@@ -1,6 +1,6 @@
 // SchematicView.tsx
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sampleColormap } from "./colormaps";
 import { computeMach, CYL_FIELD_IDX, fieldRange, PIPE_FIELD_IDX, WAVE_FIELD_META } from "./fields";
@@ -20,11 +20,28 @@ interface Props {
   field: WaveField;
   sizeField: WaveSizeField;
   cylField: WaveCylField;
+  /** Reports the live canvas element (for PNG capture in the parent modal).
+   *  Called with the element on mount and null on unmount, alongside the
+   *  internal ref assignment — no rendering behavior changes. */
+  onCanvasRef?: (el: HTMLCanvasElement | null) => void;
 }
 
-export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: Props) {
+export function SchematicView({ packed, frameIdx, field, sizeField, cylField, onCanvasRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [layout, setLayout] = useState<SchematicLayout | null>(null);
+
+  // Combined callback-ref: keep the internal ref wired for draw effects AND
+  // surface the element to the parent (for PNG capture) in the same assignment.
+  // useCallback keeps the ref identity stable across renders — a fresh inline
+  // arrow makes React detach/reattach (null → el) on EVERY render, i.e. two
+  // redundant parent setState calls per animation frame during playback.
+  const setCanvas = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      canvasRef.current = el;
+      onCanvasRef?.(el);
+    },
+    [onCanvasRef],
+  );
 
   // Precompute stroke-per-frame per cylinder from V curve + x_b combustion
   // marker. The simulator does not reset x_b during intake — it stays at
@@ -72,7 +89,7 @@ export function SchematicView({ packed, frameIdx, field, sizeField, cylField }: 
 
   return (
     <div className="h-full w-full bg-helios-base">
-      <canvas ref={canvasRef} className="block" />
+      <canvas ref={setCanvas} className="block" />
     </div>
   );
 }

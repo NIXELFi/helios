@@ -4,6 +4,7 @@ import type { FileId, Version } from "./types";
 import { gzipBytes } from "./compression";
 import { friendlyPgError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
+import { setLockOverlay } from "./lock-overlay";
 
 const BUCKET = "vault-objects";
 
@@ -90,10 +91,13 @@ export function useCheckIn() {
           p_comment: comment,
         });
         if (rpcErr) throw new Error(friendlyPgError(rpcErr, "version").message);
-        // pdm_check_in releases the caller's lock server-side. Broadcast so
-        // every mounted useLocks() refetches immediately rather than waiting
-        // on the realtime channel — closes the window where auto-sync could
-        // clobber the file the user just checked in (see lock-events.ts).
+        // pdm_check_in releases the caller's lock server-side. Clear the pill
+        // this frame (optimistic remove) so check-in feels as instant as
+        // checkout, then broadcast so every mounted useLocks() refetches rather
+        // than waiting on the realtime channel — closes the window where
+        // auto-sync could clobber the file the user just checked in (see
+        // lock-events.ts). reconcile drops the overlay once the refetch lands.
+        setLockOverlay(file_id, { kind: "remove" });
         notifyLockChange();
         setResult(ver as Version);
         return ver as Version;
