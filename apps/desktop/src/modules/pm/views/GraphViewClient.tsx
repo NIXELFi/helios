@@ -167,7 +167,7 @@ function TaskNode({ data }: NodeProps<TaskNodeType>) {
       <p
         onClick={() => selectTask(task.id)}
         className={
-          "mt-1 cursor-pointer text-xs font-normal leading-snug hover:underline " +
+          "mt-1 line-clamp-2 cursor-pointer overflow-hidden text-xs font-normal leading-snug hover:underline " +
           (isExternal ? "italic text-helios-text/80" : "text-helios-text")
         }
         title="Open task details"
