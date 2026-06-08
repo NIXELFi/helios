@@ -1503,13 +1503,15 @@ function YearMonth({
             >
               <span className="leading-none">{format(d, "d")}</span>
               {taskN > 0 ? (
-                <span className="flex max-w-full flex-wrap justify-center gap-px leading-none">
+                <span className="flex max-w-full flex-wrap justify-center gap-[1.5px] leading-none">
                   {dayTasks.slice(0, 6).map((t, i) => {
-                    const { background, borderColor } = calendarMarkerColors(t, body, border);
+                    // Brighter (higher alpha) + slightly larger than the week/month
+                    // chips so the year heatmap reads clearly at a glance.
+                    const { background, borderColor } = calendarMarkerColors(t, body, border, 0.85);
                     return (
                       <span
                         key={`${t.id}-${i}`}
-                        className="size-[3px] rounded-[1px]"
+                        className="size-[5px] rounded-[1.5px]"
                         style={{
                           backgroundColor: background,
                           ...(borderColor ? { boxShadow: `0 0 0 0.5px ${borderColor}` } : {}),

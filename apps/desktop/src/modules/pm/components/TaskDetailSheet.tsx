@@ -151,6 +151,21 @@ export function TaskDetailSheet() {
     }
     return set;
   }, [tasks, task]);
+  // Tasks that can't be added AS a subtask of this one: itself, its ancestors
+  // (would create a cycle), and tasks already its direct children.
+  const childExcludeIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!task) return set;
+    set.add(task.id);
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    let cur = task.parent_task_id;
+    while (cur && !set.has(cur)) {
+      set.add(cur);
+      cur = byId.get(cur)?.parent_task_id ?? null;
+    }
+    for (const st of subtasks) set.add(st.id);
+    return set;
+  }, [tasks, task, subtasks]);
   const predecessors = useMemo(
     () =>
       task
@@ -472,6 +487,15 @@ export function TaskDetailSheet() {
                 ))}
               </ul>
             )}
+            {/* Attach an EXISTING task as a subtask — mirror of the parent picker. */}
+            <div className="mt-1.5">
+              <TaskLookup
+                tasks={tasks}
+                excludeIds={childExcludeIds}
+                onSelect={(id) => updateTask(id, { parent_task_id: task.id })}
+                placeholder="Add an existing task as a subtask…"
+              />
+            </div>
           </Section>
 
           {/* Comments */}

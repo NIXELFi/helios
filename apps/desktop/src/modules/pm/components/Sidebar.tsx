@@ -17,7 +17,6 @@ import {
   IconListDetails,
   IconPencil,
   IconPlus,
-  IconStack2,
   IconTimeline,
   IconTrash,
   IconTruck,
@@ -25,6 +24,8 @@ import {
 } from "@tabler/icons-react";
 import { Link } from "@pm/lib/router";
 import { usePathname, useRouter } from "@pm/lib/router";
+import { AllTeamsIcon, SubteamIcon } from "@pm/components/SubteamIcon";
+import { ASU_GOLD } from "@pm/lib/subteamTheme";
 import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
@@ -212,9 +213,6 @@ export function Sidebar() {
   const currentBuildSegment = activeBuildSegment(pathname);
   const currentTeamSlug = activeTeamSlug(pathname);
   const currentView = activeViewSegment(pathname);
-  const currentTeam = currentTeamSlug
-    ? subteams.find((s) => s.slug === currentTeamSlug)
-    : null;
 
   // --- Project switcher popover ---------------------------------------------
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -342,7 +340,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-helios-line bg-helios-panel">
+    <aside className="flex h-full min-h-0 w-60 shrink-0 flex-col overflow-hidden border-r border-helios-line bg-helios-panel">
       <div className="flex justify-end border-b border-helios-line px-2 py-1">
         <button
           type="button"
@@ -460,20 +458,13 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Scrollable nav region: when a project has many subteams the sidebar can
+          exceed the window — this scrolls internally instead of growing the whole
+          layout (which made the page scroll as one unit). The project/workspace
+          switchers stay fixed above so their popover isn't clipped. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {currentWorkspace === "design" && (
         <>
-          {/* Contextual scope label */}
-          <div className="border-b border-helios-line px-4 py-2.5 text-xs font-medium uppercase tracking-widest text-helios-dim">
-            Viewing{" "}
-            {currentTeam ? (
-              <span style={{ color: currentTeam.color ?? "#D8DCE2" }}>
-                {currentTeam.name}
-              </span>
-            ) : (
-              <span className="text-helios-text">Project</span>
-            )}
-          </div>
-
           <div className="px-2 pt-3">
             <button
               type="button"
@@ -532,7 +523,7 @@ export function Sidebar() {
                       : "text-helios-dim hover:bg-helios-base/60 hover:text-asu-gold")
                   }
                 >
-                  <IconStack2 size={14} strokeWidth={1.5} className="shrink-0" />
+                  <AllTeamsIcon size={17} strokeWidth={1.4} style={{ color: ASU_GOLD }} className="shrink-0" />
                   <span className="truncate">All subteams</span>
                 </Link>
               </li>
@@ -549,10 +540,12 @@ export function Sidebar() {
                           : "text-helios-dim hover:bg-helios-base/60 hover:text-asu-gold")
                       }
                     >
-                      <span
-                        aria-hidden
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: s.color ?? "#6B7280" }}
+                      <SubteamIcon
+                        name={s.name}
+                        code={s.code}
+                        size={17}
+                        className="shrink-0"
+                        style={{ color: s.color ?? "#6B7280" }}
                       />
                       <span className="truncate">{s.name}</span>
                     </Link>
@@ -616,8 +609,9 @@ export function Sidebar() {
           Competition planning is coming soon.
         </div>
       )}
+      </div>
 
-      <div className="mt-auto border-t border-helios-line px-4 py-3 text-[10px] text-helios-dim">
+      <div className="shrink-0 border-t border-helios-line px-4 py-3 text-[10px] text-helios-dim">
         Helios PM · phase 1 work in progress
       </div>
 
