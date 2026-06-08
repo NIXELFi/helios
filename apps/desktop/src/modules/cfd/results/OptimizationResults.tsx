@@ -1,17 +1,17 @@
 // Top-level results screen for optimization studies — the headline live view.
 //
-// Left pane (top → bottom): header (live best + ETA + elapsed + Cancel +
-// ExportMenu), podium row (top-3 cards), charts row (convergence scatter +
-// objective-vs-parameter scatter with a param selector), the parallel-coords
-// plot, and a sortable ranked trial table. Right pane: TrialInspector for the
-// selected trial. Selection flows through `selectedIdx` from every surface
-// (podium card, scatter point, parallel-coords line, table row).
+// Left pane: header (live best + ETA + elapsed + Cancel + ExportMenu), podium
+// (top-3), charts (convergence + value-vs-parameter scatter + parallel-coords),
+// a Rank-by control, and a sortable trial table. Right pane: TrialInspector.
 //
-// All ranking/ETA/history is derived ONCE via useOptimizationLive — a pure
-// display-side selector layered over the reducer. The elapsed clock ticks in a
-// separate gated interval so it never re-runs the heavy memo. After the job
-// finishes, ranked[0] equals study.bestTrialIdx (same direction; first-best on
-// ties) — verified in tests.
+// RANKING DIMENSION: the whole view ranks by one "active dimension" — the
+// study's backend objective by default, or any FSAE event metric (accel /
+// autocross / endurance time, endurance / efficiency / total points). Switching
+// it feeds useOptimizationLive a study whose objectiveValue is remapped to that
+// dimension, so the podium, every chart, and the table can never disagree.
+// Event metrics are scored on the frontend (same computeEvents() lib as the
+// Performance screen); since the backend sampler is space-filling, ranking by an
+// event metric picks the best sampled design for that event.
 
 import { useMemo, useState } from "react";
 
@@ -31,7 +31,10 @@ import {
   carKeyForConfig,
   vehiclePresetForKey,
   EMPTY_BASELINE,
+  EVENT_RANK_METRICS,
+  POINTS_METRIC_KEYS,
   type EventScores,
+  type EventMetricKey,
 } from "../lib/performance";
 import { TrialInspector } from "./TrialInspector";
 import type { OptimizationStudy, OptimizationTrial } from "../state/types";
@@ -40,34 +43,11 @@ interface Props {
   study: OptimizationStudy;
 }
 
-type SortKey = "rank" | "obj" | "wall" | "trial" | "event" | string; // string => a param path
+type SortKey = "rank" | "obj" | "wall" | "trial" | string; // string => a param path
 type SortDir = "asc" | "desc";
 
-// FSAE event metrics the optimizer table/chart can rank by. `get` pulls the
-// value out of a trial's EventScores; `lowerBetter` sets the default sort sense.
-type EventMetric =
-  | "none"
-  | "accelTime"
-  | "autocrossTime"
-  | "enduranceTime"
-  | "endurancePts"
-  | "efficiencyPts"
-  | "totalPts";
-
-const EVENT_METRICS: {
-  key: Exclude<EventMetric, "none">;
-  label: string;
-  lowerBetter: boolean;
-  fmt: (n: number) => string;
-  get: (e: EventScores) => number | null;
-}[] = [
-  { key: "accelTime", label: "accel (s)", lowerBetter: true, fmt: (n) => n.toFixed(3), get: (e) => e.accel.timeS },
-  { key: "autocrossTime", label: "autox (s)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.autocross.lapTimeS },
-  { key: "enduranceTime", label: "enduro (s/lap)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.endurance.lapTimeS },
-  { key: "endurancePts", label: "enduro pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.endurance.points },
-  { key: "efficiencyPts", label: "effic pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.efficiency.points },
-  { key: "totalPts", label: "total pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.totalPoints },
-];
+/** What the whole results view ranks by: the study's objective, or an event. */
+type RankDim = "objective" | EventMetricKey;
 
 const PODIUM: Record<number, { border: string; chip: string }> = {
   1: { border: "border-l-[#FFC627]", chip: "border-[#FFC627]/60 text-[#FFC627]" },
@@ -96,13 +76,54 @@ export function OptimizationResults({ study }: Props) {
   );
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [eventMetric, setEventMetric] = useState<EventMetric>("none");
+  const [rankDim, setRankDim] = useState<RankDim>(() => {
+    const rb = study.params.rankBy;
+    return rb && EVENT_RANK_METRICS.some((m) => m.key === rb) ? (rb as RankDim) : "objective";
+  });
   const carKey = carKeyForConfig(study.configPath);
 
-  const live = useOptimizationLive(study);
+  // Per-trial FSAE event scores (frontend; same computeEvents() lib as the
+  // Performance screen). Only computed when ranking by an event metric.
+  const eventsByTrial = useMemo(() => {
+    const map = new Map<number, EventScores>();
+    if (rankDim === "objective") return map;
+    const vc = cfd.state?.vehicleConfig;
+    const vehicle = vc && vc.name === carKey ? vc : vehiclePresetForKey(carKey);
+    const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
+    for (const t of study.trials) {
+      if (t.sweepPoints && t.sweepPoints.length > 0) {
+        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
+      }
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rankDim, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+
+  const dimDef = rankDim === "objective" ? null : EVENT_RANK_METRICS.find((m) => m.key === rankDim) ?? null;
+  const objUnit = objectiveUnit(study.params.objective);
+  const dim = dimDef
+    ? { label: dimDef.label, unit: "", fmt: dimDef.fmt }
+    : { label: "obj", unit: objUnit ?? "", fmt: (n: number) => n.toPrecision(5) };
+
+  // The active ranking dimension drives the ENTIRE view (podium, charts, table)
+  // by feeding useOptimizationLive a study whose objectiveValue is remapped to
+  // that dimension — one source of truth, so nothing can disagree.
+  const viewStudy: OptimizationStudy = useMemo(() => {
+    if (!dimDef) return study;
+    return {
+      ...study,
+      objectiveDirection: dimDef.lowerBetter ? "minimize" : "maximize",
+      trials: study.trials.map((t) => {
+        const e = eventsByTrial.get(t.trialIdx);
+        return { ...t, objectiveValue: e ? dimDef.get(e) : null };
+      }),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study, dimDef, eventsByTrial]);
+
+  const live = useOptimizationLive(viewStudy);
   const elapsed = useElapsedSeconds(study);
 
-  const objUnit = objectiveUnit(study.params.objective);
   const isRunning = study.status === "running";
   const showEta = isRunning && live.nDone >= 3 && live.eta != null;
 
@@ -155,7 +176,7 @@ export function OptimizationResults({ study }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [study, bridge, live.ranked]);
 
-  // ---- Charts: convergence + objective-vs-parameter ------------------------
+  // ---- Charts: convergence + value-vs-parameter (all in the active dim) -----
   const convergencePoints: ScatterPt[] = useMemo(
     () =>
       live.done.map((t) => ({
@@ -202,9 +223,10 @@ export function OptimizationResults({ study }: Props) {
     const objMax = objVals.length ? Math.max(...objVals) : 1;
     return [
       ...paramAxes,
-      { label: `objective (${study.objectiveDirection})`, min: objMin, max: objMax },
+      { label: `${dim.label} (${viewStudy.objectiveDirection})`, min: objMin, max: objMax },
     ];
-  }, [study.parameterPaths, study.objectiveDirection, live.done]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.parameterPaths, viewStudy.objectiveDirection, dim.label, live.done]);
 
   const trialsForPlot: ParallelCoordsTrial[] = useMemo(
     () =>
@@ -217,66 +239,20 @@ export function OptimizationResults({ study }: Props) {
     [live.done, study.parameterPaths, live.rankByIdx],
   );
 
-  // ---- FSAE event scores per trial (frontend; same computeEvents() lib as the
-  // Performance screen). Computed only when an event metric is picked, so the
-  // base view stays cheap. The vehicle auto-matches the study's config. --------
-  const eventsByTrial = useMemo(() => {
-    const map = new Map<number, EventScores>();
-    if (eventMetric === "none") return map;
-    const vc = cfd.state?.vehicleConfig;
-    const vehicle = vc && vc.name === carKey ? vc : vehiclePresetForKey(carKey);
-    const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
-    for (const t of study.trials) {
-      if (t.sweepPoints && t.sweepPoints.length > 0) {
-        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
-      }
-    }
-    return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventMetric, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
-
-  const metricDef = EVENT_METRICS.find((m) => m.key === eventMetric) ?? null;
-
-  const metricForTrial = (t: OptimizationTrial): number | null => {
-    if (!metricDef) return null;
-    const e = eventsByTrial.get(t.trialIdx);
-    return e ? metricDef.get(e) : null;
-  };
-
-  const eventScatter: ScatterPt[] = useMemo(() => {
-    if (!metricDef) return [];
-    const pts: ScatterPt[] = [];
-    for (const t of live.done) {
-      const e = eventsByTrial.get(t.trialIdx);
-      const y = e ? metricDef.get(e) : null;
-      if (y != null && Number.isFinite(y)) {
-        pts.push({ id: t.trialIdx, x: t.trialIdx, y, rank: live.rankByIdx.get(t.trialIdx) ?? null });
-      }
-    }
-    return pts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventMetric, eventsByTrial, live.done, live.rankByIdx]);
-
-  // ---- Sortable trial table ------------------------------------------------
+  // ---- Sortable trial table (iterates the remapped view so the obj column,
+  // ranks and deltas all reflect the active dimension) -----------------------
   const sortedTrials = useMemo(() => {
-    const arr = [...study.trials];
+    const arr = [...viewStudy.trials];
     const rankOf = (t: OptimizationTrial) =>
       live.rankByIdx.get(t.trialIdx) ?? Number.POSITIVE_INFINITY;
-    // The sorted quantity for a trial, or null when the trial doesn't carry it
-    // (pending/running rows have no objective; pending rows have no params).
+    // The sorted quantity for a trial, or null when the trial doesn't carry it.
     // Rows WITHOUT the quantity always partition to the BOTTOM regardless of
-    // asc/desc — otherwise an ascending objective sort floats a block of empty
-    // "—" rows above the actual results mid-run.
+    // asc/desc — otherwise an ascending sort floats empty "—" rows to the top.
     const valueOf = (t: OptimizationTrial): number | null => {
       if (sortKey === "rank") return Number.isFinite(rankOf(t)) ? rankOf(t) : null;
       if (sortKey === "obj") return t.objectiveValue;
       if (sortKey === "wall") return t.wallTimeS;
       if (sortKey === "trial") return t.trialIdx;
-      if (sortKey === "event") {
-        if (!metricDef) return null;
-        const e = eventsByTrial.get(t.trialIdx);
-        return e ? metricDef.get(e) : null;
-      }
       return t.parameterValues[sortKey] ?? null;
     };
     const cmp = (a: OptimizationTrial, b: OptimizationTrial): number => {
@@ -291,37 +267,15 @@ export function OptimizationResults({ study }: Props) {
       return sortDir === "asc" ? d : -d;
     };
     return arr.sort(cmp);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [study.trials, live.rankByIdx, sortKey, sortDir, eventMetric, eventsByTrial]);
+  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir]);
 
   function onSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      const eventLowerBetter = EVENT_METRICS.find((m) => m.key === eventMetric)?.lowerBetter ?? true;
-      setSortDir(
-        key === "rank" || key === "trial"
-          ? "asc"
-          : key === "event"
-          ? eventLowerBetter
-            ? "asc"
-            : "desc"
-          : "desc",
-      );
+      setSortDir(key === "rank" || key === "trial" ? "asc" : "desc");
     }
-  }
-
-  function onPickEventMetric(m: EventMetric) {
-    setEventMetric(m);
-    if (m === "none") {
-      setSortKey("rank");
-      setSortDir("asc");
-      return;
-    }
-    setSortKey("event");
-    const def = EVENT_METRICS.find((x) => x.key === m);
-    setSortDir(def && !def.lowerBetter ? "desc" : "asc");
   }
 
   const arrow = (key: SortKey) =>
@@ -350,8 +304,8 @@ export function OptimizationResults({ study }: Props) {
             {live.ranked[0] && (
               <span className="ml-2 text-amber-300">
                 best #{live.ranked[0].trial.trialIdx} ={" "}
-                {(live.ranked[0].trial.objectiveValue as number).toPrecision(5)}
-                {objUnit && <span className="ml-0.5 text-[#9097A0]">{objUnit}</span>}
+                {dim.fmt(live.ranked[0].trial.objectiveValue as number)}
+                {dim.unit && <span className="ml-0.5 text-[#9097A0]">{dim.unit}</span>}
               </span>
             )}
             {showEta && (
@@ -417,8 +371,8 @@ export function OptimizationResults({ study }: Props) {
                     <span className="text-[9px] text-[#5A5F66]">trial #{t.trialIdx}</span>
                   </div>
                   <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
-                    {(t.objectiveValue as number).toPrecision(5)}
-                    {objUnit && <span className="ml-1 text-[10px] text-[#9097A0]">{objUnit}</span>}
+                    {dim.fmt(t.objectiveValue as number)}
+                    {dim.unit && <span className="ml-1 text-[10px] text-[#9097A0]">{dim.unit}</span>}
                   </div>
                   <div className="font-mono text-[9px] text-[#5A5F66]">
                     {r.rank === 1
@@ -436,17 +390,19 @@ export function OptimizationResults({ study }: Props) {
 
           {live.nDone === 0 ? (
             <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
-              Waiting for first trial…
+              {dimDef && POINTS_METRIC_KEYS.includes(dimDef.key)
+                ? "No ranked trials — points need a reference baseline (set it on the Performance tab), or no trials are done yet."
+                : "Waiting for first trial…"}
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {/* Convergence — full width. */}
+              {/* Convergence — full width, in the active dimension. */}
               <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
                 <ScatterPlot
-                  title="convergence (objective vs trial)"
+                  title={`${dim.label} vs trial`}
                   points={convergencePoints}
                   xLabel="trial"
-                  yLabel="objective"
+                  yLabel={dim.label}
                   stepLine={convergenceStep}
                   selectedId={selectedIdx}
                   onPointClick={setSelectedIdx}
@@ -454,7 +410,7 @@ export function OptimizationResults({ study }: Props) {
                 />
               </div>
 
-              {/* Objective vs parameter — full width, with a param selector. */}
+              {/* Value vs parameter — full width, with a param selector. */}
               <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
                 <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
                   {study.parameterPaths.map((p) => (
@@ -474,10 +430,10 @@ export function OptimizationResults({ study }: Props) {
                   ))}
                 </div>
                 <ScatterPlot
-                  title={`objective vs ${paramForScatter}`}
+                  title={`${dim.label} vs ${paramForScatter}`}
                   points={paramScatterPoints}
                   xLabel={paramForScatter}
-                  yLabel="objective"
+                  yLabel={dim.label}
                   selectedId={selectedIdx}
                   onPointClick={setSelectedIdx}
                   height={360}
@@ -497,43 +453,29 @@ export function OptimizationResults({ study }: Props) {
                   height={420}
                 />
               </div>
-
-              {/* Event metric vs trial — only when an event score is selected. */}
-              {eventMetric !== "none" && metricDef && (
-                <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                  <ScatterPlot
-                    title={`${metricDef.label} vs trial`}
-                    points={eventScatter}
-                    xLabel="trial"
-                    yLabel={metricDef.label}
-                    selectedId={selectedIdx}
-                    onPointClick={setSelectedIdx}
-                    height={360}
-                  />
-                </div>
-              )}
             </div>
           )}
 
-          {/* Event-score control — rank trials by an FSAE event metric. */}
+          {/* Rank-by control — the active dimension drives the whole view. */}
           <div className="flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="uppercase tracking-wider text-[#9097A0]">Event score</span>
+            <span className="uppercase tracking-wider text-[#9097A0]">Rank by</span>
             <select
-              aria-label="Event metric"
-              value={eventMetric}
-              onChange={(e) => onPickEventMetric(e.target.value as EventMetric)}
+              aria-label="Rank by"
+              value={rankDim}
+              onChange={(e) => setRankDim(e.target.value as RankDim)}
               className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
             >
-              <option value="none">— off</option>
-              {EVENT_METRICS.map((m) => (
+              <option value="objective">objective ({study.params.objective.metric})</option>
+              {EVENT_RANK_METRICS.map((m) => (
                 <option key={m.key} value={m.key}>
-                  {m.label}
+                  event · {m.label}
                 </option>
               ))}
             </select>
-            {eventMetric !== "none" && (
+            {dimDef && (
               <span className="text-[#5A5F66]">
-                ranking by {metricDef?.label} · vehicle {carKey} · set baselines on the Performance tab to project points
+                podium + charts + table all rank by {dimDef.label} · vehicle {carKey}
+                {POINTS_METRIC_KEYS.includes(dimDef.key) ? " · needs baselines (Performance tab)" : ""}
               </span>
             )}
           </div>
@@ -546,15 +488,12 @@ export function OptimizationResults({ study }: Props) {
                   <SortTh label="rank" k="rank" onSort={onSort} arrow={arrow} />
                   <SortTh label="#" k="trial" onSort={onSort} arrow={arrow} />
                   <th>status</th>
-                  <SortTh label="obj" k="obj" align="right" onSort={onSort} arrow={arrow} />
+                  <SortTh label={dim.label} k="obj" align="right" onSort={onSort} arrow={arrow} />
                   <th className="text-right">Δ best</th>
                   <SortTh label="wall (s)" k="wall" align="right" onSort={onSort} arrow={arrow} />
                   {study.parameterPaths.map((p) => (
                     <SortTh key={p} label={p} k={p} onSort={onSort} arrow={arrow} />
                   ))}
-                  {eventMetric !== "none" && metricDef && (
-                    <SortTh label={metricDef.label} k="event" align="right" onSort={onSort} arrow={arrow} />
-                  )}
                 </tr>
               </thead>
               <tbody>
@@ -591,7 +530,7 @@ export function OptimizationResults({ study }: Props) {
                         )}
                       </td>
                       <td className="px-2 py-0.5 text-right">
-                        {t.objectiveValue !== null ? t.objectiveValue.toPrecision(5) : "—"}
+                        {t.objectiveValue !== null ? dim.fmt(t.objectiveValue) : "—"}
                       </td>
                       <td className="px-2 py-0.5 text-right">
                         {rankedRow
@@ -610,14 +549,6 @@ export function OptimizationResults({ study }: Props) {
                             : "—"}
                         </td>
                       ))}
-                      {eventMetric !== "none" && metricDef && (
-                        <td className="px-2 py-0.5 text-right">
-                          {(() => {
-                            const y = metricForTrial(t);
-                            return y != null ? metricDef.fmt(y) : "—";
-                          })()}
-                        </td>
-                      )}
                     </tr>
                   );
                 })}

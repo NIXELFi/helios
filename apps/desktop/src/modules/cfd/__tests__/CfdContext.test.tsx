@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { CfdProvider, useCfd, reducer, initialState } from "../state/CfdContext";
 import type { OptimizationParams, OptimizationStudy } from "../state/types";
 import { makeFakeBridge } from "./fakes/tauri";
-import { makeCycleStats, makeParams } from "./fakes/study";
+import { makeCycleStats, makeParams, makeOptimizationParams } from "./fakes/study";
 
 function wrap(bridge = makeFakeBridge().bridge) {
   return ({ children }: { children: ReactNode }) => (
@@ -39,6 +39,36 @@ describe("CfdContext state machine", () => {
     expect(result.current.state.activeStudyId).toBe("j-1");
     expect(result.current.state.activeScreen).toBe("results");
     expect(fake.invocations.some((i) => i.command === "cfd_start_job")).toBe(true);
+  });
+
+  it("startOptimization strips rankBy before the backend but keeps it on the study", async () => {
+    window.localStorage.clear();
+    const fake = makeFakeBridge();
+    fake.setStartJob(async () => ({ jobId: "opt-rb" }));
+
+    const { result } = renderHook(() => useCfd(), { wrapper: wrap(fake.bridge) });
+    await waitFor(() => expect(result.current.state.hydrated).toBe(true));
+
+    await act(async () => {
+      await result.current.startOptimization(
+        "C:/x/sdm26.json",
+        makeOptimizationParams({ rankBy: "accelTime" }),
+      );
+    });
+
+    // The sampler runs server-side and can't compute FSAE event metrics, so
+    // rankBy must not reach the backend.
+    const startJob = fake.invocations.find((i) => i.command === "cfd_start_job");
+    const sentParams = (startJob?.args.request as { params?: { rankBy?: unknown } })?.params;
+    expect(sentParams).toBeDefined();
+    expect(sentParams && "rankBy" in sentParams).toBe(false);
+
+    // ...but the study keeps it so the results screen defaults its "rank by" control.
+    const study = result.current.state.studies["opt-rb"];
+    expect(study?.kind).toBe("optimization");
+    if (study?.kind === "optimization") {
+      expect(study.params.rankBy).toBe("accelTime");
+    }
   });
 
   it("progress events append cycles, done event flips status", async () => {

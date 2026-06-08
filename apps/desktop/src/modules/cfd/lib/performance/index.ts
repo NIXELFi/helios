@@ -51,7 +51,14 @@ export {
   efficiencyFactor,
   efficiencyPoints,
 } from "./points";
-export { computeEvents, type EventScores, type EventOpts } from "./events";
+export {
+  computeEvents,
+  EVENT_RANK_METRICS,
+  POINTS_METRIC_KEYS,
+  type EventScores,
+  type EventOpts,
+  type EventMetricKey,
+} from "./events";
 export { simLap, type LapResult, type LapOpts } from "./lapSim";
 export {
   synthesizeAutocross,

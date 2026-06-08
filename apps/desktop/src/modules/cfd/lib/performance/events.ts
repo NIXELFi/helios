@@ -47,6 +47,36 @@ export interface EventOpts {
   co2PerL?: number;
 }
 
+export type EventMetricKey =
+  | "accelTime"
+  | "autocrossTime"
+  | "enduranceTime"
+  | "endurancePts"
+  | "efficiencyPts"
+  | "totalPts";
+
+/** Event metrics usable as a results ranking dimension / optimization objective.
+ *  Shared by the optimizer screen (ranking) and the setup modal (picker) so the
+ *  two can't drift. `get` reads the value out of an EventScores; `lowerBetter`
+ *  sets the sort sense; `fmt` formats it for display. */
+export const EVENT_RANK_METRICS: {
+  key: EventMetricKey;
+  label: string;
+  lowerBetter: boolean;
+  fmt: (n: number) => string;
+  get: (e: EventScores) => number | null;
+}[] = [
+  { key: "accelTime", label: "accel (s)", lowerBetter: true, fmt: (n) => n.toFixed(3), get: (e) => e.accel.timeS },
+  { key: "autocrossTime", label: "autox (s)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.autocross.lapTimeS },
+  { key: "enduranceTime", label: "enduro (s/lap)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.endurance.lapTimeS },
+  { key: "endurancePts", label: "enduro pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.endurance.points },
+  { key: "efficiencyPts", label: "effic pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.efficiency.points },
+  { key: "totalPts", label: "total pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.totalPoints },
+];
+
+/** Event keys whose value is FSAE points (need a reference baseline to rank). */
+export const POINTS_METRIC_KEYS: EventMetricKey[] = ["endurancePts", "efficiencyPts", "totalPts"];
+
 export function computeEvents(
   curve: TorqueCurve,
   vehicle: VehicleConfig,

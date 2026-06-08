@@ -532,7 +532,12 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         return jobId;
       },
       startOptimization: async (configPath, params) => {
-        const { jobId } = await bridge.startJob({ kind: "optimization", configPath, params });
+        // rankBy is a frontend-only display/ranking hint — the backend can't
+        // compute FSAE event metrics, so strip it before sampling. The study
+        // keeps the full params so the results screen defaults to it.
+        const backendParams: OptimizationParams = { ...params };
+        delete backendParams.rankBy;
+        const { jobId } = await bridge.startJob({ kind: "optimization", configPath, params: backendParams });
         const trials: OptimizationTrial[] = Array.from(
           { length: params.nTrials },
           (_, i): OptimizationTrial => ({
