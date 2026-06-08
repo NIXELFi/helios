@@ -52,8 +52,10 @@ export interface EventScores {
     points: number | null;
   };
   efficiency: { factor: number | null; points: number | null };
-  /** Sum of available modeled-event points (accel + autocross + endurance +
-   *  efficiency); null unless every baseline is present. Skidpad isn't modeled. */
+  /** Sum of the modeled events that have a reference baseline (accel + autocross
+   *  + endurance + efficiency); null only if none are scorable. Skidpad isn't
+   *  modeled, and events without a baseline (e.g. accel under REFERENCE_2026)
+   *  aren't counted. */
   totalPoints: number | null;
 }
 
@@ -144,10 +146,11 @@ export function computeEvents(
   const effMax = baseline.effMax != null ? baseline.effMax : 1;
   const effPts = factor != null && effMin != null ? efficiencyPoints(factor, effMin, effMax) : null;
 
-  const parts = [accelPts, axPts, enPts, effPts];
-  const totalPoints = parts.every((p) => p != null)
-    ? parts.reduce((a, p) => a + (p as number), 0)
-    : null;
+  // Sum the events that ARE scorable (have a baseline); null only if none are.
+  // Lets "total points" rank trials even when a baseline is missing (e.g. no
+  // field accel Tmin) — accel simply isn't counted until its baseline exists.
+  const scored = [accelPts, axPts, enPts, effPts].filter((p): p is number => p != null);
+  const totalPoints = scored.length ? scored.reduce((a, p) => a + p, 0) : null;
 
   return {
     accel: { timeS: accel.timeS, points: accelPts },

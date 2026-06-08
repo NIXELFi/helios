@@ -65,4 +65,15 @@ describe("SDM26 calibration to real 2026 results", () => {
   it("E85 burns more volume but emits less CO₂/lap than gasoline", () => {
     expect(e85.endurance.co2KgPerLap).toBeLessThan(gas.endurance.co2KgPerLap);
   });
+
+  it("total points is scorable from the available events (no field accel Tmin)", () => {
+    // REFERENCE_2026 has no accelTMin, so accel isn't scored — but total points
+    // still ranks on autocross + endurance + efficiency (the optimizer's
+    // "rank by total pts" must not go null just because one baseline is absent).
+    expect(gas.accel.points).toBeNull();
+    expect(gas.totalPoints).not.toBeNull();
+    const sum = (gas.autocross.points ?? 0) + (gas.endurance.points ?? 0) + (gas.efficiency.points ?? 0);
+    expect(gas.totalPoints!).toBeCloseTo(sum, 6);
+    expect(gas.totalPoints!).toBeGreaterThan(0);
+  });
 });
