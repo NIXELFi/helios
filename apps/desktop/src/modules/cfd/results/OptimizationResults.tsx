@@ -25,6 +25,14 @@ import { copyText } from "../lib/export/io";
 import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { ScatterPlot, type ScatterPt } from "../components/charts/ScatterPlot";
 import { ParallelCoordsPlot, type ParallelCoordsTrial } from "../components/charts/ParallelCoordsPlot";
+import {
+  torqueCurveFromSweep,
+  computeEvents,
+  carKeyForConfig,
+  vehiclePresetForKey,
+  EMPTY_BASELINE,
+  type EventScores,
+} from "../lib/performance";
 import { TrialInspector } from "./TrialInspector";
 import type { OptimizationStudy, OptimizationTrial } from "../state/types";
 
@@ -32,8 +40,34 @@ interface Props {
   study: OptimizationStudy;
 }
 
-type SortKey = "rank" | "obj" | "wall" | "trial" | string; // string => a param path
+type SortKey = "rank" | "obj" | "wall" | "trial" | "event" | string; // string => a param path
 type SortDir = "asc" | "desc";
+
+// FSAE event metrics the optimizer table/chart can rank by. `get` pulls the
+// value out of a trial's EventScores; `lowerBetter` sets the default sort sense.
+type EventMetric =
+  | "none"
+  | "accelTime"
+  | "autocrossTime"
+  | "enduranceTime"
+  | "endurancePts"
+  | "efficiencyPts"
+  | "totalPts";
+
+const EVENT_METRICS: {
+  key: Exclude<EventMetric, "none">;
+  label: string;
+  lowerBetter: boolean;
+  fmt: (n: number) => string;
+  get: (e: EventScores) => number | null;
+}[] = [
+  { key: "accelTime", label: "accel (s)", lowerBetter: true, fmt: (n) => n.toFixed(3), get: (e) => e.accel.timeS },
+  { key: "autocrossTime", label: "autox (s)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.autocross.lapTimeS },
+  { key: "enduranceTime", label: "enduro (s/lap)", lowerBetter: true, fmt: (n) => n.toFixed(2), get: (e) => e.endurance.lapTimeS },
+  { key: "endurancePts", label: "enduro pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.endurance.points },
+  { key: "efficiencyPts", label: "effic pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.efficiency.points },
+  { key: "totalPts", label: "total pts", lowerBetter: false, fmt: (n) => n.toFixed(1), get: (e) => e.totalPoints },
+];
 
 const PODIUM: Record<number, { border: string; chip: string }> = {
   1: { border: "border-l-[#FFC627]", chip: "border-[#FFC627]/60 text-[#FFC627]" },
@@ -54,13 +88,16 @@ function formatEta(seconds: number): string {
 }
 
 export function OptimizationResults({ study }: Props) {
-  const { cancelStudy, bridge } = useCfd();
+  const cfd = useCfd();
+  const { cancelStudy, bridge } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [paramForScatter, setParamForScatter] = useState<string>(
     study.parameterPaths[0] ?? "",
   );
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [eventMetric, setEventMetric] = useState<EventMetric>("none");
+  const carKey = carKeyForConfig(study.configPath);
 
   const live = useOptimizationLive(study);
   const elapsed = useElapsedSeconds(study);
@@ -180,6 +217,46 @@ export function OptimizationResults({ study }: Props) {
     [live.done, study.parameterPaths, live.rankByIdx],
   );
 
+  // ---- FSAE event scores per trial (frontend; same computeEvents() lib as the
+  // Performance screen). Computed only when an event metric is picked, so the
+  // base view stays cheap. The vehicle auto-matches the study's config. --------
+  const eventsByTrial = useMemo(() => {
+    const map = new Map<number, EventScores>();
+    if (eventMetric === "none") return map;
+    const vc = cfd.state?.vehicleConfig;
+    const vehicle = vc && vc.name === carKey ? vc : vehiclePresetForKey(carKey);
+    const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
+    for (const t of study.trials) {
+      if (t.sweepPoints && t.sweepPoints.length > 0) {
+        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
+      }
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventMetric, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+
+  const metricDef = EVENT_METRICS.find((m) => m.key === eventMetric) ?? null;
+
+  const metricForTrial = (t: OptimizationTrial): number | null => {
+    if (!metricDef) return null;
+    const e = eventsByTrial.get(t.trialIdx);
+    return e ? metricDef.get(e) : null;
+  };
+
+  const eventScatter: ScatterPt[] = useMemo(() => {
+    if (!metricDef) return [];
+    const pts: ScatterPt[] = [];
+    for (const t of live.done) {
+      const e = eventsByTrial.get(t.trialIdx);
+      const y = e ? metricDef.get(e) : null;
+      if (y != null && Number.isFinite(y)) {
+        pts.push({ id: t.trialIdx, x: t.trialIdx, y, rank: live.rankByIdx.get(t.trialIdx) ?? null });
+      }
+    }
+    return pts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventMetric, eventsByTrial, live.done, live.rankByIdx]);
+
   // ---- Sortable trial table ------------------------------------------------
   const sortedTrials = useMemo(() => {
     const arr = [...study.trials];
@@ -195,6 +272,11 @@ export function OptimizationResults({ study }: Props) {
       if (sortKey === "obj") return t.objectiveValue;
       if (sortKey === "wall") return t.wallTimeS;
       if (sortKey === "trial") return t.trialIdx;
+      if (sortKey === "event") {
+        if (!metricDef) return null;
+        const e = eventsByTrial.get(t.trialIdx);
+        return e ? metricDef.get(e) : null;
+      }
       return t.parameterValues[sortKey] ?? null;
     };
     const cmp = (a: OptimizationTrial, b: OptimizationTrial): number => {
@@ -209,15 +291,37 @@ export function OptimizationResults({ study }: Props) {
       return sortDir === "asc" ? d : -d;
     };
     return arr.sort(cmp);
-  }, [study.trials, live.rankByIdx, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.trials, live.rankByIdx, sortKey, sortDir, eventMetric, eventsByTrial]);
 
   function onSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir(key === "rank" || key === "trial" ? "asc" : "desc");
+      const eventLowerBetter = EVENT_METRICS.find((m) => m.key === eventMetric)?.lowerBetter ?? true;
+      setSortDir(
+        key === "rank" || key === "trial"
+          ? "asc"
+          : key === "event"
+          ? eventLowerBetter
+            ? "asc"
+            : "desc"
+          : "desc",
+      );
     }
+  }
+
+  function onPickEventMetric(m: EventMetric) {
+    setEventMetric(m);
+    if (m === "none") {
+      setSortKey("rank");
+      setSortDir("asc");
+      return;
+    }
+    setSortKey("event");
+    const def = EVENT_METRICS.find((x) => x.key === m);
+    setSortDir(def && !def.lowerBetter ? "desc" : "asc");
   }
 
   const arrow = (key: SortKey) =>
@@ -393,8 +497,46 @@ export function OptimizationResults({ study }: Props) {
                   height={420}
                 />
               </div>
+
+              {/* Event metric vs trial — only when an event score is selected. */}
+              {eventMetric !== "none" && metricDef && (
+                <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                  <ScatterPlot
+                    title={`${metricDef.label} vs trial`}
+                    points={eventScatter}
+                    xLabel="trial"
+                    yLabel={metricDef.label}
+                    selectedId={selectedIdx}
+                    onPointClick={setSelectedIdx}
+                    height={360}
+                  />
+                </div>
+              )}
             </div>
           )}
+
+          {/* Event-score control — rank trials by an FSAE event metric. */}
+          <div className="flex flex-wrap items-center gap-2 text-[10px]">
+            <span className="uppercase tracking-wider text-[#9097A0]">Event score</span>
+            <select
+              aria-label="Event metric"
+              value={eventMetric}
+              onChange={(e) => onPickEventMetric(e.target.value as EventMetric)}
+              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+            >
+              <option value="none">— off</option>
+              {EVENT_METRICS.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {eventMetric !== "none" && (
+              <span className="text-[#5A5F66]">
+                ranking by {metricDef?.label} · vehicle {carKey} · set baselines on the Performance tab to project points
+              </span>
+            )}
+          </div>
 
           {/* Sortable ranked trial table. */}
           <div className="overflow-x-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -410,6 +552,9 @@ export function OptimizationResults({ study }: Props) {
                   {study.parameterPaths.map((p) => (
                     <SortTh key={p} label={p} k={p} onSort={onSort} arrow={arrow} />
                   ))}
+                  {eventMetric !== "none" && metricDef && (
+                    <SortTh label={metricDef.label} k="event" align="right" onSort={onSort} arrow={arrow} />
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -465,6 +610,14 @@ export function OptimizationResults({ study }: Props) {
                             : "—"}
                         </td>
                       ))}
+                      {eventMetric !== "none" && metricDef && (
+                        <td className="px-2 py-0.5 text-right">
+                          {(() => {
+                            const y = metricForTrial(t);
+                            return y != null ? metricDef.fmt(y) : "—";
+                          })()}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
