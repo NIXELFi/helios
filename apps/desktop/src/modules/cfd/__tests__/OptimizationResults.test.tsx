@@ -6,7 +6,7 @@
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { makeOptimizationStudy, makeTrial } from "./fakes/study";
+import { makeOptimizationStudy, makeTrial, makeSweepPoint } from "./fakes/study";
 import type { OptimizationStudy } from "../state/types";
 
 // --- Mocks --------------------------------------------------------------------
@@ -312,6 +312,46 @@ describe("OptimizationResults — selection + inspector", () => {
     });
     render(<OptimizationResults study={study} />);
     expect(screen.getByText("running")).toBeInTheDocument();
+  });
+});
+
+describe("OptimizationResults — event ranking", () => {
+  // A sweep curve at a given peak brake torque, spanning the rev range so the
+  // accel sim has torque to integrate from launch to redline. Higher peak →
+  // quicker accel → lower (better) time, so the three trials rank distinctly.
+  const sweep = (peakNm: number) =>
+    [4000, 8000, 11000, 14000].map((rpm, i) =>
+      makeSweepPoint({ rpm, lastCycle: { brakeTorqueNm: peakNm - i * 5 } }),
+    );
+
+  const eventStudy = (): OptimizationStudy =>
+    makeOptimizationStudy({
+      trials: [
+        makeTrial({ trialIdx: 0, objectiveValue: 50, sweepPoints: sweep(48) }),
+        makeTrial({ trialIdx: 1, objectiveValue: 64, sweepPoints: sweep(64) }),
+        makeTrial({ trialIdx: 2, objectiveValue: 55, sweepPoints: sweep(56) }),
+      ],
+    });
+
+  it("re-ranks the whole view + inspector to the chosen event metric", () => {
+    render(<OptimizationResults study={eventStudy()} />);
+
+    // Default dimension is the backend objective — the convergence chart says "obj".
+    expect(screen.getByText("obj vs trial")).toBeInTheDocument();
+
+    // Switch the active ranking dimension to accel time.
+    fireEvent.change(screen.getByLabelText("Rank by"), { target: { value: "accelTime" } });
+
+    // The whole view follows: the convergence chart re-titles to the event.
+    expect(screen.getByText("accel (s) vs trial")).toBeInTheDocument();
+    expect(screen.queryByText("obj vs trial")).toBeNull();
+
+    // The inspector is dimension-aware: clicking a podium card shows the event
+    // label + value, never the (now meaningless) backend "obj" headline.
+    fireEvent.click(screen.getAllByText(/trial #\d/)[0]!.closest("button")!);
+    const aside = document.querySelector("aside")!;
+    expect(within(aside).getByText(/accel \(s\)/)).toBeInTheDocument();
+    expect(within(aside).queryByText(/^obj =/)).toBeNull();
   });
 });
 

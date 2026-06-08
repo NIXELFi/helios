@@ -282,9 +282,12 @@ export function OptimizationResults({ study }: Props) {
     key === sortKey ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
   // ---- Selected trial (right pane) -----------------------------------------
+  // Sourced from viewStudy so its objectiveValue is in the active dimension —
+  // the inspector's headline value then agrees with the podium/table (its
+  // sweepPoints are preserved through the remap for the per-RPM curves).
   const selectedTrial =
     selectedIdx !== null
-      ? study.trials.find((t) => t.trialIdx === selectedIdx) ?? null
+      ? viewStudy.trials.find((t) => t.trialIdx === selectedIdx) ?? null
       : null;
   const selectedRanked =
     selectedIdx !== null
@@ -563,7 +566,7 @@ export function OptimizationResults({ study }: Props) {
               trial={selectedTrial}
               parameterPaths={study.parameterPaths}
               configPath={study.configPath}
-              objective={study.params.objective}
+              dim={dim}
               rank={selectedRanked?.rank ?? null}
               deltaToBest={selectedRanked?.deltaToBest ?? null}
               pctOfBest={selectedRanked?.pctOfBest ?? null}
