@@ -9,6 +9,7 @@
 // keeps us under 5 MB even pessimistically.
 
 import type { Study } from "../state/types";
+import type { ReferenceBaseline, VehicleConfig } from "./performance/types";
 
 const KEY_V2 = "helios.cfd.v2";
 const KEY_V1 = "helios.cfd.v1";   // legacy: header-only
@@ -17,9 +18,16 @@ const MAX_STUDIES = 20;
 export interface Persisted {
   lastConfigPath: string | null;
   studies: Study[];
+  vehicleConfig?: VehicleConfig | null;
+  referenceBaseline?: ReferenceBaseline | null;
 }
 
-const EMPTY: Persisted = { lastConfigPath: null, studies: [] };
+const EMPTY: Persisted = {
+  lastConfigPath: null,
+  studies: [],
+  vehicleConfig: null,
+  referenceBaseline: null,
+};
 
 export function loadPersisted(): Persisted {
   try {
@@ -29,6 +37,8 @@ export function loadPersisted(): Persisted {
       return {
         lastConfigPath: parsed.lastConfigPath ?? null,
         studies: Array.isArray(parsed.studies) ? parsed.studies.slice(0, MAX_STUDIES) : [],
+        vehicleConfig: parsed.vehicleConfig ?? null,
+        referenceBaseline: parsed.referenceBaseline ?? null,
       };
     }
     // Fall back to v1 (header-only) if it still exists. Migrate
@@ -122,6 +132,8 @@ export function savePersisted(p: Persisted): void {
       const trimmed: Persisted = {
         lastConfigPath: p.lastConfigPath ?? null,
         studies: strip(baseStudies),
+        vehicleConfig: p.vehicleConfig ?? null,
+        referenceBaseline: p.referenceBaseline ?? null,
       };
       window.localStorage.setItem(KEY_V2, JSON.stringify(trimmed));
       return; // succeeded

@@ -1,0 +1,38 @@
+/* CFD desktop module styles — scoped to .cfd-root so they never fight the
+   desktop shell's global styles (no @tailwind here; the shell already injects
+   it). Matches the rest of Helios (and the PM module): asu-gold scrollbar
+   thumbs on a transparent track instead of the native OS scrollbars. */
+
+.cfd-root {
+  color-scheme: dark;
+}
+
+/* Scrollbars — asu-gold thumb, transparent track (same accent as the workspace
+   tab bar, wave scrubber, and PM module). Firefox uses scrollbar-color;
+   Chromium WebView2 (Windows) + WebKit (macOS Tauri) use the ::-webkit-*
+   pseudo-elements. */
+.cfd-root,
+.cfd-root * {
+  scrollbar-width: thin;
+  scrollbar-color: #ffc627 transparent;
+}
+.cfd-root ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+.cfd-root ::-webkit-scrollbar-track,
+.cfd-root ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.cfd-root ::-webkit-scrollbar-thumb {
+  background: #ffc627;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+.cfd-root ::-webkit-scrollbar-thumb:hover {
+  background: #ffd24d;
+  background-clip: content-box;
+  border: 2px solid transparent;
+}

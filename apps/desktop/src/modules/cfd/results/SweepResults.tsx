@@ -278,8 +278,8 @@ export function SweepResults({ study }: Props) {
               </section>
             )}
 
-            {/* Curves grid */}
-            <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
+            {/* Curves — stacked full-width so each is large and the whole page scrolls. */}
+            <div className="grid grid-cols-1 gap-2 p-2">
               <ChartCard>
                 <LinePlot
                   title="IMEP / BMEP / FMEP (bar) vs RPM"
@@ -292,7 +292,7 @@ export function SweepResults({ study }: Props) {
                       { label: "IMEP (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.imepBar), color: "#5A5F66", showPoints: false },
                     ] : []),
                   ]}
-                  xLabel="rpm" yLabel="bar" height={260}
+                  xLabel="rpm" yLabel="bar" height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -305,7 +305,7 @@ export function SweepResults({ study }: Props) {
                       { label: "VE (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.veAtm), color: "#5A5F66", showPoints: false },
                     ] : []),
                   ]}
-                  xLabel="rpm" yLabel="VE" height={260}
+                  xLabel="rpm" yLabel="VE" height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -318,7 +318,7 @@ export function SweepResults({ study }: Props) {
                       { label: "EGT (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.egtMean), color: "#5A5F66", showPoints: false },
                     ] : []),
                   ]}
-                  xLabel="rpm" yLabel="K" height={260}
+                  xLabel="rpm" yLabel="K" height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -332,7 +332,7 @@ export function SweepResults({ study }: Props) {
                       { label: "P_ind (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.indicatedPowerKW), color: "#5A5F66", showPoints: false },
                     ] : []),
                   ]}
-                  xLabel="rpm" yLabel="kW" height={260}
+                  xLabel="rpm" yLabel="kW" height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -345,7 +345,7 @@ export function SweepResults({ study }: Props) {
                       { label: "τ_brake (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.brakeTorqueNm), color: "#5A5F66", showPoints: false },
                     ] : []),
                   ]}
-                  xLabel="rpm" yLabel="Nm" height={260}
+                  xLabel="rpm" yLabel="Nm" height={340}
                 />
               </ChartCard>
               {hasKnock && (
@@ -359,7 +359,7 @@ export function SweepResults({ study }: Props) {
                         { label: "KI (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.knockIntegral ?? NaN), color: "#5A5F66", showPoints: false },
                       ] : []),
                     ]}
-                    xLabel="rpm" yLabel="KI" height={260}
+                    xLabel="rpm" yLabel="KI" height={340}
                   />
                 </ChartCard>
               )}

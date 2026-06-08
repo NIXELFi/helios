@@ -273,18 +273,17 @@ export function SingleRpmResults({ study }: Props) {
                       ]}
                       xLabel="cycle"
                       yLabel="%"
-                      height={240}
+                      height={300}
                     />
                   )}
                 </div>
               )}
             </section>
 
-            {/* Charts grid — each card constrains its own height so charts
-                cannot push the table or each other. Min row height is
-                large enough that uPlot axis labels never clip into the
-                title strip or out of the plot. */}
-            <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
+            {/* Charts — stacked full-width so each is large and the whole page
+                scrolls. Each card sets its own height so axis labels never clip
+                into the title strip or out of the plot. */}
+            <div className="grid grid-cols-1 gap-2 p-2">
               <ChartCard>
                 <CycleChart
                   title="IMEP / BMEP / FMEP (bar)"
@@ -295,7 +294,7 @@ export function SingleRpmResults({ study }: Props) {
                     { label: "FMEP", field: "fmepBar", color: "#FF8A65" },
                   ]}
                   yLabel="bar"
-                  height={260}
+                  height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -308,7 +307,7 @@ export function SingleRpmResults({ study }: Props) {
                   ]}
                   yLabel="VE"
                   y2Label="kW"
-                  height={260}
+                  height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -317,7 +316,7 @@ export function SingleRpmResults({ study }: Props) {
                   cycles={study.cycles}
                   series={[{ label: "EGT", field: "egtMean", color: "#F48FB1" }]}
                   yLabel="K"
-                  height={260}
+                  height={340}
                 />
               </ChartCard>
               <ChartCard>
@@ -329,7 +328,7 @@ export function SingleRpmResults({ study }: Props) {
                     { label: "nonconserv", field: "nonconservation", color: "#FFB300" },
                   ]}
                   yLabel="kg"
-                  height={260}
+                  height={340}
                 />
               </ChartCard>
             </div>

@@ -429,7 +429,7 @@ export interface JobSummary {
 }
 
 // Active screen inside the module.
-export type NavId = "config" | "studies" | "results";
+export type NavId = "config" | "studies" | "results" | "performance";
 
 // ---- Capture artifacts (loaded on demand via cfd_load_capture) ----
 

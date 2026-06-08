@@ -268,8 +268,11 @@ export function OptimizationResults({ study }: Props) {
         )}
       </header>
 
-      <div className="grid flex-1 min-h-0 grid-cols-[1fr_360px] gap-3 overflow-hidden p-3">
-        <div className="flex min-h-0 flex-col gap-3 overflow-auto">
+      {/* The grid IS the single scroll container: the left column flows to its
+          full height and scrolls the whole page, while the inspector sticks in
+          view. No nested mini-scrollers fighting for screen height. */}
+      <div className="grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_360px] items-start gap-3 overflow-y-auto p-3">
+        <div className="flex min-w-0 flex-col gap-3">
           {/* Podium row — 3 cards, fills in rank order; dashed placeholders. */}
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((slot) => {
@@ -332,64 +335,69 @@ export function OptimizationResults({ study }: Props) {
               Waiting for first trial…
             </div>
           ) : (
-            <>
-              {/* Charts row — convergence + objective vs parameter. */}
-              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-                <div className="overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                  <ScatterPlot
-                    title="convergence (objective vs trial)"
-                    points={convergencePoints}
-                    xLabel="trial"
-                    yLabel="objective"
-                    stepLine={convergenceStep}
-                    selectedId={selectedIdx}
-                    onPointClick={setSelectedIdx}
-                  />
-                </div>
-                <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                  <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
-                    {study.parameterPaths.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setParamForScatter(p)}
-                        className={
-                          "rounded-sm border px-1.5 py-0.5 text-[9px] " +
-                          (p === paramForScatter
-                            ? "border-[#FFC627] text-[#FFC627]"
-                            : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
-                        }
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="overflow-auto">
-                    <ScatterPlot
-                      title={`objective vs ${paramForScatter}`}
-                      points={paramScatterPoints}
-                      xLabel={paramForScatter}
-                      yLabel="objective"
-                      selectedId={selectedIdx}
-                      onPointClick={setSelectedIdx}
-                    />
-                  </div>
-                </div>
+            <div className="flex flex-col gap-3">
+              {/* Convergence — full width. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <ScatterPlot
+                  title="convergence (objective vs trial)"
+                  points={convergencePoints}
+                  xLabel="trial"
+                  yLabel="objective"
+                  stepLine={convergenceStep}
+                  selectedId={selectedIdx}
+                  onPointClick={setSelectedIdx}
+                  height={360}
+                />
               </div>
 
-              <div className="overflow-auto">
+              {/* Objective vs parameter — full width, with a param selector. */}
+              <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
+                  {study.parameterPaths.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setParamForScatter(p)}
+                      className={
+                        "rounded-sm border px-1.5 py-0.5 text-[9px] " +
+                        (p === paramForScatter
+                          ? "border-[#FFC627] text-[#FFC627]"
+                          : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
+                      }
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <ScatterPlot
+                  title={`objective vs ${paramForScatter}`}
+                  points={paramScatterPoints}
+                  xLabel={paramForScatter}
+                  yLabel="objective"
+                  selectedId={selectedIdx}
+                  onPointClick={setSelectedIdx}
+                  height={360}
+                />
+              </div>
+
+              {/* Parallel coordinates — full width. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+                  parallel coordinates
+                </div>
                 <ParallelCoordsPlot
                   axes={axes}
                   trials={trialsForPlot}
                   onTrialClick={setSelectedIdx}
                   selectedTrialIdx={selectedIdx}
+                  height={420}
                 />
               </div>
-            </>
+            </div>
           )}
 
           {/* Sortable ranked trial table. */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
             <table className="w-full text-left font-mono text-[10px]">
               <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
                 <tr className="border-b border-[#2A2C32] [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
@@ -465,7 +473,7 @@ export function OptimizationResults({ study }: Props) {
           </div>
         </div>
 
-        <aside className="min-h-0 overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
+        <aside className="sticky top-0 self-start max-h-[calc(100vh-7rem)] overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
           {selectedTrial ? (
             <TrialInspector
               trial={selectedTrial}

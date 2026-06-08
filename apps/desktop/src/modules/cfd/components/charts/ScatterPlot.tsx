@@ -6,7 +6,9 @@
 // Mirrors ParallelCoordsPlot's idioms: useMemo scales, padding, axis
 // lines/labels with toPrecision(3) extents, role="img" aria-label.
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+
+import { useElementWidth } from "./useElementWidth";
 
 export interface ScatterPt {
   id: number;
@@ -40,9 +42,13 @@ export function ScatterPlot({
   stepLine,
   selectedId,
   onPointClick,
-  height = 260,
+  height = 340,
 }: Props) {
-  const width = 600;
+  // Fill the container width (responsive) rather than a hard-coded pixel width,
+  // so the chart never overflows into its own horizontal scrollbar. Falls back
+  // to 600 until measured (and under jsdom, where layout is absent).
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const width = Math.max(useElementWidth(hostRef, 600), 200);
   const padLeft = 44;
   const padRight = 20;
   const padTop = 16;
@@ -93,8 +99,11 @@ export function ScatterPlot({
       prev = cur;
     }
     return out.join(" ");
+    // width feeds xOf() via plotW — must be a dep now that it's responsive
+    // (was the constant 600 before), else the step line stays at the old
+    // width on resize while the points reflow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepLine, xMin, xMax, yMin, yMax]);
+  }, [stepLine, xMin, xMax, yMin, yMax, width]);
 
   // Neutral (un-ranked) points first; ranked points drawn after so they
   // sit on top.
@@ -105,7 +114,7 @@ export function ScatterPlot({
   const cursor = onPointClick ? "pointer" : "default";
 
   return (
-    <div className="flex h-full w-full flex-col" style={{ minHeight: height }}>
+    <div ref={hostRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
       {/* Title strip — identical chrome to LinePlot. */}
       <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
         <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
@@ -115,7 +124,7 @@ export function ScatterPlot({
         height={height}
         role="img"
         aria-label={`${title} scatter plot`}
-        className="overflow-visible"
+        className="block overflow-visible"
       >
         {/* Axes */}
         <line x1={padLeft} y1={padTop} x2={padLeft} y2={padTop + plotH} stroke="#3f3f46" />
