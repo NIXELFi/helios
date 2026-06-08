@@ -6,14 +6,27 @@
 import type { TaskColorProperty } from "@helios/pm-ui";
 import { scopeKey } from "@pm/lib/nav";
 
+// Graph layout mode. "lanes" = subteam/subsystem swimlanes with chronological
+// columns (default); "clusters" = one rollup node per subteam (drill-down);
+// "legacy" = the original dependency-trees layout.
+export type GraphLayout = "lanes" | "clusters" | "legacy";
+export const GRAPH_LAYOUTS: readonly GraphLayout[] = ["lanes", "clusters", "legacy"];
+export const GRAPH_LAYOUT_LABEL: Record<GraphLayout, string> = {
+  lanes: "Subteam Lanes",
+  clusters: "Clusters",
+  legacy: "Legacy Dependency",
+};
+
 export interface GraphSettings {
   bgProperty: TaskColorProperty;
   outlineProperty: TaskColorProperty;
+  layout: GraphLayout;
 }
 
 export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   bgProperty: "status",
   outlineProperty: "priority",
+  layout: "lanes",
 };
 
 const COLOR_PROPERTIES: readonly TaskColorProperty[] = [
@@ -25,6 +38,10 @@ const COLOR_PROPERTIES: readonly TaskColorProperty[] = [
 
 function isColorProperty(v: unknown): v is TaskColorProperty {
   return typeof v === "string" && (COLOR_PROPERTIES as readonly string[]).includes(v);
+}
+
+function isLayout(v: unknown): v is GraphLayout {
+  return typeof v === "string" && (GRAPH_LAYOUTS as readonly string[]).includes(v);
 }
 
 function storageKey(teamSlug: string | null): string {
@@ -46,6 +63,7 @@ export function recallGraphSettings(teamSlug: string | null): GraphSettings {
       outlineProperty: isColorProperty(obj.outlineProperty)
         ? obj.outlineProperty
         : DEFAULT_GRAPH_SETTINGS.outlineProperty,
+      layout: isLayout(obj.layout) ? obj.layout : DEFAULT_GRAPH_SETTINGS.layout,
     };
   } catch {
     // ignore storage/parse failures (private mode, quota, malformed JSON)

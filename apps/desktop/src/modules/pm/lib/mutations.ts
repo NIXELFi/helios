@@ -4,6 +4,7 @@ import type {
   CalendarEvent,
   Milestone,
   Project,
+  Subsystem,
   Subteam,
   TaskComment,
   TaskDependency,
@@ -240,6 +241,24 @@ export async function patchSubteam(
 
 export async function removeSubteam(client: SupabaseClient, id: string): Promise<void> {
   check(await pm(client).from("subteams").delete().eq("id", id), "delete subteam");
+}
+
+// --- Subsystems (admin-gated) -----------------------------------------------
+
+export async function insertSubsystem(client: SupabaseClient, ss: Subsystem): Promise<void> {
+  check(await pm(client).from("subsystems").insert(ss), "create subsystem");
+}
+
+export async function patchSubsystem(
+  client: SupabaseClient,
+  id: string,
+  patch: Partial<Subsystem>,
+): Promise<void> {
+  check(await pm(client).from("subsystems").update(patch).eq("id", id), "update subsystem");
+}
+
+export async function removeSubsystem(client: SupabaseClient, id: string): Promise<void> {
+  check(await pm(client).from("subsystems").delete().eq("id", id), "delete subsystem");
 }
 
 // --- Build records ----------------------------------------------------------

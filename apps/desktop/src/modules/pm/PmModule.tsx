@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
+import { hexToRgba } from "@helios/pm-ui";
 import { loadWorkspace, type Workspace } from "@pm/lib/data";
 import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
 import { subscribePmRealtime } from "@pm/lib/pm-realtime";
 import { loadSnapshot, saveSnapshot } from "@pm/lib/workspace-snapshot";
+import { SubteamThemeProvider, useSubteamTheme } from "@pm/lib/subteamTheme";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
 import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
@@ -31,6 +33,32 @@ const PM_BACKSTOP_MS = 180_000;
 // task_subteams firing together) into one re-hydrate. Short enough to still feel
 // instant.
 const PM_REALTIME_DEBOUNCE_MS = 150;
+
+// Colored backdrop "aura" that tints the active view in the current scope's
+// identity color (subteam color, or ASU maroon+gold for all-subteams). Purely
+// decorative, sits behind the view content so it's instantly clear which
+// subteam you're in.
+function ScopeAura() {
+  const { primary, secondary, isAllTeams } = useSubteamTheme();
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }} aria-hidden>
+      <div
+        className="pm-aura pm-aura-tl"
+        style={{ background: `radial-gradient(circle at center, ${hexToRgba(primary, 0.2)} 0%, transparent 62%)` }}
+      />
+      <div
+        className="pm-aura pm-aura-br"
+        style={{
+          background: `radial-gradient(circle at center, ${hexToRgba(isAllTeams ? secondary : primary, isAllTeams ? 0.16 : 0.12)} 0%, transparent 62%)`,
+        }}
+      />
+      <div
+        className="pm-aura pm-aura-glow"
+        style={{ background: `radial-gradient(circle at center, ${hexToRgba(primary, 0.1)} 0%, transparent 70%)` }}
+      />
+    </div>
+  );
+}
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -324,11 +352,16 @@ export function PmModule() {
 
   return (
     <PmRouterProvider initialPath="/table">
-      <div className="pm-root flex h-full w-full bg-helios-base text-helios-text">
+      <div className="pm-root flex h-full w-full overflow-hidden bg-helios-base text-helios-text">
         <Sidebar />
-        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <CurrentView />
-        </main>
+        <SubteamThemeProvider>
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <ScopeAura />
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+              <CurrentView />
+            </div>
+          </main>
+        </SubteamThemeProvider>
         <TaskDetailSheet />
         <DeadlineReportHost />
         <WriteErrorToast />

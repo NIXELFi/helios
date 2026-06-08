@@ -1,11 +1,14 @@
 "use client";
 
-import type { Subteam, TaskColorProperty, TaskRow, TaskType } from "@helios/pm-ui";
+import type { Subteam, TaskColorProperty, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
 import {
   STATUS_DOT,
+  STATUS_FILL,
+  TASK_STATUSES,
   TASK_COLOR_PROPERTY_LABEL,
   TASK_TYPES,
   computeCriticalPath,
+  daysUntilDue,
   resolveMarkerColors,
 } from "@helios/pm-ui";
 import {
@@ -35,19 +38,21 @@ import { Select } from "@pm/components/ui/Select";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
+  GRAPH_LAYOUT_LABEL,
+  GRAPH_LAYOUTS,
   recallGraphSettings,
   rememberGraphSettings,
+  type GraphLayout,
 } from "@pm/lib/graphSettings";
 import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 
-type GraphSort = "dependency_tree" | "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
+type GraphSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GraphSort, string> = {
-  dependency_tree: "Dependency trees",
-  criticality: "Most critical",
+  criticality: "Highest priority",
   upcoming: "Upcoming deadline",
   subteam_asc: "Subteam A→Z",
   subteam_desc: "Subteam Z→A",
@@ -61,10 +66,6 @@ function sortComparator(
   critical: Set<string>,
 ): (a: TaskRow, b: TaskRow) => number {
   switch (sort) {
-    case "dependency_tree":
-      // The tree layout orders tasks within each tree by criticality; reuse that
-      // here so the per-rank ordering is consistent.
-      return (a, b) => criticalityScore(b, critical) - criticalityScore(a, critical);
     case "criticality":
       return (a, b) => criticalityScore(b, critical) - criticalityScore(a, critical);
     case "upcoming":
@@ -99,6 +100,7 @@ interface TaskNodeData extends Record<string, unknown> {
 const NODE_GLASS_ALPHA = 0.4;
 
 type TaskNodeType = Node<TaskNodeData, "task">;
+type GraphNodeType = TaskNodeType | LaneNodeType | ClusterNodeType;
 type FilterMode = "dim" | "hide";
 
 interface GraphFilters {
@@ -113,7 +115,264 @@ const EMPTY_FILTERS: GraphFilters = {
   mode: "dim",
 };
 
-const nodeTypes = { task: TaskNode };
+interface LaneNodeData extends Record<string, unknown> {
+  label: string;
+  color: string;
+  dashed: boolean;
+  width: number;
+  height: number;
+}
+type LaneNodeType = Node<LaneNodeData, "lane">;
+
+function hexToRgbaLocal(hex: string, a: number): string {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${a})`;
+}
+
+// Non-interactive swimlane backdrop drawn behind the task nodes.
+function LaneNode({ data }: NodeProps<LaneNodeType>) {
+  return (
+    <div
+      style={{
+        width: data.width,
+        height: data.height,
+        background: hexToRgbaLocal(data.color, 0.05),
+        borderColor: hexToRgbaLocal(data.color, data.dashed ? 0.5 : 0.28),
+        borderStyle: data.dashed ? "dashed" : "solid",
+      }}
+      className="pointer-events-none rounded-lg border"
+    >
+      <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg" style={{ background: data.color }} />
+      <div className="px-3 py-2">
+        <div className="text-xs font-semibold text-helios-text">{data.label}</div>
+        <div className="text-[9px] uppercase tracking-widest text-helios-dim">
+          {data.dashed ? "cross-team" : "lane"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ClusterTaskRow {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  owner: string;
+}
+interface ClusterNodeData extends Record<string, unknown> {
+  name: string;
+  color: string;
+  total: number;
+  done: number;
+  open: number;
+  overdue: number;
+  statusCounts: Record<TaskStatus, number>;
+  expanded: boolean;
+  tasks: ClusterTaskRow[];
+  height: number;
+}
+type ClusterNodeType = Node<ClusterNodeData, "cluster">;
+
+const CLUSTER_W = 280;
+const CLUSTER_H = 150;
+const CLUSTER_TASK_ROW = 22;
+const CLUSTER_EXPAND_MAX = 420;
+function clusterHeight(d: { expanded: boolean; tasks: { length: number } }): number {
+  if (!d.expanded) return CLUSTER_H;
+  return Math.min(CLUSTER_EXPAND_MAX, 116 + d.tasks.length * CLUSTER_TASK_ROW);
+}
+
+// One rollup card per subteam in the Clusters layout. Click the card to expand
+// it in place (reveals the subteam's tasks); click a task to open its detail.
+function ClusterNode({ data }: NodeProps<ClusterNodeType>) {
+  const selectTask = usePmStore((s) => s.selectTask);
+  const pct = data.total ? Math.round((data.done / data.total) * 100) : 0;
+  const segs = TASK_STATUSES.map((s) => ({ s, n: data.statusCounts[s] ?? 0 })).filter((x) => x.n > 0);
+  return (
+    <div
+      style={{ width: CLUSTER_W, height: data.height, borderColor: data.color }}
+      className="cursor-pointer overflow-hidden rounded-xl border bg-helios-panel/90 transition-shadow hover:shadow-[0_0_0_2px_rgba(255,198,39,0.4)]"
+    >
+      <div className="absolute left-0 top-0 h-full w-1.5 rounded-l-xl" style={{ background: data.color }} />
+      <div className="p-3">
+        <div className="flex items-start justify-between">
+          <div className="text-sm font-semibold text-helios-text">{data.name}</div>
+          <div className="text-xl font-bold tabular-nums" style={{ color: data.color }}>{pct}%</div>
+        </div>
+        <div className="mt-0.5 text-[10px] text-helios-dim">
+          {data.total} tasks · {data.open} open{data.overdue > 0 ? ` · ${data.overdue} overdue` : ""}
+        </div>
+        <div className="mt-3 flex h-2 overflow-hidden rounded bg-helios-base">
+          {segs.map(({ s, n }) => (
+            <div key={s} style={{ width: `${(n / data.total) * 100}%`, background: STATUS_FILL[s] }} />
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] uppercase tracking-widest text-asu-gold/80">
+          {data.expanded ? "▾ click to collapse" : "▸ click to expand"}
+        </div>
+      </div>
+      {data.expanded ? (
+        <ul
+          className="nowheel mx-2 mb-2 flex flex-col gap-0.5 overflow-y-auto border-t border-helios-line pt-1.5"
+          style={{ maxHeight: data.height - 116 }}
+        >
+          {data.tasks.map((t) => (
+            <li key={t.id}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); selectTask(t.id); }}
+                className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] hover:bg-helios-base"
+              >
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_DOT[t.status] }} />
+                <span className="min-w-0 flex-1 truncate text-helios-text">{t.title}</span>
+                <span className="shrink-0 text-[9px] text-helios-dim">{t.owner}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+const nodeTypes = { task: TaskNode, lane: LaneNode, cluster: ClusterNode };
+
+interface ClusterModel {
+  nodes: ClusterNodeType[];
+  edges: Edge[];
+}
+
+const CLUSTER_COL_GAP = CLUSTER_W + 150;
+const CLUSTER_BAND_GAP = 48;
+
+// Build the per-subteam rollup graph: one node per subteam, aggregated counts,
+// and bundled cross-team dependency edges (labeled with the underlying count).
+// Expanded subteams reveal their task list in place (taller node).
+function buildClusterModel(
+  tasks: ReadonlyArray<TaskRow>,
+  edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
+  expanded: Set<string>,
+): ClusterModel {
+  const byTeam = new Map<string, { st: Subteam; tasks: TaskRow[] }>();
+  const teamOf = new Map<string, string>();
+  for (const t of tasks) {
+    teamOf.set(t.id, t.subteam_id);
+    let g = byTeam.get(t.subteam_id);
+    if (!g) { g = { st: t.subteam, tasks: [] }; byTeam.set(t.subteam_id, g); }
+    g.tasks.push(t);
+  }
+  // aggregate cross-team edge counts
+  const pairCount = new Map<string, number>();
+  for (const e of edges) {
+    const a = teamOf.get(e.predecessor_id), b = teamOf.get(e.successor_id);
+    if (!a || !b || a === b) continue;
+    const k = `${a}->${b}`;
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  }
+  // longest-path rank over the cluster DAG (cycle-safe Kahn)
+  const ids = [...byTeam.keys()];
+  const succ = new Map<string, string[]>();
+  const indeg = new Map<string, number>();
+  for (const id of ids) { succ.set(id, []); indeg.set(id, 0); }
+  for (const k of pairCount.keys()) {
+    const [a, b] = k.split("->");
+    if (a && b && a !== b) { succ.get(a)!.push(b); indeg.set(b, (indeg.get(b) ?? 0) + 1); }
+  }
+  const rank = new Map<string, number>();
+  const q: string[] = [];
+  for (const id of ids) if ((indeg.get(id) ?? 0) === 0) { rank.set(id, 0); q.push(id); }
+  while (q.length) {
+    const id = q.shift()!;
+    const r = rank.get(id) ?? 0;
+    for (const s of succ.get(id) ?? []) {
+      rank.set(s, Math.max(rank.get(s) ?? 0, r + 1));
+      indeg.set(s, (indeg.get(s) ?? 0) - 1);
+      if ((indeg.get(s) ?? 0) === 0) q.push(s);
+    }
+  }
+  for (const id of ids) if (!rank.has(id)) rank.set(id, 0);
+
+  // Per-cluster aggregated data + ordered task rows (open first, then by title).
+  const datum = new Map<string, ClusterNodeData>();
+  for (const id of ids) {
+    const g = byTeam.get(id)!;
+    const statusCounts = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as Record<TaskStatus, number>;
+    let done = 0, overdue = 0;
+    for (const t of g.tasks) {
+      statusCounts[t.status] += 1;
+      if (t.status === "done") done += 1;
+      else {
+        const d = daysUntilDue(t.due_date);
+        if (d !== null && d < 0) overdue += 1;
+      }
+    }
+    const rows: ClusterTaskRow[] = [...g.tasks]
+      .sort((a, b) => (a.status === "done" ? 1 : 0) - (b.status === "done" ? 1 : 0) || a.title.localeCompare(b.title))
+      .map((t) => ({ id: t.id, title: t.title, status: t.status, owner: t.owner?.name ?? "—" }));
+    const isExpanded = expanded.has(id);
+    const d: ClusterNodeData = {
+      name: g.st.name,
+      color: g.st.color ?? "#6B7280",
+      total: g.tasks.length,
+      done,
+      open: g.tasks.length - done,
+      overdue,
+      statusCounts,
+      expanded: isExpanded,
+      tasks: rows,
+      height: 0,
+    };
+    d.height = clusterHeight(d);
+    datum.set(id, d);
+  }
+
+  // Stack each rank-column top-to-bottom using each node's actual height so
+  // expanding a cluster reflows its neighbors instead of overlapping them.
+  const byRank = new Map<number, string[]>();
+  for (const id of ids) {
+    const r = rank.get(id)!;
+    if (!byRank.has(r)) byRank.set(r, []);
+    byRank.get(r)!.push(id);
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  for (const [r, arr] of byRank) {
+    arr.sort((a, b) => (byTeam.get(a)!.st.name).localeCompare(byTeam.get(b)!.st.name));
+    let cy = 0;
+    for (const id of arr) {
+      pos.set(id, { x: r * CLUSTER_COL_GAP, y: cy });
+      cy += datum.get(id)!.height + CLUSTER_BAND_GAP;
+    }
+  }
+
+  const nodes: ClusterNodeType[] = ids.map((id) => ({
+    id: `cluster:${id}`,
+    type: "cluster" as const,
+    position: pos.get(id) ?? { x: 0, y: 0 },
+    data: datum.get(id)!,
+    draggable: true,
+    selectable: true,
+    zIndex: 1,
+  }));
+
+  const clusterEdges: Edge[] = [...pairCount.entries()].map(([k, count]) => {
+    const [a, b] = k.split("->");
+    return {
+      id: `cl-${k}`,
+      source: `cluster:${a}`,
+      target: `cluster:${b}`,
+      type: "smoothstep",
+      label: String(count),
+      labelBgPadding: [4, 2] as [number, number],
+      labelStyle: { fill: "#0F1115", fontWeight: 700, fontSize: 11 },
+      labelBgStyle: { fill: "#FFC627" },
+      style: { stroke: "#FFC627", strokeWidth: Math.min(6, 1.5 + count) },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "#FFC627" },
+    };
+  });
+
+  return { nodes, edges: clusterEdges };
+}
 
 function TaskNode({ data }: NodeProps<TaskNodeType>) {
   const { task, isCritical, inSelectedChain, dimmed, highlightCritical, relation, bgProperty, outlineProperty } = data;
@@ -199,7 +458,11 @@ const UNRELATED_ROW_GAP = ROW_GAP * 2;
 // In a SPECIFIC subteam's graph, cross-team prerequisite/dependent tasks are
 // shown only up to this many dependency hops from the subteam's own tasks;
 // anything farther removed is hidden.
-const SUBTEAM_GRAPH_MAX_HOPS = 2;
+// Direct cross-team handoffs only (1 hop). Pulling in 2+ hops drags in nearly
+// every subteam on a hub-heavy graph, making each subteam view look like the
+// all-subteams view — so the neighborhood is kept to immediate prerequisites /
+// dependents of the subteam's own tasks.
+const SUBTEAM_GRAPH_MAX_HOPS = 1;
 
 // Subtasks are nested under their parent as an indented outline: each depth level
 // shifts right by SUBTASK_INDENT, and stacked subtasks step down by SUBTASK_ROW_GAP.
@@ -355,6 +618,175 @@ function layeredLayout(
     }
   }
   return positions;
+}
+
+// --- Subteam Lanes layout ---------------------------------------------------
+// Swimlanes (one per subteam at the project root; per subsystem inside a single
+// subteam, with cross-team work in flanking "(external)" lanes) crossed with
+// chronological columns (x = longest-path dependency depth, so every task sits
+// to the right of its prerequisites). Within a lane, same-depth tasks stack in
+// sub-rows ordered by the active comparator.
+
+export interface LaneInfo {
+  key: string;
+  label: string;
+  color: string;
+  dashed: boolean;
+  top: number;
+  height: number;
+  x: number;
+  width: number;
+}
+
+const LANE_COL_GAP = NODE_WIDTH + 90;
+const LANE_ROW_GAP = NODE_HEIGHT + 22;
+const LANE_LABEL_GUTTER = 168;
+const LANE_PAD_TOP = 34;
+const LANE_PAD_BOT = 16;
+const LANE_BAND_GAP = 26;
+
+// Longest-path depth per task via a Kahn topological sweep (cycle-safe).
+function computeRanks(
+  tasks: ReadonlyArray<TaskRow>,
+  edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
+): Map<string, number> {
+  const ids = new Set(tasks.map((t) => t.id));
+  const succ = new Map<string, string[]>();
+  const indeg = new Map<string, number>();
+  for (const t of tasks) {
+    succ.set(t.id, []);
+    indeg.set(t.id, 0);
+  }
+  for (const e of edges) {
+    if (ids.has(e.predecessor_id) && ids.has(e.successor_id)) {
+      succ.get(e.predecessor_id)!.push(e.successor_id);
+      indeg.set(e.successor_id, (indeg.get(e.successor_id) ?? 0) + 1);
+    }
+  }
+  const rank = new Map<string, number>();
+  const q: string[] = [];
+  for (const t of tasks) if ((indeg.get(t.id) ?? 0) === 0) { rank.set(t.id, 0); q.push(t.id); }
+  while (q.length) {
+    const id = q.shift()!;
+    const r = rank.get(id) ?? 0;
+    for (const s of succ.get(id) ?? []) {
+      rank.set(s, Math.max(rank.get(s) ?? 0, r + 1));
+      indeg.set(s, (indeg.get(s) ?? 0) - 1);
+      if ((indeg.get(s) ?? 0) === 0) q.push(s);
+    }
+  }
+  for (const t of tasks) if (!rank.has(t.id)) rank.set(t.id, 0);
+  return rank;
+}
+
+interface LaneAssign {
+  key: string;
+  label: string;
+  color: string;
+  dashed: boolean;
+  order: number;
+}
+
+function laneLayout(
+  tasks: ReadonlyArray<TaskRow>,
+  edges: ReadonlyArray<{ predecessor_id: string; successor_id: string }>,
+  compare: (a: TaskRow, b: TaskRow) => number,
+  currentTeam: { id: string } | null,
+  relationByTaskId: Map<string, CrossTeamRelation>,
+): { pos: Map<string, { x: number; y: number }>; lanes: LaneInfo[] } {
+  const FALLBACK = "#6B7280";
+  const laneFor = (t: TaskRow): LaneAssign => {
+    if (currentTeam) {
+      const rel = relationByTaskId.get(t.id) ?? "owned";
+      if (rel !== "owned") {
+        return { key: `ext:${t.subteam_id}`, label: `${t.subteam.name} (external)`, color: t.subteam.color ?? FALLBACK, dashed: true, order: 1000 };
+      }
+      const ss = t.subsystem;
+      return { key: ss ? `ss:${ss.id}` : "ss:none", label: ss?.name ?? "No subsystem", color: t.subteam.color ?? FALLBACK, dashed: false, order: 0 };
+    }
+    return { key: t.subteam_id, label: t.subteam.name, color: t.subteam.color ?? FALLBACK, dashed: false, order: 0 };
+  };
+
+  // Subtasks are stacked as an indented outline UNDER their parent (same lane),
+  // not laid out by their own dependency depth — so only TOP-LEVEL tasks define
+  // the columns; the column x is their longest-path depth.
+  const displayed = new Set(tasks.map((t) => t.id));
+  const isSubtask = (t: TaskRow) => t.parent_task_id != null && displayed.has(t.parent_task_id);
+  const childrenOf = new Map<string, TaskRow[]>();
+  for (const t of tasks) {
+    if (isSubtask(t)) {
+      const arr = childrenOf.get(t.parent_task_id!) ?? [];
+      arr.push(t);
+      childrenOf.set(t.parent_task_id!, arr);
+    }
+  }
+  const topLevel = tasks.filter((t) => !isSubtask(t));
+
+  const rank = computeRanks(topLevel, edges);
+  const meta = new Map<string, LaneAssign>();
+  const byLane = new Map<string, TaskRow[]>();
+  for (const t of topLevel) {
+    const l = laneFor(t);
+    if (!meta.has(l.key)) { meta.set(l.key, l); byLane.set(l.key, []); }
+    byLane.get(l.key)!.push(t);
+  }
+  const laneKeys = [...meta.keys()].sort((a, b) => {
+    const A = meta.get(a)!, B = meta.get(b)!;
+    return A.order - B.order || A.label.localeCompare(B.label);
+  });
+
+  const pos = new Map<string, { x: number; y: number }>();
+  let maxX = 0;
+  const seen = new Set<string>();
+  // Place a task and its subtask subtree; children indent one step and stack
+  // below. Returns the top-most y of the deepest/last node placed (its row), so
+  // the caller can advance past the whole subtree.
+  const placeSubtree = (t: TaskRow, x: number, top: number): number => {
+    pos.set(t.id, { x, y: top });
+    seen.add(t.id);
+    if (x > maxX) maxX = x;
+    let cursor = top;
+    const kids = (childrenOf.get(t.id) ?? []).slice().sort(compare);
+    for (const k of kids) {
+      if (seen.has(k.id)) continue; // guard against malformed parent cycles
+      cursor = placeSubtree(k, x + SUBTASK_INDENT, cursor + SUBTASK_ROW_GAP);
+    }
+    return cursor;
+  };
+
+  const lanes: LaneInfo[] = [];
+  let y = 0;
+  for (const key of laneKeys) {
+    const m = meta.get(key)!;
+    const arr = byLane.get(key)!;
+    const byRank = new Map<number, TaskRow[]>();
+    for (const t of arr) {
+      const r = rank.get(t.id) ?? 0;
+      if (!byRank.has(r)) byRank.set(r, []);
+      byRank.get(r)!.push(t);
+    }
+    const innerTop = y + LANE_PAD_TOP;
+    let laneBottom = innerTop;
+    for (const r of [...byRank.keys()].sort((a, b) => a - b)) {
+      const col = byRank.get(r)!.slice().sort(compare);
+      let cursor = innerTop;
+      for (const t of col) {
+        const bottom = placeSubtree(t, r * LANE_COL_GAP, cursor);
+        cursor = bottom + LANE_ROW_GAP;
+        if (bottom + NODE_HEIGHT > laneBottom) laneBottom = bottom + NODE_HEIGHT;
+      }
+    }
+    const height = laneBottom - y + LANE_PAD_BOT;
+    lanes.push({
+      key, label: m.label, color: m.color, dashed: m.dashed,
+      top: y, height, x: -LANE_LABEL_GUTTER, width: 0,
+    });
+    y += height + LANE_BAND_GAP;
+  }
+  // Lane bands span the full content width (now that subtask indents are known).
+  const contentWidth = maxX + NODE_WIDTH;
+  for (const ln of lanes) ln.width = contentWidth + LANE_LABEL_GUTTER + 40;
+  return { pos, lanes };
 }
 
 // "Dependency trees" layout: split the tasks into separate trees and stack them
@@ -807,19 +1239,35 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [highlightCritical, setHighlightCritical] = useState(false);
+  // Which subteam clusters are expanded in place (Clusters layout).
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  // Re-frame the canvas when the LAYOUT changes (the node set moves wholesale).
+  // Not on expand/collapse or drag — only a layout switch sets this flag.
+  const pendingFit = useRef(false);
   // User-pinned positions, committed on drag STOP. react-flow owns the LIVE
   // drag (via useNodesState below); we persist only the final position here so
   // the node array isn't rebuilt mid-drag (which blanked the canvas).
   const [pinned, setPinned] = useState<Map<string, { x: number; y: number }>>(new Map());
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<TaskNodeType>([]);
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<GraphNodeType>([]);
   const [filters, setFilters] = useState<GraphFilters>(EMPTY_FILTERS);
-  const [sort, setSort] = useState<GraphSort>("dependency_tree");
+  const [sort, setSort] = useState<GraphSort>("criticality");
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // Color-by-property settings, persisted per-scope (mirrors the Gantt).
+  // Color-by-property + layout settings, persisted per-scope (mirrors the Gantt).
   const [colorSettings, setColorSettings] = useState(() => recallGraphSettings(teamSlug));
-  const { bgProperty, outlineProperty } = colorSettings;
+  const { bgProperty, outlineProperty, layout } = colorSettings;
+  // GraphInner does NOT remount on scope change (the route swaps teamSlug in
+  // place), so re-load the new scope's saved settings when teamSlug changes —
+  // and DON'T persist the old scope's values into the new one. A single effect
+  // keyed by a "loaded scope" ref handles both: load on scope change, persist
+  // user edits within the same scope.
+  const loadedScope = useRef(teamSlug);
   useEffect(() => {
+    if (loadedScope.current !== teamSlug) {
+      loadedScope.current = teamSlug;
+      setColorSettings(recallGraphSettings(teamSlug));
+      return;
+    }
     rememberGraphSettings(teamSlug, colorSettings);
   }, [teamSlug, colorSettings]);
 
@@ -866,12 +1314,17 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
     [effectiveTasks, effectiveDeps],
   );
 
-  const autoPositions = useMemo(() => {
-    // Subtasks are laid out as an indented outline UNDER their parent rather than
-    // by their own dependencies: lay out only the top-level (non-subtask) tasks
-    // via the dependency layout, then stack each parent's subtask subtree below
-    // it, indented one step per depth.
+  const layoutResult = useMemo<{ pos: Map<string, { x: number; y: number }>; lanes: LaneInfo[] }>(() => {
     const displayed = new Set(effectiveTasks.map((t) => t.id));
+
+    // Subteam Lanes: positions ALL tasks (subtasks included) by lane + depth; the
+    // lane engine guarantees no overlap, so no subtree outline / overlap pass.
+    if (layout === "lanes") {
+      return laneLayout(effectiveTasks, effectiveDeps, sortComparator(sort, critical), currentTeam, relationByTaskId);
+    }
+
+    // Legacy / Clusters(layered): subtasks are an indented outline UNDER their
+    // parent; top-level tasks are laid out by dependency, then subtrees stacked.
     const isSubtask = (t: TaskRow) =>
       t.parent_task_id != null && displayed.has(t.parent_task_id);
     const childrenOf = new Map<string, string[]>();
@@ -884,7 +1337,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
     }
     const topLevel = effectiveTasks.filter((t) => !isSubtask(t));
     const base =
-      sort === "dependency_tree"
+      layout === "legacy"
         ? treeLayout(topLevel, effectiveDeps, critical)
         : layeredLayout(topLevel, effectiveDeps, sortComparator(sort, critical));
 
@@ -906,8 +1359,17 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
     }
     // Guarantee no two cards overlap.
     removeCardOverlaps(pos, effectiveTasks, displayed);
-    return pos;
-  }, [effectiveTasks, effectiveDeps, sort, critical]);
+    return { pos, lanes: [] };
+  }, [effectiveTasks, effectiveDeps, sort, critical, layout, currentTeam, relationByTaskId]);
+
+  const autoPositions = layoutResult.pos;
+  const laneBands = layoutResult.lanes;
+
+  // Clusters layout: one rollup node per subteam + bundled cross-team edges.
+  const clusterModel = useMemo(
+    () => (layout === "clusters" ? buildClusterModel(effectiveTasks, effectiveDeps, expandedClusters) : null),
+    [layout, effectiveTasks, effectiveDeps, expandedClusters],
+  );
 
   useEffect(() => {
     const ids = new Set(effectiveTasks.map((t) => t.id));
@@ -933,39 +1395,56 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
     return a;
   }, [selected, effectiveDeps]);
 
-  const computedNodes: TaskNodeType[] = useMemo(
-    () =>
-      effectiveTasks.map((t) => {
-        const pos = pinned.get(t.id) ?? autoPositions.get(t.id) ?? { x: 0, y: 0 };
-        const inChain = chain === null ? false : chain.has(t.id);
+  const computedNodes: GraphNodeType[] = useMemo(() => {
+    if (clusterModel) {
+      // Cluster rollup nodes carry their own positions; honor pins on drag.
+      return clusterModel.nodes.map((n) => ({ ...n, position: pinned.get(n.id) ?? n.position }));
+    }
+    // Lane backdrops first so they render behind the task nodes.
+    const laneNodes: LaneNodeType[] = laneBands.map((b) => ({
+      id: `lane:${b.key}`,
+      type: "lane" as const,
+      position: { x: b.x, y: b.top },
+      data: { label: b.label, color: b.color, dashed: b.dashed, width: b.width, height: b.height },
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      deletable: false,
+      focusable: false,
+      zIndex: 0,
+    }));
+    const taskNodes: TaskNodeType[] = effectiveTasks.map((t) => {
+      const pos = pinned.get(t.id) ?? autoPositions.get(t.id) ?? { x: 0, y: 0 };
+      const inChain = chain === null ? false : chain.has(t.id);
 
-        // A task is "dimmed" if:
-        //   (a) a chain is selected and this task isn't on it, OR
-        //   (b) filters are active in "dim" mode and this task is out of scope
-        let dimmed = false;
-        if (chain !== null && !inChain) dimmed = true;
-        if (anyFilterActive && filters.mode === "dim" && !filterInScope.has(t.id)) dimmed = true;
+      // A task is "dimmed" if:
+      //   (a) a chain is selected and this task isn't on it, OR
+      //   (b) filters are active in "dim" mode and this task is out of scope
+      let dimmed = false;
+      if (chain !== null && !inChain) dimmed = true;
+      if (anyFilterActive && filters.mode === "dim" && !filterInScope.has(t.id)) dimmed = true;
 
-        return {
-          id: t.id,
-          type: "task" as const,
-          position: pos,
-          data: {
-            task: t,
-            isCritical: critical.has(t.id),
-            inSelectedChain: inChain,
-            dimmed,
-            highlightCritical,
-            relation: relationByTaskId.get(t.id) ?? "owned",
-            bgProperty,
-            outlineProperty,
-          },
-          draggable: true,
-          selectable: true,
-        };
-      }),
-    [effectiveTasks, pinned, autoPositions, critical, chain, highlightCritical, relationByTaskId, anyFilterActive, filters.mode, filterInScope, bgProperty, outlineProperty],
-  );
+      return {
+        id: t.id,
+        type: "task" as const,
+        position: pos,
+        data: {
+          task: t,
+          isCritical: critical.has(t.id),
+          inSelectedChain: inChain,
+          dimmed,
+          highlightCritical,
+          relation: relationByTaskId.get(t.id) ?? "owned",
+          bgProperty,
+          outlineProperty,
+        },
+        draggable: true,
+        selectable: true,
+        zIndex: 1,
+      };
+    });
+    return [...laneNodes, ...taskNodes];
+  }, [clusterModel, effectiveTasks, laneBands, pinned, autoPositions, critical, chain, highlightCritical, relationByTaskId, anyFilterActive, filters.mode, filterInScope, bgProperty, outlineProperty]);
 
   // Push the derived nodes into react-flow's own node state. This runs only
   // when the derived inputs change (data / filter / sort / pinned) — NEVER
@@ -977,14 +1456,30 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
       const prevById = new Map(prev.map((nd) => [nd.id, nd]));
       return computedNodes.map((cn) => {
         const ex = prevById.get(cn.id);
-        return ex ? { ...ex, position: cn.position, data: cn.data } : cn;
+        // Same id is always the same node kind, so merging measured fields from
+        // `ex` with `cn`'s position/data is sound; TS can't prove it across the union.
+        return ex ? ({ ...ex, position: cn.position, data: cn.data } as GraphNodeType) : cn;
       });
     });
   }, [computedNodes, setRfNodes]);
 
+  // Flag a re-frame whenever the layout mode changes.
+  useEffect(() => {
+    pendingFit.current = true;
+  }, [layout]);
+
+  // After the nodes for a new layout have been pushed, fit the view once.
+  useEffect(() => {
+    if (!pendingFit.current) return;
+    pendingFit.current = false;
+    const raf = requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
+    return () => cancelAnimationFrame(raf);
+  }, [rfNodes, rf]);
+
   const edges: Edge[] = useMemo(
-    () =>
-      reducedDeps.map((d) => {
+    () => {
+      if (clusterModel) return clusterModel.edges;
+      return reducedDeps.map((d) => {
         const pred = effectiveTasks.find((t) => t.id === d.predecessor_id);
         const succ = effectiveTasks.find((t) => t.id === d.successor_id);
         const crossTeam = pred && succ && pred.subteam_id !== succ.subteam_id;
@@ -1008,7 +1503,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
         // In the Dependency-trees layout, an edge into a hub is a cross-tree
         // "leader line" connecting two separated trees — dash it so it reads as
         // a convergence link rather than an in-tree dependency.
-        const isLeader = sort === "dependency_tree" && hubIds.has(d.successor_id);
+        const isLeader = layout === "legacy" && hubIds.has(d.successor_id);
 
         return {
           id: `${d.predecessor_id}-${d.successor_id}`,
@@ -1029,8 +1524,9 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 18, height: 18 },
           animated: inChain,
         };
-      }),
-    [reducedDeps, effectiveTasks, chain, critical, highlightCritical, anyFilterActive, filters.mode, filterInScope, sort, hubIds],
+      });
+    },
+    [clusterModel, reducedDeps, effectiveTasks, chain, critical, highlightCritical, anyFilterActive, filters.mode, filterInScope, layout, hubIds],
   );
 
   // Clamp panning to the bounding box of the laid-out tasks (plus padding) so
@@ -1079,7 +1575,8 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   // react-flow owns the LIVE drag (via useNodesState's onNodesChange). We only
   // persist the final position when the drag ends, so `computedNodes` stays
   // stable during the drag.
-  const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: TaskNodeType) => {
+  const onNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: GraphNodeType) => {
+    if (node.type === "lane") return; // lane backdrops aren't draggable
     setPinned((prev) => {
       const next = new Map(prev);
       next.set(node.id, { x: node.position.x, y: node.position.y });
@@ -1111,6 +1608,23 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
         actions={
           // Wrap on narrow screens so the toolbar doesn't clip its right-edge buttons.
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+            <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
+              Layout
+              <Select
+                size="sm"
+                value={layout}
+                ariaLabel="Graph layout"
+                className="min-w-[150px]"
+                onChange={(v) => {
+                  setColorSettings((s) => ({ ...s, layout: v as GraphLayout }));
+                  setPinned(new Map());
+                }}
+                options={(GRAPH_LAYOUTS as readonly GraphLayout[]).map((k) => ({
+                  value: k,
+                  label: GRAPH_LAYOUT_LABEL[k],
+                }))}
+              />
+            </label>
             <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
               Sort
               <Select
@@ -1201,7 +1715,20 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           onNodeDragStop={onNodeDragStop}
           onEdgesChange={onEdgesChange}
           onNodeClick={(_e, n) => {
-            // Plain node click only highlights the dependency chain. Opening the
+            // Cluster nodes expand/collapse in place (roll-up), no navigation.
+            if (n.type === "cluster") {
+              const teamId = n.id.startsWith("cluster:") ? n.id.slice("cluster:".length) : null;
+              if (teamId) {
+                setExpandedClusters((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(teamId)) next.delete(teamId);
+                  else next.add(teamId);
+                  return next;
+                });
+              }
+              return;
+            }
+            // Plain task click only highlights the dependency chain. Opening the
             // detail sheet is reserved for clicking the task title (see TaskNode).
             setSelected(n.id);
           }}
@@ -1222,7 +1749,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           minZoom={GRAPH_MIN_ZOOM}
           maxZoom={GRAPH_MAX_ZOOM}
           panOnDrag
-          style={{ backgroundColor: "#0E0E10" }}
+          style={{ backgroundColor: "transparent" }}
           defaultEdgeOptions={{ type: "smoothstep" }}
         >
           <Background color="#23252B" gap={20} />

@@ -47,6 +47,52 @@
   opacity: 0.85;
 }
 
+/* Scope identity aura — soft colored glows behind the active view, tinted by the
+   current subteam (or ASU maroon+gold for all-subteams). Slow drift so it feels
+   alive without distracting. */
+.pm-aura {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(36px);
+  will-change: transform, opacity;
+}
+.pm-aura-tl {
+  top: -16%;
+  left: -8%;
+  width: 46%;
+  height: 60%;
+  animation: pm-aura-drift-a 16s ease-in-out infinite;
+}
+.pm-aura-br {
+  bottom: -18%;
+  right: -8%;
+  width: 50%;
+  height: 64%;
+  animation: pm-aura-drift-b 19s ease-in-out infinite;
+}
+.pm-aura-glow {
+  top: 20%;
+  left: 30%;
+  width: 50%;
+  height: 56%;
+  animation: pm-aura-pulse 12s ease-in-out infinite;
+}
+@keyframes pm-aura-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(4%, 5%, 0); }
+}
+@keyframes pm-aura-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(-5%, -4%, 0); }
+}
+@keyframes pm-aura-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pm-aura { animation: none !important; }
+}
+
 /* React Flow on the dark theme (dependency graph) — wipe its default light
    controls so the Helios styling shows through. */
 .react-flow__controls-button {

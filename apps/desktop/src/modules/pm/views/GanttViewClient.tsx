@@ -244,7 +244,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
 
   // Color-by-property settings, persisted per-scope (see ganttSettings.ts).
   const [colorSettings, setColorSettings] = useState(() => recallGanttSettings(teamSlug));
-  const { bgProperty, outlineProperty } = colorSettings;
+  const { bgProperty, outlineProperty, showDependencies } = colorSettings;
   useEffect(() => {
     rememberGanttSettings(teamSlug, colorSettings);
   }, [teamSlug, colorSettings]);
@@ -490,6 +490,17 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               minusDisabled={rowHeight <= ROW_BOUNDS.min}
               plusDisabled={rowHeight >= ROW_BOUNDS.max}
             />
+            <label className="inline-flex items-center gap-2 text-xs font-normal text-helios-dim">
+              <input
+                type="checkbox"
+                checked={showDependencies}
+                onChange={(e) =>
+                  setColorSettings((s) => ({ ...s, showDependencies: e.target.checked }))
+                }
+                className="size-3 accent-asu-gold"
+              />
+              Dependencies
+            </label>
             <label className="inline-flex items-center gap-2 text-xs font-normal text-helios-dim">
               <input
                 type="checkbox"
@@ -832,7 +843,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#9097A0" />
                   </marker>
                 </defs>
-                {deps.map((d) => {
+                {showDependencies && deps.map((d) => {
                   const pred = barByTaskId.get(d.predecessor_id);
                   const succ = barByTaskId.get(d.successor_id);
                   if (!pred || !succ) return null;

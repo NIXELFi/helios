@@ -9,11 +9,15 @@ import { scopeKey } from "@pm/lib/nav";
 export interface GanttSettings {
   bgProperty: TaskColorProperty;
   outlineProperty: TaskColorProperty;
+  // Whether dependency arrows are drawn between bars. On by default; users can
+  // hide them to declutter a dense chart.
+  showDependencies: boolean;
 }
 
 export const DEFAULT_GANTT_SETTINGS: GanttSettings = {
   bgProperty: "status",
   outlineProperty: "priority",
+  showDependencies: true,
 };
 
 const COLOR_PROPERTIES: readonly TaskColorProperty[] = [
@@ -46,6 +50,10 @@ export function recallGanttSettings(teamSlug: string | null): GanttSettings {
       outlineProperty: isColorProperty(obj.outlineProperty)
         ? obj.outlineProperty
         : DEFAULT_GANTT_SETTINGS.outlineProperty,
+      showDependencies:
+        typeof obj.showDependencies === "boolean"
+          ? obj.showDependencies
+          : DEFAULT_GANTT_SETTINGS.showDependencies,
     };
   } catch {
     // ignore storage/parse failures (private mode, quota, malformed JSON)
