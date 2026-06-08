@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 
 import { loadPersisted, savePersisted } from "../lib/cfdStorage";
 import { type CfdBridge, realBridge } from "../lib/tauriBridge";
-import { EMPTY_BASELINE, SDM26_VEHICLE } from "../lib/performance/vehicle";
+import { REFERENCE_2026, SDM26_VEHICLE } from "../lib/performance/vehicle";
 import type { ReferenceBaseline, VehicleConfig } from "../lib/performance/types";
 import type {
   CycleStats,
@@ -44,7 +44,7 @@ export const initialState: State = {
   activeScreen: "config",
   hydrated: false,
   vehicleConfig: SDM26_VEHICLE,
-  referenceBaseline: EMPTY_BASELINE,
+  referenceBaseline: REFERENCE_2026,
 };
 
 export type Action =

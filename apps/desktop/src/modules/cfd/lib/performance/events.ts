@@ -10,7 +10,9 @@ import type { ReferenceBaseline, VehicleConfig } from "./types";
 import type { TorqueCurve } from "./torqueCurve";
 import { simAccel } from "./accel";
 import { simLap } from "./lapSim";
-import { synthesizeAutocross, synthesizeEndurance, type Track } from "./track";
+import { type Track } from "./track";
+import { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
+import { DEFAULT_FUEL, type Fuel } from "./fuels";
 import {
   accelPoints,
   autocrossPoints,
@@ -24,6 +26,21 @@ import {
 const ENDURANCE_LAPS_POINTS = 25;
 /** Eligibility time cap factor (§D.13.3.1): 1.45× the fastest lap. */
 const EFF_TIME_CAP = 1.45;
+
+// --- Endurance calibration (P2) ---------------------------------------------
+// Autocross runs flat-out; endurance does NOT. Over a 22 km run on degrading
+// tires, cone-bounded and managed for reliability + fuel, the field runs well
+// off the absolute limit — even the fastest 2026 lap (142 s) was ~20 s slower
+// than the flat-out physics. These two constants make the endurance lap match
+// the real field (calibrated to Mines: a CBR600RR/E85 team, 159.6 s/lap,
+// 0.9786 kg CO₂/lap → FEF 0.536 → 43 pts).
+
+/** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
+export const ENDURANCE_PACE = 0.71;
+/** Effective tank-to-propulsive-work efficiency for the energy→fuel estimate on
+ *  the endurance duty cycle (engine BSFC × part-load/idle losses, lumped).
+ *  Calibrated to the Mines fuel anchor — lower than peak BSFC by design. */
+export const ENDURANCE_THERMAL_EFF = 0.13;
 
 export interface EventScores {
   accel: { timeS: number; points: number | null };
@@ -43,7 +60,9 @@ export interface EventScores {
 export interface EventOpts {
   autocrossTrack?: Track;
   enduranceTrack?: Track;
-  /** Fuel CO₂ factor, kg/L (gasoline 2.31, E85 1.65). Default gasoline. */
+  /** Fuel for the endurance/efficiency energy + CO₂ chain. Default Sunoco 93. */
+  fuel?: Fuel;
+  /** Override just the CO₂ factor, kg/L (legacy; `fuel` is preferred). */
   co2PerL?: number;
 }
 
@@ -83,19 +102,28 @@ export function computeEvents(
   baseline: ReferenceBaseline,
   opts: EventOpts = {},
 ): EventScores {
-  const co2PerL = opts.co2PerL ?? 2.31;
-  const axTrack = opts.autocrossTrack ?? synthesizeAutocross();
-  const enTrack = opts.enduranceTrack ?? synthesizeEndurance();
+  const fuel = opts.fuel ?? DEFAULT_FUEL;
+  const co2PerL = opts.co2PerL ?? fuel.co2PerL;
+  const axTrack = opts.autocrossTrack ?? AUTOCROSS_2026;
+  const enTrack = opts.enduranceTrack ?? ENDURANCE_2026;
 
   const accel = simAccel(curve, vehicle);
   const accelPts = baseline.accelTMin ? accelPoints(accel.timeS, baseline.accelTMin) : null;
 
+  // Autocross = flat-out (pace 1.0, default). Calibrated muLat lands the time.
   const ax = simLap(curve, vehicle, axTrack);
   const axPts = baseline.autocrossTMin
     ? autocrossPoints(ax.lapTimeS, baseline.autocrossTMin)
     : null;
 
-  const en = simLap(curve, vehicle, enTrack, { co2PerL });
+  // Endurance = managed race pace + lumped fuel-burn efficiency on the chosen fuel.
+  const en = simLap(curve, vehicle, enTrack, {
+    pace: ENDURANCE_PACE,
+    thermalEff: ENDURANCE_THERMAL_EFF,
+    fuelLhvMJkg: fuel.lhvMJkg,
+    fuelDensityKgL: fuel.densityKgL,
+    co2PerL,
+  });
   const enTimePts = baseline.enduranceTMin
     ? enduranceTimePoints(en.lapTimeS, baseline.enduranceTMin)
     : null;
@@ -105,11 +133,16 @@ export function computeEvents(
     baseline.enduranceTMin && baseline.co2MinPerLap
       ? efficiencyFactor(en.lapTimeS, en.co2Kg, baseline.enduranceTMin, baseline.co2MinPerLap)
       : null;
+  // Prefer the real field EF anchors (§D.13.4.6); else approximate EFmin from the
+  // CO₂ ratio at the time cap and take EFmax = 1.
   const effMin =
-    baseline.co2MinPerLap && baseline.co2MaxPerLap
-      ? (1 / EFF_TIME_CAP) * (baseline.co2MinPerLap / baseline.co2MaxPerLap)
-      : null;
-  const effPts = factor != null && effMin != null ? efficiencyPoints(factor, effMin, 1) : null;
+    baseline.effMin != null
+      ? baseline.effMin
+      : baseline.co2MinPerLap && baseline.co2MaxPerLap
+        ? (1 / EFF_TIME_CAP) * (baseline.co2MinPerLap / baseline.co2MaxPerLap)
+        : null;
+  const effMax = baseline.effMax != null ? baseline.effMax : 1;
+  const effPts = factor != null && effMin != null ? efficiencyPoints(factor, effMin, effMax) : null;
 
   const parts = [accelPts, axPts, enPts, effPts];
   const totalPoints = parts.every((p) => p != null)

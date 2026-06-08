@@ -40,6 +40,14 @@ export interface LapOpts {
   fuelDensityKgL?: number;
   /** CO₂ per litre, kg/L (gasoline 2.31, E85 1.65 per §D.13.4.1). */
   co2PerL?: number;
+  /** Race-pace fraction (0..1, default 1 = flat-out qualifying lap). Models the
+   *  endurance regime: over a 22 km run on degrading tires, cone-bounded and
+   *  managed for reliability + fuel, the driver holds a fraction of the absolute
+   *  limit. Scales the whole speed envelope (corner ceilings AND top-speed cap),
+   *  so it lowers BOTH cornering and straight-line speed — which a pure throttle
+   *  cut can't, because corners are grip-limited. Slower speeds also cut drag
+   *  work → fuel. Autocross runs at 1.0; endurance below it. */
+  pace?: number;
 }
 
 export function simLap(
@@ -49,7 +57,7 @@ export function simLap(
   opts: LapOpts = {},
 ): LapResult {
   const { radius, step, length } = discretizeTrack(track, opts.ds ?? 2);
-  const v = solveSpeeds(curve, vehicle, radius, step, track.closed);
+  const v = solveSpeeds(curve, vehicle, radius, step, track.closed, opts.pace ?? 1);
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;
 
@@ -83,13 +91,16 @@ export function simLap(
   };
 }
 
-/** Solve v(s) for one lap. `closed` replicates 3× and returns the middle lap. */
+/** Solve v(s) for one lap. `closed` replicates 3× and returns the middle lap.
+ *  `pace` (0..1) scales the speed envelope (corner ceilings + top-speed cap) for
+ *  the endurance race-pace regime (1 = flat-out). */
 function solveSpeeds(
   curve: TorqueCurve,
   vehicle: VehicleConfig,
   radius: number[],
   ds: number,
   closed: boolean,
+  pace: number,
 ): number[] {
   const N = radius.length;
   const reps = closed ? 3 : 1;
@@ -109,7 +120,10 @@ function solveSpeeds(
     const v2 = denom > 1e-6 ? (vehicle.muLat * R * G) / denom : Number.POSITIVE_INFINITY;
     return Math.min(vCap, Math.sqrt(Math.max(0, v2)));
   };
-  const ceil = (i: number): number => vCorner(rad(i));
+  // Race-pace fraction scales the whole target-speed envelope (corners + the
+  // top-speed cap that vCorner returns on straights), modeling managed endurance
+  // pace; the engine still pulls at full force up to that lowered ceiling.
+  const ceil = (i: number): number => pace * vCorner(rad(i));
 
   // Longitudinal accel/brake available after lateral grip is spent (ellipse).
   const aLongGrip = (v: number, R: number, mu: number): number => {

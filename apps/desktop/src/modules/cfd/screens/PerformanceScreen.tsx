@@ -19,6 +19,10 @@ import {
   simAccel,
   skidpad,
   computeEvents,
+  AUTOCROSS_2026,
+  ENDURANCE_2026,
+  REFERENCE_2026,
+  trackLength,
   type VehicleConfig,
   type ReferenceBaseline,
   type EventScores,
@@ -26,6 +30,10 @@ import {
 import type { Study, SweepPoint } from "../state/types";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
+
+// The lap sim scores against the real 2026 courses (see lib/performance/tracks).
+const AX_LEN_M = trackLength(AUTOCROSS_2026);
+const EN_LEN_KM = trackLength(ENDURANCE_2026) / 1000;
 
 interface CurveSource {
   id: string;
@@ -310,15 +318,24 @@ function EventsSection({
   const set = (patch: Partial<ReferenceBaseline>) => onBaseline({ ...baseline, ...patch });
   return (
     <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="border-b border-[#2A2C32] px-3 py-2 text-[10px] uppercase tracking-wider text-[#FFC627]">
-        FSAE events — projected
+      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">FSAE events — projected</span>
+        <button
+          type="button"
+          onClick={() => onBaseline(REFERENCE_2026)}
+          className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          Load 2026 reference
+        </button>
       </div>
-      <div className="grid grid-cols-2 gap-2 border-b border-[#2A2C32] p-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 border-b border-[#2A2C32] p-3 sm:grid-cols-4">
         <BaselineField label="accel Tmin (s)" value={baseline.accelTMin} onChange={(n) => set({ accelTMin: n })} />
         <BaselineField label="autocross Tmin (s)" value={baseline.autocrossTMin} onChange={(n) => set({ autocrossTMin: n })} />
         <BaselineField label="enduro Tmin/lap (s)" value={baseline.enduranceTMin} onChange={(n) => set({ enduranceTMin: n })} />
         <BaselineField label="CO₂ min/lap (kg)" value={baseline.co2MinPerLap} onChange={(n) => set({ co2MinPerLap: n })} />
         <BaselineField label="CO₂ cap/lap (kg)" value={baseline.co2MaxPerLap} onChange={(n) => set({ co2MaxPerLap: n })} />
+        <BaselineField label="EF min (field)" value={baseline.effMin ?? null} onChange={(n) => set({ effMin: n })} />
+        <BaselineField label="EF max (field)" value={baseline.effMax ?? null} onChange={(n) => set({ effMax: n })} />
       </div>
       {events ? (
         <>
@@ -364,7 +381,7 @@ function EventsSection({
             </tbody>
           </table>
           <p className="px-3 py-2 text-[10px] text-[#5A5F66]">
-            Tracks are rules-synthesized placeholders — lap times are relative until a real GPS trace is loaded. Points project against last year's results (enter above).
+            Autocross 2026 ({AX_LEN_M.toFixed(0)} m, flat-out) and Endurance 2026 ({EN_LEN_KM.toFixed(2)} km/lap, race-paced) — real 2026 layouts. Model calibrated to SDM26's autocross (42.9 s) and the field's endurance/efficiency (Mines CBR600RR/E85). Lap times are estimates; points project against the 2026 field anchors above.
           </p>
         </>
       ) : (

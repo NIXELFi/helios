@@ -8,12 +8,14 @@ export {
   SDM26_VEHICLE,
   SDM25_VEHICLE,
   EMPTY_BASELINE,
+  REFERENCE_2026,
   carKeyForConfig,
   vehiclePresetForKey,
   totalReduction,
   gearVps,
   topSpeedMps,
 } from "./vehicle";
+export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
 export {
   torqueCurveFromSweep,
   torqueAtRpm,
@@ -55,6 +57,8 @@ export {
   computeEvents,
   EVENT_RANK_METRICS,
   POINTS_METRIC_KEYS,
+  ENDURANCE_PACE,
+  ENDURANCE_THERMAL_EFF,
   type EventScores,
   type EventOpts,
   type EventMetricKey,
@@ -63,8 +67,11 @@ export { simLap, type LapResult, type LapOpts } from "./lapSim";
 export {
   synthesizeAutocross,
   synthesizeEndurance,
+  parseTrack,
   discretizeTrack,
   trackLength,
   type Track,
   type TrackSegment,
+  type RawTrack,
 } from "./track";
+export { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";

@@ -1,0 +1,250 @@
+{
+  "name": "Endurance 2026",
+  "closed": true,
+  "segments": [
+    {
+      "length": 28.0,
+      "radius": 8.3
+    },
+    {
+      "length": 12.0,
+      "radius": 28.6
+    },
+    {
+      "length": 20.0,
+      "radius": 21.3
+    },
+    {
+      "length": 74.1,
+      "radius": null
+    },
+    {
+      "length": 18.0,
+      "radius": 16.1
+    },
+    {
+      "length": 39.0,
+      "radius": 19.0
+    },
+    {
+      "length": 22.0,
+      "radius": null
+    },
+    {
+      "length": 44.0,
+      "radius": 17.8
+    },
+    {
+      "length": 54.0,
+      "radius": 25.2
+    },
+    {
+      "length": 19.0,
+      "radius": null
+    },
+    {
+      "length": 68.1,
+      "radius": 13.4
+    },
+    {
+      "length": 23.0,
+      "radius": 4.6
+    },
+    {
+      "length": 36.0,
+      "radius": null
+    },
+    {
+      "length": 25.0,
+      "radius": 6.9
+    },
+    {
+      "length": 47.0,
+      "radius": 9.8
+    },
+    {
+      "length": 17.0,
+      "radius": 14.6
+    },
+    {
+      "length": 88.1,
+      "radius": null
+    },
+    {
+      "length": 13.0,
+      "radius": 8.5
+    },
+    {
+      "length": 15.0,
+      "radius": 4.5
+    },
+    {
+      "length": 19.0,
+      "radius": 10.1
+    },
+    {
+      "length": 35.0,
+      "radius": null
+    },
+    {
+      "length": 28.0,
+      "radius": 5.7
+    },
+    {
+      "length": 51.0,
+      "radius": 7.0
+    },
+    {
+      "length": 58.0,
+      "radius": 13.3
+    },
+    {
+      "length": 40.0,
+      "radius": 7.3
+    },
+    {
+      "length": 14.0,
+      "radius": 4.9
+    },
+    {
+      "length": 104.1,
+      "radius": 16.0
+    },
+    {
+      "length": 64.0,
+      "radius": null
+    },
+    {
+      "length": 12.0,
+      "radius": 25.1
+    },
+    {
+      "length": 18.0,
+      "radius": 20.9
+    },
+    {
+      "length": 41.0,
+      "radius": 36.4
+    },
+    {
+      "length": 25.0,
+      "radius": 4.6
+    },
+    {
+      "length": 173.1,
+      "radius": null
+    },
+    {
+      "length": 38.0,
+      "radius": 11.8
+    },
+    {
+      "length": 12.0,
+      "radius": 32.3
+    },
+    {
+      "length": 84.1,
+      "radius": 15.3
+    },
+    {
+      "length": 12.0,
+      "radius": 11.6
+    },
+    {
+      "length": 15.0,
+      "radius": 12.9
+    },
+    {
+      "length": 36.0,
+      "radius": 16.5
+    },
+    {
+      "length": 81.1,
+      "radius": null
+    },
+    {
+      "length": 18.0,
+      "radius": 21.5
+    },
+    {
+      "length": 12.0,
+      "radius": 15.7
+    },
+    {
+      "length": 18.0,
+      "radius": 27.1
+    },
+    {
+      "length": 12.0,
+      "radius": null
+    },
+    {
+      "length": 13.0,
+      "radius": 36.5
+    },
+    {
+      "length": 160.1,
+      "radius": null
+    },
+    {
+      "length": 14.0,
+      "radius": 34.0
+    },
+    {
+      "length": 36.0,
+      "radius": null
+    },
+    {
+      "length": 25.0,
+      "radius": 34.8
+    },
+    {
+      "length": 39.0,
+      "radius": 7.9
+    },
+    {
+      "length": 45.0,
+      "radius": null
+    },
+    {
+      "length": 12.0,
+      "radius": 25.1
+    },
+    {
+      "length": 38.0,
+      "radius": 37.9
+    },
+    {
+      "length": 27.0,
+      "radius": null
+    },
+    {
+      "length": 22.0,
+      "radius": 9.4
+    },
+    {
+      "length": 56.0,
+      "radius": 21.6
+    },
+    {
+      "length": 12.0,
+      "radius": 32.8
+    },
+    {
+      "length": 13.0,
+      "radius": null
+    },
+    {
+      "length": 24.0,
+      "radius": 8.3
+    },
+    {
+      "length": 54.0,
+      "radius": 9.5
+    },
+    {
+      "length": 27.0,
+      "radius": 13.5
+    }
+  ]
+}

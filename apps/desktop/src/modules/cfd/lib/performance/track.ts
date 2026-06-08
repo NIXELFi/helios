@@ -2,11 +2,11 @@
 // straight (radius = Infinity) or a constant-radius corner. Only the radius
 // profile matters for a point-mass lap sim, so corner direction is irrelevant.
 //
-// The synthesized tracks are PLACEHOLDERS built from the FSAE rules' feature
-// specs (§D.11 autocross, §D.12 endurance) — representative, not a real comp
-// course. The `Track` shape is the seam for dropping in GPS-traced curvature
-// later: produce segments (or a sampled radius profile) and everything else
-// works unchanged.
+// The real 2026 competition courses (see ./tracks2026.ts, traced from the
+// published course maps) are the production defaults. `synthesize*` below
+// remains as a rules-spec SYNTHETIC FALLBACK (§D.11 autocross, §D.12 endurance)
+// for tests / when no real track is supplied. `parseTrack` is the import seam:
+// any source that yields `{ length, radius|null }` segments drops straight in.
 
 export interface TrackSegment {
   /** Arc length of this segment (m). */
@@ -22,7 +22,30 @@ export interface Track {
   closed: boolean;
 }
 
+/** A track as it arrives from an external source (JSON file, GPS trace export):
+ *  same shape as `Track` but a straight is `radius: null` rather than Infinity,
+ *  since JSON can't carry Infinity. `parseTrack` normalizes it. */
+export interface RawTrack {
+  name: string;
+  closed: boolean;
+  segments: readonly { length: number; radius: number | null }[];
+}
+
 const STR = Infinity;
+
+/** Normalize a raw/serialized track into a `Track`: a null or non-positive
+ *  radius becomes a straight (Infinity), lengths are floored at 0. This is the
+ *  single entry point for loading real (or GPS-traced) courses. */
+export function parseTrack(raw: RawTrack): Track {
+  return {
+    name: raw.name,
+    closed: raw.closed,
+    segments: raw.segments.map((s) => ({
+      length: Math.max(0, s.length),
+      radius: s.radius != null && s.radius > 0 ? s.radius : STR,
+    })),
+  };
+}
 
 export function trackLength(t: Track): number {
   return t.segments.reduce((a, s) => a + Math.max(0, s.length), 0);
@@ -107,13 +130,15 @@ const ENDURANCE_MOTIF: TrackSegment[] = [
   { length: 31.4, radius: 20 },
 ];
 
-/** Representative autocross course (~0.8 km, point-to-point). Placeholder. */
+/** Rules-spec autocross course (~0.8 km, point-to-point). Synthetic fallback —
+ *  the real course is AUTOCROSS_2026 (./tracks2026.ts). */
 export function synthesizeAutocross(): Track {
   return buildFromMotif("Autocross (synthetic)", AUTOCROSS_MOTIF, 800, false);
 }
 
-/** Representative endurance lap (~1 km closed loop). Placeholder. Total
- *  endurance distance (~22 km) = this lap × lap count. */
+/** Rules-spec endurance lap (~1 km closed loop). Synthetic fallback — the real
+ *  course is ENDURANCE_2026 (./tracks2026.ts). Total endurance distance
+ *  (~22 km) = this lap × lap count. */
 export function synthesizeEndurance(): Track {
   return buildFromMotif("Endurance lap (synthetic)", ENDURANCE_MOTIF, 1000, true);
 }

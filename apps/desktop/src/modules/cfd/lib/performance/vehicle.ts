@@ -6,7 +6,9 @@ import type { ReferenceBaseline, VehicleConfig } from "./types";
 
 /** SDM26 (ASU Car #106) — chassis/aero from the 2026 FSAE spec sheet; gearbox =
  *  stock Honda CBR600RR (PC40) ratios + 2.111 primary, with SDM's 3.0 final
- *  drive. μ, shift_rpm and rev_limit are estimates pending confirmation. */
+ *  drive. muLat is calibrated so the flat-out autocross lap reproduces SDM26's
+ *  real 2026 time (42.922 s, 90.4 pts); muLong stays at the launch-traction
+ *  estimate that lands the 75 m accel at ~4.2 s. */
 export const SDM26_VEHICLE: VehicleConfig = {
   name: "SDM26",
   massKg: 268, // 200 kg car (no driver/fuel) + 68 kg driver
@@ -15,8 +17,8 @@ export const SDM26_VEHICLE: VehicleConfig = {
   wheelbaseM: 1.53,
   trackWidthM: 1.2, // F 1.207 / R 1.194
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
-  muLong: 1.5, // estimate (Hoosier R20 slick)
-  muLat: 1.5, // estimate
+  muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
+  muLat: 1.8, // calibrated to SDM26 autocross 42.922 s (Hoosier R20 slick + aero)
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,
@@ -36,6 +38,23 @@ export const EMPTY_BASELINE: ReferenceBaseline = {
   enduranceTMin: null,
   co2MinPerLap: null,
   co2MaxPerLap: null,
+  effMin: null,
+  effMax: null,
+};
+
+/** Real 2026 FSAE field anchors used to project points. Autocross Tmin is
+ *  back-solved from SDM26's run (42.922 s → 90.39 pts → Tmin ≈ 39.04 s); the
+ *  endurance/efficiency anchors are the published field min/max (the efficiency
+ *  "Maximum" time 206.024 s = 1.45 × Tmin 142.085 s confirms the eligibility
+ *  cap). accelTMin unknown → left null. */
+export const REFERENCE_2026: ReferenceBaseline = {
+  accelTMin: null,
+  autocrossTMin: 39.04,
+  enduranceTMin: 142.085,
+  co2MinPerLap: 0.5893,
+  co2MaxPerLap: 1.3214,
+  effMin: 0.308,
+  effMax: 0.839,
 };
 
 /** Total reduction (engine → wheel) in gear `gearIdx`: primary × gear × final. */

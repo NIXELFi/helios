@@ -50,4 +50,9 @@ export interface ReferenceBaseline {
   co2MinPerLap: number | null;
   /** Eligibility-cap CO₂ per lap (kg) — sets the efficiency-score floor. */
   co2MaxPerLap: number | null;
+  /** Field min/max efficiency FACTOR (EF) — the efficiency-score anchors
+   *  (§D.13.4.6). When both are present the score uses them directly; otherwise
+   *  it approximates EFmin from the CO₂ ratio and takes EFmax = 1. */
+  effMin?: number | null;
+  effMax?: number | null;
 }
