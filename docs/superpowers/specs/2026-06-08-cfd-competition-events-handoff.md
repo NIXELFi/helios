@@ -117,16 +117,47 @@ started from the app.
 - Optimizer scores **gasoline (Sunoco 93)** by default (SDM26's fuel); E85 is
   only used for the Mines calibration. Wiring a fuel selector is P3.
 
+## Session 2 (2026-06-09) — P3/P4/P5 + import + track overview ALL SHIPPED
+
+Branch `feat/cfd-competition-events`, all committed + pushed to origin.
+
+- **P4 sensitivity tornado** (`819c03b`). `optimizationStats.ts` gains
+  `spearman()` (avg-tie ranks) + `sensitivityTornado()`; `TornadoChart.tsx`
+  (diverging SVG, favorability-colored); wired into `OptimizationResults` off
+  the SAME view-remapped trials so "Rank by" re-derives sensitivity in that
+  dimension; clicking a bar drives the scatter. Validated on Nick's real
+  128-trial run: runner_length ρ −0.80 dominates.
+- **Import study (JSON)** (`67d74be`). Export was one-way; added the inverse.
+  `io.openTextFile()`, `lib/import/importStudy.ts` (`parseStudyImport` — pure,
+  round-trips a bundle / `{studies:[]}` dump / bare array; fresh ids; skip-bad-
+  keep-good), `CfdContext.importStudies()`, "Import (JSON)" button on Studies.
+  Imported optimization trials keep sweepPoints → event ranking + tornado work.
+- **Track overview** (`9ecec5c`). `trackGeometry.ts` `trackPlan()` (heading
+  walk, "steer-to-straight" direction heuristic — SCHEMATIC, model is
+  direction-agnostic) + `tightnessOf`/`TIGHTNESS_COLOR`; `TrackOverview.tsx`
+  (plan view + faithful 1/R-vs-distance strip) on the Performance screen with
+  an Autocross/Endurance toggle.
+- **P5 light-mode export** (`cd3fee7`). `lib/export/designReport.ts`
+  `buildDesignReportHtml()` — self-contained light HTML one-pager (inline CSS +
+  SVG: vehicle, FSAE points, tractive chart, both track plans), prints to PDF.
+  "Export report" button on the Performance screen.
+- **P3 fuel switching** (`064d656`). Rust: `WiebeParams`/`SDM26Config` gain
+  `afr_stoich` (default 14.7 → **parity byte-identical**; afr_eta_factor reads
+  it for φ instead of a literal 14.7); loader reads it optional; params.rs
+  meta + override. Frontend: `fuels.ts` gains `qLhvJkg`/`afrTarget`; a "Fuel
+  preset" dropdown in the Combustion group sets q_lhv/afr_stoich/afr_target.
+  Full parity suite green.
+
 ## Pending / next steps
 
-1. **Run the optimization** (above) — Nick's immediate goal.
-2. **P3 fuel-switching UI** — `fuels.ts` data exists; wire a selector + the
-   engine-sim octane→torque effect (afr_stoich / q_lhv) in the backend.
-3. **P4 post-hoc sensitivity / tornado** on optimization trials.
-4. **P5 light-mode export** (tractive map + design-review export).
-5. Optional accuracy: real GPS curvature (replace traced segment tracks);
-   per-fuel octane→torque; a field accel Tmin if obtained (folds accel into
-   total pts automatically).
+1. Optional accuracy: real GPS curvature (replace traced segment tracks) — would
+   also let the track overview show a TRUE layout (it's schematic today because
+   the segment data carries radius magnitude but no turn direction); a field
+   accel Tmin if obtained (folds accel into total pts automatically).
+2. Optional: wire `octane` through the loader so a fuel's knock margin shows in
+   the per-cycle knock integral (currently octane defaults to 95, no torque
+   effect by design).
+3. Optional: a P4 detail view / CSV export of the full Spearman table.
 
 ## Verify
 
