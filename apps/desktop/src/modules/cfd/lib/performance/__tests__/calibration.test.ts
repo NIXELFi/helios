@@ -50,23 +50,30 @@ describe("SDM26 calibration to real 2026 results", () => {
     expect(gas.autocross.points).toBeLessThan(96);
   });
 
-  it("endurance ≈ 148 s/lap at managed race pace (Mines clean-lap average)", () => {
-    // Mines' real 2026 lap breakdown averages 148.0 s over the clean laps
-    // (2–9); the old 159.6 anchor was run-total/laps including the 173.9
-    // in-lap (corrected per Nick 2026-06-09).
-    expect(gas.endurance.lapTimeS).toBeGreaterThan(143);
-    expect(gas.endurance.lapTimeS).toBeLessThan(153);
+  it("endurance ≈ 159.6 s/lap at managed race pace (Mines run-average)", () => {
+    // Run-average (in/out laps included) — the SAME convention as the official
+    // baselines (enduranceTMin 142.085 is corrected-total/laps), so the score
+    // comparison is apples-to-apples. Scoring a clean-lap 148 s against the
+    // run-average Tmin briefly put SDM26 in P1 (2026-06-09).
+    expect(gas.endurance.lapTimeS).toBeGreaterThan(155);
+    expect(gas.endurance.lapTimeS).toBeLessThan(165);
+  });
+
+  it("endurance points land mid-field, not field-beating (the P1 regression)", () => {
+    // Mines officially scored ~186.6 endurance pts at this pace; SDM26 (similar
+    // car, slower team) must not come out ahead of the 2026 field.
+    expect(gas.endurance.points!).toBeGreaterThan(160);
+    expect(gas.endurance.points!).toBeLessThan(210);
+    expect(gas.totalPoints!).toBeLessThan(340); // was 382.7 when miscalibrated
   });
 
   it("E85 endurance reproduces the Mines fuel anchor (0.9786 kg CO₂/lap)", () => {
     expect(e85.endurance.co2KgPerLap).toBeCloseTo(0.9786, 1); // within 0.05
-    // FEF/points run a bit ABOVE Mines' official 0.536 / 43 pts: official
-    // scoring divides by total corrected time (in/out laps included), while
-    // the model predicts CLEAN-lap pace (148.0 vs 159.6 s) at the same
-    // CO₂/lap — same fuel physics, faster denominator.
-    expect(e85.efficiency.factor!).toBeCloseTo(0.575, 1); // within 0.05
-    expect(e85.efficiency.points!).toBeGreaterThan(45);
-    expect(e85.efficiency.points!).toBeLessThan(56);
+    // Run-average pace convention → FEF/points reproduce Mines' OFFICIAL
+    // results (FEF 0.536, 43 pts) rather than running above them.
+    expect(e85.efficiency.factor!).toBeCloseTo(0.536, 1); // within 0.05
+    expect(e85.efficiency.points!).toBeGreaterThan(38);
+    expect(e85.efficiency.points!).toBeLessThan(50);
   });
 
   it("E85 burns more volume but emits less CO₂/lap than gasoline", () => {
