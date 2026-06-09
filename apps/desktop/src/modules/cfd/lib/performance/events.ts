@@ -36,18 +36,21 @@ const EFF_TIME_CAP = 1.45;
 // 0.9786 kg CO₂/lap → FEF 0.536 → 43 pts).
 
 /** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
-export const ENDURANCE_PACE = 0.71;
+export const ENDURANCE_PACE = 0.695;
 /** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
  *  corner radius vs the traced centerline. Calibrated so the autocross lap hits
  *  SDM26's real 42.9 s at a REALISTIC tire μ (~1.5) instead of an inflated one —
  *  i.e. the corner speed comes from the line, not from fictional grip. Applies
- *  to both autocross and endurance (a driver lines both). */
-export const LINE_FACTOR = 1.30;
+ *  to both autocross and endurance (a driver lines both). Re-anchored after the
+ *  grip-model upgrade (lateral load transfer χ + rear-axle drive traction +
+ *  optimal shifts), which lowered raw corner/exit grip to physical levels —
+ *  the line factor absorbs what the inflated grip used to. */
+export const LINE_FACTOR = 1.39;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
  *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map. */
-export const ENDURANCE_THERMAL_EFF = 0.143;
+export const ENDURANCE_THERMAL_EFF = 0.14;
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never

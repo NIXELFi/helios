@@ -32,6 +32,8 @@ export {
   tractionLimit,
   resistanceForce,
   tractiveMap,
+  optimalShiftSpeeds,
+  gearAtSpeed,
   type TractiveMap,
 } from "./tractive";
 export {

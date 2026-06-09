@@ -384,6 +384,8 @@ function TelemetryCard({
         <Stat label="top spd" value={`${tm.vMaxKph.toFixed(0)} km/h`} />
         <Stat label="min spd" value={`${tm.vMinKph.toFixed(0)} km/h`} />
         <Stat label="on throttle" value={`${(tm.pctOnThrottle * 100).toFixed(0)}%`} />
+        <Stat label="power-ltd" value={`${(tm.pctPowerLimited * 100).toFixed(0)}%`} highlight />
+        <Stat label="corner-ltd" value={`${(tm.pctCornerLimited * 100).toFixed(0)}%`} />
         <Stat label="max lat" value={`${tm.maxLatG.toFixed(2)} g`} />
         <Stat label="max accel" value={`${tm.maxAccelG.toFixed(2)} g`} />
         <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />

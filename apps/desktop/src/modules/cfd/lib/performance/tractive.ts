@@ -43,9 +43,48 @@ export function tractiveEnvelope(
   return best;
 }
 
+/** Optimal upshift speeds (m/s) per gear, from the tractive-force crossovers:
+ *  v*[g] is the speed at which a driver chasing maximum force leaves gear g+1
+ *  (1-based) for the next — the lowest speed from which the next gear's force
+ *  stays at or above the current gear's all the way to redline (scan-down, so
+ *  a bumpy torque curve can't cause shift flapping). When the next gear never
+ *  wins below redline, v*[g] is the redline speed (ride it out, then shift).
+ *  Enforced non-decreasing so speed→gear stays a monotone map. */
+export function optimalShiftSpeeds(curve: TorqueCurve, vehicle: VehicleConfig): number[] {
+  const n = vehicle.gearRatios.length;
+  const out: number[] = [];
+  for (let g = 0; g < n - 1; g++) {
+    const vRedline = gearVps(vehicle, g) * vehicle.revLimitRpm;
+    let vStar = vRedline;
+    if (curve.length > 0 && vRedline > 0) {
+      const du = Math.max(0.05, vRedline / 400);
+      // Walk DOWN from redline while the next gear keeps winning; the first
+      // speed where the current gear is stronger ends the sustained-crossover
+      // region, and v* is the lowest speed of that region.
+      for (let u = vRedline; u > du; u -= du) {
+        const fCur = tractiveForceInGear(curve, vehicle, g, u);
+        const fNext = tractiveForceInGear(curve, vehicle, g + 1, u);
+        if (fNext >= fCur && fNext > 0) vStar = u;
+        else break;
+      }
+    }
+    // Monotone: can't leave a taller gear at a lower speed than a shorter one.
+    out.push(Math.max(vStar, out[g - 1] ?? 0));
+  }
+  return out;
+}
+
+/** The gear a force-optimal driver is in at speed `v`, given the shift schedule
+ *  from `optimalShiftSpeeds`: ride gear g until v reaches v*[g], then up. */
+export function gearAtSpeed(shiftSpeeds: number[], v: number): number {
+  let g = 0;
+  while (g < shiftSpeeds.length && v >= shiftSpeeds[g]!) g++;
+  return g;
+}
+
 /** Fraction of total aero downforce carried by the rear (driven) axle. SDM26
  *  aero balance is ~53% front, so ~0.47 rear. */
-const REAR_AERO_FRAC = 0.47;
+export const REAR_AERO_FRAC = 0.47;
 
 /** Rear-axle traction limit (N) at speed `v`, RWD. Includes longitudinal weight
  *  transfer under acceleration (closed form: F = μ(W_rear + F·h/L) solved for F)

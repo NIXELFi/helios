@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 
 import type { VehicleConfig } from "../types";
 import type { TorqueCurve } from "../torqueCurve";
-import { simLap } from "../lapSim";
+import { simLap, makeGripModel } from "../lapSim";
+import { tractionLimit, optimalShiftSpeeds, gearAtSpeed } from "../tractive";
+import { gearVps } from "../vehicle";
 import {
   synthesizeAutocross,
   synthesizeEndurance,
@@ -133,6 +135,77 @@ describe("simLap — shift losses", () => {
   });
 });
 
+describe("grip model (χ + rear-axle drive traction)", () => {
+  const geared = makeVehicle({
+    gearRatios: [2.75, 2.0, 1.667, 1.444, 1.304, 1.208],
+    primaryReduction: 2.111,
+    finalDrive: 3.0,
+    revLimitRpm: 14500,
+  });
+
+  it("drive traction on a straight MATCHES the accel event's tractionLimit (unified physics)", () => {
+    const grip = makeGripModel(geared); // sens = 0 → loadMult = 1
+    for (const v of [0, 10, 20, 30]) {
+      expect(geared.massKg * grip.aDriveGrip(v, Infinity)).toBeCloseTo(tractionLimit(geared, v), 6);
+    }
+  });
+
+  it("χ = 1 with no load sensitivity; < 1 in a corner with it; = 1 on straights", () => {
+    const noSens = makeGripModel(geared);
+    expect(noSens.chi(15, 20)).toBe(1);
+    const sens = makeGripModel(makeVehicle({ ...geared, tireLoadSensitivity: 0.15 }));
+    expect(sens.chi(15, 20)).toBeLessThan(1); // cornering shifts load outboard
+    expect(sens.chi(15, 20)).toBeGreaterThan(0.9); // …but it's a few-% effect
+    expect(sens.chi(15, Infinity)).toBe(1); // no lateral load → no transfer
+  });
+
+  it("load transfer costs corner speed: same μ corners slower with sensitivity", () => {
+    const base = makeGripModel(geared).vCorner(20);
+    const withSens = makeGripModel(makeVehicle({ ...geared, tireLoadSensitivity: 0.15 })).vCorner(20);
+    expect(withSens).toBeLessThan(base);
+  });
+});
+
+describe("optimal shift schedule", () => {
+  const geared = makeVehicle({
+    gearRatios: [2.75, 2.0, 1.667, 1.444, 1.304, 1.208],
+    primaryReduction: 2.111,
+    finalDrive: 3.0,
+    revLimitRpm: 14500,
+  });
+
+  it("flat torque → shift at redline (the shorter gear always wins below it)", () => {
+    const shiftV = optimalShiftSpeeds(flatCurve(60), geared);
+    for (let g = 0; g < shiftV.length; g++) {
+      expect(shiftV[g]!).toBeCloseTo(gearVps(geared, g) * 14500, 0);
+    }
+  });
+
+  it("torque that dies at high RPM → shift BEFORE redline (the crossover)", () => {
+    // Strong mid-range, dead past 11k — riding to 14.5k would be wrong.
+    const peaky: TorqueCurve = [
+      { rpm: 4000, torqueNm: 60 },
+      { rpm: 10000, torqueNm: 60 },
+      { rpm: 12000, torqueNm: 20 },
+      { rpm: 14500, torqueNm: 10 },
+    ];
+    const shiftV = optimalShiftSpeeds(peaky, geared);
+    const redline1 = gearVps(geared, 0) * 14500;
+    expect(shiftV[0]!).toBeLessThan(redline1 * 0.95);
+  });
+
+  it("gearAtSpeed is a monotone non-decreasing map over the schedule", () => {
+    const shiftV = optimalShiftSpeeds(flatCurve(60), geared);
+    let prev = 0;
+    for (let v = 0; v < 70; v += 1) {
+      const g = gearAtSpeed(shiftV, v);
+      expect(g).toBeGreaterThanOrEqual(prev);
+      prev = g;
+    }
+    expect(prev).toBe(geared.gearRatios.length - 1); // reaches top gear
+  });
+});
+
 describe("simLap — channels", () => {
   const geared = makeVehicle({
     gearRatios: [2.75, 2.0, 1.667, 1.444, 1.304, 1.208],
@@ -176,11 +249,18 @@ describe("simLap — channels", () => {
   });
 
   it("classifies limit states that cover the lap (power somewhere, corner somewhere, braking somewhere)", () => {
-    const ch = simLap(torque, geared, track, { channels: true }).channels!;
+    // A modest engine: with honest rear-axle drive traction, a flat-60 Nm
+    // monster would be traction-limited everywhere (correctly!), so "power"
+    // segments need an engine that can actually run out of force.
+    const ch = simLap(flatCurve(25), geared, track, { channels: true }).channels!;
     const states = new Set(ch.limit);
     expect(states.has("power")).toBe(true);
     expect(states.has("corner")).toBe(true);
     expect(states.has("brake")).toBe(true);
+    // And the torque monster IS grip-limited out of corners — the rear axle
+    // can only put down so much, no matter the curve.
+    const strong = simLap(torque, geared, track, { channels: true }).channels!;
+    expect(new Set(strong.limit).has("grip")).toBe(true);
   });
 
   it("telemetry pct power/corner-limited are sane fractions and respond to torque", () => {

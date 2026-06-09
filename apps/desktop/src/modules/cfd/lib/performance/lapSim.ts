@@ -15,8 +15,15 @@
 // lap, which converges the periodic start/finish speed without index wrapping.
 
 import type { VehicleConfig } from "./types";
-import { topSpeedMps, gearVps, gearForSpeed } from "./vehicle";
-import { tractiveForceInGear, resistanceForce, G } from "./tractive";
+import { topSpeedMps, gearVps } from "./vehicle";
+import {
+  tractiveForceInGear,
+  resistanceForce,
+  optimalShiftSpeeds,
+  gearAtSpeed,
+  REAR_AERO_FRAC,
+  G,
+} from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
 import { discretizeTrack, type Track } from "./track";
 
@@ -146,8 +153,12 @@ export interface LapOpts {
 // ---- Grip model -------------------------------------------------------------
 // One shared closure set for "how much grip does the car have at speed v":
 // aero downforce raises vertical load (gEff), tire load sensitivity discounts
-// the μ gained from it (loadMult), and the friction circle splits what's left
-// between lateral and longitudinal use. Used by BOTH the speed solver and the
+// the μ gained from it (loadMult), LATERAL load transfer discounts cornering
+// capacity further (chi — outer tires gain less than inner tires lose, by the
+// same load sensitivity), the friction ellipse splits what's left between
+// lateral and longitudinal use, and DRIVE traction is the rear axle's (static
+// rear weight + rear aero + longitudinal weight transfer, the same closed form
+// as tractive.tractionLimit). Used by BOTH the speed solver and the
 // channel-limit classifier so they can never disagree about the physics.
 
 export interface GripModel {
@@ -155,10 +166,14 @@ export interface GripModel {
   gEff(v: number): number;
   /** Load-sensitivity discount on μ at speed v (≤1 above static). */
   loadMult(v: number): number;
-  /** Lateral grip acceleration limit at v (m/s²). */
-  latAccel(v: number): number;
-  /** Longitudinal accel/brake available after lateral use (friction ellipse). */
-  aLongGrip(v: number, R: number, mu: number): number;
+  /** Lateral-load-transfer capacity factor χ ≤ 1 at speed v on radius R. */
+  chi(v: number, R: number): number;
+  /** Lateral grip acceleration limit (m/s²) at v on radius R (incl. χ). */
+  latCap(v: number, R: number): number;
+  /** DRIVE traction accel (m/s²): rear axle + weight transfer + ellipse. */
+  aDriveGrip(v: number, R: number): number;
+  /** BRAKE deceleration (m/s²): all four tires (μ_lat) + ellipse. */
+  aBrakeGrip(v: number, R: number): number;
   /** Steady-state corner-speed ceiling for radius R (un-paced), ≤ vCap. */
   vCorner(R: number): number;
   /** Speed cap (gearing top speed × 1.1) the solver clamps to. */
@@ -179,16 +194,31 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   // sens = 0 recovers the old load-independent (closed-form) behavior exactly.
   const sens = vehicle.tireLoadSensitivity ?? 0;
   const loadMult = (v: number): number => Math.pow(gEff(v) / G, -sens);
-  // Load-sensitive lateral grip acceleration (m/s²) at the limit.
-  const latAccel = (v: number): number => vehicle.muLat * loadMult(v) * gEff(v);
 
-  // Steady-state corner speed: solve v²/R = latAccel(v). With load sensitivity
-  // latAccel is sub-linear in Fz so there's no closed form — bisect (latAccel·R
+  // Lateral load transfer × load sensitivity: cornering shifts load to the
+  // outer tires, and with μ ∝ Fz^(−s) the outer tires gain LESS grip than the
+  // inner tires lose, so axle capacity drops. For the power-law tire the exact
+  // pair factor is χ = ((1+δ)^(1−s) + (1−δ)^(1−s))/2 with δ the transferred
+  // fraction of the pair's load: δ = a_lat·h_cg / (½·track·g_eff), clamped at 1
+  // (inner wheels unloaded). s = 0 (or δ = 0) gives χ = 1 — no effect.
+  const chi = (v: number, R: number): number => {
+    if (sens === 0 || !Number.isFinite(R) || R <= 0) return 1;
+    const aLat = (v * v) / R;
+    const d = Math.min(1, (aLat * vehicle.cgHeightM) / (0.5 * vehicle.trackWidthM * gEff(v)));
+    return (Math.pow(1 + d, 1 - sens) + Math.pow(1 - d, 1 - sens)) / 2;
+  };
+
+  // Load-sensitive, transfer-discounted lateral grip acceleration (m/s²).
+  const latCap = (v: number, R: number): number =>
+    vehicle.muLat * loadMult(v) * gEff(v) * chi(v, R);
+
+  // Steady-state corner speed: solve v²/R = latCap(v, R). Load sensitivity and
+  // χ make the capacity sub-linear in v with no closed form — bisect (capacity·R
   // − v² is +ve at v=0, −ve at high v → one root). Falls back to the speed cap
   // when grip would exceed it (straights).
   const vCorner = (R: number): number => {
     if (!Number.isFinite(R) || R <= 0) return vCap;
-    const f = (v: number): number => latAccel(v) * R - v * v;
+    const f = (v: number): number => latCap(v, R) * R - v * v;
     if (f(vCap) >= 0) return vCap; // grip beats the cap → straight-line region
     let lo = 0;
     let hi = vCap;
@@ -200,18 +230,34 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
     return Math.min(vCap, lo);
   };
 
-  // Longitudinal accel/brake available after lateral grip is spent (ellipse),
-  // with the same load-sensitive μ on both axes.
-  const aLongGrip = (v: number, R: number, mu: number): number => {
-    const ge = gEff(v);
-    const lm = loadMult(v);
-    const latCap = vehicle.muLat * lm * ge;
+  // Friction-ellipse fraction left for longitudinal use at (v, R).
+  const ellipse = (v: number, R: number): number => {
+    const cap = latCap(v, R);
     const aLat = Number.isFinite(R) && R > 0 ? (v * v) / R : 0;
-    const frac = latCap > 0 ? Math.min(1, aLat / latCap) : 0;
-    return mu * lm * ge * Math.sqrt(Math.max(0, 1 - frac * frac));
+    const frac = cap > 0 ? Math.min(1, aLat / cap) : 0;
+    return Math.sqrt(Math.max(0, 1 - frac * frac));
   };
 
-  return { gEff, loadMult, latAccel, aLongGrip, vCorner, vCap };
+  // DRIVE traction (RWD): the rear axle's load — static rear weight + the rear
+  // share of aero + longitudinal weight transfer (more thrust → more rear load;
+  // closed form a = μ'·N_rear/(1 − μ'·h/L)) — with the ellipse discounting μ
+  // for lateral use on corner exit. SAME physics as tractive.tractionLimit, so
+  // the lap sim and the accel event finally agree on how the car launches.
+  const rearStaticAccel = G * (1 - vehicle.weightDistFront);
+  const kRear = k * REAR_AERO_FRAC;
+  const aDriveGrip = (v: number, R: number): number => {
+    const muEff = vehicle.muLong * loadMult(v) * ellipse(v, R);
+    const nRear = rearStaticAccel + kRear * v * v;
+    const denom = Math.max(1 - (muEff * vehicle.cgHeightM) / vehicle.wheelbaseM, 0.05);
+    return (muEff * nRear) / denom;
+  };
+
+  // BRAKING loads ALL FOUR tires (with forward weight transfer), so its grip is
+  // ~the lateral coefficient — NOT muLong, the rear-axle launch limit.
+  const aBrakeGrip = (v: number, R: number): number =>
+    vehicle.muLat * loadMult(v) * gEff(v) * ellipse(v, R);
+
+  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap };
 }
 
 export function simLap(
@@ -228,8 +274,11 @@ export function simLap(
   const lineFactor = Math.max(1, opts.lineFactor ?? 1);
   const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
   const grip = makeGripModel(vehicle);
+  // Optimal shift schedule (tractive-force crossovers) — the same shift policy
+  // the accel event uses, so the two sims drive the car the same way.
+  const shiftV = optimalShiftSpeeds(curve, vehicle);
   const pace = opts.pace ?? 1;
-  const { v, shiftCount } = solveSpeeds(curve, vehicle, grip, radius, step, track.closed, pace);
+  const { v, shiftCount } = solveSpeeds(curve, vehicle, grip, shiftV, radius, step, track.closed, pace);
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;
   const nGears = vehicle.gearRatios.length;
@@ -269,7 +318,7 @@ export function simLap(
     time += dt;
 
     // The gear/RPM the car is actually in at this speed (also drives the BSFC).
-    const gear = gearForSpeed(vehicle, vAvg);
+    const gear = gearAtSpeed(shiftV, vAvg);
     const vps = gearVps(vehicle, gear);
     const rpm = vps > 0 ? Math.min(vAvg / vps, vehicle.revLimitRpm) : 0;
 
@@ -304,7 +353,7 @@ export function simLap(
       limit = "corner"; // riding the (paced) lateral ceiling / speed cap
     } else if (aG > 0.05) {
       const fAvail = tractiveForceInGear(curve, vehicle, gear, vAvg);
-      const fGrip = vehicle.massKg * grip.aLongGrip(vAvg, R, vehicle.muLong);
+      const fGrip = vehicle.massKg * grip.aDriveGrip(vAvg, R);
       limit = fAvail <= fGrip ? "power" : "grip";
     } else {
       limit = "coast";
@@ -370,6 +419,7 @@ function solveSpeeds(
   curve: TorqueCurve,
   vehicle: VehicleConfig,
   grip: GripModel,
+  shiftV: number[],
   radius: number[],
   ds: number,
   closed: boolean,
@@ -380,7 +430,7 @@ function solveSpeeds(
   const M = N * reps;
   const m = vehicle.massKg;
   const rad = (i: number): number => radius[((i % N) + N) % N]!;
-  const { vCorner, aLongGrip } = grip;
+  const { vCorner, aDriveGrip, aBrakeGrip } = grip;
 
   // Race-pace fraction scales the whole target-speed envelope (corners + the
   // top-speed cap that vCorner returns on straights), modeling managed endurance
@@ -390,18 +440,20 @@ function solveSpeeds(
   const vf = new Array<number>(M);
   const vb = new Array<number>(M);
 
-  // Forward pass (acceleration out of corners), GEAR-EXPLICIT: the car uses the
-  // gear it would actually be in at the entry speed (gearForSpeed = ride each
-  // gear to redline, then upshift), so the tractive force is that gear's force
-  // at its real RPM — NOT the optimistic best-across-gears envelope. This
-  // captures the post-upshift "bog" (engine drops to the bottom of the next
-  // gear) and makes acceleration honestly gearing-dependent.
+  // Forward pass (acceleration out of corners), GEAR-EXPLICIT with the OPTIMAL
+  // shift schedule (tractive-force crossovers — same policy as the accel
+  // event): the car uses the gear a force-optimal driver would hold at the
+  // entry speed, so the tractive force is that gear's force at its real RPM —
+  // NOT the optimistic best-across-gears envelope. This still captures the
+  // post-upshift "bog" (the crossover IS where the bog stops costing time) and
+  // keeps acceleration honestly gearing-dependent. Drive traction is the rear
+  // axle's (weight transfer + rear aero + ellipse), not μ·m·g on all four.
   vf[0] = closed ? ceil(0) : 0;
   for (let i = 1; i < M; i++) {
     const vEntry = Math.min(vf[i - 1]!, ceil(i - 1));
-    const gear = gearForSpeed(vehicle, vEntry);
+    const gear = gearAtSpeed(shiftV, vEntry);
     const fEng = tractiveForceInGear(curve, vehicle, gear, vEntry);
-    const fGrip = m * aLongGrip(vEntry, rad(i - 1), vehicle.muLong);
+    const fGrip = m * aDriveGrip(vEntry, rad(i - 1));
     const aAcc = (Math.min(fEng, fGrip) - resistanceForce(vehicle, vEntry)) / m;
     vf[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aAcc * ds)));
   }
@@ -414,7 +466,7 @@ function solveSpeeds(
   vb[M - 1] = closed ? ceil(M - 1) : Math.min(ceil(M - 1), vf[M - 1]!);
   for (let i = M - 2; i >= 0; i--) {
     const vEntry = Math.min(vb[i + 1]!, ceil(i + 1));
-    const aBrk = aLongGrip(vEntry, rad(i + 1), vehicle.muLat);
+    const aBrk = aBrakeGrip(vEntry, rad(i + 1));
     vb[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aBrk * ds)));
   }
 
@@ -433,8 +485,8 @@ function solveSpeeds(
   // monotone within an accel zone, so ripple can't double-count.
   let shiftCount = 0;
   for (let i = 1; i < N; i++) {
-    const gPrev = gearForSpeed(vehicle, out[i - 1]!);
-    const gCur = gearForSpeed(vehicle, out[i]!);
+    const gPrev = gearAtSpeed(shiftV, out[i - 1]!);
+    const gCur = gearAtSpeed(shiftV, out[i]!);
     if (gCur > gPrev) shiftCount += gCur - gPrev;
   }
 
