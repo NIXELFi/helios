@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { LinePlot, type LineSeries } from "../components/charts/LinePlot";
+import { TrackOverview } from "../components/charts/TrackOverview";
 import { basename } from "../lib/cfdPath";
 import {
   carKeyForConfig,
@@ -84,6 +85,7 @@ export function PerformanceScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [skidpadTime, setSkidpadTime] = useState(4.9);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [trackView, setTrackView] = useState<"autocross" | "endurance">("autocross");
 
   const selected = sources.find((s) => s.id === selectedId) ?? sources[0] ?? null;
   // The vehicle (esp. final drive) auto-matches the loaded config: an SDM25
@@ -174,6 +176,33 @@ export function PerformanceScreen() {
         ) : (
           <div className="flex flex-col gap-3">
             <EventsSection events={events} baseline={baseline} onBaseline={setReferenceBaseline} />
+
+            {/* Track overview — the loaded course the events are scored on. */}
+            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Track overview</span>
+                <div className="flex items-center gap-1">
+                  {(["autocross", "endurance"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTrackView(t)}
+                      className={
+                        "rounded-sm border px-2 py-0.5 text-[9px] uppercase tracking-wider " +
+                        (trackView === t
+                          ? "border-[#FFC627] text-[#FFC627]"
+                          : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
+                      }
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="p-3">
+                <TrackOverview track={trackView === "autocross" ? AUTOCROSS_2026 : ENDURANCE_2026} />
+              </div>
+            </section>
 
             {/* Tractive-effort map */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">

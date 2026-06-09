@@ -75,3 +75,11 @@ export {
   type RawTrack,
 } from "./track";
 export { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
+export {
+  trackPlan,
+  tightnessOf,
+  TIGHTNESS_COLOR,
+  type TrackPlan,
+  type TrackPoint,
+  type Tightness,
+} from "./trackGeometry";
