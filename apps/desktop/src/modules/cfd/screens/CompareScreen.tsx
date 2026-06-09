@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { useCfd } from "../state/CfdContext";
 import { LinePlot } from "../components/charts/LinePlot";
 import { sourcesFrom, type CurveSource } from "../lib/curveSources";
+import { ReportButton } from "../components/ReportButton";
 import {
   carKeyForConfig,
   vehicleForCar,
@@ -87,6 +88,11 @@ export function CompareScreen() {
             pin designs · overlay curves · attribute the gap (engine vs mass vs gearing vs chassis)
           </p>
         </div>
+        <ReportButton
+          only={pinnedIds.length > 0 ? pinnedIds : undefined}
+          label={pinnedIds.length > 0 ? "Report — pinned (PDF)" : "Full report (PDF)"}
+          title={pinnedIds.length > 0 ? "Helios CFD — Design Comparison Report" : undefined}
+        />
         <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#9097A0]">
           Pin design
           <select

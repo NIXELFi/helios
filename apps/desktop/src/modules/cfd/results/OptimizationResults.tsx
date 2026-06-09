@@ -21,6 +21,7 @@ import { basename } from "../lib/cfdPath";
 import { studyName, sweepFromTrialName, refineName } from "../lib/studyName";
 import { getAutoRefine, setAutoRefine, improvedEnough } from "../lib/autoRefine";
 import { buildSensitivityTsv } from "../lib/export/buildCsv";
+import { exportMasterReport } from "../lib/export/exportReport";
 import { StudyNameEditor } from "../components/StudyNameEditor";
 import { objectiveUnit } from "../lib/metricMeta";
 import { exportActionsFor } from "../lib/export/exportStudy";
@@ -292,6 +293,22 @@ export function OptimizationResults({ study }: Props) {
       run: async () => {
         await copyText(buildTrialsTsv(study));
         return { ok: true, message: "Copied!" };
+      },
+    });
+    items.push({
+      id: "opt-report",
+      label: "Report (print → PDF)",
+      run: async () => {
+        try {
+          const path = await exportMasterReport(
+            { studies: cfd.state.studies, vehicleConfig: cfd.state.vehicleConfig, referenceBaseline: cfd.state.referenceBaseline },
+            [study.id],
+          );
+          if (path == null) return { ok: true, message: "Cancelled" };
+          return { ok: true, message: `Saved → ${basename(path)} — open & print to PDF` };
+        } catch (err) {
+          return { ok: false, message: String(err) };
+        }
       },
     });
     items.push({

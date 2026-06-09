@@ -7,6 +7,7 @@ import { OptimizationParamsModal } from "../components/optimization/Optimization
 import { basename } from "../lib/cfdPath";
 import { studyName } from "../lib/studyName";
 import { StudyNameEditor } from "../components/StudyNameEditor";
+import { ReportButton } from "../components/ReportButton";
 import { parseRpmList } from "../lib/rpmList";
 import { rankTrials } from "../lib/analytics/optimizationStats";
 import { summarizeSweep } from "../lib/analytics/sweepStats";
@@ -182,6 +183,7 @@ export function StudiesScreen() {
         >
           {importBusy ? "Import (JSON)…" : "Import (JSON)"}
         </button>
+        <ReportButton label="Full report (PDF)" />
         <button
           type="button"
           className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"

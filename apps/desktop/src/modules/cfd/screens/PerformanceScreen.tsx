@@ -39,6 +39,7 @@ import {
   type LapTelemetry,
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
+import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
 
@@ -152,6 +153,7 @@ export function PerformanceScreen() {
         >
           Export report
         </button>
+        <ReportButton label="Full report (PDF)" />
       </header>
 
       {reportMsg && (

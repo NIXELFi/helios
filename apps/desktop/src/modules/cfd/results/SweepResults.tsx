@@ -25,6 +25,7 @@ import { exportActionsFor, type ExportAction } from "../lib/export/exportStudy";
 import { copyText, openTextFile } from "../lib/export/io";
 import { parseDynoCsv, dynoPowerKw, dynoTorqueNm } from "../lib/import/importDyno";
 import { compareDyno } from "../lib/analytics/dynoCompare";
+import { exportMasterReport } from "../lib/export/exportReport";
 import type { SweepStudy } from "../state/types";
 
 interface Props {
@@ -175,6 +176,22 @@ export function SweepResults({ study }: Props) {
       },
     }));
     fromActions.push({
+      id: "sweep-report",
+      label: "Report (print → PDF)",
+      run: async () => {
+        try {
+          const path = await exportMasterReport(
+            { studies: state.studies, vehicleConfig: state.vehicleConfig, referenceBaseline: state.referenceBaseline },
+            [study.id],
+          );
+          if (path == null) return { ok: true, message: "Cancelled" };
+          return { ok: true, message: `Saved → ${basename(path)} — open & print to PDF` };
+        } catch (err) {
+          return { ok: false, message: String(err) };
+        }
+      },
+    });
+    fromActions.push({
       id: "sweep-copy-summary",
       label: "Copy summary",
       run: async () => {
@@ -187,7 +204,7 @@ export function SweepResults({ study }: Props) {
       },
     });
     return fromActions;
-  }, [study, summary]);
+  }, [study, summary, state]);
 
   async function copySummary() {
     try {
