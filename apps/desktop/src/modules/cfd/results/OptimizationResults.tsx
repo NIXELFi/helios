@@ -25,6 +25,8 @@ import { copyText } from "../lib/export/io";
 import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { ScatterPlot, type ScatterPt } from "../components/charts/ScatterPlot";
 import { ParallelCoordsPlot, type ParallelCoordsTrial } from "../components/charts/ParallelCoordsPlot";
+import { TornadoChart, type TornadoBar } from "../components/charts/TornadoChart";
+import { sensitivityTornado } from "../lib/analytics/optimizationStats";
 import {
   torqueCurveFromSweep,
   computeEvents,
@@ -205,6 +207,20 @@ export function OptimizationResults({ study }: Props) {
         })),
     [live.done, live.rankByIdx, paramForScatter],
   );
+
+  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
+  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
+  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
+  // is "favorable" when raising the knob pushes the objective the better way.
+  const sensitivityBars: TornadoBar[] = useMemo(() => {
+    const maximize = viewStudy.objectiveDirection === "maximize";
+    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
+      label: e.path,
+      value: e.rho,
+      favorable: e.rho > 0 === maximize,
+      n: e.n,
+    }));
+  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
 
   // ---- Parallel-coords plot ------------------------------------------------
   const axes = useMemo(() => {
@@ -440,6 +456,19 @@ export function OptimizationResults({ study }: Props) {
                   selectedId={selectedIdx}
                   onPointClick={setSelectedIdx}
                   height={360}
+                />
+              </div>
+
+              {/* Sensitivity tornado — which knobs move the active dimension. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <TornadoChart
+                  title={`sensitivity · ${dim.label}`}
+                  bars={sensitivityBars}
+                  axisLabel={`Spearman ρ vs ${dim.label} (${
+                    viewStudy.objectiveDirection === "maximize" ? "higher" : "lower"
+                  } better)`}
+                  selectedLabel={paramForScatter}
+                  onBarClick={setParamForScatter}
                 />
               </div>
 
