@@ -15,10 +15,34 @@
 // lap, which converges the periodic start/finish speed without index wrapping.
 
 import type { VehicleConfig } from "./types";
-import { topSpeedMps, gearVps } from "./vehicle";
-import { tractiveEnvelope, resistanceForce, G } from "./tractive";
+import { topSpeedMps, gearVps, gearForSpeed } from "./vehicle";
+import { tractiveForceInGear, resistanceForce, G } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
 import { discretizeTrack, type Track } from "./track";
+
+/** Rich per-event telemetry the lap sim now exposes (display + accuracy debug).
+ *  All aggregates are time-weighted over the lap unless noted. */
+export interface LapTelemetry {
+  /** Time-weighted mean engine RPM over the lap. */
+  avgRpm: number;
+  /** Peak engine RPM reached (≤ rev limit). */
+  maxRpm: number;
+  /** Number of upshifts over the lap (each costs `shiftTimeS`). */
+  shiftCount: number;
+  /** Fraction of lap TIME spent in each gear (index = gear). Sums to ~1. */
+  timeInGearFrac: number[];
+  /** Peak lateral acceleration (g) — the grip-limited corners. */
+  maxLatG: number;
+  /** Peak longitudinal accel (g) under power. */
+  maxAccelG: number;
+  /** Peak longitudinal decel (g) under braking. */
+  maxBrakeG: number;
+  /** Fraction of lap TIME on throttle (accelerating) vs braking/coasting. */
+  pctOnThrottle: number;
+  /** Top / minimum speed over the lap (km/h), for the readout. */
+  vMaxKph: number;
+  vMinKph: number;
+}
 
 export interface LapResult {
   lapTimeS: number;
@@ -30,19 +54,8 @@ export interface LapResult {
   vMinMps: number;
   /** Number of upshifts over the lap (each costs `shiftTimeS` of dead time). */
   shiftCount: number;
-}
-
-/** Speeds (m/s) at which the car upshifts: each gear runs to the rev limit, so
- *  crossing `gearVps(g)·revLimit` from below is one shift. Shorter gearing →
- *  lower thresholds → more shifts to reach a given speed. Excludes the top gear
- *  (nothing to shift into). */
-function upshiftSpeeds(vehicle: VehicleConfig): number[] {
-  const out: number[] = [];
-  for (let g = 0; g < vehicle.gearRatios.length - 1; g++) {
-    const vs = gearVps(vehicle, g) * vehicle.revLimitRpm;
-    if (Number.isFinite(vs) && vs > 0) out.push(vs);
-  }
-  return out;
+  /** Rich per-lap telemetry (avg/max RPM, gear usage, g's, throttle fraction). */
+  telemetry: LapTelemetry;
 }
 
 export interface LapOpts {
@@ -72,29 +85,44 @@ export function simLap(
   opts: LapOpts = {},
 ): LapResult {
   const { radius, step, length } = discretizeTrack(track, opts.ds ?? 2);
-  const v = solveSpeeds(curve, vehicle, radius, step, track.closed, opts.pace ?? 1);
+  const { v, shiftCount } = solveSpeeds(curve, vehicle, radius, step, track.closed, opts.pace ?? 1);
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;
-
-  // Shift losses: each upshift is a ~100 ms torque cut (LapOpts.pace doesn't
-  // change WHICH gears are used, only the speed ceiling, so the shift thresholds
-  // are gearing-only). Counting upshifts where the car is accelerating past a
-  // threshold makes shorter gearing (SDM25's 3.5 FD) pay for its extra shifts.
-  const shiftSpeeds = upshiftSpeeds(vehicle);
+  const nGears = vehicle.gearRatios.length;
 
   let time = 0;
   let work = 0;
-  let shiftCount = 0;
+  // Telemetry accumulators (time-weighted).
+  let sumRpmDt = 0;
+  let maxRpm = 0;
+  let maxLatG = 0;
+  let maxAccelG = 0;
+  let maxBrakeG = 0;
+  let onThrottleDt = 0;
+  const timeInGear = new Array<number>(nGears).fill(0);
+
   for (let i = 0; i < nSeg; i++) {
     const vi = v[i]!;
     const vn = v[(i + 1) % N]!;
     const vAvg = Math.max(0.1, (vi + vn) / 2);
-    time += step / vAvg;
+    const dt = step / vAvg;
+    time += dt;
     const a = (vn * vn - vi * vi) / (2 * step);
     const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
     if (fEngine > 0) work += fEngine * step; // propulsive work only (off-throttle = 0)
-    // Count an upshift for each gear threshold crossed while accelerating.
-    if (vn > vi) for (const s of shiftSpeeds) if (vi < s && s <= vn) shiftCount++;
+
+    // Per-segment telemetry: the gear/RPM the car is actually in at this speed.
+    const gear = gearForSpeed(vehicle, vAvg);
+    const vps = gearVps(vehicle, gear);
+    const rpm = vps > 0 ? Math.min(vAvg / vps, vehicle.revLimitRpm) : 0;
+    sumRpmDt += rpm * dt;
+    if (rpm > maxRpm) maxRpm = rpm;
+    if (gear >= 0 && gear < nGears) timeInGear[gear]! += dt;
+    if (a > 0) { onThrottleDt += dt; if (a / G > maxAccelG) maxAccelG = a / G; }
+    else if (-a / G > maxBrakeG) maxBrakeG = -a / G;
+    const R = radius[i]!;
+    const latG = Number.isFinite(R) && R > 0 ? vAvg * vAvg / R / G : 0;
+    if (latG > maxLatG) maxLatG = latG;
   }
   // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
   time += shiftCount * Math.max(0, vehicle.shiftTimeS);
@@ -106,6 +134,20 @@ export function simLap(
   const fuelKg = work / (thermalEff * lhv);
   const fuelL = fuelKg / density;
 
+  const dtTot = time - shiftCount * Math.max(0, vehicle.shiftTimeS); // moving time
+  const telemetry: LapTelemetry = {
+    avgRpm: dtTot > 0 ? sumRpmDt / dtTot : 0,
+    maxRpm,
+    shiftCount,
+    timeInGearFrac: dtTot > 0 ? timeInGear.map((t) => t / dtTot) : timeInGear,
+    maxLatG,
+    maxAccelG,
+    maxBrakeG,
+    pctOnThrottle: dtTot > 0 ? onThrottleDt / dtTot : 0,
+    vMaxKph: Math.max(...v) * 3.6,
+    vMinKph: Math.min(...v) * 3.6,
+  };
+
   return {
     lapTimeS: time,
     fuelKg,
@@ -115,6 +157,7 @@ export function simLap(
     vMaxMps: Math.max(...v),
     vMinMps: Math.min(...v),
     shiftCount,
+    telemetry,
   };
 }
 
@@ -128,7 +171,7 @@ function solveSpeeds(
   ds: number,
   closed: boolean,
   pace: number,
-): number[] {
+): { v: number[]; shiftCount: number } {
   const N = radius.length;
   const reps = closed ? 3 : 1;
   const M = N * reps;
@@ -164,11 +207,17 @@ function solveSpeeds(
   const vf = new Array<number>(M);
   const vb = new Array<number>(M);
 
-  // Forward pass (acceleration out of corners).
+  // Forward pass (acceleration out of corners), GEAR-EXPLICIT: the car uses the
+  // gear it would actually be in at the entry speed (gearForSpeed = ride each
+  // gear to redline, then upshift), so the tractive force is that gear's force
+  // at its real RPM — NOT the optimistic best-across-gears envelope. This
+  // captures the post-upshift "bog" (engine drops to the bottom of the next
+  // gear) and makes acceleration honestly gearing-dependent.
   vf[0] = closed ? ceil(0) : 0;
   for (let i = 1; i < M; i++) {
     const vEntry = Math.min(vf[i - 1]!, ceil(i - 1));
-    const fEng = tractiveEnvelope(curve, vehicle, vEntry).force;
+    const gear = gearForSpeed(vehicle, vEntry);
+    const fEng = tractiveForceInGear(curve, vehicle, gear, vEntry);
     const fGrip = m * aLongGrip(vEntry, rad(i - 1), vehicle.muLong);
     const aAcc = (Math.min(fEng, fGrip) - resistanceForce(vehicle, vEntry)) / m;
     vf[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aAcc * ds)));
@@ -188,5 +237,17 @@ function solveSpeeds(
     const j = i + off;
     out[i] = Math.max(0.1, Math.min(vf[j]!, vb[j]!, ceil(j)));
   }
-  return out;
+
+  // Upshift count over the (middle) lap: where the forward-pass accel profile
+  // climbs into a taller gear. Counted on vf (the acceleration trace) so corner
+  // braking downshifts don't count and numerical ripple can't (vf rises
+  // monotonically within an accel zone, then is capped at corners).
+  let shiftCount = 0;
+  for (let i = off + 1; i < off + N; i++) {
+    const gPrev = gearForSpeed(vehicle, Math.min(vf[i - 1]!, ceil(i - 1)));
+    const gCur = gearForSpeed(vehicle, Math.min(vf[i]!, ceil(i)));
+    if (gCur > gPrev) shiftCount += gCur - gPrev;
+  }
+
+  return { v: out, shiftCount };
 }

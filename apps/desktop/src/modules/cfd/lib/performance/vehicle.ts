@@ -18,9 +18,11 @@ export const SDM26_VEHICLE: VehicleConfig = {
   trackWidthM: 1.2, // F 1.207 / R 1.194
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
-  muLat: 1.94, // calibrated to SDM26 autocross 42.922 s WITH shift losses modeled
-  //            (Hoosier R20 slick + aero; was 1.8 before the lap sim counted the
-  //             100 ms shift cuts — those were implicitly baked into grip before)
+  muLat: 1.97, // calibrated to SDM26 autocross 42.922 s with the gear-explicit
+  //            lap sim (actual-gear tractive force) + 100 ms shift cuts modeled.
+  //            (Hoosier R20 slick + aero; rose from 1.8 as the sim added shift
+  //             losses then honest per-gear force — both of which the old grip
+  //             had silently absorbed.)
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,
@@ -72,6 +74,20 @@ export function gearVps(vehicle: VehicleConfig, gearIdx: number): number {
   const total = totalReduction(vehicle, gearIdx);
   if (total <= 0) return 0;
   return (2 * Math.PI * vehicle.tireRadiusM) / (60 * total);
+}
+
+/** The gear a driver would be in at speed `v` (m/s): the shortest gear (most
+ *  wheel force) whose engine RPM at `v` stays at or below the rev limit — i.e.
+ *  you ride each gear to redline, then upshift. Returns the top gear when even
+ *  it over-revs (the car is at its speed ceiling). Assumes gearRatios are
+ *  ordered 1st→top (descending ratio, ascending speed-per-rpm). */
+export function gearForSpeed(vehicle: VehicleConfig, v: number): number {
+  const top = vehicle.gearRatios.length - 1;
+  for (let g = 0; g <= top; g++) {
+    const vps = gearVps(vehicle, g);
+    if (vps > 0 && vps * vehicle.revLimitRpm >= v) return g;
+  }
+  return Math.max(0, top);
 }
 
 /** Top speed (m/s) the gearing allows: fastest gear spun to the rev limit. */

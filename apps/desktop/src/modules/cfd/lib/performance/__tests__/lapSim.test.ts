@@ -91,6 +91,21 @@ describe("simLap — shift losses", () => {
     const oneGear = makeVehicle({ gearRatios: [2.0], revLimitRpm: 1e9, shiftTimeS: 0.1 });
     expect(simLap(torque, oneGear, track).shiftCount).toBe(0);
   });
+
+  it("reports sane telemetry (avg/max RPM, gear usage, g's, throttle)", () => {
+    const tm = simLap(torque, geared(3.0), track).telemetry;
+    expect(tm.avgRpm).toBeGreaterThan(0);
+    expect(tm.maxRpm).toBeGreaterThan(tm.avgRpm);
+    expect(tm.maxRpm).toBeLessThanOrEqual(14500 + 1e-6); // never past the rev limit
+    expect(tm.shiftCount).toBeGreaterThan(0);
+    // Gear-usage fractions are non-negative and sum to ~1 (the lap's moving time).
+    const sum = tm.timeInGearFrac.reduce((a, b) => a + b, 0);
+    expect(sum).toBeCloseTo(1, 2);
+    expect(tm.timeInGearFrac.every((f) => f >= -1e-9)).toBe(true);
+    expect(tm.maxLatG).toBeGreaterThan(0); // a track with corners loads laterally
+    expect(tm.pctOnThrottle).toBeGreaterThan(0);
+    expect(tm.pctOnThrottle).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("simLap", () => {

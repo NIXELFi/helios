@@ -40,7 +40,7 @@ export const ENDURANCE_PACE = 0.71;
 /** Effective tank-to-propulsive-work efficiency for the energy→fuel estimate on
  *  the endurance duty cycle (engine BSFC × part-load/idle losses, lumped).
  *  Calibrated to the Mines fuel anchor — lower than peak BSFC by design. */
-export const ENDURANCE_THERMAL_EFF = 0.13;
+export const ENDURANCE_THERMAL_EFF = 0.121;
 
 export interface EventScores {
   accel: { timeS: number; points: number | null };
