@@ -220,6 +220,11 @@ pub struct SDM26Config {
     pub eta_comb: f64,
     pub q_lhv: f64,
     pub afr_target: f64,
+    /// Stoichiometric AFR of the fuel (gasoline 14.7, E85 ~9.76). Feeds the
+    /// equivalence-ratio φ in the AFR efficiency factor. Optional in the
+    /// config JSON; defaults to 14.7 (gasoline) so existing configs are
+    /// unchanged.
+    pub afr_stoich: f64,
     /// 0013: fuel octane number for the Livengood-Wu knock integral
     /// (Douaud-Eyzat 1978 auto-ignition delay). Default 95 (race/premium).
     /// Pump gas ~91. Lower octane → faster auto-ignition → higher knock
@@ -368,6 +373,7 @@ impl Default for SDM26Config {
             combustion_duration: 50.0, spark_advance: 25.0,
             ignition_delay: 7.0,
             eta_comb: 0.96, q_lhv: 44.0e6, afr_target: 13.1,
+            afr_stoich: 14.7,
             octane_number: 95.0,
             afr_eta_enabled: false,
             t_wall_cylinder: 450.0,
@@ -721,6 +727,7 @@ impl SDM26Engine {
             ignition_delay_deg: cfg.ignition_delay,
             eta_comb: cfg.eta_comb,
             q_lhv: cfg.q_lhv, afr_target: cfg.afr_target,
+            afr_stoich: cfg.afr_stoich,
             afr_eta_enabled: cfg.afr_eta_enabled,
             tumble_burn_factor: cfg.tumble_burn_factor,
             // 0006: RPM-dependent MBT map + Wiebe duration. Defaults

@@ -1,0 +1,162 @@
+{
+  "name": "Autocross 2026",
+  "closed": false,
+  "segments": [
+    {
+      "length": 12.0,
+      "radius": 31.5
+    },
+    {
+      "length": 26.1,
+      "radius": null
+    },
+    {
+      "length": 15.0,
+      "radius": 13.6
+    },
+    {
+      "length": 32.1,
+      "radius": 13.0
+    },
+    {
+      "length": 17.0,
+      "radius": 9.9
+    },
+    {
+      "length": 51.1,
+      "radius": null
+    },
+    {
+      "length": 10.0,
+      "radius": 13.4
+    },
+    {
+      "length": 8.0,
+      "radius": 18.8
+    },
+    {
+      "length": 8.0,
+      "radius": null
+    },
+    {
+      "length": 13.0,
+      "radius": 8.7
+    },
+    {
+      "length": 10.0,
+      "radius": 7.5
+    },
+    {
+      "length": 14.0,
+      "radius": null
+    },
+    {
+      "length": 11.0,
+      "radius": 9.0
+    },
+    {
+      "length": 14.0,
+      "radius": 9.5
+    },
+    {
+      "length": 17.0,
+      "radius": null
+    },
+    {
+      "length": 21.1,
+      "radius": 20.4
+    },
+    {
+      "length": 13.0,
+      "radius": 11.1
+    },
+    {
+      "length": 9.0,
+      "radius": null
+    },
+    {
+      "length": 14.0,
+      "radius": 12.8
+    },
+    {
+      "length": 10.0,
+      "radius": null
+    },
+    {
+      "length": 24.1,
+      "radius": 34.4
+    },
+    {
+      "length": 15.0,
+      "radius": null
+    },
+    {
+      "length": 10.0,
+      "radius": 17.4
+    },
+    {
+      "length": 24.1,
+      "radius": 6.3
+    },
+    {
+      "length": 11.0,
+      "radius": 15.1
+    },
+    {
+      "length": 26.1,
+      "radius": 5.4
+    },
+    {
+      "length": 9.0,
+      "radius": null
+    },
+    {
+      "length": 17.0,
+      "radius": 11.3
+    },
+    {
+      "length": 29.1,
+      "radius": 8.3
+    },
+    {
+      "length": 14.0,
+      "radius": 10.6
+    },
+    {
+      "length": 31.1,
+      "radius": 25.4
+    },
+    {
+      "length": 13.0,
+      "radius": 21.2
+    },
+    {
+      "length": 19.0,
+      "radius": 19.6
+    },
+    {
+      "length": 10.0,
+      "radius": null
+    },
+    {
+      "length": 20.1,
+      "radius": 23.5
+    },
+    {
+      "length": 39.1,
+      "radius": 26.6
+    },
+    {
+      "length": 14.0,
+      "radius": 21.0
+    },
+    {
+      "length": 33.1,
+      "radius": 22.6
+    },
+    {
+      "length": 54.1,
+      "radius": null
+    }
+  ]
+}

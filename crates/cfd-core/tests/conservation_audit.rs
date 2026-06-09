@@ -29,8 +29,10 @@ use engine_sim::solver::muscl::{LIMITER_MINMOD, LIMITER_SUPERBEE, LIMITER_VAN_LE
 
 fn sdm26_config_path() -> PathBuf {
     let candidates = [
-        "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26.json",
+        // python_ref FIRST: these tests pin LEGACY-physics expectations, and the
+        // bundled app config now ships with the validated physics section ON.
         "../engine-sim/python_ref/configs/sdm26.json",
+        "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26.json",
     ];
     for c in candidates {
         let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(c);

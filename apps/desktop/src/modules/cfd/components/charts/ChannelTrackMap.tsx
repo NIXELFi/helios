@@ -1,0 +1,93 @@
+// Channel-colored track map: the traced course ribbon (VisualTrack) with the
+// centerline painted by a lap-sim channel (speed, rpm, gear, g's, limit state…).
+// The sim runs on the radius-segment Track, not this trace, so channel samples
+// are mapped onto the visual centerline by FRACTIONAL ARC LENGTH — an honest
+// display approximation (the two represent the same course at slightly
+// different lengths). Equal-aspect fit, same chrome as TrackLayout.
+
+import { useMemo, useRef } from "react";
+
+import { useElementWidth } from "./useElementWidth";
+import { boundsOf, type VisualTrack, type XY } from "../../lib/performance";
+
+interface Props {
+  track: VisualTrack;
+  /** Distance fraction (0..1 of lap length) per channel sample, ascending. */
+  fracs: number[];
+  /** Pre-computed color per channel sample (parent owns the scale/legend). */
+  colors: string[];
+  height?: number;
+}
+
+/** Cumulative arc-length fraction at each centerline point. */
+function cumFracs(points: XY[]): number[] {
+  const cum = new Array<number>(points.length).fill(0);
+  for (let i = 1; i < points.length; i++) {
+    cum[i] =
+      cum[i - 1]! +
+      Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  const total = cum[cum.length - 1] || 1;
+  return cum.map((c) => c / total);
+}
+
+export function ChannelTrackMap({ track, fracs, colors, height = 300 }: Props) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const width = Math.max(useElementWidth(hostRef, 380), 200);
+
+  const pad = 14;
+  const { minX, minY, maxX, maxY } = useMemo(
+    () => boundsOf([...track.leftEdge, ...track.rightEdge]),
+    [track],
+  );
+  const spanX = Math.max(1e-6, maxX - minX);
+  const spanY = Math.max(1e-6, maxY - minY);
+  const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY);
+  const offX = (width - spanX * scale) / 2;
+  const offY = (height - spanY * scale) / 2;
+  const px = (p: XY) => offX + (p[0] - minX) * scale;
+  const py = (p: XY) => offY + (maxY - p[1]) * scale;
+
+  const ribbon = useMemo(() => {
+    const fwd = track.leftEdge.map((p) => `${px(p).toFixed(1)},${py(p).toFixed(1)}`);
+    const back = [...track.rightEdge].reverse().map((p) => `${px(p).toFixed(1)},${py(p).toFixed(1)}`);
+    return [...fwd, ...back].join(" ");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track, width, height]);
+
+  // Each centerline segment gets the color of the nearest channel sample (by
+  // lap fraction). Two-pointer walk — both sequences are ascending.
+  const segs = useMemo(() => {
+    const vf = cumFracs(track.centerline);
+    const out: { x1: number; y1: number; x2: number; y2: number; c: string }[] = [];
+    if (fracs.length === 0 || colors.length === 0) return out;
+    let j = 0;
+    for (let i = 1; i < track.centerline.length; i++) {
+      const f = (vf[i - 1]! + vf[i]!) / 2;
+      while (j < fracs.length - 1 && fracs[j + 1]! <= f) j++;
+      const a = track.centerline[i - 1]!;
+      const b = track.centerline[i]!;
+      out.push({ x1: px(a), y1: py(a), x2: px(b), y2: py(b), c: colors[j] ?? "#5A5F66" });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track, fracs, colors, width, height]);
+
+  const start = track.centerline[0];
+  const finish = track.centerline[track.centerline.length - 1];
+
+  return (
+    <div ref={hostRef} className="w-full" style={{ minHeight: height }}>
+      <svg width={width} height={height} role="img" aria-label={`${track.name} channel map`} className="block">
+        <polygon points={ribbon} fill="#1B1D22" stroke="#2A2C32" strokeWidth={1} />
+        {segs.map((s, i) => (
+          <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={s.c} strokeWidth={3} strokeLinecap="round" />
+        ))}
+        {start && <circle cx={px(start)} cy={py(start)} r={4} fill="#FAFAFA" stroke="#0E0E10" strokeWidth={1} />}
+        {finish && !track.closed && (
+          <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke="#0E0E10" strokeWidth={1} />
+        )}
+      </svg>
+    </div>
+  );
+}

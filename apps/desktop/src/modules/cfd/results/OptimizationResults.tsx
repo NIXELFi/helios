@@ -1,17 +1,17 @@
 // Top-level results screen for optimization studies — the headline live view.
 //
-// Left pane (top → bottom): header (live best + ETA + elapsed + Cancel +
-// ExportMenu), podium row (top-3 cards), charts row (convergence scatter +
-// objective-vs-parameter scatter with a param selector), the parallel-coords
-// plot, and a sortable ranked trial table. Right pane: TrialInspector for the
-// selected trial. Selection flows through `selectedIdx` from every surface
-// (podium card, scatter point, parallel-coords line, table row).
+// Left pane: header (live best + ETA + elapsed + Cancel + ExportMenu), podium
+// (top-3), charts (convergence + value-vs-parameter scatter + parallel-coords),
+// a Rank-by control, and a sortable trial table. Right pane: TrialInspector.
 //
-// All ranking/ETA/history is derived ONCE via useOptimizationLive — a pure
-// display-side selector layered over the reducer. The elapsed clock ticks in a
-// separate gated interval so it never re-runs the heavy memo. After the job
-// finishes, ranked[0] equals study.bestTrialIdx (same direction; first-best on
-// ties) — verified in tests.
+// RANKING DIMENSION: the whole view ranks by one "active dimension" — the
+// study's backend objective by default, or any FSAE event metric (accel /
+// autocross / endurance time, endurance / efficiency / total points). Switching
+// it feeds useOptimizationLive a study whose objectiveValue is remapped to that
+// dimension, so the podium, every chart, and the table can never disagree.
+// Event metrics are scored on the frontend (same computeEvents() lib as the
+// Performance screen); since the backend sampler is space-filling, ranking by an
+// event metric picks the best sampled design for that event.
 
 import { useMemo, useState } from "react";
 
@@ -25,8 +25,22 @@ import { copyText } from "../lib/export/io";
 import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { ScatterPlot, type ScatterPt } from "../components/charts/ScatterPlot";
 import { ParallelCoordsPlot, type ParallelCoordsTrial } from "../components/charts/ParallelCoordsPlot";
+import { TornadoChart, type TornadoBar } from "../components/charts/TornadoChart";
+import { sensitivityTornado, refineBounds } from "../lib/analytics/optimizationStats";
+import {
+  torqueCurveFromSweep,
+  computeEvents,
+  carKeyForConfig,
+  vehicleForCar,
+  EMPTY_BASELINE,
+  EVENT_RANK_METRICS,
+  POINTS_METRIC_KEYS,
+  type EventScores,
+  type EventMetricKey,
+} from "../lib/performance";
 import { TrialInspector } from "./TrialInspector";
-import type { OptimizationStudy, OptimizationTrial } from "../state/types";
+import { SweepParamsModal } from "../components/SweepParamsModal";
+import type { OptimizationStudy, OptimizationTrial, ParameterOverride } from "../state/types";
 
 interface Props {
   study: OptimizationStudy;
@@ -34,6 +48,9 @@ interface Props {
 
 type SortKey = "rank" | "obj" | "wall" | "trial" | string; // string => a param path
 type SortDir = "asc" | "desc";
+
+/** What the whole results view ranks by: the study's objective, or an event. */
+type RankDim = "objective" | EventMetricKey;
 
 const PODIUM: Record<number, { border: string; chip: string }> = {
   1: { border: "border-l-[#FFC627]", chip: "border-[#FFC627]/60 text-[#FFC627]" },
@@ -54,18 +71,83 @@ function formatEta(seconds: number): string {
 }
 
 export function OptimizationResults({ study }: Props) {
-  const { cancelStudy, bridge } = useCfd();
+  const cfd = useCfd();
+  const { cancelStudy, bridge, startSweep, startOptimization } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // Trial whose recipe seeds the "run a sweep from this recipe" modal (null = closed).
+  const [sweepSeedTrial, setSweepSeedTrial] = useState<OptimizationTrial | null>(null);
   const [paramForScatter, setParamForScatter] = useState<string>(
     study.parameterPaths[0] ?? "",
   );
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [rankDim, setRankDim] = useState<RankDim>(() => {
+    const rb = study.params.rankBy;
+    return rb && EVENT_RANK_METRICS.some((m) => m.key === rb) ? (rb as RankDim) : "objective";
+  });
+  const carKey = carKeyForConfig(study.configPath);
 
-  const live = useOptimizationLive(study);
+  // Per-trial FSAE event scores (frontend; same computeEvents() lib as the
+  // Performance screen). Computed for ALL done trials so BOTH the active-dimension
+  // re-rank AND the multi-objective "best design per objective" panel can read it.
+  const eventsByTrial = useMemo(() => {
+    const map = new Map<number, EventScores>();
+    const vehicle = vehicleForCar(carKey, cfd.state?.vehicleConfig);
+    const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
+    for (const t of study.trials) {
+      if (t.sweepPoints && t.sweepPoints.length > 0) {
+        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
+      }
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+
+  // Best trial for EACH objective (total points + each event), so the speed ↔
+  // efficiency trade-off is visible at a glance: the total-points winner is the
+  // balanced design, while the per-event winners show the extremes. One pick
+  // jumps the whole view + inspector to that design.
+  const bestByMetric = useMemo(() => {
+    return EVENT_RANK_METRICS.map((m) => {
+      let best: { val: number; trialIdx: number } | null = null;
+      for (const t of study.trials) {
+        const e = eventsByTrial.get(t.trialIdx);
+        if (!e) continue;
+        const val = m.get(e);
+        if (val == null || !Number.isFinite(val)) continue;
+        if (!best || (m.lowerBetter ? val < best.val : val > best.val)) {
+          best = { val, trialIdx: t.trialIdx };
+        }
+      }
+      return { metric: m, best };
+    });
+  }, [eventsByTrial, study.trials]);
+
+  const dimDef = rankDim === "objective" ? null : EVENT_RANK_METRICS.find((m) => m.key === rankDim) ?? null;
+  const objUnit = objectiveUnit(study.params.objective);
+  const dim = dimDef
+    ? { label: dimDef.label, unit: "", fmt: dimDef.fmt }
+    : { label: "obj", unit: objUnit ?? "", fmt: (n: number) => n.toPrecision(5) };
+
+  // The active ranking dimension drives the ENTIRE view (podium, charts, table)
+  // by feeding useOptimizationLive a study whose objectiveValue is remapped to
+  // that dimension — one source of truth, so nothing can disagree.
+  const viewStudy: OptimizationStudy = useMemo(() => {
+    if (!dimDef) return study;
+    return {
+      ...study,
+      objectiveDirection: dimDef.lowerBetter ? "minimize" : "maximize",
+      trials: study.trials.map((t) => {
+        const e = eventsByTrial.get(t.trialIdx);
+        return { ...t, objectiveValue: e ? dimDef.get(e) : null };
+      }),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study, dimDef, eventsByTrial]);
+
+  const live = useOptimizationLive(viewStudy);
   const elapsed = useElapsedSeconds(study);
 
-  const objUnit = objectiveUnit(study.params.objective);
   const isRunning = study.status === "running";
   const showEta = isRunning && live.nDone >= 3 && live.eta != null;
 
@@ -118,7 +200,7 @@ export function OptimizationResults({ study }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [study, bridge, live.ranked]);
 
-  // ---- Charts: convergence + objective-vs-parameter ------------------------
+  // ---- Charts: convergence + value-vs-parameter (all in the active dim) -----
   const convergencePoints: ScatterPt[] = useMemo(
     () =>
       live.done.map((t) => ({
@@ -148,6 +230,20 @@ export function OptimizationResults({ study }: Props) {
     [live.done, live.rankByIdx, paramForScatter],
   );
 
+  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
+  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
+  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
+  // is "favorable" when raising the knob pushes the objective the better way.
+  const sensitivityBars: TornadoBar[] = useMemo(() => {
+    const maximize = viewStudy.objectiveDirection === "maximize";
+    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
+      label: e.path,
+      value: e.rho,
+      favorable: e.rho > 0 === maximize,
+      n: e.n,
+    }));
+  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
+
   // ---- Parallel-coords plot ------------------------------------------------
   const axes = useMemo(() => {
     const paramAxes = study.parameterPaths.map((p) => {
@@ -165,9 +261,10 @@ export function OptimizationResults({ study }: Props) {
     const objMax = objVals.length ? Math.max(...objVals) : 1;
     return [
       ...paramAxes,
-      { label: `objective (${study.objectiveDirection})`, min: objMin, max: objMax },
+      { label: `${dim.label} (${viewStudy.objectiveDirection})`, min: objMin, max: objMax },
     ];
-  }, [study.parameterPaths, study.objectiveDirection, live.done]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.parameterPaths, viewStudy.objectiveDirection, dim.label, live.done]);
 
   const trialsForPlot: ParallelCoordsTrial[] = useMemo(
     () =>
@@ -180,16 +277,15 @@ export function OptimizationResults({ study }: Props) {
     [live.done, study.parameterPaths, live.rankByIdx],
   );
 
-  // ---- Sortable trial table ------------------------------------------------
+  // ---- Sortable trial table (iterates the remapped view so the obj column,
+  // ranks and deltas all reflect the active dimension) -----------------------
   const sortedTrials = useMemo(() => {
-    const arr = [...study.trials];
+    const arr = [...viewStudy.trials];
     const rankOf = (t: OptimizationTrial) =>
       live.rankByIdx.get(t.trialIdx) ?? Number.POSITIVE_INFINITY;
-    // The sorted quantity for a trial, or null when the trial doesn't carry it
-    // (pending/running rows have no objective; pending rows have no params).
+    // The sorted quantity for a trial, or null when the trial doesn't carry it.
     // Rows WITHOUT the quantity always partition to the BOTTOM regardless of
-    // asc/desc — otherwise an ascending objective sort floats a block of empty
-    // "—" rows above the actual results mid-run.
+    // asc/desc — otherwise an ascending sort floats empty "—" rows to the top.
     const valueOf = (t: OptimizationTrial): number | null => {
       if (sortKey === "rank") return Number.isFinite(rankOf(t)) ? rankOf(t) : null;
       if (sortKey === "obj") return t.objectiveValue;
@@ -209,7 +305,7 @@ export function OptimizationResults({ study }: Props) {
       return sortDir === "asc" ? d : -d;
     };
     return arr.sort(cmp);
-  }, [study.trials, live.rankByIdx, sortKey, sortDir]);
+  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir]);
 
   function onSort(key: SortKey) {
     if (key === sortKey) {
@@ -224,9 +320,12 @@ export function OptimizationResults({ study }: Props) {
     key === sortKey ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
   // ---- Selected trial (right pane) -----------------------------------------
+  // Sourced from viewStudy so its objectiveValue is in the active dimension —
+  // the inspector's headline value then agrees with the podium/table (its
+  // sweepPoints are preserved through the remap for the per-RPM curves).
   const selectedTrial =
     selectedIdx !== null
-      ? study.trials.find((t) => t.trialIdx === selectedIdx) ?? null
+      ? viewStudy.trials.find((t) => t.trialIdx === selectedIdx) ?? null
       : null;
   const selectedRanked =
     selectedIdx !== null
@@ -246,8 +345,8 @@ export function OptimizationResults({ study }: Props) {
             {live.ranked[0] && (
               <span className="ml-2 text-amber-300">
                 best #{live.ranked[0].trial.trialIdx} ={" "}
-                {(live.ranked[0].trial.objectiveValue as number).toPrecision(5)}
-                {objUnit && <span className="ml-0.5 text-[#9097A0]">{objUnit}</span>}
+                {dim.fmt(live.ranked[0].trial.objectiveValue as number)}
+                {dim.unit && <span className="ml-0.5 text-[#9097A0]">{dim.unit}</span>}
               </span>
             )}
             {showEta && (
@@ -268,8 +367,11 @@ export function OptimizationResults({ study }: Props) {
         )}
       </header>
 
-      <div className="grid flex-1 min-h-0 grid-cols-[1fr_360px] gap-3 overflow-hidden p-3">
-        <div className="flex min-h-0 flex-col gap-3 overflow-auto">
+      {/* The grid IS the single scroll container: the left column flows to its
+          full height and scrolls the whole page, while the inspector sticks in
+          view. No nested mini-scrollers fighting for screen height. */}
+      <div className="grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_360px] items-start gap-3 overflow-y-auto p-3">
+        <div className="flex min-w-0 flex-col gap-3">
           {/* Podium row — 3 cards, fills in rank order; dashed placeholders. */}
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((slot) => {
@@ -310,8 +412,8 @@ export function OptimizationResults({ study }: Props) {
                     <span className="text-[9px] text-[#5A5F66]">trial #{t.trialIdx}</span>
                   </div>
                   <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
-                    {(t.objectiveValue as number).toPrecision(5)}
-                    {objUnit && <span className="ml-1 text-[10px] text-[#9097A0]">{objUnit}</span>}
+                    {dim.fmt(t.objectiveValue as number)}
+                    {dim.unit && <span className="ml-1 text-[10px] text-[#9097A0]">{dim.unit}</span>}
                   </div>
                   <div className="font-mono text-[9px] text-[#5A5F66]">
                     {r.rank === 1
@@ -327,76 +429,186 @@ export function OptimizationResults({ study }: Props) {
             })}
           </div>
 
+          {/* Best design per OBJECTIVE — the efficiency ↔ speed trade-off at a
+              glance. "total pts" is the balanced pick; the per-event winners are
+              the extremes. Click any to inspect that design + rank the view by it. */}
+          {bestByMetric.some((b) => b.best) && (
+            <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+                Best design per objective
+                <span className="ml-2 text-[9px] lowercase text-[#5A5F66]">
+                  total pts = the efficiency↔speed balance · click to inspect + rank by it
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-2 font-mono text-[10px] sm:grid-cols-3">
+                {bestByMetric.map(({ metric, best }) => (
+                  <button
+                    key={metric.key}
+                    type="button"
+                    disabled={!best}
+                    onClick={() => {
+                      if (!best) return;
+                      setSelectedIdx(best.trialIdx);
+                      setRankDim(metric.key);
+                    }}
+                    className={
+                      "flex items-baseline justify-between gap-2 rounded-sm border px-1.5 py-1 text-left " +
+                      (rankDim === metric.key
+                        ? "border-[#FFC627]/60 bg-[#FFC627]/5"
+                        : "border-[#2A2C32] hover:border-[#FFC627]/40") +
+                      (best ? "" : " opacity-40")
+                    }
+                  >
+                    <span className="uppercase tracking-wider text-[#5A5F66]">{metric.label}</span>
+                    {best ? (
+                      <span className="text-[#D8DCE2]">
+                        {metric.fmt(best.val)} <span className="text-[#5A5F66]">#{best.trialIdx}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[#5A5F66]">—</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {live.nDone === 0 ? (
             <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
-              Waiting for first trial…
+              {dimDef && POINTS_METRIC_KEYS.includes(dimDef.key)
+                ? "No ranked trials — points need a reference baseline (set it on the Performance tab), or no trials are done yet."
+                : "Waiting for first trial…"}
             </div>
           ) : (
-            <>
-              {/* Charts row — convergence + objective vs parameter. */}
-              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-                <div className="overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                  <ScatterPlot
-                    title="convergence (objective vs trial)"
-                    points={convergencePoints}
-                    xLabel="trial"
-                    yLabel="objective"
-                    stepLine={convergenceStep}
-                    selectedId={selectedIdx}
-                    onPointClick={setSelectedIdx}
-                  />
-                </div>
-                <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                  <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
-                    {study.parameterPaths.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setParamForScatter(p)}
-                        className={
-                          "rounded-sm border px-1.5 py-0.5 text-[9px] " +
-                          (p === paramForScatter
-                            ? "border-[#FFC627] text-[#FFC627]"
-                            : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
-                        }
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="overflow-auto">
-                    <ScatterPlot
-                      title={`objective vs ${paramForScatter}`}
-                      points={paramScatterPoints}
-                      xLabel={paramForScatter}
-                      yLabel="objective"
-                      selectedId={selectedIdx}
-                      onPointClick={setSelectedIdx}
-                    />
-                  </div>
-                </div>
+            <div className="flex flex-col gap-3">
+              {/* Convergence — full width, in the active dimension. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <ScatterPlot
+                  title={`${dim.label} vs trial`}
+                  points={convergencePoints}
+                  xLabel="trial"
+                  yLabel={dim.label}
+                  stepLine={convergenceStep}
+                  selectedId={selectedIdx}
+                  onPointClick={setSelectedIdx}
+                  height={360}
+                />
               </div>
 
-              <div className="overflow-auto">
+              {/* Value vs parameter — full width, with a param selector. */}
+              <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
+                  {study.parameterPaths.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setParamForScatter(p)}
+                      className={
+                        "rounded-sm border px-1.5 py-0.5 text-[9px] " +
+                        (p === paramForScatter
+                          ? "border-[#FFC627] text-[#FFC627]"
+                          : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
+                      }
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <ScatterPlot
+                  title={`${dim.label} vs ${paramForScatter}`}
+                  points={paramScatterPoints}
+                  xLabel={paramForScatter}
+                  yLabel={dim.label}
+                  selectedId={selectedIdx}
+                  onPointClick={setSelectedIdx}
+                  height={360}
+                />
+              </div>
+
+              {/* Sensitivity tornado — which knobs move the active dimension. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <TornadoChart
+                  title={`sensitivity · ${dim.label}`}
+                  bars={sensitivityBars}
+                  axisLabel={`Spearman ρ vs ${dim.label} (${
+                    viewStudy.objectiveDirection === "maximize" ? "higher" : "lower"
+                  } better)`}
+                  selectedLabel={paramForScatter}
+                  onBarClick={setParamForScatter}
+                />
+              </div>
+
+              {/* Parallel coordinates — full width. */}
+              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+                <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+                  parallel coordinates
+                </div>
                 <ParallelCoordsPlot
                   axes={axes}
                   trials={trialsForPlot}
                   onTrialClick={setSelectedIdx}
                   selectedTrialIdx={selectedIdx}
+                  height={420}
                 />
               </div>
-            </>
+            </div>
           )}
 
+          {/* Rank-by control — the active dimension drives the whole view. */}
+          <div className="flex flex-wrap items-center gap-2 text-[10px]">
+            <span className="uppercase tracking-wider text-[#9097A0]">Rank by</span>
+            <select
+              aria-label="Rank by"
+              value={rankDim}
+              onChange={(e) => setRankDim(e.target.value as RankDim)}
+              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+            >
+              <option value="objective">objective ({study.params.objective.metric})</option>
+              {EVENT_RANK_METRICS.map((m) => (
+                <option key={m.key} value={m.key}>
+                  event · {m.label}
+                </option>
+              ))}
+            </select>
+            {dimDef && (
+              <span className="text-[#5A5F66]">
+                podium + charts + table all rank by {dimDef.label} · vehicle {carKey}
+                {POINTS_METRIC_KEYS.includes(dimDef.key) ? " · needs baselines (Performance tab)" : ""}
+              </span>
+            )}
+            {/* Actually optimize FOR the active metric: re-sample in a narrowed
+                box around the current #1, concentrating the search where the
+                score is highest (iterative refinement on the space-filling
+                backend). Each click converges further on that objective. */}
+            <button
+              type="button"
+              disabled={!live.ranked[0] || study.status === "running"}
+              title={`Start a new optimization that narrows the parameter search around the current #1 (best ${dim.label}) — concentrates the sampler there to push that objective further.`}
+              onClick={() => {
+                const best = live.ranked[0]?.trial;
+                if (!best) return;
+                void startOptimization(study.configPath, {
+                  ...study.params,
+                  tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
+                  seed: null,
+                  rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
+                });
+              }}
+              className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+            >
+              ⟲ Refine around #1
+            </button>
+          </div>
+
           {/* Sortable ranked trial table. */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
             <table className="w-full text-left font-mono text-[10px]">
               <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
                 <tr className="border-b border-[#2A2C32] [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
                   <SortTh label="rank" k="rank" onSort={onSort} arrow={arrow} />
                   <SortTh label="#" k="trial" onSort={onSort} arrow={arrow} />
                   <th>status</th>
-                  <SortTh label="obj" k="obj" align="right" onSort={onSort} arrow={arrow} />
+                  <SortTh label={dim.label} k="obj" align="right" onSort={onSort} arrow={arrow} />
                   <th className="text-right">Δ best</th>
                   <SortTh label="wall (s)" k="wall" align="right" onSort={onSort} arrow={arrow} />
                   {study.parameterPaths.map((p) => (
@@ -438,7 +650,7 @@ export function OptimizationResults({ study }: Props) {
                         )}
                       </td>
                       <td className="px-2 py-0.5 text-right">
-                        {t.objectiveValue !== null ? t.objectiveValue.toPrecision(5) : "—"}
+                        {t.objectiveValue !== null ? dim.fmt(t.objectiveValue) : "—"}
                       </td>
                       <td className="px-2 py-0.5 text-right">
                         {rankedRow
@@ -465,23 +677,44 @@ export function OptimizationResults({ study }: Props) {
           </div>
         </div>
 
-        <aside className="min-h-0 overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
+        <aside className="sticky top-0 self-start max-h-[calc(100vh-7rem)] overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
           {selectedTrial ? (
             <TrialInspector
               trial={selectedTrial}
               parameterPaths={study.parameterPaths}
               configPath={study.configPath}
-              objective={study.params.objective}
+              dim={dim}
               rank={selectedRanked?.rank ?? null}
               deltaToBest={selectedRanked?.deltaToBest ?? null}
               pctOfBest={selectedRanked?.pctOfBest ?? null}
               bestTrial={bestTrial}
+              onRunSweep={
+                selectedTrial && Object.keys(selectedTrial.parameterValues).length > 0
+                  ? () => setSweepSeedTrial(selectedTrial)
+                  : undefined
+              }
             />
           ) : (
             <p className="text-[11px] text-[#5A5F66]">Click a trial to inspect.</p>
           )}
         </aside>
       </div>
+
+      {sweepSeedTrial && (
+        <SweepParamsModal
+          open
+          defaultPath={study.configPath}
+          seedLabel={`trial #${sweepSeedTrial.trialIdx}`}
+          seedOverrides={Object.entries(sweepSeedTrial.parameterValues).map(
+            ([path, value]): ParameterOverride => ({ path, value }),
+          )}
+          onCancel={() => setSweepSeedTrial(null)}
+          onStart={async (params) => {
+            await startSweep(study.configPath, params);
+            setSweepSeedTrial(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { followerOf, withPerElement } from "../../lib/lockedPairs";
 import { useParameterSchema } from "../../lib/useParameterSchema";
 import { ParameterPanel } from "./ParameterPanel";
 import { ObjectiveBuilder } from "./ObjectiveBuilder";
+import { EVENT_RANK_METRICS } from "../../lib/performance";
 
 interface Props {
   configPath: string;
@@ -44,6 +45,7 @@ export function OptimizationParamsModal({
     direction: "maximize",
   });
   const [rpmListText, setRpmListText] = useState("6000:10000:2000");
+  const [rankBy, setRankBy] = useState<string>("objective");
   const [nTrials, setNTrials] = useState(32);
   const [sampler, setSampler] = useState<SamplerKind>("lhs");
   const [seedText, setSeedText] = useState("");
@@ -116,6 +118,7 @@ export function OptimizationParamsModal({
       convergenceTolImep: tol,
       convergenceMinCycles: minCycles,
       lockedPairs,
+      rankBy: rankBy === "objective" ? null : rankBy,
     };
     onSubmit(params);
   }
@@ -170,6 +173,30 @@ export function OptimizationParamsModal({
               onRpmListTextChange={setRpmListText}
               onChange={setObjective}
             />
+            <label className="mt-3 block">
+              <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">
+                Rank results by
+              </span>
+              <select
+                value={rankBy}
+                onChange={(e) => setRankBy(e.target.value)}
+                aria-label="Rank results by"
+                className={INPUT_CLS + " mt-1 w-full"}
+              >
+                <option value="objective">The objective above</option>
+                {EVENT_RANK_METRICS.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    FSAE event · {m.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-[#5A5F66]">
+                The objective is what the sampler explores; ranking by an FSAE
+                event scores each trial&apos;s curve through the vehicle model
+                (set baselines on the Performance tab for points). Switchable
+                later on the results screen.
+              </p>
+            </label>
           </section>
 
           <section className="mb-2">

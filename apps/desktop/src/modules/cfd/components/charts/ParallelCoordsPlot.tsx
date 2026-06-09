@@ -8,7 +8,9 @@
 // `rank` field (1/2/3 gold/silver/bronze). When both are present `rank` wins;
 // `bestTrial` is treated as rank 1.
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+
+import { useElementWidth } from "./useElementWidth";
 
 export interface ParallelCoordsTrial {
   trialIdx: number;
@@ -43,11 +45,17 @@ interface Props {
 export function ParallelCoordsPlot({
   axes,
   trials,
-  height = 360,
+  height = 400,
   onTrialClick,
   selectedTrialIdx,
 }: Props) {
-  const width = Math.max(600, axes.length * 120);
+  // Fill the container width so the plot never overflows into an early
+  // horizontal scrollbar. A per-axis floor keeps many-axis plots legible; with
+  // the usual handful of parameters the measured container width always wins,
+  // and only a genuinely wide axis set falls back to a (needed) scroll.
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const measured = useElementWidth(hostRef, 720);
+  const width = Math.max(measured, 320, axes.length * 60);
   const padLeft = 40;
   const padRight = 40;
   const padTop = 28;
@@ -84,12 +92,13 @@ export function ParallelCoordsPlot({
   );
 
   return (
+    <div ref={hostRef} className="w-full overflow-x-auto">
     <svg
       width={width}
       height={height}
       role="img"
       aria-label="Parallel coordinates of trials"
-      className="overflow-visible"
+      className="block overflow-visible"
     >
       {/* Axes */}
       {axes.map((ax, i) => (
@@ -192,5 +201,6 @@ export function ParallelCoordsPlot({
         );
       })}
     </svg>
+    </div>
   );
 }

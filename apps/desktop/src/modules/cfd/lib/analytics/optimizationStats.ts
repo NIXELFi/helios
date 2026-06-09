@@ -6,7 +6,34 @@
 // by ascending trialIdx). No React / Tauri imports: this file is unit-testable
 // in isolation and safe to import from anywhere.
 
-import type { ObjectiveDirection, OptimizationTrial } from "../../state/types";
+import type { ObjectiveDirection, OptimizationTrial, ParameterBounds } from "../../state/types";
+
+/** Narrow each tunable's bounds to a `factor`-wide window centered on a design's
+ *  parameter values, clamped to the original range. This is how the optimizer
+ *  ACTUALLY targets an FSAE objective on a space-filling backend: re-sample in a
+ *  shrunk box around the current best for that objective, so the search
+ *  concentrates where the score is highest (iterative pattern search). factor 0.3
+ *  keeps ±15% of each parameter's original range. */
+export function refineBounds(
+  tunables: ParameterBounds[],
+  paramValues: Record<string, number>,
+  factor = 0.3,
+): ParameterBounds[] {
+  return tunables.map((t) => {
+    const span = t.max - t.min;
+    const c = paramValues[t.path];
+    const center = c != null && Number.isFinite(c) ? c : (t.min + t.max) / 2;
+    const half = (span * factor) / 2;
+    let lo = Math.max(t.min, center - half);
+    let hi = Math.min(t.max, center + half);
+    if (!(lo < hi)) {
+      // Center sat on an edge → keep a small valid window just inside the range.
+      lo = Math.max(t.min, Math.min(center, t.max - span * 0.05));
+      hi = Math.min(t.max, lo + span * 0.1);
+    }
+    return { path: t.path, min: lo, max: hi, step: t.step };
+  });
+}
 
 export interface RankedTrial {
   trial: OptimizationTrial;
@@ -85,6 +112,101 @@ export function runningBest(
     }
     out.push({ trialIdx: t.trialIdx, objective: value, bestSoFar });
   }
+  return out;
+}
+
+// ---- Sensitivity (Spearman rank correlation) ------------------------------
+
+/** Fractional (average-tie) ranks of `values`, 1-based. Equal values share
+ *  the mean of the ranks they span — the standard tie correction so Spearman
+ *  stays well-defined on snapped/duplicate samples. */
+function averageRanks(values: number[]): number[] {
+  const order = values.map((v, i) => [v, i] as const).sort((a, b) => a[0] - b[0]);
+  const ranks = new Array<number>(values.length);
+  let i = 0;
+  while (i < order.length) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1]![0] === order[i]![0]) j++;
+    const avg = (i + j) / 2 + 1; // mean of 1-based positions i+1..j+1
+    for (let k = i; k <= j; k++) ranks[order[k]![1]] = avg;
+    i = j + 1;
+  }
+  return ranks;
+}
+
+/** Pearson correlation; null when n<3 or either side has zero variance. */
+function pearson(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 3 || ys.length !== n) return null;
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i]!;
+    my += ys[i]!;
+  }
+  mx /= n;
+  my /= n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i]! - mx;
+    const dy = ys[i]! - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  if (sxx === 0 || syy === 0) return null; // constant series → undefined
+  return sxy / Math.sqrt(sxx * syy);
+}
+
+/** Spearman rank correlation in [-1, 1] (Pearson of the average-tie ranks).
+ *  null when fewer than 3 complete pairs or either side has no rank variance
+ *  (all-equal). */
+export function spearman(xs: number[], ys: number[]): number | null {
+  if (xs.length !== ys.length) return null;
+  return pearson(averageRanks(xs), averageRanks(ys));
+}
+
+export interface SensitivityEntry {
+  path: string;
+  /** Spearman ρ of this parameter vs the trial objective, in [-1, 1]. */
+  rho: number;
+  /** Number of finite paired samples the correlation was computed over. */
+  n: number;
+}
+
+/** Spearman sensitivity of each tunable vs the trial objective, sorted by
+ *  |ρ| descending — the tornado order (strongest driver on top).
+ *
+ *  Mines the done+finite trials already in the study; the objective is taken
+ *  verbatim, so feeding a view-remapped study (objectiveValue = an FSAE event
+ *  metric) yields the sensitivity in THAT dimension. A parameter is omitted
+ *  when it has <3 finite paired samples or no variance over the trials (a
+ *  pinned knob can't correlate with anything). Sign convention follows the raw
+ *  objective: ρ>0 means a higher parameter tracks a higher objectiveValue —
+ *  the caller knows whether higher is better from objectiveDirection. */
+export function sensitivityTornado(
+  trials: OptimizationTrial[],
+  parameterPaths: string[],
+): SensitivityEntry[] {
+  const done = trials.filter(isRankable);
+  const out: SensitivityEntry[] = [];
+  for (const path of parameterPaths) {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const t of done) {
+      const x = t.parameterValues[path];
+      const y = t.objectiveValue;
+      if (x !== undefined && Number.isFinite(x) && y !== null && Number.isFinite(y)) {
+        xs.push(x);
+        ys.push(y);
+      }
+    }
+    const rho = spearman(xs, ys);
+    if (rho !== null) out.push({ path, rho, n: xs.length });
+  }
+  out.sort((a, b) => Math.abs(b.rho) - Math.abs(a.rho));
   return out;
 }
 

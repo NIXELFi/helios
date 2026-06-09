@@ -207,5 +207,13 @@
     },
     "p_ambient": 101325.0,
     "T_ambient": 300.0,
-    "drivetrain_efficiency": 0.85
+        "drivetrain_efficiency": 0.85,
+    "physics": {
+        "spark_advance_rpm_slope_deg_per_krpm": 1.5,
+        "duration_rpm_exp": 0.4,
+        "restrictor_cd_mach_k": 0.1,
+        "restrictor_loss_from_diffuser_geometry": true,
+        "intake_junction_borda_carnot": true,
+        "fmep_c": 0.00075
+    }
 }

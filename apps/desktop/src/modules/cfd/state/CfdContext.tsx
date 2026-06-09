@@ -6,6 +6,8 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 
 import { loadPersisted, savePersisted } from "../lib/cfdStorage";
 import { type CfdBridge, realBridge } from "../lib/tauriBridge";
+import { REFERENCE_2026, SDM26_VEHICLE } from "../lib/performance/vehicle";
+import type { ReferenceBaseline, VehicleConfig } from "../lib/performance/types";
 import type {
   CycleStats,
   JobEvent,
@@ -31,6 +33,8 @@ export interface State {
   activeStudyId: string | null;
   activeScreen: NavId;
   hydrated: boolean;
+  vehicleConfig: VehicleConfig;
+  referenceBaseline: ReferenceBaseline;
 }
 
 export const initialState: State = {
@@ -39,10 +43,14 @@ export const initialState: State = {
   activeStudyId: null,
   activeScreen: "config",
   hydrated: false,
+  vehicleConfig: SDM26_VEHICLE,
+  referenceBaseline: REFERENCE_2026,
 };
 
 export type Action =
   | { type: "setLoadedConfig"; cfg: LoadedConfig | null }
+  | { type: "setVehicleConfig"; config: VehicleConfig }
+  | { type: "setReferenceBaseline"; baseline: ReferenceBaseline }
   | { type: "setActiveScreen"; screen: NavId }
   | { type: "setActiveStudy"; id: string | null }
   | { type: "addStudy"; study: Study }
@@ -53,7 +61,13 @@ export type Action =
   | { type: "sweepRpmDone"; id: string; point: Omit<SweepPoint, "cycles" | "captureDir">; captureDir?: string }
   | { type: "setSweepCompare"; id: string; compareWithStudyId?: string }
   | { type: "deleteStudy"; id: string }
-  | { type: "rehydrate"; studies: Study[]; lastConfigPath: string | null }
+  | {
+      type: "rehydrate";
+      studies: Study[];
+      lastConfigPath: string | null;
+      vehicleConfig?: VehicleConfig | null;
+      referenceBaseline?: ReferenceBaseline | null;
+    }
   // Optimization (Phase 5):
   | {
       type: "optimizationTrialStarted";
@@ -84,6 +98,10 @@ export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "setLoadedConfig":
       return { ...s, loadedConfig: a.cfg };
+    case "setVehicleConfig":
+      return { ...s, vehicleConfig: a.config };
+    case "setReferenceBaseline":
+      return { ...s, referenceBaseline: a.baseline };
     case "setActiveScreen":
       return { ...s, activeScreen: a.screen };
     case "setActiveStudy":
@@ -254,6 +272,8 @@ export function reducer(s: State, a: Action): State {
         hydrated: true,
         studies: Object.fromEntries(a.studies.map((st) => [st.id, st])),
         loadedConfig: s.loadedConfig,
+        vehicleConfig: a.vehicleConfig ?? s.vehicleConfig,
+        referenceBaseline: a.referenceBaseline ?? s.referenceBaseline,
       };
   }
 }
@@ -269,7 +289,12 @@ export interface CfdContextValue {
   startOptimization: (configPath: string, params: OptimizationParams) => Promise<string>;
   cancelStudy: (id: string) => Promise<void>;
   deleteStudy: (id: string) => void;
+  /** Add one or more studies reconstructed from an exported JSON bundle. The
+   *  last one becomes active; returns the active id (or null if none added). */
+  importStudies: (studies: Study[]) => string | null;
   setSweepCompare: (id: string, compareWithStudyId?: string) => void;
+  setVehicleConfig: (config: VehicleConfig) => void;
+  setReferenceBaseline: (baseline: ReferenceBaseline) => void;
   /** Test-only entry point. Dispatches actions as if a Tauri event fired. */
   __dispatchTestEvent?: (event: JobEvent) => void;
 }
@@ -431,6 +456,12 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
       type: "rehydrate",
       studies: rehydratedStudies,
       lastConfigPath: persisted.lastConfigPath,
+      // Merge over the SDM26 preset so configs persisted before a field was
+      // added (e.g. finalDrive) fill in their defaults instead of NaN.
+      vehicleConfig: persisted.vehicleConfig
+        ? { ...SDM26_VEHICLE, ...persisted.vehicleConfig }
+        : null,
+      referenceBaseline: persisted.referenceBaseline ?? null,
     });
 
     unsubPromise = bridge.subscribe((event) => {
@@ -464,8 +495,13 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
     if (!state.hydrated) return;
     const studies = Object.values(state.studies)
       .sort((a, b) => b.startedAt - a.startedAt);
-    savePersisted({ lastConfigPath: state.loadedConfig?.path ?? null, studies });
-  }, [state.studies, state.loadedConfig, state.hydrated]);
+    savePersisted({
+      lastConfigPath: state.loadedConfig?.path ?? null,
+      studies,
+      vehicleConfig: state.vehicleConfig,
+      referenceBaseline: state.referenceBaseline,
+    });
+  }, [state.studies, state.loadedConfig, state.hydrated, state.vehicleConfig, state.referenceBaseline]);
 
   const value: CfdContextValue = useMemo(
     () => ({
@@ -499,7 +535,12 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         return jobId;
       },
       startOptimization: async (configPath, params) => {
-        const { jobId } = await bridge.startJob({ kind: "optimization", configPath, params });
+        // rankBy is a frontend-only display/ranking hint — the backend can't
+        // compute FSAE event metrics, so strip it before sampling. The study
+        // keeps the full params so the results screen defaults to it.
+        const backendParams: OptimizationParams = { ...params };
+        delete backendParams.rankBy;
+        const { jobId } = await bridge.startJob({ kind: "optimization", configPath, params: backendParams });
         const trials: OptimizationTrial[] = Array.from(
           { length: params.nTrials },
           (_, i): OptimizationTrial => ({
@@ -533,7 +574,17 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         await bridge.cancelJob(id);
       },
       deleteStudy: (id) => dispatch({ type: "deleteStudy", id }),
+      importStudies: (studies) => {
+        let lastId: string | null = null;
+        for (const study of studies) {
+          dispatch({ type: "addStudy", study });
+          lastId = study.id;
+        }
+        return lastId;
+      },
       setSweepCompare: (id, compareWithStudyId) => dispatch({ type: "setSweepCompare", id, compareWithStudyId }),
+      setVehicleConfig: (config) => dispatch({ type: "setVehicleConfig", config }),
+      setReferenceBaseline: (baseline) => dispatch({ type: "setReferenceBaseline", baseline }),
       __dispatchTestEvent: (event: JobEvent) => applyEventAction(event),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

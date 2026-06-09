@@ -3,7 +3,11 @@ import {
   etaSeconds,
   rankTrials,
   runningBest,
+  spearman,
+  sensitivityTornado,
+  refineBounds,
 } from "../../lib/analytics/optimizationStats";
+import type { ParameterBounds } from "../../state/types";
 import { makeTrial } from "../fakes/study";
 
 describe("rankTrials", () => {
@@ -135,6 +139,115 @@ describe("runningBest", () => {
     ];
     const hist = runningBest(trials, "maximize");
     expect(hist.map((h) => h.trialIdx)).toEqual([0, 3]);
+  });
+});
+
+describe("spearman", () => {
+  it("returns +1 for a strictly increasing monotone (non-linear) relation", () => {
+    const xs = [1, 2, 3, 4, 5];
+    const ys = xs.map((x) => x ** 3); // monotone but not linear
+    expect(spearman(xs, ys)).toBeCloseTo(1, 12);
+  });
+
+  it("returns -1 for a strictly decreasing monotone relation", () => {
+    const xs = [1, 2, 3, 4, 5];
+    const ys = [50, 40, 30, 20, 10];
+    expect(spearman(xs, ys)).toBeCloseTo(-1, 12);
+  });
+
+  it("matches the textbook ρ on a tie-free sample", () => {
+    // ρ = 1 − 6Σd²/(n(n²−1)). x-ranks 1..5, y-ranks [3,1,4,5,2] → d=[-2,1,-1,-1,3],
+    // Σd²=16, n=5 → 1 − 96/120 = 0.2.
+    const xs = [10, 20, 30, 40, 50];
+    const ys = [30, 10, 40, 50, 20];
+    expect(spearman(xs, ys)).toBeCloseTo(0.2, 12);
+  });
+
+  it("handles ties via average ranks", () => {
+    // ys all-equal → no rank variance → undefined → null.
+    expect(spearman([1, 2, 3], [5, 5, 5])).toBeNull();
+    // A tie on xs still yields a defined correlation.
+    const r = spearman([1, 1, 2, 3], [10, 20, 30, 40]);
+    expect(r).not.toBeNull();
+    expect(r!).toBeGreaterThan(0);
+  });
+
+  it("returns null below 3 pairs or on length mismatch", () => {
+    expect(spearman([1, 2], [3, 4])).toBeNull();
+    expect(spearman([1, 2, 3], [1, 2])).toBeNull();
+  });
+});
+
+describe("sensitivityTornado", () => {
+  it("orders parameters by |ρ| descending and signs them", () => {
+    // runner_length perfectly tracks objective up; plenum tracks it down weaker.
+    const trials = [
+      makeTrial({ trialIdx: 0, objectiveValue: 10, parameterValues: { runner_length: 0.20, plenum_volume_l: 2.4 } }),
+      makeTrial({ trialIdx: 1, objectiveValue: 20, parameterValues: { runner_length: 0.25, plenum_volume_l: 1.9 } }),
+      makeTrial({ trialIdx: 2, objectiveValue: 30, parameterValues: { runner_length: 0.30, plenum_volume_l: 2.1 } }),
+      makeTrial({ trialIdx: 3, objectiveValue: 40, parameterValues: { runner_length: 0.35, plenum_volume_l: 1.5 } }),
+    ];
+    const t = sensitivityTornado(trials, ["runner_length", "plenum_volume_l"]);
+    expect(t.map((e) => e.path)).toEqual(["runner_length", "plenum_volume_l"]);
+    expect(t[0]!.rho).toBeCloseTo(1, 12); // monotone up
+    expect(t[1]!.rho).toBeLessThan(0); // tracks down
+    expect(Math.abs(t[0]!.rho)).toBeGreaterThanOrEqual(Math.abs(t[1]!.rho));
+    expect(t[0]!.n).toBe(4);
+  });
+
+  it("omits pinned params (no variance) and non-finite/unfinished trials", () => {
+    const trials = [
+      makeTrial({ trialIdx: 0, objectiveValue: 10, parameterValues: { runner_length: 0.3, plenum_volume_l: 2.0 } }),
+      makeTrial({ trialIdx: 1, objectiveValue: 20, parameterValues: { runner_length: 0.3, plenum_volume_l: 1.5 } }),
+      makeTrial({ trialIdx: 2, objectiveValue: 30, parameterValues: { runner_length: 0.3, plenum_volume_l: 1.0 } }),
+      makeTrial({ trialIdx: 3, status: "running", objectiveValue: null, parameterValues: { runner_length: 0.9, plenum_volume_l: 9 } }),
+    ];
+    const t = sensitivityTornado(trials, ["runner_length", "plenum_volume_l"]);
+    // runner_length is pinned at 0.3 → dropped; plenum varies → kept.
+    expect(t.map((e) => e.path)).toEqual(["plenum_volume_l"]);
+    expect(t[0]!.n).toBe(3);
+  });
+
+  it("returns [] when too few finite trials to correlate", () => {
+    const trials = [
+      makeTrial({ trialIdx: 0, objectiveValue: 10 }),
+      makeTrial({ trialIdx: 1, objectiveValue: 20 }),
+    ];
+    expect(sensitivityTornado(trials, ["runner_length", "plenum_volume_l"])).toEqual([]);
+  });
+});
+
+describe("refineBounds", () => {
+  const tunables: ParameterBounds[] = [
+    { path: "runner_length", min: 0.1, max: 0.5, step: null },
+    { path: "plenum_volume", min: 0.0005, max: 0.005, step: null },
+  ];
+
+  it("narrows to a window centered on the design, clamped to the range", () => {
+    const r = refineBounds(tunables, { runner_length: 0.3, plenum_volume: 0.003 }, 0.3);
+    // ±15% of the 0.4 range = ±0.06 around 0.3 → [0.24, 0.36].
+    expect(r[0]!.min).toBeCloseTo(0.24, 6);
+    expect(r[0]!.max).toBeCloseTo(0.36, 6);
+    // The window is strictly inside the original bounds.
+    expect(r[0]!.min).toBeGreaterThanOrEqual(0.1);
+    expect(r[0]!.max).toBeLessThanOrEqual(0.5);
+    expect(r[1]!.min).toBeLessThan(r[1]!.max);
+  });
+
+  it("clamps at an edge and still returns a valid (min<max) window", () => {
+    const r = refineBounds(tunables, { runner_length: 0.5, plenum_volume: 0.0005 }, 0.3);
+    for (const b of r) {
+      expect(b.min).toBeLessThan(b.max);
+      expect(b.min).toBeGreaterThanOrEqual(b.min === r[0]!.min ? 0.1 : 0.0005 - 1e-9);
+    }
+    expect(r[0]!.max).toBeLessThanOrEqual(0.5 + 1e-9);
+  });
+
+  it("centers on the range midpoint when a value is missing", () => {
+    const r = refineBounds(tunables, {}, 0.5);
+    // midpoint 0.3, ±25% of 0.4 = ±0.1 → [0.2, 0.4].
+    expect(r[0]!.min).toBeCloseTo(0.2, 6);
+    expect(r[0]!.max).toBeCloseTo(0.4, 6);
   });
 });
 

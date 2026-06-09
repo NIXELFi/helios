@@ -12,20 +12,28 @@ import { useState } from "react";
 import { LinePlot } from "../components/charts/LinePlot";
 import { useParameterSchema } from "../lib/useParameterSchema";
 import { copyText } from "../lib/export/io";
-import { objectiveUnit } from "../lib/metricMeta";
 import type {
-  ObjectiveSpec,
   OptimizationTrial,
   ParameterMeta,
 } from "../state/types";
+
+/** The active ranking dimension's display contract — label, unit, and value
+ *  formatter. Supplied by the results screen so the inspector's headline value
+ *  and Δ line always agree with the podium/table (the trial's objectiveValue is
+ *  already remapped to this dimension). */
+export interface InspectorDim {
+  label: string;
+  unit: string;
+  fmt: (n: number) => string;
+}
 
 interface Props {
   trial: OptimizationTrial;
   parameterPaths: string[];
   /** Config path used to resolve parameter units (best-effort). */
   configPath: string;
-  /** Objective spec — drives the objective unit shown next to obj/Δ. */
-  objective: ObjectiveSpec;
+  /** Active ranking dimension — drives the headline value + unit shown by obj/Δ. */
+  dim: InspectorDim;
   /** This trial's 1-based rank, or null when it isn't rankable yet. */
   rank: number | null;
   /** Signed objective gap to the best trial (0 for rank 1; null when n/a). */
@@ -34,6 +42,8 @@ interface Props {
   pctOfBest: number | null;
   /** The best trial, for the overlay curves (null when this IS the best). */
   bestTrial: OptimizationTrial | null;
+  /** Open the sweep modal seeded with THIS trial's recipe (null = hide). */
+  onRunSweep?: () => void;
 }
 
 const RANK_BADGE: Record<number, { label: string; cls: string }> = {
@@ -51,11 +61,12 @@ export function TrialInspector({
   trial,
   parameterPaths,
   configPath,
-  objective,
+  dim,
   rank,
   deltaToBest,
   pctOfBest,
   bestTrial,
+  onRunSweep,
 }: Props) {
   const { schema } = useParameterSchema(configPath);
   const [copied, setCopied] = useState(false);
@@ -71,7 +82,6 @@ export function TrialInspector({
   const overlayPoints = overlay?.sweepPoints ?? [];
   const overlayRpms = overlayPoints.map((p) => p.rpm);
 
-  const objUnit = objectiveUnit(objective);
   const badge = rank != null ? RANK_BADGE[rank] : undefined;
 
   async function copyRecipe() {
@@ -108,8 +118,8 @@ export function TrialInspector({
           )}
         </div>
         <div className="mt-1 font-mono text-[#9097A0]">
-          obj = {trial.objectiveValue !== null ? trial.objectiveValue.toPrecision(5) : "—"}
-          {objUnit && <span className="ml-1 text-[#5A5F66]">{objUnit}</span>}
+          {dim.label} = {trial.objectiveValue !== null ? dim.fmt(trial.objectiveValue) : "—"}
+          {dim.unit && <span className="ml-1 text-[#5A5F66]">{dim.unit}</span>}
           {trial.wallTimeS !== null && (
             <span className="ml-2 text-[#5A5F66]">{trial.wallTimeS.toFixed(2)} s</span>
           )}
@@ -122,7 +132,7 @@ export function TrialInspector({
               ? rank === 1
                 ? "best"
                 : "—"
-              : `Δ ${deltaToBest > 0 ? "+" : ""}${deltaToBest.toPrecision(3)}${objUnit ? " " + objUnit : ""}` +
+              : `Δ ${deltaToBest > 0 ? "+" : ""}${deltaToBest.toPrecision(3)}${dim.unit ? " " + dim.unit : ""}` +
                 (pctOfBest != null
                   ? ` (${pctOfBest > 0 ? "+" : ""}${pctOfBest.toFixed(1)}%)`
                   : "")}
@@ -133,13 +143,25 @@ export function TrialInspector({
       <div>
         <div className="mb-1 flex items-center justify-between">
           <h4 className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Recipe</h4>
-          <button
-            type="button"
-            onClick={() => void copyRecipe()}
-            className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
-          >
-            {copied ? "Copied!" : "Copy"}
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onRunSweep && (
+              <button
+                type="button"
+                onClick={onRunSweep}
+                title="Open the sweep menu with this trial's parameters, to sweep it across RPM"
+                className="rounded-sm border border-[#FFC627]/50 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+              >
+                Run sweep
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void copyRecipe()}
+              className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
         </div>
         <table className="w-full text-[11px]">
           <tbody className="font-mono">

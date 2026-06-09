@@ -9,6 +9,7 @@
 // keeps us under 5 MB even pessimistically.
 
 import type { Study } from "../state/types";
+import type { ReferenceBaseline, VehicleConfig } from "./performance/types";
 
 const KEY_V2 = "helios.cfd.v2";
 const KEY_V1 = "helios.cfd.v1";   // legacy: header-only
@@ -17,9 +18,16 @@ const MAX_STUDIES = 20;
 export interface Persisted {
   lastConfigPath: string | null;
   studies: Study[];
+  vehicleConfig?: VehicleConfig | null;
+  referenceBaseline?: ReferenceBaseline | null;
 }
 
-const EMPTY: Persisted = { lastConfigPath: null, studies: [] };
+const EMPTY: Persisted = {
+  lastConfigPath: null,
+  studies: [],
+  vehicleConfig: null,
+  referenceBaseline: null,
+};
 
 export function loadPersisted(): Persisted {
   try {
@@ -29,6 +37,8 @@ export function loadPersisted(): Persisted {
       return {
         lastConfigPath: parsed.lastConfigPath ?? null,
         studies: Array.isArray(parsed.studies) ? parsed.studies.slice(0, MAX_STUDIES) : [],
+        vehicleConfig: parsed.vehicleConfig ?? null,
+        referenceBaseline: parsed.referenceBaseline ?? null,
       };
     }
     // Fall back to v1 (header-only) if it still exists. Migrate
@@ -98,11 +108,31 @@ export function savePersisted(p: Persisted): void {
         return { ...s, points: s.points.map((pt) => ({ ...pt, cycles: [] })) };
       }
       if (s.kind === "optimization") {
-        // Drop sweep points entirely on each trial; keep param values + objective.
+        // Keep sweepPoints ONLY on the best trial (others → null). A large
+        // imported/optimization study can't fit full curves in localStorage,
+        // but the Performance screen reads its torque curve from the best
+        // trial's sweepPoints — preserving just that one keeps it usable as a
+        // source after reload while shrinking the blob ~100×. (Per-trial event
+        // ranking loses its curves until re-run/re-import; objective ranking is
+        // unaffected.)
         return {
           ...s,
-          trials: s.trials.map((t) => ({ ...t, sweepPoints: null })),
+          trials: s.trials.map((t) =>
+            t.trialIdx === s.bestTrialIdx
+              ? { ...t, sweepPoints: t.sweepPoints?.map((pt) => ({ ...pt, cycles: [] })) ?? null }
+              : { ...t, sweepPoints: null },
+          ),
         };
+      }
+      return { ...s, cycles: [] };
+    }),
+    (xs) => xs.map((s) => {
+      if (s.kind === "sweep") {
+        return { ...s, points: s.points.map((pt) => ({ ...pt, cycles: [] })) };
+      }
+      if (s.kind === "optimization") {
+        // Last resort before dropping data wholesale: no curves at all.
+        return { ...s, trials: s.trials.map((t) => ({ ...t, sweepPoints: null })) };
       }
       return { ...s, cycles: [] };
     }),
@@ -122,6 +152,8 @@ export function savePersisted(p: Persisted): void {
       const trimmed: Persisted = {
         lastConfigPath: p.lastConfigPath ?? null,
         studies: strip(baseStudies),
+        vehicleConfig: p.vehicleConfig ?? null,
+        referenceBaseline: p.referenceBaseline ?? null,
       };
       window.localStorage.setItem(KEY_V2, JSON.stringify(trimmed));
       return; // succeeded

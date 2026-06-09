@@ -4,8 +4,8 @@
 // + clipboard seam they funnel through. Mirrors lib/csv-export.ts idioms:
 // save() with a filter list, slug() for filenames, writeTextFile/writeFile.
 
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
+import { save, open } from "@tauri-apps/plugin-dialog";
+import { writeTextFile, writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 
 /** Lowercase a label into a filename-safe slug. csv-export.ts idiom. */
 export function slugify(s: string): string {
@@ -51,6 +51,24 @@ export async function savePngFile(
   if (!path) return null;
   await writeFile(path, bytes);
   return path;
+}
+
+/** Prompt for a file to open (single .json) and read it as text. Returns the
+ *  chosen path + contents, or null when the user cancels the dialog. The
+ *  inverse of saveTextFile — the disk seam for study import. */
+export async function openTextFile(
+  ext = "json",
+): Promise<{ path: string; contents: string } | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+  });
+  if (picked == null) return null;
+  // open() returns a string path (multiple:false, directory:false).
+  const path = typeof picked === "string" ? picked : String(picked);
+  const contents = await readTextFile(path);
+  return { path, contents };
 }
 
 /** Copy text to the system clipboard. */

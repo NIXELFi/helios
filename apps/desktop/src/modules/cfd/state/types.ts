@@ -182,6 +182,11 @@ export interface OptimizationParams {
    *  follower path is NOT sent in `tunables`; the runner copies the
    *  leader's per-trial value into it. */
   lockedPairs: LockedPair[];
+  /** Frontend-only: the FSAE event metric key to rank/display the results by
+   *  ("objective" or null = the backend objective). Stripped before the backend
+   *  (which can't compute event metrics) and stored on the study for the
+   *  results screen's default ranking dimension. */
+  rankBy?: string | null;
 }
 
 export interface LockedPair {
@@ -429,7 +434,7 @@ export interface JobSummary {
 }
 
 // Active screen inside the module.
-export type NavId = "config" | "studies" | "results";
+export type NavId = "config" | "studies" | "results" | "performance" | "lapsim" | "compare";
 
 // ---- Capture artifacts (loaded on demand via cfd_load_capture) ----
 
