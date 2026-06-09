@@ -11,6 +11,11 @@ pub struct WiebeParams {
     pub eta_comb: f64,
     pub q_lhv: f64,
     pub afr_target: f64,
+    /// Stoichiometric air-fuel ratio of the FUEL (gasoline 14.7, E85 ~9.76,
+    /// methanol ~6.4). Only used to compute the equivalence ratio φ =
+    /// afr_stoich / afr_target inside `afr_eta_factor`; defaults to 14.7 so a
+    /// config that omits it (every gasoline fixture) is bit-identical.
+    pub afr_stoich: f64,
     // Audit 2026-05-19: F4 ramp neutered (all factors = 1.0).
     pub factor_rpm_lo: f64,
     pub factor_rpm_knee: f64,
@@ -133,6 +138,7 @@ impl Default for WiebeParams {
             eta_comb: 0.96,
             q_lhv: 44.0e6,
             afr_target: 13.1,
+            afr_stoich: 14.7,
             factor_rpm_lo: 3500.0,
             factor_rpm_knee: 6000.0,
             factor_rpm_hi: 10500.0,
@@ -243,8 +249,8 @@ impl WiebeParams {
     /// product (m_fuel × factor) peaks around φ ≈ 1.1, giving the
     /// textbook brake-power-rich peak.
     pub fn afr_eta_factor(&self) -> f64 {
-        let afr_stoich = 14.7_f64; // gasoline; consider lifting to a field later
-        let phi = afr_stoich / self.afr_target.max(1.0);
+        // Equivalence ratio from the configured fuel stoich AFR (default 14.7).
+        let phi = self.afr_stoich.max(1.0) / self.afr_target.max(1.0);
         let f = if phi <= 0.7 {
             1.0 - 5.0 * (0.7 - phi).powi(2)
         } else if phi <= 1.0 {
@@ -320,4 +326,33 @@ pub fn wiebe_burn_rate(theta_local_deg: f64, a: f64, m: f64,
 pub fn is_combusting(theta_local_deg: f64, theta_start: f64, duration: f64) -> bool {
     let t = to_combustion_angle(theta_local_deg, theta_start);
     (theta_start <= t) && (t <= theta_start + duration)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn afr_stoich_defaults_to_gasoline() {
+        // Default field reproduces the old hardcoded 14.7 → parity preserved.
+        assert_eq!(WiebeParams::default().afr_stoich, 14.7);
+    }
+
+    #[test]
+    fn afr_eta_factor_uses_configured_stoich() {
+        // Gasoline at afr_target 13.1 → φ = 14.7/13.1 ≈ 1.122 (gentle rich falloff).
+        let gas = WiebeParams { afr_stoich: 14.7, afr_target: 13.1, ..Default::default() };
+        let phi_gas = 14.7 / 13.1;
+        let expect_gas = 1.0 - 0.5 * (phi_gas - 1.0);
+        assert!((gas.afr_eta_factor() - expect_gas).abs() < 1e-9);
+
+        // E85 (stoich 9.76) at the SAME φ (afr_target 8.70) lands the SAME factor —
+        // it's φ, not raw AFR, that drives the curve. Proves the field is wired.
+        let e85 = WiebeParams { afr_stoich: 9.76, afr_target: 8.70, ..Default::default() };
+        assert!((e85.afr_eta_factor() - gas.afr_eta_factor()).abs() < 2e-3);
+
+        // If we'd kept the hardcoded 14.7, E85's φ would be 14.7/8.70 = 1.69
+        // (deep quench, clamped 0.30) — far from gas. Confirm it's NOT that.
+        assert!(e85.afr_eta_factor() > 0.5);
+    }
 }

@@ -25,6 +25,7 @@ import {
   type Topology,
 } from "../lib/sdm26Schema";
 import { getAt } from "../editor/lib/path-helpers";
+import { FUELS } from "../lib/performance";
 import { FullPathLabel } from "../components/PathLabel";
 import type { ExampleConfig } from "../state/types";
 
@@ -263,12 +264,59 @@ function GroupSection({ title }: { title: string }) {
       <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
         {title}
       </div>
+      {title === "Combustion" && <FuelPreset />}
       <div className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 p-2">
         {fields.map((meta) => (
           <FieldRow key={meta.key} meta={meta} draft={state.draft} fieldErrors={state.fieldErrors} />
         ))}
       </div>
     </section>
+  );
+}
+
+/** Fuel preset selector — one pick sets q_lhv + afr_stoich + afr_target to a
+ *  Sunoco fuel's properties (the torque-relevant trio; switching fuel changes
+ *  the heat release m_fuel·q_lhv and the φ in the AFR efficiency factor). The
+ *  individual fields below stay editable, so a mismatch shows as "Custom". */
+function FuelPreset() {
+  const editor = useEditor();
+  const { draft } = editor.state;
+  const qlhv = Number(getAt(draft, "combustion.q_lhv") ?? NaN);
+  const afrS = Number(getAt(draft, "combustion.afr_stoich") ?? NaN);
+  const afrT = Number(getAt(draft, "combustion.afr_target") ?? NaN);
+  // Match the current combustion fields to a known fuel (loose tolerance).
+  const current =
+    Object.values(FUELS).find(
+      (f) =>
+        Math.abs(f.qLhvJkg - qlhv) < 1e5 &&
+        Math.abs(f.afrStoich - afrS) < 0.05 &&
+        Math.abs(f.afrTarget - afrT) < 0.05,
+    )?.key ?? "custom";
+
+  return (
+    <div className="flex items-center gap-2 border-b border-[#16171B] px-2 py-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Fuel preset</span>
+      <select
+        aria-label="Fuel preset"
+        value={current}
+        onChange={(e) => {
+          const f = FUELS[e.target.value];
+          if (!f) return;
+          editor.dispatch({ type: "setField", path: "combustion.q_lhv", value: f.qLhvJkg });
+          editor.dispatch({ type: "setField", path: "combustion.afr_stoich", value: f.afrStoich });
+          editor.dispatch({ type: "setField", path: "combustion.afr_target", value: f.afrTarget });
+        }}
+        className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-0.5 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+      >
+        {current === "custom" && <option value="custom">Custom</option>}
+        {Object.values(FUELS).map((f) => (
+          <option key={f.key} value={f.key}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      <span className="text-[9px] text-[#5A5F66]">sets q_lhv · afr_stoich · afr_target</span>
+    </div>
   );
 }
 

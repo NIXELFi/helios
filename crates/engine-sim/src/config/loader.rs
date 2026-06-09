@@ -150,6 +150,9 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.eta_comb = req_f64(comb, "combustion_efficiency")?;
     cfg.q_lhv = req_f64(comb, "q_lhv")?;
     cfg.afr_target = req_f64(comb, "afr_target")?;
+    // Optional — defaults to gasoline (14.7) so configs without it (and every
+    // existing parity fixture) load unchanged.
+    cfg.afr_stoich = comb.get("afr_stoich").and_then(|x| x.as_f64()).unwrap_or(14.7);
 
     cfg.intake_valve_diameter = req_f64(iv, "diameter")?;
     cfg.intake_valve_max_lift = req_f64(iv, "max_lift")?;
