@@ -381,3 +381,31 @@ describe("OptimizationResults — cancel", () => {
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
   });
 });
+
+describe("OptimizationResults — knock surfacing", () => {
+  it("flags trials whose max KI exceeds 1.0 (table + header count)", () => {
+    const study = makeOptimizationStudy({
+      trials: [
+        makeTrial({
+          trialIdx: 0, objectiveValue: 60, status: "done",
+          sweepPoints: [
+            makeSweepPoint({ rpm: 8000, lastCycle: { knockIntegral: 0.4 } }),
+            makeSweepPoint({ rpm: 11000, lastCycle: { knockIntegral: 1.31 } }),
+          ],
+        }),
+        makeTrial({
+          trialIdx: 1, objectiveValue: 64, status: "done",
+          sweepPoints: [makeSweepPoint({ rpm: 8000, lastCycle: { knockIntegral: 0.62 } })],
+        }),
+      ],
+    });
+    render(<OptimizationResults study={study} />);
+    // Header count: exactly one knocking trial.
+    expect(screen.getByTitle(/knock integral exceeds 1\.0/i).textContent).toContain("1 knock");
+    // Table column: the knocking trial shows ⚠ + its max KI; the safe one a plain value.
+    const rows = tableRows();
+    const flat = rows.map((r) => r.join(" "));
+    expect(flat.some((r) => r.includes("⚠ 1.31"))).toBe(true);
+    expect(flat.some((r) => r.includes("0.62") && !r.includes("⚠ 0.62"))).toBe(true);
+  });
+});

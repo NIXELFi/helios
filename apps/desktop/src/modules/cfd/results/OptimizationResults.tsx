@@ -117,6 +117,26 @@ export function OptimizationResults({ study }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [study.id, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
 
+  // Max Livengood-Wu knock integral per trial (over its RPM band). Roadmap #4:
+  // KI was computed but watch-only here, so high-CR trials could silently "win"
+  // with designs that would detonate. I > 1.0 = knock predicted.
+  const kiByTrial = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const t of study.trials) {
+      let max: number | null = null;
+      for (const p of t.sweepPoints ?? []) {
+        const ki = p.lastCycle.knockIntegral;
+        if (ki != null && (max == null || ki > max)) max = ki;
+      }
+      if (max != null) map.set(t.trialIdx, max);
+    }
+    return map;
+  }, [study.trials]);
+  const knockCount = useMemo(
+    () => [...kiByTrial.values()].filter((ki) => ki > 1).length,
+    [kiByTrial],
+  );
+
   // Best trial for EACH objective (total points + each event), so the speed ↔
   // efficiency trade-off is visible at a glance: the total-points winner is the
   // balanced design, while the per-event winners show the extremes. One pick
@@ -304,6 +324,7 @@ export function OptimizationResults({ study }: Props) {
       if (sortKey === "rank") return Number.isFinite(rankOf(t)) ? rankOf(t) : null;
       if (sortKey === "obj") return t.objectiveValue;
       if (sortKey === "wall") return t.wallTimeS;
+      if (sortKey === "ki") return kiByTrial.get(t.trialIdx) ?? null;
       if (sortKey === "trial") return t.trialIdx;
       return t.parameterValues[sortKey] ?? null;
     };
@@ -319,7 +340,7 @@ export function OptimizationResults({ study }: Props) {
       return sortDir === "asc" ? d : -d;
     };
     return arr.sort(cmp);
-  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir]);
+  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir, kiByTrial]);
 
   function onSort(key: SortKey) {
     if (key === sortKey) {
@@ -371,6 +392,14 @@ export function OptimizationResults({ study }: Props) {
             )}
             {showEta && (
               <span className="ml-2 text-[#9097A0]">{formatEta(live.eta as number)}</span>
+            )}
+            {knockCount > 0 && (
+              <span
+                className="ml-2 text-[#FF5252]"
+                title="Trials whose max Livengood–Wu knock integral exceeds 1.0 — flagged in the table's KI column"
+              >
+                ⚠ {knockCount} knock
+              </span>
             )}
             <span className="ml-2">{elapsed.toFixed(1)} s</span>
           </p>
@@ -429,7 +458,17 @@ export function OptimizationResults({ study }: Props) {
                     >
                       #{r.rank}
                     </span>
-                    <span className="text-[9px] text-[#5A5F66]">trial #{t.trialIdx}</span>
+                    <span className="text-[9px] text-[#5A5F66]">
+                      {(kiByTrial.get(t.trialIdx) ?? 0) > 1 && (
+                        <span
+                          className="mr-1 text-[#FF5252]"
+                          title={`Knock predicted (KI ${kiByTrial.get(t.trialIdx)!.toFixed(2)} > 1.0)`}
+                        >
+                          ⚠ knock
+                        </span>
+                      )}
+                      trial #{t.trialIdx}
+                    </span>
                   </div>
                   <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
                     {dim.fmt(t.objectiveValue as number)}
@@ -631,6 +670,7 @@ export function OptimizationResults({ study }: Props) {
                   <SortTh label={dim.label} k="obj" align="right" onSort={onSort} arrow={arrow} />
                   <th className="text-right">Δ best</th>
                   <SortTh label="wall (s)" k="wall" align="right" onSort={onSort} arrow={arrow} />
+                  <SortTh label="KI max" k="ki" align="right" onSort={onSort} arrow={arrow} />
                   {study.parameterPaths.map((p) => (
                     <SortTh key={p} label={p} k={p} onSort={onSort} arrow={arrow} />
                   ))}
@@ -690,6 +730,19 @@ export function OptimizationResults({ study }: Props) {
                       </td>
                       <td className="px-2 py-0.5 text-right">
                         {t.wallTimeS !== null ? t.wallTimeS.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-2 py-0.5 text-right">
+                        {(() => {
+                          const ki = kiByTrial.get(t.trialIdx);
+                          if (ki == null) return "—";
+                          return ki > 1 ? (
+                            <span className="text-[#FF5252]" title="Knock predicted (Livengood–Wu integral > 1.0) — this design would detonate as simulated">
+                              ⚠ {ki.toFixed(2)}
+                            </span>
+                          ) : (
+                            ki.toFixed(2)
+                          );
+                        })()}
                       </td>
                       {study.parameterPaths.map((p) => (
                         <td key={p} className="px-2 py-0.5">
