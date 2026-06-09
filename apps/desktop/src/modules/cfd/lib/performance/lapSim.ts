@@ -44,6 +44,17 @@ export interface LapTelemetry {
   vMinKph: number;
 }
 
+/** Thermal efficiency RELATIVE to the engine's best-BSFC point, vs RPM. Real SI
+ *  BSFC is U-shaped: best near peak-torque RPM, ~25-35% worse toward the rev
+ *  limit (pumping + friction) and toward idle. So fuel is integrated per lap
+ *  segment at the LOCAL engine RPM — short gearing (high RPM) burns more for the
+ *  same work, which a single lumped efficiency couldn't capture. Parabolic in
+ *  (rpm−sweet), floored so it never goes negative or silly. */
+function bsfcEffMult(rpm: number, sweetRpm: number): number {
+  const x = (rpm - sweetRpm) / 1000;
+  return Math.max(0.6, 1 - 0.007 * x * x);
+}
+
 export interface LapResult {
   lapTimeS: number;
   fuelKg: number;
@@ -68,6 +79,9 @@ export interface LapOpts {
   fuelDensityKgL?: number;
   /** CO₂ per litre, kg/L (gasoline 2.31, E85 1.65 per §D.13.4.1). */
   co2PerL?: number;
+  /** Best-BSFC engine speed (rpm) — where the fuel map's thermal efficiency
+   *  peaks (near peak torque/BMEP for an SI engine). Default 8000 (CBR600RR). */
+  bsfcSweetRpm?: number;
   /** Race-pace fraction (0..1, default 1 = flat-out qualifying lap). Models the
    *  endurance regime: over a 22 km run on degrading tires, cone-bounded and
    *  managed for reliability + fuel, the driver holds a fraction of the absolute
@@ -90,8 +104,15 @@ export function simLap(
   const nSeg = track.closed ? N : N - 1;
   const nGears = vehicle.gearRatios.length;
 
+  const effPeak = opts.thermalEff ?? 0.3; // best-BSFC thermal efficiency
+  const lhv = (opts.fuelLhvMJkg ?? 43) * 1e6; // J/kg
+  const density = opts.fuelDensityKgL ?? 0.745;
+  const co2PerL = opts.co2PerL ?? 2.31;
+  const sweetRpm = opts.bsfcSweetRpm ?? 8000;
+
   let time = 0;
   let work = 0;
+  let fuelKg = 0;
   // Telemetry accumulators (time-weighted).
   let sumRpmDt = 0;
   let maxRpm = 0;
@@ -107,14 +128,22 @@ export function simLap(
     const vAvg = Math.max(0.1, (vi + vn) / 2);
     const dt = step / vAvg;
     time += dt;
-    const a = (vn * vn - vi * vi) / (2 * step);
-    const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
-    if (fEngine > 0) work += fEngine * step; // propulsive work only (off-throttle = 0)
 
-    // Per-segment telemetry: the gear/RPM the car is actually in at this speed.
+    // The gear/RPM the car is actually in at this speed (also drives the BSFC).
     const gear = gearForSpeed(vehicle, vAvg);
     const vps = gearVps(vehicle, gear);
     const rpm = vps > 0 ? Math.min(vAvg / vps, vehicle.revLimitRpm) : 0;
+
+    const a = (vn * vn - vi * vi) / (2 * step);
+    const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
+    if (fEngine > 0) {
+      const segWork = fEngine * step; // propulsive work only (off-throttle = 0)
+      work += segWork;
+      // Fuel burned for THIS segment at the engine's efficiency for its current
+      // RPM — high-RPM (short-geared) running costs more fuel per joule.
+      fuelKg += segWork / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
+    }
+
     sumRpmDt += rpm * dt;
     if (rpm > maxRpm) maxRpm = rpm;
     if (gear >= 0 && gear < nGears) timeInGear[gear]! += dt;
@@ -127,11 +156,6 @@ export function simLap(
   // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
   time += shiftCount * Math.max(0, vehicle.shiftTimeS);
 
-  const thermalEff = opts.thermalEff ?? 0.3;
-  const lhv = (opts.fuelLhvMJkg ?? 43) * 1e6; // J/kg
-  const density = opts.fuelDensityKgL ?? 0.745;
-  const co2PerL = opts.co2PerL ?? 2.31;
-  const fuelKg = work / (thermalEff * lhv);
   const fuelL = fuelKg / density;
 
   const dtTot = time - shiftCount * Math.max(0, vehicle.shiftTimeS); // moving time

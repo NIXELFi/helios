@@ -93,6 +93,18 @@ describe("simLap — shift losses", () => {
     expect(simLap(torque, oneGear, track).shiftCount).toBe(0);
   });
 
+  it("BSFC map: running far from the best-BSFC RPM burns more fuel", () => {
+    const v = geared(3.0);
+    const opts = { thermalEff: 0.3, fuelLhvMJkg: 43, fuelDensityKgL: 0.745 };
+    // Sweet spot at a mid RPM the car actually uses vs. way out of reach (the
+    // car then runs entirely below the sweet spot → BSFC penalty everywhere).
+    const near = simLap(torque, v, track, { ...opts, bsfcSweetRpm: 8000 });
+    const far = simLap(torque, v, track, { ...opts, bsfcSweetRpm: 30000 });
+    expect(far.fuelKg).toBeGreaterThan(near.fuelKg); // worse BSFC → more fuel
+    // Same lap work either way (BSFC only changes fuel, not the speed profile).
+    expect(far.lapTimeS).toBeCloseTo(near.lapTimeS, 6);
+  });
+
   it("reports sane telemetry (avg/max RPM, gear usage, g's, throttle)", () => {
     const tm = simLap(torque, geared(3.0), track).telemetry;
     expect(tm.avgRpm).toBeGreaterThan(0);
