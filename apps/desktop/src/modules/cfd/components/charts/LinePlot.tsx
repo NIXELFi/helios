@@ -52,7 +52,29 @@ export function LinePlot({
   // setData() path.
   const dataReady = (xs?.length ?? 0) > 0
     || series.some((s) => (s.xs?.length ?? 0) > 0 || s.y.length > 0);
-  const fieldKey = `ready=${dataReady}|` + series.map((s) =>
+
+  // X extent across all data. The plot pins its x range at creation (uPlot's
+  // post-setData auto-scale is flaky — see scales.x below), so the extent MUST
+  // be part of the rebuild key: when the same-shaped series swap to data over
+  // a different domain (e.g. the Lap Sim screen toggling between the ~0.8 km
+  // autocross and the ~1.3 km endurance lap), the axis has to rebuild — it
+  // can't follow via setData against a pinned range.
+  let xMin = Infinity, xMax = -Infinity;
+  const scanX = (vals: number[] | undefined) => {
+    if (!vals) return;
+    for (const v of vals) {
+      if (Number.isFinite(v)) {
+        if (v < xMin) xMin = v;
+        if (v > xMax) xMax = v;
+      }
+    }
+  };
+  scanX(xs);
+  for (const s of series) scanX(s.xs);
+  const haveXRange = isFinite(xMin) && isFinite(xMax) && xMax > xMin;
+  const xRange = haveXRange ? ([xMin, xMax] as [number, number]) : undefined;
+
+  const fieldKey = `ready=${dataReady}|x=${haveXRange ? `${xMin}:${xMax}` : "auto"}|` + series.map((s) =>
     `${s.label}:${s.color ?? ""}:${s.axis ?? "y"}:${s.xs ? "own" : "shared"}`
   ).join("|");
 
@@ -102,26 +124,11 @@ export function LinePlot({
     };
 
     const totalPts = series.reduce((acc, s) => acc + s.y.length, 0);
-    // Explicit X range from the actual data — uPlot's auto-scale can
-    // be flaky when series have their own xs (overlay/compare path)
-    // or when the initial render starts with empty data and updates
-    // later. We compute the union range here so the X axis ALWAYS
-    // covers the full data extent.
-    let xMin = Infinity, xMax = -Infinity;
-    const seenAnyX = (vals: number[] | undefined) => {
-      if (!vals) return;
-      for (const v of vals) {
-        if (Number.isFinite(v)) {
-          if (v < xMin) xMin = v;
-          if (v > xMax) xMax = v;
-        }
-      }
-    };
-    seenAnyX(xs);
-    for (const s of series) seenAnyX(s.xs);
-    const haveXRange = isFinite(xMin) && isFinite(xMax) && xMax > xMin;
-    const xRange = haveXRange ? [xMin, xMax] as [number, number] : undefined;
-
+    // Explicit X range (xRange, computed above with the rebuild key) — uPlot's
+    // auto-scale can be flaky when series have their own xs (overlay/compare
+    // path) or when the initial render starts with empty data and updates
+    // later. Pinning it here + rebuilding when the extent changes keeps the
+    // axis correct in BOTH directions.
     const opts: uPlot.Options = {
       width: plotHostRef.current.clientWidth || 400,
       height: Math.max(height - 28, 80),
