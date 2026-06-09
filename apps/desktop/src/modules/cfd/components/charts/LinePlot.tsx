@@ -233,7 +233,14 @@ export function LinePlot({
           ))}
         </div>
       </div>
-      <div ref={plotHostRef} className="flex-1 min-h-0" />
+      {/* uPlot draws to canvas, which is invisible to assistive tech — name
+          the chart region so screen readers announce what the canvas shows. */}
+      <div
+        ref={plotHostRef}
+        role="img"
+        aria-label={`${title} chart: ${series.map((s) => s.label).join(", ")}`}
+        className="flex-1 min-h-0"
+      />
     </div>
   );
 }
