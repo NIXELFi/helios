@@ -57,6 +57,8 @@ export {
 } from "./points";
 export {
   computeEvents,
+  autocrossLapOpts,
+  enduranceLapOpts,
   EVENT_RANK_METRICS,
   POINTS_METRIC_KEYS,
   ENDURANCE_PACE,
@@ -65,7 +67,16 @@ export {
   type EventOpts,
   type EventMetricKey,
 } from "./events";
-export { simLap, type LapResult, type LapOpts, type LapTelemetry } from "./lapSim";
+export {
+  simLap,
+  makeGripModel,
+  type GripModel,
+  type LapResult,
+  type LapOpts,
+  type LapTelemetry,
+  type LapChannels,
+  type LimitState,
+} from "./lapSim";
 export {
   synthesizeAutocross,
   synthesizeEndurance,

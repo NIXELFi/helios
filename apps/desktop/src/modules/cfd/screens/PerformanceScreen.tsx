@@ -9,7 +9,6 @@ import { useMemo, useState } from "react";
 import { useCfd } from "../state/CfdContext";
 import { LinePlot, type LineSeries } from "../components/charts/LinePlot";
 import { TrackLayout } from "../components/charts/TrackLayout";
-import { basename } from "../lib/cfdPath";
 import { buildDesignReportHtml } from "../lib/export/designReport";
 import { saveTextFile, fileTimestamp, slugify } from "../lib/export/io";
 import {
@@ -35,54 +34,13 @@ import {
   type EventScores,
   type LapTelemetry,
 } from "../lib/performance";
-import type { Study, SweepPoint } from "../state/types";
+import { sourcesFrom } from "../lib/curveSources";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
 
 // The lap sim scores against the real 2026 courses (see lib/performance/tracks).
 const AX_LEN_M = trackLength(AUTOCROSS_2026);
 const EN_LEN_KM = trackLength(ENDURANCE_2026) / 1000;
-
-interface CurveSource {
-  id: string;
-  label: string;
-  configName: string;
-  points: SweepPoint[];
-}
-
-/** Sweeps (their per-RPM points) and optimization studies (their best trial's
- *  sweepPoints) are the torque-curve sources. */
-function sourcesFrom(studies: Record<string, Study>): CurveSource[] {
-  const out: CurveSource[] = [];
-  for (const s of Object.values(studies)) {
-    if (s.kind === "sweep" && s.points.length > 0) {
-      out.push({
-        id: s.id,
-        label: `Sweep · ${basename(s.configPath)} · ${s.points.length} rpm`,
-        configName: basename(s.configPath),
-        points: s.points,
-      });
-    } else if (s.kind === "optimization") {
-      const best =
-        s.bestTrialIdx != null
-          ? s.trials.find((t) => t.trialIdx === s.bestTrialIdx)
-          : undefined;
-      const trial =
-        best?.sweepPoints && best.sweepPoints.length > 0
-          ? best
-          : s.trials.find((t) => t.sweepPoints && t.sweepPoints.length > 0);
-      if (trial?.sweepPoints && trial.sweepPoints.length > 0) {
-        out.push({
-          id: s.id,
-          label: `Optimization · ${basename(s.configPath)} · best #${trial.trialIdx}`,
-          configName: basename(s.configPath),
-          points: trial.sweepPoints,
-        });
-      }
-    }
-  }
-  return out.sort((a, b) => a.label.localeCompare(b.label));
-}
 
 export function PerformanceScreen() {
   const { state, navigateTo, setVehicleConfig, setReferenceBaseline } = useCfd();

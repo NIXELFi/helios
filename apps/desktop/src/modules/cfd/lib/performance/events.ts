@@ -9,7 +9,7 @@
 import type { ReferenceBaseline, VehicleConfig } from "./types";
 import type { TorqueCurve } from "./torqueCurve";
 import { simAccel } from "./accel";
-import { simLap, type LapTelemetry } from "./lapSim";
+import { simLap, type LapOpts, type LapTelemetry } from "./lapSim";
 import { type Track } from "./track";
 import { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
 import { DEFAULT_FUEL, type Fuel } from "./fuels";
@@ -48,6 +48,26 @@ export const LINE_FACTOR = 1.30;
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
  *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map. */
 export const ENDURANCE_THERMAL_EFF = 0.143;
+
+/** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
+ *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never
+ *  drift from the scoring physics. */
+export function autocrossLapOpts(): LapOpts {
+  return { lineFactor: LINE_FACTOR };
+}
+
+/** The EXACT LapOpts computeEvents uses for the race-paced endurance lap (see
+ *  autocrossLapOpts for why this is exported). */
+export function enduranceLapOpts(fuel: Fuel = DEFAULT_FUEL, co2PerL?: number): LapOpts {
+  return {
+    pace: ENDURANCE_PACE,
+    lineFactor: LINE_FACTOR,
+    thermalEff: ENDURANCE_THERMAL_EFF,
+    fuelLhvMJkg: fuel.lhvMJkg,
+    fuelDensityKgL: fuel.densityKgL,
+    co2PerL: co2PerL ?? fuel.co2PerL,
+  };
+}
 
 export interface EventScores {
   accel: { timeS: number; points: number | null };
@@ -122,20 +142,13 @@ export function computeEvents(
 
   // Autocross = flat-out (pace 1.0, default). Calibrated muLat + LINE_FACTOR land
   // the time at a REALISTIC tire μ (the racing line carries the corner speed).
-  const ax = simLap(curve, vehicle, axTrack, { lineFactor: LINE_FACTOR });
+  const ax = simLap(curve, vehicle, axTrack, autocrossLapOpts());
   const axPts = baseline.autocrossTMin
     ? autocrossPoints(ax.lapTimeS, baseline.autocrossTMin)
     : null;
 
   // Endurance = managed race pace + lumped fuel-burn efficiency on the chosen fuel.
-  const en = simLap(curve, vehicle, enTrack, {
-    pace: ENDURANCE_PACE,
-    lineFactor: LINE_FACTOR,
-    thermalEff: ENDURANCE_THERMAL_EFF,
-    fuelLhvMJkg: fuel.lhvMJkg,
-    fuelDensityKgL: fuel.densityKgL,
-    co2PerL,
-  });
+  const en = simLap(curve, vehicle, enTrack, enduranceLapOpts(fuel, co2PerL));
   const enTimePts = baseline.enduranceTMin
     ? enduranceTimePoints(en.lapTimeS, baseline.enduranceTMin)
     : null;

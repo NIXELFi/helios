@@ -133,6 +133,78 @@ describe("simLap — shift losses", () => {
   });
 });
 
+describe("simLap — channels", () => {
+  const geared = makeVehicle({
+    gearRatios: [2.75, 2.0, 1.667, 1.444, 1.304, 1.208],
+    primaryReduction: 2.111,
+    finalDrive: 3.0,
+    revLimitRpm: 14500,
+    shiftTimeS: 0.1,
+    muLat: 1.6,
+  });
+  const track = synthesizeAutocross();
+  const torque = flatCurve(60);
+
+  it("are absent by default (the optimizer must not pay for them)", () => {
+    expect(simLap(torque, geared, track).channels).toBeUndefined();
+  });
+
+  it("emits aligned, monotone, in-range traces", () => {
+    const res = simLap(torque, geared, track, { channels: true });
+    const ch = res.channels!;
+    expect(ch).toBeDefined();
+    const n = ch.distM.length;
+    expect(n).toBeGreaterThan(100);
+    // All channels aligned to the same sample count.
+    for (const arr of [ch.tS, ch.vMps, ch.rpm, ch.gear, ch.latG, ch.longG, ch.limit, ch.fuelCumKg]) {
+      expect(arr.length).toBe(n);
+    }
+    // Distance + time + fuel are monotone non-decreasing.
+    for (let i = 1; i < n; i++) {
+      expect(ch.distM[i]!).toBeGreaterThan(ch.distM[i - 1]!);
+      expect(ch.tS[i]!).toBeGreaterThan(ch.tS[i - 1]!);
+      expect(ch.fuelCumKg[i]!).toBeGreaterThanOrEqual(ch.fuelCumKg[i - 1]!);
+    }
+    // Gear is 1-based and within the box; rpm within the rev limit.
+    expect(Math.min(...ch.gear)).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...ch.gear)).toBeLessThanOrEqual(6);
+    expect(Math.max(...ch.rpm)).toBeLessThanOrEqual(14500 + 1e-6);
+    // Cumulative fuel ends at the lap total; channel clock ends within a couple
+    // of shift cuts of the lap time (shift counting on final vs accel profile).
+    expect(ch.fuelCumKg[n - 1]!).toBeCloseTo(res.fuelKg, 9);
+    expect(Math.abs(ch.tS[n - 1]! - res.lapTimeS)).toBeLessThan(0.3);
+  });
+
+  it("classifies limit states that cover the lap (power somewhere, corner somewhere, braking somewhere)", () => {
+    const ch = simLap(torque, geared, track, { channels: true }).channels!;
+    const states = new Set(ch.limit);
+    expect(states.has("power")).toBe(true);
+    expect(states.has("corner")).toBe(true);
+    expect(states.has("brake")).toBe(true);
+  });
+
+  it("telemetry pct power/corner-limited are sane fractions and respond to torque", () => {
+    const weak = simLap(flatCurve(25), geared, track).telemetry;
+    const strong = simLap(flatCurve(120), geared, track).telemetry;
+    for (const tm of [weak, strong]) {
+      expect(tm.pctPowerLimited).toBeGreaterThanOrEqual(0);
+      expect(tm.pctPowerLimited).toBeLessThanOrEqual(1);
+      expect(tm.pctCornerLimited).toBeGreaterThanOrEqual(0);
+      expect(tm.pctCornerLimited).toBeLessThanOrEqual(1);
+    }
+    // A weaker engine spends MORE of the lap power-limited than a monster one.
+    expect(weak.pctPowerLimited).toBeGreaterThan(strong.pctPowerLimited);
+  });
+
+  it("channels do not change the solved lap (pure observation)", () => {
+    const a = simLap(torque, geared, track);
+    const b = simLap(torque, geared, track, { channels: true });
+    expect(b.lapTimeS).toBeCloseTo(a.lapTimeS, 12);
+    expect(b.fuelKg).toBeCloseTo(a.fuelKg, 12);
+    expect(b.shiftCount).toBe(a.shiftCount);
+  });
+});
+
 describe("simLap", () => {
   it("a constant-radius circle laps at the cornering-speed limit", () => {
     const R = 20;

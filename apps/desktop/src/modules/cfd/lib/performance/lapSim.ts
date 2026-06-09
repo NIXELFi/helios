@@ -20,6 +20,39 @@ import { tractiveForceInGear, resistanceForce, G } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
 import { discretizeTrack, type Track } from "./track";
 
+/** What binds the car at a point on the lap. "power" = the engine's tractive
+ *  force is the limit (more torque here = lap time); "grip" = traction-limited
+ *  corner exit (more power would just spin); "corner" = at the lateral-grip
+ *  speed ceiling; "brake" = decelerating into a corner; "coast" = none binding
+ *  (e.g. at the paced speed cap). */
+export type LimitState = "power" | "grip" | "corner" | "brake" | "coast";
+
+/** Full per-distance channel traces from one lap solve — the data layer for the
+ *  Lap Sim view and the CSV export. One sample per integration segment (~ds
+ *  apart). Only produced when `LapOpts.channels` is set (the optimizer scores
+ *  thousands of laps and must not pay for these arrays). */
+export interface LapChannels {
+  /** Distance from the start line at the sample (m). */
+  distM: number[];
+  /** Cumulative lap time at the sample (s), INCLUDING upshift dead time
+   *  inserted where the upshift happens (so A/B time deltas localize shift
+   *  losses). The final entry can differ from `lapTimeS` by at most a shift or
+   *  two of dead time (shift counting on the final profile vs the accel pass). */
+  tS: number[];
+  vMps: number[];
+  rpm: number[];
+  /** Gear number, 1-based (1 = first). */
+  gear: number[];
+  latG: number[];
+  /** Signed longitudinal acceleration (g); negative = braking. */
+  longG: number[];
+  /** What binds the car over this segment (see LimitState). */
+  limit: LimitState[];
+  /** Cumulative fuel burned (kg). Meaningful when fuel opts are supplied
+   *  (endurance); still populated (relative shape) otherwise. */
+  fuelCumKg: number[];
+}
+
 /** Rich per-event telemetry the lap sim now exposes (display + accuracy debug).
  *  All aggregates are time-weighted over the lap unless noted. */
 export interface LapTelemetry {
@@ -39,6 +72,12 @@ export interface LapTelemetry {
   maxBrakeG: number;
   /** Fraction of lap TIME on throttle (accelerating) vs braking/coasting. */
   pctOnThrottle: number;
+  /** Fraction of lap TIME where the ENGINE is the binding limit (more torque
+   *  here would directly cut lap time). The engine team's leverage metric. */
+  pctPowerLimited: number;
+  /** Fraction of lap TIME spent at the lateral-grip corner ceiling (engine
+   *  power is irrelevant here — chassis/tire territory). */
+  pctCornerLimited: number;
   /** Top / minimum speed over the lap (km/h), for the readout. */
   vMaxKph: number;
   vMinKph: number;
@@ -67,6 +106,8 @@ export interface LapResult {
   shiftCount: number;
   /** Rich per-lap telemetry (avg/max RPM, gear usage, g's, throttle fraction). */
   telemetry: LapTelemetry;
+  /** Full per-distance traces — only present when `LapOpts.channels` was set. */
+  channels?: LapChannels;
 }
 
 export interface LapOpts {
@@ -97,123 +138,35 @@ export interface LapOpts {
    *  cut can't, because corners are grip-limited. Slower speeds also cut drag
    *  work → fuel. Autocross runs at 1.0; endurance below it. */
   pace?: number;
+  /** Emit full per-distance channel traces (LapResult.channels). Off by default
+   *  — the optimizer scores thousands of laps and must not allocate these. */
+  channels?: boolean;
 }
 
-export function simLap(
-  curve: TorqueCurve,
-  vehicle: VehicleConfig,
-  track: Track,
-  opts: LapOpts = {},
-): LapResult {
-  const { radius: rawRadius, step, length } = discretizeTrack(track, opts.ds ?? 2);
-  // Racing line: the driven path has a larger effective radius than the traced
-  // centerline. Scale finite corner radii (straights stay Infinity). Both the
-  // corner-speed solve AND the lateral-g telemetry then use the same effective
-  // radius, so the car's actual lateral load stays grip-limited (μ·g_eff).
-  const lineFactor = Math.max(1, opts.lineFactor ?? 1);
-  const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
-  const { v, shiftCount } = solveSpeeds(curve, vehicle, radius, step, track.closed, opts.pace ?? 1);
-  const N = v.length;
-  const nSeg = track.closed ? N : N - 1;
-  const nGears = vehicle.gearRatios.length;
+// ---- Grip model -------------------------------------------------------------
+// One shared closure set for "how much grip does the car have at speed v":
+// aero downforce raises vertical load (gEff), tire load sensitivity discounts
+// the μ gained from it (loadMult), and the friction circle splits what's left
+// between lateral and longitudinal use. Used by BOTH the speed solver and the
+// channel-limit classifier so they can never disagree about the physics.
 
-  const effPeak = opts.thermalEff ?? 0.3; // best-BSFC thermal efficiency
-  const lhv = (opts.fuelLhvMJkg ?? 43) * 1e6; // J/kg
-  const density = opts.fuelDensityKgL ?? 0.745;
-  const co2PerL = opts.co2PerL ?? 2.31;
-  const sweetRpm = opts.bsfcSweetRpm ?? 8000;
-
-  let time = 0;
-  let work = 0;
-  let fuelKg = 0;
-  // Telemetry accumulators (time-weighted).
-  let sumRpmDt = 0;
-  let maxRpm = 0;
-  let maxLatG = 0;
-  let maxAccelG = 0;
-  let maxBrakeG = 0;
-  let onThrottleDt = 0;
-  const timeInGear = new Array<number>(nGears).fill(0);
-
-  for (let i = 0; i < nSeg; i++) {
-    const vi = v[i]!;
-    const vn = v[(i + 1) % N]!;
-    const vAvg = Math.max(0.1, (vi + vn) / 2);
-    const dt = step / vAvg;
-    time += dt;
-
-    // The gear/RPM the car is actually in at this speed (also drives the BSFC).
-    const gear = gearForSpeed(vehicle, vAvg);
-    const vps = gearVps(vehicle, gear);
-    const rpm = vps > 0 ? Math.min(vAvg / vps, vehicle.revLimitRpm) : 0;
-
-    const a = (vn * vn - vi * vi) / (2 * step);
-    const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
-    if (fEngine > 0) {
-      const segWork = fEngine * step; // propulsive work only (off-throttle = 0)
-      work += segWork;
-      // Fuel burned for THIS segment at the engine's efficiency for its current
-      // RPM — high-RPM (short-geared) running costs more fuel per joule.
-      fuelKg += segWork / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
-    }
-
-    sumRpmDt += rpm * dt;
-    if (rpm > maxRpm) maxRpm = rpm;
-    if (gear >= 0 && gear < nGears) timeInGear[gear]! += dt;
-    if (a > 0) { onThrottleDt += dt; if (a / G > maxAccelG) maxAccelG = a / G; }
-    else if (-a / G > maxBrakeG) maxBrakeG = -a / G;
-    const R = radius[i]!;
-    const latG = Number.isFinite(R) && R > 0 ? vAvg * vAvg / R / G : 0;
-    if (latG > maxLatG) maxLatG = latG;
-  }
-  // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
-  time += shiftCount * Math.max(0, vehicle.shiftTimeS);
-
-  const fuelL = fuelKg / density;
-
-  const dtTot = time - shiftCount * Math.max(0, vehicle.shiftTimeS); // moving time
-  const telemetry: LapTelemetry = {
-    avgRpm: dtTot > 0 ? sumRpmDt / dtTot : 0,
-    maxRpm,
-    shiftCount,
-    timeInGearFrac: dtTot > 0 ? timeInGear.map((t) => t / dtTot) : timeInGear,
-    maxLatG,
-    maxAccelG,
-    maxBrakeG,
-    pctOnThrottle: dtTot > 0 ? onThrottleDt / dtTot : 0,
-    vMaxKph: Math.max(...v) * 3.6,
-    vMinKph: Math.min(...v) * 3.6,
-  };
-
-  return {
-    lapTimeS: time,
-    fuelKg,
-    fuelL,
-    co2Kg: fuelL * co2PerL,
-    avgSpeedMps: time > 0 ? length / time : 0,
-    vMaxMps: Math.max(...v),
-    vMinMps: Math.min(...v),
-    shiftCount,
-    telemetry,
-  };
+export interface GripModel {
+  /** Effective normal acceleration (m/s²): g + aero downforce / m. */
+  gEff(v: number): number;
+  /** Load-sensitivity discount on μ at speed v (≤1 above static). */
+  loadMult(v: number): number;
+  /** Lateral grip acceleration limit at v (m/s²). */
+  latAccel(v: number): number;
+  /** Longitudinal accel/brake available after lateral use (friction ellipse). */
+  aLongGrip(v: number, R: number, mu: number): number;
+  /** Steady-state corner-speed ceiling for radius R (un-paced), ≤ vCap. */
+  vCorner(R: number): number;
+  /** Speed cap (gearing top speed × 1.1) the solver clamps to. */
+  vCap: number;
 }
 
-/** Solve v(s) for one lap. `closed` replicates 3× and returns the middle lap.
- *  `pace` (0..1) scales the speed envelope (corner ceilings + top-speed cap) for
- *  the endurance race-pace regime (1 = flat-out). */
-function solveSpeeds(
-  curve: TorqueCurve,
-  vehicle: VehicleConfig,
-  radius: number[],
-  ds: number,
-  closed: boolean,
-  pace: number,
-): { v: number[]; shiftCount: number } {
-  const N = radius.length;
-  const reps = closed ? 3 : 1;
-  const M = N * reps;
+export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const m = vehicle.massKg;
-  const rad = (i: number): number => radius[((i % N) + N) % N]!;
   const vCap = Math.max(topSpeedMps(vehicle), 1) * 1.1;
 
   // Downforce normal-accel coefficient: aero adds grip ∝ v². gEff/G is the ratio
@@ -246,10 +199,6 @@ function solveSpeeds(
     }
     return Math.min(vCap, lo);
   };
-  // Race-pace fraction scales the whole target-speed envelope (corners + the
-  // top-speed cap that vCorner returns on straights), modeling managed endurance
-  // pace; the engine still pulls at full force up to that lowered ceiling.
-  const ceil = (i: number): number => pace * vCorner(rad(i));
 
   // Longitudinal accel/brake available after lateral grip is spent (ellipse),
   // with the same load-sensitive μ on both axes.
@@ -261,6 +210,182 @@ function solveSpeeds(
     const frac = latCap > 0 ? Math.min(1, aLat / latCap) : 0;
     return mu * lm * ge * Math.sqrt(Math.max(0, 1 - frac * frac));
   };
+
+  return { gEff, loadMult, latAccel, aLongGrip, vCorner, vCap };
+}
+
+export function simLap(
+  curve: TorqueCurve,
+  vehicle: VehicleConfig,
+  track: Track,
+  opts: LapOpts = {},
+): LapResult {
+  const { radius: rawRadius, step, length } = discretizeTrack(track, opts.ds ?? 2);
+  // Racing line: the driven path has a larger effective radius than the traced
+  // centerline. Scale finite corner radii (straights stay Infinity). Both the
+  // corner-speed solve AND the lateral-g telemetry then use the same effective
+  // radius, so the car's actual lateral load stays grip-limited (μ·g_eff).
+  const lineFactor = Math.max(1, opts.lineFactor ?? 1);
+  const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
+  const grip = makeGripModel(vehicle);
+  const pace = opts.pace ?? 1;
+  const { v, shiftCount } = solveSpeeds(curve, vehicle, grip, radius, step, track.closed, pace);
+  const N = v.length;
+  const nSeg = track.closed ? N : N - 1;
+  const nGears = vehicle.gearRatios.length;
+
+  const effPeak = opts.thermalEff ?? 0.3; // best-BSFC thermal efficiency
+  const lhv = (opts.fuelLhvMJkg ?? 43) * 1e6; // J/kg
+  const density = opts.fuelDensityKgL ?? 0.745;
+  const co2PerL = opts.co2PerL ?? 2.31;
+  const sweetRpm = opts.bsfcSweetRpm ?? 8000;
+
+  let time = 0;
+  let work = 0;
+  let fuelKg = 0;
+  // Telemetry accumulators (time-weighted).
+  let sumRpmDt = 0;
+  let maxRpm = 0;
+  let maxLatG = 0;
+  let maxAccelG = 0;
+  let maxBrakeG = 0;
+  let onThrottleDt = 0;
+  let powerLimitedDt = 0;
+  let cornerLimitedDt = 0;
+  const timeInGear = new Array<number>(nGears).fill(0);
+
+  // Channel collection (only when asked for — see LapOpts.channels).
+  const ch: LapChannels | null = opts.channels
+    ? { distM: [], tS: [], vMps: [], rpm: [], gear: [], latG: [], longG: [], limit: [], fuelCumKg: [] }
+    : null;
+  let tCh = 0; // channel clock: moving time + shift dead time AT the shift
+  let prevGear = -1;
+
+  for (let i = 0; i < nSeg; i++) {
+    const vi = v[i]!;
+    const vn = v[(i + 1) % N]!;
+    const vAvg = Math.max(0.1, (vi + vn) / 2);
+    const dt = step / vAvg;
+    time += dt;
+
+    // The gear/RPM the car is actually in at this speed (also drives the BSFC).
+    const gear = gearForSpeed(vehicle, vAvg);
+    const vps = gearVps(vehicle, gear);
+    const rpm = vps > 0 ? Math.min(vAvg / vps, vehicle.revLimitRpm) : 0;
+
+    const a = (vn * vn - vi * vi) / (2 * step);
+    const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
+    if (fEngine > 0) {
+      const segWork = fEngine * step; // propulsive work only (off-throttle = 0)
+      work += segWork;
+      // Fuel burned for THIS segment at the engine's efficiency for its current
+      // RPM — high-RPM (short-geared) running costs more fuel per joule.
+      fuelKg += segWork / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
+    }
+
+    sumRpmDt += rpm * dt;
+    if (rpm > maxRpm) maxRpm = rpm;
+    if (gear >= 0 && gear < nGears) timeInGear[gear]! += dt;
+    if (a > 0) { onThrottleDt += dt; if (a / G > maxAccelG) maxAccelG = a / G; }
+    else if (-a / G > maxBrakeG) maxBrakeG = -a / G;
+    const R = radius[i]!;
+    const latG = Number.isFinite(R) && R > 0 ? vAvg * vAvg / R / G : 0;
+    if (latG > maxLatG) maxLatG = latG;
+
+    // Limit-state classification: WHAT bound the car over this segment. The
+    // engine team's leverage map — "power" segments are where torque buys lap
+    // time; "corner"/"grip" segments are chassis/tire territory. Uses the same
+    // grip model as the solver, so the labels agree with the speeds.
+    const aG = a / G;
+    let limit: LimitState;
+    if (aG < -0.05) {
+      limit = "brake";
+    } else if (vAvg >= 0.985 * pace * grip.vCorner(R)) {
+      limit = "corner"; // riding the (paced) lateral ceiling / speed cap
+    } else if (aG > 0.05) {
+      const fAvail = tractiveForceInGear(curve, vehicle, gear, vAvg);
+      const fGrip = vehicle.massKg * grip.aLongGrip(vAvg, R, vehicle.muLong);
+      limit = fAvail <= fGrip ? "power" : "grip";
+    } else {
+      limit = "coast";
+    }
+    if (limit === "power") powerLimitedDt += dt;
+    else if (limit === "corner") cornerLimitedDt += dt;
+
+    if (ch) {
+      // Insert the upshift dead time AT the shift so A/B deltas localize it.
+      if (prevGear >= 0 && gear > prevGear) tCh += (gear - prevGear) * Math.max(0, vehicle.shiftTimeS);
+      prevGear = gear;
+      tCh += dt;
+      ch.distM.push(i * step);
+      ch.tS.push(tCh);
+      ch.vMps.push(vAvg);
+      ch.rpm.push(rpm);
+      ch.gear.push(gear + 1); // 1-based for humans
+      ch.latG.push(latG);
+      ch.longG.push(aG);
+      ch.limit.push(limit);
+      ch.fuelCumKg.push(fuelKg);
+    }
+  }
+  // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
+  time += shiftCount * Math.max(0, vehicle.shiftTimeS);
+
+  const fuelL = fuelKg / density;
+
+  const dtTot = time - shiftCount * Math.max(0, vehicle.shiftTimeS); // moving time
+  const telemetry: LapTelemetry = {
+    avgRpm: dtTot > 0 ? sumRpmDt / dtTot : 0,
+    maxRpm,
+    shiftCount,
+    timeInGearFrac: dtTot > 0 ? timeInGear.map((t) => t / dtTot) : timeInGear,
+    maxLatG,
+    maxAccelG,
+    maxBrakeG,
+    pctOnThrottle: dtTot > 0 ? onThrottleDt / dtTot : 0,
+    pctPowerLimited: dtTot > 0 ? powerLimitedDt / dtTot : 0,
+    pctCornerLimited: dtTot > 0 ? cornerLimitedDt / dtTot : 0,
+    vMaxKph: Math.max(...v) * 3.6,
+    vMinKph: Math.min(...v) * 3.6,
+  };
+
+  return {
+    lapTimeS: time,
+    fuelKg,
+    fuelL,
+    co2Kg: fuelL * co2PerL,
+    avgSpeedMps: time > 0 ? length / time : 0,
+    vMaxMps: Math.max(...v),
+    vMinMps: Math.min(...v),
+    shiftCount,
+    telemetry,
+    ...(ch ? { channels: ch } : {}),
+  };
+}
+
+/** Solve v(s) for one lap. `closed` replicates 3× and returns the middle lap.
+ *  `pace` (0..1) scales the speed envelope (corner ceilings + top-speed cap) for
+ *  the endurance race-pace regime (1 = flat-out). */
+function solveSpeeds(
+  curve: TorqueCurve,
+  vehicle: VehicleConfig,
+  grip: GripModel,
+  radius: number[],
+  ds: number,
+  closed: boolean,
+  pace: number,
+): { v: number[]; shiftCount: number } {
+  const N = radius.length;
+  const reps = closed ? 3 : 1;
+  const M = N * reps;
+  const m = vehicle.massKg;
+  const rad = (i: number): number => radius[((i % N) + N) % N]!;
+  const { vCorner, aLongGrip } = grip;
+
+  // Race-pace fraction scales the whole target-speed envelope (corners + the
+  // top-speed cap that vCorner returns on straights), modeling managed endurance
+  // pace; the engine still pulls at full force up to that lowered ceiling.
+  const ceil = (i: number): number => pace * vCorner(rad(i));
 
   const vf = new Array<number>(M);
   const vb = new Array<number>(M);
@@ -300,14 +425,16 @@ function solveSpeeds(
     out[i] = Math.max(0.1, Math.min(vf[j]!, vb[j]!, ceil(j)));
   }
 
-  // Upshift count over the (middle) lap: where the forward-pass accel profile
-  // climbs into a taller gear. Counted on vf (the acceleration trace) so corner
-  // braking downshifts don't count and numerical ripple can't (vf rises
-  // monotonically within an accel zone, then is capped at corners).
+  // Upshift count over the (middle) lap, on the DRIVEN profile (min of all
+  // three passes). Counting on vf (the old behavior) overcounted: the forward
+  // pass accelerates all the way to each corner before the cap, passing through
+  // taller gears the driven car never reaches because it brakes earlier (vb).
+  // Only gear INCREASES count, so braking downshifts are excluded; v is
+  // monotone within an accel zone, so ripple can't double-count.
   let shiftCount = 0;
-  for (let i = off + 1; i < off + N; i++) {
-    const gPrev = gearForSpeed(vehicle, Math.min(vf[i - 1]!, ceil(i - 1)));
-    const gCur = gearForSpeed(vehicle, Math.min(vf[i]!, ceil(i)));
+  for (let i = 1; i < N; i++) {
+    const gPrev = gearForSpeed(vehicle, out[i - 1]!);
+    const gCur = gearForSpeed(vehicle, out[i]!);
     if (gCur > gPrev) shiftCount += gCur - gPrev;
   }
 
