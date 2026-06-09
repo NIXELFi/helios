@@ -30,13 +30,15 @@ const EFF_TIME_CAP = 1.45;
 // --- Endurance calibration (P2) ---------------------------------------------
 // Autocross runs flat-out; endurance does NOT. Over a 22 km run on degrading
 // tires, cone-bounded and managed for reliability + fuel, the field runs well
-// off the absolute limit — even the fastest 2026 lap (142 s) was ~20 s slower
-// than the flat-out physics. These two constants make the endurance lap match
-// the real field (calibrated to Mines: a CBR600RR/E85 team, 159.6 s/lap,
-// 0.9786 kg CO₂/lap → FEF 0.536 → 43 pts).
+// off the absolute limit. Calibrated to Mines (the closest CBR600RR/E85
+// comparison): their CLEAN-lap pace from the real 2026 lap breakdown
+// (151.8, 147.3, 147.6, 146.6, 145.7, 153.3, 148.2, 147.4, 148.2, 173.9 —
+// first lap is warmup, last is the in-lap; laps 2–9 average 148.0 s) and
+// 0.9786 kg CO₂/lap. The previous 159.6 s anchor was run-total/laps, poisoned
+// by the 173.9 out-lap (per Nick 2026-06-09).
 
 /** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
-export const ENDURANCE_PACE = 0.695;
+export const ENDURANCE_PACE = 0.7625;
 /** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
  *  corner radius vs the traced centerline. Calibrated so the autocross lap hits
  *  SDM26's real 42.9 s at a REALISTIC tire μ (~1.5) instead of an inflated one —
@@ -50,7 +52,7 @@ export const LINE_FACTOR = 1.39;
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
  *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map. */
-export const ENDURANCE_THERMAL_EFF = 0.14;
+export const ENDURANCE_THERMAL_EFF = 0.15;
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never
