@@ -42,6 +42,8 @@ interface Props {
   pctOfBest: number | null;
   /** The best trial, for the overlay curves (null when this IS the best). */
   bestTrial: OptimizationTrial | null;
+  /** Open the sweep modal seeded with THIS trial's recipe (null = hide). */
+  onRunSweep?: () => void;
 }
 
 const RANK_BADGE: Record<number, { label: string; cls: string }> = {
@@ -64,6 +66,7 @@ export function TrialInspector({
   deltaToBest,
   pctOfBest,
   bestTrial,
+  onRunSweep,
 }: Props) {
   const { schema } = useParameterSchema(configPath);
   const [copied, setCopied] = useState(false);
@@ -140,13 +143,25 @@ export function TrialInspector({
       <div>
         <div className="mb-1 flex items-center justify-between">
           <h4 className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Recipe</h4>
-          <button
-            type="button"
-            onClick={() => void copyRecipe()}
-            className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
-          >
-            {copied ? "Copied!" : "Copy"}
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onRunSweep && (
+              <button
+                type="button"
+                onClick={onRunSweep}
+                title="Open the sweep menu with this trial's parameters, to sweep it across RPM"
+                className="rounded-sm border border-[#FFC627]/50 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+              >
+                Run sweep
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void copyRecipe()}
+              className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
         </div>
         <table className="w-full text-[11px]">
           <tbody className="font-mono">

@@ -39,7 +39,8 @@ import {
   type EventMetricKey,
 } from "../lib/performance";
 import { TrialInspector } from "./TrialInspector";
-import type { OptimizationStudy, OptimizationTrial } from "../state/types";
+import { SweepParamsModal } from "../components/SweepParamsModal";
+import type { OptimizationStudy, OptimizationTrial, ParameterOverride } from "../state/types";
 
 interface Props {
   study: OptimizationStudy;
@@ -71,8 +72,10 @@ function formatEta(seconds: number): string {
 
 export function OptimizationResults({ study }: Props) {
   const cfd = useCfd();
-  const { cancelStudy, bridge } = cfd;
+  const { cancelStudy, bridge, startSweep } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // Trial whose recipe seeds the "run a sweep from this recipe" modal (null = closed).
+  const [sweepSeedTrial, setSweepSeedTrial] = useState<OptimizationTrial | null>(null);
   const [paramForScatter, setParamForScatter] = useState<string>(
     study.parameterPaths[0] ?? "",
   );
@@ -600,12 +603,33 @@ export function OptimizationResults({ study }: Props) {
               deltaToBest={selectedRanked?.deltaToBest ?? null}
               pctOfBest={selectedRanked?.pctOfBest ?? null}
               bestTrial={bestTrial}
+              onRunSweep={
+                selectedTrial && Object.keys(selectedTrial.parameterValues).length > 0
+                  ? () => setSweepSeedTrial(selectedTrial)
+                  : undefined
+              }
             />
           ) : (
             <p className="text-[11px] text-[#5A5F66]">Click a trial to inspect.</p>
           )}
         </aside>
       </div>
+
+      {sweepSeedTrial && (
+        <SweepParamsModal
+          open
+          defaultPath={study.configPath}
+          seedLabel={`trial #${sweepSeedTrial.trialIdx}`}
+          seedOverrides={Object.entries(sweepSeedTrial.parameterValues).map(
+            ([path, value]): ParameterOverride => ({ path, value }),
+          )}
+          onCancel={() => setSweepSeedTrial(null)}
+          onStart={async (params) => {
+            await startSweep(study.configPath, params);
+            setSweepSeedTrial(null);
+          }}
+        />
+      )}
     </div>
   );
 }
