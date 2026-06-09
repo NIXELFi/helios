@@ -15,6 +15,7 @@ export const DEFAULT_NAV_ENTRIES: NavEntry[] = [
   { id: "studies", label: "Studies" },
   { id: "results", label: "Results" },
   { id: "performance", label: "Performance" },
+  { id: "lapsim", label: "Lap Sim" },
 ];
 
 interface NavRailProps {
