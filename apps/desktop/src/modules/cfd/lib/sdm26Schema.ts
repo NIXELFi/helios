@@ -100,6 +100,17 @@ export const SDM26_SCHEMA: FieldMeta[] = [
   { key: "p_ambient", label: "p_ambient", unit: "Pa", group: "Ambient & drivetrain", type: "number", format: f0, min: 5e4, max: 2e5, required: true },
   { key: "T_ambient", label: "T_ambient", unit: "K", group: "Ambient & drivetrain", type: "number", format: f1, min: 200, max: 400, required: true },
   { key: "drivetrain_efficiency", label: "Drivetrain η", group: "Ambient & drivetrain", type: "number", format: f3, min: 0.1, max: 1.0, required: true },
+
+  // Physics — dyno-validated model refinements (findings 0005/0006/0020/0021).
+  // All optional: a config without the `physics` section runs the legacy
+  // (Python-parity) models. The bundled SDM25/SDM26 ship with the validated
+  // production values (RMSE 4.27 kW vs team dyno).
+  { key: "physics.spark_advance_rpm_slope_deg_per_krpm", label: "MBT spark slope", unit: "°/krpm", group: "Physics", type: "number", format: f2, min: 0, max: 3 },
+  { key: "physics.duration_rpm_exp", label: "Burn duration RPM exp", group: "Physics", type: "number", format: f2, min: 0, max: 0.8 },
+  { key: "physics.restrictor_cd_mach_k", label: "Restrictor Mach-Cd k", group: "Physics", type: "number", format: f2, min: 0, max: 0.6 },
+  { key: "physics.restrictor_loss_from_diffuser_geometry", label: "Diffuser loss (Idelchik)", group: "Physics", type: "boolean" },
+  { key: "physics.intake_junction_borda_carnot", label: "Intake jct Borda-Carnot", group: "Physics", type: "boolean" },
+  { key: "physics.fmep_c", label: "FMEP c (quadratic)", unit: "bar·s²/m²", group: "Physics", type: "number", format: expE1, min: 0, max: 0.005 },
 ];
 
 export const SDM26_GROUPS = [
@@ -108,6 +119,7 @@ export const SDM26_GROUPS = [
   "Intake",
   "Exhaust",
   "Ambient & drivetrain",
+  "Physics",
 ] as const;
 
 // Valve sub-schema — used by ConfigScreen to render two valve cards

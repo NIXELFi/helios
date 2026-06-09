@@ -35,6 +35,10 @@ fn opt_f64(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(|x| x.as_f64())
 }
 
+fn opt_bool(v: &Value, key: &str) -> Option<bool> {
+    v.get(key).and_then(|x| x.as_bool())
+}
+
 fn unpack_cd_table(v: &Value, key: &str) -> Result<(Vec<f64>, Vec<f64>), ConfigLoadError> {
     let arr = v.get(key).and_then(|x| x.as_array()).ok_or_else(|| {
         ConfigLoadError::Schema(format!("missing array {key:?}"))
@@ -189,5 +193,103 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
         cfg.secondary_wall_t = secondary_wall_ts[0];
     }
 
+    // ---- Optional `physics` section -------------------------------------
+    // The dyno-validated physics refinements (findings 0005/0006/0020/0021)
+    // live behind opt-in SDM26Config fields whose defaults preserve the
+    // legacy Python behavior. Until now they were ONLY reachable through
+    // sweep/optimization overrides (cfd-core apply_override) — a config file
+    // could not turn them on, so the app always ran legacy physics. This
+    // section makes them first-class config: every key is optional, and a
+    // config without the section (including every parity fixture) loads
+    // bit-identically to before.
+    if let Some(phys) = data.get("physics") {
+        // Combustion phasing vs RPM (finding 0006: MBT map + Bonatesta burn
+        // scaling; recommended 1.5 °/krpm and exp 0.4).
+        if let Some(v) = opt_f64(phys, "spark_advance_rpm_slope_deg_per_krpm") {
+            cfg.spark_advance_rpm_slope_deg_per_krpm = v;
+        }
+        if let Some(v) = opt_f64(phys, "spark_advance_rpm_ref") { cfg.spark_advance_rpm_ref = v; }
+        if let Some(v) = opt_f64(phys, "duration_rpm_exp") { cfg.duration_rpm_exp = v; }
+        if let Some(v) = opt_f64(phys, "duration_rpm_ref") { cfg.duration_rpm_ref = v; }
+        if let Some(v) = opt_f64(phys, "wiebe_a_rpm_exp") { cfg.wiebe_a_rpm_exp = v; }
+        if let Some(v) = opt_f64(phys, "wiebe_a_rpm_ref") { cfg.wiebe_a_rpm_ref = v; }
+        if let Some(v) = opt_f64(phys, "tumble_burn_factor") { cfg.tumble_burn_factor = v; }
+        // Restrictor (findings 0006/0021: Mach-dependent Cd k=0.10 for the
+        // contoured nozzle + Idelchik diffuser loss from the half-angle).
+        if let Some(v) = opt_f64(phys, "restrictor_cd_mach_k") { cfg.restrictor_cd_mach_k = v; }
+        if let Some(v) = opt_bool(phys, "restrictor_loss_from_diffuser_geometry") {
+            cfg.restrictor_loss_from_diffuser_geometry = v;
+        }
+        // Junction losses (finding 0005: geometry-derived Borda-Carnot,
+        // applied inside the inter-leg mass residual).
+        if let Some(v) = opt_f64(phys, "intake_junction_loss_coef") { cfg.intake_junction_loss_coef = v; }
+        if let Some(v) = opt_bool(phys, "intake_junction_borda_carnot") { cfg.intake_junction_borda_carnot = v; }
+        if let Some(v) = opt_f64(phys, "exhaust_junction_loss_coef") { cfg.exhaust_junction_loss_coef = v; }
+        if let Some(v) = opt_bool(phys, "exhaust_junction_borda_carnot") { cfg.exhaust_junction_borda_carnot = v; }
+        // Chen-Flynn friction (finding 0020: fmep_c 0.00075 = Heywood
+        // motorcycle midpoint; the old 0.003 was 3× the literature ceiling).
+        if let Some(v) = opt_f64(phys, "fmep_a") { cfg.fmep_a = v; }
+        if let Some(v) = opt_f64(phys, "fmep_b") { cfg.fmep_b = v; }
+        if let Some(v) = opt_f64(phys, "fmep_c") { cfg.fmep_c = v; }
+    }
+
     Ok(cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn python_ref_sdm26() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("python_ref/configs/sdm26.json")
+    }
+
+    fn write_temp(value: &Value) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("loader-physics-test-{}.json", std::process::id()));
+        let mut f = fs::File::create(&p).unwrap();
+        f.write_all(serde_json::to_string(value).unwrap().as_bytes()).unwrap();
+        p
+    }
+
+    #[test]
+    fn config_without_physics_section_loads_with_legacy_defaults() {
+        let cfg = load_v1_json(python_ref_sdm26()).unwrap();
+        let def = SDM26Config::default();
+        assert_eq!(cfg.spark_advance_rpm_slope_deg_per_krpm, def.spark_advance_rpm_slope_deg_per_krpm);
+        assert_eq!(cfg.duration_rpm_exp, def.duration_rpm_exp);
+        assert_eq!(cfg.restrictor_cd_mach_k, def.restrictor_cd_mach_k);
+        assert_eq!(cfg.restrictor_loss_from_diffuser_geometry, def.restrictor_loss_from_diffuser_geometry);
+        assert_eq!(cfg.intake_junction_borda_carnot, def.intake_junction_borda_carnot);
+        assert_eq!(cfg.fmep_c, def.fmep_c);
+    }
+
+    #[test]
+    fn physics_section_applies_the_validated_flags() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["physics"] = serde_json::json!({
+            "spark_advance_rpm_slope_deg_per_krpm": 1.5,
+            "duration_rpm_exp": 0.4,
+            "restrictor_cd_mach_k": 0.10,
+            "restrictor_loss_from_diffuser_geometry": true,
+            "intake_junction_borda_carnot": true,
+            "fmep_c": 0.00075,
+        });
+        let p = write_temp(&data);
+        let cfg = load_v1_json(&p).unwrap();
+        let _ = fs::remove_file(&p);
+        assert_eq!(cfg.spark_advance_rpm_slope_deg_per_krpm, 1.5);
+        assert_eq!(cfg.duration_rpm_exp, 0.4);
+        assert_eq!(cfg.restrictor_cd_mach_k, 0.10);
+        assert!(cfg.restrictor_loss_from_diffuser_geometry);
+        assert!(cfg.intake_junction_borda_carnot);
+        assert_eq!(cfg.fmep_c, 0.00075);
+        // Untouched knobs keep their defaults — partial sections are fine.
+        let def = SDM26Config::default();
+        assert_eq!(cfg.fmep_a, def.fmep_a);
+        assert_eq!(cfg.wiebe_a_rpm_exp, def.wiebe_a_rpm_exp);
+        assert_eq!(cfg.exhaust_junction_borda_carnot, def.exhaust_junction_borda_carnot);
+    }
 }

@@ -11,6 +11,7 @@ import { useEditor } from "../editor/state/editor-context";
 import { NumberField } from "../editor/fields/NumberField";
 import { TextField } from "../editor/fields/TextField";
 import { SelectField } from "../editor/fields/SelectField";
+import { BooleanField } from "../editor/fields/BooleanField";
 import { CdTableField, type CdRow } from "../editor/fields/CdTableField";
 import { PipeArrayField, type PipeRow as PipeRowData } from "../editor/fields/PipeArrayField";
 import { FiringOrderField } from "../editor/fields/FiringOrderField";
@@ -385,7 +386,7 @@ function FieldByType({
     case "select":
       return <SelectField meta={meta} value={value} error={error} onChange={onChange} />;
     case "boolean":
-      return <span className="text-[11px] text-[#5A5F66]">(unsupported in Phase 2)</span>;
+      return <BooleanField meta={meta} value={value} error={error} onChange={onChange} />;
   }
 }
 
