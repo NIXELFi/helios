@@ -108,11 +108,31 @@ export function savePersisted(p: Persisted): void {
         return { ...s, points: s.points.map((pt) => ({ ...pt, cycles: [] })) };
       }
       if (s.kind === "optimization") {
-        // Drop sweep points entirely on each trial; keep param values + objective.
+        // Keep sweepPoints ONLY on the best trial (others → null). A large
+        // imported/optimization study can't fit full curves in localStorage,
+        // but the Performance screen reads its torque curve from the best
+        // trial's sweepPoints — preserving just that one keeps it usable as a
+        // source after reload while shrinking the blob ~100×. (Per-trial event
+        // ranking loses its curves until re-run/re-import; objective ranking is
+        // unaffected.)
         return {
           ...s,
-          trials: s.trials.map((t) => ({ ...t, sweepPoints: null })),
+          trials: s.trials.map((t) =>
+            t.trialIdx === s.bestTrialIdx
+              ? { ...t, sweepPoints: t.sweepPoints?.map((pt) => ({ ...pt, cycles: [] })) ?? null }
+              : { ...t, sweepPoints: null },
+          ),
         };
+      }
+      return { ...s, cycles: [] };
+    }),
+    (xs) => xs.map((s) => {
+      if (s.kind === "sweep") {
+        return { ...s, points: s.points.map((pt) => ({ ...pt, cycles: [] })) };
+      }
+      if (s.kind === "optimization") {
+        // Last resort before dropping data wholesale: no curves at all.
+        return { ...s, trials: s.trials.map((t) => ({ ...t, sweepPoints: null })) };
       }
       return { ...s, cycles: [] };
     }),
