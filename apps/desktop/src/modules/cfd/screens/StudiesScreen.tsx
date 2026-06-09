@@ -10,7 +10,8 @@ import { rankTrials } from "../lib/analytics/optimizationStats";
 import { summarizeSweep } from "../lib/analytics/sweepStats";
 import { type ExportAction, exportActionsFor } from "../lib/export/exportStudy";
 import { buildWorkspaceJson } from "../lib/export/buildJson";
-import { saveTextFile, fileTimestamp } from "../lib/export/io";
+import { saveTextFile, openTextFile, fileTimestamp } from "../lib/export/io";
+import { parseStudyImport } from "../lib/import/importStudy";
 import type { JunctionKind, ParameterOverride, SingleRpmParams, Study, SweepParams } from "../state/types";
 import type { CfdBridge } from "../lib/tauriBridge";
 import { PresetPicker } from "../components/PresetPicker";
@@ -63,13 +64,14 @@ function bestPeakText(study: Study): string {
 }
 
 export function StudiesScreen() {
-  const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, navigateTo } = useCfd();
+  const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, importStudies, navigateTo } = useCfd();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
   const [optimizationOpen, setOptimizationOpen] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [exportAllBusy, setExportAllBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
 
   const studies = Object.values(state.studies).sort((a, b) => b.startedAt - a.startedAt);
@@ -96,6 +98,41 @@ export function StudiesScreen() {
       setToast({ ok: false, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setExportAllBusy(false);
+    }
+  }
+
+  // Import reads an exported study/workspace JSON bundle and reconstructs live
+  // studies (the inverse of "Export all"). Imported studies get fresh ids so
+  // they can't collide with a live run; the last one is opened in results.
+  async function importJson() {
+    if (importBusy) return;
+    setImportBusy(true);
+    try {
+      const picked = await openTextFile("json");
+      if (picked === null) {
+        setToast({ ok: true, message: "Cancelled" });
+        return;
+      }
+      const stamp = fileTimestamp();
+      const { studies: imported, warnings } = parseStudyImport(
+        picked.contents,
+        (i) => `import-${stamp}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      );
+      if (imported.length === 0) {
+        setToast({ ok: false, message: warnings[0] ?? "No studies found in file." });
+        return;
+      }
+      const activeId = importStudies(imported);
+      const suffix = warnings.length ? ` (${warnings.length} skipped)` : "";
+      setToast({ ok: true, message: `Imported ${imported.length} study(ies)${suffix}` });
+      if (activeId) {
+        setActiveStudy(activeId);
+        navigateTo("results");
+      }
+    } catch (e) {
+      setToast({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -134,6 +171,14 @@ export function StudiesScreen() {
               : <>Open a config first.</>}
           </p>
         </div>
+        <button
+          type="button"
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+          disabled={importBusy}
+          onClick={() => void importJson()}
+        >
+          {importBusy ? "Import (JSON)…" : "Import (JSON)"}
+        </button>
         <button
           type="button"
           className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"

@@ -289,6 +289,9 @@ export interface CfdContextValue {
   startOptimization: (configPath: string, params: OptimizationParams) => Promise<string>;
   cancelStudy: (id: string) => Promise<void>;
   deleteStudy: (id: string) => void;
+  /** Add one or more studies reconstructed from an exported JSON bundle. The
+   *  last one becomes active; returns the active id (or null if none added). */
+  importStudies: (studies: Study[]) => string | null;
   setSweepCompare: (id: string, compareWithStudyId?: string) => void;
   setVehicleConfig: (config: VehicleConfig) => void;
   setReferenceBaseline: (baseline: ReferenceBaseline) => void;
@@ -571,6 +574,14 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         await bridge.cancelJob(id);
       },
       deleteStudy: (id) => dispatch({ type: "deleteStudy", id }),
+      importStudies: (studies) => {
+        let lastId: string | null = null;
+        for (const study of studies) {
+          dispatch({ type: "addStudy", study });
+          lastId = study.id;
+        }
+        return lastId;
+      },
       setSweepCompare: (id, compareWithStudyId) => dispatch({ type: "setSweepCompare", id, compareWithStudyId }),
       setVehicleConfig: (config) => dispatch({ type: "setVehicleConfig", config }),
       setReferenceBaseline: (baseline) => dispatch({ type: "setReferenceBaseline", baseline }),
