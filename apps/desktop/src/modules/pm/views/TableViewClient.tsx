@@ -55,6 +55,7 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
+import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low", medium: "Medium", high: "High", critical: "Critical",
@@ -83,6 +84,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
   const users = usePmStore((s) => s.users);
   const deps = usePmStore((s) => s.dependencies);
   const projectId = usePmStore((s) => s.projectId);
+  const activeProjectId = usePmStore((s) => s.activeProjectId);
   const addTask = usePmStore((s) => s.addTask);
   const updateTask = usePmStore((s) => s.updateTask);
   const deleteTask = usePmStore((s) => s.deleteTask);
@@ -198,19 +200,35 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
     return map;
   }, [baseVisible]);
 
-  // The OWNED ids of every row currently RENDERED, for "select all filtered".
-  // A parent's children are only rendered when that parent is expanded, so we
-  // recurse into childrenOf only for expanded rows — otherwise select-all and
-  // the header tri-state would count collapsed/hidden descendants. External/
-  // cross-team rows are excluded so a bulk .in() write never touches an
-  // RLS-denied row (which would roll the whole atomic batch back).
+  // Tasks rendered DIMMED: they match the base filters but fall outside the
+  // subteam/type scope filters in "dim" show-mode. They read as filter-excluded,
+  // so select-all must not sweep them up (in "hide" mode they're already gone).
+  const dimmedById = useMemo(() => {
+    const out = new Set<string>();
+    if (!hasScopeFilters(filters) || filters.showMode !== "dim") return out;
+    for (const t of baseVisible) {
+      if (!taskMatchesScopeFilters(t, filters)) out.add(t.id);
+    }
+    return out;
+  }, [baseVisible, filters]);
+
+  // The OWNED ids of every row currently RENDERED and not dimmed, for "select
+  // all filtered". A parent's children are only rendered when that parent is
+  // expanded, so we recurse into childrenOf only for expanded rows — otherwise
+  // select-all and the header tri-state would count collapsed/hidden
+  // descendants. External/cross-team rows are excluded so a bulk .in() write
+  // never touches an RLS-denied row (which would roll the whole atomic batch
+  // back); dimmed (filter-excluded) rows are excluded so select-all only ever
+  // covers the visible, in-scope tasks.
   const selectableIds = useMemo(() => {
     const ids: string[] = [];
     const seen = new Set<string>();
     const walk = (t: TaskRow) => {
       if (seen.has(t.id)) return;
       seen.add(t.id);
-      if ((relationByTaskId.get(t.id) ?? "owned") === "owned") ids.push(t.id);
+      if ((relationByTaskId.get(t.id) ?? "owned") === "owned" && !dimmedById.has(t.id)) {
+        ids.push(t.id);
+      }
       // Only descend into children that are actually on screen (parent open).
       if (expanded.has(t.id)) {
         for (const child of childrenOf.get(t.id) ?? []) walk(child);
@@ -218,7 +236,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
     };
     for (const root of visibleParents) walk(root);
     return ids;
-  }, [visibleParents, childrenOf, relationByTaskId, expanded]);
+  }, [visibleParents, childrenOf, relationByTaskId, expanded, dimmedById]);
 
   const selectableSet = useMemo(() => new Set(selectableIds), [selectableIds]);
   const selectedInView = selectableIds.filter((id) => selectedTaskIds.has(id)).length;
@@ -243,18 +261,6 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
     filters.dueTo !== null ||
     filters.search.length > 0;
 
-  // Tasks that match the existing filters but fall outside the scope filters
-  // (subteam + type) should render dimmed when showMode = "dim". In "hide" mode
-  // they're filtered out upstream via applyFilters in filters.ts.
-  const dimmedById = useMemo(() => {
-    const out = new Set<string>();
-    if (!hasScopeFilters(filters) || filters.showMode !== "dim") return out;
-    for (const t of baseVisible) {
-      if (!taskMatchesScopeFilters(t, filters)) out.add(t.id);
-    }
-    return out;
-  }, [baseVisible, filters]);
-
   function toggleRow(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -263,6 +269,20 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
       return next;
     });
   }
+
+  // Multi-subteam sharing overlay (localStorage) so a subsystem shared to a
+  // subteam still shows up for that subteam's tasks. Keyed by project.
+  const sharing = useMemo(() => recallSharing(activeProjectId), [activeProjectId]);
+
+  // Subsystems offered for a task: only those of its PRIMARY subteam (plus any
+  // shared to it), with a "No subsystem" clear option first.
+  const subsystemOptionsFor = (task: TaskRow): SelectOption<string>[] => {
+    const opts: SelectOption<string>[] = [{ value: "", label: "No subsystem" }];
+    for (const ss of subsystemsForSubteam(subsystems, task.subteam_id, sharing)) {
+      opts.push({ value: ss.id, label: ss.name, swatch: ss.color ?? task.subteam.color ?? "#6B7280" });
+    }
+    return opts;
+  };
 
   function renderRow(task: TaskRow, depth: number) {
     const kids = childrenOf.get(task.id) ?? [];
@@ -291,6 +311,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         onChangeOwner={(id) => updateTask(task.id, { owner_id: id })}
         onChangeDue={(d) => updateTask(task.id, { due_date: d })}
         onChangePriority={(p) => updateTask(task.id, { priority: p })}
+        subsystemOptions={subsystemOptionsFor(task)}
+        onChangeSubsystem={(id) => updateTask(task.id, { subsystem_id: id || null })}
         onAddSubtask={() => {
           setCreateParentId(task.id);
           setDialogOpen(true);
@@ -370,6 +392,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
                 <SortHeader label="Title"     active={sort.key === "title"}     dir={sort.dir} onClick={() => toggleSort("title")} />
                 <th className="px-3 py-2 font-medium">Type</th>
                 <SortHeader label="Subteam"   active={sort.key === "subsystem"} dir={sort.dir} onClick={() => toggleSort("subsystem")} />
+                <th className="px-3 py-2 font-medium">Subsystem</th>
                 <SortHeader label="Owner"     active={sort.key === "owner"}     dir={sort.dir} onClick={() => toggleSort("owner")} />
                 <SortHeader label="Status"    active={sort.key === "status"}    dir={sort.dir} onClick={() => toggleSort("status")} />
                 <SortHeader label="Priority"  active={sort.key === "priority"}  dir={sort.dir} onClick={() => toggleSort("priority")} />
@@ -381,7 +404,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
             <tbody className="divide-y divide-helios-line">
               {visibleParents.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-helios-dim">
+                  <td colSpan={11} className="px-4 py-10 text-center text-helios-dim">
                     No tasks match the current filters.
                   </td>
                 </tr>
@@ -529,6 +552,8 @@ function RowFragment({
   onChangeOwner,
   onChangeDue,
   onChangePriority,
+  subsystemOptions,
+  onChangeSubsystem,
   onAddSubtask,
   onAddExisting,
   onDelete,
@@ -551,6 +576,8 @@ function RowFragment({
   onChangeOwner: (id: string | null) => void;
   onChangeDue: (d: string | null) => void;
   onChangePriority: (p: TaskPriority) => void;
+  subsystemOptions: SelectOption<string>[];
+  onChangeSubsystem: (id: string) => void;
   onAddSubtask: () => void;
   onAddExisting: () => void;
   onDelete: () => void;
@@ -638,10 +665,19 @@ function RowFragment({
         <td className="px-3 py-2">
           <span className="inline-flex flex-wrap items-center gap-1.5">
             <TaskSubteamChips task={task} />
-            {task.subsystem ? (
-              <span className="text-helios-dim">· {task.subsystem.name}</span>
-            ) : null}
           </span>
+        </td>
+        <td className="px-3 py-2">
+          <Select
+            size="sm"
+            value={task.subsystem_id ?? ""}
+            disabled={editsDisabled}
+            ariaLabel="Subsystem"
+            placeholder="—"
+            className="min-w-[8rem]"
+            options={subsystemOptions}
+            onChange={(v) => onChangeSubsystem(v)}
+          />
         </td>
         <td className="px-3 py-2">
           <Select

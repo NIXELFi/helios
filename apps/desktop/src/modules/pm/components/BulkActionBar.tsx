@@ -1,6 +1,6 @@
 "use client";
 
-import type { TaskPriority, TaskStatus, TaskType } from "@helios/pm-ui";
+import type { TaskPriority, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
 import {
   STATUS_DOT,
   STATUS_LABEL,
@@ -13,6 +13,7 @@ import {
 import { IconX } from "@tabler/icons-react";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
+import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -58,6 +59,9 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
   const bulkUpdateTasks = usePmStore((s) => s.bulkUpdateTasks);
   const subteams = usePmStore((s) => s.subteams);
   const users = usePmStore((s) => s.users);
+  const tasks = usePmStore((s) => s.tasks);
+  const subsystems = usePmStore((s) => s.subsystems);
+  const activeProjectId = usePmStore((s) => s.activeProjectId);
   // Viewers can't write — disable every bulk action so a rejected write never
   // optimistically flips values that then snap back on auto-refresh.
   const isViewer = usePmStore(selectMyRole) === "viewer";
@@ -70,6 +74,25 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
 
   const count = ids.length;
   if (count === 0) return null;
+
+  // Subsystems valid for EVERY selected task. A subsystem belongs to a subteam,
+  // so a bulk subsystem change can only offer ones relevant to all the selected
+  // tasks' primary subteams (plus any shared to them) — the same rule as the
+  // per-row table dropdowns. If the selection spans subteams with no common
+  // subsystem, only "No subsystem" (clear) is offered.
+  const sharing = recallSharing(activeProjectId);
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const selectedTasks = ids.map((id) => taskById.get(id)).filter((t): t is TaskRow => !!t);
+  const relevantSets = selectedTasks.map(
+    (t) => new Set(subsystemsForSubteam(subsystems, t.subteam_id, sharing).map((s) => s.id)),
+  );
+  const commonIds =
+    relevantSets.length === 0
+      ? new Set<string>()
+      : new Set([...relevantSets[0]!].filter((id) => relevantSets.every((set) => set.has(id))));
+  const subsystemOptions: SelectOption<string>[] = subsystems
+    .filter((s) => commonIds.has(s.id))
+    .map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? "#6B7280" }));
 
   const apply = (patch: Parameters<typeof bulkUpdateTasks>[1]) => {
     bulkUpdateTasks(ids, patch);
@@ -159,6 +182,25 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
               })),
             ]}
             onChange={(v) => v !== ACTION && apply({ subteam_id: v })}
+          />
+        </div>
+
+        <div className="w-40 shrink-0">
+          <Select<string>
+            size="sm"
+            value={ACTION}
+            disabled={isViewer}
+            placeholder="Subsystem…"
+            ariaLabel="Set subsystem for selected tasks"
+            options={[
+              { value: ACTION, label: "Subsystem…" },
+              { value: "__none__", label: "No subsystem" },
+              ...subsystemOptions,
+            ]}
+            onChange={(v) => {
+              if (v === ACTION) return;
+              apply({ subsystem_id: v === "__none__" ? null : v });
+            }}
           />
         </div>
 

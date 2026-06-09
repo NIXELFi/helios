@@ -94,6 +94,7 @@ export function calendarMarkerColors(
   task: TaskRow,
   body: TaskColorProperty,
   border: CalendarBorderProperty,
+  alpha: number = BODY_ALPHA,
 ): { background: string; borderColor: string | null } {
-  return resolveMarkerColors(task, body, border, BODY_ALPHA);
+  return resolveMarkerColors(task, body, border, alpha);
 }

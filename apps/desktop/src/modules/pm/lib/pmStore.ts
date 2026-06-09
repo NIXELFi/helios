@@ -363,6 +363,12 @@ interface PmState {
   // instead of being deleted. The caller (Sidebar) must pass a fallback subteam.
   deleteSubteam: (id: string, fallbackId: string) => void;
 
+  // Subsystem mutations (admin-gated). Single primary subteam (schema limit);
+  // delete relies on the tasks.subsystem_id ON DELETE SET NULL FK.
+  addSubsystem: (subsystem: Subsystem) => void;
+  updateSubsystem: (id: string, patch: Partial<Subsystem>) => void;
+  removeSubsystem: (id: string) => void;
+
   // Task mutations
   addTask: (task: TaskRow) => void;
   updateTask: (id: string, patch: Partial<TaskRow>, opts?: { withHistory?: boolean }) => void;
@@ -768,6 +774,41 @@ export const usePmStore = create<PmState>((set, get) => {
         }),
       }));
       persist((c) => db.insertSubteam(c, subteam), () => set(snap));
+    },
+
+    addSubsystem: (subsystem) => {
+      const snap = { subsystems: get().subsystems };
+      set((s) => ({ subsystems: [...s.subsystems, subsystem] }));
+      persist((c) => db.insertSubsystem(c, subsystem), () => set(snap));
+    },
+
+    updateSubsystem: (id, patch) => {
+      const current = get().subsystems.find((x) => x.id === id);
+      if (!current) return;
+      const snap = { subsystems: get().subsystems, tasks: get().tasks };
+      set((s) => {
+        const next: Subsystem = { ...current, ...patch };
+        return {
+          subsystems: s.subsystems.map((x) => (x.id === id ? next : x)),
+          // Tasks embed a copy of their subsystem — re-embed the updated record.
+          tasks: s.tasks.map((t) => (t.subsystem_id === id ? { ...t, subsystem: next } : t)),
+        };
+      });
+      persist((c) => db.patchSubsystem(c, id, patch), () => set(snap));
+    },
+
+    removeSubsystem: (id) => {
+      const removed = get().subsystems.find((x) => x.id === id);
+      if (!removed) return;
+      const snap = { subsystems: get().subsystems, tasks: get().tasks };
+      set((s) => ({
+        subsystems: s.subsystems.filter((x) => x.id !== id),
+        // FK is ON DELETE SET NULL — mirror that locally so tasks drop the link.
+        tasks: s.tasks.map((t) =>
+          t.subsystem_id === id ? { ...t, subsystem_id: null, subsystem: null } : t,
+        ),
+      }));
+      persist((c) => db.removeSubsystem(c, id), () => set(snap));
     },
 
     updateSubteam: (id, patch) => {
