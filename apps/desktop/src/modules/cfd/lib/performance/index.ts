@@ -18,6 +18,7 @@ export {
   topSpeedMps,
 } from "./vehicle";
 export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
+export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,
   torqueAtRpm,

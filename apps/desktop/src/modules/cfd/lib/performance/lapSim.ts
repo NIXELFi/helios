@@ -274,6 +274,17 @@ export function simLap(
   const lineFactor = Math.max(1, opts.lineFactor ?? 1);
   const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
   const grip = makeGripModel(vehicle);
+  // vCorner bisects 40 steps per call; radii repeat (piecewise-constant track),
+  // so cache per distinct radius for the telemetry loop's limit classifier.
+  const vCornerCache = new Map<number, number>();
+  const vCornerAt = (R: number): number => {
+    let v = vCornerCache.get(R);
+    if (v === undefined) {
+      v = grip.vCorner(R);
+      vCornerCache.set(R, v);
+    }
+    return v;
+  };
   // Optimal shift schedule (tractive-force crossovers) — the same shift policy
   // the accel event uses, so the two sims drive the car the same way.
   const shiftV = optimalShiftSpeeds(curve, vehicle);
@@ -349,7 +360,7 @@ export function simLap(
     let limit: LimitState;
     if (aG < -0.05) {
       limit = "brake";
-    } else if (vAvg >= 0.985 * pace * grip.vCorner(R)) {
+    } else if (vAvg >= 0.985 * pace * vCornerAt(R)) {
       limit = "corner"; // riding the (paced) lateral ceiling / speed cap
     } else if (aG > 0.05) {
       const fAvail = tractiveForceInGear(curve, vehicle, gear, vAvg);
@@ -435,7 +446,23 @@ function solveSpeeds(
   // Race-pace fraction scales the whole target-speed envelope (corners + the
   // top-speed cap that vCorner returns on straights), modeling managed endurance
   // pace; the engine still pulls at full force up to that lowered ceiling.
-  const ceil = (i: number): number => pace * vCorner(rad(i));
+  //
+  // vCorner is a 40-step bisection and the passes below read the ceiling ~5×
+  // per cell — but track radii are piecewise-constant (tens of distinct values
+  // over ~1000 cells), so solve once per distinct radius and precompute the
+  // per-cell ceiling. Identical values, ~6× faster endurance laps.
+  const vByRadius = new Map<number, number>();
+  const ceilArr = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const r = radius[i]!;
+    let vc = vByRadius.get(r);
+    if (vc === undefined) {
+      vc = vCorner(r);
+      vByRadius.set(r, vc);
+    }
+    ceilArr[i] = pace * vc;
+  }
+  const ceil = (i: number): number => ceilArr[((i % N) + N) % N]!;
 
   const vf = new Array<number>(M);
   const vb = new Array<number>(M);

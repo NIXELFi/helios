@@ -30,6 +30,7 @@ import { sensitivityTornado, refineBounds } from "../lib/analytics/optimizationS
 import {
   torqueCurveFromSweep,
   computeEvents,
+  cachedTrialEvents,
   carKeyForConfig,
   vehicleForCar,
   EMPTY_BASELINE,
@@ -90,18 +91,29 @@ export function OptimizationResults({ study }: Props) {
   // Per-trial FSAE event scores (frontend; same computeEvents() lib as the
   // Performance screen). Computed for ALL done trials so BOTH the active-dimension
   // re-rank AND the multi-objective "best design per objective" panel can read it.
+  // Scores go through cachedTrialEvents (content-keyed, cross-render): trials are
+  // immutable once done, so state-identity churn — a live trial landing, a
+  // rehydrate, switching studies — only ever pays for trials not yet scored.
+  // Without this, every churn re-simmed the WHOLE study and froze the app.
   const eventsByTrial = useMemo(() => {
     const map = new Map<number, EventScores>();
     const vehicle = vehicleForCar(carKey, cfd.state?.vehicleConfig);
     const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
+    const ctxKey = `${JSON.stringify(vehicle)}|${JSON.stringify(baseline)}`;
     for (const t of study.trials) {
-      if (t.sweepPoints && t.sweepPoints.length > 0) {
-        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
+      const pts = t.sweepPoints;
+      if (pts && pts.length > 0) {
+        map.set(
+          t.trialIdx,
+          cachedTrialEvents(ctxKey, `${study.id}:${t.trialIdx}:${pts.length}`, () =>
+            computeEvents(torqueCurveFromSweep(pts), vehicle, baseline),
+          ),
+        );
       }
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+  }, [study.id, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
 
   // Best trial for EACH objective (total points + each event), so the speed ↔
   // efficiency trade-off is visible at a glance: the total-points winner is the
