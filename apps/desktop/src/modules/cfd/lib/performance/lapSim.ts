@@ -15,7 +15,7 @@
 // lap, which converges the periodic start/finish speed without index wrapping.
 
 import type { VehicleConfig } from "./types";
-import { topSpeedMps } from "./vehicle";
+import { topSpeedMps, gearVps } from "./vehicle";
 import { tractiveEnvelope, resistanceForce, G } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
 import { discretizeTrack, type Track } from "./track";
@@ -28,6 +28,21 @@ export interface LapResult {
   avgSpeedMps: number;
   vMaxMps: number;
   vMinMps: number;
+  /** Number of upshifts over the lap (each costs `shiftTimeS` of dead time). */
+  shiftCount: number;
+}
+
+/** Speeds (m/s) at which the car upshifts: each gear runs to the rev limit, so
+ *  crossing `gearVps(g)·revLimit` from below is one shift. Shorter gearing →
+ *  lower thresholds → more shifts to reach a given speed. Excludes the top gear
+ *  (nothing to shift into). */
+function upshiftSpeeds(vehicle: VehicleConfig): number[] {
+  const out: number[] = [];
+  for (let g = 0; g < vehicle.gearRatios.length - 1; g++) {
+    const vs = gearVps(vehicle, g) * vehicle.revLimitRpm;
+    if (Number.isFinite(vs) && vs > 0) out.push(vs);
+  }
+  return out;
 }
 
 export interface LapOpts {
@@ -61,8 +76,15 @@ export function simLap(
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;
 
+  // Shift losses: each upshift is a ~100 ms torque cut (LapOpts.pace doesn't
+  // change WHICH gears are used, only the speed ceiling, so the shift thresholds
+  // are gearing-only). Counting upshifts where the car is accelerating past a
+  // threshold makes shorter gearing (SDM25's 3.5 FD) pay for its extra shifts.
+  const shiftSpeeds = upshiftSpeeds(vehicle);
+
   let time = 0;
   let work = 0;
+  let shiftCount = 0;
   for (let i = 0; i < nSeg; i++) {
     const vi = v[i]!;
     const vn = v[(i + 1) % N]!;
@@ -71,7 +93,11 @@ export function simLap(
     const a = (vn * vn - vi * vi) / (2 * step);
     const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
     if (fEngine > 0) work += fEngine * step; // propulsive work only (off-throttle = 0)
+    // Count an upshift for each gear threshold crossed while accelerating.
+    if (vn > vi) for (const s of shiftSpeeds) if (vi < s && s <= vn) shiftCount++;
   }
+  // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
+  time += shiftCount * Math.max(0, vehicle.shiftTimeS);
 
   const thermalEff = opts.thermalEff ?? 0.3;
   const lhv = (opts.fuelLhvMJkg ?? 43) * 1e6; // J/kg
@@ -88,6 +114,7 @@ export function simLap(
     avgSpeedMps: time > 0 ? length / time : 0,
     vMaxMps: Math.max(...v),
     vMinMps: Math.min(...v),
+    shiftCount,
   };
 }
 

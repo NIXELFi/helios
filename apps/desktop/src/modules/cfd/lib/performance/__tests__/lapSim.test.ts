@@ -55,6 +55,44 @@ describe("track synthesis", () => {
   });
 });
 
+describe("simLap — shift losses", () => {
+  // Gearing that forces real shifts: low ratios + a finite rev limit so the
+  // car runs out of revs and must upshift while accelerating down a straight.
+  const geared = (finalDrive: number, shiftTimeS = 0.1): VehicleConfig =>
+    makeVehicle({
+      gearRatios: [2.75, 2.0, 1.667, 1.444, 1.304, 1.208],
+      primaryReduction: 2.111,
+      finalDrive,
+      revLimitRpm: 14500,
+      shiftTimeS,
+      muLat: 1.6,
+    });
+  const track = synthesizeAutocross();
+  const torque = flatCurve(60);
+
+  it("counts upshifts and adds shiftTimeS of dead time per shift", () => {
+    const withCut = simLap(torque, geared(3.0, 0.1), track);
+    const noCut = simLap(torque, geared(3.0, 0), track);
+    expect(withCut.shiftCount).toBeGreaterThan(0);
+    expect(noCut.shiftCount).toBe(withCut.shiftCount); // same gearing → same shifts
+    // The ONLY difference is the per-shift time cut.
+    expect(withCut.lapTimeS - noCut.lapTimeS).toBeCloseTo(withCut.shiftCount * 0.1, 6);
+  });
+
+  it("shorter gearing (higher final drive) shifts more and laps no faster", () => {
+    const tall = simLap(torque, geared(3.0), track); // SDM26-like
+    const short = simLap(torque, geared(3.5), track); // SDM25-like
+    expect(short.shiftCount).toBeGreaterThan(tall.shiftCount);
+    // More shift cuts → the shorter-geared car can't beat the taller one here.
+    expect(short.lapTimeS).toBeGreaterThanOrEqual(tall.lapTimeS - 1e-9);
+  });
+
+  it("a single-gear car never shifts", () => {
+    const oneGear = makeVehicle({ gearRatios: [2.0], revLimitRpm: 1e9, shiftTimeS: 0.1 });
+    expect(simLap(torque, oneGear, track).shiftCount).toBe(0);
+  });
+});
+
 describe("simLap", () => {
   it("a constant-radius circle laps at the cornering-speed limit", () => {
     const R = 20;

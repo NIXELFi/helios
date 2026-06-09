@@ -11,14 +11,16 @@ import type { ReferenceBaseline, VehicleConfig } from "./types";
  *  estimate that lands the 75 m accel at ~4.2 s. */
 export const SDM26_VEHICLE: VehicleConfig = {
   name: "SDM26",
-  massKg: 268, // 200 kg car (no driver/fuel) + 68 kg driver
+  massKg: 267, // 199 kg car (confirmed by Nick) + 68 kg driver
   weightDistFront: 0.485, // with 68 kg driver
   cgHeightM: 0.2845,
   wheelbaseM: 1.53,
   trackWidthM: 1.2, // F 1.207 / R 1.194
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
-  muLat: 1.8, // calibrated to SDM26 autocross 42.922 s (Hoosier R20 slick + aero)
+  muLat: 1.94, // calibrated to SDM26 autocross 42.922 s WITH shift losses modeled
+  //            (Hoosier R20 slick + aero; was 1.8 before the lap sim counted the
+  //             100 ms shift cuts — those were implicitly baked into grip before)
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,
@@ -81,11 +83,14 @@ export function topSpeedMps(vehicle: VehicleConfig): number {
   return v;
 }
 
-/** SDM25 — same chassis/engine family as SDM26 but ran a 3.5 final drive
- *  (shorter than SDM26's 3.0 → revs out sooner, more/earlier shifts). */
+/** SDM25 — same chassis/engine family as SDM26 but HEAVIER (469 lb ≈ 213 kg car,
+ *  confirmed by Nick, vs SDM26's 199 kg) and a shorter 3.5 final drive (vs 3.0 →
+ *  revs out sooner, so more shifts → more 100 ms shift cuts in the lap sim). Both
+ *  the extra mass and the extra shifts make it slower than SDM26 here. */
 export const SDM25_VEHICLE: VehicleConfig = {
   ...SDM26_VEHICLE,
   name: "SDM25",
+  massKg: 281, // 469 lb (≈213 kg car) + 68 kg driver
   finalDrive: 3.5,
 };
 
