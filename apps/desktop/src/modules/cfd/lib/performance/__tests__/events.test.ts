@@ -26,6 +26,7 @@ function makeVehicle(over: Partial<VehicleConfig> = {}): VehicleConfig {
     tireRadiusM: 0.2,
     muLong: 1.5,
     muLat: 1.5,
+    tireLoadSensitivity: 0,
     cdaM2: 1.0,
     claM2: 2.0,
     airDensityKgM3: 1.162,

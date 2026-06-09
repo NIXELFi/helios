@@ -11,6 +11,8 @@ export {
   REFERENCE_2026,
   carKeyForConfig,
   vehiclePresetForKey,
+  vehicleForCar,
+  gearForSpeed,
   totalReduction,
   gearVps,
   topSpeedMps,

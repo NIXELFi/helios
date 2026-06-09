@@ -31,7 +31,7 @@ import {
   torqueCurveFromSweep,
   computeEvents,
   carKeyForConfig,
-  vehiclePresetForKey,
+  vehicleForCar,
   EMPTY_BASELINE,
   EVENT_RANK_METRICS,
   POINTS_METRIC_KEYS,
@@ -92,8 +92,7 @@ export function OptimizationResults({ study }: Props) {
   const eventsByTrial = useMemo(() => {
     const map = new Map<number, EventScores>();
     if (rankDim === "objective") return map;
-    const vc = cfd.state?.vehicleConfig;
-    const vehicle = vc && vc.name === carKey ? vc : vehiclePresetForKey(carKey);
+    const vehicle = vehicleForCar(carKey, cfd.state?.vehicleConfig);
     const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
     for (const t of study.trials) {
       if (t.sweepPoints && t.sweepPoints.length > 0) {

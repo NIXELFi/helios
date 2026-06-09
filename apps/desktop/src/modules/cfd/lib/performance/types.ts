@@ -17,6 +17,11 @@ export interface VehicleConfig {
   tireRadiusM: number;
   muLong: number;
   muLat: number;
+  /** Tire load-sensitivity exponent (0..~0.3). Grip μ falls as vertical load
+   *  rises: μ_eff = μ · (Fz/Fz_static)^(−sens). 0 = load-independent (flat μ).
+   *  For racing slicks ~0.1–0.2 — this is why aero downforce buys less grip than
+   *  the naive μ·Fz, and why a fast corner doesn't pull μ·(1+downforce) g. */
+  tireLoadSensitivity: number;
   /** Drag area Cd·A (m²). */
   cdaM2: number;
   /** Downforce area Cl·A (m², positive = downforce). Used from P2 on. */

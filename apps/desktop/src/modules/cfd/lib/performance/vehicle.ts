@@ -18,11 +18,14 @@ export const SDM26_VEHICLE: VehicleConfig = {
   trackWidthM: 1.2, // F 1.207 / R 1.194
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
-  muLat: 1.97, // calibrated to SDM26 autocross 42.922 s with the gear-explicit
-  //            lap sim (actual-gear tractive force) + 100 ms shift cuts modeled.
-  //            (Hoosier R20 slick + aero; rose from 1.8 as the sim added shift
-  //             losses then honest per-gear force — both of which the old grip
-  //             had silently absorbed.)
+  tireLoadSensitivity: 0.15, // Hoosier R20 slick — flattens grip-vs-load (aero)
+  muLat: 2.06, // EFFECTIVE lateral grip, calibrated so the gear-explicit lap sim
+  //            (actual-gear force + 100 ms shift cuts + load-sensitive μ +
+  //             4-tire braking) reproduces SDM26's real autocross 42.9 s / 90 pts
+  //             on the traced course. Higher than a bare slick's ~1.5 because it
+  //             also absorbs QSS/track-trace conservatism — it's the grip the
+  //             real lap time implies, not a tire-rig number. Peak cornering then
+  //             lands ~2.8–2.9 g in the fastest corner (aero-dominated, Cl·A 3.09).
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,
@@ -125,4 +128,38 @@ export function vehiclePresetForKey(key: string): VehicleConfig {
   if (key === "SDM25") return SDM25_VEHICLE;
   if (key === "SDM26") return SDM26_VEHICLE;
   return { ...SDM26_VEHICLE, name: key };
+}
+
+/** Car-IDENTITY fields that are fixed facts of a real car (not tuning knobs):
+ *  the mass, gearing, and tire size that make an SDM25 an SDM25. These always
+ *  come from the preset for a known car — so SDM25 weighs 281 kg and runs a 3.5
+ *  final drive AUTOMATICALLY, exactly like the final drive already did, no
+ *  matter what stale/edited `vehicleConfig` is in state. */
+const IDENTITY_KEYS = [
+  "massKg",
+  "finalDrive",
+  "gearRatios",
+  "primaryReduction",
+  "tireRadiusM",
+  "revLimitRpm",
+] as const;
+
+/** Resolve the vehicle to SCORE a config of `carKey` with, given the user's
+ *  current (possibly edited or stale-persisted) `vehicleConfig`. For a known
+ *  car the identity fields are forced from the preset (auto-correct weight +
+ *  gearing); the user's tuning of everything else (grip, aero, Crr, driveline,
+ *  geometry) is preserved when it's the matching car. Unknown configs just use
+ *  the persisted config (or the fallback preset). */
+export function vehicleForCar(
+  carKey: string,
+  persisted: VehicleConfig | null | undefined,
+): VehicleConfig {
+  const preset = vehiclePresetForKey(carKey);
+  const isKnown = carKey === "SDM25" || carKey === "SDM26";
+  // Start from the user's config when it's for THIS car (keeps their tuning),
+  // else from the preset.
+  const base = persisted && persisted.name === carKey ? { ...persisted } : { ...preset };
+  if (isKnown) for (const k of IDENTITY_KEYS) (base as Record<string, unknown>)[k] = preset[k];
+  base.name = carKey;
+  return base;
 }

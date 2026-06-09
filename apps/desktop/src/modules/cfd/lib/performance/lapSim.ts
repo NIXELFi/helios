@@ -179,29 +179,50 @@ function solveSpeeds(
   const rad = (i: number): number => radius[((i % N) + N) % N]!;
   const vCap = Math.max(topSpeedMps(vehicle), 1) * 1.1;
 
-  // Downforce normal-accel coefficient: aero adds grip ∝ v².
+  // Downforce normal-accel coefficient: aero adds grip ∝ v². gEff/G is the ratio
+  // of total vertical load (static + aero) to static — i.e. Fz/Fz_static.
   const k = (0.5 * vehicle.airDensityKgM3 * vehicle.claM2) / m;
   const gEff = (v: number): number => G + k * v * v;
 
-  // Steady-state corner speed (lateral grip incl. downforce, closed form).
+  // Tire load sensitivity: μ falls as vertical load rises, so aero downforce
+  // buys LESS grip than μ·Fz would imply. loadMult ≤ 1 for v > 0 (1 at static).
+  // sens = 0 recovers the old load-independent (closed-form) behavior exactly.
+  const sens = vehicle.tireLoadSensitivity ?? 0;
+  const loadMult = (v: number): number => Math.pow(gEff(v) / G, -sens);
+  // Load-sensitive lateral grip acceleration (m/s²) at the limit.
+  const latAccel = (v: number): number => vehicle.muLat * loadMult(v) * gEff(v);
+
+  // Steady-state corner speed: solve v²/R = latAccel(v). With load sensitivity
+  // latAccel is sub-linear in Fz so there's no closed form — bisect (latAccel·R
+  // − v² is +ve at v=0, −ve at high v → one root). Falls back to the speed cap
+  // when grip would exceed it (straights).
   const vCorner = (R: number): number => {
     if (!Number.isFinite(R) || R <= 0) return vCap;
-    const denom = 1 - vehicle.muLat * R * k;
-    const v2 = denom > 1e-6 ? (vehicle.muLat * R * G) / denom : Number.POSITIVE_INFINITY;
-    return Math.min(vCap, Math.sqrt(Math.max(0, v2)));
+    const f = (v: number): number => latAccel(v) * R - v * v;
+    if (f(vCap) >= 0) return vCap; // grip beats the cap → straight-line region
+    let lo = 0;
+    let hi = vCap;
+    for (let it = 0; it < 40; it++) {
+      const mid = (lo + hi) / 2;
+      if (f(mid) > 0) lo = mid;
+      else hi = mid;
+    }
+    return Math.min(vCap, lo);
   };
   // Race-pace fraction scales the whole target-speed envelope (corners + the
   // top-speed cap that vCorner returns on straights), modeling managed endurance
   // pace; the engine still pulls at full force up to that lowered ceiling.
   const ceil = (i: number): number => pace * vCorner(rad(i));
 
-  // Longitudinal accel/brake available after lateral grip is spent (ellipse).
+  // Longitudinal accel/brake available after lateral grip is spent (ellipse),
+  // with the same load-sensitive μ on both axes.
   const aLongGrip = (v: number, R: number, mu: number): number => {
     const ge = gEff(v);
-    const latCap = vehicle.muLat * ge;
+    const lm = loadMult(v);
+    const latCap = vehicle.muLat * lm * ge;
     const aLat = Number.isFinite(R) && R > 0 ? (v * v) / R : 0;
     const frac = latCap > 0 ? Math.min(1, aLat / latCap) : 0;
-    return mu * ge * Math.sqrt(Math.max(0, 1 - frac * frac));
+    return mu * lm * ge * Math.sqrt(Math.max(0, 1 - frac * frac));
   };
 
   const vf = new Array<number>(M);
@@ -223,11 +244,15 @@ function solveSpeeds(
     vf[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aAcc * ds)));
   }
 
-  // Backward pass (braking into corners).
+  // Backward pass (braking into corners). Braking loads ALL FOUR tires (with
+  // forward weight transfer), so its grip is ~the lateral coefficient — NOT
+  // muLong, which is the REAR-axle launch/corner-exit limit. Using muLong here
+  // (the old behavior) under-braked the car and forced muLat up to recover lap
+  // time, which inflated the predicted cornering g. Brake on muLat instead.
   vb[M - 1] = closed ? ceil(M - 1) : Math.min(ceil(M - 1), vf[M - 1]!);
   for (let i = M - 2; i >= 0; i--) {
     const vEntry = Math.min(vb[i + 1]!, ceil(i + 1));
-    const aBrk = aLongGrip(vEntry, rad(i + 1), vehicle.muLong);
+    const aBrk = aLongGrip(vEntry, rad(i + 1), vehicle.muLat);
     vb[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aBrk * ds)));
   }
 

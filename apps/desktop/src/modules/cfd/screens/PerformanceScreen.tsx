@@ -15,6 +15,7 @@ import { saveTextFile, fileTimestamp, slugify } from "../lib/export/io";
 import {
   carKeyForConfig,
   vehiclePresetForKey,
+  vehicleForCar,
   torqueCurveFromSweep,
   peakTorque,
   topSpeedMps,
@@ -97,8 +98,10 @@ export function PerformanceScreen() {
   // config uses the SDM25 preset (3.5 final drive), SDM26 uses 3.0. Edits to the
   // active car stick; selecting a different car shows that car's preset.
   const carKey = selected ? carKeyForConfig(selected.configName) : "SDM26";
-  const vehicle =
-    state.vehicleConfig.name === carKey ? state.vehicleConfig : vehiclePresetForKey(carKey);
+  // Car-identity (mass, final drive, gearing) is forced from the preset for a
+  // known car — SDM25 is always 281 kg / 3.5 FD, SDM26 267 kg / 3.0 FD — so it
+  // can't be thrown off by stale persisted state. User tuning (grip/aero) is kept.
+  const vehicle = vehicleForCar(carKey, state.vehicleConfig);
   const curve = useMemo(
     () => (selected ? torqueCurveFromSweep(selected.points) : []),
     [selected],
@@ -609,6 +612,7 @@ function VehicleEditor({
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
         <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })} />
         <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })} />
+        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })} />
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
         <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />
