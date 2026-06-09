@@ -19,13 +19,9 @@ export const SDM26_VEHICLE: VehicleConfig = {
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
   tireLoadSensitivity: 0.15, // Hoosier R20 slick — flattens grip-vs-load (aero)
-  muLat: 2.06, // EFFECTIVE lateral grip, calibrated so the gear-explicit lap sim
-  //            (actual-gear force + 100 ms shift cuts + load-sensitive μ +
-  //             4-tire braking) reproduces SDM26's real autocross 42.9 s / 90 pts
-  //             on the traced course. Higher than a bare slick's ~1.5 because it
-  //             also absorbs QSS/track-trace conservatism — it's the grip the
-  //             real lap time implies, not a tire-rig number. Peak cornering then
-  //             lands ~2.8–2.9 g in the fastest corner (aero-dominated, Cl·A 3.09).
+  muLat: 1.55, // Hoosier R20 slick — a REALISTIC mechanical μ. The autocross
+  //            time is hit via the racing line (events.LINE_FACTOR), not inflated
+  //            grip, so peak cornering lands a realistic ~2.2 g (× aero g_eff).
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,

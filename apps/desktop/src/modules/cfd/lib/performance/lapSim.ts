@@ -82,6 +82,13 @@ export interface LapOpts {
   /** Best-BSFC engine speed (rpm) — where the fuel map's thermal efficiency
    *  peaks (near peak torque/BMEP for an SI engine). Default 8000 (CBR600RR). */
   bsfcSweetRpm?: number;
+  /** Racing-line factor (≥1): the driver's line through a corner has a LARGER
+   *  effective radius than the traced centerline (clip the apex, use track
+   *  width), so the car carries more corner speed at the SAME grip. Multiplies
+   *  every finite corner radius. Default 1 = drive the centerline. This is what
+   *  lets the tire μ stay realistic (~1.5) instead of being inflated to make the
+   *  centerline-radius lap hit the real time. */
+  lineFactor?: number;
   /** Race-pace fraction (0..1, default 1 = flat-out qualifying lap). Models the
    *  endurance regime: over a 22 km run on degrading tires, cone-bounded and
    *  managed for reliability + fuel, the driver holds a fraction of the absolute
@@ -98,7 +105,13 @@ export function simLap(
   track: Track,
   opts: LapOpts = {},
 ): LapResult {
-  const { radius, step, length } = discretizeTrack(track, opts.ds ?? 2);
+  const { radius: rawRadius, step, length } = discretizeTrack(track, opts.ds ?? 2);
+  // Racing line: the driven path has a larger effective radius than the traced
+  // centerline. Scale finite corner radii (straights stay Infinity). Both the
+  // corner-speed solve AND the lateral-g telemetry then use the same effective
+  // radius, so the car's actual lateral load stays grip-limited (μ·g_eff).
+  const lineFactor = Math.max(1, opts.lineFactor ?? 1);
+  const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
   const { v, shiftCount } = solveSpeeds(curve, vehicle, radius, step, track.closed, opts.pace ?? 1);
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;

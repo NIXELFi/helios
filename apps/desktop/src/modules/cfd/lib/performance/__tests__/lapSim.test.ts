@@ -93,6 +93,18 @@ describe("simLap — shift losses", () => {
     expect(simLap(torque, oneGear, track).shiftCount).toBe(0);
   });
 
+  it("racing line (lineFactor>1) speeds the lap at the SAME tire μ", () => {
+    const v = geared(3.0);
+    const centerline = simLap(torque, v, track, { lineFactor: 1.0 });
+    const racingLine = simLap(torque, v, track, { lineFactor: 1.3 });
+    // Bigger effective corner radius → more corner speed → faster lap.
+    expect(racingLine.lapTimeS).toBeLessThan(centerline.lapTimeS);
+    // Cornering is still grip-limited, so peak lateral g barely moves (it's
+    // μ·g_eff, independent of radius) — the speed gain comes from the line, not
+    // from extra grip. This is what lets μ stay realistic.
+    expect(Math.abs(racingLine.telemetry.maxLatG - centerline.telemetry.maxLatG)).toBeLessThan(0.25);
+  });
+
   it("BSFC map: running far from the best-BSFC RPM burns more fuel", () => {
     const v = geared(3.0);
     const opts = { thermalEff: 0.3, fuelLhvMJkg: 43, fuelDensityKgL: 0.745 };

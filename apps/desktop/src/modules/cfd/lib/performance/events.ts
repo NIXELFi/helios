@@ -37,11 +37,17 @@ const EFF_TIME_CAP = 1.45;
 
 /** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
 export const ENDURANCE_PACE = 0.71;
+/** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
+ *  corner radius vs the traced centerline. Calibrated so the autocross lap hits
+ *  SDM26's real 42.9 s at a REALISTIC tire μ (~1.5) instead of an inflated one —
+ *  i.e. the corner speed comes from the line, not from fictional grip. Applies
+ *  to both autocross and endurance (a driver lines both). */
+export const LINE_FACTOR = 1.30;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
  *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map. */
-export const ENDURANCE_THERMAL_EFF = 0.148;
+export const ENDURANCE_THERMAL_EFF = 0.143;
 
 export interface EventScores {
   accel: { timeS: number; points: number | null };
@@ -114,8 +120,9 @@ export function computeEvents(
   const accel = simAccel(curve, vehicle);
   const accelPts = baseline.accelTMin ? accelPoints(accel.timeS, baseline.accelTMin) : null;
 
-  // Autocross = flat-out (pace 1.0, default). Calibrated muLat lands the time.
-  const ax = simLap(curve, vehicle, axTrack);
+  // Autocross = flat-out (pace 1.0, default). Calibrated muLat + LINE_FACTOR land
+  // the time at a REALISTIC tire μ (the racing line carries the corner speed).
+  const ax = simLap(curve, vehicle, axTrack, { lineFactor: LINE_FACTOR });
   const axPts = baseline.autocrossTMin
     ? autocrossPoints(ax.lapTimeS, baseline.autocrossTMin)
     : null;
@@ -123,6 +130,7 @@ export function computeEvents(
   // Endurance = managed race pace + lumped fuel-burn efficiency on the chosen fuel.
   const en = simLap(curve, vehicle, enTrack, {
     pace: ENDURANCE_PACE,
+    lineFactor: LINE_FACTOR,
     thermalEff: ENDURANCE_THERMAL_EFF,
     fuelLhvMJkg: fuel.lhvMJkg,
     fuelDensityKgL: fuel.densityKgL,
