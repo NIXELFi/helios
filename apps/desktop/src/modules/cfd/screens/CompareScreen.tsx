@@ -89,7 +89,7 @@ export function CompareScreen() {
           </p>
         </div>
         <ReportButton
-          only={pinnedIds.length > 0 ? pinnedIds : undefined}
+          defaultOnly={pinnedIds.length > 0 ? pinnedIds : undefined}
           label={pinnedIds.length > 0 ? "Report — pinned (PDF)" : "Full report (PDF)"}
           title={pinnedIds.length > 0 ? "Helios CFD — Design Comparison Report" : undefined}
         />

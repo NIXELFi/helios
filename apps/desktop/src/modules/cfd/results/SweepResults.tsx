@@ -20,12 +20,12 @@ import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
 import { studyName } from "../lib/studyName";
 import { StudyNameEditor } from "../components/StudyNameEditor";
+import { ReportButton } from "../components/ReportButton";
 import { summarizeSweep, type PeakInfo, type SweepSummary } from "../lib/analytics/sweepStats";
 import { exportActionsFor, type ExportAction } from "../lib/export/exportStudy";
 import { copyText, openTextFile } from "../lib/export/io";
 import { parseDynoCsv, dynoPowerKw, dynoTorqueNm } from "../lib/import/importDyno";
 import { compareDyno } from "../lib/analytics/dynoCompare";
-import { exportMasterReport } from "../lib/export/exportReport";
 import type { SweepStudy } from "../state/types";
 
 interface Props {
@@ -176,22 +176,6 @@ export function SweepResults({ study }: Props) {
       },
     }));
     fromActions.push({
-      id: "sweep-report",
-      label: "Report (print → PDF)",
-      run: async () => {
-        try {
-          const path = await exportMasterReport(
-            { studies: state.studies, vehicleConfig: state.vehicleConfig, referenceBaseline: state.referenceBaseline },
-            [study.id],
-          );
-          if (path == null) return { ok: true, message: "Cancelled" };
-          return { ok: true, message: `Saved → ${basename(path)} — open & print to PDF` };
-        } catch (err) {
-          return { ok: false, message: String(err) };
-        }
-      },
-    });
-    fromActions.push({
       id: "sweep-copy-summary",
       label: "Copy summary",
       run: async () => {
@@ -204,7 +188,7 @@ export function SweepResults({ study }: Props) {
       },
     });
     return fromActions;
-  }, [study, summary, state]);
+  }, [study, summary]);
 
   async function copySummary() {
     try {
@@ -251,6 +235,7 @@ export function SweepResults({ study }: Props) {
             </div>
           )}
         </div>
+        <ReportButton defaultOnly={[study.id]} />
         <ExportMenu items={exportItems} />
         {study.status === "running" && (
           <button type="button"
