@@ -26,7 +26,7 @@ import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { ScatterPlot, type ScatterPt } from "../components/charts/ScatterPlot";
 import { ParallelCoordsPlot, type ParallelCoordsTrial } from "../components/charts/ParallelCoordsPlot";
 import { TornadoChart, type TornadoBar } from "../components/charts/TornadoChart";
-import { sensitivityTornado } from "../lib/analytics/optimizationStats";
+import { sensitivityTornado, refineBounds } from "../lib/analytics/optimizationStats";
 import {
   torqueCurveFromSweep,
   computeEvents,
@@ -72,7 +72,7 @@ function formatEta(seconds: number): string {
 
 export function OptimizationResults({ study }: Props) {
   const cfd = useCfd();
-  const { cancelStudy, bridge, startSweep } = cfd;
+  const { cancelStudy, bridge, startSweep, startOptimization } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   // Trial whose recipe seeds the "run a sweep from this recipe" modal (null = closed).
   const [sweepSeedTrial, setSweepSeedTrial] = useState<OptimizationTrial | null>(null);
@@ -576,6 +576,28 @@ export function OptimizationResults({ study }: Props) {
                 {POINTS_METRIC_KEYS.includes(dimDef.key) ? " · needs baselines (Performance tab)" : ""}
               </span>
             )}
+            {/* Actually optimize FOR the active metric: re-sample in a narrowed
+                box around the current #1, concentrating the search where the
+                score is highest (iterative refinement on the space-filling
+                backend). Each click converges further on that objective. */}
+            <button
+              type="button"
+              disabled={!live.ranked[0] || study.status === "running"}
+              title={`Start a new optimization that narrows the parameter search around the current #1 (best ${dim.label}) — concentrates the sampler there to push that objective further.`}
+              onClick={() => {
+                const best = live.ranked[0]?.trial;
+                if (!best) return;
+                void startOptimization(study.configPath, {
+                  ...study.params,
+                  tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
+                  seed: null,
+                  rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
+                });
+              }}
+              className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+            >
+              ⟲ Refine around #1
+            </button>
           </div>
 
           {/* Sortable ranked trial table. */}

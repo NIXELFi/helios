@@ -6,7 +6,34 @@
 // by ascending trialIdx). No React / Tauri imports: this file is unit-testable
 // in isolation and safe to import from anywhere.
 
-import type { ObjectiveDirection, OptimizationTrial } from "../../state/types";
+import type { ObjectiveDirection, OptimizationTrial, ParameterBounds } from "../../state/types";
+
+/** Narrow each tunable's bounds to a `factor`-wide window centered on a design's
+ *  parameter values, clamped to the original range. This is how the optimizer
+ *  ACTUALLY targets an FSAE objective on a space-filling backend: re-sample in a
+ *  shrunk box around the current best for that objective, so the search
+ *  concentrates where the score is highest (iterative pattern search). factor 0.3
+ *  keeps ±15% of each parameter's original range. */
+export function refineBounds(
+  tunables: ParameterBounds[],
+  paramValues: Record<string, number>,
+  factor = 0.3,
+): ParameterBounds[] {
+  return tunables.map((t) => {
+    const span = t.max - t.min;
+    const c = paramValues[t.path];
+    const center = c != null && Number.isFinite(c) ? c : (t.min + t.max) / 2;
+    const half = (span * factor) / 2;
+    let lo = Math.max(t.min, center - half);
+    let hi = Math.min(t.max, center + half);
+    if (!(lo < hi)) {
+      // Center sat on an edge → keep a small valid window just inside the range.
+      lo = Math.max(t.min, Math.min(center, t.max - span * 0.05));
+      hi = Math.min(t.max, lo + span * 0.1);
+    }
+    return { path: t.path, min: lo, max: hi, step: t.step };
+  });
+}
 
 export interface RankedTrial {
   trial: OptimizationTrial;

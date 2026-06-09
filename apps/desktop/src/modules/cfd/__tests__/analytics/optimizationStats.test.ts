@@ -5,7 +5,9 @@ import {
   runningBest,
   spearman,
   sensitivityTornado,
+  refineBounds,
 } from "../../lib/analytics/optimizationStats";
+import type { ParameterBounds } from "../../state/types";
 import { makeTrial } from "../fakes/study";
 
 describe("rankTrials", () => {
@@ -212,6 +214,40 @@ describe("sensitivityTornado", () => {
       makeTrial({ trialIdx: 1, objectiveValue: 20 }),
     ];
     expect(sensitivityTornado(trials, ["runner_length", "plenum_volume_l"])).toEqual([]);
+  });
+});
+
+describe("refineBounds", () => {
+  const tunables: ParameterBounds[] = [
+    { path: "runner_length", min: 0.1, max: 0.5, step: null },
+    { path: "plenum_volume", min: 0.0005, max: 0.005, step: null },
+  ];
+
+  it("narrows to a window centered on the design, clamped to the range", () => {
+    const r = refineBounds(tunables, { runner_length: 0.3, plenum_volume: 0.003 }, 0.3);
+    // ±15% of the 0.4 range = ±0.06 around 0.3 → [0.24, 0.36].
+    expect(r[0]!.min).toBeCloseTo(0.24, 6);
+    expect(r[0]!.max).toBeCloseTo(0.36, 6);
+    // The window is strictly inside the original bounds.
+    expect(r[0]!.min).toBeGreaterThanOrEqual(0.1);
+    expect(r[0]!.max).toBeLessThanOrEqual(0.5);
+    expect(r[1]!.min).toBeLessThan(r[1]!.max);
+  });
+
+  it("clamps at an edge and still returns a valid (min<max) window", () => {
+    const r = refineBounds(tunables, { runner_length: 0.5, plenum_volume: 0.0005 }, 0.3);
+    for (const b of r) {
+      expect(b.min).toBeLessThan(b.max);
+      expect(b.min).toBeGreaterThanOrEqual(b.min === r[0]!.min ? 0.1 : 0.0005 - 1e-9);
+    }
+    expect(r[0]!.max).toBeLessThanOrEqual(0.5 + 1e-9);
+  });
+
+  it("centers on the range midpoint when a value is missing", () => {
+    const r = refineBounds(tunables, {}, 0.5);
+    // midpoint 0.3, ±25% of 0.4 = ±0.1 → [0.2, 0.4].
+    expect(r[0]!.min).toBeCloseTo(0.2, 6);
+    expect(r[0]!.max).toBeCloseTo(0.4, 6);
   });
 });
 
