@@ -10,6 +10,8 @@ import { useCfd } from "../state/CfdContext";
 import { LinePlot, type LineSeries } from "../components/charts/LinePlot";
 import { TrackOverview } from "../components/charts/TrackOverview";
 import { basename } from "../lib/cfdPath";
+import { buildDesignReportHtml } from "../lib/export/designReport";
+import { saveTextFile, fileTimestamp, slugify } from "../lib/export/io";
 import {
   carKeyForConfig,
   vehiclePresetForKey,
@@ -114,6 +116,31 @@ export function PerformanceScreen() {
   );
   const peak = useMemo(() => peakTorque(curve), [curve]);
 
+  const [reportMsg, setReportMsg] = useState<string | null>(null);
+  async function exportReport() {
+    if (!selected || curve.length === 0) return;
+    try {
+      const html = buildDesignReportHtml({
+        configName: selected.configName,
+        generatedAt: new Date().toISOString(),
+        vehicle,
+        events,
+        accel,
+        skid,
+        tractive,
+        peak,
+        autocross: AUTOCROSS_2026,
+        endurance: ENDURANCE_2026,
+      });
+      const stem = `cfd-design-review-${slugify(selected.configName)}-${fileTimestamp()}`;
+      const path = await saveTextFile(stem, "html", html);
+      setReportMsg(path == null ? "Cancelled" : `Saved → ${path.split(/[\\/]/).pop()}`);
+    } catch (e) {
+      setReportMsg(e instanceof Error ? e.message : String(e));
+    }
+    setTimeout(() => setReportMsg(null), 4000);
+  }
+
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header */}
@@ -148,7 +175,22 @@ export function PerformanceScreen() {
         >
           {editorOpen ? "Hide vehicle" : "Vehicle setup"}
         </button>
+        <button
+          type="button"
+          onClick={() => void exportReport()}
+          disabled={!selected || curve.length === 0}
+          title="Export a light-theme one-pager (HTML) for a design review — prints to PDF"
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+        >
+          Export report
+        </button>
       </header>
+
+      {reportMsg && (
+        <div role="status" className="flex-shrink-0 border-b border-[#FFC627]/40 bg-[#16171B] px-3 py-1 text-[10px] text-[#D8DCE2]">
+          {reportMsg}
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {editorOpen && (
