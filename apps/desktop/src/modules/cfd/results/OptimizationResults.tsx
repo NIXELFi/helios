@@ -88,10 +88,10 @@ export function OptimizationResults({ study }: Props) {
   const carKey = carKeyForConfig(study.configPath);
 
   // Per-trial FSAE event scores (frontend; same computeEvents() lib as the
-  // Performance screen). Only computed when ranking by an event metric.
+  // Performance screen). Computed for ALL done trials so BOTH the active-dimension
+  // re-rank AND the multi-objective "best design per objective" panel can read it.
   const eventsByTrial = useMemo(() => {
     const map = new Map<number, EventScores>();
-    if (rankDim === "objective") return map;
     const vehicle = vehicleForCar(carKey, cfd.state?.vehicleConfig);
     const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
     for (const t of study.trials) {
@@ -101,7 +101,27 @@ export function OptimizationResults({ study }: Props) {
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankDim, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+  }, [study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+
+  // Best trial for EACH objective (total points + each event), so the speed ↔
+  // efficiency trade-off is visible at a glance: the total-points winner is the
+  // balanced design, while the per-event winners show the extremes. One pick
+  // jumps the whole view + inspector to that design.
+  const bestByMetric = useMemo(() => {
+    return EVENT_RANK_METRICS.map((m) => {
+      let best: { val: number; trialIdx: number } | null = null;
+      for (const t of study.trials) {
+        const e = eventsByTrial.get(t.trialIdx);
+        if (!e) continue;
+        const val = m.get(e);
+        if (val == null || !Number.isFinite(val)) continue;
+        if (!best || (m.lowerBetter ? val < best.val : val > best.val)) {
+          best = { val, trialIdx: t.trialIdx };
+        }
+      }
+      return { metric: m, best };
+    });
+  }, [eventsByTrial, study.trials]);
 
   const dimDef = rankDim === "objective" ? null : EVENT_RANK_METRICS.find((m) => m.key === rankDim) ?? null;
   const objUnit = objectiveUnit(study.params.objective);
@@ -408,6 +428,50 @@ export function OptimizationResults({ study }: Props) {
               );
             })}
           </div>
+
+          {/* Best design per OBJECTIVE — the efficiency ↔ speed trade-off at a
+              glance. "total pts" is the balanced pick; the per-event winners are
+              the extremes. Click any to inspect that design + rank the view by it. */}
+          {bestByMetric.some((b) => b.best) && (
+            <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+                Best design per objective
+                <span className="ml-2 text-[9px] lowercase text-[#5A5F66]">
+                  total pts = the efficiency↔speed balance · click to inspect + rank by it
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-2 font-mono text-[10px] sm:grid-cols-3">
+                {bestByMetric.map(({ metric, best }) => (
+                  <button
+                    key={metric.key}
+                    type="button"
+                    disabled={!best}
+                    onClick={() => {
+                      if (!best) return;
+                      setSelectedIdx(best.trialIdx);
+                      setRankDim(metric.key);
+                    }}
+                    className={
+                      "flex items-baseline justify-between gap-2 rounded-sm border px-1.5 py-1 text-left " +
+                      (rankDim === metric.key
+                        ? "border-[#FFC627]/60 bg-[#FFC627]/5"
+                        : "border-[#2A2C32] hover:border-[#FFC627]/40") +
+                      (best ? "" : " opacity-40")
+                    }
+                  >
+                    <span className="uppercase tracking-wider text-[#5A5F66]">{metric.label}</span>
+                    {best ? (
+                      <span className="text-[#D8DCE2]">
+                        {metric.fmt(best.val)} <span className="text-[#5A5F66]">#{best.trialIdx}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[#5A5F66]">—</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {live.nDone === 0 ? (
             <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">

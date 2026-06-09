@@ -353,6 +353,17 @@ describe("OptimizationResults — event ranking", () => {
     expect(within(aside).getByText(/accel \(s\)/)).toBeInTheDocument();
     expect(within(aside).queryByText(/^obj =/)).toBeNull();
   });
+
+  it("shows a best-design-per-objective panel; picking one re-ranks the view", () => {
+    render(<OptimizationResults study={eventStudy()} />);
+    // The panel lists each objective's winning design.
+    expect(screen.getByText("Best design per objective")).toBeInTheDocument();
+    // Time metrics always score (no baseline needed); the autocross-best button
+    // carries a value + trial number. Clicking it re-ranks the whole view.
+    const axBtn = screen.getByRole("button", { name: /autox \(s\)/ });
+    fireEvent.click(axBtn);
+    expect(screen.getByText("autox (s) vs trial")).toBeInTheDocument();
+  });
 });
 
 describe("OptimizationResults — cancel", () => {
