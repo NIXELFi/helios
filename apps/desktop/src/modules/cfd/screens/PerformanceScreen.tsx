@@ -32,6 +32,7 @@ import {
   type VehicleConfig,
   type ReferenceBaseline,
   type EventScores,
+  type LapTelemetry,
 } from "../lib/performance";
 import type { Study, SweepPoint } from "../state/types";
 
@@ -221,6 +222,8 @@ export function PerformanceScreen() {
           <div className="flex flex-col gap-3">
             <EventsSection events={events} baseline={baseline} onBaseline={setReferenceBaseline} />
 
+            {events && <TelemetrySection events={events} />}
+
             {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
               <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
@@ -377,6 +380,82 @@ function tractiveSeries(tractive: NonNullable<ReturnType<typeof tractiveMap>>): 
 
 function ptsStr(p: number | null): string {
   return p != null ? p.toFixed(1) : "—";
+}
+
+/** Model-predicted lap telemetry for autocross + endurance, side by side. Pulls
+ *  everything the 2D sim now exposes: avg/max RPM, shift count, peak g's, time
+ *  on throttle, top/avg speed, and a per-gear time-usage bar. */
+function TelemetrySection({ events }: { events: EventScores }) {
+  return (
+    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Lap telemetry — model predictions</span>
+        <span className="text-[9px] text-[#5A5F66]">gear-explicit QSS sim</span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
+        <TelemetryCard label="Autocross" lapTimeS={events.autocross.lapTimeS} tm={events.autocross.telemetry} />
+        <TelemetryCard label="Endurance" lapTimeS={events.endurance.lapTimeS} tm={events.endurance.telemetry} perLap />
+      </div>
+    </section>
+  );
+}
+
+function TelemetryCard({
+  label, lapTimeS, tm, perLap,
+}: {
+  label: string;
+  lapTimeS: number;
+  tm: LapTelemetry;
+  perLap?: boolean;
+}) {
+  return (
+    <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-2.5">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">{label}</span>
+        <span className="font-mono text-[12px] text-[#FFC627]">
+          {lapTimeS.toFixed(2)} s{perLap ? "/lap" : ""}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+        <Stat label="avg rpm" value={tm.avgRpm.toFixed(0)} highlight />
+        <Stat label="max rpm" value={tm.maxRpm.toFixed(0)} />
+        <Stat label="shifts" value={String(tm.shiftCount)} />
+        <Stat label="top spd" value={`${tm.vMaxKph.toFixed(0)} km/h`} />
+        <Stat label="min spd" value={`${tm.vMinKph.toFixed(0)} km/h`} />
+        <Stat label="on throttle" value={`${(tm.pctOnThrottle * 100).toFixed(0)}%`} />
+        <Stat label="max lat" value={`${tm.maxLatG.toFixed(2)} g`} />
+        <Stat label="max accel" value={`${tm.maxAccelG.toFixed(2)} g`} />
+        <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />
+      </div>
+      <GearUsageBar frac={tm.timeInGearFrac} />
+    </div>
+  );
+}
+
+/** Horizontal stacked bar of time spent in each gear (colored g1…gN). */
+function GearUsageBar({ frac }: { frac: number[] }) {
+  const total = frac.reduce((a, b) => a + b, 0) || 1;
+  return (
+    <div className="mt-2.5">
+      <div className="mb-1 text-[8px] uppercase tracking-wider text-[#5A5F66]">time in gear</div>
+      <div className="flex h-3 w-full overflow-hidden rounded-sm border border-[#2A2C32]">
+        {frac.map((f, i) => {
+          const pct = (f / total) * 100;
+          if (pct < 0.5) return null;
+          return (
+            <div
+              key={i}
+              style={{ width: `${pct}%`, background: GEAR_COLORS[i % GEAR_COLORS.length] }}
+              title={`gear ${i + 1}: ${pct.toFixed(0)}% of lap time`}
+              className="flex items-center justify-center text-[7px] font-mono text-black/70"
+            >
+              {pct >= 9 ? i + 1 : ""}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function EventsSection({

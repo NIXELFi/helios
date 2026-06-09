@@ -63,7 +63,7 @@ export {
   type EventOpts,
   type EventMetricKey,
 } from "./events";
-export { simLap, type LapResult, type LapOpts } from "./lapSim";
+export { simLap, type LapResult, type LapOpts, type LapTelemetry } from "./lapSim";
 export {
   synthesizeAutocross,
   synthesizeEndurance,

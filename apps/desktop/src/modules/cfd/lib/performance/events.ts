@@ -9,7 +9,7 @@
 import type { ReferenceBaseline, VehicleConfig } from "./types";
 import type { TorqueCurve } from "./torqueCurve";
 import { simAccel } from "./accel";
-import { simLap } from "./lapSim";
+import { simLap, type LapTelemetry } from "./lapSim";
 import { type Track } from "./track";
 import { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
 import { DEFAULT_FUEL, type Fuel } from "./fuels";
@@ -44,12 +44,13 @@ export const ENDURANCE_THERMAL_EFF = 0.121;
 
 export interface EventScores {
   accel: { timeS: number; points: number | null };
-  autocross: { lapTimeS: number; points: number | null };
+  autocross: { lapTimeS: number; points: number | null; telemetry: LapTelemetry };
   endurance: {
     lapTimeS: number;
     fuelKgPerLap: number;
     co2KgPerLap: number;
     points: number | null;
+    telemetry: LapTelemetry;
   };
   efficiency: { factor: number | null; points: number | null };
   /** Sum of the modeled events that have a reference baseline (accel + autocross
@@ -154,12 +155,13 @@ export function computeEvents(
 
   return {
     accel: { timeS: accel.timeS, points: accelPts },
-    autocross: { lapTimeS: ax.lapTimeS, points: axPts },
+    autocross: { lapTimeS: ax.lapTimeS, points: axPts, telemetry: ax.telemetry },
     endurance: {
       lapTimeS: en.lapTimeS,
       fuelKgPerLap: en.fuelKg,
       co2KgPerLap: en.co2Kg,
       points: enPts,
+      telemetry: en.telemetry,
     },
     efficiency: { factor, points: effPts },
     totalPoints,
