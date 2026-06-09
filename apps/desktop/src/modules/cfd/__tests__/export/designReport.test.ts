@@ -4,8 +4,8 @@ import { buildDesignReportHtml, type DesignReportInput } from "../../lib/export/
 import {
   SDM26_VEHICLE,
   REFERENCE_2026,
-  AUTOCROSS_2026,
-  ENDURANCE_2026,
+  AUTOCROSS_2026_VISUAL,
+  ENDURANCE_2026_VISUAL,
   computeEvents,
   simAccel,
   skidpad,
@@ -32,8 +32,8 @@ function input(over: Partial<DesignReportInput> = {}): DesignReportInput {
     skid: skidpad(SDM26_VEHICLE, 4.9),
     tractive: tractiveMap(CURVE, SDM26_VEHICLE),
     peak: peakTorque(CURVE),
-    autocross: AUTOCROSS_2026,
-    endurance: ENDURANCE_2026,
+    autocross: AUTOCROSS_2026_VISUAL,
+    endurance: ENDURANCE_2026_VISUAL,
     ...over,
   };
 }

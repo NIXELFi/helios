@@ -12,8 +12,7 @@ import type { EventScores } from "../performance/events";
 import type { AccelResult } from "../performance/accel";
 import type { SkidpadResult } from "../performance/skidpad";
 import type { TractiveMap } from "../performance/tractive";
-import { trackPlan, tightnessOf } from "../performance/trackGeometry";
-import type { Track } from "../performance/track";
+import { visualCurvatureRadii, tightnessOf, boundsOf, type VisualTrack, type XY } from "../performance/trackGeometry";
 
 export interface DesignReportInput {
   configName: string;
@@ -24,8 +23,8 @@ export interface DesignReportInput {
   skid: SkidpadResult;
   tractive: TractiveMap | null;
   peak: { rpm: number; torqueNm: number } | null;
-  autocross: Track;
-  endurance: Track;
+  autocross: VisualTrack;
+  endurance: VisualTrack;
 }
 
 // Light palette for the report (distinct from the app's dark chart palette).
@@ -95,39 +94,45 @@ function svgLineChart(opts: {
   </svg>`;
 }
 
-/** Light-theme plan-view schematic of a track → SVG string. */
-function svgTrackPlan(track: Track, width: number, height: number): string {
-  const plan = trackPlan(track);
-  const pad = 14;
-  const { minX, minY, maxX, maxY } = plan.bbox;
+/** Light-theme TRUE-layout plan view of a visual track → SVG string. Draws the
+ *  traced ribbon (left/right edges) with the centerline colored by local corner
+ *  tightness. Equal-aspect fit so the shape isn't distorted. */
+function svgVisualTrack(track: VisualTrack, width: number, height: number): string {
+  const pad = 12;
+  const { minX, minY, maxX, maxY } = boundsOf([...track.leftEdge, ...track.rightEdge]);
   const spanX = Math.max(1e-6, maxX - minX);
   const spanY = Math.max(1e-6, maxY - minY);
   const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY);
   const offX = (width - spanX * scale) / 2;
   const offY = (height - spanY * scale) / 2;
-  const X = (x: number) => offX + (x - minX) * scale;
-  const Y = (y: number) => height - (offY + (y - minY) * scale);
-  // Tightness-colored runs, but in print-friendly tones.
+  const X = (p: XY) => offX + (p[0] - minX) * scale;
+  const Y = (p: XY) => offY + (maxY - p[1]) * scale; // y-north → svg y-down
+  // Print-friendly tightness tones.
   const COLOR = { straight: "#2E86C1", open: "#27AE60", medium: "#B8860B", tight: "#E67E22", hairpin: "#C0392B" };
+  const radii = visualCurvatureRadii(track.centerline);
+  const ribbon = [
+    ...track.leftEdge.map((p) => `${X(p).toFixed(1)},${Y(p).toFixed(1)}`),
+    ...[...track.rightEdge].reverse().map((p) => `${X(p).toFixed(1)},${Y(p).toFixed(1)}`),
+  ].join(" ");
   const runs: string[] = [];
   let cur = "", buf: string[] = [], prev: string | null = null;
-  for (const p of plan.points) {
-    const c = COLOR[tightnessOf(p.radius)];
-    const xy = `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`;
+  track.centerline.forEach((p, i) => {
+    const c = COLOR[tightnessOf(radii[i] ?? Infinity)];
+    const xy = `${X(p).toFixed(1)},${Y(p).toFixed(1)}`;
     if (c !== cur) {
-      if (buf.length > 1) runs.push(`<polyline points="${buf.join(" ")}" fill="none" stroke="${cur}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`);
+      if (buf.length > 1) runs.push(`<polyline points="${buf.join(" ")}" fill="none" stroke="${cur}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`);
       buf = prev ? [prev, xy] : [xy];
       cur = c;
     } else buf.push(xy);
     prev = xy;
-  }
-  if (buf.length > 1) runs.push(`<polyline points="${buf.join(" ")}" fill="none" stroke="${cur}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`);
-  const s = plan.points[0]!, f = plan.points[plan.points.length - 1]!;
+  });
+  if (buf.length > 1) runs.push(`<polyline points="${buf.join(" ")}" fill="none" stroke="${cur}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`);
+  const s = track.centerline[0]!;
   return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${width}" height="${height}" fill="#FFFFFF"/>
+    <polygon points="${ribbon}" fill="#ECEFF3" stroke="#C8CDD4" stroke-width="0.8"/>
     ${runs.join("")}
-    <circle cx="${X(s.x).toFixed(1)}" cy="${Y(s.y).toFixed(1)}" r="4" fill="#27AE60"/>
-    <circle cx="${X(f.x).toFixed(1)}" cy="${Y(f.y).toFixed(1)}" r="4" fill="#C0392B"/>
+    <circle cx="${X(s).toFixed(1)}" cy="${Y(s).toFixed(1)}" r="3.5" fill="#27AE60"/>
   </svg>`;
 }
 
@@ -216,8 +221,8 @@ export function buildDesignReportHtml(input: DesignReportInput): string {
 
   <h2>Courses (2026)</h2>
   <div class="two">
-    <figure>${svgTrackPlan(input.autocross, 350, 200)}<figcaption>${esc(input.autocross.name)} — schematic (turn directions approximated; tightness/lengths real).</figcaption></figure>
-    <figure>${svgTrackPlan(input.endurance, 350, 200)}<figcaption>${esc(input.endurance.name)} — schematic.</figcaption></figure>
+    <figure>${svgVisualTrack(input.autocross, 350, 220)}<figcaption>${esc(input.autocross.name)} — traced layout; centerline colored by corner tightness.</figcaption></figure>
+    <figure>${svgVisualTrack(input.endurance, 350, 220)}<figcaption>${esc(input.endurance.name)} — traced layout (closed loop).</figcaption></figure>
   </div>
 
   <footer>Projected points use frontend FSAE scoring against the 2026 field anchors. Lap times are estimates (driver/tire/conditions vary). Track plan views are schematic — the model is corner-direction-agnostic.</footer>

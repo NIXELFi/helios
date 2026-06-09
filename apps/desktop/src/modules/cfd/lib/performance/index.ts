@@ -79,7 +79,14 @@ export {
   trackPlan,
   tightnessOf,
   TIGHTNESS_COLOR,
+  parseVisualTrack,
+  boundsOf,
+  visualCurvatureRadii,
   type TrackPlan,
   type TrackPoint,
   type Tightness,
+  type VisualTrack,
+  type RawVisualTrack,
+  type XY,
 } from "./trackGeometry";
+export { AUTOCROSS_2026_VISUAL, ENDURANCE_2026_VISUAL } from "./tracksVisual2026";

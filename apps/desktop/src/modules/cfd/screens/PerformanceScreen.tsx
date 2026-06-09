@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { LinePlot, type LineSeries } from "../components/charts/LinePlot";
-import { TrackOverview } from "../components/charts/TrackOverview";
+import { TrackLayout } from "../components/charts/TrackLayout";
 import { basename } from "../lib/cfdPath";
 import { buildDesignReportHtml } from "../lib/export/designReport";
 import { saveTextFile, fileTimestamp, slugify } from "../lib/export/io";
@@ -24,8 +24,11 @@ import {
   computeEvents,
   AUTOCROSS_2026,
   ENDURANCE_2026,
+  AUTOCROSS_2026_VISUAL,
+  ENDURANCE_2026_VISUAL,
   REFERENCE_2026,
   trackLength,
+  TIGHTNESS_COLOR,
   type VehicleConfig,
   type ReferenceBaseline,
   type EventScores,
@@ -87,7 +90,6 @@ export function PerformanceScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [skidpadTime, setSkidpadTime] = useState(4.9);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [trackView, setTrackView] = useState<"autocross" | "endurance">("autocross");
 
   const selected = sources.find((s) => s.id === selectedId) ?? sources[0] ?? null;
   // The vehicle (esp. final drive) auto-matches the loaded config: an SDM25
@@ -129,8 +131,8 @@ export function PerformanceScreen() {
         skid,
         tractive,
         peak,
-        autocross: AUTOCROSS_2026,
-        endurance: ENDURANCE_2026,
+        autocross: AUTOCROSS_2026_VISUAL,
+        endurance: ENDURANCE_2026_VISUAL,
       });
       const stem = `cfd-design-review-${slugify(selected.configName)}-${fileTimestamp()}`;
       const path = await saveTextFile(stem, "html", html);
@@ -219,31 +221,31 @@ export function PerformanceScreen() {
           <div className="flex flex-col gap-3">
             <EventsSection events={events} baseline={baseline} onBaseline={setReferenceBaseline} />
 
-            {/* Track overview — the loaded course the events are scored on. */}
+            {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
               <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
                 <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Track overview</span>
-                <div className="flex items-center gap-1">
-                  {(["autocross", "endurance"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTrackView(t)}
-                      className={
-                        "rounded-sm border px-2 py-0.5 text-[9px] uppercase tracking-wider " +
-                        (trackView === t
-                          ? "border-[#FFC627] text-[#FFC627]"
-                          : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
-                      }
-                    >
+                <div className="flex items-center gap-2 text-[8px] uppercase tracking-wider text-[#5A5F66]">
+                  {(["straight", "open", "medium", "tight", "hairpin"] as const).map((t) => (
+                    <span key={t} className="flex items-center gap-1">
+                      <span className="inline-block h-1.5 w-2.5 rounded-sm" style={{ background: TIGHTNESS_COLOR[t] }} />
                       {t}
-                    </button>
+                    </span>
                   ))}
                 </div>
               </div>
-              <div className="p-3">
-                <TrackOverview track={trackView === "autocross" ? AUTOCROSS_2026 : ENDURANCE_2026} />
+              <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
+                <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D]">
+                  <TrackLayout track={AUTOCROSS_2026_VISUAL} />
+                </div>
+                <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D]">
+                  <TrackLayout track={ENDURANCE_2026_VISUAL} />
+                </div>
               </div>
+              <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
+                Real traced 2026 layouts (display only — the lap sim integrates the radius profile, not these).
+                Centerline colored by local corner tightness; the surface is the ~3.5 m course width.
+              </p>
             </section>
 
             {/* Tractive-effort map */}
