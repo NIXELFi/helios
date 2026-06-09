@@ -13,12 +13,14 @@
 // Performance screen); since the backend sampler is space-filling, ranking by an
 // event metric picks the best sampled design for that event.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { useOptimizationLive, useElapsedSeconds } from "../state/useOptimizationLive";
 import { basename } from "../lib/cfdPath";
 import { studyName, sweepFromTrialName, refineName } from "../lib/studyName";
+import { getAutoRefine, setAutoRefine, improvedEnough } from "../lib/autoRefine";
+import { buildSensitivityTsv } from "../lib/export/buildCsv";
 import { StudyNameEditor } from "../components/StudyNameEditor";
 import { objectiveUnit } from "../lib/metricMeta";
 import { exportActionsFor } from "../lib/export/exportStudy";
@@ -182,8 +184,84 @@ export function OptimizationResults({ study }: Props) {
   const live = useOptimizationLive(viewStudy);
   const elapsed = useElapsedSeconds(study);
 
+  // ---- Auto-refine loop (roadmap #8) ----------------------------------------
+  // One "Refine around #1" round is a single click; converging on an FSAE
+  // objective needs several. The loop state lives at module level (each round
+  // is a NEW study, which remounts this screen); this effect advances it when
+  // the awaited round finishes. `[ticker]` only forces a re-render on Stop.
+  const [, setArTick] = useState(0);
+  const autoRefine = getAutoRefine();
+  const arActive = autoRefine?.studyId === study.id;
+
+  /** Start one refine round around the current #1 (shared by the manual
+   *  button and the loop). Returns the new study's id. */
+  async function startRefineRound(): Promise<string | null> {
+    const best = live.ranked[0]?.trial;
+    if (!best) return null;
+    return startOptimization(study.configPath, {
+      ...study.params,
+      tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
+      seed: null,
+      rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
+    }, { name: refineName(study.configPath, best.trialIdx) });
+  }
+
+  useEffect(() => {
+    const ar = getAutoRefine();
+    if (!ar || ar.studyId !== study.id) return;
+    if (study.status === "error" || study.status === "cancelled") {
+      setAutoRefine(null);
+      setArTick((t) => t + 1);
+      return;
+    }
+    if (study.status !== "done") return;
+    const best = live.ranked[0]?.trial.objectiveValue;
+    const continueLoop =
+      best != null &&
+      ar.roundsLeft > 0 &&
+      improvedEnough(ar.lastBest, best, viewStudy.objectiveDirection);
+    if (!continueLoop) {
+      setAutoRefine(null);
+      setArTick((t) => t + 1);
+      return;
+    }
+    // Mark advancing BEFORE the async start so a re-run can't double-fire.
+    setAutoRefine({ ...ar, studyId: "<starting>" });
+    void startRefineRound().then((nextId) => {
+      if (nextId == null) {
+        setAutoRefine(null);
+        return;
+      }
+      setAutoRefine({
+        studyId: nextId,
+        roundsLeft: ar.roundsLeft - 1,
+        round: ar.round + 1,
+        totalRounds: ar.totalRounds,
+        lastBest: best!,
+      });
+    }).catch(() => setAutoRefine(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.id, study.status, live.ranked, viewStudy.objectiveDirection]);
+
+  const [arRounds, setArRounds] = useState(3);
+
   const isRunning = study.status === "running";
   const showEta = isRunning && live.nDone >= 3 && live.eta != null;
+
+  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
+  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
+  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
+  // is "favorable" when raising the knob pushes the objective the better way.
+  const sensitivityBars: TornadoBar[] = useMemo(() => {
+    const maximize = viewStudy.objectiveDirection === "maximize";
+    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
+      label: e.path,
+      value: e.rho,
+      favorable: e.rho > 0 === maximize,
+      n: e.n,
+    }));
+  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
+
 
   // ---- Export menu items ---------------------------------------------------
   const exportItems: ExportMenuItem[] = useMemo(() => {
@@ -217,6 +295,15 @@ export function OptimizationResults({ study }: Props) {
       },
     });
     items.push({
+      id: "opt-copy-sensitivity",
+      label: "Copy sensitivity (TSV)",
+      run: async () => {
+        if (sensitivityBars.length === 0) return { ok: false, message: "No sensitivity data yet" };
+        await copyText(buildSensitivityTsv(sensitivityBars, dim.label));
+        return { ok: true, message: "Copied!" };
+      },
+    });
+    items.push({
       id: "opt-copy-recipe",
       label: "Copy best recipe",
       run: async () => {
@@ -232,7 +319,7 @@ export function OptimizationResults({ study }: Props) {
     });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [study, bridge, live.ranked]);
+  }, [study, bridge, live.ranked, sensitivityBars, dim.label]);
 
   // ---- Charts: convergence + value-vs-parameter (all in the active dim) -----
   const convergencePoints: ScatterPt[] = useMemo(
@@ -263,20 +350,6 @@ export function OptimizationResults({ study }: Props) {
         })),
     [live.done, live.rankByIdx, paramForScatter],
   );
-
-  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
-  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
-  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
-  // is "favorable" when raising the knob pushes the objective the better way.
-  const sensitivityBars: TornadoBar[] = useMemo(() => {
-    const maximize = viewStudy.objectiveDirection === "maximize";
-    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
-      label: e.path,
-      value: e.rho,
-      favorable: e.rho > 0 === maximize,
-      n: e.n,
-    }));
-  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
 
   // ---- Parallel-coords plot ------------------------------------------------
   const axes = useMemo(() => {
@@ -657,6 +730,50 @@ export function OptimizationResults({ study }: Props) {
             >
               ⟲ Refine around #1
             </button>
+            {/* Auto-refine: run several rounds hands-off, stop on convergence. */}
+            {arActive || autoRefine?.studyId === "<starting>" ? (
+              <span role="status" className="flex items-center gap-2 rounded-sm border border-[#FFC627]/40 bg-[#FFC627]/5 px-2 py-1 text-[10px] text-[#FFC627]">
+                auto-refine round {autoRefine!.round}/{autoRefine!.totalRounds}
+                {study.status === "running" ? " — running…" : " — evaluating…"}
+                <span className="text-[#9097A0]">stops when gain &lt; 0.5%</span>
+                <button
+                  type="button"
+                  onClick={() => { setAutoRefine(null); setArTick((t) => t + 1); }}
+                  title="Stop the loop after this round (the running job itself continues)"
+                  className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FF5252] hover:text-[#FF5252]"
+                >
+                  Stop loop
+                </button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!live.ranked[0] || study.status === "running"}
+                  title="Run several refine rounds automatically, re-narrowing around each round's #1; stops early when the best improves by less than 0.5%."
+                  onClick={() => {
+                    const best = live.ranked[0]?.trial.objectiveValue;
+                    if (best == null) return;
+                    setAutoRefine({ studyId: "<starting>", roundsLeft: arRounds - 1, round: 1, totalRounds: arRounds, lastBest: best });
+                    void startRefineRound().then((nextId) => {
+                      if (nextId == null) { setAutoRefine(null); return; }
+                      setAutoRefine({ studyId: nextId, roundsLeft: arRounds - 1, round: 1, totalRounds: arRounds, lastBest: best });
+                    }).catch(() => setAutoRefine(null));
+                  }}
+                  className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+                >
+                  ▶ Auto-refine
+                </button>
+                <select
+                  aria-label="Auto-refine rounds"
+                  value={arRounds}
+                  onChange={(e) => setArRounds(Number(e.target.value))}
+                  className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+                >
+                  {[2, 3, 5].map((n) => <option key={n} value={n}>{n} rounds</option>)}
+                </select>
+              </span>
+            )}
           </div>
 
           {/* Sortable ranked trial table. */}

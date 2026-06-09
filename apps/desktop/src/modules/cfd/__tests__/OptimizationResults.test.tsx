@@ -4,7 +4,7 @@
 // calls are observable without a Tauri runtime.
 
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { makeOptimizationStudy, makeTrial, makeSweepPoint } from "./fakes/study";
 import type { OptimizationStudy } from "../state/types";
@@ -407,5 +407,41 @@ describe("OptimizationResults — knock surfacing", () => {
     const flat = rows.map((r) => r.join(" "));
     expect(flat.some((r) => r.includes("⚠ 1.31"))).toBe(true);
     expect(flat.some((r) => r.includes("0.62") && !r.includes("⚠ 0.62"))).toBe(true);
+  });
+});
+
+// Appended import — top-level statement, hoisted like the ones above.
+import { getAutoRefine, setAutoRefine } from "../lib/autoRefine";
+
+describe("OptimizationResults — auto-refine loop", () => {
+  afterEach(() => {
+    setAutoRefine(null);
+    delete (stableCtx as Record<string, unknown>).startOptimization;
+  });
+
+  it("advances to the next round when the watched study finishes improved", async () => {
+    const startOptimization = vi.fn(async () => "next-job");
+    (stableCtx as Record<string, unknown>).startOptimization = startOptimization;
+    // Prior best 50 → this study's best 64 (maximize default) = big gain.
+    setAutoRefine({ studyId: "opt-1", roundsLeft: 2, round: 1, totalRounds: 3, lastBest: 50 });
+    const study = makeOptimizationStudy({ id: "opt-1", status: "done" });
+    render(<OptimizationResults study={study} />);
+    await waitFor(() => expect(startOptimization).toHaveBeenCalledTimes(1));
+    // Narrowed tunables + the loop now waits on the new study.
+    const params = (startOptimization.mock.calls[0] as unknown[])[1] as { tunables: unknown[] };
+    expect(params.tunables.length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(getAutoRefine()).toMatchObject({ studyId: "next-job", round: 2, roundsLeft: 1, lastBest: 64 }),
+    );
+  });
+
+  it("stops the loop when the gain is under the 0.5% floor", async () => {
+    const startOptimization = vi.fn(async () => "never");
+    (stableCtx as Record<string, unknown>).startOptimization = startOptimization;
+    setAutoRefine({ studyId: "opt-1", roundsLeft: 2, round: 1, totalRounds: 3, lastBest: 63.9 });
+    const study = makeOptimizationStudy({ id: "opt-1", status: "done" }); // best 64 → +0.16%
+    render(<OptimizationResults study={study} />);
+    await waitFor(() => expect(getAutoRefine()).toBeNull());
+    expect(startOptimization).not.toHaveBeenCalled();
   });
 });
