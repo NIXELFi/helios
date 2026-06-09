@@ -8,6 +8,7 @@ import { StudiesScreen } from "./screens/StudiesScreen";
 import { ResultsScreen } from "./screens/ResultsScreen";
 import { PerformanceScreen } from "./screens/PerformanceScreen";
 import { LapSimScreen } from "./screens/LapSimScreen";
+import { CompareScreen } from "./screens/CompareScreen";
 import { ConfirmModal } from "./components/ConfirmModal";
 import type { NavId } from "./state/types";
 
@@ -113,6 +114,7 @@ function CfdShell() {
         {state.activeScreen === "results" && <ResultsScreen />}
         {state.activeScreen === "performance" && <PerformanceScreen />}
         {state.activeScreen === "lapsim" && <LapSimScreen />}
+        {state.activeScreen === "compare" && <CompareScreen />}
       </div>
       <ConfirmModal
         open={pendingNav !== null}

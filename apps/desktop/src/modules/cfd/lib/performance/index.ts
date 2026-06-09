@@ -70,6 +70,13 @@ export {
   type EventMetricKey,
 } from "./events";
 export {
+  attributeGap,
+  stepDeltas,
+  type CompareDesign,
+  type GapStep,
+  type GapStepKey,
+} from "./compare";
+export {
   simLap,
   makeGripModel,
   type GripModel,
