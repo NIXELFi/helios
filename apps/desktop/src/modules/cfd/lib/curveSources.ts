@@ -4,6 +4,7 @@
 // Lap Sim screens so the two dropdowns can never drift.
 
 import { basename } from "./cfdPath";
+import { studyName } from "./studyName";
 import type { Study, SweepPoint } from "../state/types";
 
 export interface CurveSource {
@@ -21,7 +22,7 @@ export function sourcesFrom(studies: Record<string, Study>): CurveSource[] {
     if (s.kind === "sweep" && s.points.length > 0) {
       out.push({
         id: s.id,
-        label: `Sweep · ${basename(s.configPath)} · ${s.points.length} rpm`,
+        label: `Sweep · ${studyName(s)} · ${s.points.length} rpm`,
         configName: basename(s.configPath),
         points: s.points,
       });
@@ -37,7 +38,7 @@ export function sourcesFrom(studies: Record<string, Study>): CurveSource[] {
       if (trial?.sweepPoints && trial.sweepPoints.length > 0) {
         out.push({
           id: s.id,
-          label: `Optimization · ${basename(s.configPath)} · best #${trial.trialIdx}`,
+          label: `Optimization · ${studyName(s)} · best #${trial.trialIdx}`,
           configName: basename(s.configPath),
           points: trial.sweepPoints,
         });

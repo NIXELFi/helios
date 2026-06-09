@@ -26,6 +26,7 @@ import type {
   SweepPoint,
   SweepStudy,
 } from "./types";
+import type { DynoRef } from "../lib/import/importDyno";
 
 export interface State {
   loadedConfig: LoadedConfig | null;
@@ -60,6 +61,8 @@ export type Action =
   | { type: "sweepCycle"; id: string; rpmIdx: number; rpm: number; cycleStats: CycleStats }
   | { type: "sweepRpmDone"; id: string; point: Omit<SweepPoint, "cycles" | "captureDir">; captureDir?: string }
   | { type: "setSweepCompare"; id: string; compareWithStudyId?: string }
+  | { type: "setSweepDynoRef"; id: string; dynoRef?: DynoRef }
+  | { type: "renameStudy"; id: string; name: string | null }
   | { type: "deleteStudy"; id: string }
   | {
       type: "rehydrate";
@@ -196,6 +199,24 @@ export function reducer(s: State, a: Action): State {
         },
       };
     }
+    case "setSweepDynoRef": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      const { dynoRef: _old, ...rest } = existing;
+      const next = (a.dynoRef ? { ...rest, dynoRef: a.dynoRef } : rest) as Study;
+      return { ...s, studies: { ...s.studies, [a.id]: next } };
+    }
+    case "renameStudy": {
+      const existing = s.studies[a.id];
+      if (!existing) return s;
+      // null/blank clears the custom name → screens fall back to the config
+      // basename via studyName(). `name` is dropped (not set to undefined) so
+      // persisted/exported JSON stays clean.
+      const trimmed = a.name?.trim();
+      const { name: _drop, ...rest } = existing;
+      const renamed = (trimmed ? { ...rest, name: trimmed } : rest) as Study;
+      return { ...s, studies: { ...s.studies, [a.id]: renamed } };
+    }
     case "deleteStudy": {
       const { [a.id]: _drop, ...rest } = s.studies;
       return {
@@ -285,14 +306,18 @@ export interface CfdContextValue {
   navigateTo: (screen: NavId) => void;
   setActiveStudy: (id: string | null) => void;
   startSingleRpm: (configPath: string, params: SingleRpmParams) => Promise<string>;
-  startSweep: (configPath: string, params: SweepParams) => Promise<string>;
-  startOptimization: (configPath: string, params: OptimizationParams) => Promise<string>;
+  startSweep: (configPath: string, params: SweepParams, opts?: { name?: string }) => Promise<string>;
+  startOptimization: (configPath: string, params: OptimizationParams, opts?: { name?: string }) => Promise<string>;
   cancelStudy: (id: string) => Promise<void>;
   deleteStudy: (id: string) => void;
+  /** Set or clear (null/blank) a study's display name. */
+  renameStudy: (id: string, name: string | null) => void;
   /** Add one or more studies reconstructed from an exported JSON bundle. The
    *  last one becomes active; returns the active id (or null if none added). */
   importStudies: (studies: Study[]) => string | null;
   setSweepCompare: (id: string, compareWithStudyId?: string) => void;
+  /** Attach (or clear) an imported dyno reference overlay on a sweep. */
+  setSweepDynoRef: (id: string, dynoRef?: DynoRef) => void;
   setVehicleConfig: (config: VehicleConfig) => void;
   setReferenceBaseline: (baseline: ReferenceBaseline) => void;
   /** Test-only entry point. Dispatches actions as if a Tauri event fired. */
@@ -522,19 +547,20 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         dispatch({ type: "setActiveScreen", screen: "results" });
         return jobId;
       },
-      startSweep: async (configPath, params) => {
+      startSweep: async (configPath, params, opts) => {
         const { jobId } = await bridge.startJob({ kind: "sweep", configPath, params });
         dispatch({
           type: "addStudy",
           study: {
             id: jobId, kind: "sweep", status: "running", configPath,
+            ...(opts?.name ? { name: opts.name } : {}),
             startedAt: Date.now(), params, points: [],
           },
         });
         dispatch({ type: "setActiveScreen", screen: "results" });
         return jobId;
       },
-      startOptimization: async (configPath, params) => {
+      startOptimization: async (configPath, params, opts) => {
         // rankBy is a frontend-only display/ranking hint — the backend can't
         // compute FSAE event metrics, so strip it before sampling. The study
         // keeps the full params so the results screen defaults to it.
@@ -557,6 +583,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
           kind: "optimization",
           status: "running",
           configPath,
+          ...(opts?.name ? { name: opts.name } : {}),
           startedAt: Date.now(),
           params,
           trials,
@@ -574,6 +601,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         await bridge.cancelJob(id);
       },
       deleteStudy: (id) => dispatch({ type: "deleteStudy", id }),
+      renameStudy: (id, name) => dispatch({ type: "renameStudy", id, name }),
       importStudies: (studies) => {
         let lastId: string | null = null;
         for (const study of studies) {
@@ -583,6 +611,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         return lastId;
       },
       setSweepCompare: (id, compareWithStudyId) => dispatch({ type: "setSweepCompare", id, compareWithStudyId }),
+      setSweepDynoRef: (id, dynoRef) => dispatch({ type: "setSweepDynoRef", id, dynoRef }),
       setVehicleConfig: (config) => dispatch({ type: "setVehicleConfig", config }),
       setReferenceBaseline: (baseline) => dispatch({ type: "setReferenceBaseline", baseline }),
       __dispatchTestEvent: (event: JobEvent) => applyEventAction(event),

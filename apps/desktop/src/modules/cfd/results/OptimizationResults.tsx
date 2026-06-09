@@ -18,6 +18,8 @@ import { useMemo, useState } from "react";
 import { useCfd } from "../state/CfdContext";
 import { useOptimizationLive, useElapsedSeconds } from "../state/useOptimizationLive";
 import { basename } from "../lib/cfdPath";
+import { studyName, sweepFromTrialName, refineName } from "../lib/studyName";
+import { StudyNameEditor } from "../components/StudyNameEditor";
 import { objectiveUnit } from "../lib/metricMeta";
 import { exportActionsFor } from "../lib/export/exportStudy";
 import { buildTrialsTsv } from "../lib/export/buildCsv";
@@ -73,7 +75,7 @@ function formatEta(seconds: number): string {
 
 export function OptimizationResults({ study }: Props) {
   const cfd = useCfd();
-  const { cancelStudy, bridge, startSweep, startOptimization } = cfd;
+  const { cancelStudy, bridge, startSweep, startOptimization, renameStudy } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   // Trial whose recipe seeds the "run a sweep from this recipe" modal (null = closed).
   const [sweepSeedTrial, setSweepSeedTrial] = useState<OptimizationTrial | null>(null);
@@ -348,10 +350,16 @@ export function OptimizationResults({ study }: Props) {
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
-        <div className="min-w-0 flex-1">
+        <div className="group min-w-0 flex-1">
           <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Optimization</div>
           <p className="text-[10px] text-[#5A5F66]">
-            <span className="text-[#D8DCE2]">{basename(study.configPath)}</span>
+            <StudyNameEditor
+              display={studyName(study)}
+              customName={study.name}
+              onRename={(name) => renameStudy(study.id, name)}
+              className="text-[#D8DCE2]"
+            />
+            {study.name && <span className="ml-1">({basename(study.configPath)})</span>}
             {" · "}
             {live.nDone}/{study.params.nTrials} trials done
             {live.ranked[0] && (
@@ -604,7 +612,7 @@ export function OptimizationResults({ study }: Props) {
                   tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
                   seed: null,
                   rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
-                });
+                }, { name: refineName(study.configPath, best.trialIdx) });
               }}
               className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
             >
@@ -643,8 +651,17 @@ export function OptimizationResults({ study }: Props) {
                     <tr
                       key={t.trialIdx}
                       onClick={() => setSelectedIdx(t.trialIdx)}
+                      // Rows select the inspected trial — make that reachable
+                      // and operable by keyboard, not just pointer.
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedIdx(t.trialIdx);
+                        }
+                      }}
                       className={
-                        "cursor-pointer border-t border-[#16171B] " +
+                        "cursor-pointer border-t border-[#16171B] focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[#FFC627]/60 " +
                         (isSelected ? "bg-[#16171B] " : "hover:bg-[#16171B]/50 ") +
                         baseCls
                       }
@@ -722,7 +739,11 @@ export function OptimizationResults({ study }: Props) {
           )}
           onCancel={() => setSweepSeedTrial(null)}
           onStart={async (params) => {
-            await startSweep(study.configPath, params);
+            // Provenance name: "sdm26 — opt #12 recipe", not a third study
+            // that just says "sdm26.json".
+            await startSweep(study.configPath, params, {
+              name: sweepFromTrialName(study.configPath, sweepSeedTrial.trialIdx),
+            });
             setSweepSeedTrial(null);
           }}
         />

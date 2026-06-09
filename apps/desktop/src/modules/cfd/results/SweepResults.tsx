@@ -18,9 +18,13 @@ import { PipeProfileView } from "./PipeProfileView";
 import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
+import { studyName } from "../lib/studyName";
+import { StudyNameEditor } from "../components/StudyNameEditor";
 import { summarizeSweep, type PeakInfo, type SweepSummary } from "../lib/analytics/sweepStats";
 import { exportActionsFor, type ExportAction } from "../lib/export/exportStudy";
-import { copyText } from "../lib/export/io";
+import { copyText, openTextFile } from "../lib/export/io";
+import { parseDynoCsv, dynoPowerKw, dynoTorqueNm } from "../lib/import/importDyno";
+import { compareDyno } from "../lib/analytics/dynoCompare";
 import type { SweepStudy } from "../state/types";
 
 interface Props {
@@ -62,7 +66,8 @@ function summaryLine(summary: SweepSummary): string {
 }
 
 export function SweepResults({ study }: Props) {
-  const { state, cancelStudy, setSweepCompare, bridge } = useCfd();
+  const { state, cancelStudy, setSweepCompare, setSweepDynoRef, renameStudy, bridge } = useCfd();
+  const [dynoError, setDynoError] = useState<string | null>(null);
   const [expandedRpm, setExpandedRpm] = useState<number | null>(null);
   const [waveViewerRpm, setWaveViewerRpm] = useState<number | null>(null);
 
@@ -108,6 +113,44 @@ export function SweepResults({ study }: Props) {
 
   // Roll-up summary (peaks, powerband, KI). Shown once ≥2 points exist.
   const summary = useMemo(() => summarizeSweep(points), [points]);
+
+  // Dyno reference overlay: imported CSV points + on-screen RMSE/bias vs the
+  // sim's brake power, recomputed whenever either side changes (accuracy on
+  // screen, not in docs). Power/torque derive from each other when one is
+  // absent (P = tau*omega).
+  const dyno = study.dynoRef ?? null;
+  const dynoCmp = useMemo(() => {
+    if (!dyno) return null;
+    const sim = points.map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.brakePowerKW }));
+    return compareDyno(sim, dyno.points);
+  }, [dyno, points]);
+  const dynoPowerSeries = useMemo(() => {
+    if (!dyno) return null;
+    const pts = dyno.points
+      .map((d) => ({ rpm: d.rpm, v: dynoPowerKw(d) }))
+      .filter((d): d is { rpm: number; v: number } => d.v != null);
+    return pts.length ? pts : null;
+  }, [dyno]);
+  const dynoTorqueSeries = useMemo(() => {
+    if (!dyno) return null;
+    const pts = dyno.points
+      .map((d) => ({ rpm: d.rpm, v: dynoTorqueNm(d) }))
+      .filter((d): d is { rpm: number; v: number } => d.v != null);
+    return pts.length ? pts : null;
+  }, [dyno]);
+
+  async function importDynoCsv() {
+    setDynoError(null);
+    try {
+      const picked = await openTextFile("csv");
+      if (!picked) return;
+      const label = picked.path.split(/[\\/]/).pop() ?? picked.path;
+      setSweepDynoRef(study.id, parseDynoCsv(picked.contents, label));
+    } catch (err) {
+      setDynoError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const showSummary = points.length >= 2;
   const hasKnock = summary.maxKnockIntegral != null;
 
@@ -172,8 +215,15 @@ export function SweepResults({ study }: Props) {
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate text-[10px] text-[#5A5F66]" title={study.configPath}>
-            {basename(study.configPath)} · {points.length}/{study.params.rpmList.length} rpm · {elapsed}s
+          <div className="group mt-0.5 truncate text-[10px] text-[#5A5F66]" title={study.configPath}>
+            <StudyNameEditor
+              display={studyName(study)}
+              customName={study.name}
+              onRename={(name) => renameStudy(study.id, name)}
+              className="text-[#9097A0]"
+            />
+            {study.name && <span className="ml-1">({basename(study.configPath)})</span>}
+            {" "}· {points.length}/{study.params.rpmList.length} rpm · {elapsed}s
             {study.summary && (
               <> · {study.summary.totalStepCount.toLocaleString()} steps · {study.summary.totalWallTimeS.toFixed(1)}s solver</>
             )}
@@ -211,7 +261,7 @@ export function SweepResults({ study }: Props) {
           <option value="">(none — no overlay)</option>
           {otherSweeps.map((s) => (
             <option key={s.id} value={s.id}>
-              {basename(s.configPath)} · {s.params.rpmList.length} rpm · {s.params.junctionKind} · {new Date(s.startedAt).toLocaleTimeString()}
+              {studyName(s)} · {s.params.rpmList.length} rpm · {s.params.junctionKind} · {new Date(s.startedAt).toLocaleTimeString()}
             </option>
           ))}
         </select>
@@ -224,6 +274,46 @@ export function SweepResults({ study }: Props) {
           <span className="text-[10px] text-[#5A5F66]">Run another sweep to enable overlay comparison.</span>
         ) : (
           <span className="text-[10px] text-[#5A5F66]">{otherSweeps.length} sweep{otherSweeps.length === 1 ? "" : "s"} available to overlay.</span>
+        )}
+
+        {/* Dyno reference: import → overlay + RMSE/bias readout (sim − dyno). */}
+        <span className="mx-1 h-4 w-px bg-[#2A2C32]" aria-hidden />
+        <button
+          type="button"
+          onClick={() => void importDynoCsv()}
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {dyno ? "Replace dyno CSV…" : "Import dyno CSV…"}
+        </button>
+        {dyno && (
+          <span className="flex items-center gap-1.5 text-[10px] text-[#9097A0]">
+            <span className="inline-block h-[2px] w-3 bg-[#CE93D8]" aria-hidden />
+            <span className="text-[#CE93D8]">{dyno.label}</span>
+            {dynoCmp ? (
+              <span
+                className="rounded-sm border border-[#CE93D8]/40 px-1.5 py-[1px] tabular-nums"
+                title="Brake power, sim − dyno, over the overlapping RPM band. Positive bias = the sim over-predicts."
+              >
+                RMSE {dynoCmp.rmseKw.toFixed(2)} kW · bias {dynoCmp.biasKw >= 0 ? "+" : ""}
+                {dynoCmp.biasKw.toFixed(2)} kW · {dynoCmp.n} pts {fmtRpm(dynoCmp.rpmMin)}–{fmtRpm(dynoCmp.rpmMax)}
+              </span>
+            ) : (
+              <span className="text-[#5A5F66]">no overlapping RPM band yet</span>
+            )}
+            <button
+              type="button"
+              aria-label={`Remove dyno reference ${dyno.label}`}
+              onClick={() => setSweepDynoRef(study.id, undefined)}
+              className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+            >
+              remove
+            </button>
+          </span>
+        )}
+        {dynoError && (
+          <span role="alert" className="text-[10px] text-red-300">
+            {dynoError}
+          </span>
         )}
       </div>
 
@@ -331,6 +421,9 @@ export function SweepResults({ study }: Props) {
                     ...(compare ? [
                       { label: "P_ind (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.indicatedPowerKW), color: "#5A5F66", showPoints: false },
                     ] : []),
+                    ...(dynoPowerSeries ? [
+                      { label: "P dyno", xs: dynoPowerSeries.map((d) => d.rpm), y: dynoPowerSeries.map((d) => d.v), color: "#CE93D8", showPoints: true },
+                    ] : []),
                   ]}
                   xLabel="rpm" yLabel="kW" height={340}
                 />
@@ -343,6 +436,9 @@ export function SweepResults({ study }: Props) {
                     { label: "τ_brake", y: points.map((p) => p.lastCycle.brakeTorqueNm), color: "#FF8A65", showPoints: true },
                     ...(compare ? [
                       { label: "τ_brake (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.brakeTorqueNm), color: "#5A5F66", showPoints: false },
+                    ] : []),
+                    ...(dynoTorqueSeries ? [
+                      { label: "τ dyno", xs: dynoTorqueSeries.map((d) => d.rpm), y: dynoTorqueSeries.map((d) => d.v), color: "#CE93D8", showPoints: true },
                     ] : []),
                   ]}
                   xLabel="rpm" yLabel="Nm" height={340}
