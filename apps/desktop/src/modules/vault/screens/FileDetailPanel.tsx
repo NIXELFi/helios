@@ -1,6 +1,6 @@
 import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
-import { GetVersionButton } from "../components/RowActions";
+import { GetVersionButton, RestoreVersionButton } from "../components/RowActions";
 import { ReferencesPanel } from "../components/ReferencesPanel";
 import { PropertiesPanel } from "../components/PropertiesPanel";
 import { useSetRevision } from "../data/useSetRevision";
@@ -79,17 +79,33 @@ function FileDetailLoader({
     const ok = await setRevision.run(fileId);
     if (ok) refetch();
   }
-  // Only offer "Get this version" when we know the file's name (needed to
-  // compute the local destination / save-dialog default).
+  // Only offer per-version actions when we know the file's name (needed to
+  // compute the local destination / save-dialog default). "Restore" (SW-PDM
+  // rollback) appears for editors on every NON-latest row — restoring the
+  // latest is a no-op; useVersions orders descending, so data[0] is latest.
+  const latestId = data?.[0]?.id ?? null;
   const renderActions = fileName
     ? (v: Version) => (
-        <GetVersionButton
-          version={v}
-          fileName={fileName}
-          folderId={folderId}
-          vaultRoot={vaultRoot}
-          folders={folders}
-        />
+        <span className="flex items-center gap-1">
+          {canEdit && v.id !== latestId && (
+            <RestoreVersionButton
+              version={v}
+              fileId={fileId}
+              fileName={fileName}
+              folderId={folderId}
+              vaultRoot={vaultRoot}
+              folders={folders}
+              onDone={refetch}
+            />
+          )}
+          <GetVersionButton
+            version={v}
+            fileName={fileName}
+            folderId={folderId}
+            vaultRoot={vaultRoot}
+            folders={folders}
+          />
+        </span>
       )
     : undefined;
   return (

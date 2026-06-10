@@ -8,6 +8,7 @@ import { useDeleteFile } from "../data/useDeleteFile";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
 import { useRecordProperties } from "../data/useRecordProperties";
+import { useRestoreVersion } from "../data/useRestoreVersion";
 import { localDestPath, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ledgerRecord } from "../data/sync-ledger";
@@ -548,6 +549,86 @@ export function GetVersionButton({
           confirmTone="danger"
           cancelLabel="Cancel"
           onConfirm={() => { void doGet(); }}
+          onClose={() => setConfirming(false)}
+        />
+      )}
+    </>
+  );
+}
+
+interface RestoreVersionButtonProps {
+  version: Version;
+  fileId: FileId;
+  fileName: string;
+  folderId: FolderId | null;
+  vaultRoot: string | null;
+  folders: Folder[];
+  vaultId?: string | null;
+  onDone?: () => void;
+}
+
+/**
+ * SW-PDM "Rollback": make an old version the file's NEW LATEST. Server-side
+ * it's a check-in of that version's content (requires the caller's active
+ * lock, releases it on success, carries the data card + refs forward) — no
+ * upload happens because the bucket already holds the bytes for that sha.
+ * History is never destroyed: the previous latest stays as an older version.
+ */
+export function RestoreVersionButton({
+  version, fileId, fileName, folderId, vaultRoot, folders, vaultId, onDone,
+}: RestoreVersionButtonProps) {
+  const restore = useRestoreVersion();
+  const download = useDownloadVersion();
+  const [confirming, setConfirming] = useState(false);
+  if (!version.sha256) return null;
+
+  async function doRestore() {
+    const restored = await restore.run(fileId, version.id);
+    if (!restored) return;
+    // Materialize the restored content locally (read-only — the lock was
+    // released by the RPC, exactly like a check-in). Best-effort: the vault
+    // row is already correct; a failed download self-heals on the next sync.
+    const dest = localTarget({ vaultRoot, folderId, fileName, folders });
+    if (dest && restored.sha256) {
+      const ok = await download.run(restored.sha256, dest);
+      if (ok) {
+        recordLedger({ folderId, fileName, folders, vaultId }, restored.sha256);
+        await setReadonly(dest, true);
+      }
+    }
+    onDone?.();
+  }
+
+  const err = restore.error?.message ?? null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+        disabled={restore.loading || download.loading}
+        title={
+          err
+            ? `Restore failed: ${err}`
+            : `Make version ${version.version_num} the new latest (requires the file to be checked out by you; checks it back in with this version's content)`
+        }
+        className={
+          "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (err
+            ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+            : "border-asu-gold/50 text-asu-gold hover:bg-asu-gold/10")
+        }
+      >
+        {restore.loading || download.loading ? "…" : err ? "Retry" : "Restore"}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title={`Restore version ${version.version_num}?`}
+          body={`This checks ${fileName} back in with version ${version.version_num}'s content, making it the new latest version. Nothing is deleted — the current latest stays in history. Requires the file to be checked out by you; your checkout is released when it completes.`}
+          confirmLabel="Restore as latest"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => { void doRestore(); }}
           onClose={() => setConfirming(false)}
         />
       )}
