@@ -190,8 +190,8 @@ export function CheckInButton({
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
       if (pathRef.current && refName) {
-        void recordRefs.run(result.id, pathRef.current, refName);
-        void recordProperties.run(result.id, pathRef.current, refName);
+        void recordRefs.run(result.id, pathRef.current, refName, vaultId);
+        void recordProperties.run(result.id, pathRef.current, refName, true);
       }
       onDone?.();
     }

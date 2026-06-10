@@ -44,6 +44,7 @@ import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
 import { AutoAddBanner } from "../components/AutoAddBanner";
+import { VaultWarningBanner } from "../components/VaultWarningBanner";
 import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
@@ -573,6 +574,7 @@ export function BrowseScreen() {
         />
       )}
       <LocalDeleteBanner />
+      <VaultWarningBanner />
       <div className="flex min-h-0 flex-1">
       <div className="flex w-64 flex-col border-r border-helios-line bg-helios-base">
         <header className="flex items-center justify-between border-b border-helios-line px-3 py-2">

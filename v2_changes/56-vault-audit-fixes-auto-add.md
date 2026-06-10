@@ -31,3 +31,21 @@ per failing file. Manual mode keeps the explicit banner. A passive status
 strip narrates progress/failures.
 
 6 new tests; 177 desktop test files + typecheck green.
+
+## Round 2 (same day): reference + data-card honesty
+
+- **Unresolved references surface at check-in**: after recording refs, the
+  client reads back what stayed unresolved and warns — distinguishing "not
+  found in this vault" from "matches multiple vault files (rename one to
+  disambiguate)", which a re-check-in can never fix. SW PDM halts on these;
+  we at least stop being silent. (Arms fully once parse_sw_refs learns the
+  modern deflate format — it returns empty on current SW files.)
+- **Data-card capture failures surface at check-in**: a property-parse error
+  now says "version checked in fine; its data card is empty" instead of
+  silently recording nothing. The lazy backfill path stays quiet.
+- Both ride a new `vault-warning-events` bus + dismissible amber
+  `VaultWarningBanner` — warnings outlive the button that fired them (the
+  check-in button unmounts on success).
+- Audit note: client has NO file-rename feature, so "warn on rename of
+  referenced files" has nothing to guard yet — rename itself is the missing
+  SW PDM parity piece.
