@@ -484,18 +484,20 @@ function TelemetryCard({
         <Stat label="max lat" value={`${tm.maxLatG.toFixed(2)} g`} />
         <Stat label="max accel" value={`${tm.maxAccelG.toFixed(2)} g`} />
         <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />
-        {tm.pctFrontLimited != null && (
-          <Stat
-            label="balance"
-            value={
-              tm.pctFrontLimited > 0.6
-                ? `push ${(tm.pctFrontLimited * 100).toFixed(0)}%F`
-                : tm.pctFrontLimited < 0.4
-                  ? `loose ${((1 - tm.pctFrontLimited) * 100).toFixed(0)}%R`
-                  : `neutral ${(tm.pctFrontLimited * 100).toFixed(0)}%F`
-            }
-            highlight
-          />
+        {tm.balanceMargin != null && (
+          <span
+            className="flex items-baseline gap-1"
+            title="Mean axle-capacity margin while corner-limited: how much spare grip the NON-limiting axle holds. loose = rear axle limits (front has spare); push = front limits. Small % = nearly neutral."
+          >
+            <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">balance</span>
+            <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+              {Math.abs(tm.balanceMargin) < 0.015
+                ? "neutral"
+                : tm.balanceMargin > 0
+                  ? `loose ${(tm.balanceMargin * 100).toFixed(1)}%`
+                  : `push ${(-tm.balanceMargin * 100).toFixed(1)}%`}
+            </span>
+          </span>
         )}
       </div>
       <GearUsageBar frac={tm.timeInGearFrac} />

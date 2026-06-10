@@ -91,8 +91,15 @@ export interface LapTelemetry {
   vMinKph: number;
   /** Of the corner-limited time, the fraction where the FRONT axle is the
    *  saturating one (≈ understeer-limited). Only with a roll-balance model.
-   *  0.5 = neutral; >0.5 = push-limited; <0.5 = rear-limited. */
+   *  0.5 = neutral; >0.5 = push-limited; <0.5 = rear-limited. NOTE: with a
+   *  static weight bias + load-sensitive μ this saturates to 0 or 1 (the
+   *  same axle wins every corner) — `balanceMargin` is the honest readout. */
   pctFrontLimited?: number;
+  /** Time-weighted mean signed axle-capacity margin over corner-limited
+   *  time: (capFront − capRear)/mean. +0.04 ⇒ the rear limits with the
+   *  front holding ~4% spare ("loose by 4%"); negative ⇒ push. Only with a
+   *  roll-balance model. */
+  balanceMargin?: number;
 }
 
 /** Thermal efficiency RELATIVE to the engine's best-BSFC point, vs RPM. Real SI
@@ -186,6 +193,10 @@ export interface GripModel {
   /** Which axle saturates first at (v, R) — only when a roll-balance model
    *  is configured (per-axle limit). Undefined under the lumped model. */
   limitingAxle?(v: number, R: number): "front" | "rear";
+  /** Signed axle-capacity margin at (v, R): (capFront − capRear) / mean.
+   *  Positive = the front has spare capacity (rear limits → "loose");
+   *  negative = front limits ("push"). Magnitude is how decisively. */
+  axleMargin?(v: number, R: number): number;
 }
 
 export function makeGripModel(vehicle: VehicleConfig): GripModel {
@@ -292,6 +303,13 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
         return c.front <= c.rear ? "front" : "rear";
       }
     : undefined;
+  const axleMargin = roll
+    ? (v: number, R: number): number => {
+        const c = axleCaps(v, R);
+        const mean = (c.front + c.rear) / 2;
+        return mean > 0 ? (c.front - c.rear) / mean : 0;
+      }
+    : undefined;
 
   // Steady-state corner speed: solve v²/R = latCap(v, R). Load sensitivity and
   // χ make the capacity sub-linear in v with no closed form — bisect (capacity·R
@@ -343,7 +361,7 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const aBrakeGrip = (v: number, R: number): number =>
     muLatV(v) * gEff(v) * ellipse(v, R);
 
-  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle };
+  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle, axleMargin };
 }
 
 export function simLap(
@@ -399,6 +417,7 @@ export function simLap(
   let powerLimitedDt = 0;
   let cornerLimitedDt = 0;
   let frontLimitedDt = 0;
+  let marginDtSum = 0;
   const timeInGear = new Array<number>(nGears).fill(0);
 
   // Channel collection (only when asked for — see LapOpts.channels).
@@ -459,9 +478,10 @@ export function simLap(
     if (limit === "power") powerLimitedDt += dt;
     else if (limit === "corner") {
       cornerLimitedDt += dt;
-      // Balance bookkeeping: which axle is the binding one here (roll model).
+      // Balance bookkeeping: which axle binds, and by how much (roll model).
       if (grip.limitingAxle && Number.isFinite(R) && R > 0) {
         if (grip.limitingAxle(vAvg, R) === "front") frontLimitedDt += dt;
+        if (grip.axleMargin) marginDtSum += grip.axleMargin(vAvg, R) * dt;
       }
     }
 
@@ -501,7 +521,10 @@ export function simLap(
     vMaxKph: Math.max(...v) * 3.6,
     vMinKph: Math.min(...v) * 3.6,
     ...(grip.limitingAxle && cornerLimitedDt > 0
-      ? { pctFrontLimited: frontLimitedDt / cornerLimitedDt }
+      ? {
+          pctFrontLimited: frontLimitedDt / cornerLimitedDt,
+          balanceMargin: marginDtSum / cornerLimitedDt,
+        }
       : {}),
   };
 
