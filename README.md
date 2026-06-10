@@ -2,14 +2,15 @@
 
 **Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, and 1D engine simulation — in one signed, auto-updating binary.
 
-> **Status:** `v4.3.1` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
+> **Status:** `v4.3.2` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
 
-Four modules ship today:
+Five modules ship today:
 
 - **Telemetry** — MoTeC-style CSV log analysis: multi-session overlay, math channels, GPS basemaps, custom widget workspaces (details below).
 - **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
 - **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles.
-- **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, dyno-calibrated) with parameter sweeps and reports.
+- **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, dyno-calibrated) with parameter sweeps, FSAE-points optimization, a lap simulator, and print-to-PDF engineering reports.
+- **Games** — arcade lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards.
 
 ## The Vault (PDM)
 
@@ -24,13 +25,13 @@ A self-hosted SolidWorks PDM Standard alternative — check-out/check-in with re
 - **SolidWorks integration** — a Task Pane add-in (check in/out from inside SolidWorks via a localhost bridge with bearer-token auth), Explorer shell overlays, and a one-click in-app installer for both.
 - **Insights** — vault analytics dashboard (activity, storage, lock hygiene, member stats).
 
-The Vault's RLS/RPC security suite (88 integration tests against a real local Supabase stack) runs on every PR — see [`infra/pdm-supabase/`](infra/pdm-supabase/).
+The Vault's RLS/RPC security suite (97 integration tests against a real local Supabase stack) runs on every PR — see [`infra/pdm-supabase/`](infra/pdm-supabase/).
 
 ## Telemetry highlights
 
 - **Multi-session overlay.** A collapsible left rail lists every loaded CSV; tick more than one to overlay them on every plot. Strip charts, GPS tracks, XY scatters, and histograms all draw a trace per visible session in distinct palette colors. Click any track / chart to scrub the cursor — emits the closest sample's time across sessions.
 - **MoTeC CSV ingest.** Out of the box the loader handles plain time-series CSVs *and* MoTeC i2 exports (the metadata-block-prefixed format with quoted values and a units row). The channel registry in [`docs/channels.yaml`](docs/channels.yaml) maps human-readable MoTeC column names to canonical channel ids via aliases. The GPS widget also decodes MoTeC ADL's int32-as-uint32 micro-degree quirk so longitudes like "3175683584" round-trip back to "-111.93°" without a config change.
-- **Workspace editor.** Drag tiles to move, drag the corner to resize, snap to a 24×16 grid. **+ Add tile** drops any of 12 widget types (incl. Steering Wheel) into the next free slot. Per-tile config editor changes channels, ranges, colors, and even widget type (in-place swap). Workspaces persist to localStorage.
+- **Workspace editor.** Drag tiles to move, drag the corner to resize, snap to a 24×16 grid. **+ Add tile** drops any of 18 widget types (incl. Steering Wheel) into the next free slot. Per-tile config editor changes channels, ranges, colors, and even widget type (in-place swap). Workspaces persist to localStorage.
 - **Math channels.** Define computed channels by formula — `derivative(engine.rpm)`, `lowpass(imu.lat_g, 5)`, `engine.rpm * 0.1047` — with full operator precedence, ternary, comparison/logical ops, 17 scalar functions, and time-aware ops (`derivative integral shift smooth lowpass`). New channels appear in every channel picker and inspector instantly. Drag-and-drop palette of channels, operators, and functions in the editor.
 - **GPS basemap.** Toggle the GPS widget between dark canvas, CARTO Dark Matter roads, Esri World Imagery satellite, or a custom tile-URL template. Track polyline + cursor dot project through the active basemap so they ride real lat/lon. Auto-detected turn/straight labels (T1, T2…, S1, S2…) overlay the track when enabled — uses `imu.lat_g` when available for noise-resistant detection, GPS curvature otherwise.
 - **Playback.** ▶ / pause + 0.25–8× speed selector in the header drive the cursor at wall-clock rate, so every widget animates together. Spacebar toggles. Click anywhere on a scrubbable plot to re-anchor while playing.
@@ -85,9 +86,9 @@ crates/              Rust crates
 packages/            TypeScript packages
   lib/                 cursor emitter, time helpers, math-expression engine
   store/               JS-side channel store + slice
-  widgets/             12 widgets (strip chart, GPS, gauges, steering wheel)
+  widgets/             18 widgets (strip chart, GPS, gauges, steering wheel)
   ui/ auth/ pm-ui/     primitives, Supabase auth, project-management UI
-infra/pdm-supabase/  Vault backend: 68 SQL migrations + RLS/RPC test suite
+infra/pdm-supabase/  Vault backend: 69 SQL migrations + RLS/RPC test suite
 solidworks-addin/    SolidWorks Task Pane add-in (C#)
 shell-ext/ sw-helper/  Explorer overlay shell extension + read-only helper
 docs/                architecture, channel registry, design specs, wiki

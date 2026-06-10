@@ -80,3 +80,4 @@ worktrees/agent-*/pending_amend.rejected.json
 # (prebuilt) so the Helios bundle can include the SOLIDWORKS add-in without the
 # .NET toolchain on the build machine. Rebuild + recommit it after add-in changes
 # via `pnpm --filter @helios/desktop build:addin`.
+worktrees/
