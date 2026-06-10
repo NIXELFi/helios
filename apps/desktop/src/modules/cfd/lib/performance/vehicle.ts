@@ -44,12 +44,13 @@ export const SDM26_VEHICLE: VehicleConfig = {
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
   tireLoadSensitivity: 0.15, // Hoosier R20 slick — flattens grip-vs-load (aero)
-  muLat: 1.5, // Hoosier R20 slick — a REALISTIC mechanical μ. The autocross
-  //           time is hit via the racing line (events.LINE_FACTOR), not inflated
-  //           grip, so peak cornering lands a realistic ~2.1 g (× aero g_eff).
-  //           Re-anchored 1.55 → 1.50 when the per-axle roll-balance limit
-  //           replaced the lumped χ model (per-axle is less pessimistic, so
-  //           the same real 42.922 s autocross needs slightly less μ).
+  muLat: 1.59, // Lateral grip anchored to SDM26's real 42.922 s autocross on
+  //            the traced-curvature track at rules-nominal 800 m length,
+  //            LINE_FACTOR 1 (retired). Back in the physical Hoosier band —
+  //            the rules-length rescale restored consistency (at the raw
+  //            undersized trace this solved to an implausible 1.27).
+  //            History: 1.55 (lumped χ) → 1.50 (per-axle roll) → 1.59
+  //            (traced rules-length tracks, line factor retired).
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,

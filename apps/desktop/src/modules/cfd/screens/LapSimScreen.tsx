@@ -579,25 +579,104 @@ function LapPlayer({
           {t.toFixed(2)} / {endT.toFixed(2)} s
         </span>
       </div>
-      {/* Live readouts — car + engine internals at the cursor */}
-      <div className="grid grid-cols-3 gap-x-4 gap-y-1 border-t border-[#2A2C32] px-3 py-1.5 sm:grid-cols-6">
-        <Stat label="dist" value={`${cur.dist.toFixed(0)} m`} />
-        <Stat label="speed" value={`${cur.speedKph.toFixed(1)} km/h`} highlight />
-        <Stat label="rpm" value={cur.rpm.toFixed(0)} highlight />
-        <Stat label="gear" value={String(cur.gear)} />
-        <Stat label="lat" value={`${cur.latG.toFixed(2)} g`} />
-        <Stat label="long" value={`${cur.longG.toFixed(2)} g`} />
-        <span className="flex items-baseline gap-1">
-          <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">limit</span>
-          <span className="font-mono text-[11px]" style={{ color: LIMIT_COLOR[cur.limit] }}>{cur.limit}</span>
-        </span>
-        <Stat label="power" value={Number.isFinite(cur.powerKw) ? `${cur.powerKw.toFixed(1)} kW` : "—"} highlight />
-        <Stat label="VE" value={Number.isFinite(cur.ve) ? `${(cur.ve * 100).toFixed(0)}%` : "—"} />
-        <Stat label="EGT" value={Number.isFinite(cur.egt) ? `${cur.egt.toFixed(0)} K` : "—"} />
-        <Stat label="BMEP" value={Number.isFinite(cur.bmep) ? `${cur.bmep.toFixed(1)} bar` : "—"} />
-        <Stat label="fuel" value={`${cur.fuelG.toFixed(1)} g`} />
+      {/* Dash — real-telemetry look: tach + gear + speed, then the data grid */}
+      <div className="flex flex-wrap items-center gap-4 border-t border-[#2A2C32] px-3 py-2">
+        <Tachometer rpm={cur.rpm} revLimit={runA.vehicle.revLimitRpm} />
+        <div className="flex flex-col items-center" aria-label="Gear indicator">
+          <span className="text-[8px] uppercase tracking-wider text-[#5A5F66]">gear</span>
+          <span className="font-mono text-[42px] leading-none text-[#FFC627]">{cur.gear || "N"}</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-[8px] uppercase tracking-wider text-[#5A5F66]">km/h</span>
+          <span className="font-mono text-[34px] leading-none text-[#D8DCE2] tabular-nums">
+            {cur.speedKph.toFixed(0)}
+          </span>
+          <span
+            className="mt-1 rounded-sm px-1.5 py-0.5 font-mono text-[9px] uppercase"
+            style={{ color: LIMIT_COLOR[cur.limit], border: `1px solid ${LIMIT_COLOR[cur.limit]}55` }}
+          >
+            {cur.limit}
+          </span>
+        </div>
+        {/* Engine + chassis data grid */}
+        <div className="grid flex-1 grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+          <Stat label="power" value={Number.isFinite(cur.powerKw) ? `${cur.powerKw.toFixed(1)} kW` : "—"} highlight />
+          <Stat label="BMEP" value={Number.isFinite(cur.bmep) ? `${cur.bmep.toFixed(1)} bar` : "—"} />
+          <Stat label="VE" value={Number.isFinite(cur.ve) ? `${(cur.ve * 100).toFixed(0)}%` : "—"} />
+          <Stat label="EGT" value={Number.isFinite(cur.egt) ? `${cur.egt.toFixed(0)} K` : "—"} />
+          <Stat label="lat" value={`${cur.latG.toFixed(2)} g`} />
+          <Stat label="long" value={`${cur.longG.toFixed(2)} g`} />
+          <Stat label="fuel" value={`${cur.fuelG.toFixed(1)} g`} />
+          <Stat label="dist" value={`${cur.dist.toFixed(0)} m`} />
+        </div>
       </div>
     </div>
+  );
+}
+
+/** SVG tachometer: 240° sweep to the rev ceiling, redline band, needle, and a
+ *  shift light that arms near the limiter (the optimal-shift policy rides
+ *  each gear to the crossover, usually near redline). */
+function Tachometer({ rpm, revLimit }: { rpm: number; revLimit: number }) {
+  const maxRpm = Math.ceil(revLimit / 1000) * 1000;
+  const a0 = -210; // degrees, gauge start (left-down)
+  const sweep = 240;
+  const angleOf = (r: number) => ((a0 + (Math.min(r, maxRpm) / maxRpm) * sweep) * Math.PI) / 180;
+  const cx = 62;
+  const cy = 64;
+  const R = 50;
+  const arc = (from: number, to: number, radius: number) => {
+    const p0 = [cx + radius * Math.cos(angleOf(from)), cy + radius * Math.sin(angleOf(from))];
+    const p1 = [cx + radius * Math.cos(angleOf(to)), cy + radius * Math.sin(angleOf(to))];
+    const large = ((to - from) / maxRpm) * sweep > 180 ? 1 : 0;
+    return `M ${p0[0]!.toFixed(1)} ${p0[1]!.toFixed(1)} A ${radius} ${radius} 0 ${large} 1 ${p1[0]!.toFixed(1)} ${p1[1]!.toFixed(1)}`;
+  };
+  const needle = angleOf(rpm);
+  const shiftLit = rpm >= 0.93 * revLimit;
+  return (
+    <svg width={124} height={118} role="img" aria-label={`Tachometer ${rpm.toFixed(0)} rpm`}>
+      <path d={arc(0, maxRpm, R)} fill="none" stroke="#2A2C32" strokeWidth={7} />
+      <path d={arc(revLimit, maxRpm, R)} fill="none" stroke="#FF5252" strokeWidth={7} />
+      <path d={arc(0, Math.max(1, rpm), R)} fill="none" stroke="#FFC627" strokeWidth={4} opacity={0.85} />
+      {Array.from({ length: maxRpm / 1000 + 1 }, (_, i) => {
+        const a = angleOf(i * 1000);
+        const r1 = R - 7;
+        const r2 = R - (i % 2 === 0 ? 13 : 10);
+        return (
+          <g key={i}>
+            <line
+              x1={cx + r1 * Math.cos(a)} y1={cy + r1 * Math.sin(a)}
+              x2={cx + r2 * Math.cos(a)} y2={cy + r2 * Math.sin(a)}
+              stroke={i * 1000 >= revLimit ? "#FF5252" : "#5A5F66"} strokeWidth={1.5}
+            />
+            {i % 2 === 0 && (
+              <text
+                x={cx + (R - 20) * Math.cos(a)} y={cy + (R - 20) * Math.sin(a) + 3}
+                fontSize={7.5} fontFamily="monospace" fill="#5A5F66" textAnchor="middle"
+              >
+                {i}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      <line
+        x1={cx} y1={cy}
+        x2={cx + (R - 14) * Math.cos(needle)} y2={cy + (R - 14) * Math.sin(needle)}
+        stroke="#FAFAFA" strokeWidth={2} strokeLinecap="round"
+      />
+      <circle cx={cx} cy={cy} r={3.5} fill="#FAFAFA" />
+      {/* shift light */}
+      <circle cx={cx} cy={cy - R - 6 + 18} r={4} fill={shiftLit ? "#FF5252" : "#2A2C32"}>
+        {shiftLit && <animate attributeName="opacity" values="1;0.3;1" dur="0.4s" repeatCount="indefinite" />}
+      </circle>
+      <text x={cx} y={cy + 24} fontSize={13} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle">
+        {rpm.toFixed(0)}
+      </text>
+      <text x={cx} y={cy + 34} fontSize={7} fill="#5A5F66" textAnchor="middle" style={{ textTransform: "uppercase", letterSpacing: 1 }}>
+        rpm ×1000
+      </text>
+    </svg>
   );
 }
 

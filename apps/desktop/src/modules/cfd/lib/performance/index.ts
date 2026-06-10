@@ -103,9 +103,10 @@ export {
   type TrackSegment,
   type RawTrack,
 } from "./track";
-export { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
+export { AUTOCROSS_2026, ENDURANCE_2026, AUTOCROSS_2026_RADIUS, ENDURANCE_2026_RADIUS } from "./tracks2026";
 export {
   trackPlan,
+  trackFromVisual,
   tightnessOf,
   TIGHTNESS_COLOR,
   parseVisualTrack,

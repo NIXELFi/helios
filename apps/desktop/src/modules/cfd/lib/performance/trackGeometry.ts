@@ -9,7 +9,7 @@
 // straight/corner sequence, and lengths are real; left/right and the overall
 // outline are approximated. Callers must label it as such.
 
-import { type Track, trackLength } from "./track";
+import { type Track, type TrackSegment, trackLength } from "./track";
 
 export interface TrackPoint {
   x: number;
@@ -148,6 +148,72 @@ export function visualCurvatureRadii(centerline: XY[]): number[] {
     out[n - 1] = out[n - 2]!;
   }
   return out;
+}
+
+/** Build a SIM track (radius vs distance) from the traced visual centerline —
+ *  the real course geometry, replacing the hand-synthesized constant-radius
+ *  arcs that made the solver ride flat corner-speed ceilings (RPM "hangs").
+ *
+ *  Method: per-point Menger curvature κ along the centerline, then an
+ *  arc-length-weighted moving average of κ over ±smoothM/2 (κ is the right
+ *  thing to smooth — radii blow up to ∞ on straights). The window stands in
+ *  for both tracing noise and the driver's line smoothing. Radii above
+ *  `maxRadius` read as straights; below `minRadius` clamp to it (rules floor
+ *  for hairpins — guards tracing pinches). One segment per centerline
+ *  interval, so the radius profile varies continuously like the real course. */
+export function trackFromVisual(
+  visual: VisualTrack,
+  opts: { smoothM?: number; maxRadius?: number; minRadius?: number; scaleToLength?: number } = {},
+): Track {
+  const { smoothM = 10, maxRadius = 250, minRadius = 4.5, scaleToLength } = opts;
+  const pts = visual.centerline;
+  const n = pts.length;
+  const radii = visualCurvatureRadii(pts);
+  // segment lengths (ds[i] = distance from point i to i+1)
+  const ds = new Array<number>(Math.max(0, n - 1));
+  for (let i = 0; i < n - 1; i++) {
+    ds[i] = Math.hypot(pts[i + 1]![0] - pts[i]![0], pts[i + 1]![1] - pts[i]![1]);
+  }
+  // curvature per point, smoothed over an arc-length window
+  const kappa = radii.map((r) => (Number.isFinite(r) && r > 0 ? 1 / r : 0));
+  const half = smoothM / 2;
+  const smooth = new Array<number>(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    let acc = kappa[i]!;
+    let w = 1;
+    // walk outward in both directions until the half-window is exhausted
+    for (const dir of [-1, 1] as const) {
+      let dist = 0;
+      let j = i;
+      for (;;) {
+        const next = j + dir;
+        if (next < 0 || next >= n) break;
+        dist += dir === 1 ? ds[j]! : ds[next]!;
+        if (dist > half) break;
+        acc += kappa[next]!;
+        w += 1;
+        j = next;
+      }
+    }
+    smooth[i] = acc / w;
+  }
+  // Optional uniform rescale to a known true length (e.g. the rules-nominal
+  // course length when the traced map's scale bar is suspect). Geometry
+  // scales linearly: lengths AND radii both multiply by s.
+  let s = 1;
+  if (scaleToLength != null && scaleToLength > 0) {
+    const raw = ds.reduce((a, b) => a + b, 0);
+    if (raw > 0) s = scaleToLength / raw;
+  }
+  const segments: TrackSegment[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const kMid = (smooth[i]! + smooth[i + 1]!) / 2;
+    const r = kMid > 1 / maxRadius ? Math.max(minRadius, 1 / kMid) : Infinity;
+    if (ds[i]! > 1e-6) {
+      segments.push({ length: ds[i]! * s, radius: Number.isFinite(r) ? r * s : r });
+    }
+  }
+  return { name: `${visual.name} (traced)`, segments, closed: visual.closed };
 }
 
 /** A corner-tightness bucket for coloring, from a local radius (m). Straights

@@ -40,24 +40,26 @@ const EFF_TIME_CAP = 1.45;
 // ~+55 endurance pts of free pace and the whole field looks beatable (the
 // clean-lap anchor briefly shipped on 2026-06-09 and put SDM26 in P1).
 
-/** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
-export const ENDURANCE_PACE = 0.694;
-/** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
- *  corner radius vs the traced centerline. Calibrated so the autocross lap hits
- *  SDM26's real 42.9 s at a REALISTIC tire μ (~1.5) instead of an inflated one —
- *  i.e. the corner speed comes from the line, not from fictional grip. Applies
- *  to both autocross and endurance (a driver lines both). Re-anchored after the
- *  grip-model upgrade (lateral load transfer χ + rear-axle drive traction +
- *  optimal shifts), which lowered raw corner/exit grip to physical levels —
- *  the line factor absorbs what the inflated grip used to. */
-export const LINE_FACTOR = 1.39;
+/** Endurance race-pace fraction of the absolute limit (see LapOpts.pace).
+ *  Re-solved on the traced-curvature endurance track at the rules-nominal
+ *  2.20 km lap against the Mines run-average anchor, 159.6 s/lap. */
+export const ENDURANCE_PACE = 0.551;
+/** Racing-line factor (see LapOpts.lineFactor). NOW 1.0 — the tracks derive
+ *  from the traced centerlines (trackFromVisual), so there is no synthetic
+ *  radius profile left to compensate for. The driven-line-vs-centerline
+ *  effect is absorbed by the grip anchors instead (vehicle muLat / the .tir
+ *  surface scale, both re-solved against the real 42.922 s autocross):
+ *  traced centerlines under-represent slalom weaving, so at lineFactor 1 the
+ *  effective grip is "centerline-equivalent" — one anchored knob rather than
+ *  two stacked compensations. */
+export const LINE_FACTOR = 1.0;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
- *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map
- *  (re-solved when ENDURANCE_PACE moved to run-average — slower laps do less
- *  drag work, so holding 0.9786 kg CO₂/lap needs a lower efficiency). */
-export const ENDURANCE_THERMAL_EFF = 0.14;
+ *  lower than this peak. Re-solved on the traced endurance track (2.20 km,
+ *  rules length) at the new pace against the Mines fuel anchor
+ *  (0.9786 kg CO₂/lap on E85). */
+export const ENDURANCE_THERMAL_EFF = 0.192;
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never
