@@ -113,6 +113,14 @@ pub struct CylinderModel {
     /// into combustion. Designers should treat I > 1.0 as a hard
     /// no-go for SDM27 architectures.
     pub octane_number: f64,
+    /// 0029: multiplier on the Douaud-Eyzat auto-ignition delay τ.
+    /// The published constants are CFR-engine calibrations and over-
+    /// predict knock for modern fast-burn pent-roof chambers; the
+    /// standard practice is to rescale τ against a known knock
+    /// boundary. Field anchor (Nick, 2026-06-10): NO team build has
+    /// ever knocked, so the worst-case KI across both shipped engine
+    /// sweeps must sit below 1.0. Default 1.0 → parity preserved.
+    pub knock_tau_scale: f64,
 }
 
 #[inline]
@@ -136,6 +144,7 @@ impl CylinderModel {
             geom, wiebe, woschni, intake_valve, exhaust_valve,
             state, enable_residual_tracking,
             octane_number: 95.0,
+            knock_tau_scale: 1.0,
         }
     }
 
@@ -278,7 +287,8 @@ impl CylinderModel {
             };
             let p_atm = (self.state.p / 101325.0).max(0.1);
             let on_factor = (self.octane_number / 100.0).powf(3.402);
-            let tau_ms = 17.68 * on_factor * p_atm.powf(-1.7) * (3800.0 / t_unb).exp();
+            let tau_ms = self.knock_tau_scale
+                * 17.68 * on_factor * p_atm.powf(-1.7) * (3800.0 / t_unb).exp();
             if tau_ms > 1e-12 {
                 let di = (dt * 1000.0) / tau_ms; // dt in s, tau in ms → dimensionless
                 self.state.knock_integral_accum += di;

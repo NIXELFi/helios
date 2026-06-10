@@ -148,6 +148,13 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_lift_flat_top_ramp", Scalar, 1, "-", cfg.intake_lift_flat_top_ramp, 0.0, 0.5, "Intake"),
         m("exhaust_lift_flat_top_ramp", Scalar, 1, "-", cfg.exhaust_lift_flat_top_ramp, 0.0, 0.5, "Exhaust"),
         m("octane_number", Scalar, 1, "-", cfg.octane_number, 80.0, 110.0, "Combustion"),
+        // 0029 — closed-loop knock control (ECU-style spark retard on KI > limit)
+        m("knock_control_enabled", Scalar, 1, "bool",
+          if cfg.knock_control_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("knock_integral_limit", Scalar, 1, "-", cfg.knock_integral_limit, 0.5, 2.0, "Combustion"),
+        m("knock_retard_step_deg", Scalar, 1, "deg", cfg.knock_retard_step_deg, 0.25, 3.0, "Combustion"),
+        m("knock_max_retard_deg", Scalar, 1, "deg", cfg.knock_max_retard_deg, 0.0, 15.0, "Combustion"),
+        m("knock_tau_scale", Scalar, 1, "-", cfg.knock_tau_scale, 0.5, 5.0, "Combustion"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -214,7 +221,10 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("ignition_delay", Scalar, 1, "deg", cfg.ignition_delay, 0.0, 20.0, "Combustion"),
         m("eta_comb", Scalar, 1, "-", cfg.eta_comb, 0.85, 1.00, "Combustion"),
         m("q_lhv", Scalar, 1, "J/kg", cfg.q_lhv, 40.0e6, 48.0e6, "Combustion"),
-        m("afr_target", Scalar, 1, "-", cfg.afr_target, 11.5, 15.0, "Combustion"),
+        // Floor 10.5 (was 11.5): the physics audit showed peak power sits at
+        // or below 11.5 AFR, so the old floor clipped the optimum out of the
+        // search space (physics_synthesis 2026-05-22, calibration concern #2).
+        m("afr_target", Scalar, 1, "-", cfg.afr_target, 10.5, 15.0, "Combustion"),
         m("afr_stoich", Scalar, 1, "-", cfg.afr_stoich, 6.0, 15.0, "Combustion"),
         m("t_wall_cylinder", Scalar, 1, "K", cfg.t_wall_cylinder, 350.0, 550.0, "Combustion"),
         m("woschni_c1_gas_exchange", Scalar, 1, "-", cfg.woschni_c1_gas_exchange, 1.0, 10.0, "Combustion"),
@@ -234,7 +244,10 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_valve_diameter", Scalar, 1, "m", cfg.intake_valve_diameter, 0.020, 0.040, "Valves"),
         m("intake_valve_max_lift", Scalar, 1, "m", cfg.intake_valve_max_lift, 0.005, 0.014, "Valves"),
         m("intake_valve_open_angle", Scalar, 1, "deg", cfg.intake_valve_open_angle, 300.0, 380.0, "Valves"),
-        m("intake_valve_close_angle", Scalar, 1, "deg", cfg.intake_valve_close_angle, 540.0, 620.0, "Valves"),
+        // Ceiling 645 (was 620): high-RPM designs want IVC well past 620° to
+        // exploit ram charging; the old cap bound the 12k+ optimum exactly at
+        // the schema edge (physics_synthesis 2026-05-22, concern #3).
+        m("intake_valve_close_angle", Scalar, 1, "deg", cfg.intake_valve_close_angle, 540.0, 645.0, "Valves"),
         m("intake_valve_seat_angle", Scalar, 1, "deg", cfg.intake_valve_seat_angle, 30.0, 60.0, "Valves"),
         // 0015 — low-Re intake Cd correction (Heywood §6.2)
         m("intake_valve_re_correction_enabled", Scalar, 1, "bool",
@@ -469,6 +482,12 @@ pub fn apply_override(
         "intake_lift_flat_top_ramp" => cfg.intake_lift_flat_top_ramp = value,
         "exhaust_lift_flat_top_ramp" => cfg.exhaust_lift_flat_top_ramp = value,
         "octane_number" => cfg.octane_number = value,
+        // 0029 — closed-loop knock control
+        "knock_control_enabled" => cfg.knock_control_enabled = value != 0.0,
+        "knock_integral_limit" => cfg.knock_integral_limit = value,
+        "knock_retard_step_deg" => cfg.knock_retard_step_deg = value,
+        "knock_max_retard_deg" => cfg.knock_max_retard_deg = value,
+        "knock_tau_scale" => cfg.knock_tau_scale = value,
         // 0015 — low-Re intake Cd correction
         "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = value != 0.0,
         "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = value,

@@ -17,6 +17,8 @@ interface Props {
   /** Pre-computed color per channel sample (parent owns the scale/legend). */
   colors: string[];
   height?: number;
+  /** Live car markers (lap player): position by lap-distance fraction. */
+  markers?: { frac: number; color: string; label?: string }[];
 }
 
 /** Cumulative arc-length fraction at each centerline point. */
@@ -31,7 +33,26 @@ function cumFracs(points: XY[]): number[] {
   return cum.map((c) => c / total);
 }
 
-export function ChannelTrackMap({ track, fracs, colors, height = 300 }: Props) {
+/** Interpolated centerline position at arc-length fraction `f` (0..1). */
+function pointAtFrac(points: XY[], vf: number[], f: number): XY {
+  const n = points.length;
+  if (n === 0) return [0, 0];
+  const ff = Math.min(1, Math.max(0, f));
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (vf[mid]! <= ff) lo = mid;
+    else hi = mid;
+  }
+  const span = Math.max(1e-12, vf[hi]! - vf[lo]!);
+  const u = (ff - vf[lo]!) / span;
+  const a = points[lo]!;
+  const b = points[hi]!;
+  return [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1])];
+}
+
+export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const width = Math.max(useElementWidth(hostRef, 380), 200);
 
@@ -87,6 +108,20 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300 }: Props) {
         {finish && !track.closed && (
           <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke="#0E0E10" strokeWidth={1} />
         )}
+        {markers?.map((mk, i) => {
+          const vf = cumFracs(track.centerline);
+          const p = pointAtFrac(track.centerline, vf, mk.frac);
+          return (
+            <g key={i}>
+              <circle cx={px(p)} cy={py(p)} r={6} fill={mk.color} stroke="#0E0E10" strokeWidth={1.5} />
+              {mk.label && (
+                <text x={px(p) + 9} y={py(p) + 3.5} fontSize={10} fontFamily="monospace" fill={mk.color}>
+                  {mk.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
       </svg>
     </div>
   );

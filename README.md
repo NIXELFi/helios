@@ -9,7 +9,7 @@ Five modules ship today:
 - **Telemetry** — MoTeC-style CSV log analysis: multi-session overlay, math channels, GPS basemaps, custom widget workspaces (details below).
 - **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
 - **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles.
-- **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, dyno-calibrated) with parameter sweeps, FSAE-points optimization, a lap simulator, and print-to-PDF engineering reports.
+- **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, calibrated against the team's real dynos) with parameter sweeps, FSAE-points optimization, and print-to-PDF engineering reports — plus a measurement-driven lap simulator: Pacejka `.tir` tire fits, CFD aero maps, and roll-stiffness data load from a team-data folder; grip is pinned by real skidpad/autocross/accel results; fuel burn comes from a solver-derived variable-throttle model (no fudge constants); and a playback "lap player" with a supersport dash, per-axle balance readout, residency histograms, and a filterable channel analyzer.
 - **Games** — arcade lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards.
 
 ## The Vault (PDM)

@@ -21,6 +21,14 @@ export function fileTimestamp(d: Date = new Date()): string {
   );
 }
 
+/** Prompt for a directory (team simulation-data folder etc.). Returns the
+ *  chosen path, or null when the user cancels. */
+export async function openDirectory(): Promise<string | null> {
+  const picked = await open({ multiple: false, directory: true });
+  if (picked == null) return null;
+  return typeof picked === "string" ? picked : String(picked);
+}
+
 /** Prompt for a save path (defaulting to `${defaultName}.${ext}` with an
  *  ext-named filter) and write text. Returns the chosen path, or null when
  *  the user cancels the dialog. */

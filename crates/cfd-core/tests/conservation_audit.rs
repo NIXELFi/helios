@@ -53,6 +53,14 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Audit artifacts live with the other physics evidence, not the repo root
+/// (root cleanup 2026-06-10; the 2026-05 run's outputs moved there too).
+fn audit_out_dir() -> PathBuf {
+    let dir = workspace_root().join("physics_findings/audit-2026-05");
+    fs::create_dir_all(&dir).expect("create audit output dir");
+    dir
+}
+
 // --------- scenario record + serialization (manual JSON) -----------------
 
 #[derive(Debug, Clone)]
@@ -125,7 +133,7 @@ fn write_json(path: &Path, sr: &ScenarioResult) -> std::io::Result<()> {
 // aggregate. We do not rely on this for primary output — each scenario writes
 // its own file. But we also append into the summary via a JSON line file.
 fn append_summary_line(sr: &ScenarioResult) {
-    let path = workspace_root().join("conservation_results.ndjson");
+    let path = audit_out_dir().join("conservation_results.ndjson");
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -257,7 +265,7 @@ fn run_scenario_with_junction(
         notes: notes.replace('"', "'"),
     };
 
-    let out_path = workspace_root().join(format!("conservation_{}.json", name));
+    let out_path = audit_out_dir().join(format!("conservation_{}.json", name));
     let _ = write_json(&out_path, &sr);
     append_summary_line(&sr);
 
@@ -281,7 +289,7 @@ static INIT: Mutex<bool> = Mutex::new(false);
 fn ensure_clean_log() {
     let mut g = INIT.lock().unwrap();
     if !*g {
-        let p = workspace_root().join("conservation_results.ndjson");
+        let p = audit_out_dir().join("conservation_results.ndjson");
         let _ = fs::remove_file(&p);
         *g = true;
     }

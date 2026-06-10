@@ -16,6 +16,12 @@ import {
   vehiclePresetForKey,
   vehicleForCar,
   torqueCurveFromSweep,
+  torqueCurveFromDyno,
+  fuelMapFromSweep,
+  designSensitivities,
+  predictSkidpad,
+  type SensitivityRow,
+  type EngineFuelMap,
   peakTorque,
   topSpeedMps,
   tractiveMap,
@@ -39,6 +45,9 @@ import {
   type LapTelemetry,
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
+import { compareDynoBanded } from "../lib/analytics/dynoCompare";
+import { distillTir, tirMuLat, tirMuLong, loadTeamData, G } from "../lib/performance";
+import { openTextFile, openDirectory } from "../lib/export/io";
 import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
@@ -65,10 +74,36 @@ export function PerformanceScreen() {
   // known car — SDM25 is always 281 kg / 3.5 FD, SDM26 267 kg / 3.0 FD — so it
   // can't be thrown off by stale persisted state. User tuning (grip/aero) is kept.
   const vehicle = vehicleForCar(carKey, state.vehicleConfig);
-  const curve = useMemo(
+  const simCurve = useMemo(
     () => (selected ? torqueCurveFromSweep(selected.points) : []),
     [selected],
   );
+
+  // Measured engine option: when the selected study has an imported dyno
+  // reference attached, the lap sims / events can run on the MEASURED curve
+  // instead of the simulated one — ground truth for as-built scoring. The
+  // dyno measures wheel torque, so the conversion divides out driveline loss
+  // (torqueCurveFromDyno) before the tractive chain multiplies it back in.
+  const study = selected ? state.studies[selected.id] : undefined;
+  const dynoRef = study && "dynoRef" in study ? study.dynoRef : undefined;
+  const dynoCurve = useMemo(
+    () => (dynoRef ? torqueCurveFromDyno(dynoRef.points, vehicle.drivetrainEff) : []),
+    [dynoRef, vehicle.drivetrainEff],
+  );
+  const [engineSource, setEngineSource] = useState<"sim" | "dyno">("sim");
+  const usingDyno = engineSource === "dyno" && dynoCurve.length >= 2;
+  const curve = usingDyno ? dynoCurve : simCurve;
+
+  // Model-accuracy strip: banded sim-vs-dyno agreement (wheel power, the
+  // finding-0028 calibration bands) whenever a dyno reference is attached.
+  const accuracy = useMemo(() => {
+    if (!dynoRef || !selected) return null;
+    const sim = [...selected.points]
+      .sort((a, b) => a.rpm - b.rpm)
+      .map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.wheelPowerKW }));
+    const bands = compareDynoBanded(sim, dynoRef.points);
+    return bands.some((b) => b.cmp != null) ? bands : null;
+  }, [dynoRef, selected]);
 
   const tractive = useMemo(
     () => (curve.length ? tractiveMap(curve, vehicle) : null),
@@ -79,9 +114,16 @@ export function PerformanceScreen() {
     [curve, vehicle],
   );
   const skid = useMemo(() => skidpad(vehicle, skidpadTime), [vehicle, skidpadTime]);
+  // Variable-throttle fuel model from the source sweep (null for dyno-only
+  // sources → the lumped thermal model). Used by events, the FD optimizer,
+  // and the sensitivity panel so all three score fuel identically.
+  const fuelMap = useMemo(
+    () => (selected ? fuelMapFromSweep(selected.points) ?? undefined : undefined),
+    [selected],
+  );
   const events = useMemo(
-    () => (curve.length ? computeEvents(curve, vehicle, baseline) : null),
-    [curve, vehicle, baseline],
+    () => (curve.length ? computeEvents(curve, vehicle, baseline, { fuelMap }) : null),
+    [curve, vehicle, baseline, fuelMap],
   );
   const peak = useMemo(() => peakTorque(curve), [curve]);
 
@@ -137,6 +179,31 @@ export function PerformanceScreen() {
             ))}
           </select>
         </label>
+        {dynoCurve.length >= 2 && (
+          <div
+            role="group"
+            aria-label="Engine curve source"
+            className="flex overflow-hidden rounded-sm border border-[#2A2C32] text-[10px] uppercase tracking-wider"
+            title="Run the vehicle model on the simulated curve or on the measured dyno curve attached to this study"
+          >
+            {(["sim", "dyno"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={engineSource === k}
+                onClick={() => setEngineSource(k)}
+                className={
+                  "px-2 py-1 " +
+                  (engineSource === k
+                    ? "bg-[#FFC627] text-[#0E0E10]"
+                    : "text-[#9097A0] hover:text-[#FFC627]")
+                }
+              >
+                {k === "sim" ? "Simulated" : "Measured dyno"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setEditorOpen((v) => !v)}
@@ -159,6 +226,34 @@ export function PerformanceScreen() {
       {reportMsg && (
         <div role="status" className="flex-shrink-0 border-b border-[#FFC627]/40 bg-[#16171B] px-3 py-1 text-[10px] text-[#D8DCE2]">
           {reportMsg}
+        </div>
+      )}
+
+      {/* Model-accuracy strip — banded wheel-power agreement vs the attached
+          dyno (the finding-0028 calibration bands), so the trust level of the
+          numbers below is visible where decisions are made. */}
+      {accuracy && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[#2A2C32] bg-[#0B0B0D] px-3 py-1.5 text-[10px]">
+          <span className="uppercase tracking-wider text-[#5A5F66]">
+            model vs dyno{dynoRef ? ` (${dynoRef.label})` : ""}
+          </span>
+          {accuracy.map((b) =>
+            b.cmp ? (
+              <span
+                key={b.key}
+                className="rounded-sm border border-[#CE93D8]/40 px-1.5 py-[1px] font-mono tabular-nums text-[#CE93D8]"
+                title={`Wheel power, sim − dyno, ${b.cmp.n} pts. Positive bias = sim over-predicts.`}
+              >
+                {b.label}: RMSE {b.cmp.rmseKw.toFixed(2)} kW · bias {b.cmp.biasKw >= 0 ? "+" : ""}
+                {b.cmp.biasKw.toFixed(2)}
+              </span>
+            ) : null,
+          )}
+          {usingDyno && (
+            <span className="ml-auto rounded-sm border border-[#FFC627]/50 px-1.5 py-[1px] uppercase tracking-wider text-[#FFC627]">
+              scoring on measured curve
+            </span>
+          )}
         </div>
       )}
 
@@ -191,7 +286,9 @@ export function PerformanceScreen() {
 
             {events && <TelemetrySection events={events} />}
 
-            <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} />
+            <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} fuelMap={fuelMap} />
+
+            <SensitivitySection curve={curve} vehicle={vehicle} baseline={baseline} fuelMap={fuelMap} />
 
             {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -298,6 +395,15 @@ export function PerformanceScreen() {
                 <Stat label="radius" value={`${skid.radiusM.toFixed(2)} m`} />
                 <Stat label="speed" value={`${skid.speedKph.toFixed(1)} km/h`} highlight />
                 <Stat label="lateral" value={`${skid.lateralG.toFixed(2)} g`} />
+                <span
+                  className="flex items-baseline gap-1"
+                  title="Grip-model PREDICTION at the 9.125 m skidpad path — the cleanest grip validation (no aero, no line, no engine). Real anchors: SDM26 5.02 s (comp, stickers), SDM25 4.98 s (scrubbed)."
+                >
+                  <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">model predicts</span>
+                  <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+                    {predictSkidpad(vehicle).timeS.toFixed(2)} s
+                  </span>
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-2 p-3 sm:grid-cols-6">
                 {skid.perGear.map((g) => {
@@ -397,6 +503,21 @@ function TelemetryCard({
         <Stat label="max lat" value={`${tm.maxLatG.toFixed(2)} g`} />
         <Stat label="max accel" value={`${tm.maxAccelG.toFixed(2)} g`} />
         <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />
+        {tm.balanceMargin != null && (
+          <span
+            className="flex items-baseline gap-1"
+            title="Mean axle-capacity margin while corner-limited: how much spare grip the NON-limiting axle holds. loose = rear axle limits (front has spare); push = front limits. Small % = nearly neutral."
+          >
+            <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">balance</span>
+            <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+              {Math.abs(tm.balanceMargin) < 0.015
+                ? "neutral"
+                : tm.balanceMargin > 0
+                  ? `loose ${(tm.balanceMargin * 100).toFixed(1)}%`
+                  : `push ${(-tm.balanceMargin * 100).toFixed(1)}%`}
+            </span>
+          </span>
+        )}
       </div>
       <GearUsageBar frac={tm.timeInGearFrac} />
     </div>
@@ -562,6 +683,59 @@ function VehicleEditor({
   resetTo: VehicleConfig;
 }) {
   const set = (patch: Partial<VehicleConfig>) => onChange({ ...vehicle, ...patch });
+  const [tirError, setTirError] = useState<string | null>(null);
+  const [teamMsg, setTeamMsg] = useState<string | null>(null);
+
+  // Team simulation-data folder: tire/*.tir + aero/*-aero-map.csv in one
+  // pick. The path persists so the data can be re-applied next session.
+  async function importTeamData(dirOverride?: string) {
+    setTeamMsg(null);
+    try {
+      const dir = dirOverride ?? (await openDirectory());
+      if (!dir) return;
+      const td = await loadTeamData(dir, vehicle.name);
+      const patch: Partial<VehicleConfig> = {};
+      const applied: string[] = [];
+      if (td.tire) {
+        patch.tire = { ...td.tire, scale: vehicle.tire?.scale ?? td.tire.scale, scaleLong: vehicle.tire?.scaleLong ?? td.tire.scaleLong };
+        applied.push(`tire ${td.tireFile}`);
+      }
+      if (td.aero) {
+        patch.claM2 = td.aero.claM2;
+        patch.cdaM2 = td.aero.cdaM2;
+        if (Number.isFinite(td.aero.aeroFrontFrac) && vehicle.roll) {
+          patch.roll = { ...vehicle.roll, aeroFrontFrac: td.aero.aeroFrontFrac };
+        }
+        applied.push(`aero ${td.aeroFile} (ClA ${td.aero.claM2.toFixed(2)} / CdA ${td.aero.cdaM2.toFixed(2)})`);
+      }
+      onChange({ ...vehicle, ...patch });
+      localStorage.setItem("helios.cfd.teamDataDir", dir);
+      setTeamMsg(
+        applied.length ? `loaded: ${applied.join(" · ")}${td.notes.length ? ` — ${td.notes.join("; ")}` : ""}` : `nothing usable found — ${td.notes.join("; ")}`,
+      );
+    } catch (e) {
+      setTeamMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const rememberedDir = localStorage.getItem("helios.cfd.teamDataDir");
+
+  async function importTir() {
+    setTirError(null);
+    try {
+      const picked = await openTextFile("tir");
+      if (!picked) return;
+      const label = picked.path.split(/[\\/]/).pop() ?? picked.path;
+      // Surface scale: TTC flat-belt grip never fully transfers to asphalt;
+      // start at the literature-typical 0.7 and tune via the field below.
+      onChange({ ...vehicle, tire: distillTir(picked.contents, label, vehicle.tire?.scale ?? 0.7) });
+    } catch (err) {
+      setTirError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Peak μ readout at static per-tire load — the sanity check on the fit.
+  const fzStatic = (vehicle.massKg * G) / 4;
+  const tire = vehicle.tire;
 
   return (
     <section className="mb-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -575,12 +749,112 @@ function VehicleEditor({
           Reset to {resetTo.name}
         </button>
       </div>
+      {/* Measured tire model (.tir) + team data folder. Proprietary data —
+          lives only in local app state, never in the repo. */}
+      <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => void importTeamData()}
+          title={
+            "Pick the team Simulation Data folder — loads tire/*.tir and aero/<car>-aero-map.csv automatically." +
+            (rememberedDir ? `\nRemembered: ${rememberedDir}` : "")
+          }
+          className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+        >
+          Load team data…
+        </button>
+        {rememberedDir && (
+          <button
+            type="button"
+            onClick={() => void importTeamData(rememberedDir)}
+            title={`Re-apply from ${rememberedDir}`}
+            className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          >
+            ↻ reload
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void importTir()}
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {tire ? "Replace tire model…" : "Import tire model (.tir)…"}
+        </button>
+        {tire && (
+          <>
+            <span className="pb-1 font-mono text-[10px] text-[#CE93D8]" title="Imported Pacejka MF6.x peak-friction fit">
+              {tire.label}
+            </span>
+            <span
+              className="pb-1 font-mono text-[10px] tabular-nums text-[#D8DCE2]"
+              title="Peak friction at static per-tire load, surface scale included. Sanity-check against expectations — a .tir fit is only as good as its data."
+            >
+              μ_lat {tirMuLat(tire, fzStatic).toFixed(2)} · μ_long {tirMuLong(tire, fzStatic).toFixed(2)} @ static
+            </span>
+            <NumField
+              label="lat scale"
+              value={tire.scale}
+              step={0.005}
+              onChange={(n) => set({ tire: { ...tire, scale: n } })}
+            />
+            <NumField
+              label="long scale"
+              value={tire.scaleLong ?? tire.scale}
+              step={0.005}
+              onChange={(n) => set({ tire: { ...tire, scaleLong: n } })}
+            />
+            <button
+              type="button"
+              aria-label={`Remove tire model ${tire.label}`}
+              onClick={() => {
+                const { tire: _drop, ...rest } = vehicle;
+                onChange(rest as VehicleConfig);
+              }}
+              className="mb-1 rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+            >
+              remove
+            </button>
+          </>
+        )}
+        {!tire && (
+          <span className="pb-1 text-[9px] text-[#5A5F66]">
+            no tire model — using μ lat/long + load-sensitivity below
+          </span>
+        )}
+        {tirError && <span className="pb-1 text-[10px] text-[#FF5252]">{tirError}</span>}
+        {teamMsg && <span className="basis-full pb-1 font-mono text-[9px] text-[#A5D6A7]">{teamMsg}</span>}
+      </div>
+      {tire && <TireMuChart tire={tire} fzStatic={fzStatic} />}
+      {/* Roll balance (per-axle cornering limit) — from the team's ARB/RSD
+          calculators. RSD front is the ARB-setting knob (SDM26 combos span
+          ~0.38–0.60). */}
+      {vehicle.roll && (
+        <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+          <span className="pb-1 text-[9px] uppercase tracking-wider text-[#5A5F66]">roll balance</span>
+          <NumField label="RSD front" value={vehicle.roll.rsdFront} step={0.005}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rsdFront: n } })} />
+          <NumField label="roll arm" unit="m" value={vehicle.roll.hRollArmM} step={0.005}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, hRollArmM: n } })} />
+          <NumField label="RC front" unit="m" value={vehicle.roll.rcFrontM} step={0.001}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rcFrontM: n } })} />
+          <NumField label="RC rear" unit="m" value={vehicle.roll.rcRearM} step={0.001}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rcRearM: n } })} />
+          <NumField label="aero front" value={vehicle.roll.aeroFrontFrac} step={0.01}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, aeroFrontFrac: n } })} />
+          <span className="pb-1 text-[9px] text-[#5A5F66]" title="Per-axle cornering limit active: the lap sim saturates whichever axle gives up first (see lap telemetry balance readout)">
+            per-axle limit active
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
-        <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })} />
-        <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })} />
-        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })} />
+        <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+        <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
         <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />
@@ -625,15 +899,22 @@ function NumField({
   onChange,
   step = 1,
   unit,
+  disabled,
+  disabledHint,
 }: {
   label: string;
   value: number;
   onChange: (n: number) => void;
   step?: number;
   unit?: string;
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   return (
-    <label className="flex flex-col gap-0.5">
+    <label
+      className={"flex flex-col gap-0.5" + (disabled ? " opacity-40" : "")}
+      title={disabled ? disabledHint : undefined}
+    >
       <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">
         {label}
         {unit ? ` (${unit})` : ""}
@@ -642,13 +923,140 @@ function NumField({
         type="number"
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => {
           const n = parseFloat(e.target.value);
           if (Number.isFinite(n)) onChange(n);
         }}
-        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:cursor-not-allowed"
       />
     </label>
+  );
+}
+
+// ---- Tire μ(Fz) mini-chart ---------------------------------------------------
+// The suspension team's view of what the sim actually uses: peak friction vs
+// per-tire vertical load from the imported fit, with the static load marked.
+// Derived from proprietary fit data — rendered live, never persisted/exported.
+function TireMuChart({ tire, fzStatic }: { tire: NonNullable<VehicleConfig["tire"]>; fzStatic: number }) {
+  const data = useMemo(() => {
+    const xs: number[] = [];
+    const lat: number[] = [];
+    const long: number[] = [];
+    for (let fz = 150; fz <= 2500; fz += 50) {
+      xs.push(fz);
+      lat.push(tirMuLat(tire, fz));
+      long.push(tirMuLong(tire, fz));
+    }
+    return { xs, lat, long };
+  }, [tire]);
+  return (
+    <div className="border-b border-[#2A2C32] px-2 pb-1">
+      <LinePlot
+        title="tire peak μ vs load (track-scaled)"
+        xs={data.xs}
+        series={[
+          { label: "μ lateral", y: data.lat, color: "#FFC627", showPoints: false },
+          { label: "μ longitudinal", y: data.long, color: "#4FC3F7", showPoints: false },
+          {
+            label: "static load/tire",
+            xs: [fzStatic, fzStatic],
+            y: [Math.min(...data.lat, ...data.long), Math.max(...data.lat, ...data.long)],
+            color: "#CE93D8",
+            width: 1,
+            showPoints: false,
+          } satisfies LineSeries,
+        ]}
+        xLabel="Fz per tire (N)"
+        yLabel="μ"
+        height={180}
+      />
+    </div>
+  );
+}
+
+// ---- Design sensitivities ----------------------------------------------------
+// One-at-a-time design levers (mass, aero, grip, driveline, shift, CG) re-run
+// through the FULL scoring chain and ranked by Δpoints — "what should the team
+// work on next", straight from the model. Collapsed; computes on first expand.
+function SensitivitySection({
+  curve, vehicle, baseline, fuelMap,
+}: {
+  curve: TorqueCurve;
+  vehicle: VehicleConfig;
+  baseline: ReferenceBaseline;
+  fuelMap?: EngineFuelMap;
+}) {
+  const [open, setOpen] = useState(false);
+  const result = useMemo(
+    () => (open && curve.length ? designSensitivities(curve, vehicle, baseline, { fuelMap }) : null),
+    [open, curve, vehicle, baseline, fuelMap],
+  );
+  const havePts = result != null && result.rows.some((r) => r.dPoints != null);
+  const fmtD = (d: number, unit: string, invertGood = false) => {
+    const good = invertGood ? d > 0 : d < 0;
+    return (
+      <span className={good ? "text-[#A5D6A7]" : d === 0 ? "text-[#5A5F66]" : "text-[#FF8A65]"}>
+        {d >= 0 ? "+" : ""}{d.toFixed(unit === "pts" ? 1 : 3)} {unit}
+      </span>
+    );
+  };
+  return (
+    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Design sensitivities</span>
+        <span className="text-[9px] text-[#5A5F66]">
+          one realistic step per lever, full scoring chain, ranked by payoff
+        </span>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {open ? "Hide" : "Analyze"}
+        </button>
+      </div>
+      {open && result && (
+        <div className="p-2">
+          <table className="w-full text-left font-mono text-[10px]">
+            <caption className="sr-only">Design levers ranked by projected points gained</caption>
+            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+              <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
+                <th>change</th>
+                <th className="text-right">Δ autocross</th>
+                <th className="text-right">Δ endurance</th>
+                <th className="text-right">Δ accel</th>
+                {havePts && <th className="text-right">Δ total pts</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {result.rows.map((r: SensitivityRow) => (
+                <tr key={r.key} className="border-t border-[#16171B] text-[#9097A0]">
+                  <td className="px-2 py-1 text-[#D8DCE2]">{r.label}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dAxS, "s")}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dEnS, "s")}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {fmtD(r.events.accel.timeS - result.base.accel.timeS, "s")}
+                  </td>
+                  {havePts && (
+                    <td className="px-2 py-1 text-right tabular-nums text-[12px]">
+                      {r.dPoints != null ? fmtD(r.dPoints, "pts", true) : "—"}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-2 pt-1.5 text-[9px] leading-tight text-[#5A5F66]">
+            One lever at a time vs the current setup (no interactions). Green = improvement.
+            {!havePts && " Set a reference baseline above to rank in points instead of seconds."}
+            {" "}Grip step scales the {vehicle.tire ? "imported tire's surface scales" : "μ constants"} —
+            read it as compound/pressure/setup gains.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -660,18 +1068,19 @@ function NumField({
 // first expand. The explicit `{ ...vehicle, finalDrive }` override happens
 // AFTER vehicleForCar identity resolution (don't fight the preset).
 function FdOptimizerSection({
-  curve, vehicle, baseline,
+  curve, vehicle, baseline, fuelMap,
 }: {
   curve: TorqueCurve;
   vehicle: VehicleConfig;
   baseline: ReferenceBaseline;
+  fuelMap?: EngineFuelMap;
 }) {
   const [open, setOpen] = useState(false);
 
   const rows = useMemo<FdSweepRow[] | null>(() => {
     if (!open || curve.length === 0) return null;
-    return sweepFinalDrive(curve, vehicle, baseline);
-  }, [open, curve, vehicle, baseline]);
+    return sweepFinalDrive(curve, vehicle, baseline, undefined, { fuelMap });
+  }, [open, curve, vehicle, baseline, fuelMap]);
 
   const scored = rows?.filter((r) => r.events.totalPoints != null) ?? [];
   const havePoints = scored.length > 0;

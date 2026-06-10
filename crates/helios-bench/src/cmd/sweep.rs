@@ -150,6 +150,7 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
                     "nonconservation": stats.nonconservation,
                     "intake_mass_per_cycle_g": stats.intake_mass_per_cycle_g,
                     "knock_integral": stats.knock_integral,
+                    "knock_retard_deg": stats.knock_retard_deg,
                     "f_residual": stats.f_residual,
                 }))?;
             }

@@ -236,6 +236,28 @@ pub struct SDM26Config {
     /// models rich-quench and lean-misfire (φ = AFR_stoich / AFR).
     /// Default false → bit-exact Python parity preserved.
     pub afr_eta_enabled: bool,
+    /// 0029: closed-loop knock control, emulating a production ECU.
+    /// After each cycle, any cylinder whose Livengood-Wu integral at
+    /// flame arrival exceeds `knock_integral_limit` has its spark
+    /// retarded by `knock_retard_step_deg` (clamped to
+    /// `knock_max_retard_deg`); when comfortably below the limit the
+    /// retard relaxes back toward the base map at 1/4 step per cycle.
+    /// Evidence: the SDM26 team dyno sags exactly where the open-loop
+    /// model's KI crosses 1.0 (11.5-12k) and recovers where KI falls
+    /// back under (12.5k+); SDM25 shows neither the KI excursion nor
+    /// the sag. Default false → bit-exact Python parity preserved.
+    pub knock_control_enabled: bool,
+    pub knock_integral_limit: f64,
+    pub knock_retard_step_deg: f64,
+    pub knock_max_retard_deg: f64,
+    /// 0029: Douaud-Eyzat τ rescale (see CylinderModel::knock_tau_scale).
+    /// Field-calibrated so the knock-free team builds read KI < 1.
+    pub knock_tau_scale: f64,
+    /// 0030: optional measured per-RPM ignition map, (rpm, deg BTDC) pairs
+    /// sorted by rpm. Overrides `spark_advance` + slope when present so the
+    /// sim runs the engine's ACTUAL ECU table — the team dynos reflect the
+    /// flashed tune, not an idealized MBT map. Default None → parity.
+    pub spark_advance_map: Option<Vec<(f64, f64)>>,
     pub t_wall_cylinder: f64,
     // Woschni
     pub woschni_c1_gas_exchange: f64,
@@ -376,6 +398,12 @@ impl Default for SDM26Config {
             afr_stoich: 14.7,
             octane_number: 95.0,
             afr_eta_enabled: false,
+            knock_control_enabled: false,
+            knock_integral_limit: 1.0,
+            knock_retard_step_deg: 1.0,
+            knock_max_retard_deg: 10.0,
+            knock_tau_scale: 1.0,
+            spark_advance_map: None,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
             woschni_c1_combustion: 2.28, woschni_c2_combustion: 3.24e-3,
@@ -405,6 +433,50 @@ impl Default for SDM26Config {
             drivetrain_efficiency: 0.85,
             enable_residual_tracking: false,
             cfl: 0.85, limiter: LIMITER_MINMOD,
+        }
+    }
+}
+
+impl SDM26Config {
+    /// Dyno-calibrated configuration (finding 0028, 2026-06-10).
+    ///
+    /// `default()` is frozen as the bit-for-bit Python-parity baseline; this
+    /// constructor layers on the validated physics that minimizes banded
+    /// power RMSE against BOTH real team dynos (C10 anti-overfit guard):
+    /// the Option-B knob set (finding 0021), van Leer + CFL 0.5 numerics,
+    /// flat-top cam lift with low-Re valve Cd (finding 0015), collector
+    /// open-end reflection (finding 0007), and eta_comb 0.94 for the
+    /// rich-of-stoich AFR 13.1 operating point.
+    ///
+    /// Wheel-power RMSE vs team dyno, WOT 6-13.5k band:
+    /// SDM26 5.80 (legacy) -> 2.56 kW; SDM25 6.54 -> 4.54 kW.
+    pub fn calibrated() -> Self {
+        Self {
+            // Option B (finding 0021)
+            intake_junction_borda_carnot: true,
+            intake_junction_loss_coef: 1.0,
+            restrictor_loss_from_diffuser_geometry: true,
+            restrictor_cd_mach_k: 0.10,
+            spark_advance_rpm_slope_deg_per_krpm: 1.5,
+            duration_rpm_exp: 0.4,
+            fmep_c: 0.00075,
+            // Numerics fidelity (finding 0028)
+            limiter: crate::solver::muscl::LIMITER_VAN_LEER,
+            cfl: 0.5,
+            // Valve physics (finding 0015, on by default per 0028)
+            intake_lift_flat_top_ramp: 0.25,
+            exhaust_lift_flat_top_ramp: 0.25,
+            intake_valve_re_correction_enabled: true,
+            // Exhaust open-end reflection (finding 0007, tuned in 0028)
+            exhaust_collector_reflection_coef: 0.15,
+            // Combustion efficiency at AFR 13.1 (finding 0028 bias trim)
+            eta_comb: 0.94,
+            // Knock-integral field calibration (finding 0029): RON of the
+            // team's 93-AKI pump fuel + Douaud-Eyzat tau rescale anchored
+            // to "no team build has ever knocked" (worst-case KI 0.75).
+            octane_number: 98.0,
+            knock_tau_scale: 2.0,
+            ..Self::default()
         }
     }
 }
@@ -529,6 +601,12 @@ pub struct CycleStats {
     /// Designers should treat I > 1.0 as a hard no-go for SDM27 designs.
     #[serde(rename = "knockIntegral")]
     pub knock_integral: f64,
+    /// 0029: spark retard applied by the closed-loop knock controller this
+    /// cycle, deg (max across cylinders). 0.0 when knock control is off or
+    /// the base map is knock-free at this RPM. Defaults on deserialize so
+    /// studies persisted before 0029 still load.
+    #[serde(rename = "knockRetardDeg", default)]
+    pub knock_retard_deg: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -734,6 +812,7 @@ impl SDM26Engine {
             // (slope=0, exp=0) keep behavior bit-identical to legacy.
             spark_advance_rpm_slope_deg_per_krpm: cfg.spark_advance_rpm_slope_deg_per_krpm,
             spark_advance_rpm_ref: cfg.spark_advance_rpm_ref,
+            spark_map: cfg.spark_advance_map.clone(),
             duration_rpm_exp: cfg.duration_rpm_exp,
             duration_rpm_ref: cfg.duration_rpm_ref,
             wiebe_a_rpm_exp: cfg.wiebe_a_rpm_exp,
@@ -797,6 +876,7 @@ impl SDM26Engine {
                 phase_offset, cfg.enable_residual_tracking,
             );
             cyl.octane_number = cfg.octane_number;
+            cyl.knock_tau_scale = cfg.knock_tau_scale;
             cyl.initialize(cfg.p_ambient, cfg.t_ambient, 0.0);
             cylinders.push(cyl);
         }
@@ -1225,7 +1305,27 @@ impl SDM26Engine {
                     knock_integral: self.cylinders.iter()
                         .map(|c| c.state.knock_integral_at_spark)
                         .fold(0.0_f64, f64::max),
+                    knock_retard_deg: self.cylinders.iter()
+                        .map(|c| c.wiebe.knock_retard_deg)
+                        .fold(0.0_f64, f64::max),
                 };
+                // 0029: closed-loop knock control — per-cylinder spark retard
+                // adjusted at each cycle boundary, like a production ECU:
+                // fast retard on a knocking cycle, slow (1/4-step) relax back
+                // toward the base map when comfortably under the limit. The
+                // retard takes effect from the NEXT cycle's combustion window.
+                if cfg.knock_control_enabled {
+                    for c in self.cylinders.iter_mut() {
+                        let ki = c.state.knock_integral_at_spark;
+                        let r = &mut c.wiebe.knock_retard_deg;
+                        if ki > cfg.knock_integral_limit {
+                            *r = (*r + cfg.knock_retard_step_deg)
+                                .min(cfg.knock_max_retard_deg);
+                        } else if ki < 0.9 * cfg.knock_integral_limit && *r > 0.0 {
+                            *r = (*r - 0.25 * cfg.knock_retard_step_deg).max(0.0);
+                        }
+                    }
+                }
                 state.last_mass_total = m_now;
                 for c in self.cylinders.iter_mut() {
                     c.state.m_intake_total = 0.0;

@@ -63,6 +63,23 @@ pub struct WiebeParams {
     pub spark_advance_rpm_slope_deg_per_krpm: f64,
     pub spark_advance_rpm_ref: f64,
 
+    /// 0029: runtime knock-control retard, deg, subtracted from the
+    /// base spark map. NOT a calibration constant — the engine's
+    /// cycle-end knock controller (sdm26.rs) adjusts it cycle-to-cycle
+    /// when `knock_control_enabled`, emulating a production ECU's
+    /// closed-loop knock strategy (retard on KI > limit, slow relax
+    /// back toward the base map). Default 0.0 → parity preserved.
+    pub knock_retard_deg: f64,
+
+    /// 0030: optional measured per-RPM ignition map, (rpm, deg BTDC)
+    /// pairs sorted by rpm. When present it REPLACES the scalar
+    /// `spark_advance_deg` + slope model (linear interpolation, clamped
+    /// at the ends), so the sim can run the engine's ACTUAL ECU table
+    /// instead of an idealized tune — the dyno curves reflect the tune
+    /// that was flashed, not MBT. Knock-control retard still subtracts
+    /// on top. Default None → parity preserved.
+    pub spark_map: Option<Vec<(f64, f64)>>,
+
     /// 0007: optional RPM-dependent Wiebe shape parameter `a` (turbulent
     /// flame speed scaling). Real engines have flame speed proportional
     /// to mean piston speed (Heywood Ch 9, Eq 9.50: u'_turb ≈ 0.5·S_p),
@@ -149,12 +166,39 @@ impl Default for WiebeParams {
             tumble_burn_factor: 0.0,
             spark_advance_rpm_slope_deg_per_krpm: 0.0,
             spark_advance_rpm_ref: 10000.0,
+            knock_retard_deg: 0.0,
+            spark_map: None,
             duration_rpm_exp: 0.0,
             duration_rpm_ref: 10000.0,
             wiebe_a_rpm_exp: 0.0,
             wiebe_a_rpm_ref: 10000.0,
             two_zone_enabled: false,
             two_zone_gamma_cv_weighted: false,
+        }
+    }
+}
+
+/// Linear interpolation over (x, y) pairs sorted by x, clamped at the ends.
+#[inline]
+fn interp_map(map: &[(f64, f64)], x: f64) -> f64 {
+    match map {
+        [] => 0.0,
+        [only] => only.1,
+        _ => {
+            let first = map[0];
+            if x <= first.0 { return first.1; }
+            let last = map[map.len() - 1];
+            if x >= last.0 { return last.1; }
+            for w in map.windows(2) {
+                let (x0, y0) = w[0];
+                let (x1, y1) = w[1];
+                if x <= x1 {
+                    let span = x1 - x0;
+                    if span <= 0.0 { return y1; }
+                    return y0 + (x - x0) / span * (y1 - y0);
+                }
+            }
+            last.1
         }
     }
 }
@@ -170,15 +214,22 @@ impl WiebeParams {
         self.theta_start() + self.duration_deg
     }
 
-    /// RPM-aware spark advance (deg BTDC). Falls back to the
-    /// RPM-invariant `spark_advance_deg` when the slope is zero.
+    /// RPM-aware spark advance (deg BTDC), minus any active knock-control
+    /// retard. A measured `spark_map` (0030) takes precedence over the
+    /// scalar + slope model; otherwise falls back to the RPM-invariant
+    /// `spark_advance_deg` when the slope is zero (subtracting an exact
+    /// 0.0 retard preserves parity).
     #[inline]
     pub fn spark_advance_at(&self, rpm: f64) -> f64 {
-        if self.spark_advance_rpm_slope_deg_per_krpm == 0.0 {
-            return self.spark_advance_deg;
-        }
-        let delta_krpm = (rpm - self.spark_advance_rpm_ref) / 1000.0;
-        self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
+        let base = if let Some(map) = &self.spark_map {
+            interp_map(map, rpm)
+        } else if self.spark_advance_rpm_slope_deg_per_krpm == 0.0 {
+            self.spark_advance_deg
+        } else {
+            let delta_krpm = (rpm - self.spark_advance_rpm_ref) / 1000.0;
+            self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
+        };
+        base - self.knock_retard_deg
     }
 
     /// RPM-aware Wiebe burn duration (deg). Falls back to the

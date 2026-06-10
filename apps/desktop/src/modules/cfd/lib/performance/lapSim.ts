@@ -25,6 +25,8 @@ import {
   G,
 } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
+import { tirMuLat, tirMuLong } from "./tir";
+import { fuelFlowKgS, type EngineFuelMap } from "./fuelMap";
 import { discretizeTrack, type Track } from "./track";
 
 /** What binds the car at a point on the lap. "power" = the engine's tractive
@@ -88,6 +90,17 @@ export interface LapTelemetry {
   /** Top / minimum speed over the lap (km/h), for the readout. */
   vMaxKph: number;
   vMinKph: number;
+  /** Of the corner-limited time, the fraction where the FRONT axle is the
+   *  saturating one (≈ understeer-limited). Only with a roll-balance model.
+   *  0.5 = neutral; >0.5 = push-limited; <0.5 = rear-limited. NOTE: with a
+   *  static weight bias + load-sensitive μ this saturates to 0 or 1 (the
+   *  same axle wins every corner) — `balanceMargin` is the honest readout. */
+  pctFrontLimited?: number;
+  /** Time-weighted mean signed axle-capacity margin over corner-limited
+   *  time: (capFront − capRear)/mean. +0.04 ⇒ the rear limits with the
+   *  front holding ~4% spare ("loose by 4%"); negative ⇒ push. Only with a
+   *  roll-balance model. */
+  balanceMargin?: number;
 }
 
 /** Thermal efficiency RELATIVE to the engine's best-BSFC point, vs RPM. Real SI
@@ -148,6 +161,12 @@ export interface LapOpts {
   /** Emit full per-distance channel traces (LapResult.channels). Off by default
    *  — the optimizer scores thousands of laps and must not allocate these. */
   channels?: boolean;
+  /** Physics-derived part-load fuel model (variable throttle) built from the
+   *  source sweep (fuelMapFromSweep). When present it REPLACES the lumped
+   *  thermalEff×BSFC fuel estimate with the Willans line measured by the 1D
+   *  solver — zero calibration constants. Absent (synthetic/dyno curves) →
+   *  the legacy thermal model. */
+  fuelMap?: EngineFuelMap;
 }
 
 // ---- Grip model -------------------------------------------------------------
@@ -178,6 +197,13 @@ export interface GripModel {
   vCorner(R: number): number;
   /** Speed cap (gearing top speed × 1.1) the solver clamps to. */
   vCap: number;
+  /** Which axle saturates first at (v, R) — only when a roll-balance model
+   *  is configured (per-axle limit). Undefined under the lumped model. */
+  limitingAxle?(v: number, R: number): "front" | "rear";
+  /** Signed axle-capacity margin at (v, R): (capFront − capRear) / mean.
+   *  Positive = the front has spare capacity (rear limits → "loose");
+   *  negative = front limits ("push"). Magnitude is how decisively. */
+  axleMargin?(v: number, R: number): number;
 }
 
 export function makeGripModel(vehicle: VehicleConfig): GripModel {
@@ -189,6 +215,24 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const k = (0.5 * vehicle.airDensityKgM3 * vehicle.claM2) / m;
   const gEff = (v: number): number => G + k * v * v;
 
+  // Measured tire model (imported .tir): μ(Fz) comes from the Pacejka peak-
+  // friction fit instead of the constant-μ + power-law guess. Per-tire load
+  // at speed v assumes even distribution (transfer is handled by χ below and
+  // by the rear-axle closed form for drive traction).
+  const tir = vehicle.tire;
+  const fzTireStatic = (m * G) / 4;
+  const fzTire = (v: number): number => fzTireStatic * (gEff(v) / G);
+  const muLatV = (v: number): number =>
+    tir ? tirMuLat(tir, fzTire(v)) : vehicle.muLat * loadMult(v);
+  // Per-tire lateral μ at an arbitrary load — the .tir fit when imported,
+  // else the power-law generalized to per-tire load (identical to the legacy
+  // loadMult at even loading).
+  const sensEarly = vehicle.tireLoadSensitivity ?? 0;
+  const muLatFz = (fz: number): number =>
+    tir
+      ? tirMuLat(tir, fz)
+      : vehicle.muLat * Math.pow(Math.max(fz, 1) / fzTireStatic, -sensEarly);
+
   // Tire load sensitivity: μ falls as vertical load rises, so aero downforce
   // buys LESS grip than μ·Fz would imply. loadMult ≤ 1 for v > 0 (1 at static).
   // sens = 0 recovers the old load-independent (closed-form) behavior exactly.
@@ -196,21 +240,83 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const loadMult = (v: number): number => Math.pow(gEff(v) / G, -sens);
 
   // Lateral load transfer × load sensitivity: cornering shifts load to the
-  // outer tires, and with μ ∝ Fz^(−s) the outer tires gain LESS grip than the
-  // inner tires lose, so axle capacity drops. For the power-law tire the exact
-  // pair factor is χ = ((1+δ)^(1−s) + (1−δ)^(1−s))/2 with δ the transferred
-  // fraction of the pair's load: δ = a_lat·h_cg / (½·track·g_eff), clamped at 1
-  // (inner wheels unloaded). s = 0 (or δ = 0) gives χ = 1 — no effect.
+  // outer tires, and the outer tires gain LESS grip than the inner tires
+  // lose, so axle capacity drops. With a measured tire the pair factor is
+  // capacity-weighted directly from μ(Fz): χ = [μ(Fz(1+δ))·(1+δ) +
+  // μ(Fz(1−δ))·(1−δ)] / (2·μ(Fz)); for the power-law tire it reduces to the
+  // closed form χ = ((1+δ)^(1−s) + (1−δ)^(1−s))/2. δ is the transferred
+  // fraction of the pair's load: δ = a_lat·h_cg / (½·track·g_eff), clamped
+  // at 1 (inner wheels unloaded). s = 0 (or δ = 0) gives χ = 1 — no effect.
   const chi = (v: number, R: number): number => {
-    if (sens === 0 || !Number.isFinite(R) || R <= 0) return 1;
+    if (!Number.isFinite(R) || R <= 0) return 1;
+    if (!tir && sens === 0) return 1;
     const aLat = (v * v) / R;
     const d = Math.min(1, (aLat * vehicle.cgHeightM) / (0.5 * vehicle.trackWidthM * gEff(v)));
+    if (tir) {
+      const fz = fzTire(v);
+      const even = tirMuLat(tir, fz);
+      if (even <= 0) return 1;
+      return (
+        (tirMuLat(tir, fz * (1 + d)) * (1 + d) + tirMuLat(tir, fz * (1 - d)) * (1 - d)) /
+        (2 * even)
+      );
+    }
     return (Math.pow(1 + d, 1 - sens) + Math.pow(1 - d, 1 - sens)) / 2;
   };
 
+  // ---- Per-axle cornering limit (roll-balance model) ------------------------
+  // With a RollConfig, lateral load transfer splits by roll-stiffness
+  // distribution + roll-center geometry: ΔF_axle = m·a_lat·(q·h_arm +
+  // rc·w_static)/track (Milliken Ch 18 simplified, sprung≈total mass). Each
+  // axle's capacity is the load-weighted μ(Fz) of its outer+inner tires; in
+  // steady state each axle must react its load share of m·a_lat, so the car
+  // saturates at min over axles — whichever gives up first sets the balance.
+  const roll = vehicle.roll;
+  const axleCaps = (v: number, R: number): { front: number; rear: number } => {
+    const r = roll!;
+    const aLat = Number.isFinite(R) && R > 0 ? (v * v) / R : 0;
+    const aeroN = m * k * v * v;
+    const wf = vehicle.weightDistFront;
+    const W = m * G + aeroN;
+    const caps = { front: 0, rear: 0 };
+    for (const axle of ["front", "rear"] as const) {
+      const isF = axle === "front";
+      const wStatic = isF ? wf : 1 - wf;
+      const Wa = m * G * wStatic + aeroN * (isF ? r.aeroFrontFrac : 1 - r.aeroFrontFrac);
+      const q = isF ? r.rsdFront : 1 - r.rsdFront;
+      const rc = isF ? r.rcFrontM : r.rcRearM;
+      const dF = Math.min(Wa, (m * aLat * (q * r.hRollArmM + rc * wStatic)) / vehicle.trackWidthM);
+      const out = Wa / 2 + dF / 2;
+      const inn = Math.max(0, Wa / 2 - dF / 2);
+      const fCap = muLatFz(out) * out + muLatFz(inn) * inn;
+      // axle reacts its load share of the total lateral force m·a_lat
+      caps[axle] = (fCap * W) / (m * Math.max(Wa, 1));
+    }
+    return caps;
+  };
+
   // Load-sensitive, transfer-discounted lateral grip acceleration (m/s²).
-  const latCap = (v: number, R: number): number =>
-    vehicle.muLat * loadMult(v) * gEff(v) * chi(v, R);
+  const latCap = (v: number, R: number): number => {
+    if (roll) {
+      const c = axleCaps(v, R);
+      return Math.min(c.front, c.rear);
+    }
+    return muLatV(v) * gEff(v) * chi(v, R);
+  };
+
+  const limitingAxle = roll
+    ? (v: number, R: number): "front" | "rear" => {
+        const c = axleCaps(v, R);
+        return c.front <= c.rear ? "front" : "rear";
+      }
+    : undefined;
+  const axleMargin = roll
+    ? (v: number, R: number): number => {
+        const c = axleCaps(v, R);
+        const mean = (c.front + c.rear) / 2;
+        return mean > 0 ? (c.front - c.rear) / mean : 0;
+      }
+    : undefined;
 
   // Steady-state corner speed: solve v²/R = latCap(v, R). Load sensitivity and
   // χ make the capacity sub-linear in v with no closed form — bisect (capacity·R
@@ -246,8 +352,13 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const rearStaticAccel = G * (1 - vehicle.weightDistFront);
   const kRear = k * REAR_AERO_FRAC;
   const aDriveGrip = (v: number, R: number): number => {
-    const muEff = vehicle.muLong * loadMult(v) * ellipse(v, R);
+    // With a measured tire, μ comes from the rear per-tire load (pre-transfer;
+    // the closed form below then folds the transfer in, same as before).
     const nRear = rearStaticAccel + kRear * v * v;
+    const muBase = tir
+      ? tirMuLong(tir, (m * nRear) / 2)
+      : vehicle.muLong * loadMult(v);
+    const muEff = muBase * ellipse(v, R);
     const denom = Math.max(1 - (muEff * vehicle.cgHeightM) / vehicle.wheelbaseM, 0.05);
     return (muEff * nRear) / denom;
   };
@@ -255,9 +366,31 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   // BRAKING loads ALL FOUR tires (with forward weight transfer), so its grip is
   // ~the lateral coefficient — NOT muLong, the rear-axle launch limit.
   const aBrakeGrip = (v: number, R: number): number =>
-    vehicle.muLat * loadMult(v) * gEff(v) * ellipse(v, R);
+    muLatV(v) * gEff(v) * ellipse(v, R);
 
-  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap };
+  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle, axleMargin };
+}
+
+/** FSAE skidpad driving-path radius: 15.25 m inner diameter + half the 3 m
+ *  lane (§D.10). */
+export const SKIDPAD_PATH_RADIUS_M = 9.125;
+
+/** Grip-model skidpad prediction — the cleanest validation point the rules
+ *  offer, because skidpad isolates lateral grip: ~no aero (low speed), no
+ *  line freedom, no engine. SDM26's real 5.02 s pins the default muLat;
+ *  this prediction keeps that validation visible (and immediately flags a
+ *  grip-model regression). */
+export function predictSkidpad(vehicle: VehicleConfig): {
+  timeS: number;
+  speedKph: number;
+  latG: number;
+} {
+  const v = makeGripModel(vehicle).vCorner(SKIDPAD_PATH_RADIUS_M);
+  return {
+    timeS: (2 * Math.PI * SKIDPAD_PATH_RADIUS_M) / v,
+    speedKph: v * 3.6,
+    latG: (v * v) / SKIDPAD_PATH_RADIUS_M / G,
+  };
 }
 
 export function simLap(
@@ -268,11 +401,19 @@ export function simLap(
 ): LapResult {
   const { radius: rawRadius, step, length } = discretizeTrack(track, opts.ds ?? 2);
   // Racing line: the driven path has a larger effective radius than the traced
-  // centerline. Scale finite corner radii (straights stay Infinity). Both the
-  // corner-speed solve AND the lateral-g telemetry then use the same effective
+  // centerline. Scale finite corner radii (straights stay Infinity) — but the
+  // gain is PHYSICALLY BOUNDED: a driver buys radius with course width, and
+  // geometry says full use of a ~3 m lane through a typical corner is worth
+  // at most ~17 m of radius, no matter how big the corner. Without the cap a
+  // multiplicative factor inflates 200 m+ sweepers by 30+ m of free radius,
+  // which is where the spurious 6th-gear autocross speeds came from. Both the
+  // corner-speed solve AND the lateral-g telemetry use the same effective
   // radius, so the car's actual lateral load stays grip-limited (μ·g_eff).
+  const LINE_GAIN_CAP_M = 17;
   const lineFactor = Math.max(1, opts.lineFactor ?? 1);
-  const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
+  const radius = rawRadius.map((r) =>
+    Number.isFinite(r) && r > 0 ? Math.min(r * lineFactor, r + LINE_GAIN_CAP_M) : r,
+  );
   const grip = makeGripModel(vehicle);
   // vCorner bisects 40 steps per call; radii repeat (piecewise-constant track),
   // so cache per distinct radius for the telemetry loop's limit classifier.
@@ -312,6 +453,8 @@ export function simLap(
   let onThrottleDt = 0;
   let powerLimitedDt = 0;
   let cornerLimitedDt = 0;
+  let frontLimitedDt = 0;
+  let marginDtSum = 0;
   const timeInGear = new Array<number>(nGears).fill(0);
 
   // Channel collection (only when asked for — see LapOpts.channels).
@@ -336,11 +479,19 @@ export function simLap(
     const a = (vn * vn - vi * vi) / (2 * step);
     const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
     if (fEngine > 0) {
-      const segWork = fEngine * step; // propulsive work only (off-throttle = 0)
-      work += segWork;
-      // Fuel burned for THIS segment at the engine's efficiency for its current
-      // RPM — high-RPM (short-geared) running costs more fuel per joule.
-      fuelKg += segWork / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
+      work += fEngine * step; // propulsive work only (off-throttle = 0)
+    }
+    if (opts.fuelMap) {
+      // Variable throttle (Willans, solver-derived): engine BRAKE power
+      // demand = wheel power / driveline η, clamped to WOT inside the map.
+      // Off-throttle segments still pay the friction floor (no DFCO).
+      const pDemKw = fEngine > 0 ? (fEngine * vAvg) / (vehicle.drivetrainEff * 1000) : 0;
+      fuelKg += fuelFlowKgS(opts.fuelMap, rpm, pDemKw, lhv) * dt;
+    } else if (fEngine > 0) {
+      // Legacy lumped model: fuel for this segment at the engine's efficiency
+      // for its current RPM — high-RPM (short-geared) running costs more
+      // fuel per joule.
+      fuelKg += (fEngine * step) / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
     }
 
     sumRpmDt += rpm * dt;
@@ -370,7 +521,14 @@ export function simLap(
       limit = "coast";
     }
     if (limit === "power") powerLimitedDt += dt;
-    else if (limit === "corner") cornerLimitedDt += dt;
+    else if (limit === "corner") {
+      cornerLimitedDt += dt;
+      // Balance bookkeeping: which axle binds, and by how much (roll model).
+      if (grip.limitingAxle && Number.isFinite(R) && R > 0) {
+        if (grip.limitingAxle(vAvg, R) === "front") frontLimitedDt += dt;
+        if (grip.axleMargin) marginDtSum += grip.axleMargin(vAvg, R) * dt;
+      }
+    }
 
     if (ch) {
       // Insert the upshift dead time AT the shift so A/B deltas localize it.
@@ -407,6 +565,12 @@ export function simLap(
     pctCornerLimited: dtTot > 0 ? cornerLimitedDt / dtTot : 0,
     vMaxKph: Math.max(...v) * 3.6,
     vMinKph: Math.min(...v) * 3.6,
+    ...(grip.limitingAxle && cornerLimitedDt > 0
+      ? {
+          pctFrontLimited: frontLimitedDt / cornerLimitedDt,
+          balanceMargin: marginDtSum / cornerLimitedDt,
+        }
+      : {}),
   };
 
   return {
@@ -443,9 +607,12 @@ function solveSpeeds(
   const rad = (i: number): number => radius[((i % N) + N) % N]!;
   const { vCorner, aDriveGrip, aBrakeGrip } = grip;
 
-  // Race-pace fraction scales the whole target-speed envelope (corners + the
-  // top-speed cap that vCorner returns on straights), modeling managed endurance
-  // pace; the engine still pulls at full force up to that lowered ceiling.
+  // Race-pace fraction scales the CORNER ceilings only — the grip-limited
+  // stations where an endurance driver actually backs off (cones, tire
+  // management, margin). Straights and gearing-capped sections stay flat-out:
+  // real endurance drivers still run the straights out, which is why real
+  // endurance telemetry reaches top gears (a global speed scale would cap the
+  // whole lap at pace×vmax and never leave 4th — the bug Nick spotted).
   //
   // vCorner is a 40-step bisection and the passes below read the ceiling ~5×
   // per cell — but track radii are piecewise-constant (tens of distinct values
@@ -460,7 +627,9 @@ function solveSpeeds(
       vc = vCorner(r);
       vByRadius.set(r, vc);
     }
-    ceilArr[i] = pace * vc;
+    // grip-limited (a true corner ceiling, below the gearing cap) → paced;
+    // gearing/aero-capped (straight-line) → flat out.
+    ceilArr[i] = vc < grip.vCap * 0.999 ? pace * vc : vc;
   }
   const ceil = (i: number): number => ceilArr[((i % N) + N) % N]!;
 

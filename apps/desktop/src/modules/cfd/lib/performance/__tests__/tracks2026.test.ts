@@ -38,29 +38,25 @@ describe("parseTrack", () => {
   });
 });
 
-describe("2026 competition tracks", () => {
-  it("Autocross 2026 — point-to-point, 39 segments, ~738 m", () => {
-    expect(AUTOCROSS_2026.name).toBe("Autocross 2026");
+describe("2026 competition tracks (traced curvature, rules-nominal lengths)", () => {
+  it("Autocross 2026 — point-to-point, exactly the rules-nominal 800 m", () => {
+    expect(AUTOCROSS_2026.name).toContain("Autocross 2026");
     expect(AUTOCROSS_2026.closed).toBe(false);
-    expect(AUTOCROSS_2026.segments).toHaveLength(39);
-    expect(trackLength(AUTOCROSS_2026)).toBeCloseTo(738.3, 1);
-    const straights = AUTOCROSS_2026.segments.filter((s) => s.radius === Infinity);
+    expect(trackLength(AUTOCROSS_2026)).toBeCloseTo(800, 1);
+    // Continuously varying radius profile (one segment per trace interval) —
+    // this is what killed the constant-radius "RPM hang" plateaus.
+    expect(AUTOCROSS_2026.segments.length).toBeGreaterThan(200);
     const corners = AUTOCROSS_2026.segments.filter((s) => Number.isFinite(s.radius));
-    expect(straights).toHaveLength(11);
-    expect(corners).toHaveLength(28);
-    // Every corner has a real positive radius; tightest matches the source.
-    expect(corners.every((s) => s.radius > 0)).toBe(true);
-    expect(Math.min(...corners.map((s) => s.radius))).toBeCloseTo(5.4, 6);
+    expect(corners.length).toBeGreaterThan(50);
+    expect(corners.every((s) => s.radius >= 4.5)).toBe(true); // rules hairpin floor (scaled ≥)
   });
 
-  it("Endurance 2026 — closed loop, 61 segments, ~2.30 km", () => {
-    expect(ENDURANCE_2026.name).toBe("Endurance 2026");
+  it("Endurance 2026 — closed loop, exactly the rules-nominal 2.20 km", () => {
+    expect(ENDURANCE_2026.name).toContain("Endurance 2026");
     expect(ENDURANCE_2026.closed).toBe(true);
-    expect(ENDURANCE_2026.segments).toHaveLength(61);
-    expect(trackLength(ENDURANCE_2026)).toBeCloseTo(2299.8, 1);
+    expect(trackLength(ENDURANCE_2026)).toBeCloseTo(2200, 1);
     const corners = ENDURANCE_2026.segments.filter((s) => Number.isFinite(s.radius));
-    expect(corners).toHaveLength(46);
-    expect(Math.min(...corners.map((s) => s.radius))).toBeCloseTo(4.5, 6);
+    expect(corners.length).toBeGreaterThan(100);
   });
 
   it("the lap sim runs on both real courses; the longer endurance lap is slower", () => {
@@ -72,7 +68,7 @@ describe("2026 competition tracks", () => {
       expect(r.fuelKg).toBeGreaterThan(0);
       expect(r.vMaxMps).toBeGreaterThan(r.vMinMps);
     }
-    // Endurance lap (~2.30 km) is ~3× the autocross run (~0.74 km).
+    // Endurance lap (2.2 km) is ~3× the autocross run (0.8 km).
     expect(en.lapTimeS).toBeGreaterThan(ax.lapTimeS);
   });
 });

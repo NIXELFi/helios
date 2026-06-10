@@ -184,10 +184,11 @@ function sweepSection(study: SweepStudy, vehicleConfig: VehicleConfig | null, ba
     if (dp.length) {
       series.push({ label: `dyno: ${study.dynoRef.label}`, xs: dp.map((d) => d.rpm), y: dp.map((d) => d.v), color: PALETTE[3]!, dashed: true });
     }
-    const cmp = compareDyno(points.map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.brakePowerKW })), study.dynoRef.points);
+    // Wheel-vs-wheel: a chassis dyno measures downstream of the driveline.
+    const cmp = compareDyno(points.map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.wheelPowerKW })), study.dynoRef.points);
     dynoBlock = cmp
       ? `<p><strong>Dyno validation:</strong> RMSE ${n(cmp.rmseKw, 2)} kW, bias ${cmp.biasKw >= 0 ? "+" : ""}${n(cmp.biasKw, 2)} kW
-         (sim − dyno) over ${cmp.n} points, ${n(cmp.rpmMin, 0)}–${n(cmp.rpmMax, 0)} rpm.</p>`
+         (sim wheel power − dyno) over ${cmp.n} points, ${n(cmp.rpmMin, 0)}–${n(cmp.rpmMax, 0)} rpm.</p>`
       : `<p class="muted">Dyno reference attached but no overlapping RPM band.</p>`;
   }
   const hasKi = points.some((p) => p.lastCycle.knockIntegral != null);

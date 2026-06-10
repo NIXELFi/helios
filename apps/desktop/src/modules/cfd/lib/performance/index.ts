@@ -3,10 +3,13 @@
 export type {
   VehicleConfig,
   ReferenceBaseline,
+  RollConfig,
 } from "./types";
 export {
   SDM26_VEHICLE,
   SDM25_VEHICLE,
+  SDM26_ROLL,
+  SDM25_ROLL,
   EMPTY_BASELINE,
   REFERENCE_2026,
   carKeyForConfig,
@@ -18,9 +21,15 @@ export {
   topSpeedMps,
 } from "./vehicle";
 export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
+export { parseTirText, distillTir, tirMuLat, tirMuLong, type TirGrip } from "./tir";
+export { parseAeroMap, sampleAero, distillAero, type AeroMap, type AeroNominal } from "./aeroMap";
+export { fuelMapFromSweep, fuelFlowKgS, type EngineFuelMap } from "./fuelMap";
+export { loadTeamData, type TeamData } from "./teamData";
+export { designSensitivities, type SensitivityRow } from "./sensitivity";
 export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,
+  torqueCurveFromDyno,
   torqueAtRpm,
   peakTorque,
   type TorqueCurve,
@@ -80,6 +89,8 @@ export {
 export {
   simLap,
   makeGripModel,
+  predictSkidpad,
+  SKIDPAD_PATH_RADIUS_M,
   type GripModel,
   type LapResult,
   type LapOpts,
@@ -97,9 +108,10 @@ export {
   type TrackSegment,
   type RawTrack,
 } from "./track";
-export { AUTOCROSS_2026, ENDURANCE_2026 } from "./tracks2026";
+export { AUTOCROSS_2026, ENDURANCE_2026, AUTOCROSS_2026_RADIUS, ENDURANCE_2026_RADIUS } from "./tracks2026";
 export {
   trackPlan,
+  trackFromVisual,
   tightnessOf,
   TIGHTNESS_COLOR,
   parseVisualTrack,

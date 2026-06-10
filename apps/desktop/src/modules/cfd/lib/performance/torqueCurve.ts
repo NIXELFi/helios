@@ -3,6 +3,7 @@
 // (tractive map, acceleration, skidpad) reads torque through `torqueAtRpm`.
 
 import type { SweepPoint } from "../../state/types";
+import type { DynoPoint } from "../import/importDyno";
 
 export interface TorquePoint {
   rpm: number;
@@ -18,6 +19,25 @@ export function torqueCurveFromSweep(points: SweepPoint[]): TorqueCurve {
   return points
     .map((p) => ({ rpm: p.rpm, torqueNm: p.lastCycle.brakeTorqueNm }))
     .filter((p) => Number.isFinite(p.rpm) && Number.isFinite(p.torqueNm))
+    .sort((a, b) => a.rpm - b.rpm);
+}
+
+/** Build a torque curve from an imported chassis-dyno reference. A chassis
+ *  dyno measures at the WHEEL, while a TorqueCurve is crank-side brake torque
+ *  (the tractive chain multiplies by drivetrain efficiency downstream), so
+ *  measured torque is divided by `drivetrainEff` to avoid double-counting the
+ *  driveline loss. Points missing torque derive it from power (τ = P/ω). */
+export function torqueCurveFromDyno(points: DynoPoint[], drivetrainEff: number): TorqueCurve {
+  const eff = drivetrainEff > 0 ? drivetrainEff : 1;
+  return points
+    .map((p) => {
+      const wheelNm =
+        p.torqueNm ?? (p.powerKw != null && p.rpm > 0
+          ? (p.powerKw * 1000) / ((2 * Math.PI * p.rpm) / 60)
+          : null);
+      return wheelNm == null ? null : { rpm: p.rpm, torqueNm: wheelNm / eff };
+    })
+    .filter((p): p is TorquePoint => p != null && Number.isFinite(p.rpm) && Number.isFinite(p.torqueNm))
     .sort((a, b) => a.rpm - b.rpm);
 }
 
