@@ -148,6 +148,13 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_lift_flat_top_ramp", Scalar, 1, "-", cfg.intake_lift_flat_top_ramp, 0.0, 0.5, "Intake"),
         m("exhaust_lift_flat_top_ramp", Scalar, 1, "-", cfg.exhaust_lift_flat_top_ramp, 0.0, 0.5, "Exhaust"),
         m("octane_number", Scalar, 1, "-", cfg.octane_number, 80.0, 110.0, "Combustion"),
+        // 0029 — closed-loop knock control (ECU-style spark retard on KI > limit)
+        m("knock_control_enabled", Scalar, 1, "bool",
+          if cfg.knock_control_enabled { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("knock_integral_limit", Scalar, 1, "-", cfg.knock_integral_limit, 0.5, 2.0, "Combustion"),
+        m("knock_retard_step_deg", Scalar, 1, "deg", cfg.knock_retard_step_deg, 0.25, 3.0, "Combustion"),
+        m("knock_max_retard_deg", Scalar, 1, "deg", cfg.knock_max_retard_deg, 0.0, 15.0, "Combustion"),
+        m("knock_tau_scale", Scalar, 1, "-", cfg.knock_tau_scale, 0.5, 5.0, "Combustion"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -475,6 +482,12 @@ pub fn apply_override(
         "intake_lift_flat_top_ramp" => cfg.intake_lift_flat_top_ramp = value,
         "exhaust_lift_flat_top_ramp" => cfg.exhaust_lift_flat_top_ramp = value,
         "octane_number" => cfg.octane_number = value,
+        // 0029 — closed-loop knock control
+        "knock_control_enabled" => cfg.knock_control_enabled = value != 0.0,
+        "knock_integral_limit" => cfg.knock_integral_limit = value,
+        "knock_retard_step_deg" => cfg.knock_retard_step_deg = value,
+        "knock_max_retard_deg" => cfg.knock_max_retard_deg = value,
+        "knock_tau_scale" => cfg.knock_tau_scale = value,
         // 0015 — low-Re intake Cd correction
         "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = value != 0.0,
         "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = value,

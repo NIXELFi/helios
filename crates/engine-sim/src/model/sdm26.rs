@@ -236,6 +236,23 @@ pub struct SDM26Config {
     /// models rich-quench and lean-misfire (φ = AFR_stoich / AFR).
     /// Default false → bit-exact Python parity preserved.
     pub afr_eta_enabled: bool,
+    /// 0029: closed-loop knock control, emulating a production ECU.
+    /// After each cycle, any cylinder whose Livengood-Wu integral at
+    /// flame arrival exceeds `knock_integral_limit` has its spark
+    /// retarded by `knock_retard_step_deg` (clamped to
+    /// `knock_max_retard_deg`); when comfortably below the limit the
+    /// retard relaxes back toward the base map at 1/4 step per cycle.
+    /// Evidence: the SDM26 team dyno sags exactly where the open-loop
+    /// model's KI crosses 1.0 (11.5-12k) and recovers where KI falls
+    /// back under (12.5k+); SDM25 shows neither the KI excursion nor
+    /// the sag. Default false → bit-exact Python parity preserved.
+    pub knock_control_enabled: bool,
+    pub knock_integral_limit: f64,
+    pub knock_retard_step_deg: f64,
+    pub knock_max_retard_deg: f64,
+    /// 0029: Douaud-Eyzat τ rescale (see CylinderModel::knock_tau_scale).
+    /// Field-calibrated so the knock-free team builds read KI < 1.
+    pub knock_tau_scale: f64,
     pub t_wall_cylinder: f64,
     // Woschni
     pub woschni_c1_gas_exchange: f64,
@@ -376,6 +393,11 @@ impl Default for SDM26Config {
             afr_stoich: 14.7,
             octane_number: 95.0,
             afr_eta_enabled: false,
+            knock_control_enabled: false,
+            knock_integral_limit: 1.0,
+            knock_retard_step_deg: 1.0,
+            knock_max_retard_deg: 10.0,
+            knock_tau_scale: 1.0,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
             woschni_c1_combustion: 2.28, woschni_c2_combustion: 3.24e-3,
@@ -443,6 +465,11 @@ impl SDM26Config {
             exhaust_collector_reflection_coef: 0.15,
             // Combustion efficiency at AFR 13.1 (finding 0028 bias trim)
             eta_comb: 0.94,
+            // Knock-integral field calibration (finding 0029): RON of the
+            // team's 93-AKI pump fuel + Douaud-Eyzat tau rescale anchored
+            // to "no team build has ever knocked" (worst-case KI 0.75).
+            octane_number: 98.0,
+            knock_tau_scale: 2.0,
             ..Self::default()
         }
     }
@@ -568,6 +595,12 @@ pub struct CycleStats {
     /// Designers should treat I > 1.0 as a hard no-go for SDM27 designs.
     #[serde(rename = "knockIntegral")]
     pub knock_integral: f64,
+    /// 0029: spark retard applied by the closed-loop knock controller this
+    /// cycle, deg (max across cylinders). 0.0 when knock control is off or
+    /// the base map is knock-free at this RPM. Defaults on deserialize so
+    /// studies persisted before 0029 still load.
+    #[serde(rename = "knockRetardDeg", default)]
+    pub knock_retard_deg: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -836,6 +869,7 @@ impl SDM26Engine {
                 phase_offset, cfg.enable_residual_tracking,
             );
             cyl.octane_number = cfg.octane_number;
+            cyl.knock_tau_scale = cfg.knock_tau_scale;
             cyl.initialize(cfg.p_ambient, cfg.t_ambient, 0.0);
             cylinders.push(cyl);
         }
@@ -1264,7 +1298,27 @@ impl SDM26Engine {
                     knock_integral: self.cylinders.iter()
                         .map(|c| c.state.knock_integral_at_spark)
                         .fold(0.0_f64, f64::max),
+                    knock_retard_deg: self.cylinders.iter()
+                        .map(|c| c.wiebe.knock_retard_deg)
+                        .fold(0.0_f64, f64::max),
                 };
+                // 0029: closed-loop knock control — per-cylinder spark retard
+                // adjusted at each cycle boundary, like a production ECU:
+                // fast retard on a knocking cycle, slow (1/4-step) relax back
+                // toward the base map when comfortably under the limit. The
+                // retard takes effect from the NEXT cycle's combustion window.
+                if cfg.knock_control_enabled {
+                    for c in self.cylinders.iter_mut() {
+                        let ki = c.state.knock_integral_at_spark;
+                        let r = &mut c.wiebe.knock_retard_deg;
+                        if ki > cfg.knock_integral_limit {
+                            *r = (*r + cfg.knock_retard_step_deg)
+                                .min(cfg.knock_max_retard_deg);
+                        } else if ki < 0.9 * cfg.knock_integral_limit && *r > 0.0 {
+                            *r = (*r - 0.25 * cfg.knock_retard_step_deg).max(0.0);
+                        }
+                    }
+                }
                 state.last_mass_total = m_now;
                 for c in self.cylinders.iter_mut() {
                     c.state.m_intake_total = 0.0;

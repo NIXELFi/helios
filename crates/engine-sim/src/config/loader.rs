@@ -248,6 +248,13 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
             cfg.exhaust_collector_reflection_coef = v;
         }
         if let Some(v) = opt_bool(phys, "afr_eta_enabled") { cfg.afr_eta_enabled = v; }
+        // Finding 0029: ECU-style closed-loop knock control.
+        if let Some(v) = opt_bool(phys, "knock_control_enabled") { cfg.knock_control_enabled = v; }
+        if let Some(v) = opt_f64(phys, "knock_integral_limit") { cfg.knock_integral_limit = v; }
+        if let Some(v) = opt_f64(phys, "knock_retard_step_deg") { cfg.knock_retard_step_deg = v; }
+        if let Some(v) = opt_f64(phys, "knock_max_retard_deg") { cfg.knock_max_retard_deg = v; }
+        if let Some(v) = opt_f64(phys, "knock_tau_scale") { cfg.knock_tau_scale = v; }
+        if let Some(v) = opt_f64(phys, "octane_number") { cfg.octane_number = v; }
     }
 
     Ok(cfg)

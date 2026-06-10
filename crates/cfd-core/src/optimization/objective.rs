@@ -123,6 +123,7 @@ mod tests {
             wheel_torque_nm: 0.0,
             egt_mean: 0.0,
             knock_integral: 0.0,
+            knock_retard_deg: 0.0,
         }
     }
 

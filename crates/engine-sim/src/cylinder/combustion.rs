@@ -63,6 +63,14 @@ pub struct WiebeParams {
     pub spark_advance_rpm_slope_deg_per_krpm: f64,
     pub spark_advance_rpm_ref: f64,
 
+    /// 0029: runtime knock-control retard, deg, subtracted from the
+    /// base spark map. NOT a calibration constant — the engine's
+    /// cycle-end knock controller (sdm26.rs) adjusts it cycle-to-cycle
+    /// when `knock_control_enabled`, emulating a production ECU's
+    /// closed-loop knock strategy (retard on KI > limit, slow relax
+    /// back toward the base map). Default 0.0 → parity preserved.
+    pub knock_retard_deg: f64,
+
     /// 0007: optional RPM-dependent Wiebe shape parameter `a` (turbulent
     /// flame speed scaling). Real engines have flame speed proportional
     /// to mean piston speed (Heywood Ch 9, Eq 9.50: u'_turb ≈ 0.5·S_p),
@@ -149,6 +157,7 @@ impl Default for WiebeParams {
             tumble_burn_factor: 0.0,
             spark_advance_rpm_slope_deg_per_krpm: 0.0,
             spark_advance_rpm_ref: 10000.0,
+            knock_retard_deg: 0.0,
             duration_rpm_exp: 0.0,
             duration_rpm_ref: 10000.0,
             wiebe_a_rpm_exp: 0.0,
@@ -170,15 +179,18 @@ impl WiebeParams {
         self.theta_start() + self.duration_deg
     }
 
-    /// RPM-aware spark advance (deg BTDC). Falls back to the
-    /// RPM-invariant `spark_advance_deg` when the slope is zero.
+    /// RPM-aware spark advance (deg BTDC), minus any active knock-control
+    /// retard. Falls back to the RPM-invariant `spark_advance_deg` when the
+    /// slope is zero (subtracting an exact 0.0 retard preserves parity).
     #[inline]
     pub fn spark_advance_at(&self, rpm: f64) -> f64 {
-        if self.spark_advance_rpm_slope_deg_per_krpm == 0.0 {
-            return self.spark_advance_deg;
-        }
-        let delta_krpm = (rpm - self.spark_advance_rpm_ref) / 1000.0;
-        self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
+        let base = if self.spark_advance_rpm_slope_deg_per_krpm == 0.0 {
+            self.spark_advance_deg
+        } else {
+            let delta_krpm = (rpm - self.spark_advance_rpm_ref) / 1000.0;
+            self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
+        };
+        base - self.knock_retard_deg
     }
 
     /// RPM-aware Wiebe burn duration (deg). Falls back to the

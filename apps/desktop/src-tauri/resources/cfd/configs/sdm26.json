@@ -239,6 +239,8 @@
         "intake_lift_flat_top_ramp": 0.25,
         "exhaust_lift_flat_top_ramp": 0.25,
         "intake_valve_re_correction_enabled": true,
-        "exhaust_collector_reflection_coef": 0.15
+        "exhaust_collector_reflection_coef": 0.15,
+        "octane_number": 98.0,
+        "knock_tau_scale": 2.0
     }
 }

@@ -40,6 +40,20 @@ team-specific files below.
 - **Provenance class:** team-measured WOT chassis dyno; **wheel power**.
 - **Notable:** has a clear double-peak (resonance at 9.5 k and 12.5 k)
   characteristic of wave-tuning in real engines.
+- **Sub-6.5k band WRITTEN OFF as a measurement artifact (2026-06-10,
+  finding 0028/0029 review).** The implied BMEP at 4500 RPM is 7.6 bar
+  at WOT — a healthy 600cc four makes 10–12 bar there (the restrictor
+  passes that flow easily) — and it "recovers" 50% within 1500 RPM,
+  which is a pull-settle signature, not engine physics. Mechanism: a
+  small/light car launched onto a high-inertia hub/chassis dyno starts
+  the sweep with the clutch still slipping, so (a) the dyno measures
+  *transmitted* clutch torque while the engine also accelerates its own
+  inertia, and (b) torque is binned at the wheel-implied RPM, which lags
+  true engine RPM — both under-read the bottom of the sweep. A
+  truck-rated hub dyno reading 15–20 kW is also in the bottom few % of
+  its load-cell/control range. Calibration scoring bands therefore
+  start at 6000+ RPM (they already did, per finding 0021); do NOT chase
+  the sub-6.5k points with model physics.
 
 ### `sdm25-team-dyno.csv`
 

@@ -43,6 +43,9 @@ export interface CycleStats {
   // Livengood-Wu knock integral (max over cycle). Wire-present on new
   // studies; optional so old persisted (pre-knock) studies still type-check.
   knockIntegral?: number;
+  // 0029: spark retard applied by the (opt-in) closed-loop knock controller
+  // this cycle, deg. 0 when knock control is off or the map is knock-free.
+  knockRetardDeg?: number;
 }
 
 export interface ConfigSummary {
