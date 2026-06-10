@@ -21,6 +21,7 @@ import {
   carKeyForConfig,
   vehicleForCar,
   torqueCurveFromSweep,
+  fuelMapFromSweep,
   simLap,
   autocrossLapOpts,
   enduranceLapOpts,
@@ -114,7 +115,9 @@ export function LapSimScreen() {
     if (curve.length === 0) return null;
     const vehicle = vehicleForCar(carKeyForConfig(src.configName), state.vehicleConfig);
     const opts = event === "autocross" ? autocrossLapOpts() : enduranceLapOpts();
-    const lap = simLap(curve, vehicle, track, { ...opts, channels: true });
+    // Variable-throttle fuel (Willans from the solver sweep) when available.
+    const fuelMap = fuelMapFromSweep(src.points) ?? undefined;
+    const lap = simLap(curve, vehicle, track, { ...opts, fuelMap, channels: true });
     return lap.channels ? { source: src, vehicle, lap, ch: lap.channels } : null;
   };
 

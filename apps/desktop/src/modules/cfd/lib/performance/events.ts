@@ -121,6 +121,10 @@ export interface EventOpts {
   fuel?: Fuel;
   /** Override just the CO₂ factor, kg/L (legacy; `fuel` is preferred). */
   co2PerL?: number;
+  /** Physics-derived variable-throttle fuel model from the source sweep
+   *  (fuelMapFromSweep) — replaces the lumped thermal-efficiency fuel
+   *  estimate for the endurance/efficiency chain when present. */
+  fuelMap?: import("./fuelMap").EngineFuelMap;
 }
 
 export type EventMetricKey =
@@ -174,8 +178,9 @@ export function computeEvents(
     ? autocrossPoints(ax.lapTimeS, baseline.autocrossTMin)
     : null;
 
-  // Endurance = managed race pace + lumped fuel-burn efficiency on the chosen fuel.
-  const en = simLap(curve, vehicle, enTrack, enduranceLapOpts(fuel, co2PerL));
+  // Endurance = managed race pace; fuel from the solver-derived variable-
+  // throttle map when the source sweep provides one, else the lumped model.
+  const en = simLap(curve, vehicle, enTrack, { ...enduranceLapOpts(fuel, co2PerL), fuelMap: opts.fuelMap });
   const enTimePts = baseline.enduranceTMin
     ? enduranceTimePoints(en.lapTimeS, baseline.enduranceTMin)
     : null;

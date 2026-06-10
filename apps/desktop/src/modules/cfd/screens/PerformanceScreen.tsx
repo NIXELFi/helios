@@ -17,9 +17,11 @@ import {
   vehicleForCar,
   torqueCurveFromSweep,
   torqueCurveFromDyno,
+  fuelMapFromSweep,
   designSensitivities,
   predictSkidpad,
   type SensitivityRow,
+  type EngineFuelMap,
   peakTorque,
   topSpeedMps,
   tractiveMap,
@@ -112,9 +114,16 @@ export function PerformanceScreen() {
     [curve, vehicle],
   );
   const skid = useMemo(() => skidpad(vehicle, skidpadTime), [vehicle, skidpadTime]);
+  // Variable-throttle fuel model from the source sweep (null for dyno-only
+  // sources → the lumped thermal model). Used by events, the FD optimizer,
+  // and the sensitivity panel so all three score fuel identically.
+  const fuelMap = useMemo(
+    () => (selected ? fuelMapFromSweep(selected.points) ?? undefined : undefined),
+    [selected],
+  );
   const events = useMemo(
-    () => (curve.length ? computeEvents(curve, vehicle, baseline) : null),
-    [curve, vehicle, baseline],
+    () => (curve.length ? computeEvents(curve, vehicle, baseline, { fuelMap }) : null),
+    [curve, vehicle, baseline, fuelMap],
   );
   const peak = useMemo(() => peakTorque(curve), [curve]);
 
@@ -277,9 +286,9 @@ export function PerformanceScreen() {
 
             {events && <TelemetrySection events={events} />}
 
-            <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} />
+            <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} fuelMap={fuelMap} />
 
-            <SensitivitySection curve={curve} vehicle={vehicle} baseline={baseline} />
+            <SensitivitySection curve={curve} vehicle={vehicle} baseline={baseline} fuelMap={fuelMap} />
 
             {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -971,16 +980,17 @@ function TireMuChart({ tire, fzStatic }: { tire: NonNullable<VehicleConfig["tire
 // through the FULL scoring chain and ranked by Δpoints — "what should the team
 // work on next", straight from the model. Collapsed; computes on first expand.
 function SensitivitySection({
-  curve, vehicle, baseline,
+  curve, vehicle, baseline, fuelMap,
 }: {
   curve: TorqueCurve;
   vehicle: VehicleConfig;
   baseline: ReferenceBaseline;
+  fuelMap?: EngineFuelMap;
 }) {
   const [open, setOpen] = useState(false);
   const result = useMemo(
-    () => (open && curve.length ? designSensitivities(curve, vehicle, baseline) : null),
-    [open, curve, vehicle, baseline],
+    () => (open && curve.length ? designSensitivities(curve, vehicle, baseline, { fuelMap }) : null),
+    [open, curve, vehicle, baseline, fuelMap],
   );
   const havePts = result != null && result.rows.some((r) => r.dPoints != null);
   const fmtD = (d: number, unit: string, invertGood = false) => {
@@ -1058,18 +1068,19 @@ function SensitivitySection({
 // first expand. The explicit `{ ...vehicle, finalDrive }` override happens
 // AFTER vehicleForCar identity resolution (don't fight the preset).
 function FdOptimizerSection({
-  curve, vehicle, baseline,
+  curve, vehicle, baseline, fuelMap,
 }: {
   curve: TorqueCurve;
   vehicle: VehicleConfig;
   baseline: ReferenceBaseline;
+  fuelMap?: EngineFuelMap;
 }) {
   const [open, setOpen] = useState(false);
 
   const rows = useMemo<FdSweepRow[] | null>(() => {
     if (!open || curve.length === 0) return null;
-    return sweepFinalDrive(curve, vehicle, baseline);
-  }, [open, curve, vehicle, baseline]);
+    return sweepFinalDrive(curve, vehicle, baseline, undefined, { fuelMap });
+  }, [open, curve, vehicle, baseline, fuelMap]);
 
   const scored = rows?.filter((r) => r.events.totalPoints != null) ?? [];
   const havePoints = scored.length > 0;

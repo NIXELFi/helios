@@ -26,6 +26,7 @@ import {
 } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
 import { tirMuLat, tirMuLong } from "./tir";
+import { fuelFlowKgS, type EngineFuelMap } from "./fuelMap";
 import { discretizeTrack, type Track } from "./track";
 
 /** What binds the car at a point on the lap. "power" = the engine's tractive
@@ -160,6 +161,12 @@ export interface LapOpts {
   /** Emit full per-distance channel traces (LapResult.channels). Off by default
    *  — the optimizer scores thousands of laps and must not allocate these. */
   channels?: boolean;
+  /** Physics-derived part-load fuel model (variable throttle) built from the
+   *  source sweep (fuelMapFromSweep). When present it REPLACES the lumped
+   *  thermalEff×BSFC fuel estimate with the Willans line measured by the 1D
+   *  solver — zero calibration constants. Absent (synthetic/dyno curves) →
+   *  the legacy thermal model. */
+  fuelMap?: EngineFuelMap;
 }
 
 // ---- Grip model -------------------------------------------------------------
@@ -472,11 +479,19 @@ export function simLap(
     const a = (vn * vn - vi * vi) / (2 * step);
     const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
     if (fEngine > 0) {
-      const segWork = fEngine * step; // propulsive work only (off-throttle = 0)
-      work += segWork;
-      // Fuel burned for THIS segment at the engine's efficiency for its current
-      // RPM — high-RPM (short-geared) running costs more fuel per joule.
-      fuelKg += segWork / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
+      work += fEngine * step; // propulsive work only (off-throttle = 0)
+    }
+    if (opts.fuelMap) {
+      // Variable throttle (Willans, solver-derived): engine BRAKE power
+      // demand = wheel power / driveline η, clamped to WOT inside the map.
+      // Off-throttle segments still pay the friction floor (no DFCO).
+      const pDemKw = fEngine > 0 ? (fEngine * vAvg) / (vehicle.drivetrainEff * 1000) : 0;
+      fuelKg += fuelFlowKgS(opts.fuelMap, rpm, pDemKw, lhv) * dt;
+    } else if (fEngine > 0) {
+      // Legacy lumped model: fuel for this segment at the engine's efficiency
+      // for its current RPM — high-RPM (short-geared) running costs more
+      // fuel per joule.
+      fuelKg += (fEngine * step) / (effPeak * bsfcEffMult(rpm, sweetRpm) * lhv);
     }
 
     sumRpmDt += rpm * dt;

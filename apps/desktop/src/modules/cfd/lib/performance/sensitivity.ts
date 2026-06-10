@@ -100,11 +100,12 @@ export function designSensitivities(
   curve: TorqueCurve,
   vehicle: VehicleConfig,
   baseline: ReferenceBaseline,
+  eventOpts: Parameters<typeof computeEvents>[3] = {},
 ): { base: EventScores; rows: SensitivityRow[] } {
-  const base = computeEvents(curve, vehicle, baseline);
+  const base = computeEvents(curve, vehicle, baseline, eventOpts);
   const levers = vehicle.roll ? [...LEVERS, ...ROLL_LEVERS] : LEVERS;
   const rows = levers.map((lever) => {
-    const ev = computeEvents(curve, lever.apply(vehicle), baseline);
+    const ev = computeEvents(curve, lever.apply(vehicle), baseline, eventOpts);
     const dPoints =
       ev.totalPoints != null && base.totalPoints != null
         ? ev.totalPoints - base.totalPoints

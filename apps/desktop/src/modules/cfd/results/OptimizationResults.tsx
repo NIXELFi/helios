@@ -34,6 +34,7 @@ import { TornadoChart, type TornadoBar } from "../components/charts/TornadoChart
 import { sensitivityTornado, refineBounds } from "../lib/analytics/optimizationStats";
 import {
   torqueCurveFromSweep,
+  fuelMapFromSweep,
   computeEvents,
   cachedTrialEvents,
   carKeyForConfig,
@@ -111,7 +112,7 @@ export function OptimizationResults({ study }: Props) {
         map.set(
           t.trialIdx,
           cachedTrialEvents(ctxKey, `${study.id}:${t.trialIdx}:${pts.length}`, () =>
-            computeEvents(torqueCurveFromSweep(pts), vehicle, baseline),
+            computeEvents(torqueCurveFromSweep(pts), vehicle, baseline, { fuelMap: fuelMapFromSweep(pts) ?? undefined }),
           ),
         );
       }

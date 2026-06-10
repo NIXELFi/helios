@@ -23,6 +23,7 @@ export {
 export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
 export { parseTirText, distillTir, tirMuLat, tirMuLong, type TirGrip } from "./tir";
 export { parseAeroMap, sampleAero, distillAero, type AeroMap, type AeroNominal } from "./aeroMap";
+export { fuelMapFromSweep, fuelFlowKgS, type EngineFuelMap } from "./fuelMap";
 export { loadTeamData, type TeamData } from "./teamData";
 export { designSensitivities, type SensitivityRow } from "./sensitivity";
 export { cachedTrialEvents } from "./eventsCache";

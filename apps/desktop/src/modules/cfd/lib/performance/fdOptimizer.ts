@@ -63,9 +63,10 @@ export function sweepFinalDrive(
   vehicle: VehicleConfig,
   baseline: ReferenceBaseline,
   options: FdOption[] = sprocketOptions(),
+  eventOpts: Parameters<typeof computeEvents>[3] = {},
 ): FdSweepRow[] {
   return options.map((opt) => ({
     ...opt,
-    events: computeEvents(curve, { ...vehicle, finalDrive: opt.fd }, baseline),
+    events: computeEvents(curve, { ...vehicle, finalDrive: opt.fd }, baseline, eventOpts),
   }));
 }
