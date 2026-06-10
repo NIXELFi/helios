@@ -250,7 +250,8 @@ describe("RowActions error surfacing (H2)", () => {
   });
 
   it("CancelButton confirms before undoing, then surfaces a release-lock failure via title", async () => {
-    render(wrap(mockClient({ rpcError: { message: "no active lock" } }), <CancelButton fileId={"f1" as any} />));
+    // latestSha present → a checked-in file → the undo-checkout flow.
+    render(wrap(mockClient({ rpcError: { message: "no active lock" } }), <CancelButton fileId={"f1" as any} latestSha="sha-x" />));
     // Click Cancel → opens the undo-checkout confirm (does NOT release yet).
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     // Confirm the destructive undo → now the release runs and fails.
@@ -259,6 +260,15 @@ describe("RowActions error surfacing (H2)", () => {
       const btn = screen.getByRole("button", { name: /cancel|retry/i });
       expect(btn.getAttribute("title")).toMatch(/no active lock|lock/i);
     });
+  });
+
+  it("CancelButton on a never-checked-in draft offers Discard draft instead of undo", async () => {
+    // No latestSha → draft: there is no version to restore, so undo-checkout
+    // becomes a confirmed discard (soft-delete; lock released server-side).
+    render(wrap(mockClient(), <CancelButton fileId={"f1" as any} />));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(await screen.findByRole("button", { name: /discard draft/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /discard & undo/i })).toBeNull();
   });
 
   it("every RowActions button has type='button'", () => {

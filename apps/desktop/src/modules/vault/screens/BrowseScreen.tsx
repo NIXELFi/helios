@@ -43,6 +43,8 @@ import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { UnmatchedFilesBanner } from "../components/UnmatchedFilesBanner";
+import { AutoAddBanner } from "../components/AutoAddBanner";
+import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { FileDetailPanel } from "./FileDetailPanel";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
@@ -197,6 +199,22 @@ export function BrowseScreen() {
         : [],
     [allFiles, localFiles, folders],
   );
+
+  // SW-PDM-style auto-vaulting of new local files (auto mode only): each
+  // becomes a private draft checked out to this user; others see it only
+  // after the first check-in.
+  const autoAdd = useAutoAddDrafts({
+    vaultId: vaultId ?? undefined,
+    enabled: autoSyncEnabled,
+    unmatched,
+    onAdded: () => {
+      refetchAllFiles();
+      refetchFolders();
+      refetchFiles();
+      refetchLocks();
+      rescan();
+    },
+  });
 
   // When the user has the vault root selected (selectedFolder === null) we
   // derive the file list from the vault-wide query instead of asking the
@@ -448,6 +466,19 @@ export function BrowseScreen() {
     const name = promptValue.trim();
     if (!name || !vaultId || !prompt) return;
     setPromptError(null);
+    // Friendly duplicate check BEFORE the RPC: the server's unique constraint
+    // still backstops races, but "a folder named X already exists here" beats
+    // a raw 23505 message (SW PDM tells you immediately).
+    const lower = name.toLowerCase();
+    const parentForDup = prompt.kind === "folder" ? (promptParent ?? selectedFolder) : selectedFolder;
+    const dup =
+      prompt.kind === "folder"
+        ? (folders ?? []).some((f) => f.parent_id === parentForDup && f.name.toLowerCase() === lower)
+        : (allFiles ?? []).some((f) => f.folder_id === parentForDup && f.name.toLowerCase() === lower);
+    if (dup) {
+      setPromptError(`A ${prompt.kind === "folder" ? "folder" : "file"} named "${name}" already exists here.`);
+      return;
+    }
     if (prompt.kind === "folder") {
       // A right-click "New folder…" sets promptParent to the clicked folder;
       // the toolbar button leaves it null → parent at the navigation selection.
@@ -523,17 +554,24 @@ export function BrowseScreen() {
 
   return (
     <div className="flex h-full flex-col">
-      <UnmatchedFilesBanner
-        vaultId={vaultId ?? undefined}
-        unmatched={unmatched}
-        onDone={() => {
-          refetchAllFiles();
-          refetchFolders();
-          refetchFiles();
-          refetchLocks();
-          rescan();
-        }}
-      />
+      {/* SW PDM parity: in auto mode, new local files vault themselves as
+          private checked-out drafts — no "add to vault" click. Manual mode
+          keeps the explicit banner. */}
+      {autoSyncEnabled ? (
+        <AutoAddBanner status={autoAdd} />
+      ) : (
+        <UnmatchedFilesBanner
+          vaultId={vaultId ?? undefined}
+          unmatched={unmatched}
+          onDone={() => {
+            refetchAllFiles();
+            refetchFolders();
+            refetchFiles();
+            refetchLocks();
+            rescan();
+          }}
+        />
+      )}
       <LocalDeleteBanner />
       <div className="flex min-h-0 flex-1">
       <div className="flex w-64 flex-col border-r border-helios-line bg-helios-base">

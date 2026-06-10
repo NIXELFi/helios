@@ -161,6 +161,14 @@ export async function downloadVersionOnce(
         // reconciliation / check-in) re-applies read-only after. Best-effort:
         // no-ops when the dest doesn't exist yet (first download).
         await setReadonly(destPath, false);
+        // Last-chance abort check: the temp write above is awaited IO, so a
+        // supersede/abort can land while it runs. Without this re-check the
+        // rename still commits a superseded pass's bytes over a path a newer
+        // pass (or a fresh check-out) now owns.
+        if (signal?.aborted) {
+          try { await remove(tmpPath); } catch { /* best-effort */ }
+          return { ok: false, error: "aborted" };
+        }
         await rename(tmpPath, destPath);
       } catch (writeErr) {
         try { await remove(tmpPath); } catch { /* best-effort; temp may not exist */ }
