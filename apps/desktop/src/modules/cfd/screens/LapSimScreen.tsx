@@ -725,21 +725,16 @@ function Cluster({
       {/* scale track + live band */}
       <path d={arc(0, maxRpm)} fill="none" stroke="#1B1D22" strokeWidth={13} strokeLinecap="round" />
       <path d={arc(redFrom, maxRpm)} fill="none" stroke="#FF525233" strokeWidth={13} strokeLinecap="round" />
+      {/* live band — butt cap so the leading edge is a clean straight cut
+          (the band edge IS the rpm indicator; no separate cursor blade) */}
       <path
         d={arc(0, Math.max(80, rpm))}
         fill="none"
         stroke="url(#swooshBand)"
         strokeWidth={9}
-        strokeLinecap="round"
+        strokeLinecap="butt"
         opacity={0.95}
       />
-      {/* rpm cursor blade riding the curve */}
-      {(() => {
-        const [bx1, by1] = pt(rpm, -9);
-        const [bx2, by2] = pt(rpm, 11);
-        return <line x1={bx1} y1={by1} x2={bx2} y2={by2} stroke="#FAFAFA" strokeWidth={2.5} strokeLinecap="round"
-          style={{ filter: "drop-shadow(0 0 3px #FFC627)" }} />;
-      })()}
       {/* ticks + numerals: minor 500, major 1000 (numerals like the bike: 1..14) */}
       {Array.from({ length: maxRpm / 500 + 1 }, (_, i) => {
         const r = i * 500;
@@ -772,36 +767,42 @@ function Cluster({
         style={atLimiter ? { filter: "drop-shadow(0 0 5px #FF5252)" } : undefined}>
         {atLimiter && <animate attributeName="opacity" values="1;0.2;1" dur="0.22s" repeatCount="indefinite" />}
       </circle>
-      {/* GEAR — left, under the rising scale */}
-      <text x={34} y={H - 58} fontSize={9} fill="#5A5F66" style={{ letterSpacing: 2 }}>
+      {/* GEAR — top-left corner (the scale starts low there, corner is free) */}
+      <text x={12} y={16} fontSize={9} fill="#5A5F66" style={{ letterSpacing: 2 }}>
         GEAR
       </text>
-      <text x={30} y={H - 14} fontSize={46} fontFamily="monospace" fontWeight={700}
+      <text x={10} y={56} fontSize={42} fontFamily="monospace" fontWeight={700}
         fill="#A5D6A7" style={{ textShadow: "0 0 12px #A5D6A766" }}>
         {gear || "N"}
       </text>
-      {/* SPEED — big digital under the flat of the curve */}
-      <text x={W - 130} y={H - 26} fontSize={52} fontFamily="monospace" fontWeight={700}
-        fill="#FAFAFA" textAnchor="middle" style={{ textShadow: "0 0 10px #FFFFFF22" }}>
-        {speedKph.toFixed(0)}
-      </text>
-      <text x={W - 130} y={H - 12} fontSize={9} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 2 }}>
-        km/h
-      </text>
-      {/* rpm digital + limit chip, tucked mid-left */}
-      <text x={120} y={H - 30} fontSize={15} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
+      {/* Right-side stack, centered under the flat of the curve:
+          speed → km/h → limit chip, one shared centerline. */}
+      {(() => {
+        const rcx = W - 132;
+        return (
+          <g>
+            <text x={rcx} y={H - 44} fontSize={48} fontFamily="monospace" fontWeight={700}
+              fill="#FAFAFA" textAnchor="middle" style={{ textShadow: "0 0 10px #FFFFFF22" }}>
+              {speedKph.toFixed(0)}
+            </text>
+            <text x={rcx} y={H - 30} fontSize={9} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 2 }}>
+              km/h
+            </text>
+            <rect x={rcx - 26} y={H - 24} width={52} height={16} rx={2}
+              fill={`${LIMIT_COLOR[limit]}14`} stroke={`${LIMIT_COLOR[limit]}66`} strokeWidth={1} />
+            <text x={rcx} y={H - 13} fontSize={8} fontFamily="monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
+              {limit.toUpperCase()}
+            </text>
+          </g>
+        );
+      })()}
+      {/* rpm digital, lower-left under the rising scale */}
+      <text x={120} y={H - 26} fontSize={15} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
         {rpm.toFixed(0)}
       </text>
-      <text x={120} y={H - 18} fontSize={7} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 1.5 }}>
+      <text x={120} y={H - 14} fontSize={7} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 1.5 }}>
         RPM
       </text>
-      <g>
-        <rect x={W - 56} y={H - 34} width={46} height={16} rx={2}
-          fill={`${LIMIT_COLOR[limit]}14`} stroke={`${LIMIT_COLOR[limit]}66`} strokeWidth={1} />
-        <text x={W - 33} y={H - 23} fontSize={8} fontFamily="monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
-          {limit.toUpperCase()}
-        </text>
-      </g>
     </svg>
   );
 }
