@@ -95,13 +95,18 @@ export function LinePlot({
         for (const x of xsForS) allXs.add(x);
       }
       const xUnion = Array.from(allXs).sort((a, b) => a - b);
-      const cols: number[][] = series.map((s) => {
+      // Gaps must be null (uPlot's missing-value sentinel), NOT NaN: with NaN,
+      // disjoint grids (e.g. comparing a sweep to an optimization best on an
+      // offset rpm grid) interleave so EVERY neighbor is a gap and uPlot draws
+      // no segments at all — a blank chart. null + spanGaps (set on the series
+      // below) connects each series across the other grids' points.
+      const cols: (number | null)[][] = series.map((s) => {
         const sx = s.xs ?? xs ?? [];
         const map = new Map<number, number>();
         for (let i = 0; i < sx.length; i++) map.set(sx[i] as number, s.y[i] as number);
-        return xUnion.map((x) => (map.has(x) ? (map.get(x) as number) : NaN));
+        return xUnion.map((x) => (map.has(x) ? (map.get(x) as number) : null));
       });
-      return [xUnion, ...cols];
+      return [xUnion, ...cols] as uPlot.AlignedData;
     }
     const xsShared = xs ?? [];
     return [xsShared, ...series.map((s) => s.y)];
@@ -158,6 +163,9 @@ export function LinePlot({
           stroke: s.color ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length],
           width: s.width ?? 1.5,
           points: { show: s.showPoints ?? (totalPts < 40 * series.length), size: 5 },
+          // Own-x series are padded onto the x union with null gaps — span them
+          // or the line breaks at every other grid's sample (see buildData).
+          ...(s.xs ? { spanGaps: true } : {}),
           scale: s.axis === "y2" ? "y2" : "y",
         })),
       ],
@@ -225,7 +233,14 @@ export function LinePlot({
           ))}
         </div>
       </div>
-      <div ref={plotHostRef} className="flex-1 min-h-0" />
+      {/* uPlot draws to canvas, which is invisible to assistive tech — name
+          the chart region so screen readers announce what the canvas shows. */}
+      <div
+        ref={plotHostRef}
+        role="img"
+        aria-label={`${title} chart: ${series.map((s) => s.label).join(", ")}`}
+        className="flex-1 min-h-0"
+      />
     </div>
   );
 }

@@ -31,6 +31,7 @@ import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
 import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
+import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -190,6 +191,7 @@ export function TaskDetailSheet() {
   const teamSubsystems = task
     ? subsystems.filter((s) => s.subteam_id === task.subteam_id)
     : [];
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
   // When the PRIMARY subteam changes (e.g. promoted via the chips), a previously
   // chosen subsystem may no longer belong to it — clear it, matching the old
@@ -347,14 +349,29 @@ export function TaskDetailSheet() {
             <Field label="Subsystem">
               <Select
                 value={task.subsystem_id ?? ""}
-                onChange={(v) => updateTask(task.id, { subsystem_id: v || null })}
-                disabled={isViewer || teamSubsystems.length === 0}
+                onChange={(v) => {
+                  if (v === "__new-subsystem__") {
+                    setQuickCreateOpen(true);
+                    return;
+                  }
+                  updateTask(task.id, { subsystem_id: v || null });
+                }}
+                disabled={isViewer}
                 ariaLabel="Subsystem"
                 options={[
                   { value: "", label: "—" },
                   ...teamSubsystems.map((s) => ({ value: s.id, label: s.name })),
+                  ...(isViewer ? [] : [{ value: "__new-subsystem__", label: "+ New subsystem…" }]),
                 ]}
               />
+              {quickCreateOpen && (
+                <SubsystemQuickCreate
+                  open
+                  subteamId={task.subteam_id}
+                  onClose={() => setQuickCreateOpen(false)}
+                  onCreated={(id) => updateTask(task.id, { subsystem_id: id })}
+                />
+              )}
             </Field>
           </div>
 

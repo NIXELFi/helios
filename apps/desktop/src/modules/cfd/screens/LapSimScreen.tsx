@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
+import { ReportButton } from "../components/ReportButton";
 import { LinePlot } from "../components/charts/LinePlot";
 import { ChannelTrackMap } from "../components/charts/ChannelTrackMap";
 import { GGDiagram, LIMIT_COLOR } from "../components/charts/GGDiagram";
@@ -231,6 +232,7 @@ export function LapSimScreen() {
             Export CSV
           </button>
         </div>
+              <ReportButton label="Full report (PDF)" />
       </header>
 
       {exportMsg && (

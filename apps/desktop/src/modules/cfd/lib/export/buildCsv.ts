@@ -246,3 +246,16 @@ export function buildTrialsTsv(study: OptimizationStudy): string {
   }
   return lines.join("\n");
 }
+
+/** TSV of the sensitivity tornado (Spearman ρ of each tunable vs the active
+ *  ranking dimension) — the on-screen chart, exportable for the design log. */
+export function buildSensitivityTsv(
+  bars: { label: string; value: number; n?: number }[],
+  metric: string,
+): string {
+  const lines = [`parameter\tspearman_rho\tn\tmetric`];
+  for (const b of bars) {
+    lines.push(`${b.label}\t${b.value.toFixed(4)}\t${b.n ?? ""}\t${metric}`);
+  }
+  return lines.join("\n");
+}

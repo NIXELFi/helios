@@ -13,11 +13,16 @@
 // Performance screen); since the backend sampler is space-filling, ranking by an
 // event metric picks the best sampled design for that event.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { useOptimizationLive, useElapsedSeconds } from "../state/useOptimizationLive";
 import { basename } from "../lib/cfdPath";
+import { studyName, sweepFromTrialName, refineName } from "../lib/studyName";
+import { getAutoRefine, setAutoRefine, improvedEnough } from "../lib/autoRefine";
+import { buildSensitivityTsv } from "../lib/export/buildCsv";
+import { StudyNameEditor } from "../components/StudyNameEditor";
+import { ReportButton } from "../components/ReportButton";
 import { objectiveUnit } from "../lib/metricMeta";
 import { exportActionsFor } from "../lib/export/exportStudy";
 import { buildTrialsTsv } from "../lib/export/buildCsv";
@@ -30,6 +35,7 @@ import { sensitivityTornado, refineBounds } from "../lib/analytics/optimizationS
 import {
   torqueCurveFromSweep,
   computeEvents,
+  cachedTrialEvents,
   carKeyForConfig,
   vehicleForCar,
   EMPTY_BASELINE,
@@ -72,7 +78,7 @@ function formatEta(seconds: number): string {
 
 export function OptimizationResults({ study }: Props) {
   const cfd = useCfd();
-  const { cancelStudy, bridge, startSweep, startOptimization } = cfd;
+  const { cancelStudy, bridge, startSweep, startOptimization, renameStudy } = cfd;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   // Trial whose recipe seeds the "run a sweep from this recipe" modal (null = closed).
   const [sweepSeedTrial, setSweepSeedTrial] = useState<OptimizationTrial | null>(null);
@@ -90,18 +96,49 @@ export function OptimizationResults({ study }: Props) {
   // Per-trial FSAE event scores (frontend; same computeEvents() lib as the
   // Performance screen). Computed for ALL done trials so BOTH the active-dimension
   // re-rank AND the multi-objective "best design per objective" panel can read it.
+  // Scores go through cachedTrialEvents (content-keyed, cross-render): trials are
+  // immutable once done, so state-identity churn — a live trial landing, a
+  // rehydrate, switching studies — only ever pays for trials not yet scored.
+  // Without this, every churn re-simmed the WHOLE study and froze the app.
   const eventsByTrial = useMemo(() => {
     const map = new Map<number, EventScores>();
     const vehicle = vehicleForCar(carKey, cfd.state?.vehicleConfig);
     const baseline = cfd.state?.referenceBaseline ?? EMPTY_BASELINE;
+    const ctxKey = `${JSON.stringify(vehicle)}|${JSON.stringify(baseline)}`;
     for (const t of study.trials) {
-      if (t.sweepPoints && t.sweepPoints.length > 0) {
-        map.set(t.trialIdx, computeEvents(torqueCurveFromSweep(t.sweepPoints), vehicle, baseline));
+      const pts = t.sweepPoints;
+      if (pts && pts.length > 0) {
+        map.set(
+          t.trialIdx,
+          cachedTrialEvents(ctxKey, `${study.id}:${t.trialIdx}:${pts.length}`, () =>
+            computeEvents(torqueCurveFromSweep(pts), vehicle, baseline),
+          ),
+        );
       }
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+  }, [study.id, study.trials, carKey, cfd.state?.vehicleConfig, cfd.state?.referenceBaseline]);
+
+  // Max Livengood-Wu knock integral per trial (over its RPM band). Roadmap #4:
+  // KI was computed but watch-only here, so high-CR trials could silently "win"
+  // with designs that would detonate. I > 1.0 = knock predicted.
+  const kiByTrial = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const t of study.trials) {
+      let max: number | null = null;
+      for (const p of t.sweepPoints ?? []) {
+        const ki = p.lastCycle.knockIntegral;
+        if (ki != null && (max == null || ki > max)) max = ki;
+      }
+      if (max != null) map.set(t.trialIdx, max);
+    }
+    return map;
+  }, [study.trials]);
+  const knockCount = useMemo(
+    () => [...kiByTrial.values()].filter((ki) => ki > 1).length,
+    [kiByTrial],
+  );
 
   // Best trial for EACH objective (total points + each event), so the speed ↔
   // efficiency trade-off is visible at a glance: the total-points winner is the
@@ -148,8 +185,84 @@ export function OptimizationResults({ study }: Props) {
   const live = useOptimizationLive(viewStudy);
   const elapsed = useElapsedSeconds(study);
 
+  // ---- Auto-refine loop (roadmap #8) ----------------------------------------
+  // One "Refine around #1" round is a single click; converging on an FSAE
+  // objective needs several. The loop state lives at module level (each round
+  // is a NEW study, which remounts this screen); this effect advances it when
+  // the awaited round finishes. `[ticker]` only forces a re-render on Stop.
+  const [, setArTick] = useState(0);
+  const autoRefine = getAutoRefine();
+  const arActive = autoRefine?.studyId === study.id;
+
+  /** Start one refine round around the current #1 (shared by the manual
+   *  button and the loop). Returns the new study's id. */
+  async function startRefineRound(): Promise<string | null> {
+    const best = live.ranked[0]?.trial;
+    if (!best) return null;
+    return startOptimization(study.configPath, {
+      ...study.params,
+      tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
+      seed: null,
+      rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
+    }, { name: refineName(study.configPath, best.trialIdx) });
+  }
+
+  useEffect(() => {
+    const ar = getAutoRefine();
+    if (!ar || ar.studyId !== study.id) return;
+    if (study.status === "error" || study.status === "cancelled") {
+      setAutoRefine(null);
+      setArTick((t) => t + 1);
+      return;
+    }
+    if (study.status !== "done") return;
+    const best = live.ranked[0]?.trial.objectiveValue;
+    const continueLoop =
+      best != null &&
+      ar.roundsLeft > 0 &&
+      improvedEnough(ar.lastBest, best, viewStudy.objectiveDirection);
+    if (!continueLoop) {
+      setAutoRefine(null);
+      setArTick((t) => t + 1);
+      return;
+    }
+    // Mark advancing BEFORE the async start so a re-run can't double-fire.
+    setAutoRefine({ ...ar, studyId: "<starting>" });
+    void startRefineRound().then((nextId) => {
+      if (nextId == null) {
+        setAutoRefine(null);
+        return;
+      }
+      setAutoRefine({
+        studyId: nextId,
+        roundsLeft: ar.roundsLeft - 1,
+        round: ar.round + 1,
+        totalRounds: ar.totalRounds,
+        lastBest: best!,
+      });
+    }).catch(() => setAutoRefine(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study.id, study.status, live.ranked, viewStudy.objectiveDirection]);
+
+  const [arRounds, setArRounds] = useState(3);
+
   const isRunning = study.status === "running";
   const showEta = isRunning && live.nDone >= 3 && live.eta != null;
+
+  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
+  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
+  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
+  // is "favorable" when raising the knob pushes the objective the better way.
+  const sensitivityBars: TornadoBar[] = useMemo(() => {
+    const maximize = viewStudy.objectiveDirection === "maximize";
+    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
+      label: e.path,
+      value: e.rho,
+      favorable: e.rho > 0 === maximize,
+      n: e.n,
+    }));
+  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
+
 
   // ---- Export menu items ---------------------------------------------------
   const exportItems: ExportMenuItem[] = useMemo(() => {
@@ -183,6 +296,15 @@ export function OptimizationResults({ study }: Props) {
       },
     });
     items.push({
+      id: "opt-copy-sensitivity",
+      label: "Copy sensitivity (TSV)",
+      run: async () => {
+        if (sensitivityBars.length === 0) return { ok: false, message: "No sensitivity data yet" };
+        await copyText(buildSensitivityTsv(sensitivityBars, dim.label));
+        return { ok: true, message: "Copied!" };
+      },
+    });
+    items.push({
       id: "opt-copy-recipe",
       label: "Copy best recipe",
       run: async () => {
@@ -198,7 +320,7 @@ export function OptimizationResults({ study }: Props) {
     });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [study, bridge, live.ranked]);
+  }, [study, bridge, live.ranked, sensitivityBars, dim.label]);
 
   // ---- Charts: convergence + value-vs-parameter (all in the active dim) -----
   const convergencePoints: ScatterPt[] = useMemo(
@@ -229,20 +351,6 @@ export function OptimizationResults({ study }: Props) {
         })),
     [live.done, live.rankByIdx, paramForScatter],
   );
-
-  // ---- Sensitivity tornado (Spearman ρ of each tunable vs the active dim) ---
-  // Mined from the SAME view-remapped trials the rest of the screen ranks by,
-  // so switching "Rank by" re-derives sensitivity in that dimension too. A bar
-  // is "favorable" when raising the knob pushes the objective the better way.
-  const sensitivityBars: TornadoBar[] = useMemo(() => {
-    const maximize = viewStudy.objectiveDirection === "maximize";
-    return sensitivityTornado(viewStudy.trials, study.parameterPaths).map((e) => ({
-      label: e.path,
-      value: e.rho,
-      favorable: e.rho > 0 === maximize,
-      n: e.n,
-    }));
-  }, [viewStudy.trials, viewStudy.objectiveDirection, study.parameterPaths]);
 
   // ---- Parallel-coords plot ------------------------------------------------
   const axes = useMemo(() => {
@@ -290,6 +398,7 @@ export function OptimizationResults({ study }: Props) {
       if (sortKey === "rank") return Number.isFinite(rankOf(t)) ? rankOf(t) : null;
       if (sortKey === "obj") return t.objectiveValue;
       if (sortKey === "wall") return t.wallTimeS;
+      if (sortKey === "ki") return kiByTrial.get(t.trialIdx) ?? null;
       if (sortKey === "trial") return t.trialIdx;
       return t.parameterValues[sortKey] ?? null;
     };
@@ -305,7 +414,7 @@ export function OptimizationResults({ study }: Props) {
       return sortDir === "asc" ? d : -d;
     };
     return arr.sort(cmp);
-  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir]);
+  }, [viewStudy.trials, live.rankByIdx, sortKey, sortDir, kiByTrial]);
 
   function onSort(key: SortKey) {
     if (key === sortKey) {
@@ -336,10 +445,16 @@ export function OptimizationResults({ study }: Props) {
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
-        <div className="min-w-0 flex-1">
+        <div className="group min-w-0 flex-1">
           <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Optimization</div>
           <p className="text-[10px] text-[#5A5F66]">
-            <span className="text-[#D8DCE2]">{basename(study.configPath)}</span>
+            <StudyNameEditor
+              display={studyName(study)}
+              customName={study.name}
+              onRename={(name) => renameStudy(study.id, name)}
+              className="text-[#D8DCE2]"
+            />
+            {study.name && <span className="ml-1">({basename(study.configPath)})</span>}
             {" · "}
             {live.nDone}/{study.params.nTrials} trials done
             {live.ranked[0] && (
@@ -352,9 +467,18 @@ export function OptimizationResults({ study }: Props) {
             {showEta && (
               <span className="ml-2 text-[#9097A0]">{formatEta(live.eta as number)}</span>
             )}
+            {knockCount > 0 && (
+              <span
+                className="ml-2 text-[#FF5252]"
+                title="Trials whose max Livengood–Wu knock integral exceeds 1.0 — flagged in the table's KI column"
+              >
+                ⚠ {knockCount} knock
+              </span>
+            )}
             <span className="ml-2">{elapsed.toFixed(1)} s</span>
           </p>
         </div>
+        <ReportButton defaultOnly={[study.id]} />
         <ExportMenu items={exportItems} />
         {isRunning && (
           <button
@@ -409,7 +533,17 @@ export function OptimizationResults({ study }: Props) {
                     >
                       #{r.rank}
                     </span>
-                    <span className="text-[9px] text-[#5A5F66]">trial #{t.trialIdx}</span>
+                    <span className="text-[9px] text-[#5A5F66]">
+                      {(kiByTrial.get(t.trialIdx) ?? 0) > 1 && (
+                        <span
+                          className="mr-1 text-[#FF5252]"
+                          title={`Knock predicted (KI ${kiByTrial.get(t.trialIdx)!.toFixed(2)} > 1.0)`}
+                        >
+                          ⚠ knock
+                        </span>
+                      )}
+                      trial #{t.trialIdx}
+                    </span>
                   </div>
                   <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
                     {dim.fmt(t.objectiveValue as number)}
@@ -592,12 +726,56 @@ export function OptimizationResults({ study }: Props) {
                   tunables: refineBounds(study.params.tunables, best.parameterValues, 0.3),
                   seed: null,
                   rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
-                });
+                }, { name: refineName(study.configPath, best.trialIdx) });
               }}
               className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
             >
               ⟲ Refine around #1
             </button>
+            {/* Auto-refine: run several rounds hands-off, stop on convergence. */}
+            {arActive || autoRefine?.studyId === "<starting>" ? (
+              <span role="status" className="flex items-center gap-2 rounded-sm border border-[#FFC627]/40 bg-[#FFC627]/5 px-2 py-1 text-[10px] text-[#FFC627]">
+                auto-refine round {autoRefine!.round}/{autoRefine!.totalRounds}
+                {study.status === "running" ? " — running…" : " — evaluating…"}
+                <span className="text-[#9097A0]">stops when gain &lt; 0.5%</span>
+                <button
+                  type="button"
+                  onClick={() => { setAutoRefine(null); setArTick((t) => t + 1); }}
+                  title="Stop the loop after this round (the running job itself continues)"
+                  className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FF5252] hover:text-[#FF5252]"
+                >
+                  Stop loop
+                </button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!live.ranked[0] || study.status === "running"}
+                  title="Run several refine rounds automatically, re-narrowing around each round's #1; stops early when the best improves by less than 0.5%."
+                  onClick={() => {
+                    const best = live.ranked[0]?.trial.objectiveValue;
+                    if (best == null) return;
+                    setAutoRefine({ studyId: "<starting>", roundsLeft: arRounds - 1, round: 1, totalRounds: arRounds, lastBest: best });
+                    void startRefineRound().then((nextId) => {
+                      if (nextId == null) { setAutoRefine(null); return; }
+                      setAutoRefine({ studyId: nextId, roundsLeft: arRounds - 1, round: 1, totalRounds: arRounds, lastBest: best });
+                    }).catch(() => setAutoRefine(null));
+                  }}
+                  className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+                >
+                  ▶ Auto-refine
+                </button>
+                <select
+                  aria-label="Auto-refine rounds"
+                  value={arRounds}
+                  onChange={(e) => setArRounds(Number(e.target.value))}
+                  className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+                >
+                  {[2, 3, 5].map((n) => <option key={n} value={n}>{n} rounds</option>)}
+                </select>
+              </span>
+            )}
           </div>
 
           {/* Sortable ranked trial table. */}
@@ -611,6 +789,7 @@ export function OptimizationResults({ study }: Props) {
                   <SortTh label={dim.label} k="obj" align="right" onSort={onSort} arrow={arrow} />
                   <th className="text-right">Δ best</th>
                   <SortTh label="wall (s)" k="wall" align="right" onSort={onSort} arrow={arrow} />
+                  <SortTh label="KI max" k="ki" align="right" onSort={onSort} arrow={arrow} />
                   {study.parameterPaths.map((p) => (
                     <SortTh key={p} label={p} k={p} onSort={onSort} arrow={arrow} />
                   ))}
@@ -631,8 +810,17 @@ export function OptimizationResults({ study }: Props) {
                     <tr
                       key={t.trialIdx}
                       onClick={() => setSelectedIdx(t.trialIdx)}
+                      // Rows select the inspected trial — make that reachable
+                      // and operable by keyboard, not just pointer.
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedIdx(t.trialIdx);
+                        }
+                      }}
                       className={
-                        "cursor-pointer border-t border-[#16171B] " +
+                        "cursor-pointer border-t border-[#16171B] focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[#FFC627]/60 " +
                         (isSelected ? "bg-[#16171B] " : "hover:bg-[#16171B]/50 ") +
                         baseCls
                       }
@@ -661,6 +849,19 @@ export function OptimizationResults({ study }: Props) {
                       </td>
                       <td className="px-2 py-0.5 text-right">
                         {t.wallTimeS !== null ? t.wallTimeS.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-2 py-0.5 text-right">
+                        {(() => {
+                          const ki = kiByTrial.get(t.trialIdx);
+                          if (ki == null) return "—";
+                          return ki > 1 ? (
+                            <span className="text-[#FF5252]" title="Knock predicted (Livengood–Wu integral > 1.0) — this design would detonate as simulated">
+                              ⚠ {ki.toFixed(2)}
+                            </span>
+                          ) : (
+                            ki.toFixed(2)
+                          );
+                        })()}
                       </td>
                       {study.parameterPaths.map((p) => (
                         <td key={p} className="px-2 py-0.5">
@@ -710,7 +911,11 @@ export function OptimizationResults({ study }: Props) {
           )}
           onCancel={() => setSweepSeedTrial(null)}
           onStart={async (params) => {
-            await startSweep(study.configPath, params);
+            // Provenance name: "sdm26 — opt #12 recipe", not a third study
+            // that just says "sdm26.json".
+            await startSweep(study.configPath, params, {
+              name: sweepFromTrialName(study.configPath, sweepSeedTrial.trialIdx),
+            });
             setSweepSeedTrial(null);
           }}
         />

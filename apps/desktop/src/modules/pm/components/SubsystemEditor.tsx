@@ -120,13 +120,16 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
     resetForm();
   }
 
+  // Two-step inline confirm: window.confirm is a NO-OP in the Tauri webview
+  // (always falsy), so the old guard made delete silently impossible in-app.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   function handleDelete(ss: Subsystem) {
-    const n = taskCountBySubsystem.get(ss.id) ?? 0;
-    const warn =
-      n > 0
-        ? `\n\n${n} task${n === 1 ? "" : "s"} will be unassigned from this subsystem (not deleted).`
-        : "";
-    if (!window.confirm(`Remove subsystem "${ss.name}"?${warn}`)) return;
+    if (confirmDeleteId !== ss.id) {
+      setConfirmDeleteId(ss.id);
+      return; // first click arms; second click (now labeled with the impact) deletes
+    }
+    setConfirmDeleteId(null);
     removeSubsystem(ss.id);
     const next = { ...sharing };
     delete next[ss.id];
@@ -282,9 +285,23 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
                             <button type="button" onClick={() => startEdit(ss)} aria-label={`Edit ${ss.name}`} className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-asu-gold">
                               <IconPencil size={13} strokeWidth={1.5} />
                             </button>
-                            <button type="button" onClick={() => handleDelete(ss)} aria-label={`Remove ${ss.name}`} className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-red-400">
-                              <IconTrash size={13} strokeWidth={1.5} />
-                            </button>
+                            {confirmDeleteId === ss.id ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(ss)}
+                                onBlur={() => setConfirmDeleteId(null)}
+                                aria-label={`Confirm removing ${ss.name}`}
+                                className="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-400"
+                              >
+                                {(taskCountBySubsystem.get(ss.id) ?? 0) > 0
+                                  ? `Unassign ${taskCountBySubsystem.get(ss.id)} task${(taskCountBySubsystem.get(ss.id) ?? 0) === 1 ? "" : "s"} & remove?`
+                                  : "Remove?"}
+                              </button>
+                            ) : (
+                              <button type="button" onClick={() => handleDelete(ss)} aria-label={`Remove ${ss.name}`} className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-red-400">
+                                <IconTrash size={13} strokeWidth={1.5} />
+                              </button>
+                            )}
                           </span>
                         </li>
                       );

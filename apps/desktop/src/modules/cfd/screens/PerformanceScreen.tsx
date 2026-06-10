@@ -29,12 +29,17 @@ import {
   REFERENCE_2026,
   trackLength,
   TIGHTNESS_COLOR,
+  sweepFinalDrive,
+  comboLabel,
+  type FdSweepRow,
+  type TorqueCurve,
   type VehicleConfig,
   type ReferenceBaseline,
   type EventScores,
   type LapTelemetry,
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
+import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
 
@@ -148,6 +153,7 @@ export function PerformanceScreen() {
         >
           Export report
         </button>
+        <ReportButton label="Full report (PDF)" />
       </header>
 
       {reportMsg && (
@@ -184,6 +190,8 @@ export function PerformanceScreen() {
             <EventsSection events={events} baseline={baseline} onBaseline={setReferenceBaseline} />
 
             {events && <TelemetrySection events={events} />}
+
+            <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} />
 
             {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -643,3 +651,139 @@ function NumField({
     </label>
   );
 }
+
+// ---- Final-drive (sprocket) optimizer ---------------------------------------
+// Roadmap #1: gap attribution showed FD dominates endurance while a sprocket
+// swap is the cheapest hardware change. Sweeps every real tooth combination
+// through computeEvents (interactive post vCorner-memo) and plots total FSAE
+// points vs FD, annotated in teeth. Collapsed by default — the sweep runs on
+// first expand. The explicit `{ ...vehicle, finalDrive }` override happens
+// AFTER vehicleForCar identity resolution (don't fight the preset).
+function FdOptimizerSection({
+  curve, vehicle, baseline,
+}: {
+  curve: TorqueCurve;
+  vehicle: VehicleConfig;
+  baseline: ReferenceBaseline;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const rows = useMemo<FdSweepRow[] | null>(() => {
+    if (!open || curve.length === 0) return null;
+    return sweepFinalDrive(curve, vehicle, baseline);
+  }, [open, curve, vehicle, baseline]);
+
+  const scored = rows?.filter((r) => r.events.totalPoints != null) ?? [];
+  const havePoints = scored.length > 0;
+  // Rank by total points when scorable, else by endurance lap time.
+  const ranked = rows
+    ? [...rows].sort((a, b) =>
+        havePoints
+          ? (b.events.totalPoints ?? -Infinity) - (a.events.totalPoints ?? -Infinity)
+          : a.events.endurance.lapTimeS - b.events.endurance.lapTimeS)
+    : [];
+  const best = ranked[0] ?? null;
+  // The row the car is on today (nearest swept ratio to the vehicle's FD).
+  const current = rows
+    ? rows.reduce((c, r) => (Math.abs(r.fd - vehicle.finalDrive) < Math.abs(c.fd - vehicle.finalDrive) ? r : c))
+    : null;
+
+  return (
+    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Final-drive optimizer</span>
+        <span className="text-[9px] text-[#5A5F66]">
+          sprocket sweep · current FD {vehicle.finalDrive.toFixed(2)} · same scoring chain as the events table
+        </span>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {open ? "Hide" : "Sweep sprockets"}
+        </button>
+      </div>
+
+      {open && rows && (
+        <div className="flex flex-col gap-2 p-2">
+          {havePoints ? (
+            <LinePlot
+              title="total FSAE points vs final drive"
+              xs={scored.map((r) => r.fd)}
+              series={[
+                { label: "total pts", y: scored.map((r) => r.events.totalPoints as number), color: "#FFC627", showPoints: true },
+                ...(current && current.events.totalPoints != null ? [{
+                  label: `current (${vehicle.finalDrive.toFixed(2)})`,
+                  xs: [current.fd], y: [current.events.totalPoints], color: "#4FC3F7", showPoints: true,
+                } satisfies LineSeries] : []),
+              ]}
+              xLabel="final drive (rear/front)" yLabel="pts" height={260}
+            />
+          ) : (
+            <p className="px-2 py-3 text-[10px] text-[#5A5F66]">
+              No reference baseline → no points to rank. Set one in the events table above;
+              the table below ranks by endurance lap time meanwhile.
+            </p>
+          )}
+
+          <table className="w-full text-left font-mono text-[10px]">
+            <caption className="sr-only">Top final-drive options ranked by total FSAE points</caption>
+            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+              <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
+                <th>FD</th>
+                <th>teeth (rear/front)</th>
+                <th className="text-right">accel (s)</th>
+                <th className="text-right">AX (s)</th>
+                <th className="text-right">EN (s/lap)</th>
+                <th className="text-right">eff pts</th>
+                <th className="text-right">total pts</th>
+                <th className="text-right">Δ vs current</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.slice(0, 8).map((r) => {
+                const isCurrent = current != null && r.fd === current.fd;
+                const isBest = best != null && r.fd === best.fd;
+                const dTotal =
+                  r.events.totalPoints != null && current?.events.totalPoints != null
+                    ? r.events.totalPoints - current.events.totalPoints
+                    : null;
+                return (
+                  <tr
+                    key={r.fd}
+                    className={
+                      "border-t border-[#16171B] " +
+                      (isBest ? "text-[#FFC627]" : isCurrent ? "text-[#4FC3F7]" : "text-[#9097A0]")
+                    }
+                  >
+                    <td className="px-2 py-1 tabular-nums">
+                      {r.fd.toFixed(3)}
+                      {isCurrent && <span className="ml-1 text-[8px] uppercase">current</span>}
+                      {isBest && <span className="ml-1 text-[8px] uppercase">best</span>}
+                    </td>
+                    <td className="px-2 py-1">{r.combos.map(comboLabel).join(" = ")}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.events.accel.timeS.toFixed(3)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.events.autocross.lapTimeS.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.events.endurance.lapTimeS.toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.events.efficiency.points?.toFixed(1) ?? "—"}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.events.totalPoints?.toFixed(1) ?? "—"}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {dTotal == null ? "—" : `${dTotal >= 0 ? "+" : ""}${dTotal.toFixed(1)}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="px-2 pb-1 text-[9px] leading-tight text-[#5A5F66]">
+            Ratios cover 520-chain sprockets {FD_RANGE_NOTE}. Identical ratios list every tooth pair that
+            produces them. Scores use the vehicle, baseline, and fuel exactly as configured above.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const FD_RANGE_NOTE = "(front 12–16T, rear 36–56T, FD 2.4–4.4)";

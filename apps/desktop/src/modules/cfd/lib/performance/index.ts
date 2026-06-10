@@ -18,6 +18,7 @@ export {
   topSpeedMps,
 } from "./vehicle";
 export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
+export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,
   torqueAtRpm,
@@ -112,3 +113,11 @@ export {
   type XY,
 } from "./trackGeometry";
 export { AUTOCROSS_2026_VISUAL, ENDURANCE_2026_VISUAL } from "./tracksVisual2026";
+export {
+  sprocketOptions,
+  sweepFinalDrive,
+  comboLabel,
+  type FdOption,
+  type FdSweepRow,
+  type SprocketCombo,
+} from "./fdOptimizer";

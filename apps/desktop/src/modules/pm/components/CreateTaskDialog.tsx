@@ -35,6 +35,7 @@ import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { TaskLookup } from "@pm/components/TaskLookup";
 import { usePmStore } from "@pm/lib/pmStore";
+import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 
 const createTaskInput = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
@@ -203,6 +204,9 @@ export function CreateTaskDialog({
     () => subsystems.filter((s) => s.subteam_id === watchedSubteamId),
     [subsystems, watchedSubteamId],
   );
+  // "+ New subsystem…" in the picker (quick-create, scoped to the chosen
+  // subteam). The full editor remains on the dashboard; this is the inline path.
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -515,16 +519,35 @@ export function CreateTaskDialog({
               control={control}
               name="subsystem_id"
               render={({ field }) => (
-                <Select
-                  value={field.value ?? ""}
-                  onChange={(v) => field.onChange(v === "" ? null : v)}
-                  disabled={teamSubsystems.length === 0}
-                  ariaLabel="Subsystem"
-                  options={[
-                    { value: "", label: "—" },
-                    ...teamSubsystems.map((s) => ({ value: s.id, label: s.name })),
-                  ]}
-                />
+                <>
+                  <Select
+                    value={field.value ?? ""}
+                    onChange={(v) => {
+                      if (v === "__new-subsystem__") {
+                        setQuickCreateOpen(true);
+                        return; // keep the current value until the dialog resolves
+                      }
+                      field.onChange(v === "" ? null : v);
+                    }}
+                    disabled={!watchedSubteamId}
+                    ariaLabel="Subsystem"
+                    options={[
+                      { value: "", label: "—" },
+                      ...teamSubsystems.map((s) => ({ value: s.id, label: s.name })),
+                      ...(watchedSubteamId
+                        ? [{ value: "__new-subsystem__", label: "+ New subsystem…" }]
+                        : []),
+                    ]}
+                  />
+                  {quickCreateOpen && watchedSubteamId && (
+                    <SubsystemQuickCreate
+                      open
+                      subteamId={watchedSubteamId}
+                      onClose={() => setQuickCreateOpen(false)}
+                      onCreated={(id) => field.onChange(id)}
+                    />
+                  )}
+                </>
               )}
             />
           </Field>

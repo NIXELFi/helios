@@ -28,16 +28,16 @@ export interface DesignReportInput {
 }
 
 // Light palette for the report (distinct from the app's dark chart palette).
-const INK = "#1A1D21";
-const MUTED = "#5A636E";
-const ACCENT = "#B8860B"; // dark goldenrod — readable on white
-const GRID = "#D8DCE2";
+export const INK = "#1A1D21";
+export const MUTED = "#5A636E";
+export const ACCENT = "#B8860B"; // dark goldenrod — readable on white
+export const GRID = "#D8DCE2";
 const SERIES = { envelope: "#1A1D21", traction: "#C0392B", resistance: "#7F8C8D" };
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 }
-function n(v: number | null | undefined, d = 1): string {
+export function n(v: number | null | undefined, d = 1): string {
   return v == null || !Number.isFinite(v) ? "—" : v.toFixed(d);
 }
 
@@ -97,7 +97,7 @@ function svgLineChart(opts: {
 /** Light-theme TRUE-layout plan view of a visual track → SVG string. Draws the
  *  traced ribbon (left/right edges) with the centerline colored by local corner
  *  tightness. Equal-aspect fit so the shape isn't distorted. */
-function svgVisualTrack(track: VisualTrack, width: number, height: number): string {
+export function svgVisualTrack(track: VisualTrack, width: number, height: number): string {
   const pad = 12;
   const { minX, minY, maxX, maxY } = boundsOf([...track.leftEdge, ...track.rightEdge]);
   const spanX = Math.max(1e-6, maxX - minX);
@@ -136,7 +136,7 @@ function svgVisualTrack(track: VisualTrack, width: number, height: number): stri
   </svg>`;
 }
 
-function eventsTable(ev: EventScores): string {
+export function eventsTable(ev: EventScores): string {
   const row = (name: string, metric: string, pts: number | null, max: string) =>
     `<tr><td>${esc(name)}</td><td class="muted">${esc(metric)}</td><td class="r">${n(pts)} <span class="muted">/ ${max}</span></td></tr>`;
   return `<table class="data"><thead><tr><th>Event</th><th>Sim metric</th><th class="r">Proj. points</th></tr></thead><tbody>

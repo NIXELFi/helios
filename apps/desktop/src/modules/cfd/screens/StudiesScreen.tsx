@@ -5,6 +5,9 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { OptimizationParamsModal } from "../components/optimization/OptimizationParamsModal";
 import { basename } from "../lib/cfdPath";
+import { studyName } from "../lib/studyName";
+import { StudyNameEditor } from "../components/StudyNameEditor";
+import { ReportButton } from "../components/ReportButton";
 import { parseRpmList } from "../lib/rpmList";
 import { rankTrials } from "../lib/analytics/optimizationStats";
 import { summarizeSweep } from "../lib/analytics/sweepStats";
@@ -65,7 +68,7 @@ function bestPeakText(study: Study): string {
 }
 
 export function StudiesScreen() {
-  const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, setActiveStudy, importStudies, navigateTo } = useCfd();
+  const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, renameStudy, setActiveStudy, importStudies, navigateTo } = useCfd();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
@@ -180,6 +183,7 @@ export function StudiesScreen() {
         >
           {importBusy ? "Import (JSON)…" : "Import (JSON)"}
         </button>
+        <ReportButton label="Full report (PDF)" />
         <button
           type="button"
           className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
@@ -214,7 +218,7 @@ export function StudiesScreen() {
             <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
               <tr className="border-b border-[#2A2C32] [&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
                 <th>Kind</th>
-                <th>Config</th>
+                <th>Name</th>
                 <th>Params</th>
                 <th>Status</th>
                 <th>Best/Peak</th>
@@ -232,6 +236,7 @@ export function StudiesScreen() {
                 onCancel={() => cancelStudy(s.id)}
                 onDelete={() => deleteStudy(s.id)}
                 onView={() => { setActiveStudy(s.id); navigateTo("results"); }}
+                onRename={(name) => renameStudy(s.id, name)}
               />)}
             </tbody>
           </table>
@@ -321,7 +326,7 @@ export function StudiesScreen() {
 }
 
 function StudyRow({
-  study, bridge, isActive, onCancel, onDelete, onView,
+  study, bridge, isActive, onCancel, onDelete, onView, onRename,
 }: {
   study: Study;
   bridge: CfdBridge;
@@ -329,6 +334,7 @@ function StudyRow({
   onCancel: () => void;
   onDelete: () => void;
   onView: () => void;
+  onRename: (name: string | null) => void;
 }) {
   // Every study is exportable, regardless of status — a running study yields a
   // partial snapshot (the export builders never block or warn on partial data).
@@ -360,7 +366,17 @@ function StudyRow({
   return (
     <tr className={"border-t border-[#16171B] " + (isActive ? "bg-[#16171B] text-[#D8DCE2]" : "text-[#9097A0] hover:bg-[#16171B]/50")}>
       <td className="px-3 py-1.5 uppercase tracking-wider text-[10px] text-[#D8DCE2]">{kindLabel}</td>
-      <td className="px-3 py-1.5 text-[#9097A0]" title={study.configPath}>{basename(study.configPath)}</td>
+      <td className="group px-3 py-1.5 text-[#9097A0]" title={study.configPath}>
+        <StudyNameEditor
+          display={studyName(study)}
+          customName={study.name}
+          onRename={onRename}
+          className="max-w-[220px]"
+        />
+        {study.name && (
+          <span className="ml-1.5 text-[9px] text-[#5A5F66]">{basename(study.configPath)}</span>
+        )}
+      </td>
       <td className="px-3 py-1.5 text-[#9097A0]">{paramsText}</td>
       <td className="px-3 py-1.5">
         <StatusBadge status={study.status} />

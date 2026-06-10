@@ -233,6 +233,10 @@ interface StudyBase {
   kind: StudyKind;
   status: StudyStatus;
   configPath: string;
+  /** User-given display name. Absent → screens fall back to the config-file
+   *  basename (studyName()). Optional so pre-existing persisted/exported
+   *  studies load unchanged. */
+  name?: string;
   startedAt: number;
   finishedAt?: number;
   error?: string;
@@ -254,6 +258,10 @@ export interface SweepStudy extends StudyBase {
   inFlight?: Record<string, { idx: number; rpm: number; cycles: CycleStats[] }>;
   summary?: SweepDoneSummary;
   compareWithStudyId?: string;
+  /** Imported dyno reference (rpm + power/torque points) overlaid on the
+   *  curves with an on-screen RMSE/bias readout. Persisted with the study so
+   *  the validation survives reloads and rides along in exports. */
+  dynoRef?: import("../lib/import/importDyno").DynoRef;
 }
 
 // ---- Optimization study state ----

@@ -150,6 +150,22 @@ export function useAutoSync(input: {
   const downloadRunRef = useRef(download.run);
   useEffect(() => { downloadRunRef.current = download.run; }, [download.run]);
 
+  // LIVE view of the files the current user has locked. The pass partitions
+  // tasks against a myLocks snapshot taken at pass start; if the user checks a
+  // file out while the pass is in flight, the snapshot is stale and an
+  // already-queued download could land stale bytes (and a read-only freeze) on
+  // a file they now hold. Workers re-check THIS ref right before downloading
+  // and before freezing, closing that window (the supersede/abort path remains
+  // as the second line of defense).
+  const myLocksLiveRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    myLocksLiveRef.current = new Set(
+      currentUserId
+        ? (locks ?? []).filter((l) => l.user_id === currentUserId).map((l) => l.file_id)
+        : [],
+    );
+  }, [locks, currentUserId]);
+
   const run = useCallback(async () => {
     if (!enabled || !vaultRoot || !files || !localFiles) return;
     // Vault-switch race guard: on an active-vault change, vaultRoot updates
@@ -210,7 +226,7 @@ export function useAutoSync(input: {
     // different folders can share a name. `relPath`/`vaultId` ride along so the
     // worker can record a successful download in the sync ledger (T6).
     type Task = {
-      id: number; sha: string; dest: string; name: string; size: number;
+      id: number; fileId: string; sha: string; dest: string; name: string; size: number;
       relPath: string; vaultId: string | null;
     };
     const tasks: Task[] = [];
@@ -265,6 +281,7 @@ export function useAutoSync(input: {
       }
       tasks.push({
         id: ++taskIdSeq.current,
+        fileId: file.id,
         sha: ver.sha256,
         dest: localDestPath(vaultRoot, file.folder_id, file.name, folders),
         name: file.name,
@@ -301,6 +318,11 @@ export function useAutoSync(input: {
         const i = cursor++;
         if (i >= tasks.length) return;
         const t = tasks[i]!;
+        // The user checked this file out AFTER the pass partitioned → the
+        // queued download would clobber their fresh copy with this pass's
+        // (possibly stale) idea of latest, then freeze it. Skip it; the lock
+        // change has already re-triggered a pass that will reconcile.
+        if (myLocksLiveRef.current.has(t.fileId)) { skipped++; continue; }
         activeTaskIds.set(t.id, t.name);
         guardedSet((s) => ({ ...s, activeFiles: [...s.activeFiles, t.name] }));
         const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal);
@@ -310,7 +332,7 @@ export function useAutoSync(input: {
         // safe and closes the window where a fresh download is briefly writable
         // before the post-pass reconciliation loop runs. Best-effort: a chmod
         // failure must never flip ok/failed or abort the pass.
-        if (ok) {
+        if (ok && !myLocksLiveRef.current.has(t.fileId)) {
           try {
             await setReadonly(t.dest, true);
           } catch {

@@ -9,6 +9,8 @@ import { PipeProfileView } from "./PipeProfileView";
 import { WaveViewerModal } from "./wave-viewer";
 import { useCfd } from "../state/CfdContext";
 import { basename } from "../lib/cfdPath";
+import { studyName } from "../lib/studyName";
+import { StudyNameEditor } from "../components/StudyNameEditor";
 import { imepDeltaSeries, covLastN, maxKnockIntegral } from "../lib/analytics/cycleStats";
 import type { ExportAction } from "../lib/export/exportStudy";
 import { exportActionsFor } from "../lib/export/exportStudy";
@@ -41,7 +43,7 @@ function actionToMenuItem(action: ExportAction): ExportMenuItem {
 }
 
 export function SingleRpmResults({ study }: Props) {
-  const { cancelStudy, bridge } = useCfd();
+  const { cancelStudy, renameStudy, bridge } = useCfd();
   const [showPv, setShowPv] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [showWaveViewer, setShowWaveViewer] = useState(false);
@@ -110,7 +112,7 @@ export function SingleRpmResults({ study }: Props) {
             <StatusBadge status={study.status} />
           </div>
           <div className="mt-0.5 truncate text-[10px] text-[#5A5F66]" title={study.configPath}>
-            {basename(study.configPath)} · {study.cycles.length}/{study.params.nCyclesMax} cycles · {elapsed}s
+            <StudyNameEditor display={studyName(study)} customName={study.name} onRename={(name) => renameStudy(study.id, name)} className="text-[#9097A0]" />{study.name && <span className="ml-1">({basename(study.configPath)})</span>}{" "}· {study.cycles.length}/{study.params.nCyclesMax} cycles · {elapsed}s
             {study.summary && study.summary.convergedCycle >= 0 && (
               <> · converged @ cycle {study.summary.convergedCycle}</>
             )}

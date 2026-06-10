@@ -4,6 +4,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
+import { useDeleteFile } from "../data/useDeleteFile";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
 import { useRecordProperties } from "../data/useRecordProperties";
@@ -189,8 +190,8 @@ export function CheckInButton({
       // — must never block or fail the check-in the user just completed).
       const refName = localFile?.basename ?? fileName ?? "";
       if (pathRef.current && refName) {
-        void recordRefs.run(result.id, pathRef.current, refName);
-        void recordProperties.run(result.id, pathRef.current, refName);
+        void recordRefs.run(result.id, pathRef.current, refName, vaultId);
+        void recordProperties.run(result.id, pathRef.current, refName, true);
       }
       onDone?.();
     }
@@ -545,11 +546,34 @@ export function CancelButton({
 }: ActionProps) {
   const releaseLock = useReleaseLock();
   const download = useDownloadVersion();
+  const deleteFile = useDeleteFile();
   const [confirming, setConfirming] = useState(false);
+  // The lock release and the restore are two steps; if the restore fails the
+  // lock is ALREADY released — "Retry" must only re-run the restore, never
+  // call releaseLock again (it would error and mask the real state).
+  const [released, setReleased] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  // Never-checked-in draft: there is no vaulted version to restore. Undo
+  // check-out then means "discard the draft" (SW PDM: an added-but-never-
+  // checked-in file doesn't exist for anyone else) — soft-delete the row
+  // (which releases the lock server-side); the deleted-file reaper removes
+  // the local copy.
+  const isDraft = !latestSha;
+
+  async function doDiscardDraft() {
+    const ok = await deleteFile.run(fileId);
+    if (!ok) return;
+    onDone?.();
+  }
 
   async function doRelease() {
-    const ok = await releaseLock.run(fileId);
-    if (!ok) return;
+    setRestoreError(null);
+    let ok = released;
+    if (!ok) {
+      ok = await releaseLock.run(fileId);
+      if (!ok) return;
+      setReleased(true);
+    }
     // Undo check-out (real-vault): discard local edits + restore the latest
     // vaulted version, then read-only. Done here so it works in manual mode
     // too (not only via auto-sync). The download clears read-only before the
@@ -562,19 +586,25 @@ export function CancelButton({
       // held-back rule protecting it. A read-only-but-dirty file would look like
       // a clean stale copy and get clobbered on the next pass.
       const restored = await download.run(latestSha, dest);
-      if (restored) {
-        await setReadonly(dest, true); flipSwReadonly(dest, true);
-        // Undo-checkout restored the latest vaulted version locally → record it
-        // (T6): the local copy now matches latestSha and is ledger-tracked.
-        recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+      if (!restored) {
+        // The lock IS released but the latest version was NOT restored — the
+        // local edit is still on disk (writable + held back). Surface it and
+        // offer Retry (restore only) instead of silently signalling success.
+        setRestoreError(download.error?.message ?? "could not restore the latest version");
+        return;
       }
+      await setReadonly(dest, true); flipSwReadonly(dest, true);
+      // Undo-checkout restored the latest vaulted version locally → record it
+      // (T6): the local copy now matches latestSha and is ledger-tracked.
+      recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
     }
     onDone?.();
   }
 
   // Surface the release error like GetLatestButton — a silent no-op left the
-  // user wondering whether the lock was actually released.
-  const err = releaseLock.error?.message ?? null;
+  // user wondering whether the lock was actually released. A failed RESTORE
+  // (lock already released) and a failed draft-discard surface the same way.
+  const err = releaseLock.error?.message ?? deleteFile.error?.message ?? restoreError;
   return (
     <>
       <button
@@ -584,8 +614,14 @@ export function CancelButton({
         // edits. Confirm before doing it (in-app dialog — window.confirm is a
         // no-op in the Tauri webview).
         onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-        disabled={releaseLock.loading}
-        title={err ? `Cancel check-out failed: ${err}` : "Undo check-out: discard local changes and restore the latest version"}
+        disabled={releaseLock.loading || deleteFile.loading || download.loading}
+        title={
+          err
+            ? `Cancel check-out failed: ${err}`
+            : isDraft
+              ? "Discard draft: remove this never-checked-in file from the vault (and your local copy)"
+              : "Undo check-out: discard local changes and restore the latest version"
+        }
         className={
           "ml-1 rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
@@ -594,16 +630,20 @@ export function CancelButton({
             : "bg-helios-line text-white hover:brightness-110")
         }
       >
-        {releaseLock.loading ? "…" : err ? "Retry" : "Cancel"}
+        {releaseLock.loading || deleteFile.loading || download.loading ? "…" : err ? "Retry" : "Cancel"}
       </button>
       {confirming && (
         <ConfirmDialog
-          title="Undo check-out?"
-          body="This releases your lock and restores the latest vaulted version. Any local changes you made to this file will be discarded."
-          confirmLabel="Discard & undo"
+          title={isDraft ? "Discard draft?" : "Undo check-out?"}
+          body={
+            isDraft
+              ? "This file has never been checked in. Discarding removes it from the vault and deletes your local copy — there is no version to restore."
+              : "This releases your lock and restores the latest vaulted version. Any local changes you made to this file will be discarded."
+          }
+          confirmLabel={isDraft ? "Discard draft" : "Discard & undo"}
           confirmTone="danger"
           cancelLabel="Keep editing"
-          onConfirm={() => { void doRelease(); }}
+          onConfirm={() => { void (isDraft ? doDiscardDraft() : doRelease()); }}
           onClose={() => setConfirming(false)}
         />
       )}

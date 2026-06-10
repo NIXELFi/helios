@@ -8,7 +8,11 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 interface FakePlot {
-  opts: { scales?: { x?: { range?: [number, number] } } };
+  opts: {
+    scales?: { x?: { range?: [number, number] } };
+    series?: { spanGaps?: boolean }[];
+  };
+  data: (number | null)[][];
   setDataCalls: number;
 }
 const instances: FakePlot[] = [];
@@ -16,9 +20,11 @@ const instances: FakePlot[] = [];
 vi.mock("uplot", () => ({
   default: class {
     opts: unknown;
+    data: unknown;
     setDataCalls = 0;
-    constructor(opts: unknown) {
+    constructor(opts: unknown, data: unknown) {
       this.opts = opts;
+      this.data = data;
       instances.push(this as unknown as FakePlot);
     }
     setData() {
@@ -60,6 +66,30 @@ describe("LinePlot x-axis range", () => {
     // ...and back to the short track updates again (the reported bug).
     rerender(<LinePlot title="t" xs={dist(795)} series={[{ label: "speed", y: ys }]} />);
     expect(instances[instances.length - 1]!.opts.scales!.x!.range).toEqual([0, 795]);
+  });
+
+  it("draws own-x series with disjoint grids (Compare overlay): null gaps + spanGaps", () => {
+    // A sweep on a 500-rpm grid vs an optimization best on an offset grid: the
+    // x union interleaves, so every other sample is a gap for each series. With
+    // NaN gaps and spanGaps unset, uPlot draws NO line segments at all (the
+    // reported blank Compare chart). Gaps must be null and the series must span.
+    render(
+      <LinePlot
+        title="t"
+        series={[
+          { label: "sweep", xs: [4000, 5000, 6000], y: [50, 60, 55], showPoints: false },
+          { label: "opt", xs: [4500, 5500, 6500], y: [52, 62, 57], showPoints: false },
+        ]}
+      />,
+    );
+    const p = instances[instances.length - 1]!;
+    const [xu, y1, y2] = p.data;
+    expect(xu).toEqual([4000, 4500, 5000, 5500, 6000, 6500]);
+    expect(y1).toEqual([50, null, 60, null, 55, null]);
+    expect(y2).toEqual([null, 52, null, 62, null, 57]);
+    // series[0] is uPlot's x slot; data series follow.
+    expect(p.opts.series![1]!.spanGaps).toBe(true);
+    expect(p.opts.series![2]!.spanGaps).toBe(true);
   });
 
   it("does NOT rebuild when data changes within the same extent (setData path)", () => {

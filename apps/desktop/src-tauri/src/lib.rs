@@ -94,9 +94,14 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     // Common path: window exists, emit directly to it (window-
                     // scoped, not app.emit which broadcasts to every window).
+                    // show() first: the window may be HIDDEN (closed-to-tray /
+                    // --hidden autostart), and focus/unminimize on a hidden
+                    // window is a no-op — the relaunch would appear to do
+                    // nothing.
                     let _ = window.emit("helios://open-files", &helios_paths);
-                    let _ = window.set_focus();
+                    let _ = window.show();
                     let _ = window.unminimize();
+                    let _ = window.set_focus();
                 } else if let Some(state) = app.try_state::<PendingOpenFiles>() {
                     // Edge case: a 2nd launch arrived before this 1st instance
                     // finished booting. Queue the paths into PendingOpenFiles
@@ -107,11 +112,12 @@ pub fn run() {
                         .unwrap_or_else(|e| e.into_inner())
                         .extend(helios_paths);
                 }
-            } else if let Some(window) = app.get_webview_window("main") {
-                // No .helios paths in argv — just bring the existing window
-                // forward (the user clicked the app icon while it was running).
-                let _ = window.set_focus();
-                let _ = window.unminimize();
+            } else {
+                // No .helios paths in argv — the user launched Helios (Start
+                // menu / Explorer) while it was already running in the tray.
+                // Bring the window back: show + unminimize + focus, same as
+                // the tray's "Open" action (show_main).
+                show_main(app);
             }
         }))
         .manage(pending)
@@ -222,6 +228,15 @@ pub fn run() {
             cfd::commands::cfd_data_usage_bytes,
             cfd::commands::cfd_clear_data,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Helios");
+        .build(tauri::generate_context!())
+        .expect("error while building Helios")
+        .run(|_app, _event| {
+            // macOS counterpart of the Windows single-instance relaunch: a
+            // Dock-icon click while the window is hidden-to-tray fires Reopen
+            // (no second process), and without this the click does nothing.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                show_main(_app);
+            }
+        });
 }

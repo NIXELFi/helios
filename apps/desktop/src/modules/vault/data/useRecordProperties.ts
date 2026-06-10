@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSupabaseClient } from "@helios/auth";
+import { notifyVaultWarning } from "./vault-warning-events";
 import type { SwProperty, VersionId } from "./types";
 
 // File types whose custom properties we read for the data card.
@@ -23,7 +24,16 @@ function isSwFile(name: string): boolean {
 export function useRecordProperties() {
   const client = useSupabaseClient();
   const run = useCallback(
-    async (versionId: VersionId, localPath: string, fileName: string): Promise<SwProperty[] | null> => {
+    async (
+      versionId: VersionId,
+      localPath: string,
+      fileName: string,
+      // Check-in passes true: a parse failure there means the data card was
+      // NOT captured for the new version and the user should know. The lazy
+      // backfill path (viewing an old version) stays silent — a warning per
+      // panel-open would be noise.
+      surfaceErrors = false,
+    ): Promise<SwProperty[] | null> => {
       if (!isSwFile(fileName)) return null;
       try {
         const props = await invoke<SwProperty[]>("parse_sw_properties", { path: localPath });
@@ -36,6 +46,12 @@ export function useRecordProperties() {
         return props ?? null;
       } catch (e) {
         console.warn(`[vault] reading properties for ${fileName} failed (non-fatal):`, e);
+        if (surfaceErrors) {
+          notifyVaultWarning({
+            title: `${fileName}: data card not captured`,
+            detail: `Couldn't read the file's custom properties (${e instanceof Error ? e.message : String(e)}). The version checked in fine; its data card is empty.`,
+          });
+        }
         return null;
       }
     },

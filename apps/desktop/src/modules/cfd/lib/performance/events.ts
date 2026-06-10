@@ -31,14 +31,17 @@ const EFF_TIME_CAP = 1.45;
 // Autocross runs flat-out; endurance does NOT. Over a 22 km run on degrading
 // tires, cone-bounded and managed for reliability + fuel, the field runs well
 // off the absolute limit. Calibrated to Mines (the closest CBR600RR/E85
-// comparison): their CLEAN-lap pace from the real 2026 lap breakdown
-// (151.8, 147.3, 147.6, 146.6, 145.7, 153.3, 148.2, 147.4, 148.2, 173.9 —
-// first lap is warmup, last is the in-lap; laps 2–9 average 148.0 s) and
-// 0.9786 kg CO₂/lap. The previous 159.6 s anchor was run-total/laps, poisoned
-// by the 173.9 out-lap (per Nick 2026-06-09).
+// comparison) at their RUN-AVERAGE pace, 159.6 s/lap, and 0.9786 kg CO₂/lap.
+//
+// Why run-average and not the 148.0 s clean-lap average: the scoring baselines
+// (REFERENCE_2026.enduranceTMin = 142.085 s, the efficiency EF anchors) are
+// official CORRECTED-TOTAL/laps numbers — in/out laps included. A model lap
+// scored against them must be in the same convention, or every design gets
+// ~+55 endurance pts of free pace and the whole field looks beatable (the
+// clean-lap anchor briefly shipped on 2026-06-09 and put SDM26 in P1).
 
 /** Endurance race-pace fraction of the absolute limit (see LapOpts.pace). */
-export const ENDURANCE_PACE = 0.7625;
+export const ENDURANCE_PACE = 0.694;
 /** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
  *  corner radius vs the traced centerline. Calibrated so the autocross lap hits
  *  SDM26's real 42.9 s at a REALISTIC tire μ (~1.5) instead of an inflated one —
@@ -51,8 +54,10 @@ export const LINE_FACTOR = 1.39;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
- *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map. */
-export const ENDURANCE_THERMAL_EFF = 0.15;
+ *  lower than this peak. Calibrated to the Mines fuel anchor with the BSFC map
+ *  (re-solved when ENDURANCE_PACE moved to run-average — slower laps do less
+ *  drag work, so holding 0.9786 kg CO₂/lap needs a lower efficiency). */
+export const ENDURANCE_THERMAL_EFF = 0.14;
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never
