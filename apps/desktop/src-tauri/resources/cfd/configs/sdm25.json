@@ -179,7 +179,7 @@
         "combustion_duration": 50.0,
         "spark_advance": 25.0,
         "ignition_delay": 7.0,
-        "combustion_efficiency": 0.96,
+        "combustion_efficiency": 0.94,
         "q_lhv": 44000000.0,
         "afr_stoich": 14.7,
         "afr_target": 13.1
@@ -214,6 +214,12 @@
         "restrictor_cd_mach_k": 0.1,
         "restrictor_loss_from_diffuser_geometry": true,
         "intake_junction_borda_carnot": true,
-        "fmep_c": 0.00075
+        "fmep_c": 0.00075,
+        "limiter": 1,
+        "cfl": 0.5,
+        "intake_lift_flat_top_ramp": 0.25,
+        "exhaust_lift_flat_top_ramp": 0.25,
+        "intake_valve_re_correction_enabled": true,
+        "exhaust_collector_reflection_coef": 0.15
     }
 }

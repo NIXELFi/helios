@@ -410,6 +410,45 @@ impl Default for SDM26Config {
 }
 
 impl SDM26Config {
+    /// Dyno-calibrated configuration (finding 0028, 2026-06-10).
+    ///
+    /// `default()` is frozen as the bit-for-bit Python-parity baseline; this
+    /// constructor layers on the validated physics that minimizes banded
+    /// power RMSE against BOTH real team dynos (C10 anti-overfit guard):
+    /// the Option-B knob set (finding 0021), van Leer + CFL 0.5 numerics,
+    /// flat-top cam lift with low-Re valve Cd (finding 0015), collector
+    /// open-end reflection (finding 0007), and eta_comb 0.94 for the
+    /// rich-of-stoich AFR 13.1 operating point.
+    ///
+    /// Wheel-power RMSE vs team dyno, WOT 6-13.5k band:
+    /// SDM26 5.80 (legacy) -> 2.56 kW; SDM25 6.54 -> 4.54 kW.
+    pub fn calibrated() -> Self {
+        Self {
+            // Option B (finding 0021)
+            intake_junction_borda_carnot: true,
+            intake_junction_loss_coef: 1.0,
+            restrictor_loss_from_diffuser_geometry: true,
+            restrictor_cd_mach_k: 0.10,
+            spark_advance_rpm_slope_deg_per_krpm: 1.5,
+            duration_rpm_exp: 0.4,
+            fmep_c: 0.00075,
+            // Numerics fidelity (finding 0028)
+            limiter: crate::solver::muscl::LIMITER_VAN_LEER,
+            cfl: 0.5,
+            // Valve physics (finding 0015, on by default per 0028)
+            intake_lift_flat_top_ramp: 0.25,
+            exhaust_lift_flat_top_ramp: 0.25,
+            intake_valve_re_correction_enabled: true,
+            // Exhaust open-end reflection (finding 0007, tuned in 0028)
+            exhaust_collector_reflection_coef: 0.15,
+            // Combustion efficiency at AFR 13.1 (finding 0028 bias trim)
+            eta_comb: 0.94,
+            ..Self::default()
+        }
+    }
+}
+
+impl SDM26Config {
     fn runner_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.runner_lengths.as_ref().map(|v| v[i]).unwrap_or(self.runner_length);
         let d_in = self.runner_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.runner_diameter_in);

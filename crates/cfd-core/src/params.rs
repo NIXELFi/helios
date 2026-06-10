@@ -214,7 +214,10 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("ignition_delay", Scalar, 1, "deg", cfg.ignition_delay, 0.0, 20.0, "Combustion"),
         m("eta_comb", Scalar, 1, "-", cfg.eta_comb, 0.85, 1.00, "Combustion"),
         m("q_lhv", Scalar, 1, "J/kg", cfg.q_lhv, 40.0e6, 48.0e6, "Combustion"),
-        m("afr_target", Scalar, 1, "-", cfg.afr_target, 11.5, 15.0, "Combustion"),
+        // Floor 10.5 (was 11.5): the physics audit showed peak power sits at
+        // or below 11.5 AFR, so the old floor clipped the optimum out of the
+        // search space (physics_synthesis 2026-05-22, calibration concern #2).
+        m("afr_target", Scalar, 1, "-", cfg.afr_target, 10.5, 15.0, "Combustion"),
         m("afr_stoich", Scalar, 1, "-", cfg.afr_stoich, 6.0, 15.0, "Combustion"),
         m("t_wall_cylinder", Scalar, 1, "K", cfg.t_wall_cylinder, 350.0, 550.0, "Combustion"),
         m("woschni_c1_gas_exchange", Scalar, 1, "-", cfg.woschni_c1_gas_exchange, 1.0, 10.0, "Combustion"),
@@ -234,7 +237,10 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("intake_valve_diameter", Scalar, 1, "m", cfg.intake_valve_diameter, 0.020, 0.040, "Valves"),
         m("intake_valve_max_lift", Scalar, 1, "m", cfg.intake_valve_max_lift, 0.005, 0.014, "Valves"),
         m("intake_valve_open_angle", Scalar, 1, "deg", cfg.intake_valve_open_angle, 300.0, 380.0, "Valves"),
-        m("intake_valve_close_angle", Scalar, 1, "deg", cfg.intake_valve_close_angle, 540.0, 620.0, "Valves"),
+        // Ceiling 645 (was 620): high-RPM designs want IVC well past 620° to
+        // exploit ram charging; the old cap bound the 12k+ optimum exactly at
+        // the schema edge (physics_synthesis 2026-05-22, concern #3).
+        m("intake_valve_close_angle", Scalar, 1, "deg", cfg.intake_valve_close_angle, 540.0, 645.0, "Valves"),
         m("intake_valve_seat_angle", Scalar, 1, "deg", cfg.intake_valve_seat_angle, 30.0, 60.0, "Valves"),
         // 0015 — low-Re intake Cd correction (Heywood §6.2)
         m("intake_valve_re_correction_enabled", Scalar, 1, "bool",

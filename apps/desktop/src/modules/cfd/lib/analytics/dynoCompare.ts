@@ -57,3 +57,30 @@ export function compareDyno(
   if (n === 0) return null;
   return { n, rmseKw: Math.sqrt(sumSq / n), biasKw: sum / n, rpmMin, rpmMax };
 }
+
+/** The calibration bands from physics finding 0028 — the same slices the
+ *  solver's dyno-RMSE recalibration was scored on, so on-screen agreement is
+ *  directly comparable to the documented calibration numbers. */
+export const DYNO_BANDS = [
+  { key: "wot", label: "WOT 6k+", lo: 6000, hi: Infinity },
+  { key: "peak", label: "peak 7–11.5k", lo: 7000, hi: 11500 },
+  { key: "high", label: "high 10.5k+", lo: 10500, hi: Infinity },
+] as const;
+
+export interface BandComparison {
+  key: string;
+  label: string;
+  cmp: DynoComparison | null;
+}
+
+/** Per-band sim-vs-dyno agreement over the finding-0028 calibration bands. */
+export function compareDynoBanded(
+  sim: { rpm: number; powerKw: number }[],
+  dyno: DynoPoint[],
+): BandComparison[] {
+  return DYNO_BANDS.map((b) => ({
+    key: b.key,
+    label: b.label,
+    cmp: compareDyno(sim, dyno.filter((d) => d.rpm >= b.lo && d.rpm <= b.hi)),
+  }));
+}

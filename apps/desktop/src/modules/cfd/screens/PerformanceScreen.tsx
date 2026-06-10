@@ -16,6 +16,7 @@ import {
   vehiclePresetForKey,
   vehicleForCar,
   torqueCurveFromSweep,
+  torqueCurveFromDyno,
   peakTorque,
   topSpeedMps,
   tractiveMap,
@@ -39,6 +40,7 @@ import {
   type LapTelemetry,
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
+import { compareDynoBanded } from "../lib/analytics/dynoCompare";
 import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
@@ -65,10 +67,36 @@ export function PerformanceScreen() {
   // known car — SDM25 is always 281 kg / 3.5 FD, SDM26 267 kg / 3.0 FD — so it
   // can't be thrown off by stale persisted state. User tuning (grip/aero) is kept.
   const vehicle = vehicleForCar(carKey, state.vehicleConfig);
-  const curve = useMemo(
+  const simCurve = useMemo(
     () => (selected ? torqueCurveFromSweep(selected.points) : []),
     [selected],
   );
+
+  // Measured engine option: when the selected study has an imported dyno
+  // reference attached, the lap sims / events can run on the MEASURED curve
+  // instead of the simulated one — ground truth for as-built scoring. The
+  // dyno measures wheel torque, so the conversion divides out driveline loss
+  // (torqueCurveFromDyno) before the tractive chain multiplies it back in.
+  const study = selected ? state.studies[selected.id] : undefined;
+  const dynoRef = study && "dynoRef" in study ? study.dynoRef : undefined;
+  const dynoCurve = useMemo(
+    () => (dynoRef ? torqueCurveFromDyno(dynoRef.points, vehicle.drivetrainEff) : []),
+    [dynoRef, vehicle.drivetrainEff],
+  );
+  const [engineSource, setEngineSource] = useState<"sim" | "dyno">("sim");
+  const usingDyno = engineSource === "dyno" && dynoCurve.length >= 2;
+  const curve = usingDyno ? dynoCurve : simCurve;
+
+  // Model-accuracy strip: banded sim-vs-dyno agreement (wheel power, the
+  // finding-0028 calibration bands) whenever a dyno reference is attached.
+  const accuracy = useMemo(() => {
+    if (!dynoRef || !selected) return null;
+    const sim = [...selected.points]
+      .sort((a, b) => a.rpm - b.rpm)
+      .map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.wheelPowerKW }));
+    const bands = compareDynoBanded(sim, dynoRef.points);
+    return bands.some((b) => b.cmp != null) ? bands : null;
+  }, [dynoRef, selected]);
 
   const tractive = useMemo(
     () => (curve.length ? tractiveMap(curve, vehicle) : null),
@@ -137,6 +165,31 @@ export function PerformanceScreen() {
             ))}
           </select>
         </label>
+        {dynoCurve.length >= 2 && (
+          <div
+            role="group"
+            aria-label="Engine curve source"
+            className="flex overflow-hidden rounded-sm border border-[#2A2C32] text-[10px] uppercase tracking-wider"
+            title="Run the vehicle model on the simulated curve or on the measured dyno curve attached to this study"
+          >
+            {(["sim", "dyno"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={engineSource === k}
+                onClick={() => setEngineSource(k)}
+                className={
+                  "px-2 py-1 " +
+                  (engineSource === k
+                    ? "bg-[#FFC627] text-[#0E0E10]"
+                    : "text-[#9097A0] hover:text-[#FFC627]")
+                }
+              >
+                {k === "sim" ? "Simulated" : "Measured dyno"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setEditorOpen((v) => !v)}
@@ -159,6 +212,34 @@ export function PerformanceScreen() {
       {reportMsg && (
         <div role="status" className="flex-shrink-0 border-b border-[#FFC627]/40 bg-[#16171B] px-3 py-1 text-[10px] text-[#D8DCE2]">
           {reportMsg}
+        </div>
+      )}
+
+      {/* Model-accuracy strip — banded wheel-power agreement vs the attached
+          dyno (the finding-0028 calibration bands), so the trust level of the
+          numbers below is visible where decisions are made. */}
+      {accuracy && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[#2A2C32] bg-[#0B0B0D] px-3 py-1.5 text-[10px]">
+          <span className="uppercase tracking-wider text-[#5A5F66]">
+            model vs dyno{dynoRef ? ` (${dynoRef.label})` : ""}
+          </span>
+          {accuracy.map((b) =>
+            b.cmp ? (
+              <span
+                key={b.key}
+                className="rounded-sm border border-[#CE93D8]/40 px-1.5 py-[1px] font-mono tabular-nums text-[#CE93D8]"
+                title={`Wheel power, sim − dyno, ${b.cmp.n} pts. Positive bias = sim over-predicts.`}
+              >
+                {b.label}: RMSE {b.cmp.rmseKw.toFixed(2)} kW · bias {b.cmp.biasKw >= 0 ? "+" : ""}
+                {b.cmp.biasKw.toFixed(2)}
+              </span>
+            ) : null,
+          )}
+          {usingDyno && (
+            <span className="ml-auto rounded-sm border border-[#FFC627]/50 px-1.5 py-[1px] uppercase tracking-wider text-[#FFC627]">
+              scoring on measured curve
+            </span>
+          )}
         </div>
       )}
 

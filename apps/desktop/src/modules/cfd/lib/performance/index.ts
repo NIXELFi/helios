@@ -21,6 +21,7 @@ export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
 export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,
+  torqueCurveFromDyno,
   torqueAtRpm,
   peakTorque,
   type TorqueCurve,

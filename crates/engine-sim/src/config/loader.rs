@@ -231,6 +231,23 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
         if let Some(v) = opt_f64(phys, "fmep_a") { cfg.fmep_a = v; }
         if let Some(v) = opt_f64(phys, "fmep_b") { cfg.fmep_b = v; }
         if let Some(v) = opt_f64(phys, "fmep_c") { cfg.fmep_c = v; }
+        // Finding 0028: dyno-RMSE recalibration. Numerics fidelity (van Leer
+        // limiter + CFL 0.5 cut the MUSCL dissipation that was damping the
+        // intake/exhaust acoustics), real cam lift shape (flat-top ramp),
+        // low-Re valve Cd, and the collector open-end reflection.
+        if let Some(v) = phys.get("limiter").and_then(|x| x.as_i64()) { cfg.limiter = v as i32; }
+        if let Some(v) = opt_f64(phys, "cfl") { cfg.cfl = v; }
+        if let Some(v) = opt_f64(phys, "intake_lift_flat_top_ramp") { cfg.intake_lift_flat_top_ramp = v; }
+        if let Some(v) = opt_f64(phys, "exhaust_lift_flat_top_ramp") { cfg.exhaust_lift_flat_top_ramp = v; }
+        if let Some(v) = opt_bool(phys, "intake_valve_re_correction_enabled") {
+            cfg.intake_valve_re_correction_enabled = v;
+        }
+        if let Some(v) = opt_f64(phys, "intake_valve_re_cd_min") { cfg.intake_valve_re_cd_min = v; }
+        if let Some(v) = opt_f64(phys, "intake_valve_re_crit") { cfg.intake_valve_re_crit = v; }
+        if let Some(v) = opt_f64(phys, "exhaust_collector_reflection_coef") {
+            cfg.exhaust_collector_reflection_coef = v;
+        }
+        if let Some(v) = opt_bool(phys, "afr_eta_enabled") { cfg.afr_eta_enabled = v; }
     }
 
     Ok(cfg)

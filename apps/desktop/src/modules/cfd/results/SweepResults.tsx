@@ -116,13 +116,15 @@ export function SweepResults({ study }: Props) {
   const summary = useMemo(() => summarizeSweep(points), [points]);
 
   // Dyno reference overlay: imported CSV points + on-screen RMSE/bias vs the
-  // sim's brake power, recomputed whenever either side changes (accuracy on
-  // screen, not in docs). Power/torque derive from each other when one is
-  // absent (P = tau*omega).
+  // sim's WHEEL power — a chassis dyno measures downstream of the driveline,
+  // so comparing it against brake (crank) power overstated the sim by the
+  // drivetrain loss (~15%). Same wheel-vs-wheel convention as the
+  // physics_findings dyno calibration. Power/torque derive from each other
+  // when one is absent (P = tau*omega).
   const dyno = study.dynoRef ?? null;
   const dynoCmp = useMemo(() => {
     if (!dyno) return null;
-    const sim = points.map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.brakePowerKW }));
+    const sim = points.map((p) => ({ rpm: p.rpm, powerKw: p.lastCycle.wheelPowerKW }));
     return compareDyno(sim, dyno.points);
   }, [dyno, points]);
   const dynoPowerSeries = useMemo(() => {
@@ -294,7 +296,7 @@ export function SweepResults({ study }: Props) {
             {dynoCmp ? (
               <span
                 className="rounded-sm border border-[#CE93D8]/40 px-1.5 py-[1px] tabular-nums"
-                title="Brake power, sim − dyno, over the overlapping RPM band. Positive bias = the sim over-predicts."
+                title="Wheel power, sim − dyno, over the overlapping RPM band. Positive bias = the sim over-predicts."
               >
                 RMSE {dynoCmp.rmseKw.toFixed(2)} kW · bias {dynoCmp.biasKw >= 0 ? "+" : ""}
                 {dynoCmp.biasKw.toFixed(2)} kW · {dynoCmp.n} pts {fmtRpm(dynoCmp.rpmMin)}–{fmtRpm(dynoCmp.rpmMax)}
