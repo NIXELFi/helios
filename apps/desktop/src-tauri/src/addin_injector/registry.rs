@@ -99,11 +99,18 @@ pub fn register_hklm_list_elevated() -> Result<(), String> {
         .map_err(|e| format!("spawn elevation: {e}"))?;
     let _ = std::fs::remove_file(&path);
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err("elevation was declined or the registry import failed".into())
+    if !status.success() {
+        return Err("elevation was declined or the registry import failed".into());
     }
+    // reg.exe exiting 0 doesn't guarantee the key landed (policy software can
+    // swallow the write, and Start-Process success only proves the process
+    // ran). Verify before reporting success — callers latch a one-shot
+    // "attempted" flag on Ok, and latching it on a phantom success would leave
+    // the add-in undiscoverable with no retry.
+    if !hklm_list_entry_present() {
+        return Err("registry import reported success but the HKLM entry is missing — retry from Settings".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
