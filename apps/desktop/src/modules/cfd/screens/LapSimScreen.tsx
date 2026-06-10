@@ -5,12 +5,13 @@
 // breakdown (where the ENGINE is the binding constraint), A/B comparison with
 // a cumulative delta-time trace, and a MoTeC-style CSV export for hand-off.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
 import { ReportButton } from "../components/ReportButton";
 import { LinePlot } from "../components/charts/LinePlot";
 import { ChannelTrackMap } from "../components/charts/ChannelTrackMap";
+import { MiniHistogram, type HistSeries } from "../components/charts/MiniHistogram";
 import { GGDiagram, LIMIT_COLOR } from "../components/charts/GGDiagram";
 import { sourcesFrom, type CurveSource } from "../lib/curveSources";
 import { rampColor, rampColors } from "../lib/colorScale";
@@ -309,9 +310,18 @@ export function LapSimScreen() {
                     )}
                   </div>
                 </div>
-                {mapData && <ChannelTrackMap track={visual} fracs={mapData.fracs} colors={mapData.colors} height={330} />}
+                {mapData && (
+                  <LapPlayer
+                    runA={runA}
+                    runB={runB}
+                    visual={visual}
+                    fracs={mapData.fracs}
+                    colors={mapData.colors}
+                  />
+                )}
                 <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
                   Channel mapped onto the traced layout by lap-distance fraction (the sim integrates the radius profile).
+                  ▶ races A (gold) and B (blue) in real lap time — B&apos;s dot shows true track position at the same instant.
                 </p>
               </section>
 
@@ -395,11 +405,214 @@ export function LapSimScreen() {
                 height={240}
               />
             </section>
+
+            {/* Lap-time residency histograms — where the car/engine LIVES.
+                RPM residency is the engine team's tuning target map; with a B
+                lap the outline overlays it for direct comparison. */}
+            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+                  Lap-time residency — fraction of lap time per bin{runB ? " (line = B)" : ""}
+                </span>
+                <span className="text-[9px] text-[#5A5F66]">
+                  tune the engine where the RPM histogram lives, not at the peak
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 p-2 md:grid-cols-3">
+                <MiniHistogram
+                  title="engine rpm residency"
+                  unit="rpm"
+                  series={histSeries(runA, (ch, i) => ch.rpm[i]!, "A", "#FFC627")}
+                  overlay={runB ? histSeries(runB, (ch, i) => ch.rpm[i]!, "B", "#4FC3F7") : undefined}
+                />
+                <MiniHistogram
+                  title="speed residency"
+                  unit="km/h"
+                  series={histSeries(runA, (ch, i) => ch.vMps[i]! * 3.6, "A", "#FFC627")}
+                  overlay={runB ? histSeries(runB, (ch, i) => ch.vMps[i]! * 3.6, "B", "#4FC3F7") : undefined}
+                />
+                <MiniHistogram
+                  title="lateral g residency"
+                  unit="g"
+                  series={histSeries(runA, (ch, i) => Math.abs(ch.latG[i]!), "A", "#FFC627")}
+                  overlay={runB ? histSeries(runB, (ch, i) => Math.abs(ch.latG[i]!), "B", "#4FC3F7") : undefined}
+                />
+              </div>
+            </section>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+// ---- Lap player ---------------------------------------------------------------
+// "Play" the simulated lap: car dots animate over the channel-colored map in
+// real lap time (×speed), with every channel AND the engine's sweep-point
+// internals (VE, EGT, knock integral, BMEP, power) interpolated smoothly at
+// the cursor. Scrub with the slider; with a B lap, both dots race — B's
+// position is its own distance at the SAME instant, so the gap is visible
+// on track, not just in the ΔT chart.
+function LapPlayer({
+  runA, runB, visual, fracs, colors,
+}: {
+  runA: LapRun;
+  runB: LapRun | null;
+  visual: typeof AUTOCROSS_2026_VISUAL;
+  fracs: number[];
+  colors: string[];
+}) {
+  const [t, setT] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [mult, setMult] = useState(1);
+  const chA = runA.ch;
+  const endT = chA.tS[chA.tS.length - 1] ?? 0;
+  const totalDist = chA.distM[chA.distM.length - 1] || 1;
+
+  // Reset the cursor when the lap changes (new source/event/vehicle).
+  useEffect(() => setT(0), [runA]);
+
+  useEffect(() => {
+    if (!playing || endT <= 0) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = ((now - last) / 1000) * mult;
+      last = now;
+      setT((prev) => (prev + dt >= endT ? prev + dt - endT : prev + dt));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, mult, endT]);
+
+  // Smoothly interpolated cursor state (categorical channels use nearest).
+  const cur = useMemo(() => {
+    const dist = interpAt(chA.tS, chA.distM, t);
+    const rpm = interpAt(chA.tS, chA.rpm, t);
+    // nearest sample for the categorical channels
+    let i = 0;
+    let lo = 0;
+    let hi = chA.tS.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (chA.tS[mid]! <= t) lo = mid;
+      else hi = mid;
+    }
+    i = t - chA.tS[lo]! < chA.tS[hi]! - t ? lo : hi;
+    // engine internals at the cursor's rpm, from the source sweep points
+    const pts = [...runA.source.points].sort((a, b) => a.rpm - b.rpm);
+    const rpms = pts.map((p) => p.rpm);
+    const eng = (get: (p: (typeof pts)[number]) => number | undefined): number =>
+      interpAt(rpms, pts.map((p) => get(p) ?? NaN), rpm);
+    return {
+      dist,
+      frac: dist / totalDist,
+      speedKph: interpAt(chA.tS, chA.vMps, t) * 3.6,
+      rpm,
+      gear: chA.gear[i] ?? 0,
+      latG: interpAt(chA.tS, chA.latG, t),
+      longG: interpAt(chA.tS, chA.longG, t),
+      limit: chA.limit[i] ?? "coast",
+      fuelG: interpAt(chA.tS, chA.fuelCumKg, t) * 1000,
+      powerKw: eng((p) => p.lastCycle.brakePowerKW),
+      ve: eng((p) => p.lastCycle.veAtm),
+      egt: eng((p) => p.lastCycle.egtMean),
+      ki: eng((p) => p.lastCycle.knockIntegral),
+      bmep: eng((p) => p.lastCycle.bmepBar),
+    };
+  }, [chA, t, totalDist, runA.source.points]);
+
+  // B's true position at the same instant (clamped to its own finish).
+  const fracB = useMemo(() => {
+    if (!runB) return null;
+    const chB = runB.ch;
+    const dB = interpAt(chB.tS, chB.distM, Math.min(t, chB.tS[chB.tS.length - 1] ?? 0));
+    return dB / (chB.distM[chB.distM.length - 1] || 1);
+  }, [runB, t]);
+
+  const markers = [
+    { frac: cur.frac, color: "#FFC627", label: "A" },
+    ...(fracB != null ? [{ frac: fracB, color: "#4FC3F7", label: "B" }] : []),
+  ];
+
+  return (
+    <div>
+      <ChannelTrackMap track={visual} fracs={fracs} colors={colors} height={330} markers={markers} />
+      {/* Transport */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[#2A2C32] px-3 py-1.5">
+        <button
+          type="button"
+          aria-label={playing ? "Pause lap playback" : "Play lap playback"}
+          onClick={() => setPlaying((p) => !p)}
+          className="rounded-sm border border-[#FFC627]/50 px-2.5 py-0.5 font-mono text-[12px] text-[#FFC627] hover:bg-[#FFC627]/10"
+        >
+          {playing ? "⏸" : "▶"}
+        </button>
+        {[0.5, 1, 2, 4].map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMult(m)}
+            className={
+              "rounded-sm px-1.5 py-0.5 font-mono text-[10px] " +
+              (mult === m ? "bg-[#FFC627] text-[#0E0E10]" : "text-[#9097A0] hover:text-[#FFC627]")
+            }
+          >
+            {m}×
+          </button>
+        ))}
+        <input
+          type="range"
+          aria-label="Lap scrub"
+          min={0}
+          max={endT}
+          step={endT / 2000}
+          value={t}
+          onChange={(e) => {
+            setPlaying(false);
+            setT(parseFloat(e.target.value));
+          }}
+          className="min-w-[120px] flex-1 accent-[#FFC627]"
+        />
+        <span className="font-mono text-[11px] tabular-nums text-[#D8DCE2]">
+          {t.toFixed(2)} / {endT.toFixed(2)} s
+        </span>
+      </div>
+      {/* Live readouts — car + engine internals at the cursor */}
+      <div className="grid grid-cols-3 gap-x-4 gap-y-1 border-t border-[#2A2C32] px-3 py-1.5 sm:grid-cols-6">
+        <Stat label="dist" value={`${cur.dist.toFixed(0)} m`} />
+        <Stat label="speed" value={`${cur.speedKph.toFixed(1)} km/h`} highlight />
+        <Stat label="rpm" value={cur.rpm.toFixed(0)} highlight />
+        <Stat label="gear" value={String(cur.gear)} />
+        <Stat label="lat" value={`${cur.latG.toFixed(2)} g`} />
+        <Stat label="long" value={`${cur.longG.toFixed(2)} g`} />
+        <span className="flex items-baseline gap-1">
+          <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">limit</span>
+          <span className="font-mono text-[11px]" style={{ color: LIMIT_COLOR[cur.limit] }}>{cur.limit}</span>
+        </span>
+        <Stat label="power" value={Number.isFinite(cur.powerKw) ? `${cur.powerKw.toFixed(1)} kW` : "—"} highlight />
+        <Stat label="VE" value={Number.isFinite(cur.ve) ? `${(cur.ve * 100).toFixed(0)}%` : "—"} />
+        <Stat label="EGT" value={Number.isFinite(cur.egt) ? `${cur.egt.toFixed(0)} K` : "—"} />
+        <Stat label="BMEP" value={Number.isFinite(cur.bmep) ? `${cur.bmep.toFixed(1)} bar` : "—"} />
+        <Stat label="fuel" value={`${cur.fuelG.toFixed(1)} g`} />
+      </div>
+    </div>
+  );
+}
+
+/** Per-sample dt weights for time-weighted histograms. */
+function dtWeights(tS: number[]): number[] {
+  return tS.map((tv, i) => tv - (i > 0 ? tS[i - 1]! : 0));
+}
+
+function histSeries(run: LapRun, get: (ch: LapChannels, i: number) => number, label: string, color: string): HistSeries {
+  return {
+    values: run.ch.tS.map((_, i) => get(run.ch, i)),
+    weights: dtWeights(run.ch.tS),
+    color,
+    label,
+  };
 }
 
 function HeadlineRow({ tag, run, accent, deltaVs }: { tag: string; run: LapRun; accent?: boolean; deltaVs?: LapRun }) {
