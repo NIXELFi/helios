@@ -15,7 +15,7 @@ export const SDM26_ROLL: RollConfig = {
   hRollArmM: 0.2626,
   rcFrontM: 0.0186,
   rcRearM: 0.0251,
-  aeroFrontFrac: 0.53,
+  aeroFrontFrac: 0.553, // 2026 CFD aero map: %front downforce @ nominal RH
 };
 
 /** SDM25 roll balance — measured RSD test (2025-11-23): front 1719.7 /
@@ -53,8 +53,11 @@ export const SDM26_VEHICLE: VehicleConfig = {
   //            knob with its own measurement. Cross-check: SDM25 scrubbed
   //            tires ran 4.98 s — consistent. History: 1.55 → 1.50 → 1.59
   //            (autocross-anchored, line absorbed) → 1.368 (skidpad-pinned).
-  cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
-  claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
+  cdaM2: 1.294, // 2026 CFD aero map @ nominal RH: Cd 1.200 × A_ref 1.078 m²
+  claM2: 3.146, // 2026 CFD aero map @ nominal RH: Cl 2.918 × 1.078 (downforce)
+  // (was Cd 1.22/Cl 3.03 × 1.02 from the spec sheet — the aero map is the
+  //  newer source and the team-data loader applies the same values, so the
+  //  preset matches what loading the map produces.)
   airDensityKgM3: 1.162,
   crr: 0.02,
   drivetrainEff: 0.85,

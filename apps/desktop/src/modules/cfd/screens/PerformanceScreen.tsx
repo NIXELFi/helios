@@ -44,8 +44,8 @@ import {
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
 import { compareDynoBanded } from "../lib/analytics/dynoCompare";
-import { distillTir, tirMuLat, tirMuLong, G } from "../lib/performance";
-import { openTextFile } from "../lib/export/io";
+import { distillTir, tirMuLat, tirMuLong, loadTeamData, G } from "../lib/performance";
+import { openTextFile, openDirectory } from "../lib/export/io";
 import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
@@ -675,6 +675,40 @@ function VehicleEditor({
 }) {
   const set = (patch: Partial<VehicleConfig>) => onChange({ ...vehicle, ...patch });
   const [tirError, setTirError] = useState<string | null>(null);
+  const [teamMsg, setTeamMsg] = useState<string | null>(null);
+
+  // Team simulation-data folder: tire/*.tir + aero/*-aero-map.csv in one
+  // pick. The path persists so the data can be re-applied next session.
+  async function importTeamData(dirOverride?: string) {
+    setTeamMsg(null);
+    try {
+      const dir = dirOverride ?? (await openDirectory());
+      if (!dir) return;
+      const td = await loadTeamData(dir, vehicle.name);
+      const patch: Partial<VehicleConfig> = {};
+      const applied: string[] = [];
+      if (td.tire) {
+        patch.tire = { ...td.tire, scale: vehicle.tire?.scale ?? td.tire.scale, scaleLong: vehicle.tire?.scaleLong ?? td.tire.scaleLong };
+        applied.push(`tire ${td.tireFile}`);
+      }
+      if (td.aero) {
+        patch.claM2 = td.aero.claM2;
+        patch.cdaM2 = td.aero.cdaM2;
+        if (Number.isFinite(td.aero.aeroFrontFrac) && vehicle.roll) {
+          patch.roll = { ...vehicle.roll, aeroFrontFrac: td.aero.aeroFrontFrac };
+        }
+        applied.push(`aero ${td.aeroFile} (ClA ${td.aero.claM2.toFixed(2)} / CdA ${td.aero.cdaM2.toFixed(2)})`);
+      }
+      onChange({ ...vehicle, ...patch });
+      localStorage.setItem("helios.cfd.teamDataDir", dir);
+      setTeamMsg(
+        applied.length ? `loaded: ${applied.join(" · ")}${td.notes.length ? ` — ${td.notes.join("; ")}` : ""}` : `nothing usable found — ${td.notes.join("; ")}`,
+      );
+    } catch (e) {
+      setTeamMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const rememberedDir = localStorage.getItem("helios.cfd.teamDataDir");
 
   async function importTir() {
     setTirError(null);
@@ -706,10 +740,30 @@ function VehicleEditor({
           Reset to {resetTo.name}
         </button>
       </div>
-      {/* Measured tire model (.tir). Proprietary data — lives only in local
-          app state, never in the repo. When present it replaces μ lat/long +
-          load sensitivity with the fitted μ(Fz). */}
+      {/* Measured tire model (.tir) + team data folder. Proprietary data —
+          lives only in local app state, never in the repo. */}
       <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => void importTeamData()}
+          title={
+            "Pick the team Simulation Data folder — loads tire/*.tir and aero/<car>-aero-map.csv automatically." +
+            (rememberedDir ? `\nRemembered: ${rememberedDir}` : "")
+          }
+          className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+        >
+          Load team data…
+        </button>
+        {rememberedDir && (
+          <button
+            type="button"
+            onClick={() => void importTeamData(rememberedDir)}
+            title={`Re-apply from ${rememberedDir}`}
+            className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          >
+            ↻ reload
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void importTir()}
@@ -759,6 +813,7 @@ function VehicleEditor({
           </span>
         )}
         {tirError && <span className="pb-1 text-[10px] text-[#FF5252]">{tirError}</span>}
+        {teamMsg && <span className="basis-full pb-1 font-mono text-[9px] text-[#A5D6A7]">{teamMsg}</span>}
       </div>
       {tire && <TireMuChart tire={tire} fzStatic={fzStatic} />}
       {/* Roll balance (per-axle cornering limit) — from the team's ARB/RSD

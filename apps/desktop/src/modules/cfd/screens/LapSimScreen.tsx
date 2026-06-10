@@ -581,41 +581,17 @@ function LapPlayer({
           {t.toFixed(2)} / {endT.toFixed(2)} s
         </span>
       </div>
-      {/* Dash — supersport cluster: tach wrapping the top, gear box, digital
-          speed, live g-dot, and engine mini-bars. */}
+      {/* Dash — supersport LCD cluster: the rpm scale sweeps up from low-left
+          and flattens across the top (Ninja-style), gear at left, big digital
+          speed under the flat of the curve. */}
       <div className="flex flex-wrap items-end gap-4 border-t border-[#2A2C32] bg-[#0B0B0D] px-3 py-2">
-        <Tachometer rpm={cur.rpm} revLimit={runA.vehicle.revLimitRpm} />
-        <div
-          className="flex flex-col items-center rounded-md border border-[#2A2C32] bg-[#101114] px-3 py-1.5"
-          aria-label="Gear position"
-          style={{ boxShadow: "inset 0 0 12px #00000088" }}
-        >
-          <span className="text-[7px] uppercase tracking-[0.2em] text-[#5A5F66]">gear</span>
-          <span
-            className="font-mono text-[46px] font-bold leading-none text-[#FFC627]"
-            style={{ textShadow: "0 0 14px #FFC62766" }}
-          >
-            {cur.gear || "N"}
-          </span>
-        </div>
-        <div className="flex flex-col items-center rounded-md border border-[#2A2C32] bg-[#101114] px-3 py-1.5"
-          style={{ boxShadow: "inset 0 0 12px #00000088" }}>
-          <span className="text-[7px] uppercase tracking-[0.2em] text-[#5A5F66]">speed · km/h</span>
-          <span className="font-mono text-[38px] font-bold leading-none text-[#D8DCE2] tabular-nums"
-            style={{ textShadow: "0 0 10px #D8DCE233" }}>
-            {cur.speedKph.toFixed(0)}
-          </span>
-          <span
-            className="mt-1 rounded-sm px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider"
-            style={{
-              color: LIMIT_COLOR[cur.limit],
-              border: `1px solid ${LIMIT_COLOR[cur.limit]}66`,
-              background: `${LIMIT_COLOR[cur.limit]}14`,
-            }}
-          >
-            {cur.limit}
-          </span>
-        </div>
+        <Cluster
+          rpm={cur.rpm}
+          revLimit={runA.vehicle.revLimitRpm}
+          gear={cur.gear}
+          speedKph={cur.speedKph}
+          limit={cur.limit}
+        />
         <GDot latG={cur.latG} longG={cur.longG} />
         {/* Engine vitals as mini bar gauges */}
         <div className="grid min-w-[210px] flex-1 grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -687,89 +663,98 @@ function GDot({ latG, longG }: { latG: number; longG: number }) {
   );
 }
 
-/** Sportbike tachometer: the scale starts low on the LEFT and wraps clockwise
- *  over the entire top of the dial (≈200° sweep), like a supersport cluster —
- *  gradient power band, minor ticks every 500, numerals every 1000, hatched
- *  redline sector, glowing needle, and a MotoGP-style progressive LED shift
- *  strip across the top that walks green → amber → red and strobes at the
- *  limiter. */
-function Tachometer({ rpm, revLimit }: { rpm: number; revLimit: number }) {
+/** Supersport LCD cluster (Ninja-style): the rpm scale starts small at the
+ *  lower-left and sweeps up along a curve that flattens across the top of
+ *  the panel — a quarter-ellipse, using the full horizontal width. Gear
+ *  indicator sits at the left, big digital speed under the flat of the
+ *  curve, gradient band fills along the scale, redline numerals go red, and
+ *  a shift light strobes at the limiter. */
+function Cluster({
+  rpm, revLimit, gear, speedKph, limit,
+}: {
+  rpm: number;
+  revLimit: number;
+  gear: number;
+  speedKph: number;
+  limit: LimitState;
+}) {
   const maxRpm = Math.ceil(revLimit / 1000) * 1000;
-  const W = 250;
-  const H = 152;
-  const cx = W / 2;
-  const cy = 132;
-  const R = 104;
-  // Angle map (math convention, y-up): 190° (low left) → −10° (low right),
-  // sweeping over the top. SVG y is down, so py = cy − R·sinθ.
-  const A0 = 190;
-  const A1 = -10;
-  const thetaOf = (r: number) => ((A0 + (Math.min(Math.max(r, 0), maxRpm) / maxRpm) * (A1 - A0)) * Math.PI) / 180;
-  const pt = (r: number, radius: number): [number, number] => {
+  const W = 470;
+  const H = 148;
+  // Quarter-ellipse: center low-right, so θ 180° (low left) → 90° (top,
+  // right of middle). Screen y is down: y = cy − ry·sinθ.
+  const cx = W - 72;
+  const cy = H - 12;
+  const rx = W - 104;
+  const ry = H - 44;
+  const thetaOf = (r: number) =>
+    ((180 - (Math.min(Math.max(r, 0), maxRpm) / maxRpm) * 90) * Math.PI) / 180;
+  const pt = (r: number, off = 0): [number, number] => {
     const th = thetaOf(r);
-    return [cx + radius * Math.cos(th), cy - radius * Math.sin(th)];
+    // offset outward along the (approximate) normal — away from the center
+    const px = cx + rx * Math.cos(th);
+    const py = cy - ry * Math.sin(th);
+    const nx = px - cx;
+    const ny = py - cy;
+    const nl = Math.hypot(nx, ny) || 1;
+    return [px + (nx / nl) * off, py + (ny / nl) * off];
   };
-  const arc = (from: number, to: number, radius: number) => {
-    const [x0, y0] = pt(from, radius);
-    const [x1, y1] = pt(to, radius);
-    const large = ((to - from) / maxRpm) * (A0 - A1) > 180 ? 1 : 0;
-    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${radius} ${radius} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  const arc = (from: number, to: number) => {
+    const [x0, y0] = pt(from);
+    const [x1, y1] = pt(to);
+    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rx} ${ry} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
   };
-  const [nx, ny] = pt(rpm, R - 16);
-  const ledCount = 9;
-  const ledFrom = 0.78 * revLimit; // strip arms through the top of the band
-  const ledStep = (revLimit - ledFrom) / ledCount;
+  const redFrom = revLimit - 1500; // numerals go red approaching the limiter
   const atLimiter = rpm >= revLimit - 150;
   return (
-    <svg width={W} height={H} role="img" aria-label={`Tachometer ${rpm.toFixed(0)} rpm`} className="block">
+    <svg
+      width={W}
+      height={H}
+      role="img"
+      aria-label={`Cluster: ${rpm.toFixed(0)} rpm, gear ${gear || "N"}, ${speedKph.toFixed(0)} km/h`}
+      className="block rounded-md border border-[#2A2C32] bg-[#101114]"
+    >
       <defs>
-        <linearGradient id="tachBand" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id="swooshBand" x1="0" y1="1" x2="1" y2="0">
           <stop offset="0%" stopColor="#4FC3F7" />
-          <stop offset="45%" stopColor="#FFC627" />
-          <stop offset="85%" stopColor="#FF8A65" />
+          <stop offset="55%" stopColor="#FFC627" />
+          <stop offset="88%" stopColor="#FF8A65" />
           <stop offset="100%" stopColor="#FF5252" />
         </linearGradient>
-        <filter id="needleGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="1.6" result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-        <pattern id="redHatch" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
-          <rect width="5" height="5" fill="#FF525222" />
-          <line x1="0" y1="0" x2="0" y2="5" stroke="#FF5252" strokeWidth="1.6" opacity="0.8" />
-        </pattern>
       </defs>
-      {/* dial face */}
-      <path d={arc(0, maxRpm, R)} fill="none" stroke="#16171B" strokeWidth={22} strokeLinecap="round" />
-      <path d={arc(0, maxRpm, R)} fill="none" stroke="#2A2C32" strokeWidth={1} opacity={0.9} />
-      {/* redline sector */}
-      <path d={arc(revLimit, maxRpm, R)} fill="none" stroke="url(#redHatch)" strokeWidth={20} />
-      <path d={arc(revLimit, maxRpm, R)} fill="none" stroke="#FF5252" strokeWidth={2.5} />
-      {/* live band */}
+      {/* scale track + live band */}
+      <path d={arc(0, maxRpm)} fill="none" stroke="#1B1D22" strokeWidth={13} strokeLinecap="round" />
+      <path d={arc(redFrom, maxRpm)} fill="none" stroke="#FF525233" strokeWidth={13} strokeLinecap="round" />
       <path
-        d={arc(0, Math.max(60, rpm), R)}
+        d={arc(0, Math.max(80, rpm))}
         fill="none"
-        stroke="url(#tachBand)"
+        stroke="url(#swooshBand)"
         strokeWidth={9}
         strokeLinecap="round"
         opacity={0.95}
       />
-      {/* ticks: minor every 500, major + numeral every 1000 */}
+      {/* rpm cursor blade riding the curve */}
+      {(() => {
+        const [bx1, by1] = pt(rpm, -9);
+        const [bx2, by2] = pt(rpm, 11);
+        return <line x1={bx1} y1={by1} x2={bx2} y2={by2} stroke="#FAFAFA" strokeWidth={2.5} strokeLinecap="round"
+          style={{ filter: "drop-shadow(0 0 3px #FFC627)" }} />;
+      })()}
+      {/* ticks + numerals: minor 500, major 1000 (numerals like the bike: 1..14) */}
       {Array.from({ length: maxRpm / 500 + 1 }, (_, i) => {
         const r = i * 500;
+        if (r === 0) return null;
         const major = r % 1000 === 0;
-        const [x1, y1] = pt(r, R - 11);
-        const [x2, y2] = pt(r, R - (major ? 22 : 16));
-        const red = r >= revLimit;
+        const [x1, y1] = pt(r, 8);
+        const [x2, y2] = pt(r, major ? 17 : 12);
+        const red = r >= redFrom;
         return (
           <g key={i}>
             <line x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke={red ? "#FF5252" : major ? "#9097A0" : "#5A5F66"} strokeWidth={major ? 2 : 1} />
+              stroke={red ? "#FF5252" : major ? "#9097A0" : "#3A3D44"} strokeWidth={major ? 2 : 1} />
             {major && (
-              <text {...(() => { const [tx, ty] = pt(r, R - 33); return { x: tx, y: ty + 3.5 }; })()}
-                fontSize={9.5} fontFamily="monospace" fontWeight={red ? 700 : 400}
+              <text {...(() => { const [tx, ty] = pt(r, 27); return { x: tx, y: ty + 3 }; })()}
+                fontSize={10} fontFamily="monospace" fontWeight={red ? 700 : 400}
                 fill={red ? "#FF5252" : "#9097A0"} textAnchor="middle">
                 {r / 1000}
               </text>
@@ -777,37 +762,46 @@ function Tachometer({ rpm, revLimit }: { rpm: number; revLimit: number }) {
           </g>
         );
       })}
-      {/* LED shift strip — walks up across the very top, strobes on limiter */}
-      {Array.from({ length: ledCount }, (_, i) => {
-        const arm = ledFrom + i * ledStep;
-        const [lx, ly] = pt(arm + ledStep / 2, R + 16);
-        const lit = rpm >= arm;
-        const color = i < 4 ? "#A5D6A7" : i < 7 ? "#FFC627" : "#FF5252";
-        return (
-          <circle key={i} cx={lx} cy={ly} r={3.6}
-            fill={lit ? color : "#1B1D22"} stroke={lit ? color : "#2A2C32"} strokeWidth={1}
-            style={lit ? { filter: "drop-shadow(0 0 3px " + color + ")" } : undefined}>
-            {lit && atLimiter && (
-              <animate attributeName="opacity" values="1;0.15;1" dur="0.22s" repeatCount="indefinite" />
-            )}
-          </circle>
-        );
-      })}
-      {/* needle */}
-      <g filter="url(#needleGlow)">
-        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#FAFAFA" strokeWidth={2.6} strokeLinecap="round" />
-        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#FFC627" strokeWidth={1} strokeLinecap="round" />
-      </g>
-      <circle cx={cx} cy={cy} r={6} fill="#16171B" stroke="#5A5F66" strokeWidth={1.5} />
-      <circle cx={cx} cy={cy} r={2} fill="#FFC627" />
-      {/* digital rpm */}
-      <text x={cx} y={cy - 24} fontSize={19} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
+      <text x={W - 8} y={14} fontSize={7.5} fill="#5A5F66" textAnchor="end"
+        style={{ letterSpacing: 1 }}>
+        ×1000 r/min
+      </text>
+      {/* shift light */}
+      <circle cx={W - 16} cy={26} r={5} fill={atLimiter ? "#FF5252" : "#1B1D22"}
+        stroke={atLimiter ? "#FF5252" : "#2A2C32"} strokeWidth={1}
+        style={atLimiter ? { filter: "drop-shadow(0 0 5px #FF5252)" } : undefined}>
+        {atLimiter && <animate attributeName="opacity" values="1;0.2;1" dur="0.22s" repeatCount="indefinite" />}
+      </circle>
+      {/* GEAR — left, under the rising scale */}
+      <text x={34} y={H - 58} fontSize={9} fill="#5A5F66" style={{ letterSpacing: 2 }}>
+        GEAR
+      </text>
+      <text x={30} y={H - 14} fontSize={46} fontFamily="monospace" fontWeight={700}
+        fill="#A5D6A7" style={{ textShadow: "0 0 12px #A5D6A766" }}>
+        {gear || "N"}
+      </text>
+      {/* SPEED — big digital under the flat of the curve */}
+      <text x={W - 130} y={H - 26} fontSize={52} fontFamily="monospace" fontWeight={700}
+        fill="#FAFAFA" textAnchor="middle" style={{ textShadow: "0 0 10px #FFFFFF22" }}>
+        {speedKph.toFixed(0)}
+      </text>
+      <text x={W - 130} y={H - 12} fontSize={9} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 2 }}>
+        km/h
+      </text>
+      {/* rpm digital + limit chip, tucked mid-left */}
+      <text x={120} y={H - 30} fontSize={15} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
         {rpm.toFixed(0)}
       </text>
-      <text x={cx} y={cy - 12} fontSize={7} fill="#5A5F66" textAnchor="middle"
-        style={{ textTransform: "uppercase", letterSpacing: 2 }}>
-        rpm × 1000
+      <text x={120} y={H - 18} fontSize={7} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 1.5 }}>
+        RPM
       </text>
+      <g>
+        <rect x={W - 56} y={H - 34} width={46} height={16} rx={2}
+          fill={`${LIMIT_COLOR[limit]}14`} stroke={`${LIMIT_COLOR[limit]}66`} strokeWidth={1} />
+        <text x={W - 33} y={H - 23} fontSize={8} fontFamily="monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
+          {limit.toUpperCase()}
+        </text>
+      </g>
     </svg>
   );
 }
