@@ -41,6 +41,8 @@ import {
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
 import { compareDynoBanded } from "../lib/analytics/dynoCompare";
+import { distillTir, tirMuLat, tirMuLong, G } from "../lib/performance";
+import { openTextFile } from "../lib/export/io";
 import { ReportButton } from "../components/ReportButton";
 
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
@@ -643,6 +645,25 @@ function VehicleEditor({
   resetTo: VehicleConfig;
 }) {
   const set = (patch: Partial<VehicleConfig>) => onChange({ ...vehicle, ...patch });
+  const [tirError, setTirError] = useState<string | null>(null);
+
+  async function importTir() {
+    setTirError(null);
+    try {
+      const picked = await openTextFile("tir");
+      if (!picked) return;
+      const label = picked.path.split(/[\\/]/).pop() ?? picked.path;
+      // Surface scale: TTC flat-belt grip never fully transfers to asphalt;
+      // start at the literature-typical 0.7 and tune via the field below.
+      onChange({ ...vehicle, tire: distillTir(picked.contents, label, vehicle.tire?.scale ?? 0.7) });
+    } catch (err) {
+      setTirError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Peak μ readout at static per-tire load — the sanity check on the fit.
+  const fzStatic = (vehicle.massKg * G) / 4;
+  const tire = vehicle.tire;
 
   return (
     <section className="mb-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -655,6 +676,60 @@ function VehicleEditor({
         >
           Reset to {resetTo.name}
         </button>
+      </div>
+      {/* Measured tire model (.tir). Proprietary data — lives only in local
+          app state, never in the repo. When present it replaces μ lat/long +
+          load sensitivity with the fitted μ(Fz). */}
+      <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => void importTir()}
+          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {tire ? "Replace tire model…" : "Import tire model (.tir)…"}
+        </button>
+        {tire && (
+          <>
+            <span className="pb-1 font-mono text-[10px] text-[#CE93D8]" title="Imported Pacejka MF6.x peak-friction fit">
+              {tire.label}
+            </span>
+            <span
+              className="pb-1 font-mono text-[10px] tabular-nums text-[#D8DCE2]"
+              title="Peak friction at static per-tire load, surface scale included. Sanity-check against expectations — a .tir fit is only as good as its data."
+            >
+              μ_lat {tirMuLat(tire, fzStatic).toFixed(2)} · μ_long {tirMuLong(tire, fzStatic).toFixed(2)} @ static
+            </span>
+            <NumField
+              label="lat scale"
+              value={tire.scale}
+              step={0.005}
+              onChange={(n) => set({ tire: { ...tire, scale: n } })}
+            />
+            <NumField
+              label="long scale"
+              value={tire.scaleLong ?? tire.scale}
+              step={0.005}
+              onChange={(n) => set({ tire: { ...tire, scaleLong: n } })}
+            />
+            <button
+              type="button"
+              aria-label={`Remove tire model ${tire.label}`}
+              onClick={() => {
+                const { tire: _drop, ...rest } = vehicle;
+                onChange(rest as VehicleConfig);
+              }}
+              className="mb-1 rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+            >
+              remove
+            </button>
+          </>
+        )}
+        {!tire && (
+          <span className="pb-1 text-[9px] text-[#5A5F66]">
+            no tire model — using μ lat/long + load-sensitivity below
+          </span>
+        )}
+        {tirError && <span className="pb-1 text-[10px] text-[#FF5252]">{tirError}</span>}
       </div>
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />

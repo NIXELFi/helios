@@ -41,6 +41,12 @@ export interface VehicleConfig {
   revLimitRpm: number;
   /** Lost-drive time per gearshift (s) — clutchless / quickshift. */
   shiftTimeS: number;
+  /** Optional measured tire model distilled from an imported .tir file
+   *  (Pacejka MF6.x peak friction vs load). When present it REPLACES
+   *  muLat/muLong + tireLoadSensitivity with the fitted μ(Fz) law; the
+   *  surface scale inside is the one calibration knob. Loaded at runtime —
+   *  tire fit data is proprietary and never ships in the repo. */
+  tire?: import("./tir").TirGrip;
 }
 
 /** Per-event reference (from last year's published results) for projecting FSAE

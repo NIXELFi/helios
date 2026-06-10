@@ -8,6 +8,7 @@
 import type { VehicleConfig } from "./types";
 import { gearVps, topSpeedMps } from "./vehicle";
 import { torqueAtRpm, type TorqueCurve } from "./torqueCurve";
+import { tirMuLong } from "./tir";
 
 export const G = 9.80665;
 const RAD_PER_S_PER_RPM = (2 * Math.PI) / 60;
@@ -93,8 +94,14 @@ export const REAR_AERO_FRAC = 0.47;
 export function tractionLimit(vehicle: VehicleConfig, v = 0): number {
   const rearStatic = vehicle.massKg * G * (1 - vehicle.weightDistFront);
   const rearAero = 0.5 * vehicle.airDensityKgM3 * vehicle.claM2 * v * v * REAR_AERO_FRAC;
-  const denom = Math.max(1 - (vehicle.muLong * vehicle.cgHeightM) / vehicle.wheelbaseM, 0.05);
-  return (vehicle.muLong * (rearStatic + rearAero)) / denom;
+  // Measured tire: μ from the Pacejka peak-friction fit at the rear PER-TIRE
+  // load (pre-transfer); same convention as lapSim.aDriveGrip so the accel
+  // event and the lap sim keep launching the car identically.
+  const mu = vehicle.tire
+    ? tirMuLong(vehicle.tire, (rearStatic + rearAero) / 2)
+    : vehicle.muLong;
+  const denom = Math.max(1 - (mu * vehicle.cgHeightM) / vehicle.wheelbaseM, 0.05);
+  return (mu * (rearStatic + rearAero)) / denom;
 }
 
 /** Aero drag + rolling resistance (N) at speed `v`. */

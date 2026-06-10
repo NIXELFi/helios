@@ -25,6 +25,7 @@ import {
   G,
 } from "./tractive";
 import type { TorqueCurve } from "./torqueCurve";
+import { tirMuLat, tirMuLong } from "./tir";
 import { discretizeTrack, type Track } from "./track";
 
 /** What binds the car at a point on the lap. "power" = the engine's tractive
@@ -189,6 +190,16 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const k = (0.5 * vehicle.airDensityKgM3 * vehicle.claM2) / m;
   const gEff = (v: number): number => G + k * v * v;
 
+  // Measured tire model (imported .tir): μ(Fz) comes from the Pacejka peak-
+  // friction fit instead of the constant-μ + power-law guess. Per-tire load
+  // at speed v assumes even distribution (transfer is handled by χ below and
+  // by the rear-axle closed form for drive traction).
+  const tir = vehicle.tire;
+  const fzTireStatic = (m * G) / 4;
+  const fzTire = (v: number): number => fzTireStatic * (gEff(v) / G);
+  const muLatV = (v: number): number =>
+    tir ? tirMuLat(tir, fzTire(v)) : vehicle.muLat * loadMult(v);
+
   // Tire load sensitivity: μ falls as vertical load rises, so aero downforce
   // buys LESS grip than μ·Fz would imply. loadMult ≤ 1 for v > 0 (1 at static).
   // sens = 0 recovers the old load-independent (closed-form) behavior exactly.
@@ -196,21 +207,33 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const loadMult = (v: number): number => Math.pow(gEff(v) / G, -sens);
 
   // Lateral load transfer × load sensitivity: cornering shifts load to the
-  // outer tires, and with μ ∝ Fz^(−s) the outer tires gain LESS grip than the
-  // inner tires lose, so axle capacity drops. For the power-law tire the exact
-  // pair factor is χ = ((1+δ)^(1−s) + (1−δ)^(1−s))/2 with δ the transferred
-  // fraction of the pair's load: δ = a_lat·h_cg / (½·track·g_eff), clamped at 1
-  // (inner wheels unloaded). s = 0 (or δ = 0) gives χ = 1 — no effect.
+  // outer tires, and the outer tires gain LESS grip than the inner tires
+  // lose, so axle capacity drops. With a measured tire the pair factor is
+  // capacity-weighted directly from μ(Fz): χ = [μ(Fz(1+δ))·(1+δ) +
+  // μ(Fz(1−δ))·(1−δ)] / (2·μ(Fz)); for the power-law tire it reduces to the
+  // closed form χ = ((1+δ)^(1−s) + (1−δ)^(1−s))/2. δ is the transferred
+  // fraction of the pair's load: δ = a_lat·h_cg / (½·track·g_eff), clamped
+  // at 1 (inner wheels unloaded). s = 0 (or δ = 0) gives χ = 1 — no effect.
   const chi = (v: number, R: number): number => {
-    if (sens === 0 || !Number.isFinite(R) || R <= 0) return 1;
+    if (!Number.isFinite(R) || R <= 0) return 1;
+    if (!tir && sens === 0) return 1;
     const aLat = (v * v) / R;
     const d = Math.min(1, (aLat * vehicle.cgHeightM) / (0.5 * vehicle.trackWidthM * gEff(v)));
+    if (tir) {
+      const fz = fzTire(v);
+      const even = tirMuLat(tir, fz);
+      if (even <= 0) return 1;
+      return (
+        (tirMuLat(tir, fz * (1 + d)) * (1 + d) + tirMuLat(tir, fz * (1 - d)) * (1 - d)) /
+        (2 * even)
+      );
+    }
     return (Math.pow(1 + d, 1 - sens) + Math.pow(1 - d, 1 - sens)) / 2;
   };
 
   // Load-sensitive, transfer-discounted lateral grip acceleration (m/s²).
   const latCap = (v: number, R: number): number =>
-    vehicle.muLat * loadMult(v) * gEff(v) * chi(v, R);
+    muLatV(v) * gEff(v) * chi(v, R);
 
   // Steady-state corner speed: solve v²/R = latCap(v, R). Load sensitivity and
   // χ make the capacity sub-linear in v with no closed form — bisect (capacity·R
@@ -246,8 +269,13 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const rearStaticAccel = G * (1 - vehicle.weightDistFront);
   const kRear = k * REAR_AERO_FRAC;
   const aDriveGrip = (v: number, R: number): number => {
-    const muEff = vehicle.muLong * loadMult(v) * ellipse(v, R);
+    // With a measured tire, μ comes from the rear per-tire load (pre-transfer;
+    // the closed form below then folds the transfer in, same as before).
     const nRear = rearStaticAccel + kRear * v * v;
+    const muBase = tir
+      ? tirMuLong(tir, (m * nRear) / 2)
+      : vehicle.muLong * loadMult(v);
+    const muEff = muBase * ellipse(v, R);
     const denom = Math.max(1 - (muEff * vehicle.cgHeightM) / vehicle.wheelbaseM, 0.05);
     return (muEff * nRear) / denom;
   };
@@ -255,7 +283,7 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   // BRAKING loads ALL FOUR tires (with forward weight transfer), so its grip is
   // ~the lateral coefficient — NOT muLong, the rear-axle launch limit.
   const aBrakeGrip = (v: number, R: number): number =>
-    vehicle.muLat * loadMult(v) * gEff(v) * ellipse(v, R);
+    muLatV(v) * gEff(v) * ellipse(v, R);
 
   return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap };
 }

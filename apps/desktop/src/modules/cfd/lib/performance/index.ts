@@ -18,6 +18,7 @@ export {
   topSpeedMps,
 } from "./vehicle";
 export { FUELS, DEFAULT_FUEL, type Fuel } from "./fuels";
+export { parseTirText, distillTir, tirMuLat, tirMuLong, type TirGrip } from "./tir";
 export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,
