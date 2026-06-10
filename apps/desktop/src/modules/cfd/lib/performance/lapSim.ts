@@ -394,11 +394,19 @@ export function simLap(
 ): LapResult {
   const { radius: rawRadius, step, length } = discretizeTrack(track, opts.ds ?? 2);
   // Racing line: the driven path has a larger effective radius than the traced
-  // centerline. Scale finite corner radii (straights stay Infinity). Both the
-  // corner-speed solve AND the lateral-g telemetry then use the same effective
+  // centerline. Scale finite corner radii (straights stay Infinity) — but the
+  // gain is PHYSICALLY BOUNDED: a driver buys radius with course width, and
+  // geometry says full use of a ~3 m lane through a typical corner is worth
+  // at most ~17 m of radius, no matter how big the corner. Without the cap a
+  // multiplicative factor inflates 200 m+ sweepers by 30+ m of free radius,
+  // which is where the spurious 6th-gear autocross speeds came from. Both the
+  // corner-speed solve AND the lateral-g telemetry use the same effective
   // radius, so the car's actual lateral load stays grip-limited (μ·g_eff).
+  const LINE_GAIN_CAP_M = 17;
   const lineFactor = Math.max(1, opts.lineFactor ?? 1);
-  const radius = rawRadius.map((r) => (Number.isFinite(r) && r > 0 ? r * lineFactor : r));
+  const radius = rawRadius.map((r) =>
+    Number.isFinite(r) && r > 0 ? Math.min(r * lineFactor, r + LINE_GAIN_CAP_M) : r,
+  );
   const grip = makeGripModel(vehicle);
   // vCorner bisects 40 steps per call; radii repeat (piecewise-constant track),
   // so cache per distinct radius for the telemetry loop's limit classifier.
@@ -584,9 +592,12 @@ function solveSpeeds(
   const rad = (i: number): number => radius[((i % N) + N) % N]!;
   const { vCorner, aDriveGrip, aBrakeGrip } = grip;
 
-  // Race-pace fraction scales the whole target-speed envelope (corners + the
-  // top-speed cap that vCorner returns on straights), modeling managed endurance
-  // pace; the engine still pulls at full force up to that lowered ceiling.
+  // Race-pace fraction scales the CORNER ceilings only — the grip-limited
+  // stations where an endurance driver actually backs off (cones, tire
+  // management, margin). Straights and gearing-capped sections stay flat-out:
+  // real endurance drivers still run the straights out, which is why real
+  // endurance telemetry reaches top gears (a global speed scale would cap the
+  // whole lap at pace×vmax and never leave 4th — the bug Nick spotted).
   //
   // vCorner is a 40-step bisection and the passes below read the ceiling ~5×
   // per cell — but track radii are piecewise-constant (tens of distinct values
@@ -601,7 +612,9 @@ function solveSpeeds(
       vc = vCorner(r);
       vByRadius.set(r, vc);
     }
-    ceilArr[i] = pace * vc;
+    // grip-limited (a true corner ceiling, below the gearing cap) → paced;
+    // gearing/aero-capped (straight-line) → flat out.
+    ceilArr[i] = vc < grip.vCap * 0.999 ? pace * vc : vc;
   }
   const ceil = (i: number): number => ceilArr[((i % N) + N) % N]!;
 

@@ -12,7 +12,7 @@ import { ReportButton } from "../components/ReportButton";
 import { LinePlot } from "../components/charts/LinePlot";
 import { ChannelTrackMap } from "../components/charts/ChannelTrackMap";
 import { MiniHistogram, type HistSeries } from "../components/charts/MiniHistogram";
-import { GGDiagram, LIMIT_COLOR } from "../components/charts/GGDiagram";
+import { GGDiagram, LIMIT_COLOR, LIMIT_LABEL } from "../components/charts/GGDiagram";
 import { sourcesFrom, type CurveSource } from "../lib/curveSources";
 import { rampColor, rampColors } from "../lib/colorScale";
 import { buildLapChannelsCsv } from "../lib/export/lapChannelsCsv";
@@ -289,7 +289,7 @@ export function LapSimScreen() {
                         {(Object.keys(LIMIT_COLOR) as LimitState[]).map((s) => (
                           <span key={s} className="flex items-center gap-0.5">
                             <span className="inline-block h-1.5 w-2.5 rounded-sm" style={{ background: LIMIT_COLOR[s] }} />
-                            {s}
+                            {LIMIT_LABEL[s]}
                           </span>
                         ))}
                       </div>
@@ -778,7 +778,7 @@ function Cluster({
       {/* Right-side stack, centered under the flat of the curve:
           speed → km/h → limit chip, one shared centerline. */}
       {(() => {
-        const rcx = W - 132;
+        const rcx = W - 92; // centered in the open area right of the curve end
         return (
           <g>
             <text x={rcx} y={H - 44} fontSize={48} fontFamily="monospace" fontWeight={700}
@@ -791,7 +791,7 @@ function Cluster({
             <rect x={rcx - 26} y={H - 24} width={52} height={16} rx={2}
               fill={`${LIMIT_COLOR[limit]}14`} stroke={`${LIMIT_COLOR[limit]}66`} strokeWidth={1} />
             <text x={rcx} y={H - 13} fontSize={8} fontFamily="monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
-              {limit.toUpperCase()}
+              {LIMIT_LABEL[limit].toUpperCase()}
             </text>
           </g>
         );
@@ -941,7 +941,7 @@ function ChannelAnalyzer({ runA, runB }: { runA: LapRun; runB: LapRun | null }) 
           background: on ? `${LIMIT_COLOR[s]}14` : "transparent",
         }}
       >
-        {s}
+        {LIMIT_LABEL[s]}
       </button>
     );
   };
@@ -1090,10 +1090,10 @@ function LimitBar({ run }: { run: LapRun }) {
           <div
             key={state}
             style={{ width: `${frac * 100}%`, background: LIMIT_COLOR[state] }}
-            title={`${state}: ${(frac * 100).toFixed(0)}% of lap time`}
+            title={`${LIMIT_LABEL[state]}: ${(frac * 100).toFixed(0)}% of lap time`}
             className="flex items-center justify-center font-mono text-[7px] text-black/70"
           >
-            {frac >= 0.09 ? `${state} ${(frac * 100).toFixed(0)}%` : ""}
+            {frac >= 0.09 ? `${LIMIT_LABEL[state]} ${(frac * 100).toFixed(0)}%` : ""}
           </div>
         ))}
       </div>

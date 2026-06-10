@@ -17,6 +17,18 @@ export const LIMIT_COLOR: Record<LimitState, string> = {
   coast: "#5A5F66",
 };
 
+/** Display labels: "grip" reads ambiguously next to "corner" (both are
+ *  tire-limited), so it displays as TRACTION — the driven tires can't put
+ *  the engine's torque down (corner exit / launch) — vs CORNER = riding the
+ *  lateral-speed ceiling mid-corner, where more power wouldn't help. */
+export const LIMIT_LABEL: Record<LimitState, string> = {
+  power: "power",
+  grip: "traction",
+  corner: "corner",
+  brake: "brake",
+  coast: "coast",
+};
+
 interface Props {
   latG: number[];
   longG: number[];
