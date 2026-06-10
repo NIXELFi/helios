@@ -88,8 +88,10 @@ describe("LapSimScreen", () => {
     await waitFor(() => expect(ctx.state.hydrated).toBe(true));
     await seedSweep();
 
-    // Headline: a lap time and the power-limited share render.
-    expect(await screen.findByText(/^\d+\.\d{2} s$/)).toBeInTheDocument();
+    // Headline: a lap time and the power-limited share render. (Multiple
+    // "X.XX s" readouts exist now — headline, analyzer slice stat — so
+    // assert at-least-one rather than exactly-one.)
+    expect((await screen.findAllByText(/^\d+\.\d{2} s$/)).length).toBeGreaterThan(0);
     expect(screen.getByText("power-limited")).toBeInTheDocument();
     // Limit bar exists with the engine-share legend.
     expect(screen.getByText(/gold = engine-bound/i)).toBeInTheDocument();
