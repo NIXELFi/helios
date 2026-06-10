@@ -734,9 +734,12 @@ function VehicleEditor({
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
-        <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })} />
-        <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })} />
-        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })} />
+        <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+        <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })}
+          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
         <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />
@@ -781,15 +784,22 @@ function NumField({
   onChange,
   step = 1,
   unit,
+  disabled,
+  disabledHint,
 }: {
   label: string;
   value: number;
   onChange: (n: number) => void;
   step?: number;
   unit?: string;
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   return (
-    <label className="flex flex-col gap-0.5">
+    <label
+      className={"flex flex-col gap-0.5" + (disabled ? " opacity-40" : "")}
+      title={disabled ? disabledHint : undefined}
+    >
       <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">
         {label}
         {unit ? ` (${unit})` : ""}
@@ -798,11 +808,12 @@ function NumField({
         type="number"
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => {
           const n = parseFloat(e.target.value);
           if (Number.isFinite(n)) onChange(n);
         }}
-        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:cursor-not-allowed"
       />
     </label>
   );

@@ -101,4 +101,32 @@ describe("grip-model integration", () => {
     expect(withTir).not.toBeCloseTo(without, 1);
     expect(withTir).toBeGreaterThan(0);
   });
+
+  it("extrapolation guard: mu never collapses below 20% of nominal at huge loads", () => {
+    // synthetic linear law would hit zero at dfz = 12.5 (Fz = 27 kN) and then
+    // |...| would rise again — the floor keeps extrapolation sane instead.
+    const floor = 0.2 * 2.5 * 0.95 * tire.scale;
+    expect(tirMuLat(tire, 30000)).toBeGreaterThanOrEqual(floor - 1e-9);
+    expect(tirMuLat(tire, 30000)).toBeLessThan(tirMuLat(tire, 2000));
+  });
+
+  it("corner-speed ceiling stays monotonic in radius with a measured tire", () => {
+    const g = makeGripModel({ ...SDM26_VEHICLE, tire });
+    let prev = 0;
+    for (const R of [10, 20, 40, 80, 160]) {
+      const v = g.vCorner(R);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+  });
+
+  it("load-transfer chi with a measured tire is <= 1 and degrades with speed in a corner", () => {
+    const g = makeGripModel({ ...SDM26_VEHICLE, tire });
+    const chiSlow = g.chi(8, 20);
+    const chiFast = g.chi(16, 20);
+    expect(chiSlow).toBeLessThanOrEqual(1);
+    expect(chiFast).toBeLessThanOrEqual(chiSlow);
+    expect(chiFast).toBeGreaterThan(0.5); // sane, not collapsing
+  });
 });
