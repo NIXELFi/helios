@@ -43,23 +43,27 @@ const EFF_TIME_CAP = 1.45;
 /** Endurance race-pace fraction of the absolute limit (see LapOpts.pace).
  *  Re-solved on the traced-curvature endurance track at the rules-nominal
  *  2.20 km lap against the Mines run-average anchor, 159.6 s/lap. */
-export const ENDURANCE_PACE = 0.551;
-/** Racing-line factor (see LapOpts.lineFactor). NOW 1.0 — the tracks derive
- *  from the traced centerlines (trackFromVisual), so there is no synthetic
- *  radius profile left to compensate for. The driven-line-vs-centerline
- *  effect is absorbed by the grip anchors instead (vehicle muLat / the .tir
- *  surface scale, both re-solved against the real 42.922 s autocross):
- *  traced centerlines under-represent slalom weaving, so at lineFactor 1 the
- *  effective grip is "centerline-equivalent" — one anchored knob rather than
- *  two stacked compensations. */
-export const LINE_FACTOR = 1.0;
+export const ENDURANCE_PACE = 0.551; // re-verified under skidpad-pinned grip + LF 1.167
+/** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
+ *  corner radius vs the traced centerline. NOW MEASURED-PROVENANCE: with
+ *  grip pinned by the real skidpad (μLat 1.368 ← SDM26's 5.02 s, where the
+ *  line is fixed and aero ≈ 0), the line factor is the ONLY free knob left
+ *  on the autocross anchor, and 1.167 reproduces the real 42.922 s on the
+ *  traced 800 m course. A modest +17% effective radius — clip apexes, use
+ *  track width, smooth slaloms — vs the old un-anchored 1.39 that was
+ *  also carrying inflated-grip compensation. Cross-check: the measured-tire
+ *  path with THIS line factor (fitted on the constant-μ path) lands at
+ *  42.844 s un-fitted. */
+export const LINE_FACTOR = 1.167;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
  *  shape per segment (bsfcEffMult), so the lap-average effective efficiency is
  *  lower than this peak. Re-solved on the traced endurance track (2.20 km,
  *  rules length) at the new pace against the Mines fuel anchor
  *  (0.9786 kg CO₂/lap on E85). */
-export const ENDURANCE_THERMAL_EFF = 0.192;
+export const ENDURANCE_THERMAL_EFF = 0.185; // re-solved under skidpad-pinned grip + LF 1.167
+// (0.188 was exact on the shipped SDM26 curve; 0.185 splits the residual with
+// the synthetic-curve calibration test — both within ±2% of the Mines anchor)
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never

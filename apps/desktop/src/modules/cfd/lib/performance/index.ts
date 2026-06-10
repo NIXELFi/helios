@@ -86,6 +86,8 @@ export {
 export {
   simLap,
   makeGripModel,
+  predictSkidpad,
+  SKIDPAD_PATH_RADIUS_M,
   type GripModel,
   type LapResult,
   type LapOpts,

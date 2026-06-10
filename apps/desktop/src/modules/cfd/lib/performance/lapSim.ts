@@ -364,6 +364,28 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle, axleMargin };
 }
 
+/** FSAE skidpad driving-path radius: 15.25 m inner diameter + half the 3 m
+ *  lane (§D.10). */
+export const SKIDPAD_PATH_RADIUS_M = 9.125;
+
+/** Grip-model skidpad prediction — the cleanest validation point the rules
+ *  offer, because skidpad isolates lateral grip: ~no aero (low speed), no
+ *  line freedom, no engine. SDM26's real 5.02 s pins the default muLat;
+ *  this prediction keeps that validation visible (and immediately flags a
+ *  grip-model regression). */
+export function predictSkidpad(vehicle: VehicleConfig): {
+  timeS: number;
+  speedKph: number;
+  latG: number;
+} {
+  const v = makeGripModel(vehicle).vCorner(SKIDPAD_PATH_RADIUS_M);
+  return {
+    timeS: (2 * Math.PI * SKIDPAD_PATH_RADIUS_M) / v,
+    speedKph: v * 3.6,
+    latG: (v * v) / SKIDPAD_PATH_RADIUS_M / G,
+  };
+}
+
 export function simLap(
   curve: TorqueCurve,
   vehicle: VehicleConfig,

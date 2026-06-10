@@ -44,13 +44,15 @@ export const SDM26_VEHICLE: VehicleConfig = {
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
   tireLoadSensitivity: 0.15, // Hoosier R20 slick — flattens grip-vs-load (aero)
-  muLat: 1.59, // Lateral grip anchored to SDM26's real 42.922 s autocross on
-  //            the traced-curvature track at rules-nominal 800 m length,
-  //            LINE_FACTOR 1 (retired). Back in the physical Hoosier band —
-  //            the rules-length rescale restored consistency (at the raw
-  //            undersized trace this solved to an implausible 1.27).
-  //            History: 1.55 (lumped χ) → 1.50 (per-axle roll) → 1.59
-  //            (traced rules-length tracks, line factor retired).
+  muLat: 1.368, // SKIDPAD-PINNED lateral grip: SDM26 ran a real 5.02 s
+  //            skidpad at comp (stickers), and 1.368 reproduces it exactly
+  //            through the grip model at the 9.125 m path radius. Skidpad
+  //            isolates μ (low speed ≈ no aero, no line freedom, no engine),
+  //            so this is the measured number; the driven-line effect lives
+  //            in events.LINE_FACTOR (solved on the autocross anchor), each
+  //            knob with its own measurement. Cross-check: SDM25 scrubbed
+  //            tires ran 4.98 s — consistent. History: 1.55 → 1.50 → 1.59
+  //            (autocross-anchored, line absorbed) → 1.368 (skidpad-pinned).
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,

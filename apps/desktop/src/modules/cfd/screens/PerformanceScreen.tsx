@@ -18,6 +18,7 @@ import {
   torqueCurveFromSweep,
   torqueCurveFromDyno,
   designSensitivities,
+  predictSkidpad,
   type SensitivityRow,
   peakTorque,
   topSpeedMps,
@@ -385,6 +386,15 @@ export function PerformanceScreen() {
                 <Stat label="radius" value={`${skid.radiusM.toFixed(2)} m`} />
                 <Stat label="speed" value={`${skid.speedKph.toFixed(1)} km/h`} highlight />
                 <Stat label="lateral" value={`${skid.lateralG.toFixed(2)} g`} />
+                <span
+                  className="flex items-baseline gap-1"
+                  title="Grip-model PREDICTION at the 9.125 m skidpad path — the cleanest grip validation (no aero, no line, no engine). Real anchors: SDM26 5.02 s (comp, stickers), SDM25 4.98 s (scrubbed)."
+                >
+                  <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">model predicts</span>
+                  <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+                    {predictSkidpad(vehicle).timeS.toFixed(2)} s
+                  </span>
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-2 p-3 sm:grid-cols-6">
                 {skid.perGear.map((g) => {

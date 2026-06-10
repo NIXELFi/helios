@@ -85,14 +85,12 @@ function num(kv: Map<string, number | string>, key: string, fallback: number): n
 
 /** Distill a parsed .tir into the lap-sim peak-friction model. Throws when
  *  the file has no usable lateral peak-friction fit (PDY1 missing/zero).
- *  Default surface scales are the SDM26-anchored 2026 calibration: lateral
- *  0.659 reproduces the real 42.922 s autocross on the traced-curvature
- *  track at rules-nominal 800 m, LINE_FACTOR 1; longitudinal 0.70 the
- *  ~4.2 s accel (track-independent). That the two land nearly equal is the
- *  consistency check that validated the rules-length rescale (one tire on
- *  one surface should transfer ~equally in both axes). These are OUR
- *  track-transfer corrections, not tire data. */
-export function distillTir(text: string, label: string, scale = 0.659, scaleLong = 0.70): TirGrip {
+ *  Default surface scales are the SDM26-anchored 2026 calibration, each
+ *  pinned by its own measurement: lateral 0.574 reproduces the real 5.02 s
+ *  skidpad (grip isolated — no aero, no line, no engine); longitudinal 0.70
+ *  the ~4.2 s accel. The driven-line effect lives in events.LINE_FACTOR,
+ *  not here. These are OUR track-transfer corrections, not tire data. */
+export function distillTir(text: string, label: string, scale = 0.574, scaleLong = 0.70): TirGrip {
   const kv = parseTirText(text);
   const pdy1 = num(kv, "PDY1", 0);
   if (pdy1 === 0) {
