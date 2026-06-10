@@ -1,0 +1,230 @@
+{
+  "name": "Kawasaki Ninja ZX-6R 636 ZX636-B1/B2 (2003-2004, source-verified engine internals)",
+  "n_cylinders": 4,
+  "firing_order": [
+    1,
+    2,
+    4,
+    3
+  ],
+  "firing_interval": 180,
+  "cylinder": {
+    "bore": 0.068,
+    "stroke": 0.0438,
+    "con_rod_length": 0.09299,
+    "compression_ratio": 12.8,
+    "n_intake_valves": 2,
+    "n_exhaust_valves": 2
+  },
+  "intake_valve": {
+    "diameter": 0.0275,
+    "max_lift": 0.00856,
+    "open_angle": 350.0,
+    "close_angle": 585.0,
+    "seat_angle": 45.0,
+    "cd_table": [
+      [
+        0.05,
+        0.19
+      ],
+      [
+        0.1,
+        0.38
+      ],
+      [
+        0.15,
+        0.494
+      ],
+      [
+        0.2,
+        0.551
+      ],
+      [
+        0.25,
+        0.57
+      ],
+      [
+        0.3,
+        0.57
+      ]
+    ]
+  },
+  "exhaust_valve": {
+    "diameter": 0.023,
+    "max_lift": 0.00735,
+    "open_angle": 140.0,
+    "close_angle": 365.0,
+    "seat_angle": 45.0,
+    "cd_table": [
+      [
+        0.05,
+        0.171
+      ],
+      [
+        0.1,
+        0.333
+      ],
+      [
+        0.15,
+        0.456
+      ],
+      [
+        0.2,
+        0.523
+      ],
+      [
+        0.25,
+        0.542
+      ],
+      [
+        0.3,
+        0.551
+      ]
+    ]
+  },
+  "intake_pipes": [
+    {
+      "name": "intake_runner_1",
+      "length": 0.245,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 325.0,
+      "roughness": 3e-05
+    },
+    {
+      "name": "intake_runner_2",
+      "length": 0.245,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 325.0,
+      "roughness": 3e-05
+    },
+    {
+      "name": "intake_runner_3",
+      "length": 0.245,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 325.0,
+      "roughness": 3e-05
+    },
+    {
+      "name": "intake_runner_4",
+      "length": 0.245,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 325.0,
+      "roughness": 3e-05
+    }
+  ],
+  "exhaust_primaries": [
+    {
+      "name": "exhaust_primary_1",
+      "length": 0.308,
+      "diameter": 0.032,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 650.0,
+      "roughness": 4.6e-05,
+      "artificial_viscosity": 0.0
+    },
+    {
+      "name": "exhaust_primary_2",
+      "length": 0.308,
+      "diameter": 0.032,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 650.0,
+      "roughness": 4.6e-05,
+      "artificial_viscosity": 0.0
+    },
+    {
+      "name": "exhaust_primary_3",
+      "length": 0.308,
+      "diameter": 0.034,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 650.0,
+      "roughness": 4.6e-05,
+      "artificial_viscosity": 0.0
+    },
+    {
+      "name": "exhaust_primary_4",
+      "length": 0.308,
+      "diameter": 0.034,
+      "diameter_out": null,
+      "n_points": 30,
+      "wall_temperature": 650.0,
+      "roughness": 4.6e-05,
+      "artificial_viscosity": 0.0
+    }
+  ],
+  "exhaust_secondaries": [
+    {
+      "name": "exhaust_secondary_1",
+      "length": 0.392,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 20,
+      "wall_temperature": 550.0,
+      "roughness": 4.6e-05
+    },
+    {
+      "name": "exhaust_secondary_2",
+      "length": 0.392,
+      "diameter": 0.038,
+      "diameter_out": null,
+      "n_points": 20,
+      "wall_temperature": 550.0,
+      "roughness": 4.6e-05
+    }
+  ],
+  "exhaust_collector": {
+    "name": "exhaust_collector",
+    "length": 0.130665,
+    "diameter": 0.05,
+    "diameter_out": null,
+    "n_points": 20,
+    "wall_temperature": 500.0,
+    "roughness": 4.6e-05,
+    "length_note": "includes Levine-Schwinger open-end correction +30.7 mm (0.6133 * 50.0 mm diameter). Original geometric length = 100 mm."
+  },
+  "combustion": {
+    "wiebe_a": 5.0,
+    "wiebe_m": 2.0,
+    "combustion_duration": 50.0,
+    "spark_advance": 25.0,
+    "ignition_delay": 7.0,
+    "combustion_efficiency": 0.96,
+    "q_lhv": 44000000.0,
+    "afr_stoich": 14.7,
+    "afr_target": 13.1
+  },
+  "restrictor": {
+    "throat_diameter": 0.02,
+    "discharge_coefficient": 0.95,
+    "converging_half_angle": 12.0,
+    "diverging_half_angle": 6.0
+  },
+  "plenum": {
+    "volume": 0.0015,
+    "initial_pressure": 101325.0,
+    "initial_temperature": 300.0
+  },
+  "simulation": {
+    "rpm_start": 6000.0,
+    "rpm_end": 13500.0,
+    "rpm_step": 500.0,
+    "n_cycles": 5,
+    "cfl_number": 0.85,
+    "convergence_tolerance": 0.005,
+    "crank_step_max": 1.0,
+    "artificial_viscosity": 0.05
+  },
+  "p_ambient": 101325.0,
+  "T_ambient": 300.0,
+  "drivetrain_efficiency": 0.85
+}

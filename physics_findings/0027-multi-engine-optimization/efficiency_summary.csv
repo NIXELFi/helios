@@ -1,0 +1,9 @@
+engine,n_cyl,peak_hp_kw,peak_hp_rpm,bsfc_at_peak_g_per_kwh,bsfc_band_avg_g_per_kwh,co2_band_avg_g_per_kwh
+Yamaha YZF-R6 '09  (599cc 4),4,47.77,12250,273.5,269.9,858.3
+Suzuki GSX-R600 '06  (599cc 4),4,47.29,11250,266.4,271.0,861.8
+SDM26 baseline  (599cc 4),4,47.24,12250,277.9,274.2,872.0
+Honda CRF450R '20  (449cc 1),1,20.93,7000,255.7,275.3,875.5
+Kawasaki ZX-6R 636 '03-'04  (636cc 4),4,47.38,12000,277.5,276.1,878.0
+Triumph Daytona 675R '11  (675cc 3),3,44.65,10000,271.4,281.3,894.4
+KTM 690 Duke '18  (693cc 1),1,20.85,5250,257.3,301.9,960.1
+Yamaha YZ450F '24  (449cc 1),1,15.97,5500,252.0,324.2,1031.0

@@ -1,0 +1,38 @@
+[run]
+config = "/Users/nmurray/Developer/helios/physics_findings/0026-multi-engine-sweep/configs/SDM26_Kawasaki_ZX-6R_636_2003-2004.json"
+rpm = [7000.0, 8500.0, 10000.0, 11500.0, 13000.0, 14500.0, 16000.0]
+cycles = 30
+recorded = true
+seed = 8000
+junction = "characteristic"
+
+[environment]
+target_triple = "aarch64-apple-darwin"
+rustc_version = "rustc 1.95.0"
+rayon_threads = 1
+libm_source = "system"
+
+[sweep]
+sampler = "lhs"
+n_trials = 1
+parameters = [
+  { name = "collector_diameter_in", min = 0.0638693033106211, max = 0.0638693033106211 },
+  { name = "collector_length", min = 0.1945345810002614, max = 0.1945345810002614 },
+  { name = "duration_rpm_exp", min = 0.4, max = 0.4 },
+  { name = "fmep_c", min = 0.00075, max = 0.00075 },
+  { name = "intake_junction_borda_carnot", min = 1.0, max = 1.0 },
+  { name = "intake_junction_loss_coef", min = 1.0, max = 1.0 },
+  { name = "plenum_length", min = 0.33874243769433465, max = 0.33874243769433465 },
+  { name = "plenum_volume", min = 0.0010308614429928391, max = 0.0010308614429928391 },
+  { name = "primary_diameter_in", min = 0.030246974173319455, max = 0.030246974173319455 },
+  { name = "primary_length", min = 0.24524593239297357, max = 0.24524593239297357 },
+  { name = "restrictor_cd_mach_k", min = 0.1, max = 0.1 },
+  { name = "restrictor_loss_from_diffuser_geometry", min = 1.0, max = 1.0 },
+  { name = "runner_diameter_in", min = 0.035759230168499294, max = 0.035759230168499294 },
+  { name = "runner_length", min = 0.15348046596099724, max = 0.15348046596099724 },
+  { name = "secondary_diameter_in", min = 0.034749525256179914, max = 0.034749525256179914 },
+  { name = "secondary_length", min = 0.21291646113111862, max = 0.21291646113111862 },
+  { name = "spark_advance_rpm_slope_deg_per_krpm", min = 1.5, max = 1.5 },
+  { name = "afr_eta_enabled", min = 1.0, max = 1.0 },
+  { name = "afr_target", min = 16.5, max = 16.5 },
+]
