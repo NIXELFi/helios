@@ -12,7 +12,7 @@ const CURVE: TorqueCurve = Array.from({ length: 19 }, (_, i) => {
 describe("designSensitivities", () => {
   it("each lever produces finite events and the expected directions", () => {
     const { base, rows } = designSensitivities(CURVE, SDM26_VEHICLE, REFERENCE_2026);
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(9); // 7 core levers + 2 ARB-balance (roll model present)
     for (const r of rows) {
       expect(Number.isFinite(r.events.autocross.lapTimeS)).toBe(true);
       expect(r.dPoints).not.toBeNull();

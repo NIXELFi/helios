@@ -484,6 +484,19 @@ function TelemetryCard({
         <Stat label="max lat" value={`${tm.maxLatG.toFixed(2)} g`} />
         <Stat label="max accel" value={`${tm.maxAccelG.toFixed(2)} g`} />
         <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />
+        {tm.pctFrontLimited != null && (
+          <Stat
+            label="balance"
+            value={
+              tm.pctFrontLimited > 0.6
+                ? `push ${(tm.pctFrontLimited * 100).toFixed(0)}%F`
+                : tm.pctFrontLimited < 0.4
+                  ? `loose ${((1 - tm.pctFrontLimited) * 100).toFixed(0)}%R`
+                  : `neutral ${(tm.pctFrontLimited * 100).toFixed(0)}%F`
+            }
+            highlight
+          />
+        )}
       </div>
       <GearUsageBar frac={tm.timeInGearFrac} />
     </div>
@@ -736,6 +749,27 @@ function VehicleEditor({
         {tirError && <span className="pb-1 text-[10px] text-[#FF5252]">{tirError}</span>}
       </div>
       {tire && <TireMuChart tire={tire} fzStatic={fzStatic} />}
+      {/* Roll balance (per-axle cornering limit) — from the team's ARB/RSD
+          calculators. RSD front is the ARB-setting knob (SDM26 combos span
+          ~0.38–0.60). */}
+      {vehicle.roll && (
+        <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+          <span className="pb-1 text-[9px] uppercase tracking-wider text-[#5A5F66]">roll balance</span>
+          <NumField label="RSD front" value={vehicle.roll.rsdFront} step={0.005}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rsdFront: n } })} />
+          <NumField label="roll arm" unit="m" value={vehicle.roll.hRollArmM} step={0.005}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, hRollArmM: n } })} />
+          <NumField label="RC front" unit="m" value={vehicle.roll.rcFrontM} step={0.001}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rcFrontM: n } })} />
+          <NumField label="RC rear" unit="m" value={vehicle.roll.rcRearM} step={0.001}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, rcRearM: n } })} />
+          <NumField label="aero front" value={vehicle.roll.aeroFrontFrac} step={0.01}
+            onChange={(n) => set({ roll: { ...vehicle.roll!, aeroFrontFrac: n } })} />
+          <span className="pb-1 text-[9px] text-[#5A5F66]" title="Per-axle cornering limit active: the lap sim saturates whichever axle gives up first (see lap telemetry balance readout)">
+            per-axle limit active
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />

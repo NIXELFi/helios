@@ -89,6 +89,10 @@ export interface LapTelemetry {
   /** Top / minimum speed over the lap (km/h), for the readout. */
   vMaxKph: number;
   vMinKph: number;
+  /** Of the corner-limited time, the fraction where the FRONT axle is the
+   *  saturating one (≈ understeer-limited). Only with a roll-balance model.
+   *  0.5 = neutral; >0.5 = push-limited; <0.5 = rear-limited. */
+  pctFrontLimited?: number;
 }
 
 /** Thermal efficiency RELATIVE to the engine's best-BSFC point, vs RPM. Real SI
@@ -179,6 +183,9 @@ export interface GripModel {
   vCorner(R: number): number;
   /** Speed cap (gearing top speed × 1.1) the solver clamps to. */
   vCap: number;
+  /** Which axle saturates first at (v, R) — only when a roll-balance model
+   *  is configured (per-axle limit). Undefined under the lumped model. */
+  limitingAxle?(v: number, R: number): "front" | "rear";
 }
 
 export function makeGripModel(vehicle: VehicleConfig): GripModel {
@@ -199,6 +206,14 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const fzTire = (v: number): number => fzTireStatic * (gEff(v) / G);
   const muLatV = (v: number): number =>
     tir ? tirMuLat(tir, fzTire(v)) : vehicle.muLat * loadMult(v);
+  // Per-tire lateral μ at an arbitrary load — the .tir fit when imported,
+  // else the power-law generalized to per-tire load (identical to the legacy
+  // loadMult at even loading).
+  const sensEarly = vehicle.tireLoadSensitivity ?? 0;
+  const muLatFz = (fz: number): number =>
+    tir
+      ? tirMuLat(tir, fz)
+      : vehicle.muLat * Math.pow(Math.max(fz, 1) / fzTireStatic, -sensEarly);
 
   // Tire load sensitivity: μ falls as vertical load rises, so aero downforce
   // buys LESS grip than μ·Fz would imply. loadMult ≤ 1 for v > 0 (1 at static).
@@ -231,9 +246,52 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
     return (Math.pow(1 + d, 1 - sens) + Math.pow(1 - d, 1 - sens)) / 2;
   };
 
+  // ---- Per-axle cornering limit (roll-balance model) ------------------------
+  // With a RollConfig, lateral load transfer splits by roll-stiffness
+  // distribution + roll-center geometry: ΔF_axle = m·a_lat·(q·h_arm +
+  // rc·w_static)/track (Milliken Ch 18 simplified, sprung≈total mass). Each
+  // axle's capacity is the load-weighted μ(Fz) of its outer+inner tires; in
+  // steady state each axle must react its load share of m·a_lat, so the car
+  // saturates at min over axles — whichever gives up first sets the balance.
+  const roll = vehicle.roll;
+  const axleCaps = (v: number, R: number): { front: number; rear: number } => {
+    const r = roll!;
+    const aLat = Number.isFinite(R) && R > 0 ? (v * v) / R : 0;
+    const aeroN = m * k * v * v;
+    const wf = vehicle.weightDistFront;
+    const W = m * G + aeroN;
+    const caps = { front: 0, rear: 0 };
+    for (const axle of ["front", "rear"] as const) {
+      const isF = axle === "front";
+      const wStatic = isF ? wf : 1 - wf;
+      const Wa = m * G * wStatic + aeroN * (isF ? r.aeroFrontFrac : 1 - r.aeroFrontFrac);
+      const q = isF ? r.rsdFront : 1 - r.rsdFront;
+      const rc = isF ? r.rcFrontM : r.rcRearM;
+      const dF = Math.min(Wa, (m * aLat * (q * r.hRollArmM + rc * wStatic)) / vehicle.trackWidthM);
+      const out = Wa / 2 + dF / 2;
+      const inn = Math.max(0, Wa / 2 - dF / 2);
+      const fCap = muLatFz(out) * out + muLatFz(inn) * inn;
+      // axle reacts its load share of the total lateral force m·a_lat
+      caps[axle] = (fCap * W) / (m * Math.max(Wa, 1));
+    }
+    return caps;
+  };
+
   // Load-sensitive, transfer-discounted lateral grip acceleration (m/s²).
-  const latCap = (v: number, R: number): number =>
-    muLatV(v) * gEff(v) * chi(v, R);
+  const latCap = (v: number, R: number): number => {
+    if (roll) {
+      const c = axleCaps(v, R);
+      return Math.min(c.front, c.rear);
+    }
+    return muLatV(v) * gEff(v) * chi(v, R);
+  };
+
+  const limitingAxle = roll
+    ? (v: number, R: number): "front" | "rear" => {
+        const c = axleCaps(v, R);
+        return c.front <= c.rear ? "front" : "rear";
+      }
+    : undefined;
 
   // Steady-state corner speed: solve v²/R = latCap(v, R). Load sensitivity and
   // χ make the capacity sub-linear in v with no closed form — bisect (capacity·R
@@ -285,7 +343,7 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   const aBrakeGrip = (v: number, R: number): number =>
     muLatV(v) * gEff(v) * ellipse(v, R);
 
-  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap };
+  return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle };
 }
 
 export function simLap(
@@ -340,6 +398,7 @@ export function simLap(
   let onThrottleDt = 0;
   let powerLimitedDt = 0;
   let cornerLimitedDt = 0;
+  let frontLimitedDt = 0;
   const timeInGear = new Array<number>(nGears).fill(0);
 
   // Channel collection (only when asked for — see LapOpts.channels).
@@ -398,7 +457,13 @@ export function simLap(
       limit = "coast";
     }
     if (limit === "power") powerLimitedDt += dt;
-    else if (limit === "corner") cornerLimitedDt += dt;
+    else if (limit === "corner") {
+      cornerLimitedDt += dt;
+      // Balance bookkeeping: which axle is the binding one here (roll model).
+      if (grip.limitingAxle && Number.isFinite(R) && R > 0) {
+        if (grip.limitingAxle(vAvg, R) === "front") frontLimitedDt += dt;
+      }
+    }
 
     if (ch) {
       // Insert the upshift dead time AT the shift so A/B deltas localize it.
@@ -435,6 +500,9 @@ export function simLap(
     pctCornerLimited: dtTot > 0 ? cornerLimitedDt / dtTot : 0,
     vMaxKph: Math.max(...v) * 3.6,
     vMinKph: Math.min(...v) * 3.6,
+    ...(grip.limitingAxle && cornerLimitedDt > 0
+      ? { pctFrontLimited: frontLimitedDt / cornerLimitedDt }
+      : {}),
   };
 
   return {

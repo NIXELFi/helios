@@ -3,10 +3,13 @@
 export type {
   VehicleConfig,
   ReferenceBaseline,
+  RollConfig,
 } from "./types";
 export {
   SDM26_VEHICLE,
   SDM25_VEHICLE,
+  SDM26_ROLL,
+  SDM25_ROLL,
   EMPTY_BASELINE,
   REFERENCE_2026,
   carKeyForConfig,

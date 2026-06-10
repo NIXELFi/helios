@@ -2,7 +2,32 @@
 // engine → primary reduction → gearbox ratio → final drive (sprocket) → wheel,
 // so a sprocket swap (finalDrive) or a tire change recomputes everything.
 
-import type { ReferenceBaseline, VehicleConfig } from "./types";
+import type { ReferenceBaseline, RollConfig, VehicleConfig } from "./types";
+
+/** SDM26 roll balance — from the team's Anti-Roll Bar Calculator (2026):
+ *  RC heights 18.6 / 25.1 mm, sprung-CG 284.5 mm → CG-to-roll-axis arm
+ *  262.6 mm (matches the SDM25 RSD test sheet's measured 10.34 in exactly).
+ *  rsdFront 0.512 = the with-tire no-ARB baseline; the ARB combos span
+ *  0.376 (F soft / R hard) to 0.605 (F hard / R disconnected). Aero split
+ *  53% front per the spec sheet. */
+export const SDM26_ROLL: RollConfig = {
+  rsdFront: 0.512,
+  hRollArmM: 0.2626,
+  rcFrontM: 0.0186,
+  rcRearM: 0.0251,
+  aeroFrontFrac: 0.53,
+};
+
+/** SDM25 roll balance — measured RSD test (2025-11-23): front 1719.7 /
+ *  rear 3059.7 lb·in/deg as tested (no front bar, rear ARB full stiff) →
+ *  rsdFront 0.36. Same CG-to-roll-axis arm (measured 10.34 in). */
+export const SDM25_ROLL: RollConfig = {
+  rsdFront: 0.36,
+  hRollArmM: 0.2626,
+  rcFrontM: 0.0186,
+  rcRearM: 0.0251,
+  aeroFrontFrac: 0.53,
+};
 
 /** SDM26 (ASU Car #106) — chassis/aero from the 2026 FSAE spec sheet; gearbox =
  *  stock Honda CBR600RR (PC40) ratios + 2.111 primary, with SDM's 3.0 final
@@ -19,9 +44,12 @@ export const SDM26_VEHICLE: VehicleConfig = {
   tireRadiusM: 0.2, // Hoosier 16x7.5-10, loaded radius ≈ 0.20 m
   muLong: 1.5, // launch-traction estimate (accel ≈ 4.2 s, matches real)
   tireLoadSensitivity: 0.15, // Hoosier R20 slick — flattens grip-vs-load (aero)
-  muLat: 1.55, // Hoosier R20 slick — a REALISTIC mechanical μ. The autocross
-  //            time is hit via the racing line (events.LINE_FACTOR), not inflated
-  //            grip, so peak cornering lands a realistic ~2.2 g (× aero g_eff).
+  muLat: 1.5, // Hoosier R20 slick — a REALISTIC mechanical μ. The autocross
+  //           time is hit via the racing line (events.LINE_FACTOR), not inflated
+  //           grip, so peak cornering lands a realistic ~2.1 g (× aero g_eff).
+  //           Re-anchored 1.55 → 1.50 when the per-axle roll-balance limit
+  //           replaced the lumped χ model (per-axle is less pessimistic, so
+  //           the same real 42.922 s autocross needs slightly less μ).
   cdaM2: 1.24, // Cd 1.22 × ref area 1.02 m²
   claM2: 3.09, // Cl 3.03 × 1.02 m² (downforce)
   airDensityKgM3: 1.162,
@@ -33,6 +61,7 @@ export const SDM26_VEHICLE: VehicleConfig = {
   shiftRpm: 9500, // estimate (no longer drives accel shifts — those are optimal)
   revLimitRpm: 14500, // redline (confirmed by Nick)
   shiftTimeS: 0.1, // 100 ms (confirmed by Nick)
+  roll: SDM26_ROLL,
 };
 
 export const EMPTY_BASELINE: ReferenceBaseline = {
@@ -107,6 +136,7 @@ export const SDM25_VEHICLE: VehicleConfig = {
   name: "SDM25",
   massKg: 281, // 469 lb (≈213 kg car) + 68 kg driver
   finalDrive: 3.5,
+  roll: SDM25_ROLL,
 };
 
 /** Classify a loaded config name into a vehicle "car" key so the right preset

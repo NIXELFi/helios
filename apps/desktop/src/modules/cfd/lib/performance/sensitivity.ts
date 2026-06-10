@@ -78,6 +78,22 @@ const LEVERS: Lever[] = [
   },
 ];
 
+/** ARB balance levers — only meaningful under the per-axle roll model. */
+const ROLL_LEVERS: Lever[] = [
+  {
+    key: "arbF",
+    label: "ARB balance +3% front",
+    apply: (v) =>
+      v.roll ? { ...v, roll: { ...v.roll, rsdFront: Math.min(0.8, v.roll.rsdFront + 0.03) } } : v,
+  },
+  {
+    key: "arbR",
+    label: "ARB balance −3% front",
+    apply: (v) =>
+      v.roll ? { ...v, roll: { ...v.roll, rsdFront: Math.max(0.2, v.roll.rsdFront - 0.03) } } : v,
+  },
+];
+
 /** One-at-a-time design sensitivities through the full scoring chain. Rows
  *  come back sorted by |Δpoints| (or |Δ autocross| without a baseline). */
 export function designSensitivities(
@@ -86,7 +102,8 @@ export function designSensitivities(
   baseline: ReferenceBaseline,
 ): { base: EventScores; rows: SensitivityRow[] } {
   const base = computeEvents(curve, vehicle, baseline);
-  const rows = LEVERS.map((lever) => {
+  const levers = vehicle.roll ? [...LEVERS, ...ROLL_LEVERS] : LEVERS;
+  const rows = levers.map((lever) => {
     const ev = computeEvents(curve, lever.apply(vehicle), baseline);
     const dPoints =
       ev.totalPoints != null && base.totalPoints != null

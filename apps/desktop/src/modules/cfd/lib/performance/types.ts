@@ -47,6 +47,26 @@ export interface VehicleConfig {
    *  surface scale inside is the one calibration knob. Loaded at runtime —
    *  tire fit data is proprietary and never ships in the repo. */
   tire?: import("./tir").TirGrip;
+  /** Optional roll-balance model (from the team's ARB/RSD calculators).
+   *  When present, the cornering limit is computed PER AXLE: lateral load
+   *  transfer splits by roll-stiffness distribution + roll-center geometry,
+   *  each axle saturates on its own μ(Fz), and the car's limit is whichever
+   *  axle gives up first (understeer/oversteer balance). Absent → the
+   *  legacy lumped-axle χ model. */
+  roll?: RollConfig;
+}
+
+/** Roll-balance parameters. Source: ARB calculator / RSD test sheet. */
+export interface RollConfig {
+  /** Front share of total roll stiffness (0..1) — the ARB setting knob. */
+  rsdFront: number;
+  /** CG-to-roll-axis moment arm (m). */
+  hRollArmM: number;
+  /** Front / rear roll-center heights (m). */
+  rcFrontM: number;
+  rcRearM: number;
+  /** Front share of total aero downforce (0..1). */
+  aeroFrontFrac: number;
 }
 
 /** Per-event reference (from last year's published results) for projecting FSAE
