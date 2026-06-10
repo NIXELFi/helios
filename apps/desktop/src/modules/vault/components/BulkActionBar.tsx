@@ -3,7 +3,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useReleaseLock } from "../data/useReleaseLock";
 import { useDeleteFile } from "../data/useDeleteFile";
-import { useIsAdmin } from "../data/useIsAdmin";
+import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useCheckIn } from "../data/useCheckIn";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { matchLocal, vaultRelativePath } from "../data/local-match";
@@ -51,7 +51,10 @@ export function BulkActionBar({
   const deleteFile = useDeleteFile();
   const checkIn = useCheckIn();
   const download = useDownloadVersion();
-  const isAdmin = useIsAdmin();
+  // Per-vault admin (global admin rows count everywhere) — matches what the
+  // pdm_delete_file / pdm_force_unlock RPCs actually authorize, so the bar
+  // never shows actions the DB would reject for a vault-scoped member.
+  const isAdmin = useIsVaultAdmin(vaultId);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -280,14 +283,27 @@ export function BulkActionBar({
     setConfirmDelete(false);
     setBusy(true);
     setStatus(null);
-    let ok = 0, fail = 0;
+    const nameById = new Map(files.map((f) => [f.id, f.name]));
+    let ok = 0;
+    const failed: string[] = [];
     for (const id of selectedIds) {
       const r = await deleteFile.run(id);
-      if (r) ok++; else fail++;
+      if (r) ok++;
+      else failed.push(nameById.get(id) ?? String(id));
     }
-    setStatus(`Deleted ${ok}/${selectedIds.length}${fail ? ` (${fail} failed)` : ""}`);
+    if (failed.length > 0) {
+      // Name the failures (hover shows the full list via the status title) and
+      // keep the selection so the user can retry — clearing it would hide
+      // exactly which files still need attention.
+      setStatus(
+        `Deleted ${ok}/${selectedIds.length} — failed: ${failed.join(", ")}` +
+          (deleteFile.error ? ` (${deleteFile.error.message})` : ""),
+      );
+    } else {
+      setStatus(`Deleted ${ok}/${selectedIds.length}`);
+      onClear();
+    }
     setBusy(false);
-    onClear();
     onDone();
   }
 
@@ -391,8 +407,9 @@ export function BulkActionBar({
               Delete {selectedIds.length} file{selectedIds.length === 1 ? "" : "s"}?
             </h3>
             <p className="text-xs text-helios-dim">
-              This cannot be undone. All versions, references, and audit history for the selected
-              files will be removed.
+              The selected files move to this vault&apos;s Deleted tab — versions and history are
+              kept, and you (or an admin) can restore them from there. Local working copies on
+              teammates&apos; machines are removed unless they hold unsaved changes.
             </p>
             <div className="flex justify-end gap-2">
               <button

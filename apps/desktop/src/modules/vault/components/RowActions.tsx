@@ -75,10 +75,13 @@ export function CheckOutButton({
   fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha, localFile,
 }: ActionProps) {
   const acquireLock = useAcquireLock();
+  const release = useReleaseLock();
   const download = useDownloadVersion();
+  const [rollbackErr, setRollbackErr] = useState<string | null>(null);
 
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
+    setRollbackErr(null);
     const result = await acquireLock.run(fileId);
     if (!result) return;
     // Real-vault: checking out gets you the latest version (download it if you
@@ -93,8 +96,19 @@ export function CheckOutButton({
         (!!latestSha && localFile.sha256?.toLowerCase() !== latestSha.toLowerCase());
       if (latestSha && stale) {
         const ok = await download.run(latestSha, dest);
+        if (!ok) {
+          // The download failed but the lock is already held. Leaving the
+          // STALE (or missing) local copy writable would invite editing an
+          // outdated base and checking it in over a teammate's newer work —
+          // roll the checkout back instead and surface why.
+          await release.run(fileId);
+          setRollbackErr(
+            "couldn't download the latest version — check-out was rolled back. Try again.",
+          );
+          return;
+        }
         // Record the freshly-downloaded latest version in the ledger (T6).
-        if (ok) recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
+        recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
       }
       await setReadonly(dest, false);
       flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
@@ -105,7 +119,7 @@ export function CheckOutButton({
   // Surface the hook's error like GetLatestButton — hover tells the user what
   // went wrong (e.g. "already checked out") and the button tints red instead
   // of silently doing nothing.
-  const err = acquireLock.error?.message ?? null;
+  const err = acquireLock.error?.message ?? rollbackErr;
   return (
     <button
       type="button"

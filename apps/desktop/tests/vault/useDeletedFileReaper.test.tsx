@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useDeletedFileReaper } from "../../src/modules/vault/data/useDeletedFileReaper";
+import { onReaperHeldBack } from "../../src/modules/vault/data/local-delete-events";
 import type { VaultFile, Folder } from "../../src/modules/vault/data/types";
 import type { LocalFile } from "../../src/modules/vault/data/useLocalFolderScan";
 
@@ -103,6 +104,86 @@ describe("useDeletedFileReaper", () => {
     );
     await waitFor(() => expect(removeMock).toHaveBeenCalledTimes(1));
     expect(removeMock).toHaveBeenCalledWith("C:/vault/SDM25/Aero/part.sldprt");
+  });
+
+  // ── Writable-copy guard (2026-06-09 audit CRITICAL) ──────────────────────
+  // The read-only bit is the module-wide "clean copy" marker: writable means
+  // checked out / possible unsaved edits. A vault-side delete must never
+  // destroy such a copy.
+
+  it("NEVER removes a writable local copy (possible unsaved edits) — surfaces it instead", async () => {
+    const heldBack: string[][] = [];
+    const unsub = onReaperHeldBack((names) => heldBack.push(names));
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [delFile("f1", "frame.sldprt")],
+        localFiles: [{ ...local("frame.sldprt", "C:/vault/SDM25/frame.sldprt"), readonly: false }],
+        folders: [],
+      }),
+    );
+    await waitFor(() => expect(heldBack).toHaveLength(1));
+    unsub();
+    expect(removeMock).not.toHaveBeenCalled();
+    expect(setReadonlyMock).not.toHaveBeenCalled();
+    expect(heldBack[0]).toEqual(["frame.sldprt"]);
+  });
+
+  it("treats an unknown read-only bit (stat unavailable) as writable — kept on disk", async () => {
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [delFile("f1", "frame.sldprt")],
+        localFiles: [{ ...local("frame.sldprt", "C:/vault/SDM25/frame.sldprt"), readonly: undefined }],
+        folders: [],
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("warns once per held-back file, not on every reap pass", async () => {
+    const heldBack: string[][] = [];
+    const unsub = onReaperHeldBack((names) => heldBack.push(names));
+    const props = {
+      enabled: true,
+      deletedFiles: [delFile("f1", "frame.sldprt")],
+      folders: [] as Folder[],
+    };
+    const { rerender } = renderHook(
+      ({ localFiles }: { localFiles: LocalFile[] }) =>
+        useDeletedFileReaper({ ...props, localFiles }),
+      {
+        initialProps: {
+          localFiles: [{ ...local("frame.sldprt", "C:/vault/SDM25/frame.sldprt"), readonly: false }],
+        },
+      },
+    );
+    await waitFor(() => expect(heldBack).toHaveLength(1));
+    // New array identity (a fresh scan) re-fires the effect — no second event.
+    rerender({
+      localFiles: [{ ...local("frame.sldprt", "C:/vault/SDM25/frame.sldprt"), readonly: false }],
+    });
+    await settle();
+    unsub();
+    expect(heldBack).toHaveLength(1);
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("still reaps the clean read-only copies in the same pass as a held-back one", async () => {
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [delFile("f1", "dirty.sldprt"), delFile("f2", "clean.sldprt")],
+        localFiles: [
+          { ...local("dirty.sldprt", "C:/vault/SDM25/dirty.sldprt"), readonly: false },
+          local("clean.sldprt", "C:/vault/SDM25/clean.sldprt"),
+        ],
+        folders: [],
+      }),
+    );
+    await waitFor(() => expect(removeMock).toHaveBeenCalledTimes(1));
+    expect(removeMock).toHaveBeenCalledWith("C:/vault/SDM25/clean.sldprt");
   });
 
   it("does nothing when disabled (manual download mode)", async () => {

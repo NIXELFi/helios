@@ -168,8 +168,15 @@ export function useLocalFolderScan(
 
   // Clear the sha cache whenever rootPath changes — entries are keyed by
   // absolute path and would silently leak across folder/account switches.
+  // Whether THIS root has ever produced a non-empty scan — distinguishes
+  // "never synced yet" (missing root is fine, publish []) from "root vanished
+  // out from under us" (unmounted drive — publishing [] would read as a mass
+  // local delete). Reset per root.
+  const hadFilesRef = useRef(false);
+
   useEffect(() => {
     shaCacheRef.current.clear();
+    hadFilesRef.current = false;
   }, [rootPath]);
 
   useEffect(() => {
@@ -198,8 +205,24 @@ export function useLocalFolderScan(
         // created without a download, and no download happens without the
         // folder. Publishing [] lets auto-sync bootstrap it (the download path
         // mkdir's the destination).
+        //
+        // BUT: if this root HAS produced files before and is now suddenly
+        // unreadable (unmounted network drive, ejected disk, renamed parent),
+        // publishing [] would tell every absence-based consumer (auto-sync's
+        // locally-deleted detection, the deleted-file reaper's rescans) that
+        // the user deleted everything — which can propagate vault deletes.
+        // Treat that as an ERROR and keep the last good snapshot instead.
         let rootExists = true;
         try { await stat(rootPath); } catch { rootExists = false; }
+        if (!rootExists && hadFilesRef.current) {
+          if (mounted) {
+            setError(new Error(
+              `vault folder is unreachable (${rootPath}) — keeping the last known local state; reconnect the drive or fix the path`,
+            ));
+            setLoading(false);
+          }
+          return;
+        }
         const collected: LocalFile[] = [];
         const openSw = new Set<string>();
         if (rootExists) {
@@ -209,6 +232,7 @@ export function useLocalFolderScan(
         // wasn't already paused at start — that case never publishes anyway).
         const pausedNow = pausedRef.current && !startedPaused;
         if (mounted && !pausedNow) {
+          if (collected.length > 0) hadFilesRef.current = true;
           setFiles(collected);
           // Reuse the stable empty set when there's nothing open, so consumers
           // don't churn on a fresh empty-Set identity each scan.

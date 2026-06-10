@@ -40,19 +40,26 @@ export function useContains(versionId: VersionId | null) {
       if (!alive) return;
       if (e1) { setError(e1); setData(null); setLoading(false); return; }
       const fileIds = (refs ?? []).map((r: any) => r.child_file_id).filter(Boolean);
+      // Resolve names from LIVE files only: a soft-deleted child is a broken
+      // reference (the assembly still points at it, but it's in the recycle
+      // bin), so it renders as unresolved rather than as a healthy link.
       const names = new Map<string, string>();
       if (fileIds.length) {
-        const { data: files } = await (client.from("files") as any).select("id,name").in("id", fileIds);
+        const { data: files } = await (client.from("files") as any)
+          .select("id,name").in("id", fileIds).is("deleted_at", null);
         for (const f of files ?? []) names.set(f.id, f.name);
       }
       if (!alive) return;
-      setData((refs ?? []).map((r: any): ContainsRow => ({
-        childPathHint: r.child_path_hint,
-        childFileId: r.child_file_id,
-        childVersionId: r.child_version_id,
-        childName: r.child_file_id ? (names.get(r.child_file_id) ?? basename(r.child_path_hint)) : basename(r.child_path_hint),
-        resolved: !!r.child_file_id,
-      })));
+      setData((refs ?? []).map((r: any): ContainsRow => {
+        const live = !!r.child_file_id && names.has(r.child_file_id);
+        return {
+          childPathHint: r.child_path_hint,
+          childFileId: r.child_file_id,
+          childVersionId: r.child_version_id,
+          childName: live ? names.get(r.child_file_id)! : basename(r.child_path_hint),
+          resolved: live,
+        };
+      }));
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -79,13 +86,18 @@ export function useWhereUsed(fileId: FileId | null) {
       if (!verIds.length) { setData([]); setLoading(false); return; }
       const { data: versions } = await (client.from("versions") as any).select("id,file_id").in("id", verIds);
       const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
-      const { data: files } = await (client.from("files") as any).select("id,name").in("id", fileIds);
+      // LIVE parents only — a soft-deleted assembly is not a current "user"
+      // of this part; listing it would block/confuse delete decisions.
+      const { data: files } = await (client.from("files") as any)
+        .select("id,name").in("id", fileIds).is("deleted_at", null);
       if (!alive) return;
       const fileName = new Map<string, string>();
       for (const f of files ?? []) fileName.set(f.id, f.name);
-      setData((versions ?? []).map((v: any): WhereUsedRow => ({
-        parentFileId: v.file_id, parentVersionId: v.id, parentName: fileName.get(v.file_id) ?? "(unknown)",
-      })));
+      setData((versions ?? [])
+        .filter((v: any) => fileName.has(v.file_id))
+        .map((v: any): WhereUsedRow => ({
+          parentFileId: v.file_id, parentVersionId: v.id, parentName: fileName.get(v.file_id)!,
+        })));
       setLoading(false);
     })();
     return () => { alive = false; };
