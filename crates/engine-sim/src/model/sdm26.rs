@@ -253,6 +253,11 @@ pub struct SDM26Config {
     /// 0029: Douaud-Eyzat τ rescale (see CylinderModel::knock_tau_scale).
     /// Field-calibrated so the knock-free team builds read KI < 1.
     pub knock_tau_scale: f64,
+    /// 0030: optional measured per-RPM ignition map, (rpm, deg BTDC) pairs
+    /// sorted by rpm. Overrides `spark_advance` + slope when present so the
+    /// sim runs the engine's ACTUAL ECU table — the team dynos reflect the
+    /// flashed tune, not an idealized MBT map. Default None → parity.
+    pub spark_advance_map: Option<Vec<(f64, f64)>>,
     pub t_wall_cylinder: f64,
     // Woschni
     pub woschni_c1_gas_exchange: f64,
@@ -398,6 +403,7 @@ impl Default for SDM26Config {
             knock_retard_step_deg: 1.0,
             knock_max_retard_deg: 10.0,
             knock_tau_scale: 1.0,
+            spark_advance_map: None,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
             woschni_c1_combustion: 2.28, woschni_c2_combustion: 3.24e-3,
@@ -806,6 +812,7 @@ impl SDM26Engine {
             // (slope=0, exp=0) keep behavior bit-identical to legacy.
             spark_advance_rpm_slope_deg_per_krpm: cfg.spark_advance_rpm_slope_deg_per_krpm,
             spark_advance_rpm_ref: cfg.spark_advance_rpm_ref,
+            spark_map: cfg.spark_advance_map.clone(),
             duration_rpm_exp: cfg.duration_rpm_exp,
             duration_rpm_ref: cfg.duration_rpm_ref,
             wiebe_a_rpm_exp: cfg.wiebe_a_rpm_exp,

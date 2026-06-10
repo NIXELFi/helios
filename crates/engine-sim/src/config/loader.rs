@@ -255,6 +255,30 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
         if let Some(v) = opt_f64(phys, "knock_max_retard_deg") { cfg.knock_max_retard_deg = v; }
         if let Some(v) = opt_f64(phys, "knock_tau_scale") { cfg.knock_tau_scale = v; }
         if let Some(v) = opt_f64(phys, "octane_number") { cfg.octane_number = v; }
+        // Finding 0030: measured per-RPM ignition map, [[rpm, deg], ...].
+        // Lets a config run the engine's actual ECU table instead of the
+        // idealized scalar + slope tune.
+        if let Some(arr) = phys.get("spark_advance_map").and_then(|x| x.as_array()) {
+            let mut map: Vec<(f64, f64)> = Vec::with_capacity(arr.len());
+            for row in arr {
+                let r = row.as_array().ok_or_else(|| ConfigLoadError::Schema(
+                    "spark_advance_map rows must be [rpm, deg] pairs".into()))?;
+                if r.len() != 2 {
+                    return Err(ConfigLoadError::Schema(
+                        "spark_advance_map rows must be [rpm, deg] pairs".into()));
+                }
+                let rpm = r[0].as_f64().ok_or_else(|| ConfigLoadError::Schema(
+                    "spark_advance_map rpm must be numeric".into()))?;
+                let deg = r[1].as_f64().ok_or_else(|| ConfigLoadError::Schema(
+                    "spark_advance_map deg must be numeric".into()))?;
+                map.push((rpm, deg));
+            }
+            if map.windows(2).any(|w| w[1].0 <= w[0].0) {
+                return Err(ConfigLoadError::Schema(
+                    "spark_advance_map must be sorted by strictly increasing rpm".into()));
+            }
+            if !map.is_empty() { cfg.spark_advance_map = Some(map); }
+        }
     }
 
     Ok(cfg)
@@ -270,8 +294,16 @@ mod tests {
     }
 
     fn write_temp(value: &Value) -> std::path::PathBuf {
+        // Unique per call — tests run in parallel within one process, so a
+        // pid-only name races (one test deletes while another reads).
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
         let mut p = std::env::temp_dir();
-        p.push(format!("loader-physics-test-{}.json", std::process::id()));
+        p.push(format!(
+            "loader-physics-test-{}-{}.json",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed),
+        ));
         let mut f = fs::File::create(&p).unwrap();
         f.write_all(serde_json::to_string(value).unwrap().as_bytes()).unwrap();
         p
@@ -287,6 +319,41 @@ mod tests {
         assert_eq!(cfg.restrictor_loss_from_diffuser_geometry, def.restrictor_loss_from_diffuser_geometry);
         assert_eq!(cfg.intake_junction_borda_carnot, def.intake_junction_borda_carnot);
         assert_eq!(cfg.fmep_c, def.fmep_c);
+    }
+
+    #[test]
+    fn spark_advance_map_loads_and_interpolates() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["physics"] = serde_json::json!({
+            "spark_advance_map": [[6000.0, 20.0], [10000.0, 28.0]],
+        });
+        let p = write_temp(&data);
+        let cfg = load_v1_json(&p).unwrap();
+        let _ = fs::remove_file(&p);
+        let map = cfg.spark_advance_map.as_ref().expect("map loaded");
+        assert_eq!(map.len(), 2);
+        // interp behavior is owned by WiebeParams::spark_advance_at
+        let wiebe = crate::cylinder::combustion::WiebeParams {
+            spark_map: cfg.spark_advance_map.clone(),
+            ..Default::default()
+        };
+        assert_eq!(wiebe.spark_advance_at(5000.0), 20.0); // clamped low
+        assert_eq!(wiebe.spark_advance_at(8000.0), 24.0); // midpoint
+        assert_eq!(wiebe.spark_advance_at(12000.0), 28.0); // clamped high
+    }
+
+    #[test]
+    fn unsorted_spark_advance_map_is_rejected() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["physics"] = serde_json::json!({
+            "spark_advance_map": [[10000.0, 28.0], [6000.0, 20.0]],
+        });
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(res.is_err());
     }
 
     #[test]
