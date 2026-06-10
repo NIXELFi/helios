@@ -1,6 +1,6 @@
 # Modules: Vault & Logs
 
-Helios has two top-level modules, switched via the 56-px left rail (`ModulePicker`). Modules are mount-once: the first time you visit one, it loads; switching tabs after that just toggles visibility, preserving in-memory state.
+Helios has four top-level modules — **Logs**, **Vault**, **Projects (PM)**, and **CFD** — switched via the 56-px left rail (`ModulePicker`). Modules are mount-once: the first time you visit one, it loads; switching tabs after that just toggles visibility, preserving in-memory state. This page covers Logs and the Vault.
 
 ## Logs
 
@@ -54,10 +54,13 @@ Auth is app-wide (the `AuthShell` wraps the whole window, not just Vault):
 The Vault is divided into screens, switched via its own `NavRail` (the **Admin**
 screen appears only for admins):
 
-1. **Browse** — Folder/file tree with multi-select. Each file row shows latest-version metadata, lock status, and local-sync state. An **UnmatchedFilesBanner** offers bulk "Add all" or per-file "Add" actions when local files exist that aren't in the vault.
-2. **History** — Per-file version timeline with author, comment, size, SHA256, and "Restore to working copy" actions.
+1. **Browse** — Folder/file tree with multi-select and a bulk-action bar (check out / check in / get latest / delete). Each file row shows latest-version metadata, revision, lock status, and local-sync state. An **UnmatchedFilesBanner** offers bulk "Add all" or per-file "Add" actions when local files exist that aren't in the vault; drag-and-drop import works too. A **FileDetailPanel** shows versions, data-card properties, and Contains/Where-Used reference panels.
+2. **History** — Per-file version timeline with author, comment, size, SHA256, revision stamps, and per-version download.
 3. **Who has what** — Active checkouts. A table of file × holder × acquired-at. Admins get a **Force unlock** button (with a reason prompt) on any row.
-4. **Settings** — Signed-in email & role (read-only), local vault folder picker (via Tauri's `openDirDialog`), and a sign-out button.
+4. **Insights** — vault analytics dashboard: activity, storage, lock hygiene, member stats, and a spotlight file.
+5. **Deleted** (recycle bin) — soft-deleted files and folders with restore actions (the deleter or an admin).
+6. **Admin** — user/role management (global and per-vault roles), subteam management, user edit/delete. Admins only.
+7. **Settings** — Signed-in email & role, local vault folder picker, download mode (auto-sync vs manual), add-in/shell-extension installers, and sign-out.
 
 ### Local sync
 
@@ -70,27 +73,31 @@ The Browse screen auto-scans the local vault folder using a native filesystem wa
 
 ### Data model
 
-Living in the Supabase `pdm` schema:
+Living in the Supabase `pdm` schema (RLS-enforced, vault-scoped reads/writes):
 
 | Table | Fields |
 | --- | --- |
-| **Vault** | id, name, created_at, created_by |
-| **Folder** | id, vault_id, parent_id, name |
-| **VaultFile** | id, vault_id, folder_id, name, latest_version_id |
-| **Version** | id, file_id, version_num, sha256, size_bytes, author_id, comment, parent_version_id |
-| **Lock** | id, file_id, user_id, acquired_at, released_at, force_released_by |
+| **vaults** | id, name, created_at, created_by |
+| **folders** | id, vault_id, parent_id, name (+ soft-delete: deleted_at/by) |
+| **files** | id, vault_id, folder_id, name, latest_version_id, created_by, published_at (drafts), deleted_at/by (recycle) |
+| **versions** | id, file_id, version_num, sha256, size_bytes, author_id, comment, parent_version_id, revision, properties (data card) |
+| **locks** | id, file_id, user_id, acquired_at, released_at, force_released_by |
+| **refs** | parent_version_id, child_path_hint, child_file_id — assembly references |
+| **user_roles** | user_id, role, vault_id (NULL = global role) |
+| **subteams** | admin-managed signup subteam list |
+| **audit_log** | every state-changing op (client-immutable) |
 
 ### Custom hooks
 
-Vault's data layer is `~25` custom hooks under [`apps/desktop/src/modules/vault/data/`](../../apps/desktop/src/modules/vault/data/), all returning a uniform `QueryResult<T> = { data, loading, error, refetch }`:
+Vault's data layer is **53 custom hooks** under [`apps/desktop/src/modules/vault/data/`](../../apps/desktop/src/modules/vault/data/), queries returning a uniform `QueryResult<T> = { data, loading, error, refetch }`. A representative sample:
 
-- `useVaults()`, `useFolders()`, `useFiles()` — hierarchical browse.
-- `useLatestVersions()`, `useVersions()` — version history.
-- `useLocks()`, `useAcquireLock()`, `useReleaseLock()`, `useForceUnlock()` — concurrency.
-- `useAllFiles()`, `useLocalFolderScan()` — sync state.
-- `useAutoSync()` — background pull/push.
-- `useCreateVault()`, `useCreateFolder()`, `useCreateFile()`, `useDeleteFile()`, `useCheckIn()` — mutations.
-- `useMyRole()`, `useIsAdmin()` — permissions.
+- `useVaults()`, `useActiveVault()`, `useFolders()`, `useFiles()`, `useAllFiles()` — hierarchical browse.
+- `useVersions()`, `useDownloadVersion()`, `useSetRevision()`, `useFileProperties()` — version history & data cards.
+- `useLocks()`, `useAcquireLock()`, `useReleaseLock()`, `useForceUnlock()`, `useVaultRealtime()` — concurrency.
+- `useLocalFolderScan()`, `useAutoSync()`, `useAutoAddDrafts()`, `useDeletedFileReaper()`, `useBridgeSync()` — local sync (download, auto-vaulting, delete propagation, SolidWorks bridge).
+- `useCreateVault()`, `useCreateFolder()`, `useCreateFile()`, `useAddLocalFile()`, `useCheckIn()`, `useDeleteFile()`, `useRestoreFile()`, `useRestoreFolder()` — mutations.
+- `useReferences()` (Contains/Where-Used), `useRecordRefs()`, `useRecordProperties()` — assembly references.
+- `useMyRole()`, `useIsAdmin()`, `useIsOwner()`, `useVaultRole()` (per-vault), `useVaultUsers()`, `useSetUserRole()` — permissions & admin.
 
 ### Authentication package
 
@@ -109,7 +116,7 @@ Vault originally shipped with generic zinc/shadcn tokens. Commit `c5929a5` unifi
 
 Logs talks to local files only — CSV ingest goes through Tauri `commands/load_csv.rs` and the channel store. No network calls.
 
-Vault talks to Supabase from the browser (HTTPS + WebSocket), using the auth client. There are no Tauri commands for vault data — only for local filesystem operations (folder pick, file read/write for sync).
+Vault talks to Supabase from the webview (HTTPS + WebSocket), using the auth client. The Tauri side adds local-filesystem commands (folder pick, read/write for sync, `set_readonly`), native SolidWorks parsing (`parse_refs` / properties for data cards), the add-in injector, and a localhost **bridge server** (127.0.0.1, per-launch bearer token) that lets the SolidWorks Task Pane add-in drive check-out/check-in.
 
 ## Future cross-module links
 
@@ -123,4 +130,4 @@ There's no in-app routing from Logs to Vault yet (e.g. "Open this file in Vault"
 | [`apps/desktop/src/shell/ModulePicker.tsx`](../../apps/desktop/src/shell/ModulePicker.tsx) | Left-rail tab UI. |
 | [`apps/desktop/src/modules/vault/`](../../apps/desktop/src/modules/vault/) | Vault module root. |
 | [`packages/auth/`](../../packages/auth/) | Auth provider + hooks. |
-| [`infra/pdm-supabase/`](../../infra/pdm-supabase/) | Supabase schema and tests (CI-skipped without credentials). |
+| [`infra/pdm-supabase/`](../../infra/pdm-supabase/) | Supabase schema + RLS/RPC test suite (runs in CI against a local stack). |
