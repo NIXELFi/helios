@@ -89,10 +89,14 @@ jobs:
       - name: Enable the test-reset guard flag
         # pdm.test_reset() (the suite's beforeEach wipe) refuses to run unless
         # the database is explicitly marked as a test environment — see
-        # migration 20260511001200. PostgREST picks the setting up on restart.
+        # migration 20260511001200. Must run as supabase_admin (the stack's
+        # `postgres` user lacks ALTER DATABASE … SET rights for custom GUCs);
+        # PostgREST only picks the setting up on restart.
         run: |
-          DB_URL=$(supabase status -o env | grep '^DB_URL=' | cut -d= -f2- | tr -d '"')
-          psql "$DB_URL" -c "ALTER DATABASE postgres SET app.environment = 'test';"
+          docker exec -e PGPASSWORD=postgres \
+            $(docker ps --format '{{.Names}}' | grep _db_) \
+            psql -U supabase_admin -d postgres -h 127.0.0.1 \
+            -c "ALTER DATABASE postgres SET app.environment = 'test';"
           docker restart $(docker ps --format '{{.Names}}' | grep _rest_)
           sleep 3
 
