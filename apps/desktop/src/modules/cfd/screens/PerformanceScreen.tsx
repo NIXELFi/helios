@@ -17,6 +17,8 @@ import {
   vehicleForCar,
   torqueCurveFromSweep,
   torqueCurveFromDyno,
+  designSensitivities,
+  type SensitivityRow,
   peakTorque,
   topSpeedMps,
   tractiveMap,
@@ -275,6 +277,8 @@ export function PerformanceScreen() {
             {events && <TelemetrySection events={events} />}
 
             <FdOptimizerSection curve={curve} vehicle={vehicle} baseline={baseline} />
+
+            <SensitivitySection curve={curve} vehicle={vehicle} baseline={baseline} />
 
             {/* Track overview — the real 2026 course layouts, side by side. */}
             <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
@@ -731,6 +735,7 @@ function VehicleEditor({
         )}
         {tirError && <span className="pb-1 text-[10px] text-[#FF5252]">{tirError}</span>}
       </div>
+      {tire && <TireMuChart tire={tire} fzStatic={fzStatic} />}
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
@@ -816,6 +821,131 @@ function NumField({
         className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:cursor-not-allowed"
       />
     </label>
+  );
+}
+
+// ---- Tire μ(Fz) mini-chart ---------------------------------------------------
+// The suspension team's view of what the sim actually uses: peak friction vs
+// per-tire vertical load from the imported fit, with the static load marked.
+// Derived from proprietary fit data — rendered live, never persisted/exported.
+function TireMuChart({ tire, fzStatic }: { tire: NonNullable<VehicleConfig["tire"]>; fzStatic: number }) {
+  const data = useMemo(() => {
+    const xs: number[] = [];
+    const lat: number[] = [];
+    const long: number[] = [];
+    for (let fz = 150; fz <= 2500; fz += 50) {
+      xs.push(fz);
+      lat.push(tirMuLat(tire, fz));
+      long.push(tirMuLong(tire, fz));
+    }
+    return { xs, lat, long };
+  }, [tire]);
+  return (
+    <div className="border-b border-[#2A2C32] px-2 pb-1">
+      <LinePlot
+        title="tire peak μ vs load (track-scaled)"
+        xs={data.xs}
+        series={[
+          { label: "μ lateral", y: data.lat, color: "#FFC627", showPoints: false },
+          { label: "μ longitudinal", y: data.long, color: "#4FC3F7", showPoints: false },
+          {
+            label: "static load/tire",
+            xs: [fzStatic, fzStatic],
+            y: [Math.min(...data.lat, ...data.long), Math.max(...data.lat, ...data.long)],
+            color: "#CE93D8",
+            width: 1,
+            showPoints: false,
+          } satisfies LineSeries,
+        ]}
+        xLabel="Fz per tire (N)"
+        yLabel="μ"
+        height={180}
+      />
+    </div>
+  );
+}
+
+// ---- Design sensitivities ----------------------------------------------------
+// One-at-a-time design levers (mass, aero, grip, driveline, shift, CG) re-run
+// through the FULL scoring chain and ranked by Δpoints — "what should the team
+// work on next", straight from the model. Collapsed; computes on first expand.
+function SensitivitySection({
+  curve, vehicle, baseline,
+}: {
+  curve: TorqueCurve;
+  vehicle: VehicleConfig;
+  baseline: ReferenceBaseline;
+}) {
+  const [open, setOpen] = useState(false);
+  const result = useMemo(
+    () => (open && curve.length ? designSensitivities(curve, vehicle, baseline) : null),
+    [open, curve, vehicle, baseline],
+  );
+  const havePts = result != null && result.rows.some((r) => r.dPoints != null);
+  const fmtD = (d: number, unit: string, invertGood = false) => {
+    const good = invertGood ? d > 0 : d < 0;
+    return (
+      <span className={good ? "text-[#A5D6A7]" : d === 0 ? "text-[#5A5F66]" : "text-[#FF8A65]"}>
+        {d >= 0 ? "+" : ""}{d.toFixed(unit === "pts" ? 1 : 3)} {unit}
+      </span>
+    );
+  };
+  return (
+    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Design sensitivities</span>
+        <span className="text-[9px] text-[#5A5F66]">
+          one realistic step per lever, full scoring chain, ranked by payoff
+        </span>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        >
+          {open ? "Hide" : "Analyze"}
+        </button>
+      </div>
+      {open && result && (
+        <div className="p-2">
+          <table className="w-full text-left font-mono text-[10px]">
+            <caption className="sr-only">Design levers ranked by projected points gained</caption>
+            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+              <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
+                <th>change</th>
+                <th className="text-right">Δ autocross</th>
+                <th className="text-right">Δ endurance</th>
+                <th className="text-right">Δ accel</th>
+                {havePts && <th className="text-right">Δ total pts</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {result.rows.map((r: SensitivityRow) => (
+                <tr key={r.key} className="border-t border-[#16171B] text-[#9097A0]">
+                  <td className="px-2 py-1 text-[#D8DCE2]">{r.label}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dAxS, "s")}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dEnS, "s")}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {fmtD(r.events.accel.timeS - result.base.accel.timeS, "s")}
+                  </td>
+                  {havePts && (
+                    <td className="px-2 py-1 text-right tabular-nums text-[12px]">
+                      {r.dPoints != null ? fmtD(r.dPoints, "pts", true) : "—"}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-2 pt-1.5 text-[9px] leading-tight text-[#5A5F66]">
+            One lever at a time vs the current setup (no interactions). Green = improvement.
+            {!havePts && " Set a reference baseline above to rank in points instead of seconds."}
+            {" "}Grip step scales the {vehicle.tire ? "imported tire's surface scales" : "μ constants"} —
+            read it as compound/pressure/setup gains.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
