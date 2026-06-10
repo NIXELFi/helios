@@ -23,7 +23,8 @@ function mockClient(isAdmin = false, lockError: any = null): SupabaseClient {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
     rpc: (name: string) => {
-      if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
+      if (name === "pdm_is_admin" || name === "pdm_is_admin_in")
+        return Promise.resolve({ data: isAdmin, error: null });
       // pdm_cancel_checkout
       return Promise.resolve({ data: null, error: null });
     },
@@ -113,9 +114,11 @@ describe("<BulkActionBar>", () => {
   });
 
   it("shows Check Out / Cancel Checkout for all users; Delete only for admin", async () => {
+    // vaultId is required: the Delete gate is the PER-VAULT admin check
+    // (useIsVaultAdmin), matching what pdm_delete_file actually authorizes.
     const Comp = ({ isAdmin }: { isAdmin: boolean }) => (
       <SupabaseAuthProvider client={mockClient(isAdmin)}>
-        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} />
+        <BulkActionBar selectedIds={["f1", "f2"]} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
       </SupabaseAuthProvider>
     );
 
@@ -133,14 +136,15 @@ describe("<BulkActionBar>", () => {
   it("bulk delete shows confirmation modal before running", async () => {
     render(
       <SupabaseAuthProvider client={mockClient(true)}>
-        <BulkActionBar selectedIds={["f1"]} onClear={() => {}} onDone={() => {}} />
+        <BulkActionBar selectedIds={["f1"]} onClear={() => {}} onDone={() => {}} vaultId={"v1" as any} />
       </SupabaseAuthProvider>,
     );
     // Wait for admin status to resolve
     await waitFor(() => expect(screen.getByRole("button", { name: /^delete$/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
-    // Confirmation modal appears
-    await waitFor(() => expect(screen.getByText(/this cannot be undone/i)).toBeInTheDocument());
+    // Confirmation modal appears — and is honest: it's a soft delete to the
+    // Deleted tab, not a permanent destruction of versions/history.
+    await waitFor(() => expect(screen.getByText(/move to this vault.s deleted tab/i)).toBeInTheDocument());
     // Cancel button inside the modal closes it
     const cancelBtns = screen.getAllByRole("button", { name: /^cancel$/i });
     fireEvent.click(cancelBtns[0]);

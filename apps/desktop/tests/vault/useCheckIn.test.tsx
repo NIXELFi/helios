@@ -25,7 +25,7 @@ function mockClient(
   uploadError: any = null,
   rpcError: any = null,
   rpcData: any = VERSION_ROW,
-  /** Simulate the bytes already existing in storage — list() returns a hit. */
+  /** Simulate the bytes already existing in storage — the probe returns true. */
   objectAlreadyExists = false,
 ): SupabaseClient {
   return {
@@ -38,13 +38,6 @@ function mockClient(
     },
     storage: {
       from: (bucket: string) => ({
-        list: (_prefix: string, opts: { search?: string }) => {
-          const sha = opts?.search;
-          if (objectAlreadyExists && sha) {
-            return Promise.resolve({ data: [{ name: sha }], error: null });
-          }
-          return Promise.resolve({ data: [], error: null });
-        },
         upload: (path: string, bytes: any, opts: any) => {
           capturedUpload = { bucket, path, opts };
           return Promise.resolve({ data: null, error: uploadError });
@@ -52,6 +45,12 @@ function mockClient(
       }),
     },
     rpc: (name: string, args: any) => {
+      // The existence probe (pdm_object_exists) is infrastructure, not the
+      // call under test — answer it directly and keep capturedRpc on the
+      // mutation RPC.
+      if (name === "pdm_object_exists") {
+        return Promise.resolve({ data: objectAlreadyExists, error: null });
+      }
       capturedRpc = { name, args };
       return Promise.resolve({ data: rpcData, error: rpcError });
     },

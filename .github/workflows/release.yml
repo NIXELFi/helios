@@ -123,6 +123,12 @@ jobs:
       - name: Verify bundled resources present
         run: node scripts/check-bundled-resources.mjs
 
+      - name: Typecheck
+        # Release previously skipped typecheck entirely, so type-broken code
+        # could ship from a tag push even though CI gates PRs on it
+        # (audit 2026-06-09). Cheap relative to the build below.
+        run: pnpm typecheck
+
       - name: Run Rust tests
         run: cargo test --workspace --locked
 

@@ -1,10 +1,32 @@
 # Helios
 
-**Sun Devil Motorsports ground-station suite.** Tauri (Rust + React) desktop app for ingesting CSV data-log exports, overlaying multiple sessions, scrubbing through laps, defining math channels, and laying out a custom workspace of plots and gauges — MoTeC i2 in spirit, with editing built in.
+**Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, and 1D engine simulation — in one signed, auto-updating binary.
 
-> **Status:** `v2.2` — see [`v2_changes/`](v2_changes/) for the running log of every issue and fix landed since the v1 baseline.
+> **Status:** `v4.3.1` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
 
-## Highlights
+Four modules ship today:
+
+- **Telemetry** — MoTeC-style CSV log analysis: multi-session overlay, math channels, GPS basemaps, custom widget workspaces (details below).
+- **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
+- **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles.
+- **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, dyno-calibrated) with parameter sweeps and reports.
+
+## The Vault (PDM)
+
+A self-hosted SolidWorks PDM Standard alternative — check-out/check-in with real file locking, built on Supabase (Postgres + RLS + content-addressed storage) so a student team can run it for free:
+
+- **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker, flipped even while the file is open in SolidWorks).
+- **Versioning** — immutable, content-addressed (sha256) version history with comments, revisions, and per-version SolidWorks data cards (custom properties parsed natively from the CAD file at check-in).
+- **Assembly references** — Contains / Where-Used panels parsed from `.sldasm`/`.sldprt` at check-in; unresolved references are surfaced.
+- **Multi-vault + per-vault roles** — owner/admin/editor/viewer, grantable globally or per vault, enforced by row-level security (cross-vault reads and writes are isolated at the database).
+- **Auto-vaulting & sync** — new local files become private drafts automatically; a sync daemon mirrors vault state to disk with guards that never clobber or delete unsaved local work.
+- **Recycle bin** — soft-delete with restore for files and folders.
+- **SolidWorks integration** — a Task Pane add-in (check in/out from inside SolidWorks via a localhost bridge with bearer-token auth), Explorer shell overlays, and a one-click in-app installer for both.
+- **Insights** — vault analytics dashboard (activity, storage, lock hygiene, member stats).
+
+The Vault's RLS/RPC security suite (88 integration tests against a real local Supabase stack) runs on every PR — see [`infra/pdm-supabase/`](infra/pdm-supabase/).
+
+## Telemetry highlights
 
 - **Multi-session overlay.** A collapsible left rail lists every loaded CSV; tick more than one to overlay them on every plot. Strip charts, GPS tracks, XY scatters, and histograms all draw a trace per visible session in distinct palette colors. Click any track / chart to scrub the cursor — emits the closest sample's time across sessions.
 - **MoTeC CSV ingest.** Out of the box the loader handles plain time-series CSVs *and* MoTeC i2 exports (the metadata-block-prefixed format with quoted values and a units row). The channel registry in [`docs/channels.yaml`](docs/channels.yaml) maps human-readable MoTeC column names to canonical channel ids via aliases. The GPS widget also decodes MoTeC ADL's int32-as-uint32 micro-degree quirk so longitudes like "3175683584" round-trip back to "-111.93°" without a config change.
@@ -51,16 +73,24 @@ pnpm build        # release build via tauri build
 
 ```text
 apps/desktop/        Tauri shell + React frontend (the app)
+  src/modules/         vault (PDM), pm (projects), cfd (engine sim), games
+  src-tauri/           Rust shell: bridge server, add-in injector, commands
 crates/              Rust crates
   helios-core/         channel store core types
   helios-csv/          CSV loader (incl. MoTeC preprocessor)
   helios-arrow/        Arrow IPC helpers
+  engine-sim/ cfd-core/  1D finite-volume engine simulator
+  pdm-core/ pdm-client/  Vault domain types + Supabase client
+  pdm-sw-parser/       native SolidWorks file parser (refs + custom properties)
 packages/            TypeScript packages
   lib/                 cursor emitter, time helpers, math-expression engine
   store/               JS-side channel store + slice
-  widgets/             12 widgets (strip chart, GPS, gauges, steering wheel, math-channel-aware)
-  ui/                  primitives
-docs/                architecture, channel registry, design spec
+  widgets/             12 widgets (strip chart, GPS, gauges, steering wheel)
+  ui/ auth/ pm-ui/     primitives, Supabase auth, project-management UI
+infra/pdm-supabase/  Vault backend: 68 SQL migrations + RLS/RPC test suite
+solidworks-addin/    SolidWorks Task Pane add-in (C#)
+shell-ext/ sw-helper/  Explorer overlay shell extension + read-only helper
+docs/                architecture, channel registry, design specs, wiki
 samples/             bundled sample sessions
 fixtures/            CSV test fixtures (good / malformed / multi-rate / motec)
 v2_changes/          per-issue write-ups for everything landed since v1
@@ -69,9 +99,14 @@ v2_changes/          per-issue write-ups for everything landed since v1
 ## Tests
 
 ```bash
-pnpm test          # 62 TypeScript tests across @helios/lib, store, widgets, desktop
-cargo test         # all Rust tests in crates/
+pnpm test          # TypeScript suites across every workspace package
+cargo test         # all Rust tests in crates/ + the Tauri shell
 pnpm typecheck     # tsc --noEmit across every workspace package
+
+# Vault backend (RLS/RPC) integration suite — needs Docker:
+cd infra/pdm-supabase
+supabase start     # throwaway local stack; applies all migrations
+pnpm test          # skips politely if no stack/creds; CI runs it for real
 ```
 
 ## Documentation
@@ -93,6 +128,10 @@ pnpm typecheck     # tsc --noEmit across every workspace package
 4. Add it to the `widgets` map in `apps/desktop/src/components/Tile.tsx` and to the palette in [`AddTileModal.tsx`](apps/desktop/src/components/AddTileModal.tsx).
 5. Add at least one render test in `packages/widgets/tests/`.
 
+## Contributing & security
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for build prerequisites and PR expectations, and [`SECURITY.md`](SECURITY.md) for how to report a vulnerability privately.
+
 ## License
 
-MIT (per `Cargo.toml`'s `workspace.package.license`).
+MIT — see [`LICENSE`](LICENSE).

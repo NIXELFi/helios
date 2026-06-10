@@ -53,3 +53,22 @@ export function notifyLocalDeletesPropagated(names: string[]): void {
   if (names.length === 0) return;
   for (const cb of propagatedListeners) cb(names);
 }
+
+const reaperHeldBackListeners = new Set<NamesListener>();
+
+/** Subscribe to "deleted in the vault but the local copy has unsaved changes —
+ *  kept on disk" events fired by useDeletedFileReaper. Returns an unsubscribe
+ *  function. */
+export function onReaperHeldBack(cb: NamesListener): () => void {
+  reaperHeldBackListeners.add(cb);
+  return () => {
+    reaperHeldBackListeners.delete(cb);
+  };
+}
+
+/** Fire a reaper held-back event with the kept file names. No-op for an empty
+ *  list. */
+export function notifyReaperHeldBack(names: string[]): void {
+  if (names.length === 0) return;
+  for (const cb of reaperHeldBackListeners) cb(names);
+}

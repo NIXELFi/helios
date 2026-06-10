@@ -43,14 +43,15 @@ async function probeObject(
   client: ReturnType<typeof useSupabaseClient>,
   sha: string,
 ): Promise<boolean | "unknown"> {
-  const prefix = sha.slice(0, 2);
+  // Probe via the pdm_object_exists definer RPC rather than storage list():
+  // the bucket SELECT policy is vault-scoped (20260610110000), so a list()
+  // probe can't see content that exists but belongs to another vault, which
+  // would send us down the upload → "Duplicate" → re-probe → fail path for
+  // content-addressed dedup across vaults.
   try {
-    const { data, error } = await client.storage.from(BUCKET).list(prefix, {
-      limit: 1,
-      search: sha,
-    });
+    const { data, error } = await client.rpc("pdm_object_exists", { p_sha: sha });
     if (error) return "unknown";
-    return (data ?? []).some((o) => o.name === sha);
+    return data === true;
   } catch {
     return "unknown";
   }

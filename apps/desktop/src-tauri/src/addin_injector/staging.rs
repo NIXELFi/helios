@@ -21,7 +21,10 @@ pub fn dll_file_version(dll: &Path) -> Option<String> {
         .args([
             "-NoProfile",
             "-Command",
-            &format!("(Get-Item -LiteralPath '{}').VersionInfo.FileVersion", dll.display()),
+            &format!(
+                "(Get-Item -LiteralPath '{}').VersionInfo.FileVersion",
+                ps_single_quote_escape(&dll.display().to_string()),
+            ),
         ])
         .output()
         .ok()?;
@@ -31,6 +34,14 @@ pub fn dll_file_version(dll: &Path) -> Option<String> {
     } else {
         Some(v)
     }
+}
+
+/// Escape a value for interpolation inside a PowerShell single-quoted string:
+/// the only special character is the single quote itself, doubled. Without
+/// this, a profile path containing an apostrophe (C:\Users\O'Brien\…) breaks
+/// the command and version detection silently returns None.
+fn ps_single_quote_escape(s: &str) -> String {
+    s.replace('\'', "''")
 }
 
 /// The currently-staged version recorded in state.json, if any.
@@ -103,6 +114,15 @@ pub fn gc(keep: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ps_escape_doubles_single_quotes() {
+        assert_eq!(
+            ps_single_quote_escape(r"C:\Users\O'Brien\app.dll"),
+            r"C:\Users\O''Brien\app.dll"
+        );
+        assert_eq!(ps_single_quote_escape("no quotes"), "no quotes");
+    }
 
     #[test]
     fn stage_copies_and_records_version() {

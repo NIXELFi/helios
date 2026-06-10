@@ -360,6 +360,24 @@ async fn get_latest(State(state): State<Arc<BridgeState>>, Json(body): Json<Path
     let Some(file) = state.file_by_path(&body.path) else {
         return not_tracked(&body.path);
     };
+    // A WRITABLE local copy means "checked out / possibly unsaved edits" (the
+    // read-only bit is the vault-wide clean-copy marker — reconciliation only
+    // ever sets a SYNCED file read-only). Overwriting it would destroy those
+    // edits with no recoverable copy, so refuse with a structured error the
+    // add-in can show. A missing file or a clean read-only copy is safe to
+    // (re)materialize.
+    if let Ok(meta) = std::fs::metadata(&body.path) {
+        if !meta.permissions().readonly() {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": "local file is writable (checked out or has unsaved changes) — check it in or undo the checkout before getting latest",
+                    "code": "dirty_local_copy",
+                })),
+            )
+                .into_response();
+        }
+    }
     let Some(session) = state.session() else {
         return no_session();
     };

@@ -15,10 +15,15 @@ function mockClient(opts: { refs?: any[]; files?: any[]; versions?: any[] } = {}
     from: (table: string) => ({
       select: () => ({
         eq: (_c: string, _v: string) => Promise.resolve({ data: table === "refs" ? refs : [], error: null }),
-        in: (_c: string, ids: string[]) => Promise.resolve({
-          data: (table === "files" ? files : versions).filter((r: any) => ids.includes(r.id)),
-          error: null,
-        }),
+        in: (_c: string, ids: string[]) => {
+          const rows = (table === "files" ? files : versions).filter((r: any) => ids.includes(r.id));
+          // The files lookup chains .is("deleted_at", null) to exclude
+          // soft-deleted rows; the versions lookup awaits the .in() directly.
+          const result = Promise.resolve({ data: rows, error: null }) as any;
+          result.is = (col: string, val: any) =>
+            Promise.resolve({ data: rows.filter((r: any) => (r[col] ?? null) === val), error: null });
+          return result;
+        },
       }),
     }),
   } as any;
@@ -49,6 +54,15 @@ describe("useContains", () => {
     const { result } = renderHook(() => useContains(null), { wrapper: wrap(mockClient()) });
     expect(result.current.data).toBeNull();
   });
+
+  it("renders a soft-deleted child as a BROKEN (unresolved) reference, not a healthy link", async () => {
+    const refs = [{ parent_version_id: "pv", child_path_hint: "..\\frame.sldprt", child_file_id: "cf1", child_version_id: "cv1" }];
+    const files = [{ id: "cf1", name: "frame.sldprt", deleted_at: "2026-06-09T00:00:00Z" }];
+    const { result } = renderHook(() => useContains("pv" as any), { wrapper: wrap(mockClient({ refs, files })) });
+    await waitFor(() => expect(result.current.data?.length).toBe(1));
+    expect(result.current.data?.[0].resolved).toBe(false);
+    expect(result.current.data?.[0].childName).toBe("frame.sldprt");
+  });
 });
 
 describe("useWhereUsed", () => {
@@ -64,5 +78,23 @@ describe("useWhereUsed", () => {
   it("returns an empty list when nothing references the file", async () => {
     const { result } = renderHook(() => useWhereUsed("cf1" as any), { wrapper: wrap(mockClient({ refs: [] })) });
     await waitFor(() => expect(result.current.data).toEqual([]));
+  });
+
+  it("excludes soft-deleted parent assemblies from Where-Used", async () => {
+    const refs = [
+      { parent_version_id: "pv1", child_file_id: "cf1" },
+      { parent_version_id: "pv2", child_file_id: "cf1" },
+    ];
+    const versions = [
+      { id: "pv1", file_id: "pf1" },
+      { id: "pv2", file_id: "pf2" },
+    ];
+    const files = [
+      { id: "pf1", name: "live.sldasm" },
+      { id: "pf2", name: "deleted.sldasm", deleted_at: "2026-06-09T00:00:00Z" },
+    ];
+    const { result } = renderHook(() => useWhereUsed("cf1" as any), { wrapper: wrap(mockClient({ refs, versions, files })) });
+    await waitFor(() => expect(result.current.data?.length).toBe(1));
+    expect(result.current.data?.[0].parentName).toBe("live.sldasm");
   });
 });

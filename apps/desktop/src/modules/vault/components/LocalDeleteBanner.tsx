@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   onLocalDeleteBlocked,
   onLocalDeletesPropagated,
+  onReaperHeldBack,
 } from "../data/local-delete-events";
 import { osNotify } from "../data/notify";
 
@@ -24,6 +25,7 @@ import { osNotify } from "../data/notify";
 export function LocalDeleteBanner() {
   const [blockedNames, setBlockedNames] = useState<string[]>([]);
   const [propagatedNames, setPropagatedNames] = useState<string[]>([]);
+  const [heldBackNames, setHeldBackNames] = useState<string[]>([]);
 
   // Auto-dismiss timer for the propagated (success) line.
   const propagatedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,16 +68,30 @@ export function LocalDeleteBanner() {
       void osNotify("Helios Vault", body);
     });
 
+    const unsubHeldBack = onReaperHeldBack((names) => {
+      setHeldBackNames((prev) => {
+        const dedupe = new Set([...prev, ...names]);
+        return Array.from(dedupe);
+      });
+      const n = names.length;
+      const body =
+        n === 1
+          ? `"${names[0]!}" was deleted in the vault but your local copy has unsaved changes — kept on disk.`
+          : `${n} file(s) deleted in the vault had local changes — kept on disk.`;
+      void osNotify("Helios Vault", body);
+    });
+
     return () => {
       unsubBlocked();
       unsubPropagated();
+      unsubHeldBack();
       if (propagatedTimerRef.current !== null) {
         clearTimeout(propagatedTimerRef.current);
       }
     };
   }, []);
 
-  if (blockedNames.length === 0 && propagatedNames.length === 0) return null;
+  if (blockedNames.length === 0 && propagatedNames.length === 0 && heldBackNames.length === 0) return null;
 
   return (
     <>
@@ -97,6 +113,31 @@ export function LocalDeleteBanner() {
             </span>
             <button
               onClick={() => setBlockedNames([])}
+              className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      {heldBackNames.length > 0 && (
+        <div className="border-b border-[#FFB800]/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
+          <div className="flex items-start gap-3">
+            <span className="flex-1 text-[#FFD24D]">
+              {heldBackNames.length === 1 ? (
+                <>
+                  <span className="font-mono-num">{heldBackNames[0]!}</span>
+                  {" "}was deleted in the vault, but your local copy has unsaved changes — kept on disk. Restore the file from Deleted to keep working on it, or delete the local copy manually.
+                </>
+              ) : (
+                <>
+                  {heldBackNames.length} vault-deleted file(s) had unsaved local changes — kept on disk. Restore them from Deleted or delete the local copies manually:{" "}
+                  <span className="font-mono-num">{heldBackNames.join(", ")}</span>
+                </>
+              )}
+            </span>
+            <button
+              onClick={() => setHeldBackNames([])}
               className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20"
             >
               Dismiss

@@ -31,10 +31,11 @@ const localFileRoot = {
 // Tracks which Supabase operations were called, in order.
 let callLog: string[] = [];
 
-// Controls what storage.list returns for objectExists(). Default: the object
-// is absent (empty list, no error). Tests override per-case.
-let listImpl: () => Promise<{ data: any; error: any }> = () =>
-  Promise.resolve({ data: [], error: null });
+// Controls what the pdm_object_exists probe returns for objectExists().
+// Default: the object is absent ({data:false}). Tests override per-case.
+let probeImpl: () => Promise<{ data: any; error: any }> = () =>
+  Promise.resolve({ data: false, error: null });
+
 
 function buildHappyClient(): SupabaseClient {
   return {
@@ -47,10 +48,6 @@ function buildHappyClient(): SupabaseClient {
     },
     storage: {
       from: (_bucket: string) => ({
-        list: (_prefix: string, _opts: any) => {
-          callLog.push("storage.list");
-          return listImpl();
-        },
         upload: (_path: string, _bytes: any, _opts: any) => {
           callLog.push("storage.upload");
           return Promise.resolve({ data: null, error: null });
@@ -119,16 +116,38 @@ function buildHappyClient(): SupabaseClient {
   } as any;
 }
 
-const wrap = (c: SupabaseClient) =>
-  ({ children }: { children: ReactNode }) =>
-    <SupabaseAuthProvider client={c}>{children}</SupabaseAuthProvider>;
+// The hook probes content existence via rpc("pdm_object_exists") before any
+// upload. That probe is infrastructure, not the call under test — intercept
+// it here (logged as "probe", answered by probeImpl) so the per-test
+// `(c.rpc as any) = ...` overrides only ever see the RPCs they assert on.
+// The Proxy reads c.rpc at call time, so overrides assigned after wrap()
+// still apply to every other RPC.
+const wrap = (c: SupabaseClient) => {
+  const proxied = new Proxy(c as any, {
+    get(target, prop) {
+      if (prop === "rpc") {
+        return (name: string, args: any) => {
+          if (name === "pdm_object_exists") {
+            callLog.push("probe");
+            return probeImpl();
+          }
+          return (target.rpc as any)(name, args);
+        };
+      }
+      return (target as any)[prop];
+    },
+  });
+  return ({ children }: { children: ReactNode }) => (
+    <SupabaseAuthProvider client={proxied}>{children}</SupabaseAuthProvider>
+  );
+};
 
 describe("useAddLocalFile", () => {
   beforeEach(() => {
     callLog = [];
     readFileMock.mockClear();
     readFileMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-    listImpl = () => Promise.resolve({ data: [], error: null });
+    probeImpl = () => Promise.resolve({ data: false, error: null });
   });
 
   it("happy path (root file): uploads then atomically calls pdm_add_and_lock", async () => {
@@ -157,10 +176,10 @@ describe("useAddLocalFile", () => {
     expect(returned).toEqual({ ok: true, lockAcquired: true, alreadyExisted: false });
 
     // Root file means no folder lookups/creates. Steps in order:
-    //   probe storage by sha → upload bytes (object was absent) → single RPC
-    //   that creates file + version + lock atomically.
+    //   probe by sha (pdm_object_exists) → upload bytes (object was absent) →
+    //   single RPC that creates file + version + lock atomically.
     expect(callLog).toEqual([
-      "storage.list",
+      "probe",
       "storage.upload",
       "rpc:pdm_add_and_lock",
     ]);
@@ -543,7 +562,7 @@ describe("useAddLocalFile", () => {
   it("V8: reuses local.sha256 — no file read when the object already exists", async () => {
     const c = buildHappyClient();
     // Object already present in storage → no upload, so no bytes needed.
-    listImpl = () => Promise.resolve({ data: [{ name: SCAN_SHA }], error: null });
+    probeImpl = () => Promise.resolve({ data: true, error: null });
     (c.rpc as any) = (name: string, _args: any) => {
       callLog.push(`rpc:${name}`);
       return Promise.resolve({ data: { lock_id: "lo1", created: true }, error: null });
@@ -569,7 +588,7 @@ describe("useAddLocalFile", () => {
     const rpcCalls: Array<{ args: any }> = [];
     const c = buildHappyClient();
     // Object already present → no upload, no read.
-    listImpl = () => Promise.resolve({ data: [{ name: SCAN_SHA }], error: null });
+    probeImpl = () => Promise.resolve({ data: true, error: null });
     (c.rpc as any) = (name: string, args: any) => {
       callLog.push(`rpc:${name}`);
       rpcCalls.push({ args });
@@ -613,19 +632,19 @@ describe("useAddLocalFile", () => {
     // Even after a real read, the sha sent to the RPC is the scan's sha.
   });
 
-  // V7: objectExists used to return false on ANY transient list error, which
+  // V7: objectExists used to return false on ANY transient probe error, which
   // forced a doomed upsert:false upload (the object actually exists) and
-  // surfaced a spurious error. An indeterminate list error must be treated as
+  // surfaced a spurious error. An indeterminate probe error must be treated as
   // "unknown" — re-probe / let the RPC be the source of truth — not "absent".
-  it("V7: a transient list error does not force a failing upload when the object exists", async () => {
+  it("V7: a transient probe error does not force a failing upload when the object exists", async () => {
     const c = buildHappyClient();
     // First probe errors (indeterminate). The hook should re-probe; on the
     // second probe the object is found → skip upload entirely.
     let probe = 0;
-    listImpl = () => {
+    probeImpl = () => {
       probe++;
       if (probe === 1) return Promise.resolve({ data: null, error: { message: "503 transient" } });
-      return Promise.resolve({ data: [{ name: SCAN_SHA }], error: null });
+      return Promise.resolve({ data: true, error: null });
     };
     (c.rpc as any) = (name: string, _args: any) => {
       callLog.push(`rpc:${name}`);
@@ -644,7 +663,7 @@ describe("useAddLocalFile", () => {
     expect(returned.ok).toBe(true);
     expect(result.current.hook.error).toBeNull();
     // Re-probed at least once after the transient error.
-    expect(callLog.filter((s) => s === "storage.list").length).toBeGreaterThanOrEqual(2);
+    expect(callLog.filter((s) => s === "probe").length).toBeGreaterThanOrEqual(2);
     // Found on re-probe → no spurious upload.
     expect(callLog).not.toContain("storage.upload");
   });

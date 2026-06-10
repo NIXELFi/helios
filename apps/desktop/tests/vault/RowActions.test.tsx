@@ -17,9 +17,10 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
 // focused on the check-in/lock behavior they assert.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockRejectedValue(new Error("no tauri in test")) }));
 const dlCalls = vi.hoisted(() => [] as Array<{ sha: string; dest: string }>);
+const dlResult = vi.hoisted(() => ({ ok: true }));
 vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
   useDownloadVersion: () => ({
-    run: (sha: string, dest: string) => { dlCalls.push({ sha, dest }); return Promise.resolve(true); },
+    run: (sha: string, dest: string) => { dlCalls.push({ sha, dest }); return Promise.resolve(dlResult.ok); },
     loading: false, error: null,
   }),
 }));
@@ -113,7 +114,7 @@ function wrap(client: SupabaseClient, children: React.ReactNode) {
 }
 
 describe("RowActions real-vault read-only transitions", () => {
-  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; });
+  beforeEach(() => { capturedRpc = null; roCalls.length = 0; dlCalls.length = 0; dlResult.ok = true; });
 
   it("check-out downloads the file if missing, then makes it writable", async () => {
     render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" /><UserProbe /></>));
@@ -121,6 +122,26 @@ describe("RowActions real-vault read-only transitions", () => {
     fireEvent.click(screen.getByRole("button", { name: /check out/i }));
     await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
     expect(roCalls).toContainEqual({ path: "/v/a.bin", readonly: false });
+  });
+
+  it("check-out rolls back (releases the lock, stays read-only) when the latest download fails", async () => {
+    // 2026-06-09 audit HIGH: a failed download used to fall through to
+    // setReadonly(dest, false), leaving a STALE local copy writable under a
+    // fresh lock — an invitation to edit an outdated base and check it in
+    // over a teammate's newer version.
+    dlResult.ok = false;
+    render(wrap(mockClient(), <><CheckOutButton fileId={"f1" as any} vaultRoot="/v" folderId={null} fileName="a.bin" folders={[]} latestSha="sha-x" /><UserProbe /></>));
+    await waitFor(() => expect(screen.getByTestId("uid")).toHaveTextContent("u1"));
+    fireEvent.click(screen.getByRole("button", { name: /check out/i }));
+    await waitFor(() => expect(dlCalls).toContainEqual({ sha: "sha-x", dest: "/v/a.bin" }));
+    // The lock is rolled back via pdm_cancel_checkout…
+    await waitFor(() => expect(capturedRpc?.name).toBe("pdm_cancel_checkout"));
+    expect(capturedRpc?.args?.p_file_id).toBe("f1");
+    // …the file is never made writable…
+    expect(roCalls).toHaveLength(0);
+    // …and the button surfaces what happened.
+    const btn = screen.getByRole("button", { name: /retry/i });
+    expect(btn).toHaveAttribute("title", expect.stringContaining("rolled back"));
   });
 
   it("check-out of an already-local file makes it writable without re-downloading", async () => {

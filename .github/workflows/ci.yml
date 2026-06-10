@@ -44,13 +44,71 @@ jobs:
         # Serial across workspaces because some packages share fixture
         # filesystems / ports during integration runs. Matches release.yml.
         #
-        # @helios/pdm-supabase is filtered out: its test suite hits a real
-        # Supabase database via supabase-js and needs SUPABASE_URL +
-        # SUPABASE_SERVICE_ROLE_KEY. To run it in CI, wire those as repo
-        # secrets and remove the filter (and the matching one in release.yml).
-        # Until then, those tests are run locally only — see
-        # infra/pdm-supabase/scripts/test-or-skip.cjs for the local skip path.
+        # @helios/pdm-supabase is filtered out HERE because it needs a real
+        # database — the dedicated pdm-security-tests job below runs it
+        # against a local Supabase stack on every PR/push.
         run: pnpm -r --workspace-concurrency=1 --filter '!@helios/pdm-supabase' test
+
+  pdm-security-tests:
+    # The Vault's RLS / RPC / storage-policy suite (infra/pdm-supabase/tests)
+    # is the only thing standing between an authorization regression and
+    # production — it MUST run in CI, not just on contributors' machines.
+    # Runs the full migration set + suite against a throwaway local Supabase
+    # stack (Docker is preinstalled on ubuntu runners).
+    name: Vault RLS/RPC security tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/pdm-supabase
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          # "latest" tracks the CLI the team runs locally; the stack version
+          # itself is pinned by infra/pdm-supabase/supabase/config.toml.
+          version: latest
+
+      - name: Start local Supabase stack (applies all migrations)
+        run: supabase start
+
+      - name: Enable the test-reset guard flag
+        # pdm.test_reset() (the suite's beforeEach wipe) refuses to run unless
+        # the database is explicitly marked as a test environment — see
+        # migration 20260511001200. Must run as supabase_admin (the stack's
+        # `postgres` user lacks ALTER DATABASE … SET rights for custom GUCs);
+        # PostgREST only picks the setting up on restart.
+        run: |
+          docker exec -e PGPASSWORD=postgres \
+            $(docker ps --format '{{.Names}}' | grep _db_) \
+            psql -U supabase_admin -d postgres -h 127.0.0.1 \
+            -c "ALTER DATABASE postgres SET app.environment = 'test';"
+          docker restart $(docker ps --format '{{.Names}}' | grep _rest_)
+          sleep 3
+
+      - name: Run the suite (must run, not skip)
+        # test:run invokes vitest directly — unlike `test` (test-or-skip.cjs)
+        # it CANNOT silently skip, so missing env here fails loudly.
+        run: |
+          eval $(supabase status -o env | grep -E "^(API_URL|SERVICE_ROLE_KEY|ANON_KEY)=")
+          SUPABASE_URL="$API_URL" \
+          SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+          SUPABASE_ANON_KEY="$ANON_KEY" \
+          pnpm test:run
 
   cargo-test:
     name: Rust tests

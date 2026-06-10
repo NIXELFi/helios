@@ -10,18 +10,18 @@ const BUCKET = "vault-objects";
 
 /** Storage paths in this bucket are content-addressed (path === sha256 of
  *  bytes), so if the object already exists the bytes are guaranteed identical.
- *  We probe via list() first and only upload when missing — this avoids the
- *  fragile dance of trying to identify Supabase's "Duplicate" 400 response,
- *  whose error shape varies across versions / proxies. */
+ *  We probe first and only upload when missing — this avoids the fragile
+ *  dance of trying to identify Supabase's "Duplicate" 400 response, whose
+ *  error shape varies across versions / proxies. The probe is the
+ *  pdm_object_exists definer RPC rather than storage list(): the bucket
+ *  SELECT policy is vault-scoped (20260610110000), so list() can't see
+ *  content that already exists under another vault, which would make this
+ *  flow fail on the cross-vault duplicate-content path. */
 async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
-  const prefix = sha.slice(0, 2);
   try {
-    const { data, error } = await client.storage.from(BUCKET).list(prefix, {
-      limit: 1,
-      search: sha,
-    });
+    const { data, error } = await client.rpc("pdm_object_exists", { p_sha: sha });
     if (error) return false;
-    return (data ?? []).some((o) => o.name === sha);
+    return data === true;
   } catch {
     return false;
   }

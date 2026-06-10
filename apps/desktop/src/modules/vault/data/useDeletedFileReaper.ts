@@ -6,6 +6,7 @@ import { vaultRelativePath, normalizePathForCompare } from "./local-match";
 import { setReadonly } from "./fs-readonly";
 import { ledgerRemove } from "./sync-ledger";
 import { folderPath } from "./folder-paths";
+import { notifyReaperHeldBack } from "./local-delete-events";
 
 /**
  * Reaper: removes the LOCAL working copy of soft-deleted vault files on this
@@ -27,6 +28,12 @@ import { folderPath } from "./folder-paths";
  * `normalizePathForCompare` the rest of the vault uses (no path guessing).
  * Best-effort: a failed remove (file open elsewhere / permission / already
  * gone) is simply retried on the next pass and never throws.
+ *
+ * SAFETY: only CLEAN (read-only) working copies are ever removed. A writable
+ * local copy means "checked out by this user / possible unsaved edits" (the
+ * same read-only-bit rule auto-sync's held-back guard uses) — those are kept
+ * on disk and surfaced via notifyReaperHeldBack so a teammate's (or admin's)
+ * vault-side delete can never destroy this user's unsaved work.
  *
  * Gated on `enabled` (auto-sync / download mode) so it only runs when the app is
  * the one managing the local working copy — in manual mode the user owns their
@@ -60,6 +67,11 @@ export function useDeletedFileReaper(input: {
   useEffect(() => {
     onReapedRef.current = onReaped;
   }, [onReaped]);
+
+  // Warn-once registry for held-back files (`vaultId:relPath` keys). The reap
+  // effect re-runs on every scan/poll refetch while a held-back file stays
+  // held back — without this the banner + OS toast would fire on every pass.
+  const warnedHeldBackRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled) return;
@@ -95,6 +107,7 @@ export function useDeletedFileReaper(input: {
       let removedAny = false;
 
       // ── File reap ──────────────────────────────────────────────────────────
+      const heldBack: string[] = [];
       if (hasDeletedFiles && localFiles.length > 0) {
         for (const f of deletedFiles!) {
           if (cancelled) return;
@@ -102,6 +115,21 @@ export function useDeletedFileReaper(input: {
           const key = normalizePathForCompare(rel);
           const local = localByRel.get(key);
           if (!local) continue; // no local copy of this deleted file → nothing to do
+          // The read-only bit is the module-wide "clean copy" marker: a file
+          // is writable iff it's checked out by the current user or carries
+          // unsaved local edits (same rule as auto-sync's held-back guard).
+          // A vault-side delete must NEVER destroy such a copy — another
+          // member deleting the file (or an admin deleting a folder, which
+          // cascades) would silently erase this user's unsaved work with no
+          // recoverable copy. Keep it on disk and surface it instead.
+          if (local.readonly !== true) {
+            const warnKey = `${f.vault_id}:${key}`;
+            if (!warnedHeldBackRef.current.has(warnKey)) {
+              warnedHeldBackRef.current.add(warnKey);
+              heldBack.push(f.name);
+            }
+            continue;
+          }
           try {
             // Vault working copies are kept read-only; clear the bit first or
             // remove() fails on Windows (can't delete a read-only file).
@@ -160,6 +188,12 @@ export function useDeletedFileReaper(input: {
         }
       }
 
+      if (heldBack.length > 0 && !cancelled) {
+        console.warn(
+          `[vault] reaper: ${heldBack.length} deleted file(s) kept locally — writable copy may hold unsaved changes: ${heldBack.join(", ")}`,
+        );
+        notifyReaperHeldBack(heldBack);
+      }
       if (removedAny && !cancelled) onReapedRef.current?.();
     })();
 
