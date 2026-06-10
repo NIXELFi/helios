@@ -186,7 +186,7 @@
     },
     "restrictor": {
         "throat_diameter": 0.02,
-        "discharge_coefficient": 0.92,
+        "discharge_coefficient": 0.967,
         "converging_half_angle": 12.0,
         "diverging_half_angle": 6.0
     },
