@@ -19,6 +19,7 @@ import {
   TypeBadge,
   criticalityFill,
   taskStatus,
+  taskType,
 } from "@helios/pm-ui";
 import {
   IconArrowLeft,
@@ -37,9 +38,9 @@ import { TaskLookup } from "@pm/components/TaskLookup";
 import { usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 
-const createTaskInput = z.object({
+export const createTaskInput = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
-  type: z.enum(["part", "drawing", "simulation", "assembly", "analysis", "test", "general"]),
+  type: taskType,
   status: taskStatus,
   subteam_id: z.string().uuid("Pick a subteam"),
   subsystem_id: z.string().uuid().nullable(),
