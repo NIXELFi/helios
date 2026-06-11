@@ -71,17 +71,21 @@ centerline via the existing Menger curvature, smoothed) plus a track picker on
 the Lap Sim screen. Re-anchor `LINE_FACTOR` only if the source geometry type
 changes (centerline-trace vs surveyed).
 
-## 6. Two-knob endurance pace model (accuracy)
+## 6. Managed-effort endurance pace model — ✅ DONE (2026-06-11)
 
-**Why:** The single `ENDURANCE_PACE` knob scales the whole speed envelope, so
-race-pace cornering reads low (1.55 g at pace 0.7625 vs ~2 g flat-out). Real
-drivers manage pace mostly by lifting early on straights, not by cornering 25%
-under the limit.
-
-**Build:** Split into `cornerPace` (~0.9) + straight-line/throttle factor,
-calibrated jointly so the Mines clean-lap anchor (148.0 s) still holds. Then
-re-anchor `ENDURANCE_THERMAL_EFF` (fuel) — the speed profile reshapes drag
-work. Follow the recal-sweep pattern (see commit e22c9d0).
+Shipped (still ONE knob): corner ceilings scale by pace, and braking +
+traction-limited exits now run at pace × capacity — the old model paired
+full-send 2 g braking with half-pace corners, which hollowed the endurance
+g-g into a ring with spikes (Nick's screenshot). The ENGINE stays wide open
+(straights run out, top gears reached — the constraint from the earlier
+telemetry bug). Exponent experiment: effort = pace² ("uniform grip usage")
+is REFUTED by the Mines fuel anchor — it does too little lap work and forces
+the fitted efficiency to an unphysical 0.126; effort = 1 was the spike
+artifact; effort = pace fits with peak brake 1.27 g / lat ~1.0 g — typical
+managed-pace telemetry. Refit: ENDURANCE_PACE 0.5826, ENDURANCE_THERMAL_EFF
+0.1640 (both Mines anchors exact; AX flat-out untouched at 42.905 s).
+Endurance telemetry to validate the effort split would upgrade this from
+"defensible" to "measured".
 
 ## 7. WENO5 + SSP-RK2 solver upgrade (large, Rust)
 

@@ -170,11 +170,13 @@ export interface LapOpts {
   lineFactor?: number;
   /** Race-pace fraction (0..1, default 1 = flat-out qualifying lap). Models the
    *  endurance regime: over a 22 km run on degrading tires, cone-bounded and
-   *  managed for reliability + fuel, the driver holds a fraction of the absolute
-   *  limit. Scales the whole speed envelope (corner ceilings AND top-speed cap),
-   *  so it lowers BOTH cornering and straight-line speed — which a pure throttle
-   *  cut can't, because corners are grip-limited. Slower speeds also cut drag
-   *  work → fuel. Autocross runs at 1.0; endurance below it. */
+   *  managed for reliability + fuel, the driver holds back from the limit.
+   *  MANAGED-EFFORT model: corner ceilings scale by pace, and braking +
+   *  traction-limited exits run at pace × capacity (see solveSpeeds for why
+   *  linear) — the g-g envelope shrinks coherently instead of pairing
+   *  full-send braking with half-pace corners. The ENGINE stays wide open:
+   *  straights run flat-out and reach top gears, like real endurance
+   *  telemetry. Autocross runs at 1.0; endurance below it. */
   pace?: number;
   /** Emit full per-distance channel traces (LapResult.channels). Off by default
    *  — the optimizer scores thousands of laps and must not allocate these. */
@@ -579,7 +581,8 @@ export function simLap(
       limit = "corner"; // riding the (paced) lateral ceiling / speed cap
     } else if (aG > 0.05) {
       const fAvail = tractiveForceInGear(curve, vehicle, gear, vAvg);
-      const fGrip = vehicle.massKg * grip.aDriveGrip(vAvg, R);
+      // Same effort-capped traction as the solver (managed-effort pace).
+      const fGrip = pace * vehicle.massKg * grip.aDriveGrip(vAvg, R);
       limit = fAvail <= fGrip ? "power" : "grip";
     } else {
       limit = "coast";
@@ -721,12 +724,24 @@ function solveSpeeds(
   // post-upshift "bog" (the crossover IS where the bog stops costing time) and
   // keeps acceleration honestly gearing-dependent. Drive traction is the rear
   // axle's (weight transfer + rear aero + ellipse), not μ·m·g on all four.
+  // Managed-effort pace (roadmap #6): a paced driver doesn't just take corners
+  // slower — they brake and feed throttle gentler too. Grip usage scales by an
+  // EFFORT fraction on the longitudinal axes: braking and traction-limited
+  // exits run at effort × capacity, while the ENGINE stays wide open (power-
+  // limited straights still run out — top gears reached, like real endurance
+  // telemetry). effort = pace (linear): corner grip usage is pace² by
+  // geometry; pure pace² on the long axes is REFUTED by the Mines fuel anchor
+  // (too little lap work → unphysical fitted efficiency), and effort = 1
+  // (full-send braking into half-pace corners) was the old g-g artifact.
+  // pace = 1 → effort = 1: flat-out laps are bit-identical.
+  const effort = pace;
+
   vf[0] = closed ? ceil(0) : 0;
   for (let i = 1; i < M; i++) {
     const vEntry = Math.min(vf[i - 1]!, ceil(i - 1));
     const gear = gearAtSpeed(shiftV, vEntry);
     const fEng = tractiveForceInGear(curve, vehicle, gear, vEntry);
-    const fGrip = m * aDriveGrip(vEntry, rad(i - 1));
+    const fGrip = effort * m * aDriveGrip(vEntry, rad(i - 1));
     const aAcc = (Math.min(fEng, fGrip) - resistanceForce(vehicle, vEntry)) / m;
     vf[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aAcc * ds)));
   }
@@ -739,7 +754,7 @@ function solveSpeeds(
   vb[M - 1] = closed ? ceil(M - 1) : Math.min(ceil(M - 1), vf[M - 1]!);
   for (let i = M - 2; i >= 0; i--) {
     const vEntry = Math.min(vb[i + 1]!, ceil(i + 1));
-    const aBrk = aBrakeGrip(vEntry, rad(i + 1));
+    const aBrk = effort * aBrakeGrip(vEntry, rad(i + 1));
     vb[i] = Math.min(ceil(i), Math.sqrt(Math.max(0, vEntry * vEntry + 2 * aBrk * ds)));
   }
 

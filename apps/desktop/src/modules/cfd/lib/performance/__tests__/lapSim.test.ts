@@ -287,8 +287,11 @@ describe("simLap — channels", () => {
       const accelerating = ch.longG[i]! > 0.05;
       if (straight && accelerating) expect(ch.limit[i]).not.toBe("corner");
     }
-    // And the paced lap still finds power-limited time somewhere.
-    expect(ch.limit).toContain("power");
+    // A weak-enough engine is still the binding limit somewhere even under
+    // managed effort (traction is capped at pace × capacity, so the engine
+    // must be small relative to THAT to classify as "power").
+    const weak = simLap(flatCurve(10), geared, track, { pace: 0.6, channels: true }).channels!;
+    expect(weak.limit).toContain("power");
   });
 
   it("pedal channels are 0..1, mutually exclusive, and consistent with the motion", () => {

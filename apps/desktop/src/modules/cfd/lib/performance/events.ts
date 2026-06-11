@@ -48,11 +48,13 @@ const EFF_TIME_CAP = 1.45;
  *  The Mines 159.6 s/lap anchor therefore loads the whole pace deficit into
  *  the corners, which reads as very slow corner speeds; honest limitation of
  *  a one-knob pace model. */
-// Re-solved 2026-06-11 after braking gained forward-weight-transfer load
-// sensitivity + χ (audit 0029 / roadmap #12): 0.5405 holds the Mines
-// 159.6 s/lap exactly — the brake change barely moves the paced lap because
-// the pace knob governs the corner ceilings that dominate endurance time.
-export const ENDURANCE_PACE = 0.5405;
+// Re-solved 2026-06-11 (twice): first for transfer-aware braking (0.5405),
+// then for the MANAGED-EFFORT pace model (roadmap #6 — braking + exits run
+// at pace × capacity instead of full-send into half-pace corners): 0.5826
+// holds the Mines 159.6 s/lap exactly. Resulting endurance telemetry: peak
+// brake 1.27 g, peak lat ~1.0 g, top gear still reached — a coherent
+// managed-pace g-g instead of the hollow ring + 2 g brake spikes.
+export const ENDURANCE_PACE = 0.5826;
 /** Racing-line factor (see LapOpts.lineFactor): the driven line's effective
  *  corner radius vs the traced centerline. NOW MEASURED-PROVENANCE: with
  *  grip pinned by the real skidpad (μLat 1.368 ← SDM26's 5.02 s, where the
@@ -70,8 +72,8 @@ export const ENDURANCE_PACE = 0.5405;
  // is the geometry being honest rather than the knob absorbing more).
  // Re-solved 2026-06-11 after braking gained forward-weight-transfer load
  // sensitivity + χ (audit 0029 / roadmap #12): honest braking costs ~0.6 s of
- // corner entry, so the line absorbs a bit more — 1.192 lands 43.007 s
- // (still saturating 0.2% short of the anchor, same geometric ceiling).
+ // corner entry, so the line absorbs a bit more — 1.192 lands 42.905 s
+ // (0.04% under the 42.922 anchor; pace/effort don't touch flat-out laps).
 export const LINE_FACTOR = 1.192;
 /** PEAK tank-to-propulsive-work efficiency (at the best-BSFC RPM) for the
  *  energy→fuel estimate. The lap sim multiplies this by an RPM-dependent BSFC
@@ -79,10 +81,13 @@ export const LINE_FACTOR = 1.192;
  *  lower than this peak. Re-solved on the traced endurance track (2.20 km,
  *  rules length) at the new pace against the Mines fuel anchor
  *  (0.9786 kg CO₂/lap on E85). */
-export const ENDURANCE_THERMAL_EFF = 0.2125; // re-solved 2026-06-11 with the
-// transfer-aware brake model + LINE_FACTOR 1.192 + pace 0.5405: 0.2125 lands
-// the Mines 0.9786 kg CO₂/lap exactly on the shipped SDM26 curve (gentler
-// corner entries do slightly less propulsive work per lap than before).
+export const ENDURANCE_THERMAL_EFF = 0.1640; // re-solved 2026-06-11 with the
+// managed-effort pace model (pace 0.5826): 0.1640 lands the Mines 0.9786 kg
+// CO₂/lap exactly on the shipped SDM26 curve. Lower than the full-send fit
+// (0.2125) because the gentler profile does less propulsive work per lap —
+// this "effective" efficiency also absorbs the run-average anchor's traffic
+// and in/out-lap messiness, so treat it as a calibration constant, not a
+// physical engine efficiency claim.
 
 /** The EXACT LapOpts computeEvents uses for the flat-out autocross lap. Exported
  *  so the Lap Sim screen (which re-runs the lap with channels enabled) can never
