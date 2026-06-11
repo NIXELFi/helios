@@ -25,6 +25,7 @@ import {
   enduranceLapOpts,
   predictSkidpad,
   fuelMapFromSweep,
+  cornerSignsAtFracs,
   tractiveMap,
   AUTOCROSS_2026,
   ENDURANCE_2026,
@@ -385,8 +386,10 @@ function svgSpeedWithLimits(ch: LapChannels, width: number, height: number): str
   </svg>`;
 }
 
-/** g-g diagram (lat vs long acceleration scatter) colored by limit state. */
-function svgGG(ch: LapChannels, size: number): string {
+/** g-g diagram (lat vs long acceleration scatter) colored by limit state.
+ *  Lateral sign comes from the traced layout's curvature (cornerSignsAtFracs)
+ *  so left and right corners land on their real sides. */
+function svgGG(ch: LapChannels, size: number, signs: number[]): string {
   const pad = 30;
   const plot = size - 2 * pad;
   const gMax = Math.max(1, ...ch.latG, ...ch.longG.map(Math.abs)) * 1.1;
@@ -394,9 +397,7 @@ function svgGG(ch: LapChannels, size: number): string {
   const Y = (g: number) => pad + plot * (1 - (g + gMax) / (2 * gMax));
   const dots = ch.latG.map((lat, i) => {
     const color = LIMIT_INFO.find((l) => l.state === ch.limit[i])?.color ?? "#999";
-    // Lateral g is unsigned in the channels; mirror alternate samples for the
-    // familiar symmetric envelope (the physics is side-agnostic).
-    const sx = i % 2 === 0 ? lat : -lat;
+    const sx = lat * (signs[i] || 1);
     return `<circle cx="${X(sx).toFixed(1)}" cy="${Y(ch.longG[i]!).toFixed(1)}" r="1.3" fill="${color}" fill-opacity="0.55"/>`;
   }).join("");
   const axis = `
@@ -464,7 +465,12 @@ function lapSimSection(scored: Scored[]): string {
     fig(svgSpeedWithLimits(ch, 720, 240), `${label} — speed vs distance with the binding limit state along the lap (${n(lap.lapTimeS, 2)} s).`),
   ).join("");
   const axRun = runs[0]!;
-  const gg = fig(svgGG(axRun.ch, 280), "g-g diagram (autocross), colored by limit state — the friction-circle envelope the QSS solver actually used.");
+  const axTotal = axRun.ch.distM[axRun.ch.distM.length - 1] || 1;
+  const ggSigns = cornerSignsAtFracs(
+    AUTOCROSS_2026_VISUAL.centerline,
+    axRun.ch.distM.map((d) => d / axTotal),
+  );
+  const gg = fig(svgGG(axRun.ch, 280, ggSigns), "g-g diagram (autocross), colored by limit state — the friction-circle envelope the QSS solver actually used.");
 
   const sp = predictSkidpad(best.vehicle);
   return `

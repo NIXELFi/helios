@@ -118,6 +118,7 @@ export {
   parseVisualTrack,
   boundsOf,
   visualCurvatureRadii,
+  cornerSignsAtFracs,
   type TrackPlan,
   type TrackPoint,
   type Tightness,

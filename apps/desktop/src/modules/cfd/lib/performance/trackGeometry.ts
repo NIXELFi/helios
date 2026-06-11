@@ -150,6 +150,50 @@ export function visualCurvatureRadii(centerline: XY[]): number[] {
   return out;
 }
 
+/** Signed corner direction along the traced centerline at given lap-distance
+ *  fractions: +1 / −1 for the two turn directions, 0 on a straight. The QSS
+ *  sim's lateral g is unsigned (its track is radius-only), but the traced
+ *  layout knows which way each corner bends — this is what lets displays
+ *  draw a FULL g-g circle honestly instead of mirroring samples. Sign comes
+ *  from the cross product of adjacent segment vectors, window-smoothed
+ *  (±2 points) against tracing noise. */
+export function cornerSignsAtFracs(centerline: XY[], fracs: number[]): number[] {
+  const n = centerline.length;
+  if (n < 3) return fracs.map(() => 0);
+  const cum = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    cum[i] = cum[i - 1]! + Math.hypot(
+      centerline[i]![0] - centerline[i - 1]![0],
+      centerline[i]![1] - centerline[i - 1]![1],
+    );
+  }
+  const total = cum[n - 1] || 1;
+  const raw = new Array<number>(n).fill(0);
+  for (let i = 1; i < n - 1; i++) {
+    const [ax, ay] = centerline[i - 1]!;
+    const [bx, by] = centerline[i]!;
+    const [cx, cy] = centerline[i + 1]!;
+    raw[i] = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  }
+  const smooth = raw.map((_, i) => {
+    let s = 0;
+    for (let j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 2); j++) s += raw[j]!;
+    return s;
+  });
+  return fracs.map((f) => {
+    const target = Math.min(1, Math.max(0, f)) * total;
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid]! <= target) lo = mid;
+      else hi = mid;
+    }
+    const s = smooth[lo]!;
+    return s > 1e-9 ? 1 : s < -1e-9 ? -1 : 0;
+  });
+}
+
 /** Build a SIM track (radius vs distance) from the traced visual centerline —
  *  the real course geometry, replacing the hand-synthesized constant-radius
  *  arcs that made the solver ride flat corner-speed ceilings (RPM "hangs").

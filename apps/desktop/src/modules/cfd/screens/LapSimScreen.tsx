@@ -26,6 +26,7 @@ import {
   autocrossLapOpts,
   enduranceLapOpts,
   optimalShiftSpeeds,
+  cornerSignsAtFracs,
   lapSectors,
   sectorDeltas,
   AUTOCROSS_2026,
@@ -141,6 +142,15 @@ export function LapSimScreen() {
     if (!runA || !runB) return null;
     return runA.ch.distM.map((d, i) => interpAt(runB.ch.distM, runB.ch.tS, d) - runA.ch.tS[i]!);
   }, [runA, runB]);
+
+  // Signed lateral g for the g-g circle: the sim's latG is unsigned (radius-
+  // only track), the traced layout supplies the turn DIRECTION per sample.
+  const signedLatG = useMemo(() => {
+    if (!runA) return null;
+    const total = runA.ch.distM[runA.ch.distM.length - 1] || 1;
+    const signs = cornerSignsAtFracs(visual.centerline, runA.ch.distM.map((d) => d / total));
+    return runA.ch.latG.map((g, i) => g * (signs[i] || 1));
+  }, [runA, visual]);
 
   // Corner-complex sectors on A (boundaries at brake applications) and B's
   // per-sector time deltas over the same pieces of road.
@@ -340,6 +350,7 @@ export function LapSimScreen() {
                     colors={mapData.colors}
                     sectors={sectors}
                     secDeltas={secDeltas}
+                    signedLatG={signedLatG}
                   />
                 )}
                 <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
@@ -354,7 +365,7 @@ export function LapSimScreen() {
                   <span className="text-[9px] text-[#5A5F66]">dashed = static μ ellipse (aero adds the rest)</span>
                 </div>
                 <GGDiagram
-                  latG={runA.ch.latG}
+                  latG={signedLatG ?? runA.ch.latG}
                   longG={runA.ch.longG}
                   limit={runA.ch.limit}
                   muLat={runA.vehicle.muLat}
@@ -504,7 +515,7 @@ export function LapSimScreen() {
 // position is its own distance at the SAME instant, so the gap is visible
 // on track, not just in the ΔT chart.
 function LapPlayer({
-  runA, runB, visual, fracs, colors, sectors, secDeltas,
+  runA, runB, visual, fracs, colors, sectors, secDeltas, signedLatG,
 }: {
   runA: LapRun;
   runB: LapRun | null;
@@ -513,6 +524,8 @@ function LapPlayer({
   colors: string[];
   sectors: LapSector[];
   secDeltas: number[] | null;
+  /** Direction-signed lateral g (from the traced layout) for the g-meter. */
+  signedLatG: number[] | null;
 }) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -543,13 +556,27 @@ function LapPlayer({
   // a real part of the playback lag).
   const engTables = useMemo(() => {
     const pts = [...runA.source.points].sort((a, b) => a.rpm - b.rpm);
+    const maxOf = (ys: number[], fallback: number): number => {
+      const m = Math.max(...ys.filter(Number.isFinite));
+      return Number.isFinite(m) && m > 0 ? m : fallback;
+    };
+    const power = pts.map((p) => p.lastCycle.brakePowerKW ?? NaN);
+    const ve = pts.map((p) => p.lastCycle.veAtm ?? NaN);
+    const egt = pts.map((p) => p.lastCycle.egtMean ?? NaN);
+    const bmep = pts.map((p) => p.lastCycle.bmepBar ?? NaN);
     return {
       rpms: pts.map((p) => p.rpm),
-      power: pts.map((p) => p.lastCycle.brakePowerKW ?? NaN),
-      ve: pts.map((p) => p.lastCycle.veAtm ?? NaN),
-      egt: pts.map((p) => p.lastCycle.egtMean ?? NaN),
+      power,
+      ve,
+      egt,
       ki: pts.map((p) => p.lastCycle.knockIntegral ?? NaN),
-      bmep: pts.map((p) => p.lastCycle.bmepBar ?? NaN),
+      bmep,
+      // Gauge full-scale = THIS engine's actual maxima (hardcoded guesses
+      // pinned the bars on any design that beat them).
+      maxPower: maxOf(power, 55),
+      maxVe: maxOf(ve, 1.3),
+      maxEgt: maxOf(egt, 1300),
+      maxBmep: maxOf(bmep, 13),
     };
   }, [runA.source.points]);
 
@@ -580,7 +607,7 @@ function LapPlayer({
       speedKph: vMps * 3.6,
       rpm,
       gear,
-      latG: interpAt(chA.tS, chA.latG, t),
+      latG: interpAt(chA.tS, signedLatG ?? chA.latG, t),
       longG: interpAt(chA.tS, chA.longG, t),
       throttle: interpAt(chA.tS, chA.throttle, t),
       brake: interpAt(chA.tS, chA.brake, t),
@@ -594,7 +621,7 @@ function LapPlayer({
       ki: eng(engTables.ki),
       bmep: eng(engTables.bmep),
     };
-  }, [chA, t, totalDist, engTables, runA.shiftV, sectors]);
+  }, [chA, t, totalDist, engTables, runA.shiftV, sectors, signedLatG]);
 
   // B's true position at the same instant (clamped to its own finish), plus
   // the live gap: when does B reach A's CURRENT piece of road (+ve = A ahead).
@@ -715,12 +742,12 @@ function LapPlayer({
         />
         <PedalBars throttle={cur.throttle} brake={cur.brake} />
         <GDot latG={cur.latG} longG={cur.longG} />
-        {/* Engine vitals as mini bar gauges */}
+        {/* Engine vitals as mini bar gauges — full scale = this design's maxima */}
         <div className="grid min-w-[210px] flex-1 grid-cols-1 gap-1.5 sm:grid-cols-2">
-          <BarGauge label="power" value={cur.powerKw} max={55} unit="kW" color="#FFC627" />
-          <BarGauge label="BMEP" value={cur.bmep} max={13} unit="bar" color="#4FC3F7" />
-          <BarGauge label="VE" value={cur.ve * 100} max={130} unit="%" color="#A5D6A7" />
-          <BarGauge label="EGT" value={cur.egt} min={600} max={1300} unit="K" color="#FF8A65" />
+          <BarGauge label="power" value={cur.powerKw} max={engTables.maxPower} unit="kW" color="#FFC627" />
+          <BarGauge label="BMEP" value={cur.bmep} max={engTables.maxBmep} unit="bar" color="#4FC3F7" />
+          <BarGauge label="VE" value={cur.ve * 100} max={engTables.maxVe * 100} unit="%" color="#A5D6A7" />
+          <BarGauge label="EGT" value={cur.egt} min={600} max={engTables.maxEgt} unit="K" color="#FF8A65" />
           <BarGauge label="fuel" value={cur.fuelG} max={Math.max(1, runA.lap.fuelKg * 1000)} unit="g" color="#CE93D8" />
           <BarGauge label="dist" value={cur.dist} max={totalDist} unit="m" color="#9097A0" />
         </div>
@@ -746,13 +773,14 @@ function BarGauge({
     <div className="flex items-center gap-1.5">
       <span className="w-9 text-right text-[8px] uppercase tracking-wider text-[#5A5F66]">{label}</span>
       <div className="h-2.5 flex-1 overflow-hidden rounded-sm border border-[#2A2C32] bg-[#101114]">
+        {/* No CSS transition: the player updates 60×/s, and a width transition
+            keeps restarting against that and visibly trails the readout. */}
         <div
           className="h-full rounded-sm"
           style={{
             width: `${frac * 100}%`,
             background: `linear-gradient(to right, ${color}55, ${color})`,
             boxShadow: `0 0 6px ${color}66`,
-            transition: "width 80ms linear",
           }}
         />
       </div>
@@ -779,7 +807,6 @@ function PedalBars({ throttle, brake }: { throttle: number; brake: number }) {
               height: `${f * 100}%`,
               background: `linear-gradient(to top, ${color}, ${color}88)`,
               boxShadow: `0 0 6px ${color}66`,
-              transition: "height 80ms linear",
             }}
           />
           {/* full-demand tick */}
