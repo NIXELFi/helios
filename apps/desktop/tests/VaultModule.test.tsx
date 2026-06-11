@@ -43,7 +43,7 @@ describe("<VaultModule>", () => {
         if (table === "folders") return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
         if (table === "files") return { select: () => ({ eq: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
         if (table === "locks") return { select: () => ({ is: () => ({ order: () => { const node: any = { order: () => node, range: () => Promise.resolve({ data: [], error: null }) }; return node; } }) }) };
-        if (table === "user_roles") return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { role: "admin" }, error: null }) }) }) };
+        if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [{ role: "admin" }], error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
       rpc: (_name: string) => Promise.resolve({ data: false, error: null }),
@@ -72,7 +72,7 @@ describe("<VaultModule>", () => {
         onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
       },
       from: vi.fn().mockImplementation((table: string) => {
-        if (table === "user_roles") return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }) };
+        if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
     } as any;
@@ -102,7 +102,7 @@ describe("<VaultModule>", () => {
         onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
       },
       from: vi.fn().mockImplementation((table: string) => {
-        if (table === "user_roles") return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: "relation pdm.user_roles does not exist" } }) }) }) };
+        if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: null, error: { message: "relation pdm.user_roles does not exist" } }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
     } as any;
