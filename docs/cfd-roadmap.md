@@ -1,7 +1,7 @@
 # CFD Module — Future Work Roadmap
 
-_Last updated: 2026-06-09 (post-v4.3.0 feature set: Config / Studies / Results /
-Performance / Lap Sim / Compare)._
+_Last updated: 2026-06-11 (post lap-sim audit 0029: limit-classifier pace fix,
+roll-config aero split, report lap-sim section; items 10–13 added)._
 
 This is the backlog for the CFD tab, ranked by decision-value to the engine
 team. Each entry notes what exists today, what to build, and the gotchas
@@ -103,14 +103,58 @@ space-filling, so converging on an FSAE objective takes several rounds.
 `refineBounds`), stop when the best stops improving. Pure sequencing of
 existing `startOptimization` calls.
 
-## 9. Lap channels in the design-review report
+## 9. Lap channels in the design-review report — ✅ DONE (2026-06-11)
 
-**Why:** The light-theme HTML report predates the Lap Sim channels; the
-hand-off artifact should carry the limit-state strip + channel-colored maps.
+Shipped: the master report now has a "Lap simulation — traces & limit states"
+section — speed-vs-distance with the limit-state strip for AX + EN, the
+time-weighted limit-fractions table (incl. balance margin), a limit-colored
+g-g diagram, and the skidpad validation card. The lap CSV header also carries
+the headline telemetry. Remaining nice-to-have: channel-colored track MAP in
+the report (the screen has it; the report's visual-track SVG could take a
+channel ramp).
 
-**Build:** Extend `buildDesignReportHtml` with the limit-state breakdown,
-track maps colored by speed, and the headline telemetry (incl. %
-power-limited).
+## 10. Lap Sim — sector / corner-by-corner time table
+
+**Why:** A/B compare shows WHERE time moves only as a cumulative delta trace;
+engineers think in corners ("T4 exit costs 0.2 s"). Segmenting the lap at
+limit-state transitions (brake→corner→power) gives natural sector boundaries
+with zero new physics.
+
+**Build:** Pure function over `LapChannels`: split at corner entries, emit
+per-sector time / vmin / limit makeup; table in the Lap Sim screen + report,
+and per-sector ΔT in A/B mode. Observation only — no solver change, no recal.
+
+## 11. Brake + tire duty metrics from the channels
+
+**Why:** The channels already contain everything needed for two questions
+other subteams keep asking: brake sizing (energy + peak power dissipated per
+lap — m·|a|·v over brake segments) and tire thermal load (∫|a_lat|·v dt as a
+duty proxy for endurance degradation). Free wins from existing data.
+
+**Build:** Extend `LapTelemetry` with brakeEnergyKJ / peakBrakePowerKw /
+tireDutyProxy; surface in telemetry tables + the CSV header. Observation only.
+
+## 12. Braking should see lateral load transfer (χ) — needs recal
+
+**Why (found in the 2026-06-11 audit):** `aBrakeGrip` = μ_lat·g_eff·ellipse
+has no χ factor, while the cornering capacity it shares the friction ellipse
+with DOES include χ. Trail-braking segments are therefore slightly optimistic
+(the transferred-load grip penalty should shrink the whole ellipse, not just
+the lateral axis).
+
+**Build:** Multiply the brake capacity by χ(v, R) (or per-axle caps under the
+roll model). Small lap-time effect concentrated in corner entries — but it IS
+a grip-physics change, so re-run the calibration sweep (LINE_FACTOR /
+ENDURANCE_PACE / ENDURANCE_THERMAL_EFF) per the standing convention.
+
+## 13. Lap-time sensitivity panel (vehicle knobs)
+
+**Why:** "What's a kg worth? What's 0.1 CLA worth?" is the first question
+every design review asks. The optimizer answers it for engine params only.
+
+**Build:** Finite-difference ∂(lap time)/∂(mass, CdA, CLA, μ, FD, shift time)
+on the loaded design, rendered as a tornado chart in Performance/Lap Sim and
+the report. ~12 extra simLap calls — instant.
 
 ---
 

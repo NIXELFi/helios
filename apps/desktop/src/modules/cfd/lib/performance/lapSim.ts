@@ -350,7 +350,10 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
   // for lateral use on corner exit. SAME physics as tractive.tractionLimit, so
   // the lap sim and the accel event finally agree on how the car launches.
   const rearStaticAccel = G * (1 - vehicle.weightDistFront);
-  const kRear = k * REAR_AERO_FRAC;
+  // Rear share of aero downforce: from the roll config's measured aero split
+  // when present (the same split the per-axle cornering model uses — the two
+  // models must not disagree about the same car), else the legacy constant.
+  const kRear = k * (vehicle.roll ? 1 - vehicle.roll.aeroFrontFrac : REAR_AERO_FRAC);
   const aDriveGrip = (v: number, R: number): number => {
     // With a measured tire, μ comes from the rear per-tire load (pre-transfer;
     // the closed form below then folds the transfer in, same as before).
@@ -442,7 +445,6 @@ export function simLap(
   const sweetRpm = opts.bsfcSweetRpm ?? 8000;
 
   let time = 0;
-  let work = 0;
   let fuelKg = 0;
   // Telemetry accumulators (time-weighted).
   let sumRpmDt = 0;
@@ -478,9 +480,6 @@ export function simLap(
 
     const a = (vn * vn - vi * vi) / (2 * step);
     const fEngine = vehicle.massKg * a + resistanceForce(vehicle, vAvg);
-    if (fEngine > 0) {
-      work += fEngine * step; // propulsive work only (off-throttle = 0)
-    }
     if (opts.fuelMap) {
       // Variable throttle (Willans, solver-derived): engine BRAKE power
       // demand = wheel power / driveline η, clamped to WOT inside the map.
@@ -508,10 +507,16 @@ export function simLap(
     // time; "corner"/"grip" segments are chassis/tire territory. Uses the same
     // grip model as the solver, so the labels agree with the speeds.
     const aG = a / G;
+    // Paced ceiling, SAME rule as solveSpeeds: pace scales grip-limited corner
+    // ceilings only — straights (gearing/aero-capped, vCorner ≥ vCap) run
+    // flat-out. Applying pace unconditionally here mislabeled every endurance
+    // straight above pace×vCap as "corner" and understated pctPowerLimited.
+    const vCornerHere = vCornerAt(R);
+    const vCeil = vCornerHere < grip.vCap * 0.999 ? pace * vCornerHere : vCornerHere;
     let limit: LimitState;
     if (aG < -0.05) {
       limit = "brake";
-    } else if (vAvg >= 0.985 * pace * vCornerAt(R)) {
+    } else if (vAvg >= 0.985 * vCeil) {
       limit = "corner"; // riding the (paced) lateral ceiling / speed cap
     } else if (aG > 0.05) {
       const fAvail = tractiveForceInGear(curve, vehicle, gear, vAvg);

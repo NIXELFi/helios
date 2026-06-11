@@ -54,6 +54,11 @@ describe("buildMasterReportHtml", () => {
     // Lap telemetry (roadmap #9) for the best design.
     expect(html).toContain("Lap telemetry");
     expect(html).toContain("power-ltd");
+    // Lap-sim deep-dive: traces, limit-state strip + fractions, skidpad validation.
+    expect(html).toContain("Lap simulation — traces &amp; limit states");
+    expect(html).toContain("power-limited");
+    expect(html).toContain("cornering ceiling");
+    expect(html).toContain("Grip-model validation — skidpad");
   });
 
   it("scopes to one study: title changes, the other study disappears", () => {

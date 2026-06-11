@@ -20,11 +20,21 @@ import {
   peakTorque,
   computeEvents,
   simAccel,
+  simLap,
+  autocrossLapOpts,
+  enduranceLapOpts,
+  predictSkidpad,
+  fuelMapFromSweep,
   tractiveMap,
+  AUTOCROSS_2026,
+  ENDURANCE_2026,
   AUTOCROSS_2026_VISUAL,
   ENDURANCE_2026_VISUAL,
   type EventScores,
+  type LapChannels,
+  type LapResult,
   type LapTelemetry,
+  type LimitState,
 } from "../performance";
 import { sourcesFrom, type CurveSource } from "../curveSources";
 import { studyName } from "../studyName";
@@ -298,6 +308,164 @@ function bestDesignSection(scored: Scored[]): string {
     ${tel}`;
 }
 
+// --- lap-sim deep-dive --------------------------------------------------------
+// Mirrors the Lap Sim screen for the report: the SAME physics chain
+// (autocrossLapOpts/enduranceLapOpts + channels) so the document can never
+// disagree with the app's traces.
+
+const LIMIT_INFO: { state: LimitState; label: string; color: string }[] = [
+  { state: "power", label: "power-limited", color: "#B8860B" },
+  { state: "grip", label: "traction-limited", color: "#C0392B" },
+  { state: "corner", label: "cornering ceiling", color: "#2E86C1" },
+  { state: "brake", label: "braking", color: "#8E44AD" },
+  { state: "coast", label: "coast", color: "#95A5A6" },
+];
+
+/** Time-weighted fraction of the lap in each limit state (same accounting as
+ *  the Lap Sim screen's strip). */
+function limitFractions(ch: LapChannels): Map<LimitState, number> {
+  const acc = new Map<LimitState, number>();
+  let total = 0;
+  for (let i = 0; i < ch.tS.length; i++) {
+    const dt = ch.tS[i]! - (i > 0 ? ch.tS[i - 1]! : 0);
+    acc.set(ch.limit[i]!, (acc.get(ch.limit[i]!) ?? 0) + dt);
+    total += dt;
+  }
+  if (total > 0) for (const [k, v] of acc) acc.set(k, v / total);
+  return acc;
+}
+
+/** Speed-vs-distance trace with a limit-state strip underneath — the report's
+ *  version of the Lap Sim screen's headline view. */
+function svgSpeedWithLimits(ch: LapChannels, width: number, height: number): string {
+  const padL = 52, padR = 12, padT = 14, padB = 56;
+  const stripH = 12;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const xMax = ch.distM[ch.distM.length - 1]! || 1;
+  const vKph = ch.vMps.map((v) => v * 3.6);
+  const yMax = Math.max(...vKph) * 1.05 || 1;
+  const X = (d: number) => padL + (plotW * d) / xMax;
+  const Y = (v: number) => padT + plotH * (1 - v / yMax);
+  const pts = ch.distM.map((d, i) => `${X(d).toFixed(1)},${Y(vKph[i]!).toFixed(1)}`).join(" ");
+  // Limit strip: merge consecutive samples of the same state into one rect.
+  const rects: string[] = [];
+  const stripY = padT + plotH + 6;
+  let runStart = 0;
+  for (let i = 1; i <= ch.limit.length; i++) {
+    if (i === ch.limit.length || ch.limit[i] !== ch.limit[runStart]) {
+      const color = LIMIT_INFO.find((l) => l.state === ch.limit[runStart])?.color ?? "#999";
+      const x0 = X(ch.distM[runStart]!);
+      const x1 = X(i < ch.distM.length ? ch.distM[i]! : xMax);
+      rects.push(`<rect x="${x0.toFixed(1)}" y="${stripY}" width="${Math.max(0.5, x1 - x0).toFixed(1)}" height="${stripH}" fill="${color}"/>`);
+      runStart = i;
+    }
+  }
+  const ticks: string[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const ty = padT + (plotH * i) / 4;
+    const yv = yMax - (yMax * i) / 4;
+    ticks.push(`<line x1="${padL}" y1="${ty.toFixed(1)}" x2="${padL + plotW}" y2="${ty.toFixed(1)}" stroke="${i === 4 ? GRID : "#EDF0F3"}"/>`);
+    ticks.push(`<text x="${padL - 6}" y="${(ty + 3).toFixed(1)}" font-size="8.5" fill="${MUTED}" text-anchor="end">${n(yv, 0)}</text>`);
+    const tx = padL + (plotW * i) / 4;
+    ticks.push(`<text x="${tx.toFixed(1)}" y="${stripY + stripH + 12}" font-size="8.5" fill="${MUTED}" text-anchor="middle">${n((xMax * i) / 4, 0)}</text>`);
+  }
+  const legend = LIMIT_INFO.map((l, i) =>
+    `<rect x="${padL + i * 118}" y="${height - 11}" width="9" height="9" fill="${l.color}"/>
+     <text x="${padL + i * 118 + 13}" y="${height - 3}" font-size="8.5" fill="${INK}">${esc(l.label)}</text>`).join("");
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${width}" height="${height}" fill="#FFFFFF"/>
+    ${ticks.join("")}
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="${MUTED}" stroke-width="0.8"/>
+    <line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="${MUTED}" stroke-width="0.8"/>
+    <text x="12" y="${padT + plotH / 2}" font-size="10" fill="${INK}" text-anchor="middle" font-weight="600" transform="rotate(-90 12 ${padT + plotH / 2})">speed (km/h)</text>
+    <polyline points="${pts}" fill="none" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
+    ${rects.join("")}
+    ${legend}
+  </svg>`;
+}
+
+/** g-g diagram (lat vs long acceleration scatter) colored by limit state. */
+function svgGG(ch: LapChannels, size: number): string {
+  const pad = 30;
+  const plot = size - 2 * pad;
+  const gMax = Math.max(1, ...ch.latG, ...ch.longG.map(Math.abs)) * 1.1;
+  const X = (g: number) => pad + (plot * (g + gMax)) / (2 * gMax);
+  const Y = (g: number) => pad + plot * (1 - (g + gMax) / (2 * gMax));
+  const dots = ch.latG.map((lat, i) => {
+    const color = LIMIT_INFO.find((l) => l.state === ch.limit[i])?.color ?? "#999";
+    // Lateral g is unsigned in the channels; mirror alternate samples for the
+    // familiar symmetric envelope (the physics is side-agnostic).
+    const sx = i % 2 === 0 ? lat : -lat;
+    return `<circle cx="${X(sx).toFixed(1)}" cy="${Y(ch.longG[i]!).toFixed(1)}" r="1.3" fill="${color}" fill-opacity="0.55"/>`;
+  }).join("");
+  const axis = `
+    <line x1="${pad}" y1="${Y(0)}" x2="${pad + plot}" y2="${Y(0)}" stroke="${GRID}"/>
+    <line x1="${X(0)}" y1="${pad}" x2="${X(0)}" y2="${pad + plot}" stroke="${GRID}"/>
+    <text x="${pad + plot}" y="${Y(0) - 4}" font-size="8.5" fill="${MUTED}" text-anchor="end">lat g</text>
+    <text x="${X(0) + 4}" y="${pad + 8}" font-size="8.5" fill="${MUTED}">long g</text>
+    <text x="${pad - 2}" y="${Y(0) - 4}" font-size="8.5" fill="${MUTED}">−${n(gMax, 1)}</text>
+    <text x="${X(0) + 4}" y="${pad + plot - 2}" font-size="8.5" fill="${MUTED}">−${n(gMax, 1)}</text>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${size}" height="${size}" fill="#FFFFFF"/>${axis}${dots}</svg>`;
+}
+
+function lapSimSection(scored: Scored[]): string {
+  const withPts = scored.filter((s) => s.events.totalPoints != null);
+  const best = withPts.length
+    ? withPts.reduce((a, b) => ((b.events.totalPoints as number) > (a.events.totalPoints as number) ? b : a))
+    : scored[0];
+  if (!best) return `<p class="muted">No scorable design.</p>`;
+  const curve = torqueCurveFromSweep(best.source.points);
+  const fuelMap = fuelMapFromSweep(best.source.points) ?? undefined;
+  const runs: { label: string; lap: LapResult; ch: LapChannels }[] = [];
+  for (const ev of [
+    { label: "Autocross (flat-out)", track: AUTOCROSS_2026, opts: autocrossLapOpts() },
+    { label: "Endurance (race pace)", track: ENDURANCE_2026, opts: enduranceLapOpts() },
+  ]) {
+    const lap = simLap(curve, best.vehicle, ev.track, { ...ev.opts, fuelMap, channels: true });
+    if (lap.channels) runs.push({ label: ev.label, lap, ch: lap.channels });
+  }
+  if (runs.length === 0) return `<p class="muted">No lap channels available.</p>`;
+
+  const fracRows = runs.map(({ label, lap, ch }) => {
+    const fr = limitFractions(ch);
+    const cells = LIMIT_INFO.map((l) => `<td class="r">${pct(fr.get(l.state) ?? 0)}</td>`).join("");
+    const t = lap.telemetry;
+    const bal = t.balanceMargin != null
+      ? `${t.balanceMargin >= 0 ? "loose" : "push"} ${n(Math.abs(t.balanceMargin) * 100, 1)}%`
+      : "—";
+    return `<tr><td>${esc(label)}</td><td class="r">${n(lap.lapTimeS, 2)}</td>${cells}
+      <td class="r">${n(t.vMaxKph, 0)} / ${n(t.vMinKph, 0)}</td><td class="r">${bal}</td></tr>`;
+  }).join("");
+
+  const figs = runs.map(({ label, lap, ch }) =>
+    fig(svgSpeedWithLimits(ch, 720, 240), `${label} — speed vs distance with the binding limit state along the lap (${n(lap.lapTimeS, 2)} s).`),
+  ).join("");
+  const axRun = runs[0]!;
+  const gg = fig(svgGG(axRun.ch, 280), "g-g diagram (autocross), colored by limit state — the friction-circle envelope the QSS solver actually used.");
+
+  const sp = predictSkidpad(best.vehicle);
+  return `
+    <p><strong>${esc(studyLabel(best.source))}</strong> — the report re-runs the scoring laps with channel traces
+    enabled (identical physics; channels are pure observation).</p>
+    ${figs}
+    <table class="data"><thead><tr><th>lap</th><th class="r">time (s)</th>
+      ${LIMIT_INFO.map((l) => `<th class="r">${esc(l.label)}</th>`).join("")}
+      <th class="r">v max/min (km/h)</th><th class="r">balance</th></tr></thead>
+      <tbody>${fracRows}</tbody></table>
+    <p class="muted">Fractions are time-weighted. "power-limited" is where engine torque directly buys lap time;
+    "cornering ceiling" + "traction-limited" are chassis/tire territory. Balance is the time-weighted axle-capacity
+    margin over corner-limited running (roll model).</p>
+    <div class="two">${gg}
+    <figure><table class="data"><thead><tr><th colspan="2">Grip-model validation — skidpad</th></tr></thead><tbody>
+      <tr><td>Predicted time (9.125 m path)</td><td class="r">${n(sp.timeS, 2)} s</td></tr>
+      <tr><td>Predicted speed</td><td class="r">${n(sp.speedKph, 1)} km/h</td></tr>
+      <tr><td>Predicted lateral g</td><td class="r">${n(sp.latG, 2)} g</td></tr>
+    </tbody></table>
+    <figcaption>Skidpad isolates lateral grip (no aero, no line freedom, no engine) — the cleanest validation the
+    rules offer. Real anchors: SDM26 5.02 s, SDM25 4.98 s.</figcaption></figure></div>`;
+}
+
 function comparisonSection(scored: Scored[]): string {
   if (scored.length < 2) return `<p class="muted">Fewer than two designs — nothing to compare.</p>`;
   const series: XYSeries[] = scored.map((s, i) => {
@@ -356,6 +524,7 @@ export function buildMasterReportHtml(input: MasterReportInput): string {
     html: optimizationSection(s),
   }));
   if (scored.length > 0) sections.push({ title: "Best design — FSAE deep-dive", html: bestDesignSection(scored) });
+  if (scored.length > 0) sections.push({ title: "Lap simulation — traces & limit states", html: lapSimSection(scored) });
   sections.push({
     title: "Competition courses (2026)",
     html: `<div class="two">

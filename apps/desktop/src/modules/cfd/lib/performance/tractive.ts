@@ -93,7 +93,11 @@ export const REAR_AERO_FRAC = 0.47;
  *  estimate, which is why a real FSAE car launches far harder. */
 export function tractionLimit(vehicle: VehicleConfig, v = 0): number {
   const rearStatic = vehicle.massKg * G * (1 - vehicle.weightDistFront);
-  const rearAero = 0.5 * vehicle.airDensityKgM3 * vehicle.claM2 * v * v * REAR_AERO_FRAC;
+  // Rear aero share from the roll config's measured split when present (keeps
+  // this closed form and lapSim.aDriveGrip on the same aero balance as the
+  // per-axle cornering model), else the legacy constant.
+  const rearFrac = vehicle.roll ? 1 - vehicle.roll.aeroFrontFrac : REAR_AERO_FRAC;
+  const rearAero = 0.5 * vehicle.airDensityKgM3 * vehicle.claM2 * v * v * rearFrac;
   // Measured tire: μ from the Pacejka peak-friction fit at the rear PER-TIRE
   // load (pre-transfer); same convention as lapSim.aDriveGrip so the accel
   // event and the lap sim keep launching the car identically.

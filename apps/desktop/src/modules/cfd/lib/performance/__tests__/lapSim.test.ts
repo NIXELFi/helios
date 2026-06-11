@@ -276,6 +276,21 @@ describe("simLap — channels", () => {
     expect(weak.pctPowerLimited).toBeGreaterThan(strong.pctPowerLimited);
   });
 
+  it("paced laps never label an accelerating straight as 'corner' (pace scales corner ceilings only)", () => {
+    // Regression: the classifier used pace×vCorner unconditionally, but the
+    // solver paces only grip-limited corner ceilings (straights run flat-out).
+    // Under endurance pace, every straight above pace×vCap got labeled
+    // "corner" while the car was at full throttle — hiding power-limited time.
+    const ch = simLap(flatCurve(25), geared, track, { pace: 0.6, channels: true }).channels!;
+    for (let i = 0; i < ch.limit.length; i++) {
+      const straight = ch.latG[i]! < 0.05;
+      const accelerating = ch.longG[i]! > 0.05;
+      if (straight && accelerating) expect(ch.limit[i]).not.toBe("corner");
+    }
+    // And the paced lap still finds power-limited time somewhere.
+    expect(ch.limit).toContain("power");
+  });
+
   it("channels do not change the solved lap (pure observation)", () => {
     const a = simLap(torque, geared, track);
     const b = simLap(torque, geared, track, { channels: true });
