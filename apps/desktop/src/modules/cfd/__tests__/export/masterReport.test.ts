@@ -59,6 +59,10 @@ describe("buildMasterReportHtml", () => {
     expect(html).toContain("power-limited");
     expect(html).toContain("cornering ceiling");
     expect(html).toContain("Grip-model validation — skidpad");
+    // Duty metrics + corner-complex sectors (roadmap #10/#11).
+    expect(html).toContain("Lap duty");
+    expect(html).toContain("brake energy (kJ)");
+    expect(html).toContain("Autocross sectors");
   });
 
   it("scopes to one study: title changes, the other study disappears", () => {

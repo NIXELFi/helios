@@ -25,12 +25,16 @@ import {
   simLap,
   autocrossLapOpts,
   enduranceLapOpts,
+  optimalShiftSpeeds,
+  lapSectors,
+  sectorDeltas,
   AUTOCROSS_2026,
   ENDURANCE_2026,
   AUTOCROSS_2026_VISUAL,
   ENDURANCE_2026_VISUAL,
   type LapResult,
   type LapChannels,
+  type LapSector,
   type LimitState,
   type VehicleConfig,
 } from "../lib/performance";
@@ -42,7 +46,7 @@ const EVENTS: { key: EventKey; label: string; note: string }[] = [
   { key: "endurance", label: "Endurance", note: "race pace" },
 ];
 
-type ChannelKey = "speed" | "rpm" | "gear" | "latG" | "longG" | "limit" | "fuel";
+type ChannelKey = "speed" | "rpm" | "gear" | "latG" | "longG" | "throttle" | "brake" | "limit" | "fuel";
 
 const CHANNELS: { key: ChannelKey; label: string; unit: string; get: (ch: LapChannels, i: number) => number }[] = [
   { key: "speed", label: "speed", unit: "km/h", get: (ch, i) => ch.vMps[i]! * 3.6 },
@@ -50,6 +54,8 @@ const CHANNELS: { key: ChannelKey; label: string; unit: string; get: (ch: LapCha
   { key: "gear", label: "gear", unit: "", get: (ch, i) => ch.gear[i]! },
   { key: "latG", label: "lat g", unit: "g", get: (ch, i) => ch.latG[i]! },
   { key: "longG", label: "long g", unit: "g", get: (ch, i) => ch.longG[i]! },
+  { key: "throttle", label: "throttle", unit: "", get: (ch, i) => ch.throttle[i]! },
+  { key: "brake", label: "brake", unit: "", get: (ch, i) => ch.brake[i]! },
   { key: "limit", label: "limit state", unit: "", get: (ch, i) => ch.gear[i]! /* unused (categorical) */ },
   { key: "fuel", label: "fuel burned", unit: "g", get: (ch, i) => ch.fuelCumKg[i]! * 1000 },
 ];
@@ -59,6 +65,8 @@ interface LapRun {
   vehicle: VehicleConfig;
   lap: LapResult;
   ch: LapChannels;
+  /** Optimal upshift speeds (m/s) per gear — drives the dash shift light. */
+  shiftV: number[];
 }
 
 /** Time-weighted fraction of the lap in each limit state. */
@@ -118,7 +126,9 @@ export function LapSimScreen() {
     // Variable-throttle fuel (Willans from the solver sweep) when available.
     const fuelMap = fuelMapFromSweep(src.points) ?? undefined;
     const lap = simLap(curve, vehicle, track, { ...opts, fuelMap, channels: true });
-    return lap.channels ? { source: src, vehicle, lap, ch: lap.channels } : null;
+    return lap.channels
+      ? { source: src, vehicle, lap, ch: lap.channels, shiftV: optimalShiftSpeeds(curve, vehicle) }
+      : null;
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,6 +141,14 @@ export function LapSimScreen() {
     if (!runA || !runB) return null;
     return runA.ch.distM.map((d, i) => interpAt(runB.ch.distM, runB.ch.tS, d) - runA.ch.tS[i]!);
   }, [runA, runB]);
+
+  // Corner-complex sectors on A (boundaries at brake applications) and B's
+  // per-sector time deltas over the same pieces of road.
+  const sectors = useMemo(() => (runA ? lapSectors(runA.ch) : []), [runA]);
+  const secDeltas = useMemo(
+    () => (runB && sectors.length ? sectorDeltas(sectors, runB.ch) : null),
+    [sectors, runB],
+  );
 
   // Track-map coloring for the selected channel.
   const mapData = useMemo(() => {
@@ -320,6 +338,8 @@ export function LapSimScreen() {
                     visual={visual}
                     fracs={mapData.fracs}
                     colors={mapData.colors}
+                    sectors={sectors}
+                    secDeltas={secDeltas}
                   />
                 )}
                 <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
@@ -343,6 +363,11 @@ export function LapSimScreen() {
                 />
               </section>
             </div>
+
+            {/* Corner-complex sectors (brake-application boundaries) */}
+            {sectors.length > 1 && (
+              <SectorTable sectors={sectors} deltas={secDeltas} runB={runB} />
+            )}
 
             {/* Delta-T (compare mode) */}
             {runB && deltaT && (
@@ -408,6 +433,26 @@ export function LapSimScreen() {
                 height={240}
               />
             </section>
+            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <LinePlot
+                title="pedal demand vs distance — A (demand ÷ capacity from the grip model; 100% = at the limit)"
+                xs={runA.ch.distM}
+                series={[
+                  { label: "throttle (%)", y: runA.ch.throttle.map((f) => f * 100), color: "#A5D6A7", width: 1.5, showPoints: false },
+                  { label: "brake (%)", y: runA.ch.brake.map((f) => f * 100), color: "#FF5252", width: 1.5, showPoints: false },
+                  ...(runB
+                    ? [{ label: "B throttle (%)", y: runA.ch.distM.map((d) => interpAt(runB.ch.distM, runB.ch.throttle, d) * 100), color: "#4FC3F7", width: 1, showPoints: false }]
+                    : []),
+                ]}
+                xLabel="distance (m)"
+                yLabel="%"
+                height={220}
+              />
+              <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
+                Throttle pinned at 100% = power-limited (a bigger engine helps); below 100% while accelerating =
+                traction-limited corner exit (the driver is metering). Brake at 100% = using every bit of grip.
+              </p>
+            </section>
 
             {/* Lap-time residency histograms — where the car/engine LIVES.
                 RPM residency is the engine team's tuning target map; with a B
@@ -459,13 +504,15 @@ export function LapSimScreen() {
 // position is its own distance at the SAME instant, so the gap is visible
 // on track, not just in the ΔT chart.
 function LapPlayer({
-  runA, runB, visual, fracs, colors,
+  runA, runB, visual, fracs, colors, sectors, secDeltas,
 }: {
   runA: LapRun;
   runB: LapRun | null;
   visual: typeof AUTOCROSS_2026_VISUAL;
   fracs: number[];
   colors: string[];
+  sectors: LapSector[];
+  secDeltas: number[] | null;
 }) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -510,31 +557,44 @@ function LapPlayer({
     const rpms = pts.map((p) => p.rpm);
     const eng = (get: (p: (typeof pts)[number]) => number | undefined): number =>
       interpAt(rpms, pts.map((p) => get(p) ?? NaN), rpm);
+    const gear = chA.gear[i] ?? 0;
+    const vMps = interpAt(chA.tS, chA.vMps, t);
+    // Optimal-shift proximity: the dash shift light arms as the car closes on
+    // THIS gear's force-crossover speed (the same schedule the solver drives).
+    const shiftSpeed = gear >= 1 && gear - 1 < runA.shiftV.length ? runA.shiftV[gear - 1]! : Infinity;
+    const sIdx = sectors.findIndex((s) => dist >= s.startM && dist < s.endM);
     return {
       dist,
       frac: dist / totalDist,
-      speedKph: interpAt(chA.tS, chA.vMps, t) * 3.6,
+      speedKph: vMps * 3.6,
       rpm,
-      gear: chA.gear[i] ?? 0,
+      gear,
       latG: interpAt(chA.tS, chA.latG, t),
       longG: interpAt(chA.tS, chA.longG, t),
+      throttle: interpAt(chA.tS, chA.throttle, t),
+      brake: interpAt(chA.tS, chA.brake, t),
       limit: chA.limit[i] ?? "coast",
       fuelG: interpAt(chA.tS, chA.fuelCumKg, t) * 1000,
+      shiftFrac: Number.isFinite(shiftSpeed) && shiftSpeed > 0 ? vMps / shiftSpeed : 0,
+      sector: sIdx >= 0 ? sIdx : sectors.length - 1,
       powerKw: eng((p) => p.lastCycle.brakePowerKW),
       ve: eng((p) => p.lastCycle.veAtm),
       egt: eng((p) => p.lastCycle.egtMean),
       ki: eng((p) => p.lastCycle.knockIntegral),
       bmep: eng((p) => p.lastCycle.bmepBar),
     };
-  }, [chA, t, totalDist, runA.source.points]);
+  }, [chA, t, totalDist, runA.source.points, runA.shiftV, sectors]);
 
-  // B's true position at the same instant (clamped to its own finish).
-  const fracB = useMemo(() => {
+  // B's true position at the same instant (clamped to its own finish), plus
+  // the live gap: when does B reach A's CURRENT piece of road (+ve = A ahead).
+  const bState = useMemo(() => {
     if (!runB) return null;
     const chB = runB.ch;
     const dB = interpAt(chB.tS, chB.distM, Math.min(t, chB.tS[chB.tS.length - 1] ?? 0));
-    return dB / (chB.distM[chB.distM.length - 1] || 1);
-  }, [runB, t]);
+    const gapS = interpAt(chB.distM, chB.tS, cur.dist) - t;
+    return { frac: dB / (chB.distM[chB.distM.length - 1] || 1), gapS };
+  }, [runB, t, cur.dist]);
+  const fracB = bState?.frac ?? null;
 
   const markers = [
     { frac: cur.frac, color: "#FFC627", label: "A" },
@@ -587,14 +647,62 @@ function LapPlayer({
       {/* Dash — supersport LCD cluster: the rpm scale sweeps up from low-left
           and flattens across the top (Ninja-style), gear at left, big digital
           speed under the flat of the curve. */}
-      <div className="flex flex-wrap items-end gap-4 border-t border-[#2A2C32] bg-[#0B0B0D] px-3 py-2">
+      {/* Race strip — live sector + gap context above the cluster. */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[#16171B] bg-[#0B0B0D] px-3 pt-2">
+        {sectors.length > 1 && (
+          <>
+            <span className="rounded-sm border border-[#FFC627]/40 bg-[#FFC627]/10 px-2 py-0.5 font-mono text-[10px] text-[#FFC627]">
+              S{cur.sector + 1}
+              <span className="text-[#9097A0]">/{sectors.length}</span>
+            </span>
+            {sectors[cur.sector] && (
+              <span className="flex items-center gap-1 font-mono text-[9px] text-[#9097A0]">
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{ background: LIMIT_COLOR[sectors[cur.sector]!.dominant] }}
+                />
+                {LIMIT_LABEL[sectors[cur.sector]!.dominant]} sector · vmin{" "}
+                {sectors[cur.sector]!.vMinKph.toFixed(0)} km/h
+              </span>
+            )}
+            {secDeltas?.[cur.sector] != null && (
+              <span
+                className={
+                  "font-mono text-[10px] tabular-nums " +
+                  (secDeltas[cur.sector]! >= 0 ? "text-[#A5D6A7]" : "text-[#FF8A65]")
+                }
+                title="B's time over this sector minus A's (+ = A faster here)"
+              >
+                sector {secDeltas[cur.sector]! >= 0 ? "+" : ""}
+                {secDeltas[cur.sector]!.toFixed(2)} s
+              </span>
+            )}
+          </>
+        )}
+        {bState && (
+          <span
+            className={
+              "ml-auto rounded-sm border px-2 py-0.5 font-mono text-[11px] tabular-nums " +
+              (bState.gapS >= 0
+                ? "border-[#A5D6A7]/40 bg-[#A5D6A7]/10 text-[#A5D6A7]"
+                : "border-[#FF8A65]/40 bg-[#FF8A65]/10 text-[#FF8A65]")
+            }
+            title="Time until B reaches A's current track position (+ = A ahead)"
+          >
+            gap {bState.gapS >= 0 ? "+" : ""}{bState.gapS.toFixed(2)} s
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-end gap-4 bg-[#0B0B0D] px-3 py-2">
         <Cluster
           rpm={cur.rpm}
           revLimit={runA.vehicle.revLimitRpm}
           gear={cur.gear}
           speedKph={cur.speedKph}
           limit={cur.limit}
+          shiftFrac={cur.shiftFrac}
         />
+        <PedalBars throttle={cur.throttle} brake={cur.brake} />
         <GDot latG={cur.latG} longG={cur.longG} />
         {/* Engine vitals as mini bar gauges */}
         <div className="grid min-w-[210px] flex-1 grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -644,6 +752,42 @@ function BarGauge({
   );
 }
 
+/** Vertical throttle/brake demand bars — telemetry-overlay style. Values are
+ *  demand ÷ capacity from the sim's own grip model (1 = the friction or
+ *  power limit), not a guessed pedal position. */
+function PedalBars({ throttle, brake }: { throttle: number; brake: number }) {
+  const H = 92;
+  const bar = (label: string, frac: number, color: string) => {
+    const f = Math.min(1, Math.max(0, frac));
+    return (
+      <div className="flex flex-col items-center gap-0.5">
+        <div className="relative h-[64px] w-3.5 overflow-hidden rounded-sm border border-[#2A2C32] bg-[#101114]">
+          <div
+            className="absolute bottom-0 left-0 right-0"
+            style={{
+              height: `${f * 100}%`,
+              background: `linear-gradient(to top, ${color}, ${color}88)`,
+              boxShadow: `0 0 6px ${color}66`,
+              transition: "height 80ms linear",
+            }}
+          />
+          {/* full-demand tick */}
+          <div className="absolute left-0 right-0 top-0 h-px bg-[#2A2C32]" />
+        </div>
+        <span className="font-mono text-[9px] tabular-nums text-[#D8DCE2]">{(f * 100).toFixed(0)}</span>
+        <span className="text-[7px] uppercase tracking-wider text-[#5A5F66]">{label}</span>
+      </div>
+    );
+  };
+  return (
+    <div className="flex items-end gap-1.5" style={{ height: H }} role="img"
+      aria-label={`throttle ${(throttle * 100).toFixed(0)} percent, brake ${(brake * 100).toFixed(0)} percent`}>
+      {bar("thr", throttle, "#A5D6A7")}
+      {bar("brk", brake, "#FF5252")}
+    </div>
+  );
+}
+
 /** Live friction-circle dot ("g-meter") — lateral on x, longitudinal on y. */
 function GDot({ latG, longG }: { latG: number; longG: number }) {
   const S = 92;
@@ -673,13 +817,16 @@ function GDot({ latG, longG }: { latG: number; longG: number }) {
  *  curve, gradient band fills along the scale, redline numerals go red, and
  *  a shift light strobes at the limiter. */
 function Cluster({
-  rpm, revLimit, gear, speedKph, limit,
+  rpm, revLimit, gear, speedKph, limit, shiftFrac = 0,
 }: {
   rpm: number;
   revLimit: number;
   gear: number;
   speedKph: number;
   limit: LimitState;
+  /** Speed ÷ this gear's optimal (force-crossover) shift speed: ≥1 = shift
+   *  NOW for max force; ~0.97 arms the light. Drives the amber stage. */
+  shiftFrac?: number;
 }) {
   const maxRpm = Math.ceil(revLimit / 1000) * 1000;
   const W = 470;
@@ -764,12 +911,29 @@ function Cluster({
         style={{ letterSpacing: 1 }}>
         ×1000 r/min
       </text>
-      {/* shift light */}
-      <circle cx={W - 16} cy={26} r={5} fill={atLimiter ? "#FF5252" : "#1B1D22"}
-        stroke={atLimiter ? "#FF5252" : "#2A2C32"} strokeWidth={1}
-        style={atLimiter ? { filter: "drop-shadow(0 0 5px #FF5252)" } : undefined}>
-        {atLimiter && <animate attributeName="opacity" values="1;0.2;1" dur="0.22s" repeatCount="indefinite" />}
-      </circle>
+      {/* Shift light, three stages: off → AMBER at ~97% of this gear's
+          force-crossover speed (the optimal shift the solver drives — shift
+          for force, not at redline) → strobing RED at the limiter. */}
+      {(() => {
+        const shiftNow = shiftFrac >= 0.97 && !atLimiter;
+        const fill = atLimiter ? "#FF5252" : shiftNow ? "#FFC627" : "#1B1D22";
+        const glow = atLimiter ? "#FF5252" : "#FFC627";
+        return (
+          <g>
+            <circle cx={W - 16} cy={26} r={5} fill={fill}
+              stroke={atLimiter || shiftNow ? glow : "#2A2C32"} strokeWidth={1}
+              style={atLimiter || shiftNow ? { filter: `drop-shadow(0 0 5px ${glow})` } : undefined}>
+              {atLimiter && <animate attributeName="opacity" values="1;0.2;1" dur="0.22s" repeatCount="indefinite" />}
+            </circle>
+            {shiftNow && (
+              <text x={W - 16} y={42} fontSize={7} fill="#FFC627" textAnchor="middle"
+                style={{ letterSpacing: 1 }}>
+                SHIFT
+              </text>
+            )}
+          </g>
+        );
+      })()}
       {/* GEAR — top-left corner (the scale starts low there, corner is free) */}
       <text x={12} y={16} fontSize={9} fill="#5A5F66" style={{ letterSpacing: 2 }}>
         GEAR
@@ -831,6 +995,8 @@ const ANALYZER_CHANNELS: { key: string; label: string; unit: string }[] = [
   { key: "power", label: "engine power", unit: "kW" },
   { key: "latG", label: "lateral g", unit: "g" },
   { key: "longG", label: "longitudinal g", unit: "g" },
+  { key: "throttle", label: "throttle demand", unit: "%" },
+  { key: "brake", label: "brake demand", unit: "%" },
   { key: "gear", label: "gear", unit: "" },
   { key: "fuel", label: "fuel burned", unit: "g" },
 ];
@@ -848,6 +1014,8 @@ function analyzerValues(run: LapRun, key: string): number[] {
     case "rpm": return [...ch.rpm];
     case "latG": return [...ch.latG];
     case "longG": return [...ch.longG];
+    case "throttle": return ch.throttle.map((f) => f * 100);
+    case "brake": return ch.brake.map((f) => f * 100);
     case "gear": return [...ch.gear];
     case "fuel": return ch.fuelCumKg.map((f) => f * 1000);
     default: return [];
@@ -1071,8 +1239,110 @@ function HeadlineRow({ tag, run, accent, deltaVs }: { tag: string; run: LapRun; 
       <Stat label="max brake" value={`${tm.maxBrakeG.toFixed(2)} g`} />
       <Stat label="fuel" value={`${(run.lap.fuelKg * 1000).toFixed(0)} g`} />
       <Stat label="CO₂" value={`${(run.lap.co2Kg * 1000).toFixed(0)} g`} />
+      <Stat label="brake E" value={`${tm.brakeEnergyKJ.toFixed(0)} kJ`} />
+      <Stat label="pk brake" value={`${tm.peakBrakePowerKw.toFixed(0)} kW`} />
+      <Stat label="tire duty" value={`${tm.tireDutyGkm.toFixed(2)} g·km`} />
       <Stat label="power-limited" value={`${(tm.pctPowerLimited * 100).toFixed(0)}%`} highlight />
     </div>
+  );
+}
+
+/** Corner-complex sector table (roadmap #10): one row per brake-application
+ *  sector — time, apex speed, limit-state makeup, and B's time over the same
+ *  road when comparing. The worst (most time lost) sector is flagged. */
+function SectorTable({ sectors, deltas, runB }: {
+  sectors: LapSector[];
+  deltas: number[] | null;
+  runB: LapRun | null;
+}) {
+  // Most-negative delta = where A loses the most to B (or, without B, the
+  // slowest sector by time share is simply visible from the bars).
+  const worstIdx = deltas
+    ? deltas.reduce((w, d, i) => (d < deltas[w]! ? i : w), 0)
+    : -1;
+  const bestIdx = deltas
+    ? deltas.reduce((b, d, i) => (d > deltas[b]! ? i : b), 0)
+    : -1;
+  return (
+    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2A2C32] px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">
+          Sectors — corner complexes (split at brake applications)
+        </span>
+        <span className="text-[9px] text-[#5A5F66]">
+          {runB ? "ΔB = B − A over the same road; green = A faster there" : "compare a B lap to see per-sector time deltas"}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full font-mono text-[10px] tabular-nums">
+          <thead>
+            <tr className="border-b border-[#2A2C32] text-[8px] uppercase tracking-wider text-[#5A5F66]">
+              <th className="px-3 py-1.5 text-left">sector</th>
+              <th className="px-2 py-1.5 text-right">from–to (m)</th>
+              <th className="px-2 py-1.5 text-right">time (s)</th>
+              {deltas && <th className="px-2 py-1.5 text-right">ΔB (s)</th>}
+              <th className="px-2 py-1.5 text-right">vmin</th>
+              <th className="px-2 py-1.5 text-right">vmax</th>
+              <th className="px-2 py-1.5 text-left">limited by</th>
+              <th className="w-[30%] px-3 py-1.5 text-left">time makeup</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sectors.map((s, i) => {
+              const d = deltas?.[i];
+              const tag = i === worstIdx && d != null && d < 0 ? "▼" : i === bestIdx && d != null && d > 0 ? "▲" : "";
+              return (
+                <tr key={s.idx} className="border-b border-[#16171B] text-[#D8DCE2] hover:bg-[#16171B]">
+                  <td className="px-3 py-1 text-[#FFC627]">
+                    S{s.idx} {tag && <span className={d! < 0 ? "text-[#FF8A65]" : "text-[#A5D6A7]"}>{tag}</span>}
+                  </td>
+                  <td className="px-2 py-1 text-right text-[#9097A0]">
+                    {s.startM.toFixed(0)}–{s.endM.toFixed(0)}
+                  </td>
+                  <td className="px-2 py-1 text-right">{s.timeS.toFixed(2)}</td>
+                  {deltas && (
+                    <td className={"px-2 py-1 text-right " + (d == null ? "" : d >= 0 ? "text-[#A5D6A7]" : "text-[#FF8A65]")}>
+                      {d == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(2)}`}
+                    </td>
+                  )}
+                  <td className="px-2 py-1 text-right">{s.vMinKph.toFixed(0)}</td>
+                  <td className="px-2 py-1 text-right">{s.vMaxKph.toFixed(0)}</td>
+                  <td className="px-2 py-1">
+                    <span
+                      className="rounded-sm border px-1.5 py-px text-[8px] uppercase"
+                      style={{
+                        color: LIMIT_COLOR[s.dominant],
+                        borderColor: `${LIMIT_COLOR[s.dominant]}66`,
+                        background: `${LIMIT_COLOR[s.dominant]}14`,
+                      }}
+                    >
+                      {LIMIT_LABEL[s.dominant]}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1">
+                    <div className="flex h-2 w-full overflow-hidden rounded-sm border border-[#2A2C32]">
+                      {(Object.entries(s.limitFrac) as [LimitState, number][])
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([state, frac]) => (
+                          <div
+                            key={state}
+                            style={{ width: `${frac * 100}%`, background: LIMIT_COLOR[state] }}
+                            title={`${LIMIT_LABEL[state]}: ${(frac * 100).toFixed(0)}%`}
+                          />
+                        ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="px-3 py-1.5 text-[9px] leading-tight text-[#5A5F66]">
+        A sector = one braking zone + the corner it serves + the run to the next braking zone — the unit a race
+        engineer reasons in. ▼ marks where A loses the most time to B, ▲ where A gains the most.
+      </p>
+    </section>
   );
 }
 

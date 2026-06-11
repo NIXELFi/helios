@@ -53,20 +53,27 @@ describe("buildLapChannelsCsv", () => {
     expect(comments.some((l) => l.includes(`lap_time_s: ${lap.lapTimeS.toFixed(3)}`))).toBe(true);
     const headerIdx = lines.findIndex((l) => l.startsWith("dist_m,"));
     expect(headerIdx).toBeGreaterThan(0);
-    expect(lines[headerIdx]).toBe("dist_m,time_s,speed_kph,rpm,gear,lat_g,long_g,limit_state,fuel_cum_g");
+    expect(lines[headerIdx]).toBe("dist_m,time_s,speed_kph,rpm,gear,lat_g,long_g,throttle,brake,limit_state,fuel_cum_g");
     const rows = lines.slice(headerIdx + 1);
     expect(rows.length).toBe(lap.channels!.distM.length);
-    // Every row is a clean 9-column rectangle.
-    for (const r of rows) expect(r.split(",").length).toBe(9);
+    // Every row is a clean 11-column rectangle.
+    for (const r of rows) expect(r.split(",").length).toBe(11);
+    // Duty telemetry travels in the comment block.
+    expect(comments.some((l) => l.includes("brake_energy_kj:"))).toBe(true);
   });
 
-  it("rows carry physical values (speed in km/h, fuel in grams)", () => {
+  it("rows carry physical values (speed in km/h, fuel in grams, pedals 0..1)", () => {
     const csv = buildLapChannelsCsv(META, lap);
     const lines = csv.trimEnd().split("\n");
     const last = lines[lines.length - 1]!.split(",");
     expect(parseFloat(last[0]!)).toBeCloseTo(lap.channels!.distM[lap.channels!.distM.length - 1]!, 1);
-    expect(parseFloat(last[8]!)).toBeCloseTo(lap.fuelKg * 1000, 1);
-    expect(["power", "grip", "corner", "brake", "coast"]).toContain(last[7]);
+    expect(parseFloat(last[10]!)).toBeCloseTo(lap.fuelKg * 1000, 1);
+    expect(["power", "grip", "corner", "brake", "coast"]).toContain(last[9]);
+    for (const col of [7, 8]) {
+      const v = parseFloat(last[col]!);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 
   it("throws when the lap was run without channels", () => {

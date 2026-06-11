@@ -98,6 +98,7 @@ export {
   type LapChannels,
   type LimitState,
 } from "./lapSim";
+export { lapSectors, sectorDeltas, type LapSector } from "./sectors";
 export {
   synthesizeAutocross,
   synthesizeEndurance,

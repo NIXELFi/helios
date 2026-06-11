@@ -113,26 +113,25 @@ the headline telemetry. Remaining nice-to-have: channel-colored track MAP in
 the report (the screen has it; the report's visual-track SVG could take a
 channel ramp).
 
-## 10. Lap Sim — sector / corner-by-corner time table
+## 10. Lap Sim — sector / corner-by-corner time table — ✅ DONE (2026-06-11)
 
-**Why:** A/B compare shows WHERE time moves only as a cumulative delta trace;
-engineers think in corners ("T4 exit costs 0.2 s"). Segmenting the lap at
-limit-state transitions (brake→corner→power) gives natural sector boundaries
-with zero new physics.
+Shipped as `lib/performance/sectors.ts` (`lapSectors` / `sectorDeltas`):
+sectors split at brake applications (40 m sliver merge), per-sector time /
+vmin / vmax / limit makeup, and per-sector ΔT vs B over the same road. Sector
+table on the Lap Sim screen (worst/best sector flagged in A/B), autocross
+sector table in the master report, live sector chip in the lap-player dash.
+Found + fixed while building: the speed envelope now caps at the TOP-GEAR
+LIMITER speed — previously the forward pass zigzagged around it (force = 0
+past redline → phantom −0.4 g "braking" on long straights, polluted
+maxBrakeG). Calibration anchors held.
 
-**Build:** Pure function over `LapChannels`: split at corner entries, emit
-per-sector time / vmin / limit makeup; table in the Lap Sim screen + report,
-and per-sector ΔT in A/B mode. Observation only — no solver change, no recal.
+## 11. Brake + tire duty metrics from the channels — ✅ DONE (2026-06-11)
 
-## 11. Brake + tire duty metrics from the channels
-
-**Why:** The channels already contain everything needed for two questions
-other subteams keep asking: brake sizing (energy + peak power dissipated per
-lap — m·|a|·v over brake segments) and tire thermal load (∫|a_lat|·v dt as a
-duty proxy for endurance degradation). Free wins from existing data.
-
-**Build:** Extend `LapTelemetry` with brakeEnergyKJ / peakBrakePowerKw /
-tireDutyProxy; surface in telemetry tables + the CSV header. Observation only.
+Shipped: `LapTelemetry.brakeEnergyKJ / peakBrakePowerKw / tireDutyGkm`
+(brake force is net of drag's share), `throttle` / `brake` demand channels
+(demand ÷ capacity from the SAME grip model — 1.0 = at the limit), pedal
+trace plot + analyzer channels + dash pedal bars on the Lap Sim screen,
+duty table in the master report, columns + header lines in the lap CSV.
 
 ## 12. Braking should see lateral load transfer (χ) — needs recal
 

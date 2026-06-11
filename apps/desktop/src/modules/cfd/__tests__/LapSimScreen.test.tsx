@@ -129,7 +129,7 @@ describe("LapSimScreen", () => {
     const [stem, ext, contents] = saveTextFile.mock.calls[0]!;
     expect(stem).toMatch(/^cfd-lapsim-autocross-/);
     expect(ext).toBe("csv");
-    expect(contents).toContain("dist_m,time_s,speed_kph,rpm,gear,lat_g,long_g,limit_state,fuel_cum_g");
+    expect(contents).toContain("dist_m,time_s,speed_kph,rpm,gear,lat_g,long_g,throttle,brake,limit_state,fuel_cum_g");
     expect(contents).toContain("# Helios CFD lap-sim channel export");
   });
 });

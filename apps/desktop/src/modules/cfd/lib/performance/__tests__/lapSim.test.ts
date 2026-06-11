@@ -229,7 +229,7 @@ describe("simLap — channels", () => {
     const n = ch.distM.length;
     expect(n).toBeGreaterThan(100);
     // All channels aligned to the same sample count.
-    for (const arr of [ch.tS, ch.vMps, ch.rpm, ch.gear, ch.latG, ch.longG, ch.limit, ch.fuelCumKg]) {
+    for (const arr of [ch.tS, ch.vMps, ch.rpm, ch.gear, ch.latG, ch.longG, ch.limit, ch.fuelCumKg, ch.throttle, ch.brake]) {
       expect(arr.length).toBe(n);
     }
     // Distance + time + fuel are monotone non-decreasing.
@@ -289,6 +289,42 @@ describe("simLap — channels", () => {
     }
     // And the paced lap still finds power-limited time somewhere.
     expect(ch.limit).toContain("power");
+  });
+
+  it("pedal channels are 0..1, mutually exclusive, and consistent with the motion", () => {
+    const ch = simLap(torque, geared, track, { channels: true }).channels!;
+    for (let i = 0; i < ch.throttle.length; i++) {
+      expect(ch.throttle[i]).toBeGreaterThanOrEqual(0);
+      expect(ch.throttle[i]).toBeLessThanOrEqual(1);
+      expect(ch.brake[i]).toBeGreaterThanOrEqual(0);
+      expect(ch.brake[i]).toBeLessThanOrEqual(1);
+      // Never both pedals in the same segment (QSS: one net force).
+      expect(Math.min(ch.throttle[i]!, ch.brake[i]!)).toBe(0);
+      // Hard deceleration must show brake demand.
+      if (ch.longG[i]! < -0.3) expect(ch.brake[i]).toBeGreaterThan(0);
+    }
+    // Power-limited segments are (near-)wide-open — demand is evaluated at the
+    // mid-cell speed while the solver limits at cell entry, so allow the
+    // discretization gap.
+    const weak = simLap(flatCurve(25), geared, track, { channels: true }).channels!;
+    const wot = weak.limit
+      .map((l, i) => (l === "power" ? weak.throttle[i]! : null))
+      .filter((x): x is number => x != null);
+    expect(wot.length).toBeGreaterThan(0);
+    expect(wot.reduce((a, b) => a + b, 0) / wot.length).toBeGreaterThan(0.85);
+    expect(Math.min(...wot)).toBeGreaterThan(0.5);
+  });
+
+  it("duty metrics: braking dissipates energy on a lap with corners, none on a straight", () => {
+    const withCorners = simLap(torque, geared, track).telemetry;
+    expect(withCorners.brakeEnergyKJ).toBeGreaterThan(0);
+    expect(withCorners.peakBrakePowerKw).toBeGreaterThan(0);
+    expect(withCorners.tireDutyGkm).toBeGreaterThan(0);
+    const straight: Track = { name: "drag", segments: [{ length: 500, radius: Infinity }], closed: false };
+    const drag = simLap(torque, geared, straight).telemetry;
+    expect(drag.brakeEnergyKJ).toBe(0);
+    expect(drag.peakBrakePowerKw).toBe(0);
+    expect(drag.tireDutyGkm).toBe(0);
   });
 
   it("channels do not change the solved lap (pure observation)", () => {

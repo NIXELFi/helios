@@ -60,6 +60,12 @@ export interface LapChannels {
   /** Cumulative fuel burned (kg). Meaningful when fuel opts are supplied
    *  (endurance); still populated (relative shape) otherwise. */
   fuelCumKg: number[];
+  /** Throttle demand 0..1: propulsive force required ÷ force available in the
+   *  current gear (1 = wide open / power-limited). 0 while braking/coasting. */
+  throttle: number[];
+  /** Brake demand 0..1: brake force required (after drag's help) ÷ the grip
+   *  model's braking capacity at this (v, R). 0 off the brakes. */
+  brake: number[];
 }
 
 /** Rich per-event telemetry the lap sim now exposes (display + accuracy debug).
@@ -101,6 +107,18 @@ export interface LapTelemetry {
    *  front holding ~4% spare ("loose by 4%"); negative ⇒ push. Only with a
    *  roll-balance model. */
   balanceMargin?: number;
+  /** Energy dissipated by the BRAKES over the lap (kJ): ∫ max(0, m·|a| −
+   *  drag − rolling) · v dt over decelerating segments — drag's share of the
+   *  slowing is subtracted, so this is what the rotors actually absorb.
+   *  Brake-sizing input. */
+  brakeEnergyKJ: number;
+  /** Peak instantaneous brake power (kW) — the worst single dissipation
+   *  moment (end of the fastest straight). Brake thermal sizing input. */
+  peakBrakePowerKw: number;
+  /** Tire lateral-duty proxy (g·km): ∫ |a_lat|/g · v dt. Tracks how much
+   *  cornering WORK the tires do per lap — an endurance-degradation /
+   *  thermal-load comparator between designs (relative, not absolute). */
+  tireDutyGkm: number;
 }
 
 /** Thermal efficiency RELATIVE to the engine's best-BSFC point, vs RPM. Real SI
@@ -433,6 +451,8 @@ export function simLap(
   // the accel event uses, so the two sims drive the car the same way.
   const shiftV = optimalShiftSpeeds(curve, vehicle);
   const pace = opts.pace ?? 1;
+  // Top-gear limiter speed — the same envelope cap solveSpeeds applies.
+  const vLimiter = gearVps(vehicle, vehicle.gearRatios.length - 1) * vehicle.revLimitRpm;
   const { v, shiftCount } = solveSpeeds(curve, vehicle, grip, shiftV, radius, step, track.closed, pace);
   const N = v.length;
   const nSeg = track.closed ? N : N - 1;
@@ -457,11 +477,14 @@ export function simLap(
   let cornerLimitedDt = 0;
   let frontLimitedDt = 0;
   let marginDtSum = 0;
+  let brakeEnergyJ = 0;
+  let peakBrakePowerW = 0;
+  let tireDutyMs = 0; // ∫|a_lat|·v dt, m²/s²·s — converted to g·km at the end
   const timeInGear = new Array<number>(nGears).fill(0);
 
   // Channel collection (only when asked for — see LapOpts.channels).
   const ch: LapChannels | null = opts.channels
-    ? { distM: [], tS: [], vMps: [], rpm: [], gear: [], latG: [], longG: [], limit: [], fuelCumKg: [] }
+    ? { distM: [], tS: [], vMps: [], rpm: [], gear: [], latG: [], longG: [], limit: [], fuelCumKg: [], throttle: [], brake: [] }
     : null;
   let tCh = 0; // channel clock: moving time + shift dead time AT the shift
   let prevGear = -1;
@@ -502,6 +525,17 @@ export function simLap(
     const latG = Number.isFinite(R) && R > 0 ? vAvg * vAvg / R / G : 0;
     if (latG > maxLatG) maxLatG = latG;
 
+    // Duty accumulators (observation only — roadmap #11). Brake force is what
+    // the pads must produce AFTER drag + rolling have done their share of the
+    // slowing (fEngine < 0 ⇔ the engine can't absorb it): energy = F·ds.
+    const fBrake = Math.max(0, -fEngine);
+    if (fBrake > 0) {
+      brakeEnergyJ += fBrake * step;
+      const pBrake = fBrake * vAvg;
+      if (pBrake > peakBrakePowerW) peakBrakePowerW = pBrake;
+    }
+    tireDutyMs += latG * G * vAvg * dt;
+
     // Limit-state classification: WHAT bound the car over this segment. The
     // engine team's leverage map — "power" segments are where torque buys lap
     // time; "corner"/"grip" segments are chassis/tire territory. Uses the same
@@ -512,7 +546,10 @@ export function simLap(
     // flat-out. Applying pace unconditionally here mislabeled every endurance
     // straight above pace×vCap as "corner" and understated pctPowerLimited.
     const vCornerHere = vCornerAt(R);
-    const vCeil = vCornerHere < grip.vCap * 0.999 ? pace * vCornerHere : vCornerHere;
+    const vCeil = Math.min(
+      vCornerHere < grip.vCap * 0.999 ? pace * vCornerHere : vCornerHere,
+      vLimiter,
+    );
     let limit: LimitState;
     if (aG < -0.05) {
       limit = "brake";
@@ -549,6 +586,11 @@ export function simLap(
       ch.longG.push(aG);
       ch.limit.push(limit);
       ch.fuelCumKg.push(fuelKg);
+      // Pedal channels (demand ÷ capacity, same physics as the classifier).
+      const fAvail = fEngine > 0 ? tractiveForceInGear(curve, vehicle, gear, vAvg) : 0;
+      ch.throttle.push(fEngine > 0 && fAvail > 0 ? Math.min(1, fEngine / fAvail) : 0);
+      const brakeCap = fBrake > 0 ? vehicle.massKg * grip.aBrakeGrip(vAvg, R) : 0;
+      ch.brake.push(brakeCap > 0 ? Math.min(1, fBrake / brakeCap) : 0);
     }
   }
   // 100 ms (shiftTimeS) of dead time per upshift, added to the lap.
@@ -570,6 +612,9 @@ export function simLap(
     pctCornerLimited: dtTot > 0 ? cornerLimitedDt / dtTot : 0,
     vMaxKph: Math.max(...v) * 3.6,
     vMinKph: Math.min(...v) * 3.6,
+    brakeEnergyKJ: brakeEnergyJ / 1000,
+    peakBrakePowerKw: peakBrakePowerW / 1000,
+    tireDutyGkm: tireDutyMs / G / 1000,
     ...(grip.limitingAxle && cornerLimitedDt > 0
       ? {
           pctFrontLimited: frontLimitedDt / cornerLimitedDt,
@@ -623,6 +668,11 @@ function solveSpeeds(
   // per cell — but track radii are piecewise-constant (tens of distinct values
   // over ~1000 cells), so solve once per distinct radius and precompute the
   // per-cell ceiling. Identical values, ~6× faster endurance laps.
+  // Top-gear limiter speed: past it the engine produces ZERO force (rev cut),
+  // so without a cap the forward pass zigzags around it — drag-decelerate one
+  // cell (a real −0.4 g!), re-accelerate the next. A real car HOLDS the
+  // limiter; cap the envelope there so straights don't grow phantom braking.
+  const vLimiter = gearVps(vehicle, vehicle.gearRatios.length - 1) * vehicle.revLimitRpm;
   const vByRadius = new Map<number, number>();
   const ceilArr = new Float64Array(N);
   for (let i = 0; i < N; i++) {
@@ -633,8 +683,8 @@ function solveSpeeds(
       vByRadius.set(r, vc);
     }
     // grip-limited (a true corner ceiling, below the gearing cap) → paced;
-    // gearing/aero-capped (straight-line) → flat out.
-    ceilArr[i] = vc < grip.vCap * 0.999 ? pace * vc : vc;
+    // gearing/aero-capped (straight-line) → flat out (≤ the limiter).
+    ceilArr[i] = Math.min(vc < grip.vCap * 0.999 ? pace * vc : vc, vLimiter);
   }
   const ceil = (i: number): number => ceilArr[((i % N) + N) % N]!;
 

@@ -41,6 +41,7 @@ import { studyName } from "../studyName";
 import { rankTrials, sensitivityTornado } from "../analytics/optimizationStats";
 import { compareDyno } from "../analytics/dynoCompare";
 import { dynoPowerKw } from "../import/importDyno";
+import { lapSectors } from "../performance/sectors";
 import { INK, MUTED, ACCENT, GRID, esc, n, eventsTable, svgVisualTrack } from "./designReport";
 
 export interface MasterReportInput {
@@ -438,6 +439,27 @@ function lapSimSection(scored: Scored[]): string {
       <td class="r">${n(t.vMaxKph, 0)} / ${n(t.vMinKph, 0)}</td><td class="r">${bal}</td></tr>`;
   }).join("");
 
+  // Duty metrics (roadmap #11): what the lap costs the OTHER subteams.
+  const dutyRows = runs.map(({ label, lap }) => {
+    const t = lap.telemetry;
+    return `<tr><td>${esc(label)}</td><td class="r">${n(t.brakeEnergyKJ, 0)}</td>
+      <td class="r">${n(t.peakBrakePowerKw, 0)}</td><td class="r">${n(t.tireDutyGkm, 2)}</td>
+      <td class="r">${n(lap.fuelKg * 1000, 0)}</td></tr>`;
+  }).join("");
+
+  // Corner-complex sectors (roadmap #10) for the flat-out autocross lap.
+  const secs = lapSectors(runs[0]!.ch);
+  const sectorRows = secs.map((s) => {
+    const domColor = LIMIT_INFO.find((l) => l.state === s.dominant)?.color ?? MUTED;
+    return `<tr><td>S${s.idx}</td><td class="r">${n(s.startM, 0)}–${n(s.endM, 0)}</td>
+      <td class="r">${n(s.timeS, 2)}</td><td class="r">${n(s.vMinKph, 0)}</td><td class="r">${n(s.vMaxKph, 0)}</td>
+      <td><span style="color:${domColor}">■</span> ${esc(LIMIT_INFO.find((l) => l.state === s.dominant)?.label ?? s.dominant)}</td></tr>`;
+  }).join("");
+  const sectorBlock = secs.length > 1 ? `
+    <h3>Autocross sectors — corner complexes (split at brake applications)</h3>
+    <table class="data"><thead><tr><th>sector</th><th class="r">from–to (m)</th><th class="r">time (s)</th>
+      <th class="r">v min</th><th class="r">v max</th><th>limited by</th></tr></thead><tbody>${sectorRows}</tbody></table>` : "";
+
   const figs = runs.map(({ label, lap, ch }) =>
     fig(svgSpeedWithLimits(ch, 720, 240), `${label} — speed vs distance with the binding limit state along the lap (${n(lap.lapTimeS, 2)} s).`),
   ).join("");
@@ -456,6 +478,13 @@ function lapSimSection(scored: Scored[]): string {
     <p class="muted">Fractions are time-weighted. "power-limited" is where engine torque directly buys lap time;
     "cornering ceiling" + "traction-limited" are chassis/tire territory. Balance is the time-weighted axle-capacity
     margin over corner-limited running (roll model).</p>
+    <h3>Lap duty — what the lap costs the other subteams</h3>
+    <table class="data"><thead><tr><th>lap</th><th class="r">brake energy (kJ)</th>
+      <th class="r">peak brake power (kW)</th><th class="r">tire duty (g·km)</th><th class="r">fuel (g)</th></tr></thead>
+      <tbody>${dutyRows}</tbody></table>
+    <p class="muted">Brake energy is what the rotors absorb after drag's share (sizing input); tire duty is
+    ∫|a_lat|·v dt — a relative cornering-work comparator for endurance tire degradation.</p>
+    ${sectorBlock}
     <div class="two">${gg}
     <figure><table class="data"><thead><tr><th colspan="2">Grip-model validation — skidpad</th></tr></thead><tbody>
       <tr><td>Predicted time (9.125 m path)</td><td class="r">${n(sp.timeS, 2)} s</td></tr>
