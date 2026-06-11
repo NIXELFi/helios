@@ -116,6 +116,30 @@ describe("anon (unauthenticated) is denied on every pdm.* surface", () => {
     });
   });
 
+  // Intentional exception to the anon-denial rule: pdm.subteams is read by the
+  // SIGN-UP form (AuthModal / useSubteams) while the user is still anonymous —
+  // they pick a subteam before the account exists. Subteam names are
+  // non-sensitive (shown on a public sign-up screen by design). Regression
+  // guard for 20260610100000→20260610210000: revoking this anon read silently
+  // dead-ended every new signup with an empty subteam picker.
+  describe("subteams stays anon-READABLE (sign-up contract)", () => {
+    it("anon CAN select pdm.subteams", async () => {
+      const svc = serviceClient();
+      await svc.from("subteams").insert({ name: `Aero-${Date.now()}`, sort_order: 1 });
+      const c = anonClient();
+      const { data, error } = await c.from("subteams").select("id,name").limit(5);
+      expect(error).toBeNull();
+      expect(Array.isArray(data)).toBe(true);
+      expect((data ?? []).length).toBeGreaterThan(0);
+    });
+
+    it("anon still CANNOT write pdm.subteams", async () => {
+      const c = anonClient();
+      const { error } = await c.from("subteams").insert({ name: "hacked", sort_order: 99 });
+      assertDenied(error as any);
+    });
+  });
+
   describe("INSERT denial", () => {
     it("anon cannot INSERT into vaults", async () => {
       const c = anonClient();
