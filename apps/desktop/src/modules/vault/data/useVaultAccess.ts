@@ -38,16 +38,20 @@ export function useVaultAccess(): VaultAccess {
     let mounted = true;
     setAccess({ status: "loading", error: null });
     (async () => {
+      // NOT .maybeSingle(): per-vault roles (20260531000000) mean a user can
+      // legitimately hold SEVERAL rows (a global one plus per-vault ones) —
+      // maybeSingle errors on >1 row and showed members the backend-misconfig
+      // screen. Any row at all means "member".
       const { data, error } = await (client.from("user_roles") as any)
         .select("role")
         .eq("user_id", user.id)
-        .maybeSingle();
+        .limit(1);
       if (!mounted) return;
       if (error) {
         setAccess({ status: "error", error: error.message ?? String(error) });
         return;
       }
-      setAccess({ status: data?.role ? "member" : "no-role", error: null });
+      setAccess({ status: (data?.length ?? 0) > 0 ? "member" : "no-role", error: null });
     })();
     return () => {
       mounted = false;
