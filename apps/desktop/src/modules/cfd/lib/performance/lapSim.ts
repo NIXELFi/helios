@@ -209,7 +209,8 @@ export interface GripModel {
   latCap(v: number, R: number): number;
   /** DRIVE traction accel (m/s²): rear axle + weight transfer + ellipse. */
   aDriveGrip(v: number, R: number): number;
-  /** BRAKE deceleration (m/s²): all four tires (μ_lat) + ellipse. */
+  /** BRAKE deceleration (m/s²): all four tires with forward weight transfer
+   *  (load-sensitivity-weighted per axle) + χ + ellipse. */
   aBrakeGrip(v: number, R: number): number;
   /** Steady-state corner-speed ceiling for radius R (un-paced), ≤ vCap. */
   vCorner(R: number): number;
@@ -384,10 +385,31 @@ export function makeGripModel(vehicle: VehicleConfig): GripModel {
     return (muEff * nRear) / denom;
   };
 
-  // BRAKING loads ALL FOUR tires (with forward weight transfer), so its grip is
-  // ~the lateral coefficient — NOT muLong, the rear-axle launch limit.
+  // BRAKING loads ALL FOUR tires — but not evenly: forward weight transfer
+  // piles m·a·h/L onto the fronts, and a load-sensitive tire gives back more μ
+  // on the overloaded axle than it gains on the unloaded one, so real capacity
+  // sits BELOW the ideal μ·g_eff. Solved as a fixed point in the decel (the
+  // transfer depends on it; 4 iterations converge to <0.1%). χ then discounts
+  // lateral transfer and the ellipse the lateral USE on corner entry — the
+  // same treatment the cornering capacity gets (audit 0029 item #12).
+  // sens = 0 with no .tir reduces EXACTLY to the legacy μ·g_eff.
+  const aeroFrontFrac = vehicle.roll ? vehicle.roll.aeroFrontFrac : 1 - REAR_AERO_FRAC;
+  const aBrakeStraight = (v: number): number => {
+    let a = muLatV(v) * gEff(v); // legacy value = starting point
+    if (!tir && sens === 0) return a;
+    const N = m * gEff(v); // total vertical load at speed
+    const aeroN = m * k * v * v;
+    const Wf0 = m * G * vehicle.weightDistFront + aeroN * aeroFrontFrac;
+    for (let it = 0; it < 4; it++) {
+      const dF = Math.min(Math.max(0, N - Wf0), (m * a * vehicle.cgHeightM) / vehicle.wheelbaseM);
+      const Ff = Math.min(N, Wf0 + dF);
+      const Fr = Math.max(0, N - Ff);
+      a = (muLatFz(Ff / 2) * Ff + muLatFz(Fr / 2) * Fr) / m;
+    }
+    return a;
+  };
   const aBrakeGrip = (v: number, R: number): number =>
-    muLatV(v) * gEff(v) * ellipse(v, R);
+    aBrakeStraight(v) * chi(v, R) * ellipse(v, R);
 
   return { gEff, loadMult, chi, latCap, aDriveGrip, aBrakeGrip, vCorner, vCap, limitingAxle, axleMargin };
 }

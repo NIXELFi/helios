@@ -133,18 +133,21 @@ Shipped: `LapTelemetry.brakeEnergyKJ / peakBrakePowerKw / tireDutyGkm`
 trace plot + analyzer channels + dash pedal bars on the Lap Sim screen,
 duty table in the master report, columns + header lines in the lap CSV.
 
-## 12. Braking should see lateral load transfer (χ) — needs recal
+## 12. Braking should see load transfer (χ + longitudinal) — ✅ DONE (2026-06-11)
 
-**Why (found in the 2026-06-11 audit):** `aBrakeGrip` = μ_lat·g_eff·ellipse
-has no χ factor, while the cornering capacity it shares the friction ellipse
-with DOES include χ. Trail-braking segments are therefore slightly optimistic
-(the transferred-load grip penalty should shrink the whole ellipse, not just
-the lateral axis).
+Shipped: `aBrakeGrip` is now a fixed-point solve with FORWARD weight transfer
+(fronts gain m·a·h/L; load-sensitive μ weighted per axle via `muLatFz`), the
+roll-config aero split, χ(v,R) for lateral transfer, and the ellipse — the
+same treatment cornering already had. `sens = 0` + no .tir reduces exactly to
+the legacy μ·g_eff (test vehicles unchanged). SDM26 peak braking fell from an
+ideal 2.77 g to **2.02 g (AX) / 2.19 g (EN)** — flagged by Nick as
+unrealistic, now transfer-honest. No measured brake-g anchor exists yet; if
+DAQ data surfaces, pin a brake-specific scale the way skidpad pinned μ_lat.
 
-**Build:** Multiply the brake capacity by χ(v, R) (or per-axle caps under the
-roll model). Small lap-time effect concentrated in corner entries — but it IS
-a grip-physics change, so re-run the calibration sweep (LINE_FACTOR /
-ENDURANCE_PACE / ENDURANCE_THERMAL_EFF) per the standing convention.
+Recal (same anchors): LINE_FACTOR 1.159 → **1.192** (AX 43.007 s vs 42.922
+anchor — still saturating 0.2% short at the geometric line cap),
+ENDURANCE_PACE 0.540 → **0.5405** (159.600 s exact), ENDURANCE_THERMAL_EFF
+0.221 → **0.2125** (0.9786 kg CO₂/lap exact on the shipped curve).
 
 ## 13. Lap-time sensitivity panel (vehicle knobs)
 

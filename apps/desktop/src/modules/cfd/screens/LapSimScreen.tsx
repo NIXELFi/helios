@@ -538,6 +538,21 @@ function LapPlayer({
     return () => cancelAnimationFrame(raf);
   }, [playing, mult, endT]);
 
+  // Engine-internals interpolation tables — once per lap source, NOT inside
+  // the per-frame cursor memo (sorting + remapping the sweep points 60×/s was
+  // a real part of the playback lag).
+  const engTables = useMemo(() => {
+    const pts = [...runA.source.points].sort((a, b) => a.rpm - b.rpm);
+    return {
+      rpms: pts.map((p) => p.rpm),
+      power: pts.map((p) => p.lastCycle.brakePowerKW ?? NaN),
+      ve: pts.map((p) => p.lastCycle.veAtm ?? NaN),
+      egt: pts.map((p) => p.lastCycle.egtMean ?? NaN),
+      ki: pts.map((p) => p.lastCycle.knockIntegral ?? NaN),
+      bmep: pts.map((p) => p.lastCycle.bmepBar ?? NaN),
+    };
+  }, [runA.source.points]);
+
   // Smoothly interpolated cursor state (categorical channels use nearest).
   const cur = useMemo(() => {
     const dist = interpAt(chA.tS, chA.distM, t);
@@ -552,11 +567,7 @@ function LapPlayer({
       else hi = mid;
     }
     i = t - chA.tS[lo]! < chA.tS[hi]! - t ? lo : hi;
-    // engine internals at the cursor's rpm, from the source sweep points
-    const pts = [...runA.source.points].sort((a, b) => a.rpm - b.rpm);
-    const rpms = pts.map((p) => p.rpm);
-    const eng = (get: (p: (typeof pts)[number]) => number | undefined): number =>
-      interpAt(rpms, pts.map((p) => get(p) ?? NaN), rpm);
+    const eng = (ys: number[]): number => interpAt(engTables.rpms, ys, rpm);
     const gear = chA.gear[i] ?? 0;
     const vMps = interpAt(chA.tS, chA.vMps, t);
     // Optimal-shift proximity: the dash shift light arms as the car closes on
@@ -577,13 +588,13 @@ function LapPlayer({
       fuelG: interpAt(chA.tS, chA.fuelCumKg, t) * 1000,
       shiftFrac: Number.isFinite(shiftSpeed) && shiftSpeed > 0 ? vMps / shiftSpeed : 0,
       sector: sIdx >= 0 ? sIdx : sectors.length - 1,
-      powerKw: eng((p) => p.lastCycle.brakePowerKW),
-      ve: eng((p) => p.lastCycle.veAtm),
-      egt: eng((p) => p.lastCycle.egtMean),
-      ki: eng((p) => p.lastCycle.knockIntegral),
-      bmep: eng((p) => p.lastCycle.bmepBar),
+      powerKw: eng(engTables.power),
+      ve: eng(engTables.ve),
+      egt: eng(engTables.egt),
+      ki: eng(engTables.ki),
+      bmep: eng(engTables.bmep),
     };
-  }, [chA, t, totalDist, runA.source.points, runA.shiftV, sectors]);
+  }, [chA, t, totalDist, engTables, runA.shiftV, sectors]);
 
   // B's true position at the same instant (clamped to its own finish), plus
   // the live gap: when does B reach A's CURRENT piece of road (+ve = A ahead).

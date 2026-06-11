@@ -97,9 +97,16 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
   const start = track.centerline[0];
   const finish = track.centerline[track.centerline.length - 1];
 
-  return (
-    <div ref={hostRef} className="w-full" style={{ minHeight: height }}>
-      <svg width={width} height={height} role="img" aria-label={`${track.name} channel map`} className="block">
+  // Centerline arc-length table — once per track, NOT per marker per frame.
+  const centerFracs = useMemo(() => cumFracs(track.centerline), [track]);
+
+  // The ribbon + ~10³ colored segments never change while the lap player
+  // animates (only `markers` does, 60×/s). Freeze them as a memoized element
+  // so React skips reconciling the whole static layer on every frame — this
+  // is what made playback laggy.
+  const staticLayer = useMemo(
+    () => (
+      <g>
         <polygon points={ribbon} fill="#1B1D22" stroke="#2A2C32" strokeWidth={1} />
         {segs.map((s, i) => (
           <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={s.c} strokeWidth={3} strokeLinecap="round" />
@@ -108,9 +115,18 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
         {finish && !track.closed && (
           <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke="#0E0E10" strokeWidth={1} />
         )}
+      </g>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ribbon, segs, track, width, height],
+  );
+
+  return (
+    <div ref={hostRef} className="w-full" style={{ minHeight: height }}>
+      <svg width={width} height={height} role="img" aria-label={`${track.name} channel map`} className="block">
+        {staticLayer}
         {markers?.map((mk, i) => {
-          const vf = cumFracs(track.centerline);
-          const p = pointAtFrac(track.centerline, vf, mk.frac);
+          const p = pointAtFrac(track.centerline, centerFracs, mk.frac);
           return (
             <g key={i}>
               <circle cx={px(p)} cy={py(p)} r={6} fill={mk.color} stroke="#0E0E10" strokeWidth={1.5} />
