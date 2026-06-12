@@ -72,7 +72,7 @@ async function objectExists(
   return probeObject(client, sha);
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -202,7 +202,7 @@ export function useAddLocalFile() {
         //    100MB+ CAD parts / CSVs (audit V8). Only fall back to reading
         //    when the scan didn't provide a sha. Bytes are read lazily, and
         //    only when we actually need to upload them.
-        let bytes: Uint8Array | null = null;
+        let bytes: Uint8Array | null = local.bytes ?? null;
         const readBytes = async (): Promise<Uint8Array> => {
           if (bytes === null) bytes = await readFile(local.absolutePath);
           return bytes;

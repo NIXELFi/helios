@@ -11,6 +11,11 @@ export interface LocalFile {
    *  (a file is writable iff checked out by the current user). Undefined when
    *  stat was unavailable — treated as writable by reconcilers. */
   readonly?: boolean;
+  /** In-memory content, set only by the drag-drop import path (HTML5 drops
+   *  hand us File bytes, not just an absolute path). When present,
+   *  useAddLocalFile uploads these bytes instead of reading absolutePath from
+   *  disk — which lets a drop work even when no local vault folder is set. */
+  bytes?: Uint8Array;
 }
 
 /**

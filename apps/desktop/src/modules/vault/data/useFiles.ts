@@ -17,12 +17,25 @@ export function useFiles(folder_id: FolderId | undefined): PatchableFiles {
     dataRef.current = data;
   }, [data]);
 
+  // Folder the current `data` belongs to. Navigating to a DIFFERENT folder
+  // must drop the rows immediately — holding them while the new query is in
+  // flight rendered the PREVIOUS folder's files under the newly-clicked
+  // folder (STALE-FOLDER). A same-folder refetch (tick) keeps the rows so
+  // realtime-triggered refreshes don't flicker the table.
+  const folderOfDataRef = useRef<FolderId | undefined>(undefined);
+
   useEffect(() => {
     if (!folder_id) {
+      folderOfDataRef.current = undefined;
       setData(null);
       setLoading(false);
       setError(null);
       return;
+    }
+    if (folderOfDataRef.current !== folder_id) {
+      folderOfDataRef.current = folder_id;
+      dataRef.current = null;
+      setData(null);
     }
     let mounted = true;
     setLoading(true);

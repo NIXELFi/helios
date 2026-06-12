@@ -3,11 +3,11 @@ import { useLocks } from "../data/useLocks";
 import { useForceUnlock } from "../data/useForceUnlock";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useActiveVault } from "../data/useActiveVault";
-import { useAllFiles } from "../data/useAllFiles";
-import { useFolders } from "../data/useFolders";
+import { useFilesByIds, type LockFileRow } from "../data/useFilesByIds";
+import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { folderPath } from "../data/folder-paths";
-import type { VaultUser } from "../data/types";
+import type { Lock, VaultUser } from "../data/types";
 
 /** Canonical lock-holder label: prefer the human display name, then the email,
  *  else null (caller falls back to a short id). Shared so every screen that
@@ -44,11 +44,33 @@ function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 8) : id;
 }
 
+interface LockRow {
+  lock: Lock;
+  file: LockFileRow | null;
+  path: string | null;
+}
+
+interface VaultGroup {
+  /** null = locks whose file couldn't be resolved (RLS-hidden vault or a
+   *  hard-deleted file) — rendered last as "Other vaults". */
+  vaultId: string | null;
+  vaultName: string;
+  rows: LockRow[];
+}
+
 export function WhoHasWhatScreen() {
-  const { activeVaultId, activeVault } = useActiveVault();
+  const { activeVaultId, vaults } = useActiveVault();
   const { data: locks, loading, error, refetch } = useLocks();
-  const { data: files, loading: filesLoading, error: filesError } = useAllFiles(activeVaultId ?? undefined);
-  const { data: folders, error: foldersError } = useFolders(activeVaultId ?? undefined);
+  // Resolve every lock's file by id — across ALL vaults, deleted included —
+  // instead of paging the active vault's whole file list. This is what lets
+  // the screen show every checkout grouped by vault rather than filtering to
+  // the active vault (and is why the old show-then-filter flash is gone).
+  const lockFileIds = useMemo(
+    () => (locks ?? []).map((l) => l.file_id),
+    [locks],
+  );
+  const { data: lockFiles, loading: filesLoading, error: filesError } = useFilesByIds(lockFileIds);
+  const { data: folders, error: foldersError } = useCrossVaultFolders();
   // Holder resolution. useVaultUsers is admin-gated (the RPC raises for
   // non-admins) — we ignore its error and fall back to the short id, so a
   // viewer still sees the screen; an admin gets real names.
@@ -64,17 +86,11 @@ export function WhoHasWhatScreen() {
   // dialog instead (C1-MISS). null = modal closed.
   const [reasonFor, setReasonFor] = useState<string | null>(null);
 
-  // Build a file-id → "folder/path/name.ext" lookup so the table can show
-  // human-readable paths instead of raw UUIDs.
   const fileById = useMemo(() => {
-    const m = new Map<string, { name: string; path: string }>();
-    if (!files || !folders) return m;
-    for (const f of files) {
-      const dir = folderPath(f.folder_id, folders);
-      m.set(f.id, { name: f.name, path: dir ? `${dir}/${f.name}` : f.name });
-    }
+    const m = new Map<string, LockFileRow>();
+    for (const f of lockFiles ?? []) m.set(f.id, f);
     return m;
-  }, [files, folders]);
+  }, [lockFiles]);
 
   // user-id → display name / email for holder resolution (display_name-first
   // via the shared holderLabel helper).
@@ -87,18 +103,48 @@ export function WhoHasWhatScreen() {
     return m;
   }, [users]);
 
-  // H12: useLocks is cross-vault, but this screen claims "{vault} checkouts".
-  // Once the active vault's files have finished LOADING, drop locks whose
-  // file_id isn't among them — those belong to another vault. We key off
-  // useAllFiles' `loading`, NOT (files===empty): while still loading we keep
-  // every lock so the screen doesn't blank mid-load (preserves the 2026-05-25
-  // fix); once loaded — even to a genuinely empty vault — we filter, so an
-  // empty vault no longer shows every cross-vault lock under its header.
-  const visibleLocks = useMemo(() => {
-    if (!locks) return locks;
-    if (filesLoading || files === null) return locks;
-    return locks.filter((l) => fileById.has(l.file_id));
-  }, [locks, files, filesLoading, fileById]);
+  const vaultNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of vaults) m.set(v.id, v.name);
+    return m;
+  }, [vaults]);
+
+  // Group every lock under its file's vault. Path resolution (folders) only
+  // affects the path TEXT, never whether a row appears — the old screen
+  // filtered rows on the file/folder lookup, which is what caused both the
+  // open-flash and the false "Nothing checked out" while folders loaded.
+  const groups = useMemo<VaultGroup[]>(() => {
+    if (!locks) return [];
+    const byVault = new Map<string, LockRow[]>();
+    const unresolved: LockRow[] = [];
+    for (const lock of locks) {
+      const file = fileById.get(lock.file_id) ?? null;
+      if (!file) {
+        unresolved.push({ lock, file: null, path: null });
+        continue;
+      }
+      const dir = folders ? folderPath(file.folder_id, folders) : "";
+      const path = dir ? `${dir}/${file.name}` : file.name;
+      const rows = byVault.get(file.vault_id) ?? [];
+      rows.push({ lock, file, path });
+      byVault.set(file.vault_id, rows);
+    }
+    const out: VaultGroup[] = [...byVault.entries()].map(([vaultId, rows]) => ({
+      vaultId,
+      vaultName: vaultNameById.get(vaultId) ?? shortId(vaultId),
+      rows,
+    }));
+    // Active vault first, then alphabetical; unresolved last.
+    out.sort((a, b) => {
+      if (a.vaultId === activeVaultId) return -1;
+      if (b.vaultId === activeVaultId) return 1;
+      return a.vaultName.localeCompare(b.vaultName);
+    });
+    if (unresolved.length > 0) {
+      out.push({ vaultId: null, vaultName: "Other vaults", rows: unresolved });
+    }
+    return out;
+  }, [locks, fileById, folders, vaultNameById, activeVaultId]);
 
   function requestForceUnlock(lockId: string) {
     setReasonFor(lockId);
@@ -119,11 +165,25 @@ export function WhoHasWhatScreen() {
   // Surface a degraded path-resolution context (files/folders failed to load)
   // so paths don't silently fall back to short ids with no explanation.
   const contextError = filesError ?? foldersError;
+  // Hold the loading state until the locks' files are resolved too — rendering
+  // locks before resolution is what produced the open-flash. `lockFiles ===
+  // null` covers the one-commit gap between the locks landing and
+  // useFilesByIds' effect flipping its own loading flag — without it the rows
+  // flash under "Other vaults" for a frame, then remount under their real
+  // vault (which also detaches any element a test or user just targeted).
+  // A files error ends the wait so the screen can degrade to short ids.
+  const resolving =
+    loading ||
+    (lockFileIds.length > 0 && !filesError && (filesLoading || lockFiles === null));
+  const totalLocks = locks?.length ?? 0;
 
   return (
     <div className="h-full overflow-auto bg-helios-panel">
       <header className="border-b border-helios-line px-4 py-3 text-helios-dim">
-        Active checkouts{activeVault ? ` — ${activeVault.name}` : ""}
+        Active checkouts — all vaults
+        {!resolving && !error && (
+          <span className="ml-2 font-mono-num text-xs">({totalLocks})</span>
+        )}
       </header>
       {/* Surface a failed force-unlock — previously swallowed entirely. */}
       {forceUnlock.error && (
@@ -139,62 +199,78 @@ export function WhoHasWhatScreen() {
         </div>
       )}
       <div className="p-2">
-        {loading ? (
+        {resolving ? (
           <div className="p-4 text-sm text-helios-dim">Loading…</div>
         ) : error ? (
           <div className="p-4 text-sm text-[#EF5350]">{error.message}</div>
-        ) : !visibleLocks || visibleLocks.length === 0 ? (
+        ) : totalLocks === 0 ? (
           <div className="p-4 text-sm text-helios-dim">Nothing checked out right now.</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-wider text-helios-dim">
-              <tr>
-                <th className="px-3 py-2 font-normal">File</th>
-                <th className="px-3 py-2 font-normal">Holder</th>
-                <th className="px-3 py-2 font-normal">Since</th>
-                {isAdmin && <th className="px-3 py-2 font-normal">Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleLocks.map((l) => {
-                const file = fileById.get(l.file_id);
-                const holderName = userById.get(l.user_id);
-                return (
-                  <tr key={l.id} className="border-t border-helios-line">
-                    <td className="px-3 py-2 text-helios-text">
-                      {file ? (
-                        <span title={file.path}>{file.path}</span>
-                      ) : (
-                        <span className="font-mono-num text-xs text-helios-dim" title={l.file_id}>{shortId(l.file_id)}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-helios-text" title={l.user_id}>
-                      {holderName ? (
-                        holderName
-                      ) : (
-                        <span className="font-mono-num text-xs">{shortId(l.user_id)}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-helios-dim" title={l.acquired_at}>
-                      {relativeTime(l.acquired_at)}
-                    </td>
-                    {isAdmin && (
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => requestForceUnlock(l.id)}
-                          disabled={unlockingId === l.id}
-                          className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
-                        >
-                          {unlockingId === l.id ? "Unlocking…" : "Force unlock"}
-                        </button>
-                      </td>
-                    )}
+          groups.map((g) => (
+            <section key={g.vaultId ?? "__other__"} className="mb-4">
+              <h3 className="flex items-baseline gap-2 px-3 py-1.5 text-xs uppercase tracking-wider text-asu-gold">
+                {g.vaultName}
+                <span className="font-mono-num normal-case text-helios-dim">
+                  {g.rows.length} checked out
+                </span>
+              </h3>
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wider text-helios-dim">
+                  <tr>
+                    <th className="px-3 py-2 font-normal">File</th>
+                    <th className="px-3 py-2 font-normal">Holder</th>
+                    <th className="px-3 py-2 font-normal">Since</th>
+                    {isAdmin && <th className="px-3 py-2 font-normal">Actions</th>}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {g.rows.map(({ lock, file, path }) => {
+                    const holderName = userById.get(lock.user_id);
+                    return (
+                      <tr key={lock.id} className="border-t border-helios-line">
+                        <td className="px-3 py-2 text-helios-text">
+                          {path ? (
+                            <span title={path}>
+                              {path}
+                              {file?.deleted_at && (
+                                <span className="ml-1.5 text-xs text-helios-dim">(in recycle bin)</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="font-mono-num text-xs text-helios-dim" title={lock.file_id}>
+                              {shortId(lock.file_id)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-helios-text" title={lock.user_id}>
+                          {holderName ? (
+                            holderName
+                          ) : (
+                            <span className="font-mono-num text-xs">{shortId(lock.user_id)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
+                          {relativeTime(lock.acquired_at)}
+                        </td>
+                        {isAdmin && (
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => requestForceUnlock(lock.id)}
+                              disabled={unlockingId === lock.id}
+                              className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                            >
+                              {unlockingId === lock.id ? "Unlocking…" : "Force unlock"}
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+          ))
         )}
       </div>
       {reasonFor && (

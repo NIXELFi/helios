@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { readDir, stat } from "@tauri-apps/plugin-fs";
-import { useAddLocalFile } from "./useAddLocalFile";
-import { folderNamePath } from "./folder-paths";
+import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
+import { useAddLocalFile, sha256Hex } from "./useAddLocalFile";
+import { folderNamePath, folderPath, sanitizePathSegment } from "./folder-paths";
 import { resolveDropFolder } from "./drop-target";
 import type { Folder, FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
@@ -15,7 +14,7 @@ export interface DropImportResult {
 }
 
 interface Options {
-  /** Only register the OS drag-drop listener while true (Browse mounted +
+  /** Only register the drag-drop listeners while true (Browse mounted +
    *  editor). When false the hook is inert. */
   enabled: boolean;
   vaultId: VaultId | null;
@@ -23,19 +22,40 @@ interface Options {
   /** Currently-selected folder — the fallback drop target when the pointer is
    *  over no tagged tree row. */
   selectedFolder: FolderId | null;
+  /** Local vault working folder (shared-root model: <root>/<vault name>).
+   *  When set, dropped files are ALSO written here at their vault-relative
+   *  path so the drop genuinely lands a copy at the file location — without
+   *  it, only the vault add happens and the local copy arrives (auto mode) on
+   *  the next sync pass, or never (manual mode). */
+  vaultRoot: string | null;
   /** Fired after a batch finishes (regardless of per-item success) so the
    *  caller can refetch + rescan. */
   onComplete?: () => void;
 }
 
+/** A dropped file plus its path relative to the drop (directory drops keep
+ *  their structure under the dropped directory's own name). */
+interface DroppedItem {
+  file: File;
+  relativePath: string;
+}
+
 /**
  * Drag-and-drop import of OS files/folders onto the vault folder tree.
  *
- * Registers `getCurrentWebview().onDragDropEvent` while `enabled`. On `over`
- * it hit-tests the pointer against the tree's `data-folder-id` rows to expose a
- * hover-highlight target; on `drop` it stat's each dropped path, walks
- * directories recursively (preserving structure under the dropped dir's name),
- * synthesizes minimal `LocalFile`s, and runs them sequentially through
+ * Uses HTML5 drag events, NOT Tauri's onDragDropEvent: the window config sets
+ * `dragDropEnabled: false` (required for internal HTML5 drag-reorder — PM
+ * board, workspace tabs — to work on Windows WebView2), and with that flag off
+ * the native event NEVER fires. The original implementation listened on it
+ * anyway, which is why dropping files onto the vault did nothing (DROP-DEAD).
+ * HTML5 events also report pointer coords in CSS pixels, so the old
+ * physical-pixel/devicePixelRatio hit-test guesswork is gone.
+ *
+ * On `dragover` it hit-tests the pointer against the tree's `data-folder-id`
+ * rows to expose a hover-highlight target; on `drop` it expands the
+ * DataTransfer entries (walking directories via webkitGetAsEntry, preserving
+ * structure under the dropped dir's name), writes each file into the local
+ * vault folder (when configured), and runs them sequentially through
  * `useAddLocalFile` re-parented beneath the hovered folder.
  *
  * The import loop is abortable: the controller fires on unmount (or a fresh
@@ -47,6 +67,7 @@ export function useVaultDropImport({
   vaultId,
   folders,
   selectedFolder,
+  vaultRoot,
   onComplete,
 }: Options) {
   const addLocal = useAddLocalFile();
@@ -54,17 +75,19 @@ export function useVaultDropImport({
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<DropImportResult[]>([]);
 
-  // Latest-value refs so the long-lived OS event handler (registered once per
-  // `enabled` flip) always reads current props without re-subscribing on every
-  // folder/selection change.
+  // Latest-value refs so the long-lived window event handlers (registered once
+  // per `enabled` flip) always read current props without re-subscribing on
+  // every folder/selection change.
   const foldersRef = useRef(folders);
   const selectedFolderRef = useRef(selectedFolder);
   const vaultIdRef = useRef(vaultId);
+  const vaultRootRef = useRef(vaultRoot);
   const onCompleteRef = useRef(onComplete);
   const addRunRef = useRef(addLocal.run);
   useEffect(() => { foldersRef.current = folders; }, [folders]);
   useEffect(() => { selectedFolderRef.current = selectedFolder; }, [selectedFolder]);
   useEffect(() => { vaultIdRef.current = vaultId; }, [vaultId]);
+  useEffect(() => { vaultRootRef.current = vaultRoot; }, [vaultRoot]);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
   useEffect(() => { addRunRef.current = addLocal.run; }, [addLocal.run]);
 
@@ -74,105 +97,118 @@ export function useVaultDropImport({
 
   useEffect(() => {
     if (!enabled) return;
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
 
-    (async () => {
-      const un = await getCurrentWebview().onDragDropEvent((event) => {
-        const payload = event.payload;
-        if (payload.type === "over") {
-          // The OS reports the pointer in PHYSICAL pixels; elementFromPoint
-          // expects CSS pixels. Divide by devicePixelRatio to convert.
-          // NOTE: verify at runtime — on a 1.0 DPR display this is a no-op, but
-          // on a HiDPI/scaled monitor the wrong space would highlight the wrong
-          // row (or none). Adjust here if hit-testing is offset in practice.
-          const dpr = window.devicePixelRatio || 1;
-          const x = payload.position.x / dpr;
-          const y = payload.position.y / dpr;
-          setHoverFolderId(resolveDropFolder(x, y, selectedFolderRef.current));
-        } else if (payload.type === "leave") {
-          setHoverFolderId(null);
-        } else if (payload.type === "drop") {
-          const dpr = window.devicePixelRatio || 1;
-          const target = resolveDropFolder(
-            payload.position.x / dpr,
-            payload.position.y / dpr,
-            selectedFolderRef.current,
-          );
-          setHoverFolderId(null);
-          void runImport(payload.paths, target);
+    // An OS file drag carries "Files" in dataTransfer.types; internal HTML5
+    // drags (board cards, workspace tabs) don't — ignore those entirely so
+    // this hook never interferes with in-app drag-and-drop.
+    function isFileDrag(e: DragEvent): boolean {
+      return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    }
+
+    function onDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      // preventDefault is what makes the webview a valid drop target — without
+      // it the browser cancels the drop and shows the "not allowed" cursor.
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setHoverFolderId(resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current));
+    }
+
+    function onDragLeave(e: DragEvent) {
+      // relatedTarget === null means the pointer left the window entirely
+      // (between in-app elements it points at the element being entered).
+      if (e.relatedTarget === null) setHoverFolderId(null);
+    }
+
+    function onDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      const target = resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current);
+      setHoverFolderId(null);
+      // Snapshot entries SYNCHRONOUSLY — DataTransferItems are neutered once
+      // the drop handler returns, so no awaiting before this point.
+      const entries: FileSystemEntry[] = [];
+      const plainFiles: File[] = [];
+      for (const item of Array.from(e.dataTransfer?.items ?? [])) {
+        if (item.kind !== "file") continue;
+        const entry = item.webkitGetAsEntry?.();
+        if (entry) entries.push(entry);
+        else {
+          const f = item.getAsFile();
+          if (f) plainFiles.push(f);
         }
-      });
-      if (disposed) un();
-      else unlisten = un;
-    })();
+      }
+      void runImport(entries, plainFiles, target);
+    }
 
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
     return () => {
-      disposed = true;
-      if (unlisten) unlisten();
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
       abortRef.current?.abort();
       abortRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
+  /** Junk-name filter shared with the old native walk: dotfiles and Office/SW
+   *  owner-lock temp files never belong in the vault. */
+  function isJunkName(name: string): boolean {
+    return name.startsWith(".") || name.startsWith("~$");
+  }
+
   /**
-   * Expand a list of dropped absolute paths into flat {absolutePath,
-   * relativePath} entries: a file becomes one entry keyed by its basename, a
-   * directory is walked recursively with its contents preserved UNDER the
-   * dropped directory's own name (so dropping `C:\work\frame` yields
-   * `frame/...`).
+   * Expand FileSystemEntries into flat {file, relativePath} items: a file
+   * entry becomes one item keyed by its name, a directory is walked
+   * recursively with its contents preserved UNDER the dropped directory's own
+   * name (so dropping `frame/` yields `frame/...`).
    */
-  async function expandPaths(
-    paths: string[],
-  ): Promise<Array<{ absolutePath: string; relativePath: string; sizeBytes: number }>> {
-    const out: Array<{ absolutePath: string; relativePath: string; sizeBytes: number }> = [];
-    for (const p of paths) {
-      let info: Awaited<ReturnType<typeof stat>>;
-      try {
-        info = await stat(p);
-      } catch {
-        continue; // unreadable path — skip
-      }
-      const base = basename(p);
-      if (info.isDirectory) {
-        await walkDir(p, base, out);
-      } else if (info.isFile) {
-        out.push({ absolutePath: p, relativePath: base, sizeBytes: info.size });
-      }
+  async function expandEntries(entries: FileSystemEntry[]): Promise<DroppedItem[]> {
+    const out: DroppedItem[] = [];
+    for (const entry of entries) {
+      await walkEntry(entry, "", out);
     }
     return out;
   }
 
-  async function walkDir(
-    dir: string,
-    relPrefix: string,
-    out: Array<{ absolutePath: string; relativePath: string; sizeBytes: number }>,
-  ): Promise<void> {
-    let entries: Awaited<ReturnType<typeof readDir>>;
-    try {
-      entries = await readDir(dir);
-    } catch {
+  async function walkEntry(entry: FileSystemEntry, prefix: string, out: DroppedItem[]): Promise<void> {
+    if (isJunkName(entry.name)) return;
+    if (entry.isFile) {
+      const file = await new Promise<File | null>((resolve) =>
+        (entry as FileSystemFileEntry).file(resolve, () => resolve(null)),
+      );
+      if (file) {
+        out.push({ file, relativePath: prefix ? `${prefix}/${file.name}` : file.name });
+      }
       return;
     }
-    for (const e of entries) {
-      if (e.name.startsWith(".") || e.name.startsWith("~$")) continue;
-      if (e.isSymlink) continue;
-      const abs = `${dir}/${e.name}`;
-      const rel = `${relPrefix}/${e.name}`;
-      if (e.isDirectory) {
-        await walkDir(abs, rel, out);
-      } else if (e.isFile) {
-        let size = 0;
-        try { size = (await stat(abs)).size; } catch { /* keep 0 */ }
-        out.push({ absolutePath: abs, relativePath: rel, sizeBytes: size });
+    if (entry.isDirectory) {
+      const dirPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      // readEntries returns results in batches (Chromium caps at 100); keep
+      // reading until an empty batch or large directories get silently cut.
+      for (;;) {
+        const batch = await new Promise<FileSystemEntry[]>((resolve) =>
+          reader.readEntries(resolve, () => resolve([])),
+        );
+        if (batch.length === 0) return;
+        for (const child of batch) {
+          await walkEntry(child, dirPrefix, out);
+        }
       }
     }
   }
 
-  async function runImport(paths: string[], targetFolderId: string | null) {
+  async function runImport(
+    entries: FileSystemEntry[],
+    plainFiles: File[],
+    targetFolderId: string | null,
+  ) {
     const vid = vaultIdRef.current;
-    if (!vid || paths.length === 0) return;
+    if (!vid) return;
 
     // Supersede any in-flight import and start a fresh abort scope.
     abortRef.current?.abort();
@@ -180,26 +216,52 @@ export function useVaultDropImport({
     abortRef.current = ctrl;
     const signal = ctrl.signal;
 
+    const items = await expandEntries(entries);
+    for (const f of plainFiles) {
+      if (!isJunkName(f.name)) items.push({ file: f, relativePath: f.name });
+    }
+    if (signal.aborted || items.length === 0) return;
+
     setImporting(true);
     setResults([]);
 
+    // Raw DB folder names for ensureFolderHierarchy matching; sanitized
+    // segments for anything touching disk (path-traversal containment).
     const prefix = folderNamePath(targetFolderId, foldersRef.current);
-    const items = await expandPaths(paths);
-    if (signal.aborted) return;
+    const sanitizedPrefix = folderPath(targetFolderId, foldersRef.current);
 
     const collected: DropImportResult[] = [];
     for (const item of items) {
       if (signal.aborted) return;
-      // Minimal LocalFile — no sha256 so useAddLocalFile reads + hashes lazily.
-      const lf: LocalFile = {
-        basename: basename(item.relativePath),
-        relativePath: item.relativePath,
-        absolutePath: item.absolutePath,
-        sha256: "",
-        sizeBytes: item.sizeBytes,
-      };
       const name = item.relativePath;
       try {
+        const bytes = new Uint8Array(await item.file.arrayBuffer());
+        const sha = await sha256Hex(bytes);
+
+        // Copy the bytes into the local vault folder at the vault-relative
+        // path FIRST, so the file lands on disk even if the vault add fails
+        // (the unmatched/auto-add flow can then pick it up). Segment-wise
+        // sanitization matches how the sync ledger + auto-sync key paths.
+        let absolutePath = "";
+        const root = vaultRootRef.current;
+        if (root) {
+          const relSan = item.relativePath.split("/").map(sanitizePathSegment).join("/");
+          const localRel = sanitizedPrefix ? `${sanitizedPrefix}/${relSan}` : relSan;
+          absolutePath = `${root}/${localRel}`;
+          const dir = absolutePath.slice(0, absolutePath.lastIndexOf("/"));
+          await mkdir(dir, { recursive: true }).catch(() => { /* may exist */ });
+          await writeFile(absolutePath, bytes);
+        }
+        if (signal.aborted) return;
+
+        const lf: LocalFile = {
+          basename: basename(item.relativePath),
+          relativePath: item.relativePath,
+          absolutePath,
+          sha256: sha,
+          sizeBytes: bytes.length,
+          bytes,
+        };
         const r = await addRunRef.current(vid, lf, prefix || undefined);
         if (signal.aborted) return;
         collected.push(r.ok ? { name, ok: true } : { name, ok: false, error: r.error });

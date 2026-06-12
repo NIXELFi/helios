@@ -61,9 +61,14 @@ function ConfigScreenBody() {
   }
 
   async function handleOpen() {
+    // Start the dialog in the user configs directory — without a defaultPath
+    // it opens wherever the OS last remembered, which is usually some
+    // unrelated folder and reads as "the menu opened the wrong path".
+    const defaultDir = await bridge.defaultSaveDir().catch(() => null);
     const picked = await openDialog({
       multiple: false,
       directory: false,
+      defaultPath: defaultDir ?? undefined,
       filters: [{ name: "Engine config", extensions: ["json"] }],
     });
     if (typeof picked === "string") {

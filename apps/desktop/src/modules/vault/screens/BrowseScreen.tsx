@@ -527,6 +527,7 @@ export function BrowseScreen() {
     vaultId: vaultId ?? null,
     folders: folders ?? [],
     selectedFolder,
+    vaultRoot: vaultFolderPath ?? null,
     onComplete: () => {
       refetchFolders();
       refetchAllFiles();
