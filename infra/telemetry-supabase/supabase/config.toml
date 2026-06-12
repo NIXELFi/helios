@@ -76,3 +76,9 @@ deno_version = 2
 
 [analytics]
 enabled = false
+
+# Platform JWT verification must be off for telemetry-ingest: the car
+# authenticates with the HTP HMAC headers, not a Supabase JWT, and the
+# function enforces auth itself (see functions/telemetry-ingest/auth.ts).
+[functions.telemetry-ingest]
+verify_jwt = false
