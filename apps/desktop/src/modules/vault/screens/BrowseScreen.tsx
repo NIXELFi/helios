@@ -231,7 +231,30 @@ export function BrowseScreen() {
     () => (allFiles ?? []).filter((f) => f.folder_id === null),
     [allFiles],
   );
-  const files = selectedFolder === null ? rootFiles : filesInFolder;
+  // Instant folder navigation (NAV-FLASH): while the per-folder query is in
+  // flight, derive the folder's files from the vault-wide list already in
+  // memory instead of flashing a skeleton on every click. The per-folder
+  // result swaps in silently when it lands (same embed, same content). The
+  // skeleton now only appears on the FIRST load of a vault, before allFiles
+  // exists.
+  const folderFilesFallback = useMemo(
+    () => (selectedFolder === null ? null : (allFiles ?? []).filter((f) => f.folder_id === selectedFolder)),
+    [allFiles, selectedFolder],
+  );
+  const filesUnsorted =
+    selectedFolder === null
+      ? rootFiles
+      : (filesInFolder ?? (allFiles === null ? null : folderFilesFallback));
+  // One canonical sort regardless of source: useFiles orders by name but
+  // useAllFiles orders by id, so without this the rows visibly reshuffled the
+  // moment the per-folder query replaced the in-memory fallback.
+  const files = useMemo(
+    () =>
+      filesUnsorted === null
+        ? null
+        : [...filesUnsorted].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+    [filesUnsorted],
+  );
 
   // The "Download all" button operates on every file underneath the current
   // view recursively — i.e. picking Brakes downloads every file in Brakes
@@ -282,9 +305,10 @@ export function BrowseScreen() {
   const fileListError = selectedFolder === null ? allFilesError : filesError;
   const fileAreaError = fileListError ?? locksError;
   const fileAreaErrorCtx: PgErrorContext = fileListError ? "file" : "lock";
-  // At the vault root the list is derived from allFiles (no per-folder spinner);
-  // inside a folder it reflects the per-folder query's loading flag.
-  const fileListLoading = selectedFolder !== null && filesLoading && filesInFolder === null;
+  // Loading is now "we have NOTHING to show" — with the in-memory fallback
+  // above, that's only the first load of a vault (allFiles not yet in), never
+  // ordinary folder-to-folder navigation.
+  const fileListLoading = files === null || (selectedFolder === null && allFiles === null);
   const retryFileArea = useCallback(() => {
     refetchFiles();
     refetchAllFiles();
