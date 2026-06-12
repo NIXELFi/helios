@@ -124,20 +124,36 @@ export function SortableViewItem({
   return (
     <a
       ref={setNodeRef}
-      href={href}
-      // CRITICAL: anchors are natively draggable, and dnd-kit's PointerSensor
-      // only handles pointer events — so Chromium starts a *parallel* native
-      // HTML5 link-drag. In the Tauri webview (dragDropEnabled:false) dropping
-      // that link onto the window performs a full-document navigation to href,
-      // re-bootstrapping the whole app back to the default "logs" module. Kill
-      // the native drag entirely (belt-and-suspenders: attribute + onDragStart)
-      // so only dnd-kit's pointer-driven sort can start. Click-to-nav and the
-      // sortable reorder are unaffected.
+      // CRITICAL: NO href. With a real href this row navigated the whole
+      // DOCUMENT (re-bootstrapping the app) through TWO paths: (1) anchors
+      // are natively draggable, and dropping the parallel native link-drag on
+      // the window navigated to href; (2) even with the native drag killed,
+      // the browser's click-after-drag sometimes dispatched the anchor's
+      // DEFAULT navigation despite onClick preventDefault — dnd-kit's
+      // post-drag DOM reorder races React's synthetic click, so roughly
+      // every other reorder fired a real navigation to /graph, /gantt, etc.
+      // (confirmed via the beforeunload crash trap, 2026-06-12). Navigation
+      // is in-memory (router.push); the PM router never uses the URL, so the
+      // href carried no value — without it the default action is a no-op and
+      // the failure is structurally impossible. draggable/onDragStart kept as
+      // belt-and-suspenders against selection drags.
+      // role + tabIndex come from dnd-kit's {...attributes} spread below.
       draggable={false}
       onDragStart={(e) => e.preventDefault()}
       onClick={(e) => {
         e.preventDefault();
+        // Ignore the synthetic click that follows a completed drag — we only
+        // navigate on a genuine click (dnd-kit's 4px activation distance
+        // means real clicks never register as drags).
+        if (isDragging) return;
         router.push(href);
+      }}
+      onKeyDown={(e) => {
+        // href removal drops the anchor's native Enter activation — restore it.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          router.push(href);
+        }
       }}
       style={{
         transform: CSS.Transform.toString(transform),
