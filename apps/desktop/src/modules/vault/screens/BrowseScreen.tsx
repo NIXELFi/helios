@@ -47,6 +47,12 @@ import { AutoAddBanner } from "../components/AutoAddBanner";
 import { VaultWarningBanner } from "../components/VaultWarningBanner";
 import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
+import { Breadcrumbs } from "../components/Breadcrumbs";
+import { VaultSearch } from "../components/VaultSearch";
+import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
+import { RecentActivity } from "../components/RecentActivity";
+import { useMoveFile } from "../data/useMoveFile";
+import { toast } from "../data/toast";
 import { FileDetailPanel } from "./FileDetailPanel";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
@@ -489,6 +495,7 @@ export function BrowseScreen() {
         refetchFolders();
         setPrompt(null);
         setPromptValue("");
+        toast(`Created folder ${name}`);
       } else if (createFolder.error) {
         setPromptError(createFolder.error.message);
       }
@@ -498,6 +505,7 @@ export function BrowseScreen() {
         refetchFiles();
         setPrompt(null);
         setPromptValue("");
+        toast(`Created ${name}`);
       } else if (createFile.error) {
         setPromptError(createFile.error.message);
       }
@@ -536,6 +544,53 @@ export function BrowseScreen() {
       rescan();
     },
   });
+
+  // Human name of the live drop target, for the full-pane drag overlay.
+  const dropTargetName = useMemo(() => {
+    const rootName = vault?.name ?? "vault root";
+    const id = dropImport.hoverFolderId ?? (selectedFolder || "");
+    if (id === "") return rootName;
+    return (folders ?? []).find((f) => f.id === id)?.name ?? rootName;
+  }, [dropImport.hoverFolderId, selectedFolder, folders, vault]);
+
+  // Search / recent-activity pick: navigate to the file's folder + select it.
+  const jumpToFile = useCallback((fileId: FileId, folderId: FolderId | null) => {
+    setSelectedFolder(folderId);
+    setSelectedFile(fileId);
+  }, []);
+
+  // Tree drag-to-move (vault admins — the files UPDATE policy is admin-only).
+  const moveFile = useMoveFile();
+  const handleMoveFile = useCallback(
+    async (fileId: string, targetFolderId: FolderId | null) => {
+      const file = (allFiles ?? []).find((f) => f.id === fileId);
+      if (!file || !vaultId) return;
+      const ok = await moveFile.run(file, targetFolderId, {
+        vaultRoot: vaultFolderPath ?? null,
+        folders: folders ?? [],
+        vaultId,
+      });
+      if (ok) {
+        const destName =
+          targetFolderId === null
+            ? (vault?.name ?? "vault root")
+            : ((folders ?? []).find((f) => f.id === targetFolderId)?.name ?? "folder");
+        toast(`Moved ${file.name} to ${destName}`);
+        refetchAllFiles();
+        refetchFiles();
+        rescan();
+      } else if (moveFile.error) {
+        toast(moveFile.error.message, "error");
+      }
+    },
+    [allFiles, vaultId, moveFile, vaultFolderPath, folders, vault, refetchAllFiles, refetchFiles, rescan],
+  );
+
+  // First-run onboarding: a brand-new vault (no folders, no files) gets a
+  // 3-step walkthrough instead of a bare empty table.
+  const vaultIsEmpty =
+    folders !== null && (folders?.length ?? 0) === 0 &&
+    allFiles !== null && (allFiles?.length ?? 0) === 0;
 
   // No active vault — either the user has no vaults at all, or vaults are
   // still loading. Vault creation now lives in the NavRail switcher, so
@@ -617,12 +672,30 @@ export function BrowseScreen() {
               onTreeSelectionChange={setTreeSelection}
               onContextMenu={handleTreeContextMenu}
               dropHoverId={dropImport.hoverFolderId}
+              holderLabelById={holderEmailById}
+              onMoveFile={isVaultAdmin ? handleMoveFile : undefined}
             />
           ) : foldersLoading ? (
-            <div className="p-3 text-sm text-helios-dim">Loading folders…</div>
+            <SkeletonTree />
           ) : (
             <div className="p-3 text-sm text-helios-dim">No folders yet.</div>
           )}
+        </div>
+        <RecentActivity
+          allFiles={allFiles ?? []}
+          holderEmailById={holderEmailById}
+          onPick={jumpToFile}
+        />
+        {/* Lock-dot legend — the tree's blue/red dots are otherwise learned by
+            accident. One quiet line makes them self-explaining. */}
+        <div className="flex shrink-0 items-center gap-3 border-t border-helios-line px-3 py-1.5 text-[10px] text-helios-dim">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-sky-400" /> yours
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-[#EF5350]" /> checked out
+          </span>
+          {isVaultAdmin && <span className="ml-auto italic">drag files to move</span>}
         </div>
       </div>
       <div className="flex-1 overflow-auto">
@@ -632,6 +705,20 @@ export function BrowseScreen() {
             render the table; the `files` variable above derives root files
             from allFiles when selectedFolder is null. */}
         <>
+          {/* Orientation bar: clickable folder path + vault-wide search. */}
+          <div className="flex items-center gap-3 border-b border-helios-line px-3 py-1.5">
+            <Breadcrumbs
+              vaultName={vault?.name ?? "Vault"}
+              folders={folders ?? []}
+              selectedFolder={selectedFolder}
+              onNavigate={setSelectedFolder}
+            />
+            <VaultSearch
+              allFiles={allFiles ?? []}
+              folders={folders ?? []}
+              onPick={jumpToFile}
+            />
+          </div>
           <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
               {vaultFolderPath && autoSyncEnabled && (
                 <VaultSyncSection
@@ -751,7 +838,19 @@ export function BrowseScreen() {
                 onRetry={retryFileArea}
               />
             ) : fileListLoading ? (
-              <div className="p-3 text-sm text-helios-dim">Loading files…</div>
+              <SkeletonRows />
+            ) : vaultIsEmpty ? (
+              <VaultOnboarding
+                vaultName={vault?.name ?? "this vault"}
+                canEdit={canEdit}
+                hasLocalFolder={!!vaultFolderPath}
+                onPickFolder={async () => {
+                  try {
+                    const picked = await openDirDialog({ directory: true, multiple: false });
+                    if (typeof picked === "string") setHeliosRoot(picked);
+                  } catch { /* cancelled */ }
+                }}
+              />
             ) : (
               <>
                 <BulkActionBar
@@ -798,6 +897,9 @@ export function BrowseScreen() {
                   vaultId={vaultId ?? null}
                   downloadMode={downloadMode}
                   openInSw={openInSw}
+                  onRowMenu={(f, x, y) =>
+                    handleTreeContextMenu({ kind: "files", files: [f] }, x, y)
+                  }
                 />
               </>
             )}
@@ -808,6 +910,21 @@ export function BrowseScreen() {
           only treats a selection as missing once the list has actually loaded. */}
       <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} vaultRoot={vaultFolderPath} folders={folders ?? []} canEdit={canEdit} />
       </div>
+      {/* Full-pane drag overlay: names the live drop target so a drop is never
+          a guess. pointer-events-none keeps the underlying hit-testing (tree
+          row hover) working while it's up. */}
+      {dropImport.dragActive && (
+        <div className="pointer-events-none fixed inset-0 z-30 flex items-end justify-center bg-asu-gold/5 pb-16">
+          <div className="rounded-lg border-2 border-dashed border-asu-gold bg-helios-base/95 px-6 py-3 shadow-2xl">
+            <p className="text-sm font-semibold text-helios-text">
+              Drop to add to <span className="text-asu-gold">{dropTargetName}</span>
+            </p>
+            <p className="mt-0.5 text-center text-[11px] text-helios-dim">
+              Hover a folder in the tree to target it
+            </p>
+          </div>
+        </div>
+      )}
       {/* Bulk-download progress modal shared by ManualDownloadAll and the
           right-click context menu. */}
       <BulkDownloadModal api={bulk} />
@@ -935,6 +1052,7 @@ export function BrowseScreen() {
                   const ok = await deleteFolder.run(folder.id);
                   if (ok) {
                     if (selectedFolder === folder.id) setSelectedFolder(null);
+                    toast(`Moved ${folder.name} to Deleted`, "info");
                     afterMutate();
                   } else {
                     setActionError(deleteFolder.error?.message ?? "Couldn't delete the folder.");
@@ -986,6 +1104,8 @@ export function BrowseScreen() {
                   }
                   if (failed > 0) {
                     setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                  } else {
+                    toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
                   }
                   afterMutate();
                 },
@@ -1098,6 +1218,78 @@ export function BrowseScreen() {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+/** First-run walkthrough shown when the active vault has zero folders AND zero
+ *  files — three concrete steps instead of a bare empty table. */
+function VaultOnboarding({
+  vaultName,
+  canEdit,
+  hasLocalFolder,
+  onPickFolder,
+}: {
+  vaultName: string;
+  canEdit: boolean;
+  hasLocalFolder: boolean;
+  onPickFolder: () => void;
+}) {
+  const steps: Array<{ title: string; body: React.ReactNode; done?: boolean }> = [
+    {
+      title: "Pick your local folder",
+      done: hasLocalFolder,
+      body: hasLocalFolder ? (
+        <span>Done — files sync to your Helios folder.</span>
+      ) : (
+        <span>
+          Choose where {vaultName} lives on this machine.{" "}
+          <button
+            type="button"
+            onClick={onPickFolder}
+            className="rounded border border-asu-gold/70 bg-asu-gold/15 px-2 py-0.5 text-helios-text hover:bg-asu-gold/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Set folder
+          </button>
+        </span>
+      ),
+    },
+    {
+      title: "Drop files in",
+      body: canEdit
+        ? "Drag files or whole folders from Explorer anywhere onto this screen — they're vaulted and checked out to you."
+        : "An editor drops files here to populate the vault; you'll see them appear live.",
+    },
+    {
+      title: "Check out to edit",
+      body: "Files are read-only until you check them out. Check Out grabs the lock + latest version; Check In publishes your changes for the team.",
+    },
+  ];
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="w-full max-w-md space-y-4">
+        <h2 className="text-sm font-semibold text-helios-text">
+          {vaultName} is empty — here's how it works
+        </h2>
+        <ol className="space-y-3">
+          {steps.map((s, i) => (
+            <li key={s.title} className="flex gap-3 rounded-lg border border-helios-line bg-helios-panel p-3">
+              <span
+                className={
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono-num text-xs " +
+                  (s.done ? "bg-[#66BB6A]/20 text-[#9CCC65]" : "bg-asu-gold/15 text-asu-gold")
+                }
+              >
+                {s.done ? "✓" : i + 1}
+              </span>
+              <div className="min-w-0 text-xs text-helios-dim">
+                <p className="mb-0.5 font-medium text-helios-text">{s.title}</p>
+                <p>{s.body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
     </div>
   );
 }

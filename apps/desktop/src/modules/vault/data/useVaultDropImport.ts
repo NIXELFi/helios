@@ -72,6 +72,9 @@ export function useVaultDropImport({
 }: Options) {
   const addLocal = useAddLocalFile();
   const [hoverFolderId, setHoverFolderId] = useState<string | null>(null);
+  // True while an OS file drag is over the window — drives the full-pane
+  // "Drop to add to …" overlay so the drop affordance is unmissable.
+  const [dragActive, setDragActive] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<DropImportResult[]>([]);
 
@@ -111,13 +114,17 @@ export function useVaultDropImport({
       // it the browser cancels the drop and shows the "not allowed" cursor.
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
       setHoverFolderId(resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current));
     }
 
     function onDragLeave(e: DragEvent) {
       // relatedTarget === null means the pointer left the window entirely
       // (between in-app elements it points at the element being entered).
-      if (e.relatedTarget === null) setHoverFolderId(null);
+      if (e.relatedTarget === null) {
+        setHoverFolderId(null);
+        setDragActive(false);
+      }
     }
 
     function onDrop(e: DragEvent) {
@@ -125,6 +132,7 @@ export function useVaultDropImport({
       e.preventDefault();
       const target = resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current);
       setHoverFolderId(null);
+      setDragActive(false);
       // Snapshot entries SYNCHRONOUSLY — DataTransferItems are neutered once
       // the drop handler returns, so no awaiting before this point.
       const entries: FileSystemEntry[] = [];
@@ -278,7 +286,7 @@ export function useVaultDropImport({
     onCompleteRef.current?.();
   }
 
-  return { hoverFolderId, importing, results, clearResults };
+  return { hoverFolderId, dragActive, importing, results, clearResults };
 }
 
 /** basename of a slash- OR backslash-separated path. */

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useUser } from "@helios/auth";
 import { useLocks } from "../data/useLocks";
 import { useForceUnlock } from "../data/useForceUnlock";
 import { useIsAdmin } from "../data/useIsAdmin";
@@ -59,6 +60,9 @@ interface VaultGroup {
 }
 
 export function WhoHasWhatScreen() {
+  const user = useUser();
+  // "Just mine" chip — one click to audit your own checkouts.
+  const [mineOnly, setMineOnly] = useState(false);
   const { activeVaultId, vaults } = useActiveVault();
   const { data: locks, loading, error, refetch } = useLocks();
   // Resolve every lock's file by id — across ALL vaults, deleted included —
@@ -175,15 +179,40 @@ export function WhoHasWhatScreen() {
   const resolving =
     loading ||
     (lockFileIds.length > 0 && !filesError && (filesLoading || lockFiles === null));
+  // Apply the "just mine" chip AFTER grouping so the group structure (and
+  // vault ordering) stays stable while toggling.
+  const visibleGroups = useMemo(() => {
+    if (!mineOnly) return groups;
+    const me = user?.id ?? "";
+    return groups
+      .map((g) => ({ ...g, rows: g.rows.filter((r) => r.lock.user_id === me) }))
+      .filter((g) => g.rows.length > 0);
+  }, [groups, mineOnly, user]);
   const totalLocks = locks?.length ?? 0;
+  const visibleCount = visibleGroups.reduce((n, g) => n + g.rows.length, 0);
 
   return (
     <div className="h-full overflow-auto bg-helios-panel">
-      <header className="border-b border-helios-line px-4 py-3 text-helios-dim">
-        Active checkouts — all vaults
-        {!resolving && !error && (
-          <span className="ml-2 font-mono-num text-xs">({totalLocks})</span>
-        )}
+      <header className="flex items-center gap-3 border-b border-helios-line px-4 py-3 text-helios-dim">
+        <span>
+          Active checkouts — all vaults
+          {!resolving && !error && (
+            <span className="ml-2 font-mono-num text-xs">({mineOnly ? `${visibleCount} of ${totalLocks}` : totalLocks})</span>
+          )}
+        </span>
+        <button
+          type="button"
+          aria-pressed={mineOnly}
+          onClick={() => setMineOnly((v) => !v)}
+          className={
+            "ml-auto rounded-full border px-2.5 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+            (mineOnly
+              ? "border-asu-gold bg-asu-gold/20 text-asu-gold"
+              : "border-helios-line text-helios-dim hover:border-asu-gold/60 hover:text-helios-text")
+          }
+        >
+          Just mine
+        </button>
       </header>
       {/* Surface a failed force-unlock — previously swallowed entirely. */}
       {forceUnlock.error && (
@@ -203,10 +232,14 @@ export function WhoHasWhatScreen() {
           <div className="p-4 text-sm text-helios-dim">Loading…</div>
         ) : error ? (
           <div className="p-4 text-sm text-[#EF5350]">{error.message}</div>
-        ) : totalLocks === 0 ? (
-          <div className="p-4 text-sm text-helios-dim">Nothing checked out right now.</div>
+        ) : visibleCount === 0 ? (
+          <div className="p-4 text-sm text-helios-dim">
+            {mineOnly && totalLocks > 0
+              ? "You have nothing checked out right now."
+              : "Nothing checked out right now."}
+          </div>
         ) : (
-          groups.map((g) => (
+          visibleGroups.map((g) => (
             <section key={g.vaultId ?? "__other__"} className="mb-4">
               <h3 className="flex items-baseline gap-2 px-3 py-1.5 text-xs uppercase tracking-wider text-asu-gold">
                 {g.vaultName}

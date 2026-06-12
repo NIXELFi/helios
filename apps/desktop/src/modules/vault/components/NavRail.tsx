@@ -19,8 +19,11 @@ export function NavRail(props: {
   active: VaultScreenId;
   onSelect: (id: VaultScreenId) => void;
   showAdmin?: boolean;
+  /** Current user's active checkout count — badged on "Who has what" so a
+   *  glance at the rail answers "do I have anything out?". */
+  myCheckouts?: number;
 }) {
-  const { active, onSelect, showAdmin } = props;
+  const { active, onSelect, showAdmin, myCheckouts = 0 } = props;
   const entries = showAdmin ? [...ENTRIES, ADMIN_ENTRY] : ENTRIES;
   return (
     // Same button language as the Log workspace tabs in App.tsx — small
@@ -41,14 +44,27 @@ export function NavRail(props: {
               aria-current={isActive ? "page" : undefined}
               onClick={() => onSelect(e.id)}
               className={
-                "rounded-sm border px-3 py-1.5 text-left text-sm transition-colors " +
+                "flex items-center justify-between rounded-sm border px-3 py-1.5 text-left text-sm transition-colors " +
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
                 (isActive
                   ? "border-asu-gold bg-asu-gold font-semibold text-helios-base hover:bg-asu-gold/90"
                   : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold hover:bg-helios-line")
               }
             >
-              {e.label}
+              <span>{e.label}</span>
+              {e.id === "who" && myCheckouts > 0 && (
+                <span
+                  title={`You have ${myCheckouts} file${myCheckouts === 1 ? "" : "s"} checked out`}
+                  className={
+                    "ml-2 rounded-full px-1.5 py-px font-mono-num text-[10px] leading-4 " +
+                    (isActive
+                      ? "bg-helios-base/20 text-helios-base"
+                      : "bg-asu-gold/20 text-asu-gold")
+                  }
+                >
+                  {myCheckouts}
+                </span>
+              )}
             </button>
           );
         })}

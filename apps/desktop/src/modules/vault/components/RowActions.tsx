@@ -12,6 +12,7 @@ import { useRestoreVersion } from "../data/useRestoreVersion";
 import { localDestPath, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ledgerRecord } from "../data/sync-ledger";
+import { toast } from "../data/toast";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, FolderId, Folder, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
@@ -114,6 +115,7 @@ export function CheckOutButton({
       await setReadonly(dest, false);
       flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
     }
+    toast(`Checked out ${fileName ?? "file"}`);
     onDone?.();
   }
 
@@ -208,6 +210,7 @@ export function CheckInButton({
         void recordRefs.run(result.id, pathRef.current, refName, vaultId);
         void recordProperties.run(result.id, pathRef.current, refName, true);
       }
+      toast(`Checked in ${fileName ?? localFile?.basename ?? "file"} — v${result.version_num}`);
       onDone?.();
     }
   }
@@ -426,6 +429,7 @@ export function GetLatestButton({
         // ledger tracks — a save-dialog path elsewhere isn't a vault copy (T6).
         recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
       }
+      toast(`Downloaded ${fileName}`);
       onDone?.();
     }
   }
@@ -658,6 +662,7 @@ export function CancelButton({
   async function doDiscardDraft() {
     const ok = await deleteFile.run(fileId);
     if (!ok) return;
+    toast(`Discarded draft ${fileName ?? ""}`.trimEnd(), "info");
     onDone?.();
   }
 
@@ -693,6 +698,7 @@ export function CancelButton({
       // (T6): the local copy now matches latestSha and is ledger-tracked.
       recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
     }
+    toast(`Undid check-out of ${fileName ?? "file"}`, "info");
     onDone?.();
   }
 

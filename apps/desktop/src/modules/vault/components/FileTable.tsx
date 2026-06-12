@@ -47,6 +47,28 @@ interface Props {
    * pass this prop see the legacy behavior.
    */
   downloadMode?: "auto" | "manual";
+  /**
+   * Opens the row's action menu (same actions as the tree right-click) at the
+   * given screen coords. Wired to a per-row kebab button AND the row's own
+   * context-menu event, so file actions are discoverable without knowing
+   * about right-click.
+   */
+  onRowMenu?: (file: VaultFile, x: number, y: number) => void;
+}
+
+/** Compact relative time for the Modified column ("3h ago", "2d ago"). */
+function ago(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 /**
@@ -193,9 +215,10 @@ function FileTypeIcon({ name }: { name: string }) {
   );
 }
 
-function StatusPill({ info }: { info: RowStateInfo }) {
+function StatusPill({ info, title }: { info: RowStateInfo; title?: string }) {
   return (
     <span
+      title={title ?? info.label}
       className={
         "inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs font-medium " +
         info.pill
@@ -248,6 +271,7 @@ export function FileTable({
   vaultId,
   downloadMode = "auto",
   openInSw,
+  onRowMenu,
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
@@ -281,7 +305,12 @@ export function FileTable({
           )}
           <th className="px-2.5 py-2 font-medium">Name</th>
           <th className="px-2.5 py-2 font-medium">Status</th>
+          {/* "Updated", not "Modified" — the Status pill already uses
+              "Modified" for local-changes state; this column is the latest
+              check-in time. */}
+          <th className="px-2.5 py-2 font-medium">Updated</th>
           <th className="px-2.5 py-2 font-medium">Actions</th>
+          {onRowMenu && <th className="w-8 px-1 py-2" aria-label="Row menu" />}
           {/* Trailing spacer absorbs slack so Name/Status/Actions cluster on
               the left and sit next to each other, instead of Actions drifting
               to the far right edge on a wide panel. */}
@@ -292,10 +321,10 @@ export function FileTable({
         {files.length === 0 && (
           <tr>
             <td
-              colSpan={hasMultiSelect ? 5 : 4}
+              colSpan={(hasMultiSelect ? 6 : 5) + (onRowMenu ? 1 : 0)}
               className="px-3 py-8 text-center text-sm italic text-helios-dim"
             >
-              No files in this folder
+              No files in this folder{canEdit ? " — drag files from Explorer to add them" : ""}
             </td>
           </tr>
         )}
@@ -330,6 +359,17 @@ export function FileTable({
               // a11y smell).
               aria-labelledby={`file-row-name-${f.id}`}
               onClick={() => onSelect(f.id)}
+              // Double-click = file-manager convention: jump to the local
+              // copy in Explorer when one exists (single click already opens
+              // the detail panel).
+              onDoubleClick={() => {
+                if (localMatch?.local) void revealInExplorer(localMatch.local.absolutePath);
+              }}
+              onContextMenu={(e) => {
+                if (!onRowMenu) return;
+                e.preventDefault();
+                onRowMenu(f, e.clientX, e.clientY);
+              }}
               onKeyDown={(e) => {
                 // Keyboard parity with the row's click affordance: Enter/Space
                 // opens the file detail panel. Other keys (Tab etc.) pass
@@ -401,9 +441,26 @@ export function FileTable({
               </td>
               <td className="px-2.5 py-1.5">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <StatusPill info={info} />
+                  <StatusPill
+                    info={info}
+                    title={
+                      lk.kind !== "none"
+                        ? `${info.label} — since ${ago(lk.lock.acquired_at)}`
+                        : info.label
+                    }
+                  />
                   {isOpenInSw && <OpenInSwBadge />}
                 </div>
+              </td>
+              <td
+                className="whitespace-nowrap px-2.5 py-1.5 font-mono-num text-xs text-helios-dim"
+                title={
+                  f.latest
+                    ? `v${f.latest.version_num}${f.latest.comment ? ` · "${f.latest.comment}"` : ""}`
+                    : "No versions yet"
+                }
+              >
+                {f.latest ? ago(f.latest.created_at) : "—"}
               </td>
               <td className="px-2.5 py-1.5">
                 <div className="flex flex-wrap items-center justify-start gap-1.5">
@@ -475,6 +532,23 @@ export function FileTable({
                   })()}
                 </div>
               </td>
+              {onRowMenu && (
+                <td className="w-8 px-1 py-1.5">
+                  <button
+                    type="button"
+                    aria-label={`Actions for ${f.name}`}
+                    title="More actions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      onRowMenu(f, r.left, r.bottom + 2);
+                    }}
+                    className="rounded px-1.5 py-0.5 text-helios-dim opacity-0 transition-opacity hover:bg-helios-line hover:text-helios-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold group-hover:opacity-100"
+                  >
+                    ⋯
+                  </button>
+                </td>
+              )}
               {/* Slack-absorbing spacer so the columns above cluster left. */}
               <td aria-hidden />
             </tr>

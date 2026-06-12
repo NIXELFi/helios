@@ -271,7 +271,9 @@ describe("<BrowseScreen>", () => {
         <BrowseScreen />
       </SupabaseAuthProvider>,
     );
-    await waitFor(() => expect(screen.getByText("sdm26")).toBeInTheDocument());
+    // The vault name now renders in BOTH the tree header and the breadcrumb
+    // root chip — assert presence, not uniqueness.
+    await waitFor(() => expect(screen.getAllByText("sdm26").length).toBeGreaterThan(0));
     // The folder name renders in the tree row. (The expand chevron is a
     // separate button whose aria-label also contains "chassis", so target the
     // name text node directly rather than an ambiguous role+name query.)
@@ -295,7 +297,7 @@ describe("<BrowseScreen>", () => {
           <BrowseScreen />
         </SupabaseAuthProvider>,
       );
-      await waitFor(() => expect(screen.getByText("sdm26")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByText("sdm26").length).toBeGreaterThan(0));
       // The dead-zone must surface an explanation + a way to fix it.
       await waitFor(() => expect(screen.getByText(/no sync folder set/i)).toBeInTheDocument());
       expect(screen.getByRole("button", { name: /set folder/i })).toBeInTheDocument();

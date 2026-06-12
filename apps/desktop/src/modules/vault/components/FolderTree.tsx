@@ -56,7 +56,19 @@ interface Props {
    * them. null = nothing hovered.
    */
   dropHoverId?: string | null;
+  /** Lock-holder labels for file-leaf tooltips ("Checked out by Alice"). */
+  holderLabelById?: Map<UserId, string>;
+  /**
+   * When set, file leaves become draggable and folder rows accept them —
+   * dropping moves the file into that folder (vault-admin affordance; the
+   * files UPDATE policy is admin-only). Internal drags use a custom MIME type
+   * so they never collide with OS file drops (which carry "Files").
+   */
+  onMoveFile?: (fileId: FileId, targetFolderId: FolderId | null) => void;
 }
+
+/** Custom drag payload type for internal file moves. */
+const MOVE_MIME = "application/x-helios-file-id";
 
 interface FolderNode {
   folder: Folder;
@@ -176,8 +188,13 @@ export function FolderTree({
   onTreeSelectionChange,
   onContextMenu,
   dropHoverId,
+  holderLabelById,
+  onMoveFile,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Folder currently hovered by an INTERNAL file-move drag ("" = vault root).
+  // Separate from dropHoverId (OS file drops) but rendered identically.
+  const [moveHoverId, setMoveHoverId] = useState<string | null>(null);
   // Pre-compute O(1) indexes from the folders array. Without these the tree
   // recomputes O(N²) on every render — measurable on SDM26's ~500-folder
   // vault (full re-render on every tick of the auto-sync status interval).
@@ -313,6 +330,39 @@ export function FolderTree({
     return lock.user_id === currentUserId ? "me" : "other";
   }
 
+  /** True when the drag in flight is an internal file move (not an OS drop). */
+  function isMoveDrag(e: React.DragEvent): boolean {
+    return Array.from(e.dataTransfer.types).includes(MOVE_MIME);
+  }
+
+  /** Drag-over/drop handlers that make a row a move target. `target` is the
+   *  folder id, or null for the vault root (hover-keyed as ""). */
+  function moveTargetHandlers(target: string | null) {
+    if (!onMoveFile) return {};
+    const hoverKey = target ?? "";
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (!isMoveDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        setMoveHoverId(hoverKey);
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        if (!isMoveDrag(e)) return;
+        setMoveHoverId((prev) => (prev === hoverKey ? null : prev));
+      },
+      onDrop: (e: React.DragEvent) => {
+        if (!isMoveDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setMoveHoverId(null);
+        const fileId = e.dataTransfer.getData(MOVE_MIME);
+        if (fileId) onMoveFile(fileId, target);
+      },
+    };
+  }
+
   // Build a stable visible-order list of EVERY row the user can see —
   // root files, then each folder + its expanded children (recursively).
   // Used by shift-range selection across mixed file/folder rows.
@@ -429,6 +479,13 @@ export function FolderTree({
     const isSelectedFile = selectedFile === file.id;
     const isMulti = treeSelection?.files.has(file.id) ?? false;
     const lockKind = lockKindFor(file.id);
+    const lock = lockByFile.get(file.id);
+    const lockTitle =
+      lockKind === "me"
+        ? "Checked out by you"
+        : lockKind === "other"
+          ? `Checked out by ${(lock && holderLabelById?.get(lock.user_id)) ?? "another user"}`
+          : undefined;
     return (
       <div
         key={file.id}
@@ -437,6 +494,14 @@ export function FolderTree({
         aria-current={isSelectedFile ? "page" : undefined}
         data-row-kind="file"
         data-row-id={file.id}
+        title={lockTitle}
+        draggable={!!onMoveFile}
+        onDragStart={(e) => {
+          if (!onMoveFile) return;
+          e.dataTransfer.setData(MOVE_MIME, file.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => setMoveHoverId(null)}
         onClick={(e) => { e.stopPropagation(); applyFileClick(file, e); }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -538,9 +603,12 @@ export function FolderTree({
               : isSelected
                 ? "border-asu-gold bg-helios-line text-helios-text"
                 : "border-transparent text-helios-text hover:bg-helios-panel hover:text-helios-text") +
-            (dropHoverId === node.folder.id ? " ring-1 ring-asu-gold bg-asu-gold/10" : "")
+            (dropHoverId === node.folder.id || moveHoverId === node.folder.id
+              ? " ring-1 ring-asu-gold bg-asu-gold/10"
+              : "")
           }
           style={{ paddingLeft: 6 + depth * 14 }}
+          {...moveTargetHandlers(node.folder.id)}
         >
           {hasContents ? (
             <button
@@ -718,8 +786,9 @@ export function FolderTree({
           (selected === null
             ? "border-asu-gold bg-helios-line text-helios-text"
             : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text") +
-          (dropHoverId === "" ? " ring-1 ring-asu-gold bg-asu-gold/10" : "")
+          (dropHoverId === "" || moveHoverId === "" ? " ring-1 ring-asu-gold bg-asu-gold/10" : "")
         }
+        {...moveTargetHandlers(null)}
       >
         <span className="inline-block w-4 shrink-0" />
         <span>Vault root</span>
