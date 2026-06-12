@@ -517,6 +517,8 @@ export function FolderTree({
           onContextMenu?.({ kind: "files", files: targetFiles }, e.clientX, e.clientY);
         }}
         onKeyDown={(e) => {
+          // Ignore keys from descendants (see FileTable SPACE-EATER guard).
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             applyFileClick(file, e);
@@ -590,6 +592,9 @@ export function FolderTree({
             }
           }}
           onKeyDown={(e) => {
+            // Ignore keys from descendants (chevron button etc. — see
+            // FileTable SPACE-EATER guard).
+            if (e.target !== e.currentTarget) return;
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
               handleRowClick(node);
@@ -775,6 +780,7 @@ export function FolderTree({
           );
         }}
         onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onSelect(null);

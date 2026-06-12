@@ -76,6 +76,30 @@ describe("<FileTable>", () => {
     expect(onSelect).toHaveBeenCalledWith("f1");
   });
 
+  it("SPACE-EATER: row keydown ignores keys from descendants (check-in comment typing)", () => {
+    // The check-in comment modal renders INSIDE the <tr role="button">, whose
+    // Space/Enter handler used to preventDefault every bubbled keypress — so
+    // spaces typed in the comment textarea never landed. The row must only
+    // react to keys pressed on the row itself.
+    const onSelect = vi.fn();
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={files} selected={null} locks={[]} currentUserId="u" onSelect={onSelect} />,
+      ),
+    );
+    // Key event originating from a DESCENDANT (the name span) must be ignored
+    // and NOT preventDefault'd.
+    const nameSpan = screen.getByText("frame.sldprt");
+    const notPrevented = fireEvent.keyDown(nameSpan, { key: " " });
+    expect(notPrevented).toBe(true); // true = preventDefault was NOT called
+    expect(onSelect).not.toHaveBeenCalled();
+    // Key event on the row itself still activates it.
+    const row = nameSpan.closest("tr")!;
+    fireEvent.keyDown(row, { key: " " });
+    expect(onSelect).toHaveBeenCalledWith("f1");
+  });
+
   it("shows 'Locked by me' badge when current user holds the lock", () => {
     const locks = [{ id: "l1", file_id: "f1", user_id: "u", acquired_at: "x", released_at: null, force_released_by: null }];
     render(

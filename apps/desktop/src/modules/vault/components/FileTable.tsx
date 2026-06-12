@@ -371,6 +371,13 @@ export function FileTable({
                 onRowMenu(f, e.clientX, e.clientY);
               }}
               onKeyDown={(e) => {
+                // Only react to keys pressed ON THE ROW ITSELF. The row's
+                // action buttons render modals (check-in comment, confirms) as
+                // DOM descendants of this <tr>, so without this guard every
+                // Space/Enter typed in the comment textarea bubbled here and
+                // got preventDefault'd — users literally could not type spaces
+                // in check-in notes (SPACE-EATER).
+                if (e.target !== e.currentTarget) return;
                 // Keyboard parity with the row's click affordance: Enter/Space
                 // opens the file detail panel. Other keys (Tab etc.) pass
                 // through untouched.
