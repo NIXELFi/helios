@@ -554,8 +554,12 @@ export function BrowseScreen() {
   // target for the tree, runs the sequential import, and reports per-item
   // results for the strip below. On batch completion it refreshes everything
   // (folders may have been created; files added as locked drafts) + rescans.
+  // Root element of this screen — the drop-import listeners attach HERE, not
+  // on window, so they go inert when the Shell hides the Vault module.
+  const browseRootRef = useRef<HTMLDivElement | null>(null);
   const dropImport = useVaultDropImport({
     enabled: canEdit && !!vaultId,
+    containerRef: browseRootRef,
     vaultId: vaultId ?? null,
     folders: folders ?? [],
     selectedFolder,
@@ -665,7 +669,7 @@ export function BrowseScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={browseRootRef} className="flex h-full flex-col">
       {/* SW PDM parity: in auto mode, new local files vault themselves as
           private checked-out drafts — no "add to vault" click. Manual mode
           keeps the explicit banner. */}

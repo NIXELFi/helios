@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
 import { useAddLocalFile, sha256Hex } from "./useAddLocalFile";
 import { folderNamePath, folderPath, sanitizePathSegment } from "./folder-paths";
@@ -17,6 +17,13 @@ interface Options {
   /** Only register the drag-drop listeners while true (Browse mounted +
    *  editor). When false the hook is inert. */
   enabled: boolean;
+  /** The element to listen on — the Browse screen's root. Listeners are
+   *  scoped here (NOT window) because Shell keeps modules mounted-but-hidden:
+   *  window-level listeners kept reacting to drags happening inside OTHER
+   *  modules (PM board/sidebar), which is how the vault's drop layer ended up
+   *  interfering with PM drag-and-drop (CROSS-MODULE-DRAG). A hidden element
+   *  receives no drag events, so this goes inert with the module. */
+  containerRef: RefObject<HTMLElement | null>;
   vaultId: VaultId | null;
   folders: Folder[];
   /** Currently-selected folder — the fallback drop target when the pointer is
@@ -64,6 +71,7 @@ interface DroppedItem {
  */
 export function useVaultDropImport({
   enabled,
+  containerRef,
   vaultId,
   folders,
   selectedFolder,
@@ -100,34 +108,37 @@ export function useVaultDropImport({
 
   useEffect(() => {
     if (!enabled) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     // An OS file drag carries "Files" in dataTransfer.types; internal HTML5
     // drags (board cards, workspace tabs) don't — ignore those entirely so
-    // this hook never interferes with in-app drag-and-drop.
-    function isFileDrag(e: DragEvent): boolean {
-      return Array.from(e.dataTransfer?.types ?? []).includes("Files");
-    }
+    // this hook never interferes with in-app drag-and-drop. Arrow consts (not
+    // hoisted function declarations) so TS narrows `container` inside them.
+    const isFileDrag = (e: DragEvent): boolean =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
-    function onDragOver(e: DragEvent) {
+    const onDragOver = (e: DragEvent) => {
       if (!isFileDrag(e)) return;
-      // preventDefault is what makes the webview a valid drop target — without
-      // it the browser cancels the drop and shows the "not allowed" cursor.
+      // preventDefault is what makes this a valid drop target — without it
+      // the browser cancels the drop and shows the "not allowed" cursor.
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       setDragActive(true);
       setHoverFolderId(resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current));
-    }
+    };
 
-    function onDragLeave(e: DragEvent) {
-      // relatedTarget === null means the pointer left the window entirely
-      // (between in-app elements it points at the element being entered).
-      if (e.relatedTarget === null) {
+    const onDragLeave = (e: DragEvent) => {
+      // Clear when the drag leaves the Browse container entirely
+      // (relatedTarget is the element being entered; null = left the window).
+      const next = e.relatedTarget as Node | null;
+      if (next === null || !container.contains(next)) {
         setHoverFolderId(null);
         setDragActive(false);
       }
-    }
+    };
 
-    function onDrop(e: DragEvent) {
+    const onDrop = (e: DragEvent) => {
       if (!isFileDrag(e)) return;
       e.preventDefault();
       const target = resolveDropFolder(e.clientX, e.clientY, selectedFolderRef.current);
@@ -147,15 +158,15 @@ export function useVaultDropImport({
         }
       }
       void runImport(entries, plainFiles, target);
-    }
+    };
 
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
-    window.addEventListener("drop", onDrop);
+    container.addEventListener("dragover", onDragOver);
+    container.addEventListener("dragleave", onDragLeave);
+    container.addEventListener("drop", onDrop);
     return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
-      window.removeEventListener("drop", onDrop);
+      container.removeEventListener("dragover", onDragOver);
+      container.removeEventListener("dragleave", onDragLeave);
+      container.removeEventListener("drop", onDrop);
       abortRef.current?.abort();
       abortRef.current = null;
     };

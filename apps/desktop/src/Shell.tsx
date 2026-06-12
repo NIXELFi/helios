@@ -55,6 +55,30 @@ function HeliosShell() {
   // every vault even when the user is in Logs/CFD or the app is minimized in the
   // tray. No-ops when signed out. See modules/vault/data/useBridgeSync.
   useBridgeSync();
+
+  // STRAY-DROP GUARD: with dragDropEnabled:false, the webview's default action
+  // for an unhandled drop (a dragged link, text, image, or OS file released
+  // over no drop target) is a FULL-DOCUMENT NAVIGATION — which re-bootstraps
+  // the app back to Logs and reads as a crash. Sidebar view rows hit exactly
+  // this before (see SortableViewItem). preventDefault-ing dragover/drop at
+  // the window level cancels that default for every stray drag, app-wide.
+  // Real drop targets (vault import, PM board/calendar dnd) handle their
+  // events on the elements themselves, which run BEFORE these bubble-phase
+  // listeners — their behavior is unchanged.
+  useEffect(() => {
+    function onDragOver(e: DragEvent) {
+      e.preventDefault();
+    }
+    function onDrop(e: DragEvent) {
+      e.preventDefault();
+    }
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
 

@@ -65,13 +65,17 @@ export function VaultSearch({
   }, [q]);
 
   // Ctrl/Cmd+F focuses the search box. Registered on window so it works from
-  // anywhere on the Browse screen; unbinds with the component.
+  // anywhere on the Browse screen; unbinds with the component. Guarded on
+  // VISIBILITY — the Shell keeps modules mounted-but-hidden, so without the
+  // offsetParent check this stole Ctrl+F while the user was in another module.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        const el = inputRef.current;
+        if (!el || el.offsetParent === null) return; // vault hidden — not ours
         e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        el.focus();
+        el.select();
       }
     }
     window.addEventListener("keydown", onKey);
