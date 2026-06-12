@@ -79,35 +79,6 @@ function HeliosShell() {
       window.removeEventListener("drop", onDrop);
     };
   }, []);
-
-  // DEV-ONLY crash trap: append uncaught errors / rejections / document
-  // unloads (= stray navigations) to a temp log so a "the app just died"
-  // report comes with a stack trace. Remove once the PM drag crash is closed.
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    const log = (kind: string, detail: string) => {
-      void import("@tauri-apps/plugin-fs").then(({ writeTextFile }) =>
-        writeTextFile(
-          "C:/Users/nmurray/AppData/Local/Temp/helios-crash.log",
-          `[${new Date().toISOString()}] ${kind}: ${detail}\n`,
-          { append: true },
-        ).catch(() => {}),
-      );
-    };
-    const onError = (e: ErrorEvent) =>
-      log("error", `${e.message} @ ${e.filename}:${e.lineno}\n${e.error?.stack ?? ""}`);
-    const onRejection = (e: PromiseRejectionEvent) =>
-      log("unhandledrejection", e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack}` : String(e.reason));
-    const onUnload = () => log("beforeunload", `document navigating away from ${location.href}`);
-    window.addEventListener("error", onError);
-    window.addEventListener("unhandledrejection", onRejection);
-    window.addEventListener("beforeunload", onUnload);
-    return () => {
-      window.removeEventListener("error", onError);
-      window.removeEventListener("unhandledrejection", onRejection);
-      window.removeEventListener("beforeunload", onUnload);
-    };
-  }, []);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
 
