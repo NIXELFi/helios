@@ -26,8 +26,11 @@ interface Props {
 
 export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit }: Props) {
   if (!fileId) {
+    // Placeholder panel is hidden on narrow windows — it carries no content,
+    // and the space matters more (SQUEEZE). Selecting a file still shows the
+    // real panel at every width.
     return (
-      <aside className="flex h-full w-80 items-center justify-center border-l border-helios-line bg-helios-base p-4 text-sm text-helios-dim">
+      <aside className="hidden h-full w-72 shrink-0 items-center justify-center border-l border-helios-line bg-helios-base p-4 text-sm text-helios-dim lg:flex xl:w-80">
         Select a file to see its history.
       </aside>
     );
@@ -40,7 +43,7 @@ export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit }: 
 
   if (fileMissing) {
     return (
-      <aside className="flex h-full w-80 flex-col border-l border-helios-line bg-helios-base">
+      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
         <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
           History
         </header>
@@ -109,7 +112,7 @@ function FileDetailLoader({
       )
     : undefined;
   return (
-    <aside className="flex h-full w-80 flex-col border-l border-helios-line bg-helios-base">
+    <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
       <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
         {/* Show the file's name so a stale empty-history selection is
             distinguishable from a real file that simply has no versions. */}

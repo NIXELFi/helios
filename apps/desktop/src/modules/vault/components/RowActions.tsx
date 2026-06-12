@@ -130,7 +130,7 @@ export function CheckOutButton({
       disabled={acquireLock.loading}
       title={err ? `Check-out failed: ${err}` : "Check out this file (lock it for editing)"}
       className={
-        "rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+        "whitespace-nowrap rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
         (err
           ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
@@ -226,7 +226,7 @@ export function CheckInButton({
         disabled={checkIn.loading}
         title={err ? `Check-in failed: ${err}` : "Check in your changes (uploads + releases the lock)"}
         className={
-          "rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "whitespace-nowrap rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
           (err
             ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
@@ -453,7 +453,7 @@ export function GetLatestButton({
       onClick={handleClick}
       disabled={download.loading}
       className={
-        "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+        "whitespace-nowrap rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
         (err
           ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
           : "border-helios-line text-helios-text hover:bg-helios-line")
@@ -536,7 +536,7 @@ export function GetVersionButton({
             : `Download version ${version.version_num} to your local copy (read-only — does not check out or create a new version)`
         }
         className={
-          "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "whitespace-nowrap rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
           (err
             ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
@@ -616,7 +616,7 @@ export function RestoreVersionButton({
             : `Make version ${version.version_num} the new latest (requires the file to be checked out by you; checks it back in with this version's content)`
         }
         className={
-          "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "whitespace-nowrap rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
           (err
             ? "border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"

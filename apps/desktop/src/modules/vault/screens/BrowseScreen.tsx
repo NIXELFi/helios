@@ -663,7 +663,7 @@ export function BrowseScreen() {
       <LocalDeleteBanner />
       <VaultWarningBanner />
       <div className="flex min-h-0 flex-1">
-      <div className="flex w-64 flex-col border-r border-helios-line bg-helios-base">
+      <div className="flex w-56 shrink-0 flex-col border-r border-helios-line bg-helios-base xl:w-64">
         <header className="flex items-center justify-between border-b border-helios-line px-3 py-2">
           <span className="text-xs uppercase tracking-wider text-helios-dim">
             {vault?.name ?? "(no vault)"}
@@ -729,7 +729,10 @@ export function BrowseScreen() {
           {isVaultAdmin && <span className="ml-auto italic">drag files to move</span>}
         </div>
       </div>
-      <div className="flex-1 overflow-auto">
+      {/* min-w-0 lets this flex child SHRINK below its content width — without
+          it a narrow window clipped the toolbar and pushed the detail panel
+          off-screen instead of truncating/wrapping (SQUEEZE). */}
+      <div className="min-w-0 flex-1 overflow-auto">
         {/* selectedFolder === null means "vault root view", not "nothing
             selected" — files at the vault root were previously unreachable
             because the FileTable was gated behind this check. Now we always
@@ -750,7 +753,7 @@ export function BrowseScreen() {
               onPick={jumpToFile}
             />
           </div>
-          <div className="flex items-center justify-end gap-2 border-b border-helios-line px-3 py-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 border-b border-helios-line px-3 py-1.5">
               {vaultFolderPath && autoSyncEnabled && (
                 <VaultSyncSection
                   enabled

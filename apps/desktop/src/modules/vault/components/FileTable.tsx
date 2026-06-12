@@ -320,8 +320,9 @@ export function FileTable({
           <th className="px-2.5 py-2 font-medium">Status</th>
           {/* "Updated", not "Modified" — the Status pill already uses
               "Modified" for local-changes state; this column is the latest
-              check-in time. */}
-          <th className="px-2.5 py-2 font-medium">Updated</th>
+              check-in time. Hidden on narrow panels — Name/Status/Actions are
+              the load-bearing columns and must not be squeezed into wrapping. */}
+          <th className="hidden px-2.5 py-2 font-medium lg:table-cell">Updated</th>
           <th className="px-2.5 py-2 font-medium">Actions</th>
           {onRowMenu && <th className="w-8 px-1 py-2" aria-label="Row menu" />}
           {/* Trailing spacer absorbs slack so Name/Status/Actions cluster on
@@ -368,14 +369,14 @@ export function FileTable({
                     >
                       <path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" />
                     </svg>
-                    <span className="block max-w-[22rem] truncate text-[13px]">{folder.name}</span>
+                    <span className="block max-w-[14rem] xl:max-w-[22rem] truncate text-[13px]">{folder.name}</span>
                   </div>
                 </td>
-                <td className="px-2.5 py-1.5 text-xs text-helios-dim">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-xs text-helios-dim">
                   Folder{count !== undefined ? ` · ${count} file${count === 1 ? "" : "s"}` : ""}
                 </td>
-                <td className="px-2.5 py-1.5 font-mono-num text-xs text-helios-dim">—</td>
-                <td className="px-2.5 py-1.5 text-xs text-helios-dim opacity-0 transition-opacity group-hover:opacity-100">
+                <td className="hidden px-2.5 py-1.5 font-mono-num text-xs text-helios-dim lg:table-cell">—</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-xs text-helios-dim opacity-0 transition-opacity group-hover:opacity-100">
                   Open →
                 </td>
                 {onRowMenu && <td className="w-8 px-1 py-1.5" />}
@@ -498,7 +499,7 @@ export function FileTable({
                       id={`file-row-name-${f.id}`}
                       type="button"
                       title={`Reveal in ${FILE_MANAGER}`}
-                      className="block max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
+                      className="block max-w-[14rem] xl:max-w-[22rem] truncate font-mono-num text-[13px] hover:underline cursor-pointer bg-transparent border-0 p-0 text-left text-helios-text"
                       onClick={(e) => {
                         e.stopPropagation();
                         void revealInExplorer(localMatch.local!.absolutePath);
@@ -507,7 +508,7 @@ export function FileTable({
                       {f.name}
                     </button>
                   ) : (
-                    <span id={`file-row-name-${f.id}`} className="block max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
+                    <span id={`file-row-name-${f.id}`} className="block max-w-[14rem] xl:max-w-[22rem] truncate font-mono-num text-[13px]">{f.name}</span>
                   )}
                 </div>
               </td>
@@ -525,7 +526,7 @@ export function FileTable({
                 </div>
               </td>
               <td
-                className="whitespace-nowrap px-2.5 py-1.5 font-mono-num text-xs text-helios-dim"
+                className="hidden whitespace-nowrap px-2.5 py-1.5 font-mono-num text-xs text-helios-dim lg:table-cell"
                 title={
                   f.latest
                     ? `v${f.latest.version_num}${f.latest.comment ? ` · "${f.latest.comment}"` : ""}`

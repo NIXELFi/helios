@@ -263,7 +263,7 @@ export function WhoHasWhatScreen() {
                       <tr key={lock.id} className="border-t border-helios-line">
                         <td className="px-3 py-2 text-helios-text">
                           {path ? (
-                            <span title={path}>
+                            <span className="block max-w-[18rem] truncate xl:max-w-[30rem]" title={path}>
                               {path}
                               {file?.deleted_at && (
                                 <span className="ml-1.5 text-xs text-helios-dim">(in recycle bin)</span>

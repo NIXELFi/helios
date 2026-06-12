@@ -95,7 +95,7 @@ export function VaultSearch({
   }
 
   return (
-    <div ref={rootRef} className="relative w-64 shrink-0">
+    <div ref={rootRef} className="relative w-40 shrink-0 transition-[width] md:w-52 xl:w-64">
       <div className="flex items-center gap-1.5 rounded border border-helios-line bg-helios-base px-2 focus-within:border-asu-gold/70 focus-within:ring-1 focus-within:ring-asu-gold/40">
         <svg aria-hidden width="12" height="12" viewBox="0 0 16 16" fill="none" className="shrink-0 text-helios-dim">
           <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />

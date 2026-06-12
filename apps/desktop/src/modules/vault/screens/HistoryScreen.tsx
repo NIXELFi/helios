@@ -72,7 +72,7 @@ export function HistoryScreen() {
           <FolderTree folders={folders} selected={folderId} onSelect={setFolderId} />
         ) : null}
       </div>
-      <div className="w-72 border-r border-helios-line overflow-auto">
+      <div className="w-60 shrink-0 overflow-auto border-r border-helios-line xl:w-72">
         {!folderId ? (
           <div className="p-6 text-sm text-helios-dim">Pick a folder.</div>
         ) : filesLoading && !files ? (
@@ -91,7 +91,7 @@ export function HistoryScreen() {
           />
         ) : null}
       </div>
-      <div className="flex-1 overflow-auto">
+      <div className="min-w-0 flex-1 overflow-auto">
         {!fileId ? (
           <div className="p-6 text-sm text-helios-dim">Pick a file to see its history.</div>
         ) : versionsLoading && !versions ? (
