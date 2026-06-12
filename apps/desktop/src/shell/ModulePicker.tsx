@@ -11,6 +11,8 @@ import {
   type TablerIcon,
 } from "@tabler/icons-react";
 import { UpdatesPill } from "../components/UpdatesPill";
+import { PresencePanel } from "./PresencePanel";
+import type { PresenceUser } from "./useHeliosPresence";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 
@@ -92,6 +94,10 @@ interface Props {
    *  is signed in. While loading we suppress the disabled "Sign in to use
    *  Vault" presentation so a signed-in user doesn't see it flash. */
   authLoading?: boolean;
+  /** Live "who's on Helios" roster. Provided ONLY for admins/owners (the
+   *  Shell gates it); null/undefined for everyone else, which hides the panel
+   *  entirely. */
+  presence?: { users: PresenceUser[]; currentUserId: string | null } | null;
 }
 
 export function ModulePicker(props: Props) {
@@ -112,6 +118,7 @@ export function ModulePicker(props: Props) {
     pmEnabled,
     gamesEnabled,
     authLoading = false,
+    presence = null,
   } = props;
   // While auth is still resolving, don't render Vault as disabled — a returning
   // signed-in user would otherwise see "Sign in to use Vault" flash before
@@ -219,6 +226,16 @@ export function ModulePicker(props: Props) {
       </div>
 
       <div className="flex-1" />
+
+      {/* Admin/owner-only live presence roster. Sits just above the user pill
+          so "who's on Helios" clusters with your own identity. */}
+      {presence && (
+        <PresencePanel
+          users={presence.users}
+          currentUserId={presence.currentUserId}
+          railCollapsed={collapsed}
+        />
+      )}
 
       <div className="border-t border-helios-line p-2">
         <UserPill

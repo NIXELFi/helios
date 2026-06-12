@@ -149,10 +149,15 @@ export function useMyRole(): string | null {
     if (!client || !userId) return;
     let on = true;
     (async () => {
+      // NOT .maybeSingle(): per-vault roles (20260531000000) mean a user can
+      // hold several rows (a global one plus per-vault ones), and maybeSingle
+      // ERRORS on >1 row — which would blank the role for exactly the
+      // owners/admins who tend to hold multiple. Fetch all rows and resolve
+      // the EFFECTIVE role: the global (vault_id null) row if present, else
+      // the most privileged.
       const { data, error } = await (client.from("user_roles") as any)
-        .select("role")
-        .eq("user_id", userId)
-        .maybeSingle();
+        .select("role,vault_id")
+        .eq("user_id", userId);
       if (!on) return;
       if (error) {
         // Degrade to "no role" rather than throwing; log for diagnosis.
@@ -160,7 +165,11 @@ export function useMyRole(): string | null {
         setRole(null);
         return;
       }
-      setRole((data?.role as string) ?? null);
+      const rows = (data ?? []) as Array<{ role: string; vault_id: string | null }>;
+      const RANK: Record<string, number> = { owner: 4, admin: 3, editor: 2, viewer: 1 };
+      const global = rows.find((r) => r.vault_id == null);
+      const best = rows.slice().sort((a, b) => (RANK[b.role] ?? 0) - (RANK[a.role] ?? 0))[0];
+      setRole((global?.role ?? best?.role) ?? null);
     })();
     return () => { on = false; };
   }, [client, userId]);

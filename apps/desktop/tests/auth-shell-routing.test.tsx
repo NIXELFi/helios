@@ -52,11 +52,16 @@ vi.mock("@helios/auth", async () => {
           signInWithPassword: vi.fn(),
         },
         // useMyRole queries user_roles on sign-in; route through roleResolver.
+        // It no longer uses .maybeSingle() (that errors for multi-role users) —
+        // it awaits .eq() and reads an ARRAY of rows. Adapt the single-role
+        // resolver into that array shape so the existing test bodies stand.
         from: () => ({
           select: () => ({
-            eq: (_col: string, userId: string) => ({
-              maybeSingle: () => roleResolver(userId),
-            }),
+            eq: (_col: string, userId: string) =>
+              roleResolver(userId).then((r) => ({
+                data: r.data ? [{ role: r.data.role, vault_id: null }] : [],
+                error: r.error,
+              })),
           }),
         }),
       } as any),

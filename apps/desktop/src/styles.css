@@ -25,11 +25,27 @@ body { background: #0E0E10; color: #D8DCE2; font-family: Inter, system-ui, sans-
 }
 .helios-bar-slide { animation: helios-bar-slide 1.4s linear infinite; }
 
+/* "Who's on Helios" presence panel — staggered roster reveal + the live
+   pulse ring on the status dot. Decorative; disabled under reduce-motion. */
+@keyframes helios-presence-in {
+  from { opacity: 0; transform: translateX(-5px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.helios-presence-row { animation: helios-presence-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes helios-live-ping {
+  0%        { transform: scale(1);   opacity: 0.55; }
+  75%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.helios-live-ring { animation: helios-live-ping 1.9s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
 /* Respect the user's OS-level "reduce motion" setting. Animations are
    decorative here — the progress bar fills regardless, and the UpdatesPill
    "available" state is still legible without the pulse. */
 @media (prefers-reduced-motion: reduce) {
   .helios-bar-slide { animation: none; }
+  .helios-presence-row { animation: none; }
+  .helios-live-ring { animation: none; opacity: 0; }
   /* Tailwind's animate-pulse on UpdatesPill etc. */
   .animate-pulse { animation: none !important; }
   /* Generic transitions on hover/focus stay; only continuous animations are

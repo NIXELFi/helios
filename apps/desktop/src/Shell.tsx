@@ -9,6 +9,7 @@ import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
+import { useHeliosPresence } from "./shell/useHeliosPresence";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
@@ -163,6 +164,19 @@ function HeliosShell() {
   const userLabel = user ? userDisplayName(user) : null;
   const userSubteamLabel = user ? userSubteam(user) : null;
 
+  // App-wide presence: track everyone signed into Helios (every module, not
+  // just PM/Vault) via one shared realtime channel. The roster is only
+  // surfaced to admins/owners — but we always TRACK (so an admin sees everyone,
+  // including non-admins) and only gate the VIEW.
+  const presenceRoster = useHeliosPresence({
+    client,
+    userId: user?.id ?? null,
+    name: userLabel ?? "Unknown",
+    subteam: userSubteamLabel,
+    module: active,
+  });
+  const canSeePresence = myRole === "owner" || myRole === "admin";
+
   return (
     <div className="flex h-screen w-screen">
       <ModulePicker
@@ -182,6 +196,9 @@ function HeliosShell() {
         pmEnabled={pmEnabled}
         gamesEnabled={gamesEnabled}
         authLoading={authLoading}
+        presence={
+          canSeePresence ? { users: presenceRoster, currentUserId: user?.id ?? null } : null
+        }
       />
       <main className="relative min-w-0 flex-1">
         {/* Each module gets its own boundary so a crash in one (an unexpected
