@@ -5,6 +5,7 @@ import { useForceUnlock } from "../data/useForceUnlock";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFilesByIds, type LockFileRow } from "../data/useFilesByIds";
+import { useActiveCheckouts } from "../data/useActiveCheckouts";
 import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { folderPath } from "../data/folder-paths";
@@ -49,6 +50,11 @@ interface LockRow {
   lock: Lock;
   file: LockFileRow | null;
   path: string | null;
+  /** The file is another user's unpublished draft — the name is private
+   *  (files_read draft RLS); only the lock's existence/holder is visible. */
+  nameHidden?: boolean;
+  /** Checked out before its first check-in (published_at null). */
+  isDraft?: boolean;
 }
 
 interface VaultGroup {
@@ -64,6 +70,14 @@ export function WhoHasWhatScreen() {
   // "Just mine" chip — one click to audit your own checkouts.
   const [mineOnly, setMineOnly] = useState(false);
   const { activeVaultId, vaults } = useActiveVault();
+  // Preferred source: the pdm_list_active_checkouts definer RPC, which joins
+  // locks→files→vaults server-side so other users' DRAFT checkouts resolve
+  // (files_read draft privacy hides those rows from direct reads — the
+  // client-side join below can't see them and used to dump every draft into
+  // an "Other vaults" bucket). Falls back to the legacy join when the RPC
+  // isn't deployed yet.
+  const checkouts = useActiveCheckouts();
+  const rpcMode = checkouts.supported === true;
   const { data: locks, loading, error, refetch } = useLocks();
   // Resolve every lock's file by id — across ALL vaults, deleted included —
   // instead of paging the active vault's whole file list. This is what lets
@@ -145,10 +159,55 @@ export function WhoHasWhatScreen() {
       return a.vaultName.localeCompare(b.vaultName);
     });
     if (unresolved.length > 0) {
-      out.push({ vaultId: null, vaultName: "Other vaults", rows: unresolved });
+      // Without the RPC we can't distinguish a draft (name private) from a
+      // vault we're not a member of — label the bucket honestly.
+      out.push({ vaultId: null, vaultName: "Private drafts or other vaults", rows: unresolved });
     }
     return out;
   }, [locks, fileById, folders, vaultNameById, activeVaultId]);
+
+  // RPC-mode groups: every row arrives pre-resolved with its vault name; a
+  // null file_name means "another user's draft" (render a private-draft
+  // placeholder, never an opaque hex id).
+  const rpcGroups = useMemo<VaultGroup[]>(() => {
+    if (!rpcMode || !checkouts.data) return [];
+    const byVault = new Map<string, VaultGroup>();
+    for (const r of checkouts.data) {
+      const lock: Lock = {
+        id: r.lock_id,
+        file_id: r.file_id,
+        user_id: r.user_id,
+        acquired_at: r.acquired_at,
+        released_at: null,
+        force_released_by: null,
+      } as Lock;
+      const dir = r.file_name && folders ? folderPath(r.folder_id, folders) : "";
+      const path = r.file_name ? (dir ? `${dir}/${r.file_name}` : r.file_name) : null;
+      const row: LockRow = {
+        lock,
+        file: {
+          id: r.file_id,
+          vault_id: r.vault_id,
+          folder_id: r.folder_id,
+          name: r.file_name ?? "",
+          deleted_at: r.deleted_at,
+        },
+        path,
+        nameHidden: r.file_name === null,
+        isDraft: r.is_draft,
+      };
+      const g = byVault.get(r.vault_id) ?? { vaultId: r.vault_id, vaultName: r.vault_name, rows: [] };
+      g.rows.push(row);
+      byVault.set(r.vault_id, g);
+    }
+    const out = [...byVault.values()];
+    out.sort((a, b) => {
+      if (a.vaultId === activeVaultId) return -1;
+      if (b.vaultId === activeVaultId) return 1;
+      return a.vaultName.localeCompare(b.vaultName);
+    });
+    return out;
+  }, [rpcMode, checkouts.data, folders, activeVaultId]);
 
   function requestForceUnlock(lockId: string) {
     setReasonFor(lockId);
@@ -160,35 +219,47 @@ export function WhoHasWhatScreen() {
     if (!lockId || reason.trim() === "") return;
     setUnlockingId(lockId);
     // Pass the lock's file_id so the optimistic overlay can clear its pill.
-    const fileId = locks?.find((l) => l.id === lockId)?.file_id ?? "";
+    const fileId = rpcMode
+      ? checkouts.data?.find((r) => r.lock_id === lockId)?.file_id ?? ""
+      : locks?.find((l) => l.id === lockId)?.file_id ?? "";
     const ok = await forceUnlock.run(lockId, fileId, reason.trim());
     setUnlockingId(null);
-    if (ok) refetch();
+    if (ok) {
+      refetch();
+      checkouts.refetch();
+    }
   }
 
   // Surface a degraded path-resolution context (files/folders failed to load)
-  // so paths don't silently fall back to short ids with no explanation.
-  const contextError = filesError ?? foldersError;
-  // Hold the loading state until the locks' files are resolved too — rendering
-  // locks before resolution is what produced the open-flash. `lockFiles ===
-  // null` covers the one-commit gap between the locks landing and
-  // useFilesByIds' effect flipping its own loading flag — without it the rows
-  // flash under "Other vaults" for a frame, then remount under their real
-  // vault (which also detaches any element a test or user just targeted).
-  // A files error ends the wait so the screen can degrade to short ids.
+  // so paths don't silently fall back to short ids with no explanation. In
+  // RPC mode only the folders fetch feeds path display.
+  const contextError = rpcMode ? foldersError : (filesError ?? foldersError);
+  // The list source: RPC groups when the server supports it, else the legacy
+  // client-side join.
+  const sourceGroups = rpcMode ? rpcGroups : groups;
+  const listError = rpcMode ? checkouts.error : error;
+  // Hold the loading state until the rows are fully resolved — rendering
+  // locks before resolution is what produced the open-flash. While the RPC
+  // support probe is in flight (supported === null) we also hold, so the
+  // screen never flashes the legacy grouping before switching to RPC rows.
+  // In legacy mode, `lockFiles === null` covers the one-commit gap between
+  // the locks landing and useFilesByIds' effect flipping its loading flag.
   const resolving =
-    loading ||
-    (lockFileIds.length > 0 && !filesError && (filesLoading || lockFiles === null));
+    checkouts.supported === null ||
+    (rpcMode
+      ? checkouts.data === null && !checkouts.error
+      : loading ||
+        (lockFileIds.length > 0 && !filesError && (filesLoading || lockFiles === null)));
   // Apply the "just mine" chip AFTER grouping so the group structure (and
   // vault ordering) stays stable while toggling.
   const visibleGroups = useMemo(() => {
-    if (!mineOnly) return groups;
+    if (!mineOnly) return sourceGroups;
     const me = user?.id ?? "";
-    return groups
+    return sourceGroups
       .map((g) => ({ ...g, rows: g.rows.filter((r) => r.lock.user_id === me) }))
       .filter((g) => g.rows.length > 0);
-  }, [groups, mineOnly, user]);
-  const totalLocks = locks?.length ?? 0;
+  }, [sourceGroups, mineOnly, user]);
+  const totalLocks = rpcMode ? (checkouts.data?.length ?? 0) : (locks?.length ?? 0);
   const visibleCount = visibleGroups.reduce((n, g) => n + g.rows.length, 0);
 
   return (
@@ -196,7 +267,7 @@ export function WhoHasWhatScreen() {
       <header className="flex items-center gap-3 border-b border-helios-line px-4 py-3 text-helios-dim">
         <span>
           Active checkouts — all vaults
-          {!resolving && !error && (
+          {!resolving && !listError && (
             <span className="ml-2 font-mono-num text-xs">({mineOnly ? `${visibleCount} of ${totalLocks}` : totalLocks})</span>
           )}
         </span>
@@ -230,8 +301,8 @@ export function WhoHasWhatScreen() {
       <div className="p-2">
         {resolving ? (
           <div className="p-4 text-sm text-helios-dim">Loading…</div>
-        ) : error ? (
-          <div className="p-4 text-sm text-[#EF5350]">{error.message}</div>
+        ) : listError ? (
+          <div className="p-4 text-sm text-[#EF5350]">{listError.message}</div>
         ) : visibleCount === 0 ? (
           <div className="p-4 text-sm text-helios-dim">
             {mineOnly && totalLocks > 0
@@ -257,7 +328,7 @@ export function WhoHasWhatScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {g.rows.map(({ lock, file, path }) => {
+                  {g.rows.map(({ lock, file, path, nameHidden, isDraft }) => {
                     const holderName = userById.get(lock.user_id);
                     return (
                       <tr key={lock.id} className="border-t border-helios-line">
@@ -265,9 +336,24 @@ export function WhoHasWhatScreen() {
                           {path ? (
                             <span className="block max-w-[18rem] truncate xl:max-w-[30rem]" title={path}>
                               {path}
+                              {isDraft && (
+                                <span
+                                  className="ml-1.5 rounded bg-asu-gold/15 px-1 text-[10px] uppercase tracking-wide text-asu-gold"
+                                  title="Checked out before its first check-in — not yet visible to the team"
+                                >
+                                  draft
+                                </span>
+                              )}
                               {file?.deleted_at && (
                                 <span className="ml-1.5 text-xs text-helios-dim">(in recycle bin)</span>
                               )}
+                            </span>
+                          ) : nameHidden ? (
+                            <span
+                              className="text-xs italic text-helios-dim"
+                              title="An unpublished draft — the file name is visible only to its creator and vault admins"
+                            >
+                              Private draft
                             </span>
                           ) : (
                             <span className="font-mono-num text-xs text-helios-dim" title={lock.file_id}>

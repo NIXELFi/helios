@@ -33,6 +33,9 @@ function mockClient(
     filesHang?: boolean;
     filesError?: { message: string };
     foldersError?: { message: string };
+    /** Rows for pdm_list_active_checkouts. Omitted = RPC not deployed
+     *  (PGRST202), which exercises the legacy client-side join. */
+    checkouts?: any[];
   } = {},
 ): SupabaseClient {
   const {
@@ -44,6 +47,7 @@ function mockClient(
     filesHang = false,
     filesError,
     foldersError,
+    checkouts,
   } = opts;
   return {
     auth: {
@@ -94,6 +98,14 @@ function mockClient(
       return { select: () => Promise.resolve({ data: [], error: null }) };
     },
     rpc: (name: string) => {
+      if (name === "pdm_list_active_checkouts") {
+        return checkouts !== undefined
+          ? Promise.resolve({ data: checkouts, error: null })
+          : Promise.resolve({
+              data: null,
+              error: { code: "PGRST202", message: "Could not find the function pdm.pdm_list_active_checkouts" },
+            });
+      }
       if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
       if (name === "pdm_admin_list_users") {
         // Non-admins get a raised error from the RPC; admins get the list.
@@ -196,9 +208,9 @@ describe("<WhoHasWhatScreen>", () => {
     expect(screen.queryByText(/nothing checked out/i)).toBeNull();
   });
 
-  it("renders a lock whose file can't be resolved under 'Other vaults' with a short id", async () => {
-    // RLS hides files from vaults the viewer can't read; the checkout itself
-    // must still be visible rather than silently dropped.
+  it("LEGACY: a lock whose file can't be resolved lands under 'Private drafts or other vaults'", async () => {
+    // Pre-RPC servers can't distinguish a private draft from a foreign vault;
+    // the checkout must still be visible rather than silently dropped.
     const locks = [lock("l1", "FILEAAAA-1111-2222-3333-444455556666", "u-x")];
     render(
       <SupabaseAuthProvider client={mockClient(locks, { files: [] })}>
@@ -206,8 +218,57 @@ describe("<WhoHasWhatScreen>", () => {
       </SupabaseAuthProvider>,
     );
     expect(await screen.findByText("FILEAAAA")).toBeInTheDocument();
-    expect(screen.getByText("Other vaults")).toBeInTheDocument();
+    expect(screen.getByText("Private drafts or other vaults")).toBeInTheDocument();
     expect(screen.queryByText(/nothing checked out/i)).toBeNull();
+  });
+
+  it("RPC: resolves draft checkouts — named drafts get a tag, foreign drafts a private placeholder", async () => {
+    // The pdm_list_active_checkouts RPC resolves locks server-side, so draft
+    // checkouts group under their REAL vault instead of "Other vaults"
+    // (the regression this RPC exists to fix: files_read draft privacy hid
+    // those rows from the client-side join).
+    const checkouts = [
+      {
+        lock_id: "l1", file_id: "f1", file_name: "Electronics Rack.SLDPRT",
+        vault_id: "v1", vault_name: "SDM27", folder_id: null,
+        user_id: "u-a", acquired_at: new Date().toISOString(), is_draft: true, deleted_at: null,
+      },
+      {
+        lock_id: "l2", file_id: "f2", file_name: null, // someone else's draft, name redacted
+        vault_id: "v1", vault_name: "SDM27", folder_id: null,
+        user_id: "u-b", acquired_at: new Date().toISOString(), is_draft: true, deleted_at: null,
+      },
+      {
+        lock_id: "l3", file_id: "f3", file_name: "frame.sldprt",
+        vault_id: "v2", vault_name: "SDM26", folder_id: null,
+        user_id: "u-c", acquired_at: new Date().toISOString(), is_draft: false, deleted_at: null,
+      },
+    ];
+    render(
+      <SupabaseAuthProvider client={mockClient([], { checkouts })}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    // Real vault groups, no "Other vaults" bucket.
+    expect(await screen.findByText("SDM27")).toBeInTheDocument();
+    expect(screen.getByText("SDM26")).toBeInTheDocument();
+    expect(screen.queryByText(/other vaults/i)).toBeNull();
+    // Named draft shows its name + a draft tag.
+    expect(screen.getByText("Electronics Rack.SLDPRT")).toBeInTheDocument();
+    expect(screen.getByText("draft")).toBeInTheDocument();
+    // Redacted draft shows the private placeholder, not a hex id.
+    expect(screen.getByText("Private draft")).toBeInTheDocument();
+    // Published file renders normally.
+    expect(screen.getByText("frame.sldprt")).toBeInTheDocument();
+  });
+
+  it("RPC: empty result shows the empty state", async () => {
+    render(
+      <SupabaseAuthProvider client={mockClient([], { checkouts: [] })}>
+        <WhoHasWhatScreen />
+      </SupabaseAuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText(/nothing checked out/i)).toBeInTheDocument());
   });
 
   it("labels a soft-deleted locked file instead of dropping it", async () => {
