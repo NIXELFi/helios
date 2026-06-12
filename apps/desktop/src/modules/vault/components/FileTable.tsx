@@ -54,6 +54,16 @@ interface Props {
    * about right-click.
    */
   onRowMenu?: (file: VaultFile, x: number, y: number) => void;
+  /**
+   * Direct subfolders of the current view, rendered as navigable rows ABOVE
+   * the files (file-manager convention). Without these, a folder containing
+   * only nested folders showed the "No files in this folder" empty state,
+   * which read as a dead end.
+   */
+  childFolders?: Folder[];
+  onOpenFolder?: (id: string) => void;
+  /** Recursive file count per folder id, for the subfolder rows' detail. */
+  fileCountByFolder?: Map<string, number>;
 }
 
 /** Compact relative time for the Modified column ("3h ago", "2d ago"). */
@@ -272,6 +282,9 @@ export function FileTable({
   downloadMode = "auto",
   openInSw,
   onRowMenu,
+  childFolders = [],
+  onOpenFolder,
+  fileCountByFolder,
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
@@ -318,7 +331,59 @@ export function FileTable({
         </tr>
       </thead>
       <tbody>
-        {files.length === 0 && (
+        {[...childFolders]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((folder) => {
+            const count = fileCountByFolder?.get(folder.id);
+            return (
+              <tr
+                key={`folder-${folder.id}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open folder ${folder.name}`}
+                onClick={() => onOpenFolder?.(folder.id)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenFolder?.(folder.id);
+                  }
+                }}
+                className="group cursor-pointer border-b border-helios-line/60 outline-none transition-colors hover:bg-helios-panel/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
+              >
+                {hasMultiSelect && <td className="w-10 px-3 py-2" />}
+                <td className="border-l-[3px] border-transparent px-2.5 py-1.5 text-helios-text">
+                  <div className="flex items-center gap-2">
+                    <svg
+                      aria-hidden
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      className="shrink-0 text-asu-gold/80"
+                      fill="currentColor"
+                      fillOpacity="0.7"
+                      stroke="currentColor"
+                      strokeWidth="0.6"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M2 4a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" />
+                    </svg>
+                    <span className="block max-w-[22rem] truncate text-[13px]">{folder.name}</span>
+                  </div>
+                </td>
+                <td className="px-2.5 py-1.5 text-xs text-helios-dim">
+                  Folder{count !== undefined ? ` · ${count} file${count === 1 ? "" : "s"}` : ""}
+                </td>
+                <td className="px-2.5 py-1.5 font-mono-num text-xs text-helios-dim">—</td>
+                <td className="px-2.5 py-1.5 text-xs text-helios-dim opacity-0 transition-opacity group-hover:opacity-100">
+                  Open →
+                </td>
+                {onRowMenu && <td className="w-8 px-1 py-1.5" />}
+                <td aria-hidden />
+              </tr>
+            );
+          })}
+        {files.length === 0 && childFolders.length === 0 && (
           <tr>
             <td
               colSpan={(hasMultiSelect ? 6 : 5) + (onRowMenu ? 1 : 0)}

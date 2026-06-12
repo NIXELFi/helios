@@ -76,6 +76,47 @@ describe("<FileTable>", () => {
     expect(onSelect).toHaveBeenCalledWith("f1");
   });
 
+  it("shows navigable subfolder rows instead of the empty state when a folder has only nested folders", () => {
+    const onOpenFolder = vi.fn();
+    const childFolders = [
+      { id: "sub-b", vault_id: "v", parent_id: "f-parent", name: "Brakes", created_at: "x" },
+      { id: "sub-a", vault_id: "v", parent_id: "f-parent", name: "Aero", created_at: "x" },
+    ] as any[];
+    render(
+      wrap(
+        mockClient(),
+        <FileTable
+          files={[]}
+          selected={null}
+          locks={[]}
+          currentUserId="u"
+          onSelect={() => {}}
+          childFolders={childFolders}
+          onOpenFolder={onOpenFolder}
+          fileCountByFolder={new Map([["sub-a", 3], ["sub-b", 0]])}
+        />,
+      ),
+    );
+    // No dead-end empty state — the subfolders render as rows (sorted).
+    expect(screen.queryByText(/no files in this folder/i)).toBeNull();
+    expect(screen.getByText("Aero")).toBeInTheDocument();
+    expect(screen.getByText("Brakes")).toBeInTheDocument();
+    expect(screen.getByText("Folder · 3 files")).toBeInTheDocument();
+    // Clicking a folder row navigates into it.
+    fireEvent.click(screen.getByText("Aero"));
+    expect(onOpenFolder).toHaveBeenCalledWith("sub-a");
+  });
+
+  it("still shows the empty state when there are neither files nor subfolders", () => {
+    render(
+      wrap(
+        mockClient(),
+        <FileTable files={[]} selected={null} locks={[]} currentUserId="u" onSelect={() => {}} childFolders={[]} />,
+      ),
+    );
+    expect(screen.getByText(/no files in this folder/i)).toBeInTheDocument();
+  });
+
   it("SPACE-EATER: row keydown ignores keys from descendants (check-in comment typing)", () => {
     // The check-in comment modal renders INSIDE the <tr role="button">, whose
     // Space/Enter handler used to preventDefault every bubbled keypress — so

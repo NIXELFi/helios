@@ -277,8 +277,10 @@ describe("<BrowseScreen>", () => {
     // The folder name renders in the tree row. (The expand chevron is a
     // separate button whose aria-label also contains "chassis", so target the
     // name text node directly rather than an ambiguous role+name query.)
-    await waitFor(() => expect(screen.getByText("chassis")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("chassis"));
+    // "chassis" renders in the tree AND as a subfolder row in the file table
+    // (root view) — click the first occurrence; both navigate into the folder.
+    await waitFor(() => expect(screen.getAllByText("chassis").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText("chassis")[0]!);
     await waitFor(() => expect(screen.getAllByText("frame.sldprt").length).toBeGreaterThan(0));
   });
 
@@ -364,8 +366,10 @@ describe("<BrowseScreen>", () => {
       </SupabaseAuthProvider>,
     );
     // Open the chassis folder and select its file via the row checkbox.
-    await waitFor(() => expect(screen.getByText("chassis")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("chassis"));
+    // "chassis" renders in the tree AND as a subfolder row in the file table
+    // (root view) — click the first occurrence; both navigate into the folder.
+    await waitFor(() => expect(screen.getAllByText("chassis").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText("chassis")[0]!);
     await waitFor(() => expect(screen.getByLabelText("Select frame.sldprt")).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText("Select frame.sldprt"));
     // The bulk action bar surfaces the live selection count.

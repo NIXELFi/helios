@@ -586,6 +586,37 @@ export function BrowseScreen() {
     [allFiles, vaultId, moveFile, vaultFolderPath, folders, vault, refetchAllFiles, refetchFiles, rescan],
   );
 
+  // Subfolders of the current view, shown as navigable rows in the file table
+  // (file-manager convention) — a folder of folders is not a dead end.
+  const childFolders = useMemo(
+    () => (folders ?? []).filter((f) => f.parent_id === selectedFolder),
+    [folders, selectedFolder],
+  );
+  // Recursive file count per folder for the subfolder rows' "Folder · N files".
+  const fileCountByFolder = useMemo(() => {
+    const direct = new Map<string, number>();
+    for (const f of allFiles ?? []) {
+      if (f.folder_id) direct.set(f.folder_id, (direct.get(f.folder_id) ?? 0) + 1);
+    }
+    const byParent = new Map<string | null, string[]>();
+    for (const f of folders ?? []) {
+      const arr = byParent.get(f.parent_id) ?? [];
+      arr.push(f.id);
+      byParent.set(f.parent_id, arr);
+    }
+    const total = new Map<string, number>();
+    function count(id: string): number {
+      const cached = total.get(id);
+      if (cached !== undefined) return cached;
+      let n = direct.get(id) ?? 0;
+      for (const child of byParent.get(id) ?? []) n += count(child);
+      total.set(id, n);
+      return n;
+    }
+    for (const f of folders ?? []) count(f.id);
+    return total;
+  }, [allFiles, folders]);
+
   // First-run onboarding: a brand-new vault (no folders, no files) gets a
   // 3-step walkthrough instead of a bare empty table.
   const vaultIsEmpty =
@@ -900,6 +931,9 @@ export function BrowseScreen() {
                   onRowMenu={(f, x, y) =>
                     handleTreeContextMenu({ kind: "files", files: [f] }, x, y)
                   }
+                  childFolders={childFolders}
+                  onOpenFolder={(id) => setSelectedFolder(id)}
+                  fileCountByFolder={fileCountByFolder}
                 />
               </>
             )}
