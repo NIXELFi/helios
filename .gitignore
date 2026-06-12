@@ -51,6 +51,10 @@ test-results/
 
 # Supabase local secrets
 infra/pdm-supabase/.env
+infra/telemetry-supabase/.env
+
+# Telemetry bench run output (a committed example report lives in docs/)
+bench-results/
 
 # Local Claude config
 .claude/
