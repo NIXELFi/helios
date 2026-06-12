@@ -17,6 +17,7 @@ import { formatDistanceToNow, parseISO } from "date-fns";
 import { useMemo, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { usePmStore } from "@pm/lib/pmStore";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import {
   ActivityFilterBar,
   activityFiltersActive,
@@ -52,6 +53,7 @@ export interface ActivityFeedClientProps {
 }
 
 export function ActivityFeedClient({ teamSlug = null }: ActivityFeedClientProps) {
+  const scrollMemRef = useScrollMemory(`activity:${teamSlug ?? "__project__"}`);
   const activity = usePmStore((s) => s.activity);
   const subteams = usePmStore((s) => s.subteams);
   const users = usePmStore((s) => s.users);
@@ -95,7 +97,7 @@ export function ActivityFeedClient({ teamSlug = null }: ActivityFeedClientProps)
         onClear={clearFilters}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      <div ref={scrollMemRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         {filtered.length === 0 ? (
           <div className="rounded-md border border-helios-line bg-helios-panel p-8 text-center text-helios-dim">
             {filtersActive

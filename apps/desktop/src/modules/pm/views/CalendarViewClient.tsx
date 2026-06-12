@@ -76,6 +76,7 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 
 const FALLBACK_COLOR = "#6B7280";
 
@@ -145,6 +146,9 @@ export function CalendarViewClient({
   teamSlug = null,
   manufacturingOnly = false,
 }: CalendarViewClientProps) {
+  const scrollMemRef = useScrollMemory(
+    `calendar${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`,
+  );
   const tasks = usePmStore((s) => s.tasks);
   const milestones = usePmStore((s) => s.milestones);
   const events = usePmStore((s) => s.events);
@@ -571,7 +575,7 @@ export function CalendarViewClient({
         />
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+      <div ref={scrollMemRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
         {mode === "year" ? (
           <YearOverview
             anchor={anchor}

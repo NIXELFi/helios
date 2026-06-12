@@ -50,6 +50,7 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 
 type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
@@ -181,6 +182,9 @@ export interface GanttViewClientProps {
 }
 
 export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: GanttViewClientProps) {
+  const scrollMemRef = useScrollMemory(
+    `gantt${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`,
+  );
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const milestones = usePmStore((s) => s.milestones);
@@ -562,7 +566,14 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         </span>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+      <div
+        // Compose the wheel-zoom listener ref with scroll-position memory.
+        ref={(node) => {
+          scrollRef(node);
+          scrollMemRef(node);
+        }}
+        className="min-h-0 flex-1 overflow-auto"
+      >
         <div className="flex">
           <div className="sticky left-0 z-30 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
             <div

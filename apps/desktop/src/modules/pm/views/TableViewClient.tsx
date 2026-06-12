@@ -26,6 +26,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { useEffect, useMemo, useState } from "react";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
@@ -78,6 +79,9 @@ export interface TableViewClientProps {
 }
 
 export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
+  // Remember the scroll position per scope so coming back to the table (from
+  // another view or a task detail) lands where the user left off.
+  const scrollMemRef = useScrollMemory(`table:${teamSlug ?? "__project__"}`);
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const subsystems = usePmStore((s) => s.subsystems);
@@ -375,7 +379,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         onClear={() => updateUrl(EMPTY_FILTERS, sort)}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+      <div ref={scrollMemRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
         <div className="overflow-x-auto rounded-md border border-helios-line bg-helios-panel">
           <table className="w-full text-left text-sm text-helios-text">
             <thead className="border-b border-helios-line text-helios-dim">

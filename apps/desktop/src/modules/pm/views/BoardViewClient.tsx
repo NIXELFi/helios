@@ -22,6 +22,7 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { useEffect, useMemo, useState } from "react";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
@@ -66,6 +67,8 @@ export interface BoardViewClientProps {
 }
 
 export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
+  // Remember the board's scroll position (both axes) per scope.
+  const scrollMemRef = useScrollMemory(`board:${teamSlug ?? "__project__"}`);
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const subsystems = usePmStore((s) => s.subsystems);
@@ -223,7 +226,7 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         onClear={() => updateUrl(EMPTY_FILTERS)}
       />
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
+      <div ref={scrollMemRef} className="min-h-0 flex-1 overflow-auto px-6 py-6">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

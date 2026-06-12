@@ -17,6 +17,7 @@ import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
 import { SubsystemEditor } from "@pm/components/SubsystemEditor";
 import { scopeTasksToSubteam, selectIsAdmin, usePmStore, type CrossTeamRelation } from "@pm/lib/pmStore";
+import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import {
   GROUP_KEYS,
   GROUP_LABEL,
@@ -88,6 +89,7 @@ function nextEventDate(ev: CalendarEvent, today: Date): Date | null {
 }
 
 export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | null }) {
+  const scrollMemRef = useScrollMemory(`dashboard:${teamSlug ?? "__project__"}`);
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const deps = usePmStore((s) => s.dependencies);
@@ -248,7 +250,7 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         onDelete={(id) => setConfig((c) => deleteTab(c, id))}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+      <div ref={scrollMemRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
         {editing ? (
           <AddWidgetBar kinds={availableKinds} onAdd={(k) => setConfig((c) => addWidget(c, k))} />
         ) : null}
