@@ -8,7 +8,7 @@ import { loadSnapshot, saveSnapshot } from "@pm/lib/workspace-snapshot";
 import { SubteamThemeProvider, useSubteamTheme } from "@pm/lib/subteamTheme";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
-import { activeTeamSlug, activeViewSegment, activeWorkspace } from "@pm/lib/nav";
+import { activeTeamSlug, activeViewSegment, activeWorkspace, recallScopeView } from "@pm/lib/nav";
 import { Sidebar } from "@pm/components/Sidebar";
 import { TaskDetailSheet } from "@pm/components/TaskDetailSheet";
 import { DeadlineReportWindow } from "@pm/components/DeadlineReportWindow";
@@ -169,6 +169,17 @@ function DeadlineReportHost() {
   return <DeadlineReportWindow open={reportOpen} onClose={() => setReportOpen(false)} />;
 }
 
+// Default project when the user has no persisted selection: the newest season
+// by NATURAL name order ("SDM27" beats "SDM26", and a future "SDM28" will beat
+// both) — DB row order put SDM26 first, which is how new users ended up
+// creating tasks in last year's project. A persisted selection always wins.
+function defaultProjectId(projects: ReadonlyArray<{ id: string; name: string }>): string {
+  if (projects.length === 0) return "";
+  return [...projects].sort((a, b) =>
+    b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" }),
+  )[0]!.id;
+}
+
 // The PM desktop module. Mounted by the Shell only when a user is signed in
 // (same gate as Vault), so the shared Supabase client + session are available.
 // Loads the workspace from the `pm` schema, hydrates the store, then renders the
@@ -187,8 +198,8 @@ export function PmModule() {
 
     const hydrateFrom = (ws: Workspace) => {
       const persisted = readPersistedActiveProject();
-      const firstId = ws.projects[0]?.id ?? "";
-      const activeProjectId = persisted && ws.projectData[persisted] ? persisted : firstId;
+      const activeProjectId =
+        persisted && ws.projectData[persisted] ? persisted : defaultProjectId(ws.projects);
       usePmStore.getState().hydrate({
         projects: ws.projects,
         projectData: ws.projectData,
@@ -264,7 +275,7 @@ export function PmModule() {
         const keep =
           cur.activeProjectId && ws.projectData[cur.activeProjectId]
             ? cur.activeProjectId
-            : ws.projects[0]?.id ?? "";
+            : defaultProjectId(ws.projects);
         usePmStore.getState().hydrate({
           projects: ws.projects,
           projectData: ws.projectData,
@@ -351,7 +362,9 @@ export function PmModule() {
     );
 
   return (
-    <PmRouterProvider initialPath="/table">
+    // Reopen the project's last-used view (rememberScopeView, written by the
+    // Sidebar on every navigation) instead of always landing on the table.
+    <PmRouterProvider initialPath={`/${recallScopeView(null) ?? "table"}`}>
       <div className="pm-root flex h-full w-full overflow-hidden bg-helios-base text-helios-text">
         <Sidebar />
         <SubteamThemeProvider>

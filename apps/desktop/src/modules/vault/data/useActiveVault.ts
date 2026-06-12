@@ -93,7 +93,15 @@ export function useActiveVault(): {
     // during this session (fresh create), trust them — useVaults will catch
     // up shortly. Otherwise it's stale and we fall back.
     if (stored && userSetIdInSessionRef.current) return stored;
-    const sorted = [...vaults].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    // Fallback (no stored choice): the newest season by NATURAL name order —
+    // "SDM27" beats "SDM26" (and "SDM28" will beat both) regardless of which
+    // vault row was created first. Creation-date order put some users in last
+    // year's vault by default. An explicit selection always wins and persists.
+    const sorted = [...vaults].sort(
+      (a, b) =>
+        b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" }) ||
+        (a.created_at < b.created_at ? 1 : -1),
+    );
     return sorted[0]?.id ?? null;
   }, [vaults, stored]);
 

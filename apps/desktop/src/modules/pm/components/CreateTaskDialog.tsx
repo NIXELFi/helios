@@ -92,6 +92,26 @@ const TYPE_OPTIONS: SelectOption<TaskType>[] = TASK_TYPES.map((t) => ({
   node: <TypeBadge type={t} />,
 }));
 
+// Persisted last-used subteam for the create-task form (PM team request:
+// "the new task page should remember the previous subteam selection").
+const LAST_SUBTEAM_KEY = "helios:pm:lastSubteamId";
+
+function recallLastSubteam(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SUBTEAM_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberLastSubteam(id: string): void {
+  try {
+    window.localStorage.setItem(LAST_SUBTEAM_KEY, id);
+  } catch {
+    // private mode / quota — non-fatal
+  }
+}
+
 export interface CreateTaskDialogProps {
   open: boolean;
   onClose: () => void;
@@ -123,7 +143,17 @@ export function CreateTaskDialog({
   const addDependency = usePmStore((s) => s.addDependency);
   const addTaskSubteam = usePmStore((s) => s.addTaskSubteam);
 
-  const initialSubteamId = defaultSubteamId ?? subteams[0]?.id ?? "";
+  // Last subteam the user created a task under (persisted) — so consecutive
+  // new tasks don't reset to the first subteam in the list. An explicit
+  // context default (e.g. opening from a board column) still wins.
+  const rememberedSubteamId = recallLastSubteam();
+  const initialSubteamId =
+    defaultSubteamId ??
+    (rememberedSubteamId && subteams.some((s) => s.id === rememberedSubteamId)
+      ? rememberedSubteamId
+      : null) ??
+    subteams[0]?.id ??
+    "";
 
   const defaults: CreateTaskInput = useMemo(
     () => ({
@@ -272,6 +302,8 @@ export function CreateTaskDialog({
     };
 
     onCreate(task);
+    // Remember the chosen subteam so the next new-task form starts there.
+    rememberLastSubteam(subteam.id);
     // Attach any ADDITIONAL (non-primary) subteams now that the task exists.
     // addTaskSubteam no-ops on the primary / already-members, so this is safe
     // even if onCreate re-homed the primary into the current team scope.

@@ -43,16 +43,19 @@ const wrap = (client: SupabaseClient) => ({ children }: { children: React.ReactN
 describe("useActiveVault", () => {
   beforeEach(() => localStorage.clear());
 
-  it("falls back to the most-recently-created vault on first load", async () => {
+  it("falls back to the newest season name (natural order) on first load", async () => {
+    // Policy change 2026-06-12: creation-date order put users in last year's
+    // vault by default. The fallback is now natural name order DESCENDING, so
+    // SDM27 beats SDM26 regardless of which vault row was created first.
     const client = clientWith([
-      { id: "old", name: "OLD", created_at: "2024-01-01T00:00:00Z" },
-      { id: "new", name: "NEW", created_at: "2026-05-11T18:32:17Z" },
-      { id: "mid", name: "MID", created_at: "2025-06-01T00:00:00Z" },
+      { id: "sdm27", name: "SDM27", created_at: "2024-01-01T00:00:00Z" }, // oldest row, newest season
+      { id: "sdm26", name: "SDM26", created_at: "2026-05-11T18:32:17Z" },
+      { id: "sdm25", name: "SDM25", created_at: "2025-06-01T00:00:00Z" },
     ]);
     const { result } = renderHook(() => useActiveVault(), { wrapper: wrap(client) });
-    await waitFor(() => expect(result.current.activeVaultId).toBe("new"));
-    expect(result.current.activeVault?.name).toBe("NEW");
-    expect(localStorage.getItem("helios.vault.activeVaultId")).toBe("new");
+    await waitFor(() => expect(result.current.activeVaultId).toBe("sdm27"));
+    expect(result.current.activeVault?.name).toBe("SDM27");
+    expect(localStorage.getItem("helios.vault.activeVaultId")).toBe("sdm27");
   });
 
   it("respects a stored id when it matches a current vault", async () => {
@@ -77,8 +80,10 @@ describe("useActiveVault", () => {
 
   it("setActiveVaultId persists and updates", async () => {
     const client = clientWith([
-      { id: "a", name: "A", created_at: "2026-01-01T00:00:00Z" },
-      { id: "b", name: "B", created_at: "2025-01-01T00:00:00Z" },
+      // Name-desc fallback resolves "a" (SDM27) first; the explicit selection
+      // of "b" below must win and persist.
+      { id: "a", name: "SDM27", created_at: "2025-01-01T00:00:00Z" },
+      { id: "b", name: "SDM26", created_at: "2026-01-01T00:00:00Z" },
     ]);
     const { result } = renderHook(() => useActiveVault(), { wrapper: wrap(client) });
     await waitFor(() => expect(result.current.activeVaultId).toBe("a"));

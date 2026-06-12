@@ -6,6 +6,16 @@
 // color, primary subteam fixed to the picker's context — and hands the new id
 // back so the caller can select it immediately. Persists through the same
 // store action as the editor (optimistic + DB insert + rollback).
+//
+// CRASH-FIX: this used to be a native <dialog>.showModal() mounted INSIDE the
+// CreateTaskDialog's <form> (via the subsystem picker's Controller). That
+// stacked a top-layer modal on top of a floating window mid-Select
+// interaction and hard-crashed the webview when opened from the new-task
+// menu; the nested <form> also let its submit event bubble into the outer
+// create-task form. Rewritten as a plain fixed overlay (the same modal
+// convention the Vault module uses everywhere) with no <form> element at all
+// — Enter/Escape are handled explicitly and nothing propagates to the parent
+// form.
 
 import { useEffect, useRef, useState } from "react";
 import { usePmStore } from "@pm/lib/pmStore";
@@ -24,13 +34,13 @@ interface Props {
 }
 
 export function SubsystemQuickCreate({ open, subteamId, onClose, onCreated }: Props) {
-  const ref = useRef<HTMLDialogElement>(null);
   const subteams = usePmStore((s) => s.subteams);
   const subsystems = usePmStore((s) => s.subsystems);
   const addSubsystem = usePmStore((s) => s.addSubsystem);
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const subteam = subteams.find((s) => s.id === subteamId);
 
@@ -39,24 +49,26 @@ export function SubsystemQuickCreate({ open, subteamId, onClose, onCreated }: Pr
       setName("");
       setColor("");
       setError(null);
+      inputRef.current?.focus();
     }
   }, [open]);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    if (open && !node.open) node.showModal();
-    if (!open && node.open) node.close();
-  }, [open]);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const handler = () => onClose();
-    node.addEventListener("close", handler);
-    return () => node.removeEventListener("close", handler);
-  }, [onClose]);
 
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
+  // Escape closes. stopImmediatePropagation so a parent window/modal Escape
+  // handler underneath doesn't ALSO fire on the same keypress.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  function submit() {
     const trimmed = name.trim();
     if (!trimmed) return setError("Name is required.");
     if (!subteam) return setError("No subteam selected.");
@@ -77,12 +89,22 @@ export function SubsystemQuickCreate({ open, subteamId, onClose, onCreated }: Pr
     onClose();
   }
 
+  if (!open) return null;
   return (
-    <dialog
-      ref={ref}
-      className="w-[360px] rounded-lg border border-helios-line bg-helios-panel p-0 text-helios-text backdrop:bg-black/60"
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
-      <form onSubmit={submit} className="flex flex-col gap-3 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="New subsystem"
+        onClick={(e) => e.stopPropagation()}
+        className="flex w-[360px] flex-col gap-3 rounded-lg border border-helios-line bg-helios-panel p-4 text-helios-text shadow-2xl"
+      >
         <div>
           <div className="text-sm font-semibold">New subsystem</div>
           <div className="text-xs text-helios-dim">
@@ -90,10 +112,21 @@ export function SubsystemQuickCreate({ open, subteamId, onClose, onCreated }: Pr
           </div>
         </div>
         <input
+          ref={inputRef}
           autoFocus
           aria-label="Subsystem name"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter creates. Handled here (not via <form>) because this modal
+            // renders inside the create-task <form> — a nested form's submit
+            // would bubble into it.
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              submit();
+            }
+          }}
           placeholder="e.g. Uprights"
           className="w-full rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm placeholder:text-helios-dim focus:border-asu-gold focus:outline-none"
         />
@@ -124,13 +157,14 @@ export function SubsystemQuickCreate({ open, subteamId, onClose, onCreated }: Pr
             Cancel
           </button>
           <button
-            type="submit"
+            type="button"
+            onClick={submit}
             className="rounded bg-asu-gold px-3 py-1 text-xs font-semibold text-black hover:brightness-110"
           >
             Create
           </button>
         </div>
-      </form>
-    </dialog>
+      </div>
+    </div>
   );
 }
