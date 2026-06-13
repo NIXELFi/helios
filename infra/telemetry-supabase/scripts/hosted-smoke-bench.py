@@ -23,6 +23,13 @@ SESSION_ID = os.environ.get("BENCH_SESSION_ID")  # reuse a pre-created session
 DUMP_PATH = os.environ.get("BENCH_DUMP_PATH")    # JSONL of sent windows for the integrity differ
 _dump_lock = threading.Lock()
 
+# Chaos wrapper (handoff §5.2 / scenario S3): simulated cellular impairments.
+# The link drops/dups/delays POSTs; the seq/ack retry queue restores delivery.
+CHAOS_DROP = float(os.environ.get("CHAOS_DROP", "0"))        # P(drop the POST)
+CHAOS_DUP = float(os.environ.get("CHAOS_DUP", "0"))          # P(send it twice)
+CHAOS_JITTER_MS = int(os.environ.get("CHAOS_JITTER_MS", "0"))  # uniform 0..N added latency
+RETRY_QUEUE_MAX = 32  # windows; drop-oldest beyond this (per protocol §4)
+
 # Safety rails (handoff §5.5)
 MAX_DURATION_S = 300
 MAX_ERRORS = 10
@@ -88,45 +95,82 @@ class GroupDriver(threading.Thread):
         self.channels = group_def["channels"]
         self.stop_at, self.r = stop_at, results
 
+    def post(self, body):
+        """One POST through the chaos link. Returns ack dict or raises."""
+        if CHAOS_JITTER_MS:
+            time.sleep(__import__("random").uniform(0, CHAOS_JITTER_MS / 1000))
+        sig = hmac.new(HMAC_KEY, body, hashlib.sha256).hexdigest()
+        req = urllib.request.Request(
+            f"{URL}/functions/v1/telemetry-ingest", data=body,
+            headers={"content-type": "application/x-htp",
+                     "x-htp-device": "hosted-smoke-bench",
+                     "x-htp-signature": sig})
+        sent = time.time()
+        resp = json.load(urllib.request.urlopen(req, timeout=15))
+        self.r["acks"].append((time.time() - sent) * 1000)
+        self.r["bytes"] += len(body)
+        return resp
+
     def run(self):
+        import random
         seq, t0 = 0, time.time()
-        while time.time() < self.stop_at and len(self.r["errors"]) < MAX_ERRORS:
+        pending = {}  # seq -> (t_start_us, samples), awaiting ack
+        while (time.time() < self.stop_at or pending) and len(self.r["errors"]) < MAX_ERRORS:
             wall = time.time()
-            t_rel = wall - t0
-            t_start_us = int(wall * 1e6)
-            samples = {ch["id"]: [synth(ch["id"], t_rel + i / self.rate)
-                                  for i in range(self.rate)] for ch in self.channels}
-            if DUMP_PATH:
-                with _dump_lock, open(DUMP_PATH, "a") as f:
-                    f.write(json.dumps({"group_key": self.gk, "seq": seq,
-                                        "t_start_us": t_start_us,
-                                        "samples": samples}) + "\n")
-            body = encode_frame(self.sid, 1, self.gk, seq, int(wall * 1000),
-                                [(t_start_us, samples)], self.channels)
-            sig = hmac.new(HMAC_KEY, body, hashlib.sha256).hexdigest()
-            req = urllib.request.Request(
-                f"{URL}/functions/v1/telemetry-ingest", data=body,
-                headers={"content-type": "application/x-htp",
-                         "x-htp-device": "hosted-smoke-bench",
-                         "x-htp-signature": sig})
-            sent = time.time()
-            try:
-                resp = json.load(urllib.request.urlopen(req, timeout=10))
-                rtt = (time.time() - sent) * 1000
-                self.r["acks"].append(rtt)
+            generating = wall < self.stop_at
+            if generating:
+                t_rel = wall - t0
+                t_start_us = int(wall * 1e6)
+                samples = {ch["id"]: [synth(ch["id"], t_rel + i / self.rate)
+                                      for i in range(self.rate)] for ch in self.channels}
+                if DUMP_PATH:
+                    with _dump_lock, open(DUMP_PATH, "a") as f:
+                        f.write(json.dumps({"group_key": self.gk, "seq": seq,
+                                            "t_start_us": t_start_us,
+                                            "samples": samples}) + "\n")
+                pending[seq] = (t_start_us, samples)
                 self.r["offered"] += 1
-                self.r["bytes"] += len(body)
-                # every 10th frame: deliberate duplicate retry to verify dedup
-                if seq % 10 == 5:
-                    dup = json.load(urllib.request.urlopen(
-                        urllib.request.Request(f"{URL}/functions/v1/telemetry-ingest",
-                                               data=body, headers=req.headers), timeout=10))
-                    self.r["dup_checks"].append(dup["dup"] == [seq])
-            except Exception as e:
-                self.r["errors"].append(f"g{self.gk} seq{seq}: {e}")
-            seq += 1
+                seq += 1
+                # bounded retry queue: drop-oldest beyond cap (protocol §4)
+                while len(pending) > RETRY_QUEUE_MAX:
+                    oldest = min(pending)
+                    del pending[oldest]
+                    self.r["queue_drops"] += 1
+
+            # deliver: first run of consecutive pending seqs, up to 8 windows
+            if pending:
+                seqs = sorted(pending)
+                run = [seqs[0]]
+                for s in seqs[1:]:
+                    if s == run[-1] + 1 and len(run) < 8:
+                        run.append(s)
+                    else:
+                        break
+                windows = [pending[s] for s in run]
+                body = encode_frame(self.sid, 1, self.gk, run[0],
+                                    int(time.time() * 1000), windows, self.channels)
+                try:
+                    if random.random() < CHAOS_DROP:
+                        self.r["chaos_drops"] += 1  # uplink ate the POST
+                    else:
+                        ack = self.post(body)
+                        if random.random() < CHAOS_DUP:
+                            self.r["chaos_dups"] += 1
+                            dup_ack = self.post(body)  # modem retransmit
+                            if set(dup_ack.get("dup", [])) == set(run):
+                                self.r["dup_checks"].append(True)
+                            else:
+                                self.r["dup_checks"].append(False)
+                        # any acked seq (fresh or dup) is durably staged
+                        for s in ack.get("acked", []):
+                            pending.pop(s, None)
+                        if len(run) > 1:
+                            self.r["retry_batches"] += 1
+                except Exception as e:
+                    self.r["errors"].append(f"g{self.gk} seq{run[0]}: {e}")
             time.sleep(max(0, 1.0 - (time.time() - wall)))  # 1 window/s cadence
         self.r["windows_sent"][self.gk] = seq
+        self.r["unacked"][self.gk] = len(pending)
 
 
 def pct(xs, p):
@@ -146,7 +190,9 @@ def main():
           f"(binary HTP/1, HMAC auth, dup-retry every 10th frame)")
 
     results = {"acks": [], "errors": [], "dup_checks": [], "offered": 0,
-               "bytes": 0, "windows_sent": {}}
+               "bytes": 0, "windows_sent": {}, "unacked": {},
+               "chaos_drops": 0, "chaos_dups": 0, "queue_drops": 0,
+               "retry_batches": 0}
     stop_at = time.time() + DURATION_S
     drivers = [GroupDriver(sid, int(k), g, stop_at, results)
                for k, g in cs["groups"].items()]
@@ -179,6 +225,13 @@ def main():
                    "p99": round(pct(results["acks"], .99)),
                    "min": round(min(results["acks"])), "max": round(max(results["acks"]))},
         "dup_retries_correct": f"{sum(results['dup_checks'])}/{len(results['dup_checks'])}",
+        "chaos": {"drop_p": CHAOS_DROP, "dup_p": CHAOS_DUP,
+                  "jitter_ms": CHAOS_JITTER_MS,
+                  "posts_dropped": results["chaos_drops"],
+                  "posts_duplicated": results["chaos_dups"],
+                  "retry_batches": results["retry_batches"],
+                  "queue_overflow_drops": results["queue_drops"],
+                  "unacked_at_end": results["unacked"]},
         "bytes_sent": results["bytes"],
         "staging_depth_samples": depth_samples,
         "errors": results["errors"],

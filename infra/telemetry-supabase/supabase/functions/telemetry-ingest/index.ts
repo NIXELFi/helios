@@ -136,9 +136,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     };
   });
 
-  // 3. Idempotent insert. With ignoreDuplicates (ON CONFLICT DO NOTHING) the
-  //    returned representation contains only rows actually inserted, so any
-  //    frame seq missing from it was a duplicate.
+  // 3+4 run concurrently: the live broadcast is best-effort and latency-
+  //     critical (it is the driver's screen), so it must not wait behind the
+  //     staging insert. A frame that fails to stage still broadcasts — the
+  //     client's nack-driven retry restores durability independently.
+  const livePromise = publishLive(frame, group, rateHz);
+
+  // Idempotent insert. With ignoreDuplicates (ON CONFLICT DO NOTHING) the
+  // returned representation contains only rows actually inserted, so any
+  // frame seq missing from it was a duplicate.
   const { data: inserted, error: insertError } = await supabase()
     .schema("telemetry")
     .from("staging_chunks")
@@ -150,6 +156,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (insertError) {
     console.error("staging_chunks upsert failed:", insertError.message);
+    await livePromise;
     return jsonResponse(500, { error: `insert failed: ${insertError.message}` });
   }
 
@@ -157,8 +164,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const acked = rows.map((r) => r.seq);
   const dup = acked.filter((seq) => !insertedSeqs.has(seq));
 
-  // 4. Best-effort live broadcast — never fails the ingest.
-  const livePublished = await publishLive(frame, group, rateHz);
+  const livePublished = await livePromise;
 
   const ack: IngestAck = {
     acked,
