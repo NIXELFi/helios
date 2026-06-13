@@ -93,12 +93,14 @@ const SESSION_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const SCALE = 0.1;
 const OFFSET = -40;
 
+// Canonical seeded shape: rate_hz on the group, not the channels.
 const DEF: ChannelSetDefinition = {
   groups: {
     "3": {
+      rate_hz: 4,
       channels: [
-        { id: "rpm", rate_hz: 4, enc: "f32" },
-        { id: "coolant_c", rate_hz: 4, enc: "i16fp", scale: SCALE, offset: OFFSET },
+        { id: "rpm", enc: "f32" },
+        { id: "coolant_c", enc: "i16fp", scale: SCALE, offset: OFFSET },
       ],
     },
   },
@@ -232,4 +234,26 @@ Deno.test("mixed-rate group definition is rejected", () => {
     },
   };
   assertThrows(() => decodeFrame(goodFrame(), mixed), DefinitionError, "mixed rate_hz");
+});
+
+Deno.test("per-channel rate_hz disagreeing with group rate_hz is rejected", () => {
+  const conflicting: ChannelSetDefinition = {
+    groups: {
+      "3": {
+        rate_hz: 4,
+        channels: [
+          { id: "rpm", enc: "f32" },
+          { id: "coolant_c", rate_hz: 10, enc: "i16fp" },
+        ],
+      },
+    },
+  };
+  assertThrows(() => decodeFrame(goodFrame(), conflicting), DefinitionError, "mixed rate_hz");
+});
+
+Deno.test("group with neither group nor channel rate_hz is rejected", () => {
+  const missing: ChannelSetDefinition = {
+    groups: { "3": { channels: [{ id: "rpm", enc: "f32" }] } },
+  };
+  assertThrows(() => decodeFrame(goodFrame(), missing), DefinitionError, "invalid rate_hz");
 });

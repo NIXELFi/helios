@@ -33,7 +33,8 @@ export type ChannelEncoding = "f32" | "i16fp";
 
 export interface ChannelDef {
   id: string;
-  rate_hz: number;
+  /** optional per-channel override; must equal the group rate when present */
+  rate_hz?: number;
   enc: ChannelEncoding;
   /** i16fp only; defaults to 1 */
   scale?: number;
@@ -42,6 +43,8 @@ export interface ChannelDef {
 }
 
 export interface ChannelGroup {
+  /** canonical sample rate for every channel in the group (see seed/migration) */
+  rate_hz?: number;
   channels: ChannelDef[];
 }
 
@@ -89,14 +92,18 @@ export interface DecodedFrame extends FrameHeader {
 const SAMPLE_BYTES: Record<ChannelEncoding, number> = { f32: 4, i16fp: 2 };
 
 /**
- * Validates the group and returns its uniform sample rate.
- * Groups must contain only channels of equal rate_hz (mixed rates rejected).
+ * Validates the group and returns its uniform sample rate. The canonical rate
+ * lives on the group (`groups.<key>.rate_hz`, the seeded/migration shape); a
+ * per-channel `rate_hz`, when present, must agree (mixed rates rejected).
  */
 export function groupRateHz(group: ChannelGroup): number {
   if (!Array.isArray(group.channels) || group.channels.length === 0) {
     throw new DefinitionError("channel group has no channels");
   }
-  const rate = group.channels[0].rate_hz;
+  const rate = group.rate_hz ?? group.channels[0].rate_hz;
+  if (!Number.isInteger(rate) || (rate as number) < 1) {
+    throw new DefinitionError(`group has invalid rate_hz ${rate}`);
+  }
   const seen = new Set<string>();
   for (const ch of group.channels) {
     if (typeof ch.id !== "string" || ch.id.length === 0) {
@@ -106,10 +113,7 @@ export function groupRateHz(group: ChannelGroup): number {
       throw new DefinitionError(`duplicate channel id "${ch.id}" in group`);
     }
     seen.add(ch.id);
-    if (!Number.isInteger(ch.rate_hz) || ch.rate_hz < 1) {
-      throw new DefinitionError(`channel "${ch.id}" has invalid rate_hz ${ch.rate_hz}`);
-    }
-    if (ch.rate_hz !== rate) {
+    if (ch.rate_hz !== undefined && ch.rate_hz !== rate) {
       throw new DefinitionError(
         `mixed rate_hz within one group ("${ch.id}" is ${ch.rate_hz} Hz, group is ${rate} Hz)`,
       );
@@ -118,14 +122,15 @@ export function groupRateHz(group: ChannelGroup): number {
       throw new DefinitionError(`channel "${ch.id}" has unknown encoding "${ch.enc}"`);
     }
   }
-  return rate;
+  return rate as number;
 }
 
 /** Exact encoded size of one window for this group. */
 export function bytesPerWindow(group: ChannelGroup): number {
+  const rate = groupRateHz(group);
   let n = 8; // t_start_us
   for (const ch of group.channels) {
-    n += ch.rate_hz * SAMPLE_BYTES[ch.enc];
+    n += rate * SAMPLE_BYTES[ch.enc];
   }
   return n;
 }
@@ -179,7 +184,7 @@ export function decodeFrame(bytes: Uint8Array, def: ChannelSetDefinition): Decod
       `unknown group_key ${header.groupKey} for channel_set ${header.channelSetId}`,
     );
   }
-  groupRateHz(group); // validates the registered definition
+  const rateHz = groupRateHz(group); // validates the registered definition
 
   const expected = HEADER_BYTES + header.windowCount * bytesPerWindow(group);
   if (bytes.byteLength !== expected) {
@@ -198,16 +203,16 @@ export function decodeFrame(bytes: Uint8Array, def: ChannelSetDefinition): Decod
     off += 8;
     const samples: Record<string, Float64Array> = {};
     for (const ch of group.channels) {
-      const out = new Float64Array(ch.rate_hz);
+      const out = new Float64Array(rateHz);
       if (ch.enc === "f32") {
-        for (let i = 0; i < ch.rate_hz; i++) {
+        for (let i = 0; i < rateHz; i++) {
           out[i] = view.getFloat32(off, true);
           off += 4;
         }
       } else {
         const scale = ch.scale ?? 1;
         const offset = ch.offset ?? 0;
-        for (let i = 0; i < ch.rate_hz; i++) {
+        for (let i = 0; i < rateHz; i++) {
           out[i] = view.getInt16(off, true) * scale + offset;
           off += 2;
         }
