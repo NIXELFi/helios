@@ -30,8 +30,10 @@ CHAOS_DUP = float(os.environ.get("CHAOS_DUP", "0"))          # P(send it twice)
 CHAOS_JITTER_MS = int(os.environ.get("CHAOS_JITTER_MS", "0"))  # uniform 0..N added latency
 RETRY_QUEUE_MAX = 32  # windows; drop-oldest beyond this (per protocol §4)
 
-# Safety rails (handoff §5.5)
-MAX_DURATION_S = 300
+# Safety rails (handoff §5.5). The soak scenario S4 needs longer runs, so the
+# cap is raisable via env up to a hard 30-min ceiling.
+MAX_DURATION_S = int(os.environ.get("BENCH_MAX_DURATION_S", "300"))
+MAX_DURATION_S = min(MAX_DURATION_S, 1800)
 MAX_ERRORS = 10
 assert DURATION_S <= MAX_DURATION_S, f"duration capped at {MAX_DURATION_S}s"
 
@@ -198,17 +200,36 @@ def main():
                for k, g in cs["groups"].items()]
     for d in drivers: d.start()
 
-    depth_samples = []
+    depth_samples = []       # total staging rows (grows until 1h prune)
+    uncompacted_samples = []  # the real backpressure signal — should plateau
+    ack_drift = []            # mean ack RTT per 30s bucket — should stay flat
+    last_ack_n = 0
     while any(d.is_alive() for d in drivers):
         time.sleep(10)
-        n = len(rest("GET", f"staging_chunks?session_id=eq.{sid}&select=seq"))
-        depth_samples.append(n)
-        print(f"  t+{len(depth_samples)*10}s staging_depth={n} offered={results['offered']} "
-              f"errors={len(results['errors'])}")
+        total = len(rest("GET", f"staging_chunks?session_id=eq.{sid}&select=seq&limit=20000"))
+        uncomp = len(rest("GET", f"staging_chunks?session_id=eq.{sid}&compacted_at=is.null&select=seq&limit=20000"))
+        depth_samples.append(total)
+        uncompacted_samples.append(uncomp)
+        # ack drift: mean of acks since last sample
+        new_acks = results["acks"][last_ack_n:]
+        last_ack_n = len(results["acks"])
+        mean_ack = round(sum(new_acks) / len(new_acks)) if new_acks else 0
+        ack_drift.append(mean_ack)
+        print(f"  t+{len(depth_samples)*10}s total={total} uncompacted={uncomp} "
+              f"offered={results['offered']} ack~{mean_ack}ms errors={len(results['errors'])}")
     for d in drivers: d.join()
 
-    # integrity: rows present == windows sent, seqs contiguous per group, no dups (PK)
-    rows = rest("GET", f"staging_chunks?session_id=eq.{sid}&select=group_key,seq&limit=10000")
+    # integrity: rows present == windows sent, seqs contiguous per group, no dups (PK).
+    # MUST paginate — PostgREST caps responses at max_rows (1000 on hosted), so a
+    # single GET silently truncates and reports a false integrity failure on long runs.
+    rows = []
+    off = 0
+    while True:
+        batch = rest("GET", f"staging_chunks?session_id=eq.{sid}&select=group_key,seq&order=group_key,seq&limit=1000&offset={off}")
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        off += 1000
     by_group = {}
     for r in rows: by_group.setdefault(r["group_key"], set()).add(r["seq"])
     integrity = all(by_group.get(gk, set()) == set(range(n))
@@ -234,6 +255,8 @@ def main():
                   "unacked_at_end": results["unacked"]},
         "bytes_sent": results["bytes"],
         "staging_depth_samples": depth_samples,
+        "uncompacted_depth_samples": uncompacted_samples,
+        "ack_drift_ms_per_10s": ack_drift,
         "errors": results["errors"],
     }
     print(json.dumps(report, indent=2))
