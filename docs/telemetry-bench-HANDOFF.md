@@ -21,11 +21,27 @@ original prompt's requirements are restated in condensed actionable form in
 > (1) migration granted service_role no table privileges (RLS bypass ≠ table
 > grants) — every service-role read/write 500'd; (2) frame.ts expected
 > per-channel rate_hz while the seed/migration contract puts it on the group.
-> Hosted backup (§3.1): still blocked on `supabase login` (no CLI token on
-> this machine either). Operator direction 2026-06-12: Vault data does NOT
-> need backup yet (unused, restorable); **PM data backed up locally** via
-> PostgREST service-role dump → `~/helios-backups/pm-2026-06-12/` (22 tables,
-> 1468 rows, plus OpenAPI schema spec).
+> Operator direction 2026-06-12: Vault data does NOT need backup yet (unused,
+> restorable); **PM data backed up locally** via PostgREST service-role dump →
+> `~/helios-backups/pm-2026-06-12/` (22 tables, 1468 rows, plus OpenAPI spec).
+>
+> **HOSTED APPLY DONE (2026-06-12 evening, operator-provided CLI token):**
+> §3.1 + §4 are complete. Full pg_dump backups (roles/schema/data, 20 MB)
+> in `~/helios-backups/pre-telemetry-2026-06-12/` with BASELINE.md (59 MB
+> total; pdm 33 MB) — restore VERIFIED into the local stack's platform db,
+> row counts match hosted exactly (pdm.versions 13180, pdm.files 13147,
+> pm.tasks 244). Migration history is drifted, so the two telemetry
+> migrations were applied via the management API (NOT `db push`) and then
+> recorded in supabase_migrations.schema_migrations; files also copied into
+> infra/pdm-supabase/supabase/migrations/ — `migration list` shows the pair
+> in sync. Seed applied (92 registry rows, set 1). pg_cron was ALREADY
+> enabled hosted → `telemetry-prune-staging` cron job is live. `telemetry`
+> added to PostgREST exposed schemas via management API. Edge function
+> deployed, `TELEMETRY_HMAC_KEY` secret set (key in
+> infra/telemetry-supabase/.env, gitignored). Hosted smoke test passed:
+> session create → HMAC-signed JSON ingest 200 + ack → staging row readable
+> via REST → cascade delete cleanup verified. Post-apply DB 59 MB
+> (telemetry schema 424 kB). Next: build §5 (compactor, generator, bench).
 
 ## 1. What exists on this branch (authored, NOT yet verified — see update above)
 
