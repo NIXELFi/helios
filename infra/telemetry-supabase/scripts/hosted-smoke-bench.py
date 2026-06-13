@@ -19,6 +19,9 @@ URL = os.environ["SUPABASE_URL"]
 SRK = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 HMAC_KEY = os.environ["TELEMETRY_HMAC_KEY"].encode()
 DURATION_S = int(sys.argv[1]) if len(sys.argv) > 1 else 60
+SESSION_ID = os.environ.get("BENCH_SESSION_ID")  # reuse a pre-created session
+DUMP_PATH = os.environ.get("BENCH_DUMP_PATH")    # JSONL of sent windows for the integrity differ
+_dump_lock = threading.Lock()
 
 # Safety rails (handoff §5.5)
 MAX_DURATION_S = 300
@@ -93,6 +96,11 @@ class GroupDriver(threading.Thread):
             t_start_us = int(wall * 1e6)
             samples = {ch["id"]: [synth(ch["id"], t_rel + i / self.rate)
                                   for i in range(self.rate)] for ch in self.channels}
+            if DUMP_PATH:
+                with _dump_lock, open(DUMP_PATH, "a") as f:
+                    f.write(json.dumps({"group_key": self.gk, "seq": seq,
+                                        "t_start_us": t_start_us,
+                                        "samples": samples}) + "\n")
             body = encode_frame(self.sid, 1, self.gk, seq, int(wall * 1000),
                                 [(t_start_us, samples)], self.channels)
             sig = hmac.new(HMAC_KEY, body, hashlib.sha256).hexdigest()
@@ -129,9 +137,11 @@ def pct(xs, p):
 
 def main():
     cs = rest("GET", "channel_sets?id=eq.1&select=definition")[0]["definition"]
-    sess = rest("POST", "sessions", {"name": f"hosted-smoke-bench-{int(time.time())}",
-                                     "source": "synthetic", "status": "running"})[0]
-    sid = sess["id"]
+    if SESSION_ID:
+        sid = SESSION_ID
+    else:
+        sid = rest("POST", "sessions", {"name": f"hosted-smoke-bench-{int(time.time())}",
+                                        "source": "synthetic", "status": "running"})[0]["id"]
     print(f"session {sid}; driving {len(cs['groups'])} groups for {DURATION_S}s "
           f"(binary HTP/1, HMAC auth, dup-retry every 10th frame)")
 
@@ -175,18 +185,26 @@ def main():
     }
     print(json.dumps(report, indent=2))
 
-    # cleanup: cascade delete, verify zero residue
-    rest("DELETE", f"sessions?id=eq.{sid}")
-    residue = rest("GET", f"staging_chunks?session_id=eq.{sid}&select=seq")
-    print(f"cleanup: session deleted, residue rows = {len(residue)}")
-    report["cleanup_residue_rows"] = len(residue)
+    if os.environ.get("BENCH_KEEP"):
+        # leave data for the compactor + integrity differ; mark session ended
+        # so the compactor flushes the tail below min-span
+        rest("PATCH", f"sessions?id=eq.{sid}", {"status": "ended",
+                                                "ended_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        print("session marked ended; data kept for compaction + verify")
+        report["cleanup_residue_rows"] = None
+    else:
+        # cleanup: cascade delete, verify zero residue
+        rest("DELETE", f"sessions?id=eq.{sid}")
+        residue = rest("GET", f"staging_chunks?session_id=eq.{sid}&select=seq")
+        print(f"cleanup: session deleted, residue rows = {len(residue)}")
+        report["cleanup_residue_rows"] = len(residue)
 
     out = os.path.join(os.path.dirname(__file__), "..", "..", "..", "bench-results")
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, f"hosted-smoke-{time.strftime('%Y%m%d-%H%M%S')}.json")
     with open(path, "w") as f: json.dump(report, f, indent=2)
     print(f"report -> {path}")
-    ok = integrity and not results["errors"] and len(residue) == 0
+    ok = integrity and not results["errors"] and report["cleanup_residue_rows"] in (None, 0)
     sys.exit(0 if ok else 1)
 
 
