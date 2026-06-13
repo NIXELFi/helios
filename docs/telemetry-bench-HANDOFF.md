@@ -10,7 +10,24 @@ full production path and measures everything, Vault impact included. The full
 original prompt's requirements are restated in condensed actionable form in
 §5 so this doc stands alone.
 
-## 1. What exists on this branch (authored, NOT yet verified)
+> **VERIFICATION UPDATE (2026-06-12, Mac, local Docker stack):** §3 steps 2–4
+> are DONE. Both migrations + seed apply cleanly (pg_cron NOTICE path
+> confirmed); teardown verified clean after fixing it (storage rows can NOT be
+> deleted via SQL — `storage.protect_delete()` trigger — bucket must be
+> emptied/deleted via the Storage API first, script now guards on this);
+> edge function verified end-to-end (deno tests 12/12, JSON ingest, seq acks,
+> idempotent dup detection, HMAC + bearer auth, 401/400/413 paths, staged
+> Arrow IPC decodes with apache-arrow JS). Two bugs found and fixed:
+> (1) migration granted service_role no table privileges (RLS bypass ≠ table
+> grants) — every service-role read/write 500'd; (2) frame.ts expected
+> per-channel rate_hz while the seed/migration contract puts it on the group.
+> Hosted backup (§3.1): still blocked on `supabase login` (no CLI token on
+> this machine either). Operator direction 2026-06-12: Vault data does NOT
+> need backup yet (unused, restorable); **PM data backed up locally** via
+> PostgREST service-role dump → `~/helios-backups/pm-2026-06-12/` (22 tables,
+> 1468 rows, plus OpenAPI schema spec).
+
+## 1. What exists on this branch (authored, NOT yet verified — see update above)
 
 | Artifact | State |
 |---|---|
