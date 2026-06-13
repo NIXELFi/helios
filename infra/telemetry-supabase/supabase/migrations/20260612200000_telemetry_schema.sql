@@ -133,10 +133,16 @@ create policy authenticated_read on telemetry.bench_runs       for select to aut
 create policy authenticated_read on telemetry.bench_metrics    for select to authenticated using (true);
 
 -- PostgREST exposure: grant usage/select to the API roles. Writes stay
--- service-role-only (it bypasses RLS and holds table privileges via postgres).
+-- service-role-only. NOTE: service_role bypasses RLS but is NOT the table
+-- owner — it still needs explicit table privileges (verified locally:
+-- without these every service-role read fails with "permission denied").
 grant usage on schema telemetry to authenticated, anon, service_role;
 grant select on all tables in schema telemetry to authenticated;
+grant select, insert, update, delete on all tables in schema telemetry to service_role;
+grant usage on all sequences in schema telemetry to service_role;
 alter default privileges in schema telemetry grant select on tables to authenticated;
+alter default privileges in schema telemetry grant select, insert, update, delete on tables to service_role;
+alter default privileges in schema telemetry grant usage on sequences to service_role;
 -- anon gets schema usage but NO table selects (Lite reads run authenticated).
 
 -- NOTE (operational, not in this migration): the `telemetry` schema must be
