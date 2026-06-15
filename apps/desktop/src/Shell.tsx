@@ -16,6 +16,9 @@ import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
+import { ReportModal } from "./shell/report/ReportModal";
+import { ReportsViewer } from "./shell/report/ReportsViewer";
+import type { ReportKind } from "./shell/report/types";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -82,6 +85,10 @@ function HeliosShell() {
   }, []);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
+  // Bug/feature report: which kind the modal opened with (null = closed), plus
+  // the admin-only reports viewer.
+  const [reportKind, setReportKind] = useState<ReportKind | null>(null);
+  const [reportsOpen, setReportsOpen] = useState(false);
 
   // Vault is gated on a live logged-in user — the module immediately hits
   // Supabase RLS-protected tables on mount, so rendering it without a session
@@ -230,6 +237,9 @@ function HeliosShell() {
         presence={
           canSeePresence ? { users: presenceRoster, currentUserId: user?.id ?? null } : null
         }
+        onOpenReport={setReportKind}
+        canViewReports={canSeePresence}
+        onOpenReports={() => setReportsOpen(true)}
       />
       <main className="relative min-w-0 flex-1">
         {/* Each module gets its own boundary so a crash in one (an unexpected
@@ -311,6 +321,15 @@ function HeliosShell() {
         client={client}
         onClose={() => setChangePwOpen(false)}
       />
+      {reportKind && (
+        <ReportModal
+          kind={reportKind}
+          module={active}
+          appVersion={appVersion}
+          onClose={() => setReportKind(null)}
+        />
+      )}
+      {reportsOpen && <ReportsViewer onClose={() => setReportsOpen(false)} />}
     </div>
   );
 }

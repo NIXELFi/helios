@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   IconArchive,
+  IconBug,
   IconChartLine,
   IconChevronsLeft,
   IconChevronsRight,
@@ -15,6 +16,7 @@ import { PresencePanel } from "./PresencePanel";
 import type { PresenceUser } from "./useHeliosPresence";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
+import type { ReportKind } from "./report/types";
 
 export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games";
 
@@ -98,6 +100,12 @@ interface Props {
    *  Shell gates it); null/undefined for everyone else, which hides the panel
    *  entirely. */
   presence?: { users: PresenceUser[]; currentUserId: string | null } | null;
+  /** Open the bug/feature report modal; `kind` sets the initial type. */
+  onOpenReport: (kind: ReportKind) => void;
+  /** Show the admin-only "View reports" affordance under the report button. */
+  canViewReports: boolean;
+  /** Open the admin reports viewer. */
+  onOpenReports: () => void;
 }
 
 export function ModulePicker(props: Props) {
@@ -119,6 +127,9 @@ export function ModulePicker(props: Props) {
     gamesEnabled,
     authLoading = false,
     presence = null,
+    onOpenReport,
+    canViewReports,
+    onOpenReports,
   } = props;
   // While auth is still resolving, don't render Vault as disabled — a returning
   // signed-in user would otherwise see "Sign in to use Vault" flash before
@@ -237,6 +248,17 @@ export function ModulePicker(props: Props) {
         />
       )}
 
+      {/* Report a bug / request a feature — sits directly above the user pill so
+          it's one click away from any module, for every signed-in user. */}
+      <div className="border-t border-helios-line p-2">
+        <ReportRailButton
+          collapsed={collapsed}
+          canViewReports={canViewReports}
+          onOpenReport={onOpenReport}
+          onOpenReports={onOpenReports}
+        />
+      </div>
+
       <div className="border-t border-helios-line p-2">
         <UserPill
           label={userLabel}
@@ -322,6 +344,50 @@ function NavButton(props: {
         </>
       )}
     </button>
+  );
+}
+
+function ReportRailButton(props: {
+  collapsed: boolean;
+  canViewReports: boolean;
+  onOpenReport: (kind: ReportKind) => void;
+  onOpenReports: () => void;
+}) {
+  const { collapsed, canViewReports, onOpenReport, onOpenReports } = props;
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenReport("bug")}
+        aria-label="Report a bug"
+        title="Report a bug or request a feature"
+        className="flex w-full items-center justify-center rounded-sm border border-helios-line bg-helios-panel p-2 text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      >
+        <IconBug size={18} strokeWidth={1.5} />
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => onOpenReport("bug")}
+        title="Report a bug or request a feature"
+        className="flex w-full items-center gap-2 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      >
+        <IconBug size={16} strokeWidth={1.5} className="shrink-0" />
+        <span className="truncate">Report a bug</span>
+      </button>
+      {canViewReports && (
+        <button
+          type="button"
+          onClick={onOpenReports}
+          className="block w-full px-3 text-left text-[10px] text-helios-dim hover:text-helios-text focus-visible:outline-none focus-visible:underline"
+        >
+          View reports →
+        </button>
+      )}
+    </div>
   );
 }
 
