@@ -225,6 +225,21 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
             // "available" without waiting for the frontend's poll.
             state.clear_lock(&file.file_id);
             state.write_shell_state(); // refresh Explorer overlays/columns
+            // Undo check-out DISCARDS local edits and restores the vaulted
+            // version (spec 2026-05-30 §4: release -> re-download latest ->
+            // read-only) — not just release the lock. Forward a getLatest
+            // download for the file's latest version before re-protecting.
+            // Best-effort: if it can't run now, the read-only bit set below plus
+            // auto-sync's "read-only but differs -> refresh" path still discards
+            // the edits on the next pass, which is the intent of undo.
+            if let Some(vid) = file.latest_version_id.clone() {
+                if let Ok(v) = supabase::get_version_by_id(&state.http, &session, &vid).await {
+                    if let Some(sha) = v.get("sha256").and_then(|s| s.as_str()) {
+                        let payload = json!({ "op": "getLatest", "sha": sha, "destPath": body.path.clone() });
+                        let _ = forward(&state, payload).await;
+                    }
+                }
+            }
             // Re-protect the local copy: with the lock gone it must be read-only
             // again so nobody edits without checking out (mirrors check-in).
             // Best-effort — the DB lock release is the real change.
@@ -322,6 +337,16 @@ async fn checkin(State(state): State<Arc<BridgeState>>, Json(body): Json<Checkin
     };
     if state.session().is_none() {
         return no_session();
+    }
+    // Refuse a check-in for a file the caller doesn't hold: the UI would upload a
+    // new blob and pdm_check_in would then reject it on the lock mismatch, leaving
+    // an orphaned storage object and a confusing 502. Fail fast with a clear 409.
+    if !file.lock.as_ref().map(|l| l.by_me).unwrap_or(false) {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "file is not checked out by you", "code": "not_checked_out" })),
+        )
+            .into_response();
     }
     let payload = json!({
         "op": "checkin",
