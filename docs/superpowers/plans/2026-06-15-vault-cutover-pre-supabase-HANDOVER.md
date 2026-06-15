@@ -6,10 +6,14 @@
 **Goal:** July-1 production cutover — Helios Vault becomes the FSAE team's
 source of truth for all CAD, replacing SolidWorks PDM.
 
-This branch carries every cutover fix that needs **no Supabase change**. The
-DB-side fixes are deliberately *not* applied here — they need a live token and a
+This branch carries (1) every vault cutover fix that needs **no Supabase
+change**, and (2) the new **Bug/Feature Report** feature. The DB-side pieces of
+*both* are deliberately *not* applied here — they need a live token and a
 validatable stack (this machine has no Docker). Read the companion audit report
-first: `docs/superpowers/plans/2026-06-15-vault-cutover-audit.md`.
+first: `docs/superpowers/plans/2026-06-15-vault-cutover-audit.md`. The report
+feature also has its own spec + plan:
+`docs/superpowers/specs/2026-06-15-bug-feature-report-design.md` and
+`docs/superpowers/plans/2026-06-15-bug-feature-report.md`.
 
 ---
 
@@ -21,12 +25,13 @@ first: `docs/superpowers/plans/2026-06-15-vault-cutover-audit.md`.
 | `16938d7` | **P0 frontend** — bulk actions, create/move safety, admin profile guard |
 | `8341a8e` | **P1 frontend** — correctness fixes that need no DB change |
 | `c2001ba` | **bridge Rust** — `/checkin` lock-check, `/cancel-checkout` restore |
-| _(this doc)_ | handover |
+| `6ca0ad0`→`dbbdf87` | **Bug/Feature Report feature** (10 commits) — breadcrumb buffer + global capture, producers, native `xcap` screenshot, submit hook + types, report modal, sidebar button + admin viewer, `support.reports` migration file |
+| docs | cutover audit, report spec + plan, and this handover |
 
 ## Verification status (all green on this branch)
 
 - `pnpm --filter @helios/desktop typecheck` → clean
-- `pnpm --filter @helios/desktop test` → **1512 / 1512 pass** (193 files)
+- `pnpm --filter @helios/desktop test` → **1531 / 1531 pass** (197 files; +19 report/breadcrumb tests)
 - `cargo check` (apps/desktop/src-tauri, incl. `cfg(windows)`) → clean (exit 0)
 - pre-commit physics parity suite → passed on every commit
 - **Caveat (not a regression):** the full vitest run emits one *unhandled
@@ -81,6 +86,22 @@ first: `docs/superpowers/plans/2026-06-15-vault-cutover-audit.md`.
 - `/cancel-checkout` — restores the vaulted version before re-applying read-only
   (spec 2026-05-30 §4), matching the in-app CancelButton; best-effort, with
   auto-sync's "read-only but differs → refresh" as the fallback.
+
+### Bug/Feature Report (frontend shipped; backend staged for the Supabase pass)
+- **Sidebar button** in `ModulePicker` directly above the user pill (collapsed +
+  expanded); admins/owners also get a "View reports" link.
+- **`lib/breadcrumbs.ts`** — 50-entry ring buffer + `installGlobalCapture()`
+  (window error/rejection + wrapped `console.error`/`warn`); producers in
+  `main.tsx` (boot), `Shell.tsx` (nav), `ErrorBoundary` (catch + `recordLastError`),
+  and `RowActions.tsx` (vault actions).
+- **Native screenshot** — `capture_app_screenshot` Tauri command (`xcap`, captures
+  WebGL/canvas) + `lib/screenshot.ts` best-effort wrapper.
+- **`src/shell/report/`** — `useSubmitReport` (upload-then-insert, per-call
+  `.schema("support")`), `ReportModal` (diagnostics snapshotted at open + optional
+  screenshot), `useReports` + `ReportsViewer` (admin triage new→triaged→fixed).
+- **Backend (staged — Supabase pass item #5)** — `support.reports` migration +
+  `report-attachments` bucket. **INERT until applied** AND the `support` schema is
+  exposed in the project's API settings (client defaults to `pdm`).
 
 ---
 
