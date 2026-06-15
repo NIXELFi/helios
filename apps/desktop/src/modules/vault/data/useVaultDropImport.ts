@@ -228,6 +228,13 @@ export function useVaultDropImport({
   ) {
     const vid = vaultIdRef.current;
     if (!vid) return;
+    // Snapshot the vault context ONCE. The window drag handlers read these from
+    // live refs; without snapshotting, switching the active vault mid-import
+    // would route the remaining files' bytes to the NEW vault's local folder
+    // while the DB add still targets the original vault (vid) — a silent split.
+    // (abortRef only fires on a new DROP, not on a vault switch.)
+    const foldersSnap = foldersRef.current;
+    const rootSnap = vaultRootRef.current;
 
     // Supersede any in-flight import and start a fresh abort scope.
     abortRef.current?.abort();
@@ -246,8 +253,8 @@ export function useVaultDropImport({
 
     // Raw DB folder names for ensureFolderHierarchy matching; sanitized
     // segments for anything touching disk (path-traversal containment).
-    const prefix = folderNamePath(targetFolderId, foldersRef.current);
-    const sanitizedPrefix = folderPath(targetFolderId, foldersRef.current);
+    const prefix = folderNamePath(targetFolderId, foldersSnap);
+    const sanitizedPrefix = folderPath(targetFolderId, foldersSnap);
 
     const collected: DropImportResult[] = [];
     for (const item of items) {
@@ -262,7 +269,7 @@ export function useVaultDropImport({
         // (the unmatched/auto-add flow can then pick it up). Segment-wise
         // sanitization matches how the sync ledger + auto-sync key paths.
         let absolutePath = "";
-        const root = vaultRootRef.current;
+        const root = rootSnap;
         if (root) {
           const relSan = item.relativePath.split("/").map(sanitizePathSegment).join("/");
           const localRel = sanitizedPrefix ? `${sanitizedPrefix}/${relSan}` : relSan;

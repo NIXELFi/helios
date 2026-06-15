@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVaults } from "./useVaults";
+import { resetLockOverlay } from "./lock-overlay";
 import type { Vault, VaultId } from "./types";
 
 const STORAGE_KEY = "helios.vault.activeVaultId";
@@ -123,6 +124,11 @@ export function useActiveVault(): {
   const setActiveVaultId = useCallback((id: VaultId) => {
     userSetIdInSessionRef.current = true;
     writeStored(id);
+    // Drop any optimistic lock-overlay entries from the vault we're leaving —
+    // the overlay is a module singleton keyed by file id, so a stale add/remove
+    // could otherwise briefly paint the wrong lock state on the new vault's
+    // rows until the first lock refetch reconciles it.
+    resetLockOverlay();
     // Broadcast to every hook instance in this window (incl. self) so all
     // consumers re-render with the new vault id immediately.
     broadcast(id);

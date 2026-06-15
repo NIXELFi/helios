@@ -497,6 +497,15 @@ export function BrowseScreen() {
     const name = promptValue.trim();
     if (!name || !vaultId || !prompt) return;
     setPromptError(null);
+    // Reject path separators / traversal / control chars in the raw name. The
+    // DB stores the name verbatim and ensureFolderHierarchy splits folder paths
+    // on "/", so "a/b" or ".." would inject phantom folders or escape the
+    // intended location (sanitizePathSegment guards DISK paths, not the stored
+    // name). SW PDM rejects these outright too.
+    if (/[\\/]/.test(name) || name === "." || name === ".." || /[\x00-\x1f]/.test(name)) {
+      setPromptError('Names can’t contain "/" or "\\", be "." or "..", or include control characters.');
+      return;
+    }
     // Friendly duplicate check BEFORE the RPC: the server's unique constraint
     // still backstops races, but "a folder named X already exists here" beats
     // a raw 23505 message (SW PDM tells you immediately).

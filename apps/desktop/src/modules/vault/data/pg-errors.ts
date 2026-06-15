@@ -83,6 +83,8 @@ export function friendlyPgError(
         return { message: "A vault with this name already exists.", kind: "duplicate" };
       case "lock":
         return { message: "This file is already checked out.", kind: "duplicate" };
+      case "version":
+        return { message: "A revision with that number already exists — refresh and try again.", kind: "duplicate" };
       default:
         return { message: "This item already exists.", kind: "duplicate" };
     }

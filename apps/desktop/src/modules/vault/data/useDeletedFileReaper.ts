@@ -134,6 +134,11 @@ export function useDeletedFileReaper(input: {
             // Vault working copies are kept read-only; clear the bit first or
             // remove() fails on Windows (can't delete a read-only file).
             await setReadonly(local.absolutePath, false);
+            // If the pass was torn down (vault switch / unmount) between clearing
+            // the bit and removing the file, don't leave a writable-but-unlocked
+            // orphan that the held-back guard would then skip forever — restore
+            // read-only (best-effort) and bail.
+            if (cancelled) { void setReadonly(local.absolutePath, true); return; }
             await remove(local.absolutePath);
             removedAny = true;
             // Drop the ledger entry: this local copy is gone because the VAULT

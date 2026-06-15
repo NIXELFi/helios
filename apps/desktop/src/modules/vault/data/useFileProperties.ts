@@ -79,9 +79,12 @@ export function useFileProperties(
       }
     })();
     return () => { alive = false; };
-    // Re-resolve only when the selected version changes.
+    // Re-resolve when the selected version changes OR when its cached properties
+    // populate in place (another user's check-in / backfill updates
+    // version.properties on the same version.id via realtime — keying on id
+    // alone left the panel stuck on "download to read" until re-selection).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version?.id]);
+  }, [version?.id, version?.properties?.length]);
 
   return state;
 }

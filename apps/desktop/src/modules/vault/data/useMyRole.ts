@@ -35,7 +35,13 @@ export function useMyRole(): MyRole {
         .select("*")
         .eq("user_id", user.id);
       const rows = (data ?? []) as Array<RoleRow & { vault_id?: string | null }>;
-      const global = rows.find((r) => r.vault_id == null) ?? rows[0];
+      // GLOBAL role only: a row with no vault_id (== null also matches the
+      // legacy pre-vault_id-column shape, where every row is effectively
+      // global). Do NOT fall back to rows[0] — that returned a PER-VAULT role
+      // as if it were global, so an editor in vault A wrongly got edit
+      // affordances in vault B. No global row → null; per-vault edit rights
+      // come from the vault-scoped hooks (useCanEditVault / useIsVaultAdmin).
+      const global = rows.find((r) => r.vault_id == null);
       if (mounted) setRole(global?.role ?? null);
     })();
     return () => {

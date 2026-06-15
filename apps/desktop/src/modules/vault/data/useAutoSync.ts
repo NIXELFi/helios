@@ -378,7 +378,11 @@ export function useAutoSync(input: {
           if (!isCurrent()) break;
           const m = matchLocal(file, localFiles, versionsByFileId, folders);
           if (!m.local) continue; // not present locally → nothing to chmod
-          const lockedByMe = myLocks.has(file.id);
+          // Use the LIVE lock set (not the start-of-pass snapshot): a checkout
+          // during a long pass must keep the file writable here, matching the
+          // worker pool's myLocksLiveRef checks. The stale snapshot left a
+          // just-checked-out file read-only until the next pass.
+          const lockedByMe = myLocksLiveRef.current.has(file.id);
           const currentlyReadonly = m.local.readonly === true;
           if (lockedByMe) {
             // Checked out by me → must be writable so I can edit.
