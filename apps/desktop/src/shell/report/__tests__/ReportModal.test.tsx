@@ -55,9 +55,9 @@ describe("ReportModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Short summary of the problem"), { target: { value: "My title" } });
     fireEvent.click(screen.getByRole("button", { name: "Send report" }));
     expect(h.submit).toHaveBeenCalledTimes(1);
-    const [draft, diag] = h.submit.mock.calls[0]!;
-    expect(draft).toMatchObject({ kind: "bug", title: "My title" });
-    expect(diag).toMatchObject({ module: "vault", app_version: "4.3.7" });
+    const call = h.submit.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    expect(call[0]).toMatchObject({ kind: "bug", title: "My title" });
+    expect(call[1]).toMatchObject({ module: "vault", app_version: "4.3.7" });
   });
 
   it("on failure shows the error and keeps the typed title", () => {
