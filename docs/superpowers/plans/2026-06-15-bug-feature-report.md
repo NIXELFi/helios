@@ -461,8 +461,8 @@ git commit -m "feat(report): sidebar report button above the user pill + shell w
 - Modify: `apps/desktop/src/Shell.tsx` (mount `ReportsViewer` when `reportsOpen`)
 - Test: `apps/desktop/src/shell/report/useReports.test.ts` (mock client: lists rows; `setStatus` calls update with id+status)
 
-- [ ] **Step 1: Write failing test** for `useReports` (mock client `from("reports").select()` returns rows; `setStatus(id, "fixed")` issues an update). Run → FAIL.
-- [ ] **Step 2:** Implement `useReports.ts` (select newest-first; `setStatus` → `.update({status}).eq("id", id)`; expose `reports`, `loading`, `error`, `refetch`, `setStatus`).
+- [ ] **Step 1: Write failing test** for `useReports`. Mock a client whose `.schema("support").from("reports").select()` returns rows and whose `.update().eq()` records the call — the mock MUST require the `.schema("support")` hop, so an implementation that forgets it (and silently hits `pdm`) fails the test. Assert newest-first ordering + that `setStatus(id, "fixed")` issues the update. Run → FAIL.
+- [ ] **Step 2:** Implement `useReports.ts` using `client.schema("support").from("reports")` for BOTH the `.select()` (newest-first) and the `setStatus` `.update({status}).eq("id", id)` (same per-call schema override as `useSubmitReport`). Expose `reports`, `loading`, `error`, `refetch`, `setStatus`.
 - [ ] **Step 3:** Implement `ReportsViewer.tsx`: admin-only modal (the Shell only renders it for admins, but also guard inside), newest-first list, filter by status/type, expandable rows showing diagnostics + `last_error` + screenshot via `client.storage.from("report-attachments").createSignedUrl(path, 300)`, and a status dropdown wired to `setStatus`. Modal a11y recipe.
 - [ ] **Step 4:** In `Shell.tsx`, mount: `{reportsOpen && <ReportsViewer onClose={() => setReportsOpen(false)} />}`.
 - [ ] **Step 5: Verify** — hook test PASS; `pnpm typecheck` clean.
