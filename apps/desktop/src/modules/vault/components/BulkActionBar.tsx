@@ -9,6 +9,7 @@ import { useDownloadVersion } from "../data/useDownloadVersion";
 import { matchLocal, vaultRelativePath } from "../data/local-match";
 import { localDestPath } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
+import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -58,6 +59,7 @@ export function BulkActionBar({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // AbortController for the in-flight long-running loop (Get Latest /
   // Check In Changes — the two that write files and call setState across many
@@ -180,6 +182,13 @@ export function BulkActionBar({
         if (signal.aborted) return;
         if (r) {
           ok++;
+          // P0: the file is now the latest version and no longer checked out, so
+          // re-protect the local copy read-only — mirroring single-file CheckIn.
+          // Without this the writable-but-unlocked copy reads as an unsaved edit
+          // and gets held back from sync indefinitely (the next reconciliation
+          // only freezes it a pass later, if at all).
+          await setReadonly(m.local.absolutePath, true);
+          flipSwReadonly(m.local.absolutePath, true);
           // Record the just-checked-in content in the ledger (T6).
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), r.sha256);
         } else fail++;
@@ -244,7 +253,27 @@ export function BulkActionBar({
       if (kind === "me") { alreadyMine++; continue; }
       if (kind === "other") { lockedByOther++; continue; }
       const r = await acquireLock.run(id);
-      if (r) ok++; else fail++;
+      if (!r) { fail++; continue; }
+      // P0: make the local copy editable — get the latest first if ours is
+      // missing/stale (so the user doesn't edit an outdated base and then check
+      // it in over a teammate's newer work), then clear the read-only bit.
+      // Mirrors single-file CheckOut, including rolling the lock back if the
+      // required download fails.
+      const file = files.find((f) => f.id === id);
+      if (file && vaultRoot) {
+        const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
+        const ver = versionsByFileId.get(id)?.[0];
+        const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+        const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
+        if (ver && stale) {
+          const got = await download.run(ver.sha256, dest);
+          if (!got) { await releaseLock.run(id); fail++; continue; }
+          if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
+        }
+        await setReadonly(dest, false);
+        flipSwReadonly(dest, false);
+      }
+      ok++;
     }
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
@@ -258,18 +287,49 @@ export function BulkActionBar({
   }
 
   async function bulkCancel() {
+    setConfirmCancel(false);
+    const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
-    let ok = 0, fail = 0, notMine = 0;
+    let ok = 0, fail = 0, notMine = 0, discarded = 0;
     for (const id of selectedIds) {
-      // Only rows the user owns can be released — releasing someone else's
-      // lock requires force-unlock, which is admin-only and intentionally
-      // out of the bulk path.
+      if (signal.aborted) return;
+      // Only rows the user owns can be released — releasing someone else's lock
+      // requires force-unlock, which is admin-only and out of the bulk path.
       if (lockKindFor(id) !== "me") { notMine++; continue; }
-      const r = await releaseLock.run(id);
-      if (r) ok++; else fail++;
+      const file = files.find((f) => f.id === id);
+      const ver = file ? versionsByFileId.get(id)?.[0] : undefined;
+      // Never-checked-in draft: there is no vaulted version to restore, so undo
+      // = discard the draft (soft-delete releases the lock; the reaper removes
+      // the local copy). Mirrors single-file undo-checkout on a draft.
+      if (file && !ver) {
+        const del = await deleteFile.run(id);
+        if (signal.aborted) return;
+        if (del) discarded++; else fail++;
+        continue;
+      }
+      const rel = await releaseLock.run(id);
+      if (signal.aborted) return;
+      if (!rel) { fail++; continue; }
+      // P0: undo check-out is destructive in the real-vault model — discard local
+      // edits by restoring the latest vaulted version, THEN re-protect read-only.
+      // Only freeze on a SUCCESSFUL restore: a failed download leaves the local
+      // edit on disk writable (held back), never a read-only-but-dirty copy that
+      // the next sync pass would treat as clean and clobber.
+      if (file && ver && vaultRoot) {
+        const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+        const restored = await download.run(ver.sha256, dest, signal);
+        if (signal.aborted) return;
+        if (!restored) { fail++; continue; }
+        await setReadonly(dest, true);
+        flipSwReadonly(dest, true);
+        if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
+      }
+      ok++;
     }
+    if (signal.aborted) return;
     const detail: string[] = [];
+    if (discarded) detail.push(`${discarded} draft${discarded === 1 ? "" : "s"} discarded`);
     if (fail) detail.push(`${fail} failed`);
     if (notMine) detail.push(`${notMine} not yours`);
     setStatus(
@@ -332,7 +392,7 @@ export function BulkActionBar({
       </button>
       <button
         type="button"
-        onClick={bulkCancel}
+        onClick={() => setConfirmCancel(true)}
         // Disabled when nothing in the selection is locked by the current
         // user. (Cancelling someone else's lock requires force-unlock.)
         disabled={busy || eligibility.canCancel === 0}
@@ -425,6 +485,42 @@ export function BulkActionBar({
                 className="rounded bg-red-700 px-3 py-1 text-xs text-white hover:bg-red-600"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmCancel && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setConfirmCancel(false)}
+        >
+          <div
+            className="w-96 space-y-3 rounded-lg border border-helios-line bg-helios-panel p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-helios-text">
+              Undo check-out on {eligibility.canCancel} file{eligibility.canCancel === 1 ? "" : "s"}?
+            </h3>
+            <p className="text-xs text-helios-dim">
+              This discards your local changes to the files you have checked out and restores the
+              latest vaulted version (read-only). Files you created but never checked in are
+              discarded entirely. This can&apos;t be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmCancel(false)}
+                className="rounded px-3 py-1 text-xs text-helios-dim hover:bg-helios-line"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={bulkCancel}
+                className="rounded bg-red-700 px-3 py-1 text-xs text-white hover:bg-red-600"
+              >
+                Undo check-out
               </button>
             </div>
           </div>

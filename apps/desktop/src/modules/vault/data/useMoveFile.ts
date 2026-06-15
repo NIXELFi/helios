@@ -4,7 +4,7 @@ import { useSupabaseClient } from "@helios/auth";
 import type { Folder, FolderId, VaultFile } from "./types";
 import { friendlyPgError } from "./pg-errors";
 import { localDestPath, vaultRelPathFor } from "./folder-paths";
-import { ledgerRecord } from "./sync-ledger";
+import { ledgerRecord, ledgerRemove } from "./sync-ledger";
 
 /**
  * Move a file to another folder (tree drag-and-drop). Two halves:
@@ -31,13 +31,28 @@ export function useMoveFile() {
       if (file.folder_id === targetFolderId) return true; // no-op drop on own folder
       setLoading(true);
       setError(null);
-      const { error: err } = await (client.from("files") as any)
+      // Scope the UPDATE to the active vault as defence-in-depth: a global admin's
+      // RLS role spans vaults, so without this a drop could re-parent a row into a
+      // folder that belongs to a DIFFERENT vault. file.id alone is globally unique,
+      // but the vault_id predicate makes a cross-vault re-parent structurally
+      // impossible (the row simply won't match).
+      let q = (client.from("files") as any)
         .update({ folder_id: targetFolderId })
         .eq("id", file.id);
+      if (ctx.vaultId) q = q.eq("vault_id", ctx.vaultId);
+      const { error: err } = await q;
       if (err) {
         setError(new Error(friendlyPgError(err, "file").message));
         setLoading(false);
         return false;
+      }
+      // Re-key the sync ledger: DROP the old vault-relative path's entry. Leaving
+      // it behind makes a later move-BACK to this path look like a local deletion
+      // to the auto-sync pass, which (if the user holds the lock) would call
+      // pdm_delete_file and soft-delete the live vault row. The new path is
+      // recorded in the local-rename block below.
+      if (ctx.vaultId) {
+        void ledgerRemove(ctx.vaultId, vaultRelPathFor(file.folder_id, file.name, ctx.folders));
       }
       // Best-effort local rename — a failure here must not fail the move the
       // server already accepted (auto-sync will re-materialize at the new

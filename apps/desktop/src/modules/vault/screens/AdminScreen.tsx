@@ -158,6 +158,7 @@ export function AdminScreen() {
                   isOwner={isOwner}
                   isAdmin={isAdmin}
                   busy={pendingId === u.user_id}
+                  vaultScoped={scopeVaultId !== null}
                   onSetRole={handleSetRole}
                   onRevoke={(user) => setConfirmRevoke(user)}
                   onEdit={(user) => setEditingUser(user)}
@@ -343,12 +344,16 @@ function UserRow(props: {
   isOwner: boolean;
   isAdmin: boolean;
   busy: boolean;
+  /** True when the table is scoped to a single vault. The per-vault roles RPC
+   *  doesn't return display_name/subteam (those are account-wide), so editing a
+   *  profile here would save blanks over the real values — disable Edit. */
+  vaultScoped: boolean;
   onSetRole: (u: VaultUser, role: Exclude<VaultRole, "owner">) => void;
   onRevoke: (u: VaultUser) => void;
   onEdit: (u: VaultUser) => void;
   onDelete: (u: VaultUser) => void;
 }) {
-  const { u, isMe, isOwner, isAdmin, busy, onSetRole, onRevoke, onEdit, onDelete } = props;
+  const { u, isMe, isOwner, isAdmin, busy, vaultScoped, onSetRole, onRevoke, onEdit, onDelete } = props;
 
   // Editing rules (mirror the server RPCs):
   //  - your own row: never editable here (prevents self-lockout footguns).
@@ -441,8 +446,10 @@ function UserRow(props: {
           <button
             type="button"
             onClick={() => onEdit(u)}
-            disabled={!isAdmin || busy}
-            title="Edit name & subteam"
+            disabled={!isAdmin || busy || vaultScoped}
+            title={vaultScoped
+              ? "Switch the scope to Global to edit name & subteam — the per-vault list doesn't load them, so saving here would blank the real values"
+              : "Edit name & subteam"}
             className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-asu-gold hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
           >
             Edit
