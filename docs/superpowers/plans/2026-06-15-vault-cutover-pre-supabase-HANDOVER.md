@@ -136,6 +136,17 @@ security suite.
    `BEGIN … EXCEPTION WHEN OTHERS THEN NULL` around the `audit_log` inserts in
    `delete_file` / `restore_file` / `delete_folder` / `restore_folder` so a failed
    audit insert can't produce an invisible delete.
+5. **Bug/feature report backend** — apply
+   `infra/pdm-supabase/supabase/migrations/20260615000000_support_reports.sql`
+   (new `support` schema + `support.reports` table + RLS + `report-attachments`
+   bucket), AND **expose the `support` schema** in the project's API settings
+   (PostgREST exposed schemas) so the client's `.schema("support")` calls
+   resolve. The whole report feature (sidebar button, modal, admin viewer) is
+   built and committed but **inert until this is applied** — by design, not a
+   bug. Spec/plan: `docs/superpowers/specs/2026-06-15-bug-feature-report-design.md`,
+   `docs/superpowers/plans/2026-06-15-bug-feature-report.md`. RLS suite to add:
+   reporter inserts/reads own, non-admin can't read others', admin reads/updates
+   all, anon denied.
 
 ### Supabase verification checklist (audit report §6)
 - **Schema-drift diff:** live DDL vs the migration-derived schema (hosted history
