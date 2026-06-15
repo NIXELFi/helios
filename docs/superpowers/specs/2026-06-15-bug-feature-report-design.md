@@ -81,9 +81,15 @@ function installGlobalCapture(): void                        // idempotent; call
 
 Other producers:
 - **Shell** records `{category:"nav"}` on `active` module change.
-- **`ErrorBoundary.componentDidCatch`** records `{category:"error"}` with
-  `{label, message, componentStack}` (this same object becomes the report's
-  `last_error`).
+- **`ErrorBoundary.componentDidCatch`** calls `recordLastError({label, message,
+  componentStack})` — a dedicated module-level setter in `breadcrumbs.ts` that
+  the report reads as its structured `last_error` (not parsed back out of the
+  breadcrumb list). It ALSO records an `{category:"error"}` breadcrumb. Note: the
+  existing `componentDidCatch` already calls `console.error`, which the console
+  wrapper records too, so a boundary catch yields ~2 breadcrumbs — accepted in
+  v1 (harmless, low noise); do not "fix" it by removing the explicit record,
+  which is what guarantees `last_error` is populated even if console wrapping is
+  ever disabled.
 - A few **manual** `recordBreadcrumb("action", …)` calls in the hottest module
   (Vault: check-out / check-in / cancel / delete) — high signal, low cost.
 
@@ -110,9 +116,15 @@ A focus-trapped, Escape-closable modal (mirrors the app's modal a11y recipe;
 | Screenshot | "Attach screenshot" button + thumbnail/remove | none |
 | Diagnostics included | collapsible read-only preview | version, OS, module, breadcrumbs |
 
+**Diagnostic snapshot timing:** the modal **snapshots** module + breadcrumbs +
+version + OS **when it opens** and holds them constant. This guarantees the
+read-only "Diagnostics included" preview the user reviews is byte-for-byte what
+gets submitted (otherwise a late `console.error` or a module switch while the
+modal is open would make the preview and the stored row disagree).
+
 Submit flow (`useSubmitReport` hook):
 1. If a screenshot is attached, upload PNG to Storage `report-attachments/<uuid>.png`.
-2. Insert a `support.reports` row (diagnostics gathered at submit time).
+2. Insert a `support.reports` row using the snapshot taken at modal-open.
 3. Toast "Thanks — report sent."; close. On failure, surface a retry (the typed
    text is preserved).
 
@@ -169,6 +181,11 @@ create table support.reports (
 );
 ```
 
+`severity` intentionally has **no DB-level check constraint** — its allowed
+values differ by `kind` (bug: blocker/annoying/minor; feature:
+important/nice-to-have) and are enforced in the UI. Keeping it free-text avoids a
+two-dimensional constraint and lets the vocabulary evolve without a migration.
+
 RLS (mirrors pdm conventions — revoke anon/public, grant authenticated, admin
 check via the existing global-role helper, e.g. `pdm.is_admin()`):
 - **insert:** any authenticated user, `reporter_id = auth.uid()`.
@@ -191,10 +208,16 @@ user clicks Report ─▶ ReportModal (gather: active module from Shell,
 admin ─▶ View reports ─▶ ReportsViewer (RLS-gated select) ─▶ status update
 ```
 
-`active` module and the auth `client`/`user` are already in `HeliosShell`; the
-report section is rendered by `ModulePicker`, so the Shell passes a small
-`onOpenReport`/`reportContext` down (same prop pattern as the existing auth/user
-props).
+**Wiring (keep `ModulePicker` props lean — it's already 17 fields):**
+- `ReportModal` and `ReportsViewer` are mounted at the **Shell level** (like
+  `AuthModal`/`UpdateModal`), opened via Shell state. They read `client`/`user`
+  from `useHeliosAuth()` directly — those are NOT threaded through `ModulePicker`.
+- `ModulePicker` gains exactly three new props: `onOpenReport(kind)`,
+  `canViewReports: boolean` (admin/owner — shows the "View reports" link), and
+  `onOpenReports()`.
+- The Shell passes `active` (the current module) into `ReportModal` as the
+  diagnostic snapshot's `module`, and records the `nav` breadcrumb on `active`
+  change.
 
 ## Error handling
 
