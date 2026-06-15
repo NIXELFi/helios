@@ -170,6 +170,7 @@ git commit -m "feat(report): breadcrumb ring buffer + global error capture"
 - Modify: `apps/desktop/src/main.tsx` (call `installGlobalCapture()` before render)
 - Modify: `apps/desktop/src/Shell.tsx` (record `nav` on `active` change)
 - Modify: `apps/desktop/src/components/ErrorBoundary.tsx` (`recordLastError` + breadcrumb in `componentDidCatch`)
+- Modify: `apps/desktop/src/modules/vault/components/RowActions.tsx` (a few manual `action` breadcrumbs — per the spec's "Other producers")
 
 - [ ] **Step 1:** In `main.tsx`, import and call `installGlobalCapture()` once, before `ReactDOM.createRoot(...).render(...)`.
 - [ ] **Step 2:** In `Shell.tsx` `HeliosShell`, add an effect that records nav:
@@ -188,6 +189,8 @@ import { recordBreadcrumb, recordLastError } from "../lib/breadcrumbs";
 recordLastError({ label: this.props.label, message: error.message || String(error), componentStack: info.componentStack ?? undefined });
 recordBreadcrumb("error", `ErrorBoundary${this.props.label ? ` [${this.props.label}]` : ""}: ${error.message || String(error)}`);
 ```
+
+- [ ] **Step 3b: High-signal Vault breadcrumbs** — in `apps/desktop/src/modules/vault/components/RowActions.tsx`, add one terse `recordBreadcrumb("action", …)` to each hot handler (CheckOut `handleClick`, CheckIn `submit`, Cancel `doRelease` / `doDiscardDraft`), e.g. `recordBreadcrumb("action", \`vault: check-out ${fileName ?? "file"}\`)`. Short messages, no file contents.
 
 - [ ] **Step 4: Verify** — `pnpm typecheck` → clean. (No new unit test; this is wiring covered by Task 1's unit tests + Task 5's modal test reading the buffer.)
 - [ ] **Step 5: Commit**
@@ -236,15 +239,22 @@ pub fn capture_app_screenshot(window: Window) -> Result<Vec<u8>, String> {
         .find(|w| w.title() == target && !target.is_empty())
         .or_else(|| windows.iter().find(|w| w.app_name().to_lowercase().contains("helios")))
         .ok_or_else(|| "Helios window not found for capture".to_string())?;
-    let img = win.capture_image().map_err(|e| format!("capture: {e}"))?;
+    let img = win.capture_image().map_err(|e| format!("capture: {e}"))?; // RgbaImage
     let mut bytes: Vec<u8> = Vec::new();
-    img.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+    // RgbaImage has no direct write_to; wrap in DynamicImage first.
+    xcap::image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut Cursor::new(&mut bytes), xcap::image::ImageFormat::Png)
         .map_err(|e| format!("encode png: {e}"))?;
     Ok(bytes)
 }
 ```
 
-> `image` is re-exported by `xcap` (`xcap::image`) in recent versions; if the bare `image` path doesn't resolve, use `xcap::image::ImageFormat` and `use xcap::image::EncodableLayout` as needed. Adjust per `cargo check`.
+> The PNG encoder comes from the `image` crate, which `xcap` re-exports as
+> `xcap::image` (used above — no separate dependency needed). If you prefer a
+> standalone dep, add `image = "0.25"` to Cargo.toml and use bare `image::` paths
+> instead. `cargo check` is the gate; if the `xcap` window API differs from
+> `Window::all()` / `.title()` / `.app_name()` / `.capture_image()`, adjust to
+> the pinned version's surface.
 
 - [ ] **Step 3:** `commands/mod.rs` → add `pub mod screenshot;`. `lib.rs` → add `commands::screenshot::capture_app_screenshot,` to the `generate_handler!` list (after `reveal::reveal_in_explorer,`).
 - [ ] **Step 4:** Implement `lib/screenshot.ts`:
@@ -341,7 +351,10 @@ export function useSubmitReport() {
         if (upErr) { setError(`Screenshot upload failed: ${upErr.message}`); return false; }
         screenshot_path = key;
       }
-      const { error: insErr } = await (client.from("reports") as any).insert({
+      // The app's Supabase client defaults to the `pdm` schema, so a bare
+      // client.from("reports") would look in pdm. Override per-call to reach
+      // support.reports.
+      const { error: insErr } = await ((client as any).schema("support").from("reports")).insert({
         kind: draft.kind, severity: draft.severity, title: draft.title.trim(),
         what_doing: draft.what_doing.trim() || null, details: draft.details.trim() || null,
         module: diag.module, app_version: diag.app_version, os: diag.os,
@@ -355,7 +368,19 @@ export function useSubmitReport() {
 }
 ```
 
-> Note: `client.from("reports")` resolves to the `support` schema only if the Supabase client is configured with `db: { schema: "support" }` OR the table is exposed via a view/RPC. Check how the vault client targets the `pdm` schema (it uses `client.from("...")` against the public-exposed pdm objects / RPCs). **During the Supabase pass**, confirm the exposed name and adjust this `.from(...)` / add an RPC `support.submit_report(...)` if PostgREST schema exposure requires it. Until applied, the call is inert (table doesn't exist) — tests mock the client so they pass regardless.
+> **Schema routing (resolved):** the app's Supabase client hard-codes
+> `db: { schema: "pdm" }` (`packages/auth/src/client.ts`), so `client.from("reports")`
+> would hit `pdm`, not `support`. The fix (above, and in `useReports`) is the
+> per-call override `client.schema("support").from("reports")` — supported by
+> supabase-js. The Storage call (`client.storage.from(BUCKET)`) is
+> schema-independent. **Two Supabase-pass prerequisites** for this to resolve at
+> runtime: (1) apply the `support` migration; (2) **add `support` to PostgREST's
+> exposed schemas** (Supabase dashboard → Project Settings → API → Exposed
+> schemas, or the `pgrst.db_schemas` config) — otherwise `.schema("support")`
+> 404s. Until both are done the call is inert; tests mock the client so they
+> pass regardless. (Alternative if exposing a schema is undesirable: a
+> `SECURITY DEFINER` RPC in the already-exposed `pdm` schema, called via
+> `client.rpc(...)` — same pattern as `pdm_object_exists`.)
 
 - [ ] **Step 5:** Run → PASS. `pnpm typecheck` → clean.
 - [ ] **Step 6: Commit**
@@ -399,7 +424,7 @@ git commit -m "feat(report): report modal with diagnostics snapshot + screenshot
 - Modify: `apps/desktop/src/shell/ModulePicker.tsx` (new section between `PresencePanel` and `UserPill`; 3 new props)
 - Modify: `apps/desktop/src/Shell.tsx` (state + mount `ReportModal`; pass props)
 
-- [ ] **Step 1:** `ModulePicker` — add props `onOpenReport: (kind: ReportKind) => void`, `canViewReports: boolean`, `onOpenReports: () => void`. Insert before the `UserPill` block:
+- [ ] **Step 1:** `ModulePicker` — add props `onOpenReport: (kind: ReportKind) => void`, `canViewReports: boolean`, `onOpenReports: () => void`. Insert a NEW sibling `<div>` **immediately above** the existing `<div className="border-t border-helios-line p-2">` that wraps `UserPill` (≈ line 240) — a separate sibling, NOT nested inside it (nesting would double the border/padding):
 
 ```tsx
 <div className="border-t border-helios-line p-2">
@@ -455,7 +480,7 @@ git commit -m "feat(report): admin-only reports viewer with status triage"
 **Files:**
 - Create: `infra/pdm-supabase/supabase/migrations/20260615000000_support_reports.sql`
 
-> NOT applied here. This is the mirror file; it is applied + validated (RLS suite) during the Supabase pass with the SB token. No local DB test.
+> NOT applied here. This is the mirror file; it is applied + validated (RLS suite) during the Supabase pass with the SB token. No local DB test. **Also during the Supabase pass:** expose the `support` schema in the project's API settings (PostgREST exposed schemas) so the client's `.schema("support")` calls resolve.
 
 - [ ] **Step 1:** Write the migration: `create schema support`; the `support.reports` table (columns per the spec; `reporter_id ... default auth.uid()`; `status` check; **no** `severity` check); `alter table ... enable row level security`; policies — insert (authenticated, `reporter_id = auth.uid()`), select (`pdm.is_admin()` OR `reporter_id = auth.uid()`), update (`pdm.is_admin()`); `revoke ... from anon, public` and `grant ... to authenticated` per the pdm convention; create the private Storage bucket `report-attachments` + storage policies (insert authenticated; select admin-or-owner via the object's report row). Mirror idioms from an existing migration (e.g. `infra/pdm-supabase/supabase/migrations/20260531000000_pdm_per_vault_roles.sql` for SECURITY DEFINER/grant patterns).
 - [ ] **Step 2: Verify** — file lints as SQL by eye; cross-check column names against `types.ts` `ReportRow`. (Application/validation deferred to the Supabase pass.)
