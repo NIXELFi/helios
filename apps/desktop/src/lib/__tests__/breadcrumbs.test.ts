@@ -16,16 +16,16 @@ describe("breadcrumbs", () => {
     recordBreadcrumb("action", "b");
     const b = getBreadcrumbs();
     expect(b.map((e) => e.message)).toEqual(["a", "b"]);
-    expect(b[0].category).toBe("nav");
-    expect(typeof b[0].t).toBe("string");
+    expect(b[0]!.category).toBe("nav");
+    expect(typeof b[0]!.t).toBe("string");
   });
 
   it("caps at MAX_BREADCRUMBS, dropping oldest", () => {
     for (let i = 0; i < MAX_BREADCRUMBS + 10; i++) recordBreadcrumb("action", `m${i}`);
     const b = getBreadcrumbs();
     expect(b.length).toBe(MAX_BREADCRUMBS);
-    expect(b[0].message).toBe("m10");
-    expect(b[b.length - 1].message).toBe(`m${MAX_BREADCRUMBS + 9}`);
+    expect(b[0]!.message).toBe("m10");
+    expect(b[b.length - 1]!.message).toBe(`m${MAX_BREADCRUMBS + 9}`);
   });
 
   it("never throws on unserializable data", () => {
@@ -37,7 +37,7 @@ describe("breadcrumbs", () => {
 
   it("truncates long messages", () => {
     recordBreadcrumb("action", "x".repeat(1000));
-    expect(getBreadcrumbs()[0].message.length).toBe(300);
+    expect(getBreadcrumbs()[0]!.message.length).toBe(300);
   });
 
   it("recordLastError stores the latest structured error", () => {

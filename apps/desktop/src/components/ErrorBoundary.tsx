@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { recordBreadcrumb, recordLastError } from "../lib/breadcrumbs";
 
 interface Props {
   children: ReactNode;
@@ -39,6 +40,19 @@ export class ErrorBoundary extends Component<Props, State> {
         "uncaught error",
       error,
       info.componentStack,
+    );
+    // Feed the bug-report diagnostics: a structured last_error (read directly by
+    // the report) plus a breadcrumb. The console.error above is also captured by
+    // the global console wrapper, so a catch yields ~2 breadcrumbs — accepted;
+    // the explicit recordLastError is what guarantees last_error is populated.
+    recordLastError({
+      label: this.props.label,
+      message: error.message || String(error),
+      componentStack: info.componentStack ?? undefined,
+    });
+    recordBreadcrumb(
+      "error",
+      `ErrorBoundary${this.props.label ? ` [${this.props.label}]` : ""}: ${error.message || String(error)}`,
     );
   }
 

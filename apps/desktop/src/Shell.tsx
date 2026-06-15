@@ -15,6 +15,7 @@ import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { recordBreadcrumb } from "./lib/breadcrumbs";
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -98,6 +99,12 @@ function HeliosShell() {
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
+
+  // Record module navigation as a breadcrumb so a bug report shows where the
+  // user had been just before filing it.
+  useEffect(() => {
+    recordBreadcrumb("nav", `module -> ${active}`);
+  }, [active]);
 
   // True once the user has clicked "Install and restart". Used to keep the
   // UpdateModal visible (with an error + retry) if the install fails and the

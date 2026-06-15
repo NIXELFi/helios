@@ -12,6 +12,7 @@ import { useRestoreVersion } from "../data/useRestoreVersion";
 import { localDestPath, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ledgerRecord } from "../data/sync-ledger";
+import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 import { toast } from "../data/toast";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { FileId, FolderId, Folder, Version } from "../data/types";
@@ -115,6 +116,7 @@ export function CheckOutButton({
       await setReadonly(dest, false);
       flipSwReadonly(dest, false); // make it editable even if open in SW (no add-in needed)
     }
+    recordBreadcrumb("action", `vault: check-out ${fileName ?? "file"}`);
     toast(`Checked out ${fileName ?? "file"}`);
     onDone?.();
   }
@@ -195,6 +197,7 @@ export function CheckInButton({
     setPendingBytes(null);
     const result = await checkIn.run(fileId, bytes, comment);
     if (result) {
+      recordBreadcrumb("action", `vault: check-in ${fileName ?? "file"}`);
       // The file is now the latest version and no longer checked out → make the
       // local copy read-only (real-vault). Prefer the actual file we read; fall
       // back to the computed vault path.
@@ -662,6 +665,7 @@ export function CancelButton({
   async function doDiscardDraft() {
     const ok = await deleteFile.run(fileId);
     if (!ok) return;
+    recordBreadcrumb("action", `vault: discard draft ${fileName ?? ""}`.trimEnd());
     toast(`Discarded draft ${fileName ?? ""}`.trimEnd(), "info");
     onDone?.();
   }
@@ -698,6 +702,7 @@ export function CancelButton({
       // (T6): the local copy now matches latestSha and is ledger-tracked.
       recordLedger({ folderId, fileName, folders, vaultId }, latestSha);
     }
+    recordBreadcrumb("action", `vault: undo check-out ${fileName ?? "file"}`);
     toast(`Undid check-out of ${fileName ?? "file"}`, "info");
     onDone?.();
   }
