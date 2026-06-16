@@ -190,7 +190,7 @@ export function ModulePicker(props: Props) {
         </button>
       </div>
 
-      <div className="flex flex-col gap-1 p-2">
+      <div className="flex flex-col gap-0.5 p-2">
         <NavButton
           label="Logs"
           Icon={MODULE_ICON.logs}
@@ -309,14 +309,14 @@ function NavButton(props: {
       onClick={onClick}
       title={collapsed ? label : disabled ? disabledTitle : undefined}
       className={
-        "flex items-center rounded-sm border text-sm transition-colors " +
+        "flex items-center rounded text-sm transition-colors " +
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-        (collapsed ? "justify-center p-2 " : "justify-between px-3 py-1.5 text-left ") +
+        (collapsed ? "justify-center p-2 " : "justify-between gap-2 px-2 py-1.5 text-left ") +
         (disabled
-          ? "cursor-pointer border-helios-line bg-helios-panel/60 text-helios-text/70 hover:border-asu-gold hover:text-helios-text"
+          ? "cursor-pointer text-helios-dim hover:bg-helios-panel hover:text-asu-gold"
           : active
-            ? "border-asu-gold bg-asu-gold font-semibold text-helios-base"
-            : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
+            ? "bg-asu-gold/15 text-asu-gold"
+            : "text-helios-dim hover:bg-helios-panel hover:text-asu-gold")
       }
     >
       {collapsed ? (
@@ -331,11 +331,7 @@ function NavButton(props: {
             <span
               className={
                 "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
-                (disabled
-                  ? "bg-helios-line text-helios-text/80"
-                  : active
-                    ? "bg-helios-base text-asu-gold"
-                    : "bg-asu-gold text-helios-base")
+                (disabled ? "bg-helios-line text-helios-dim" : "bg-asu-gold text-helios-base")
               }
             >
               {badge}
@@ -361,7 +357,7 @@ function ReportRailButton(props: {
         onClick={() => onOpenReport("bug")}
         aria-label="Report a bug"
         title="Report a bug or request a feature"
-        className="flex w-full items-center justify-center rounded-sm border border-helios-line bg-helios-panel p-2 text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        className="flex w-full items-center justify-center rounded p-2 text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
       >
         <IconBug size={18} strokeWidth={1.5} />
       </button>
@@ -373,7 +369,7 @@ function ReportRailButton(props: {
         type="button"
         onClick={() => onOpenReport("bug")}
         title="Report a bug or request a feature"
-        className="flex w-full items-center gap-2 rounded-sm border border-helios-line bg-helios-panel px-3 py-1.5 text-left text-xs text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
       >
         <IconBug size={16} strokeWidth={1.5} className="shrink-0" />
         <span className="truncate">Report a bug</span>
@@ -522,10 +518,10 @@ function UserPill(props: {
         aria-label={collapsed ? label : undefined}
         title={collapsed ? label : undefined}
         className={
-          "rounded-sm border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          "rounded text-helios-text transition-colors hover:bg-helios-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
           (collapsed
             ? "flex w-full items-center justify-center p-2"
-            : "flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs")
+            : "flex w-full flex-col gap-0.5 px-2 py-1.5 text-left text-xs")
         }
       >
         {collapsed ? (
@@ -558,7 +554,7 @@ function UserPill(props: {
           role="menu"
           aria-label="Account"
           onKeyDown={onMenuKeyDown}
-          className="absolute bottom-full left-0 mb-1 min-w-[11rem] rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text shadow-lg"
+          className="absolute bottom-full left-0 mb-1 min-w-[11rem] rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text helios-elevate helios-modal-in"
         >
           <button
             type="button"
@@ -581,7 +577,7 @@ function UserPill(props: {
             type="button"
             role="menuitem"
             onClick={() => { closeAndRestore(); onDisconnect(); }}
-            className="block w-full px-3 py-1.5 text-left text-helios-dim hover:bg-helios-panel hover:text-red-200 focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:text-red-200 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
+            className="block w-full px-3 py-1.5 text-left text-helios-dim hover:bg-helios-panel hover:text-helios-danger focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:text-helios-danger focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
             title="Forget the saved Supabase URL and anon key on this machine"
           >
             Disconnect Supabase

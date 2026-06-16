@@ -153,10 +153,8 @@ describe("<ModulePicker>", () => {
       <ModulePicker {...baseProps} active="logs" onSelect={() => {}} vaultEnabled={false} />,
     );
     const vaultBtn = screen.getByRole("button", { name: /vault/i });
-    // A real hover cue: a hover:border-* that is NOT the base helios-line.
-    expect(vaultBtn.className).toMatch(/hover:border-asu-gold/);
-    // No-op hover (hover === base border) must be gone.
-    expect(vaultBtn.className).not.toMatch(/hover:border-helios-line/);
+    // A real hover cue in the ghost-row style: text brightens to gold on hover.
+    expect(vaultBtn.className).toMatch(/hover:text-asu-gold/);
     // Clickable affordance, not the dead default cursor.
     expect(vaultBtn.className).toMatch(/cursor-pointer/);
   });

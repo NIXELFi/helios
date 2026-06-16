@@ -54,6 +54,36 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
 .helios-modal-in   { animation: helios-modal-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 .helios-overlay-in { animation: helios-overlay-in 120ms ease both; }
 
+/* Global scrollbars — thin, a dim grey thumb that brightens to gold on hover,
+   on a transparent track. Replaces the OS default chrome app-wide. Chromium
+   WebView2 (Windows) + WebKit (macOS) use the ::-webkit-* pseudo-elements;
+   Firefox uses scrollbar-color. (The CFD/PM rails keep their own always-gold
+   variant via more-specific scoped rules.) */
+* { scrollbar-width: thin; scrollbar-color: #2A2C32 transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #2A2C32;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: #FFC627; background-clip: content-box; }
+
+/* Shared button language. Use `btn btn-primary` (gold), `btn btn-secondary`
+   (outlined), `btn btn-danger` (red), or `btn btn-ghost` (borderless). One place
+   to tune the app's buttons; consistent focus ring + transitions baked in. */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold;
+  }
+  .btn:disabled { @apply cursor-not-allowed opacity-50; }
+  .btn-primary { @apply bg-asu-gold text-helios-base hover:bg-asu-gold/90; }
+  .btn-secondary { @apply border border-helios-line bg-helios-base text-helios-text hover:border-asu-gold hover:bg-helios-line; }
+  .btn-danger { @apply bg-helios-danger text-white hover:bg-helios-danger/85; }
+  .btn-ghost { @apply text-helios-dim hover:bg-helios-base/60 hover:text-helios-text; }
+}
+
 /* Helios brand wordmark — used in the header logo and the loading splash. */
 .font-helios {
   font-family: "Orbitron", "Audiowide", system-ui, sans-serif;
