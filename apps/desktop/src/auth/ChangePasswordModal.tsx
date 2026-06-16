@@ -140,10 +140,10 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="change-pw-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 helios-overlay-in"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div ref={dialogRef} className="w-[min(92vw,400px)] rounded-md border border-helios-line bg-helios-panel text-helios-text shadow-xl">
+      <div ref={dialogRef} className="w-[min(92vw,400px)] rounded-md border border-helios-line bg-helios-panel text-helios-text helios-elevate helios-modal-in">
         <header className="flex items-center justify-between border-b border-helios-line bg-helios-base px-4 py-2">
           <div id="change-pw-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
             Change password

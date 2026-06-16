@@ -38,6 +38,14 @@ follow [semver](https://semver.org/).
   viewer.
 
 ### Changed
+- **App-wide visual refresh.** The intended typography (Inter for UI, JetBrains
+  Mono for numbers) is now actually bundled and renders identically on every
+  machine instead of falling back to OS fonts. The primary module rail and the
+  per-module sidebars (Vault/CFD/PM) now share one icon-row design language with
+  a consistent grey rail and gold-tint active state. Added consistent focus
+  rings, panel elevation, modal entrance motion (all reduce-motion aware), global
+  scrollbars, branded empty states, and a refined loading screen.
+- Renamed the Vault "Who has what" screen to **"Checkouts"**.
 - Report screenshots are now attached by **uploading an image file** rather than
   the in-app window capture.
 

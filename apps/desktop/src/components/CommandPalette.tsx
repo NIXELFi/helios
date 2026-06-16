@@ -145,12 +145,12 @@ export function CommandPalette({ open, onClose, actions }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-[2px] helios-overlay-in"
       onClick={onClose}
     >
       <div
         ref={dialogRef}
-        className="w-[640px] max-w-[80vw] bg-helios-panel border border-helios-line rounded-md shadow-2xl flex flex-col"
+        className="w-[640px] max-w-[80vw] bg-helios-panel border border-helios-line rounded-md helios-elevate helios-modal-in flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <input

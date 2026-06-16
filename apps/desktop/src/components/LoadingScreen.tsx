@@ -23,27 +23,36 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
     // `absolute` (not `fixed`): this fills its module pane, NOT the whole
     // viewport — so when the Logs tab has no data the module rail stays visible
     // and the user can switch to Vault / CFD (which don't need a CSV).
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0E0E10] text-[#D8DCE2]">
-      <div className="flex flex-col items-center gap-3">
-        <h1 className="font-helios text-[5rem] md:text-[7rem] leading-none text-[#FFC627]">
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-helios-base text-helios-text">
+      <div className="helios-splash-in relative flex flex-col items-center gap-3">
+        {/* Soft gold halo behind the wordmark for depth. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(255,198,39,0.12) 0%, transparent 70%)" }}
+        />
+        <h1
+          className="font-helios text-[5rem] leading-none text-asu-gold md:text-[7rem]"
+          style={{ textShadow: "0 0 48px rgba(255,198,39,0.25)" }}
+        >
           HELIOS
         </h1>
-        <div className="text-[10px] md:text-xs uppercase tracking-[0.4em] text-[#9097A0]">
+        <div className="text-[10px] uppercase tracking-[0.4em] text-helios-dim md:text-xs">
           Sun Devil Motorsports · Ground Station
         </div>
       </div>
 
-      <div className="mt-12 w-[520px] max-w-[80%] flex flex-col gap-2">
+      <div className="mt-12 flex w-[520px] max-w-[80%] flex-col gap-2">
         {error ? (
           <div className="flex flex-col items-center gap-4">
-            <div role="alert" className="w-full border border-[#EF5350] bg-[#16171B] px-3 py-2 text-center text-xs text-[#EF5350]">
+            <div role="alert" className="w-full rounded-sm border border-helios-danger bg-helios-panel px-3 py-2 text-center text-xs text-helios-danger">
               {error}
             </div>
             {onOpenFile && (
               <button
                 type="button"
                 onClick={onOpenFile}
-                className="border border-[#FFC627] px-5 py-2 text-xs uppercase tracking-wider text-[#FFC627] transition-colors hover:bg-[#FFC627] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFC627]"
+                className="rounded-sm border border-asu-gold px-5 py-2 text-xs uppercase tracking-wider text-asu-gold transition-colors hover:bg-asu-gold hover:text-helios-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
               >
                 Open CSV…
               </button>
@@ -51,9 +60,9 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
           </div>
         ) : (
           <>
-            <div className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-[#9097A0]">
+            <div className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-helios-dim">
               <span className="truncate">{stage}</span>
-              <span className="font-mono-num text-[#FFC627] flex-shrink-0 ml-2">
+              <span className="ml-2 flex-shrink-0 font-mono-num text-asu-gold">
                 {Math.round(pct * 100)}%
               </span>
             </div>
@@ -63,10 +72,10 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(pct * 100)}
-              className="relative h-1.5 bg-[#16171B] border border-[#2A2C32] overflow-hidden"
+              className="relative h-1.5 overflow-hidden rounded-full border border-helios-line bg-helios-panel"
             >
               <div
-                className="absolute inset-y-0 left-0 bg-[#FFC627] transition-[width] duration-300 ease-out"
+                className="absolute inset-y-0 left-0 rounded-full bg-asu-gold transition-[width] duration-300 ease-out"
                 style={{ width: `${pct * 100}%` }}
               >
                 <div
@@ -83,7 +92,7 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
         )}
       </div>
 
-      <div className="absolute bottom-4 left-0 right-0 text-center text-[10px] uppercase tracking-wider text-[#5A5F66]">
+      <div className="absolute bottom-4 left-0 right-0 text-center text-[10px] uppercase tracking-wider text-helios-dim/70">
         v{version ?? "dev"} · ground-station
       </div>
     </div>

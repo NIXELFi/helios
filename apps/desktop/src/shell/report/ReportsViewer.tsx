@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { IconInbox } from "@tabler/icons-react";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
 import { useReports } from "./useReports";
 import { REPORT_BUCKET } from "./useSubmitReport";
 import type { ReportRow } from "./types";
@@ -92,8 +94,21 @@ export function ReportsViewer({ onClose }: { onClose: () => void }) {
         {error && <div className="border-b border-helios-danger bg-helios-danger/10 px-4 py-1 text-xs text-helios-danger">{error}</div>}
 
         <div className="flex-1 overflow-y-auto">
-          {rows.length === 0 && !loading && (
-            <div className="px-4 py-8 text-center text-xs text-helios-dim">No reports.</div>
+          {loading && rows.length === 0 && (
+            <div className="space-y-2 p-3">
+              {[0, 1, 2, 3].map((i) => <div key={i} className="helios-skeleton h-12 w-full" />)}
+            </div>
+          )}
+          {!loading && rows.length === 0 && (
+            <EmptyState
+              Icon={IconInbox}
+              title="No reports"
+              hint={
+                statusFilter !== "all" || kindFilter !== "all"
+                  ? "No reports match the current filters."
+                  : "Bug and feature reports filed from the app will show up here."
+              }
+            />
           )}
           {rows.map((r) => (
             <ReportRowView
