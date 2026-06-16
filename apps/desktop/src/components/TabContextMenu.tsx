@@ -169,7 +169,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
       role="menu"
       aria-label="Workspace actions"
       style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 60, minWidth: 160 }}
-      className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm shadow-xl py-1"
+      className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in py-1"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={onMenuKeyDown}
     >
@@ -204,7 +204,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
           <div
             role="menu"
             aria-label="Color"
-            className="absolute bg-[#0E0E10] border border-[#2A2C32] rounded-sm shadow-xl py-1"
+            className="absolute bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in py-1"
             style={{
               top: 0,
               [colorFlipLeft ? "right" : "left"]: "100%" as const,

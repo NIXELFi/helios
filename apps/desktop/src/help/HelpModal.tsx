@@ -102,14 +102,14 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center helios-overlay-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Help & Wiki"
     >
       <div
-        className="bg-helios-base border border-helios-line rounded-md shadow-2xl flex flex-col"
+        className="bg-helios-base border border-helios-line rounded-md helios-elevate helios-modal-in flex flex-col"
         style={{ width: "min(1200px, 92vw)", height: "min(820px, 88vh)" }}
         onClick={(e) => e.stopPropagation()}
       >

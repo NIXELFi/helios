@@ -91,11 +91,11 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Add tile"
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 helios-overlay-in"
       onClick={onClose}
     >
       <div
-        className="bg-[#0E0E10] border border-[#2A2C32] w-[640px] max-h-[80vh] flex flex-col"
+        className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[640px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">

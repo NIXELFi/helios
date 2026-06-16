@@ -120,12 +120,12 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Keyboard shortcuts"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] helios-overlay-in"
       onClick={onClose}
     >
       <div
         ref={dialogRef}
-        className="w-[560px] max-w-[90vw] bg-helios-panel border border-helios-line rounded-md shadow-2xl"
+        className="w-[560px] max-w-[90vw] bg-helios-panel border border-helios-line rounded-md helios-elevate helios-modal-in"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">

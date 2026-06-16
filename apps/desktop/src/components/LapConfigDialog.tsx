@@ -148,8 +148,8 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Lap detection config" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div ref={dialogRef} tabIndex={-1} className="bg-[#0E0E10] border border-[#2A2C32] w-[720px] max-h-[80vh] flex flex-col outline-none" onClick={(e) => e.stopPropagation()}>
+    <div role="dialog" aria-modal="true" aria-label="Lap detection config" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 helios-overlay-in" onClick={onClose}>
+      <div ref={dialogRef} tabIndex={-1} className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[720px] max-h-[80vh] flex flex-col outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
           <span className="text-xs uppercase tracking-wider text-[#FFC627]">Lap detection · {session.label}</span>
           <button type="button" aria-label="Close" onClick={onClose}

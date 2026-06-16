@@ -55,7 +55,7 @@ export function TreeContextMenu({ x, y, actions, onClose }: Props) {
     <div
       ref={ref}
       role="menu"
-      className="fixed z-50 min-w-[12rem] rounded border border-helios-line bg-helios-panel py-1 text-sm shadow-xl"
+      className="fixed z-50 min-w-[12rem] rounded border border-helios-line bg-helios-panel py-1 text-sm helios-elevate helios-modal-in"
       style={{ left: x, top: y }}
     >
       {actions.map((a, i) => {
