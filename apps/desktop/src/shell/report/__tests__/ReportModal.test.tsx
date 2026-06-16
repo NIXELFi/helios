@@ -5,7 +5,6 @@ import { recordBreadcrumb, clearBreadcrumbs } from "../../../lib/breadcrumbs";
 
 const h = vi.hoisted(() => ({ submit: vi.fn(async () => true), error: null as string | null, submitting: false }));
 vi.mock("../useSubmitReport", () => ({ useSubmitReport: () => ({ submit: h.submit, error: h.error, submitting: h.submitting }) }));
-vi.mock("../../../lib/screenshot", () => ({ captureScreenshot: vi.fn(async () => null) }));
 
 function open(kind: "bug" | "feature" = "bug") {
   return render(<ReportModal kind={kind} module="vault" appVersion="4.3.7" onClose={() => {}} />);
@@ -17,6 +16,9 @@ describe("ReportModal", () => {
     h.submit = vi.fn(async () => true);
     h.error = null;
     h.submitting = false;
+    // jsdom doesn't implement object URLs; the modal uses them for the preview.
+    (URL as any).createObjectURL = vi.fn(() => "blob:mock");
+    (URL as any).revokeObjectURL = vi.fn();
   });
 
   it("defaults the type from the kind prop and shows that type's severities", () => {
@@ -58,6 +60,18 @@ describe("ReportModal", () => {
     const call = h.submit.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
     expect(call[0]).toMatchObject({ kind: "bug", title: "My title" });
     expect(call[1]).toMatchObject({ module: "vault", app_version: "4.3.7" });
+  });
+
+  it("lets the user upload a screenshot file and then remove it", () => {
+    open("bug");
+    expect(screen.getByRole("button", { name: "Upload screenshot" })).toBeInTheDocument();
+    const input = screen.getByLabelText("Upload screenshot");
+    const file = new File(["img-bytes"], "shot.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(screen.getByAltText("Screenshot preview")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove screenshot" }));
+    expect(screen.queryByAltText("Screenshot preview")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload screenshot" })).toBeInTheDocument();
   });
 
   it("on failure shows the error and keeps the typed title", () => {

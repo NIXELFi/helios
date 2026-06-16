@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useHeliosAuth } from "../../auth/AuthShell";
+import { REPORT_BUCKET } from "./useSubmitReport";
 import type { ReportRow } from "./types";
 
 /** Admin/owner list of submitted reports + status triage. Reads from the
@@ -47,5 +48,33 @@ export function useReports() {
     [client],
   );
 
-  return { reports, loading, error, refetch, setStatus };
+  const remove = useCallback(
+    async (id: string, screenshotPath: string | null): Promise<boolean> => {
+      if (!client) return false;
+      // Remove the screenshot object first so a deleted row never orphans its
+      // attachment. Best-effort: a failed object delete must not block the row
+      // delete (a stray object is harmless and purgeable later).
+      if (screenshotPath) {
+        try {
+          await (client as any).storage.from(REPORT_BUCKET).remove([screenshotPath]);
+        } catch {
+          /* non-fatal */
+        }
+      }
+      const { error: err } = await (client as any)
+        .schema("support")
+        .from("reports")
+        .delete()
+        .eq("id", id);
+      if (err) {
+        setError(err.message);
+        return false;
+      }
+      setReports((rs) => rs.filter((r) => r.id !== id));
+      return true;
+    },
+    [client],
+  );
+
+  return { reports, loading, error, refetch, setStatus, remove };
 }

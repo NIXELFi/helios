@@ -34,9 +34,6 @@ engine-sim = { path = "../../../crates/engine-sim" }
 cfd-core = { path = "../../../crates/cfd-core" }
 pdm-sw-parser = { path = "../../../crates/pdm-sw-parser" }
 ulid = "1"
-# Native window screenshot for bug reports (captures WebGL/canvas too). Bundles
-# the `image` crate, re-exported as `xcap::image`.
-xcap = "0.0.14"
 
 # Windows-only: the SOLIDWORKS add-in injector writes per-user (HKCU) registry
 # entries (no RegAsm/admin). winreg is a Windows crate, so it must not be pulled

@@ -1,8 +1,17 @@
 import { useState } from "react";
-import { useHeliosAuth } from "../../auth/AuthShell";
+import { useHeliosAuth, userDisplayName, userSubteam } from "../../auth/AuthShell";
 import type { ReportDraft, ReportDiagnostics } from "./types";
 
 export const REPORT_BUCKET = "report-attachments";
+
+/** Storage key extension for a user-picked image, by MIME type. Defaults to png
+ *  (the bucket only ever holds report screenshots). */
+function extFor(type: string): string {
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "image/gif") return "gif";
+  return "png";
+}
 
 /** Files a report: optionally uploads a screenshot to Storage first, then
  *  inserts the row into support.reports. The app's Supabase client defaults to
@@ -22,10 +31,11 @@ export function useSubmitReport() {
     try {
       let screenshot_path: string | null = null;
       if (screenshot) {
-        const key = `${crypto.randomUUID()}.png`;
+        const type = screenshot.type || "image/png";
+        const key = `${crypto.randomUUID()}.${extFor(type)}`;
         const { error: upErr } = await client.storage
           .from(REPORT_BUCKET)
-          .upload(key, screenshot, { contentType: "image/png" });
+          .upload(key, screenshot, { contentType: type });
         if (upErr) {
           setError(`Screenshot upload failed: ${upErr.message}`);
           return false;
@@ -41,6 +51,9 @@ export function useSubmitReport() {
           title: draft.title.trim(),
           what_doing: draft.what_doing.trim() || null,
           details: draft.details.trim() || null,
+          reporter_name: userDisplayName(user),
+          reporter_subteam: userSubteam(user),
+          reporter_email: user.email ?? null,
           module: diag.module,
           app_version: diag.app_version,
           os: diag.os,

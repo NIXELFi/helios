@@ -3,9 +3,23 @@ import { renderHook, act } from "@testing-library/react";
 import { useSubmitReport } from "../useSubmitReport";
 import type { ReportDraft, ReportDiagnostics } from "../types";
 
-// useHeliosAuth is mocked so the hook runs without a real provider.
+// useHeliosAuth is mocked so the hook runs without a real provider. The two
+// identity helpers mirror the real AuthShell implementations (read from
+// user_metadata, fall back to the email local part).
 const h = vi.hoisted(() => ({ auth: { client: null as any, user: null as any } }));
-vi.mock("../../../auth/AuthShell", () => ({ useHeliosAuth: () => h.auth }));
+vi.mock("../../../auth/AuthShell", () => ({
+  useHeliosAuth: () => h.auth,
+  userDisplayName: (u: any) => {
+    const dn = u?.user_metadata?.display_name;
+    if (typeof dn === "string" && dn.trim()) return dn.trim();
+    if (u?.email) { const at = u.email.indexOf("@"); return at > 0 ? u.email.slice(0, at) : u.email; }
+    return "user";
+  },
+  userSubteam: (u: any) => {
+    const s = u?.user_metadata?.subteam;
+    return typeof s === "string" && s.trim() ? s.trim() : null;
+  },
+}));
 
 const draft: ReportDraft = { kind: "bug", severity: "annoying", title: "  Title  ", what_doing: " did x ", details: "" };
 const diag: ReportDiagnostics = {
@@ -74,6 +88,27 @@ describe("useSubmitReport", () => {
       module: "vault", app_version: "4.3.7", os: "win32",
     });
     expect(captured.inserted.breadcrumbs).toHaveLength(1);
+  });
+
+  it("denormalizes the reporter's name/subteam/email from the signed-in user", async () => {
+    const { client, captured } = makeClient();
+    h.auth = {
+      client,
+      user: { id: "u1", email: "nick@asu.edu", user_metadata: { display_name: "Nick Murray", subteam: "Aero" } },
+    };
+    const { result } = renderHook(() => useSubmitReport());
+    await act(async () => { await result.current.submit(draft, diag, null); });
+    expect(captured.inserted).toMatchObject({
+      reporter_name: "Nick Murray", reporter_subteam: "Aero", reporter_email: "nick@asu.edu",
+    });
+  });
+
+  it("uses an extension matching the uploaded image's MIME type", async () => {
+    const { client, captured } = makeClient();
+    h.auth.client = client;
+    const { result } = renderHook(() => useSubmitReport());
+    await act(async () => { await result.current.submit(draft, diag, new Blob(["x"], { type: "image/jpeg" })); });
+    expect(captured.inserted.screenshot_path).toMatch(/\.jpg$/);
   });
 
   it("surfaces an insert error and returns false (no throw)", async () => {

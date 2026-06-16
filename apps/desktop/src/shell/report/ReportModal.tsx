@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getBreadcrumbs, getLastError } from "../../lib/breadcrumbs";
-import { captureScreenshot } from "../../lib/screenshot";
 import { useSubmitReport } from "./useSubmitReport";
 import type { ReportDiagnostics, ReportKind } from "./types";
 
@@ -35,7 +34,6 @@ export function ReportModal({
   const [whatDoing, setWhatDoing] = useState("");
   const [details, setDetails] = useState("");
   const [shot, setShot] = useState<Blob | null>(null);
-  const [capturing, setCapturing] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -53,6 +51,7 @@ export function ReportModal({
   const { submit, submitting, error } = useSubmitReport();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const firstRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const restoreTo = document.activeElement as HTMLElement | null;
@@ -79,14 +78,11 @@ export function ReportModal({
     setSeverity(DEFAULT_SEVERITY[k]);
   }
 
-  async function attachShot() {
-    setCapturing(true);
-    try {
-      const blob = await captureScreenshot();
-      if (blob) setShot(blob);
-    } finally {
-      setCapturing(false);
-    }
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f) setShot(f);
+    // Reset so re-picking the same file still fires onChange.
+    e.target.value = "";
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -188,6 +184,14 @@ export function ReportModal({
             </label>
 
             <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                aria-label="Upload screenshot"
+                onChange={onPickFile}
+                className="hidden"
+              />
               {shotUrl ? (
                 <>
                   <img src={shotUrl} alt="Screenshot preview" className="h-12 w-20 rounded-sm border border-helios-line object-cover" />
@@ -198,11 +202,10 @@ export function ReportModal({
               ) : (
                 <button
                   type="button"
-                  onClick={attachShot}
-                  disabled={capturing}
-                  className="rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-xs text-helios-text hover:border-asu-gold disabled:opacity-50"
+                  onClick={() => fileRef.current?.click()}
+                  className="rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-xs text-helios-text hover:border-asu-gold"
                 >
-                  {capturing ? "Capturing…" : "Attach screenshot"}
+                  Upload screenshot
                 </button>
               )}
             </div>
