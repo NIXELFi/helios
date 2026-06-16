@@ -226,8 +226,9 @@ jobs:
             echo "SLACK_RELEASE_WEBHOOK not set — skipping Slack notification."
             exit 0
           fi
-          NOTES="$(node scripts/extract-changelog.mjs "$RELEASE_TAG")"
           URL="$(gh release view "$RELEASE_TAG" --json url -q .url)"
-          printf -v TEXT ':rocket: *Helios %s released*\n\n%s\n\n%s' "$RELEASE_TAG" "$NOTES" "$URL"
+          # Slack Workflow Builder inserts the `text` variable literally (no
+          # markdown), so emit clean PLAIN TEXT rather than the raw GFM changelog.
+          TEXT="$(node scripts/format-slack-notes.mjs "$RELEASE_TAG" "$URL")"
           jq -n --arg text "$TEXT" '{text: $text}' \
             | curl -sf -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK"
