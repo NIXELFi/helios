@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-06-16
+
 ### Added
 - In-app **Bug / Feature report** tool — a "Report a bug" button in the sidebar
   that captures a diagnostics snapshot (recent breadcrumbs + last error) and an

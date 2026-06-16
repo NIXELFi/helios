@@ -10,7 +10,7 @@
 // One command updates all four. CI sanity-checks the tag against these before
 // building (see check-versions.mjs).
 import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,10 @@ function applyBump(text, target, version) {
   throw new Error(`unknown target kind ${target.kind}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Robust "run as a script" check. The naive `file://${process.argv[1]}` never
+// matches on Windows (backslashes + a missing slash), so the CLI silently no-ops
+// there; pathToFileURL normalizes both sides.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const version = process.argv[2];
   if (!version) {
     console.error("usage: node scripts/bump-version.mjs <version>");
