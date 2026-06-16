@@ -96,10 +96,10 @@ export function MiniHistogram({ title, unit, series, overlay, bins = 24, height 
             strokeWidth={1.5}
           />
         )}
-        <text x={2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="monospace">
+        <text x={2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="'JetBrains Mono Variable', ui-monospace, monospace">
           {model.lo.toFixed(0)}
         </text>
-        <text x={width - 2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="monospace" textAnchor="end">
+        <text x={width - 2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" textAnchor="end">
           {model.hi.toFixed(0)} {unit}
         </text>
       </svg>

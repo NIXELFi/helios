@@ -31,12 +31,12 @@ export function ConfirmModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="cfd-confirm-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 helios-overlay-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className="w-[min(90vw,420px)] rounded-md border border-helios-line bg-helios-panel p-5 text-helios-text shadow-xl">
+      <div className="w-[min(90vw,420px)] rounded-md border border-helios-line bg-helios-panel p-5 text-helios-text helios-elevate helios-modal-in">
         <h2 id="cfd-confirm-title" className="text-base font-semibold">{title}</h2>
         <div className="mt-3 text-sm text-helios-dim">{body}</div>
         <div className="mt-5 flex justify-end gap-2">

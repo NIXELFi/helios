@@ -43,8 +43,8 @@
 }
 
 /* ------------------------------------------------------------ typography */
-/* Scoreboard display type. Orbitron is loaded in index.html for the brand
- * wordmark; reusing it makes the arcade unmistakably Helios. */
+/* Scoreboard display type. Orbitron is self-hosted (imported in src/main.tsx)
+ * for the brand wordmark; reusing it makes the arcade unmistakably Helios. */
 .games-display {
   font-family: "Orbitron", system-ui, sans-serif;
   letter-spacing: 0.14em;
@@ -57,7 +57,7 @@
 }
 /* Tabular numerals for anything that counts. */
 .games-num {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
 

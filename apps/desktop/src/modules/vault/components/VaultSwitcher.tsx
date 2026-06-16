@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { IconCheck, IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { useActiveVault } from "../data/useActiveVault";
 import { useCreateVault } from "../data/useCreateVault";
 import { useIsAdmin } from "../data/useIsAdmin";
 
 /**
- * Vault picker that lives at the top of the NavRail. Trigger shows the active
- * vault name; the popover lists every vault the user can see, with an admin-
- * only "New vault" form at the bottom. Closes on outside click and on Escape.
+ * Vault picker at the top of the NavRail. Mirrors the PM sidebar's project
+ * switcher: a "VAULT" label over the active vault name, a chevron, and a
+ * bottom divider; the popover lists every vault the user can see, with an
+ * admin-only "New vault" form. Closes on outside click and on Escape.
  */
 export function VaultSwitcher() {
   const { activeVault, setActiveVaultId, vaults, refetch } = useActiveVault();
@@ -47,21 +49,28 @@ export function VaultSwitcher() {
     }
   }
 
+  const triggerLabel = activeVault?.name ?? (vaults.length === 0 ? "No vaults" : "Choose vault");
+
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative border-b border-helios-line">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-helios-base/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-asu-gold"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={activeVault ? `Active vault: ${activeVault.name}. Choose vault` : "Choose vault"}
         title={activeVault?.name ?? "Choose vault"}
       >
-        <span className="truncate text-helios-text">
-          {activeVault?.name ?? (vaults.length === 0 ? "No vaults" : "Choose vault")}
+        <span className="min-w-0">
+          <span className="block text-[10px] font-medium uppercase tracking-widest text-helios-dim">Vault</span>
+          <span className="mt-0.5 block truncate text-base font-medium text-helios-text">{triggerLabel}</span>
         </span>
-        <span className="ml-2 text-helios-dim">{open ? "▴" : "▾"}</span>
+        <IconChevronDown
+          size={16}
+          strokeWidth={1.5}
+          className={"shrink-0 text-helios-dim transition-transform " + (open ? "rotate-180" : "")}
+        />
       </button>
 
       {open && (
@@ -70,34 +79,36 @@ export function VaultSwitcher() {
           // z-50 keeps the picker above the sync popover (z-30) and on the
           // same layer as the other menus/dropdowns (TreeContextMenu z-50);
           // it was z-10 and got painted under those overlays.
-          className="absolute left-0 right-0 top-full z-50 mt-1 rounded border border-helios-line bg-helios-panel py-1 shadow-lg"
+          className="absolute inset-x-2 top-full z-50 mt-1 overflow-hidden rounded-md border border-helios-line bg-helios-panel shadow-lg"
         >
-          {vaults.length === 0 && (
-            <div className="px-3 py-2 text-xs text-helios-dim">No vaults yet</div>
-          )}
-          {vaults.map((v) => {
-            const active = v.id === activeVault?.id;
-            return (
-              <button
-                key={v.id}
-                role="option"
-                aria-selected={active}
-                onClick={() => { setActiveVaultId(v.id); setOpen(false); }}
-                className={
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm " +
-                  (active ? "text-helios-text" : "text-helios-dim hover:bg-helios-line hover:text-helios-text")
-                }
-              >
-                <span className="w-3 text-asu-gold">{active ? "✓" : ""}</span>
-                <span className="truncate">{v.name}</span>
-              </button>
-            );
-          })}
+          <div className="max-h-64 overflow-y-auto py-1">
+            {vaults.length === 0 && (
+              <div className="px-3 py-2 text-xs text-helios-dim">No vaults yet</div>
+            )}
+            {vaults.map((v) => {
+              const active = v.id === activeVault?.id;
+              return (
+                <div key={v.id} className="px-1">
+                  <button
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => { setActiveVaultId(v.id); setOpen(false); }}
+                    className={
+                      "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors " +
+                      (active ? "text-helios-text" : "text-helios-dim hover:bg-helios-base hover:text-asu-gold")
+                    }
+                  >
+                    <span className="truncate">{v.name}</span>
+                    {active && <IconCheck size={14} strokeWidth={1.5} className="shrink-0 text-asu-gold" />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
           {isAdmin && (
-            <>
-              <div className="my-1 border-t border-helios-line" />
+            <div className="border-t border-helios-line p-1">
               {creating ? (
-                <form onSubmit={handleCreate} className="flex flex-col gap-2 px-2 py-2">
+                <form onSubmit={handleCreate} className="flex flex-col gap-2 px-1 py-1">
                   <input
                     autoFocus
                     type="text"
@@ -110,7 +121,7 @@ export function VaultSwitcher() {
                     <button
                       type="submit"
                       disabled={createVault.loading || !name.trim()}
-                      className="rounded bg-asu-gold px-2 py-1 text-xs text-white hover:bg-asu-gold/90 disabled:opacity-50"
+                      className="rounded bg-asu-gold px-2 py-1 text-xs font-semibold text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
                     >
                       Create
                     </button>
@@ -123,20 +134,20 @@ export function VaultSwitcher() {
                     </button>
                   </div>
                   {createVault.error && (
-                    <p className="text-xs text-[#EF5350]">{createVault.error.message}</p>
+                    <p className="text-xs text-helios-danger">{createVault.error.message}</p>
                   )}
                 </form>
               ) : (
                 <button
                   type="button"
                   onClick={() => setCreating(true)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-helios-dim hover:bg-helios-line hover:text-helios-text"
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-helios-dim hover:bg-helios-base hover:text-asu-gold"
                 >
-                  <span className="w-3">+</span>
+                  <IconPlus size={14} strokeWidth={1.5} />
                   <span>New vault</span>
                 </button>
               )}
-            </>
+            </div>
           )}
         </div>
       )}

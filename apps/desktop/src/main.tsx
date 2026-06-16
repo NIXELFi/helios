@@ -1,5 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+// Self-hosted fonts (no runtime CDN dependency — works offline + identical on
+// every machine). Variable faces cover all weights in one file; the CSS type
+// stack in styles.css / tailwind.config.ts references these family names.
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
+import "@fontsource/orbitron/500.css";
+import "@fontsource/orbitron/700.css";
+import "@fontsource/orbitron/900.css";
 import App from "./Shell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCapture } from "./lib/breadcrumbs";

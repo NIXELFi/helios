@@ -57,7 +57,7 @@ describe("<VaultModule>", () => {
       expect(screen.getByRole("button", { name: /browse/i })).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: /history/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /who has what/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /checkouts/i })).toBeInTheDocument();
   });
 
   it("shows a 'not authorized yet' notice when the signed-in user has no role", async () => {

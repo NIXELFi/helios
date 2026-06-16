@@ -131,7 +131,7 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
             <g key={i}>
               <circle cx={px(p)} cy={py(p)} r={6} fill={mk.color} stroke="#0E0E10" strokeWidth={1.5} />
               {mk.label && (
-                <text x={px(p) + 9} y={py(p) + 3.5} fontSize={10} fontFamily="monospace" fill={mk.color}>
+                <text x={px(p) + 9} y={py(p) + 3.5} fontSize={10} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fill={mk.color}>
                   {mk.label}
                 </text>
               )}

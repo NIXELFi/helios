@@ -46,16 +46,16 @@ function renderRail(props: { active: "browse" | "history" | "who" | "settings"; 
 describe("<NavRail>", () => {
   beforeEach(() => localStorage.clear());
 
-  it("renders Browse / History / Who has what entries", () => {
+  it("renders Browse / History / Checkouts entries", () => {
     renderRail({ active: "browse" });
     expect(screen.getByRole("button", { name: /^browse$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^history$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^who has what$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^checkouts$/i })).toBeInTheDocument();
   });
 
   it("marks the active entry with aria-current", () => {
     renderRail({ active: "who" });
-    expect(screen.getByRole("button", { name: /^who has what$/i })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /^checkouts$/i })).toHaveAttribute("aria-current", "page");
   });
 
   it("calls onSelect on click", () => {

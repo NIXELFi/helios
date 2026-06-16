@@ -99,7 +99,7 @@ export function ReportModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 helios-overlay-in"
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -109,7 +109,7 @@ export function ReportModal({
         aria-modal="true"
         aria-label="Report a bug or request a feature"
         onClick={(e) => e.stopPropagation()}
-        className="w-[28rem] max-w-[90vw] max-h-[88vh] overflow-y-auto rounded-sm border border-helios-line bg-helios-panel p-4 text-helios-text shadow-xl"
+        className="w-[28rem] max-w-[90vw] max-h-[88vh] overflow-y-auto rounded-sm border border-helios-line bg-helios-panel p-4 text-helios-text helios-elevate helios-modal-in"
       >
         {sent ? (
           <div className="flex flex-col items-center gap-2 py-8 text-sm">
@@ -195,7 +195,7 @@ export function ReportModal({
               {shotUrl ? (
                 <>
                   <img src={shotUrl} alt="Screenshot preview" className="h-12 w-20 rounded-sm border border-helios-line object-cover" />
-                  <button type="button" onClick={() => setShot(null)} className="text-xs text-helios-dim hover:text-red-300">
+                  <button type="button" onClick={() => setShot(null)} className="text-xs text-helios-dim hover:text-helios-danger">
                     Remove screenshot
                   </button>
                 </>
@@ -223,7 +223,7 @@ export function ReportModal({
               {showDiag && (
                 <div className="max-h-40 overflow-y-auto border-t border-helios-line px-2 py-1 text-[10px] text-helios-dim">
                   <div>v{diag.app_version} · {diag.os} · module={diag.module}</div>
-                  {diag.last_error && <div className="mt-1 text-red-300">last error: {diag.last_error.message}</div>}
+                  {diag.last_error && <div className="mt-1 text-helios-danger">last error: {diag.last_error.message}</div>}
                   <ul className="mt-1 space-y-0.5 font-mono-num">
                     {diag.breadcrumbs.map((b, i) => (
                       <li key={i}>{b.t.slice(11, 19)} {b.category}: {b.message}</li>
@@ -233,7 +233,7 @@ export function ReportModal({
               )}
             </div>
 
-            {error && <div className="rounded-sm border border-[#EF5350] bg-[#EF5350]/10 px-2 py-1 text-xs text-[#EF5350]">{error}</div>}
+            {error && <div className="rounded-sm border border-helios-danger bg-helios-danger/10 px-2 py-1 text-xs text-helios-danger">{error}</div>}
 
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={onClose} disabled={submitting} className="rounded-sm px-3 py-1 text-xs text-helios-dim hover:bg-helios-line disabled:opacity-50">

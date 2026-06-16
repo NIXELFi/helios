@@ -8,7 +8,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    fs: { allow: [".", "../../docs/wiki"] },
+    // Allow serving the monorepo-root pnpm store so @fontsource .woff2 files
+    // (resolved under ../../node_modules/.pnpm/…) load in dev. Production
+    // bundles fonts at build time, so this is dev-only.
+    fs: { allow: [".", "../../docs/wiki", "../../node_modules"] },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: { target: "esnext", minify: "esbuild" },

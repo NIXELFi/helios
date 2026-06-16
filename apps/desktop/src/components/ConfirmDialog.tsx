@@ -62,14 +62,14 @@ export function ConfirmDialog({
   return (
     <div
       data-testid="confirm-backdrop"
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 helios-overlay-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
     >
       <div
-        className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm shadow-xl w-[360px] flex flex-col"
+        className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in w-[360px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-9 flex items-center px-4 border-b border-[#2A2C32]">

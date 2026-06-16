@@ -10,23 +10,23 @@ const STATUSES: ReportRow["status"][] = ["new", "triaged", "fixed"];
 // --- Color coding -----------------------------------------------------------
 // Classes are written as full literals so Tailwind's content scan picks them up.
 const KIND_STYLE: Record<ReportRow["kind"], { bar: string; badge: string; label: string }> = {
-  bug: { bar: "bg-[#EF5350]", badge: "bg-[#EF5350]/15 text-[#EF5350]", label: "BUG" },
+  bug: { bar: "bg-helios-danger", badge: "bg-helios-danger/15 text-helios-danger", label: "BUG" },
   feature: { bar: "bg-asu-gold", badge: "bg-asu-gold/15 text-asu-gold", label: "FEATURE" },
 };
 
 const SEVERITY_STYLE: Record<string, string> = {
-  blocker: "bg-[#EF5350]/15 text-[#EF5350]",
-  annoying: "bg-[#F5A623]/15 text-[#F5A623]",
+  blocker: "bg-helios-danger/15 text-helios-danger",
+  annoying: "bg-helios-warn/15 text-helios-warn",
   minor: "bg-helios-line/70 text-helios-dim",
   important: "bg-asu-gold/15 text-asu-gold",
-  "nice-to-have": "bg-[#42A5F5]/15 text-[#42A5F5]",
+  "nice-to-have": "bg-helios-info/15 text-helios-info",
 };
 const SEVERITY_FALLBACK = "bg-helios-line/70 text-helios-dim";
 
 const STATUS_STYLE: Record<ReportRow["status"], { dot: string; text: string }> = {
-  new: { dot: "bg-[#42A5F5]", text: "text-[#42A5F5]" },
-  triaged: { dot: "bg-[#F5A623]", text: "text-[#F5A623]" },
-  fixed: { dot: "bg-[#66BB6A]", text: "text-[#66BB6A]" },
+  new: { dot: "bg-helios-info", text: "text-helios-info" },
+  triaged: { dot: "bg-helios-warn", text: "text-helios-warn" },
+  fixed: { dot: "bg-helios-success", text: "text-helios-success" },
 };
 
 function initials(name: string | null): string {
@@ -63,13 +63,13 @@ export function ReportsViewer({ onClose }: { onClose: () => void }) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 helios-overlay-in" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Submitted reports"
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[80vh] w-[46rem] max-w-[94vw] flex-col rounded-sm border border-helios-line bg-helios-panel text-helios-text shadow-xl"
+        className="flex h-[80vh] w-[46rem] max-w-[94vw] flex-col rounded-sm border border-helios-line bg-helios-panel text-helios-text helios-elevate helios-modal-in"
       >
         <div className="flex items-center justify-between border-b border-helios-line px-4 py-2">
           <h3 className="text-sm font-semibold">Reports {loading ? "…" : `(${rows.length})`}</h3>
@@ -89,7 +89,7 @@ export function ReportsViewer({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {error && <div className="border-b border-[#EF5350] bg-[#EF5350]/10 px-4 py-1 text-xs text-[#EF5350]">{error}</div>}
+        {error && <div className="border-b border-helios-danger bg-helios-danger/10 px-4 py-1 text-xs text-helios-danger">{error}</div>}
 
         <div className="flex-1 overflow-y-auto">
           {rows.length === 0 && !loading && (
@@ -199,7 +199,7 @@ function ReportRowView({
             </div>
             {row.what_doing && <div><span className="text-helios-text">What they were doing:</span> {row.what_doing}</div>}
             {row.details && <div><span className="text-helios-text">Details:</span> {row.details}</div>}
-            {row.last_error && <div className="text-[#EF5350]">last error: {row.last_error.message}</div>}
+            {row.last_error && <div className="text-helios-danger">last error: {row.last_error.message}</div>}
             {row.breadcrumbs.length > 0 && (
               <div>
                 <span className="text-helios-text">Breadcrumbs:</span>
@@ -219,7 +219,7 @@ function ReportRowView({
               <button
                 type="button"
                 onClick={onDelete}
-                className="rounded-sm border border-transparent px-2 py-0.5 text-[11px] text-helios-dim hover:border-[#EF5350]/40 hover:bg-[#EF5350]/10 hover:text-[#EF5350]"
+                className="rounded-sm border border-transparent px-2 py-0.5 text-[11px] text-helios-dim hover:border-helios-danger/40 hover:bg-helios-danger/10 hover:text-helios-danger"
               >
                 Delete report
               </button>

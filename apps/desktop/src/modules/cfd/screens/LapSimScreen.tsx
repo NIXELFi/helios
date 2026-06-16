@@ -937,7 +937,7 @@ function Cluster({
               stroke={red ? "#FF5252" : major ? "#9097A0" : "#3A3D44"} strokeWidth={major ? 2 : 1} />
             {major && (
               <text {...(() => { const [tx, ty] = pt(r, 27); return { x: tx, y: ty + 3 }; })()}
-                fontSize={10} fontFamily="monospace" fontWeight={red ? 700 : 400}
+                fontSize={10} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fontWeight={red ? 700 : 400}
                 fill={red ? "#FF5252" : "#9097A0"} textAnchor="middle">
                 {r / 1000}
               </text>
@@ -976,7 +976,7 @@ function Cluster({
       <text x={12} y={16} fontSize={9} fill="#5A5F66" style={{ letterSpacing: 2 }}>
         GEAR
       </text>
-      <text x={10} y={56} fontSize={42} fontFamily="monospace" fontWeight={700}
+      <text x={10} y={56} fontSize={42} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fontWeight={700}
         fill="#A5D6A7" style={{ textShadow: "0 0 12px #A5D6A766" }}>
         {gear || "N"}
       </text>
@@ -986,7 +986,7 @@ function Cluster({
         const rcx = W - 92; // centered in the open area right of the curve end
         return (
           <g>
-            <text x={rcx} y={H - 44} fontSize={48} fontFamily="monospace" fontWeight={700}
+            <text x={rcx} y={H - 44} fontSize={48} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fontWeight={700}
               fill="#FAFAFA" textAnchor="middle" style={{ textShadow: "0 0 10px #FFFFFF22" }}>
               {speedKph.toFixed(0)}
             </text>
@@ -995,14 +995,14 @@ function Cluster({
             </text>
             <rect x={rcx - 26} y={H - 24} width={52} height={16} rx={2}
               fill={`${LIMIT_COLOR[limit]}14`} stroke={`${LIMIT_COLOR[limit]}66`} strokeWidth={1} />
-            <text x={rcx} y={H - 13} fontSize={8} fontFamily="monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
+            <text x={rcx} y={H - 13} fontSize={8} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fill={LIMIT_COLOR[limit]} textAnchor="middle">
               {LIMIT_LABEL[limit].toUpperCase()}
             </text>
           </g>
         );
       })()}
       {/* rpm digital, lower-left under the rising scale */}
-      <text x={120} y={H - 26} fontSize={15} fontFamily="monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
+      <text x={120} y={H - 26} fontSize={15} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fill="#D8DCE2" textAnchor="middle" fontWeight={700}>
         {rpm.toFixed(0)}
       </text>
       <text x={120} y={H - 14} fontSize={7} fill="#5A5F66" textAnchor="middle" style={{ letterSpacing: 1.5 }}>

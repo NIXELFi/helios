@@ -5,7 +5,7 @@
 
 .pm-root {
   /* Match the rest of Helios (the desktop body font stack). */
-  font-family: Inter, system-ui, sans-serif;
+  font-family: "Inter Variable", Inter, system-ui, sans-serif;
   color-scheme: dark;
 }
 
