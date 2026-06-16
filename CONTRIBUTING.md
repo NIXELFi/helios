@@ -41,7 +41,36 @@ pnpm test
 CI runs all of the above — including the RLS/RPC security suite against a real
 local Supabase stack — on every PR.
 
+## Releasing & the changelog
+
+**Every user-facing change must get a bullet in `CHANGELOG.md` under
+`## [Unreleased]`** (grouped Added / Changed / Deprecated / Removed / Fixed /
+Security). That file is the single source of truth for release notes — the chain
+is:
+
+```
+CHANGELOG.md  →  GitHub release body  →  #releases Slack channel
+```
+
+Cutting a release:
+
+1. Add/finalize your notes under `[Unreleased]` in `CHANGELOG.md`.
+2. `node scripts/bump-version.mjs <version>` — bumps the four version fields
+   **and** promotes `[Unreleased]` to a dated `## [<version>]` section, leaving a
+   fresh empty `[Unreleased]`.
+3. Commit, then push tag `v<version>`.
+
+The Release workflow (`.github/workflows/release.yml`) builds all platforms,
+puts the `CHANGELOG.md` section into the GitHub release body, and — for stable
+tags — posts it to Slack via the `SLACK_RELEASE_WEBHOOK` repo secret (the webhook
+URL is never committed). `scripts/check-versions.mjs` **fails the release** if the
+tag has no matching `CHANGELOG.md` section, so a missing changelog blocks the
+release rather than shipping silently.
+
 ## Ground rules
+
+- **Add your changelog entry under `[Unreleased]` in `CHANGELOG.md`** for any
+  user-facing change — the release will fail without it (see above).
 
 - **Never edit an existing migration** in `infra/pdm-supabase/supabase/migrations/`;
   the hosted database already ran them. Add a new timestamped file.

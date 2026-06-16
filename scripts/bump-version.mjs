@@ -33,6 +33,29 @@ export function bumpVersion(version, root = REPO_ROOT) {
     const after = applyBump(before, t, version);
     if (before !== after) writeFileSync(fullPath, after);
   }
+  return promoteChangelog(version, root);
+}
+
+// Promote CHANGELOG.md's [Unreleased] section to a dated `## [version]` section,
+// leaving a fresh empty [Unreleased] on top. This is what feeds the release body
+// + Slack (extract-changelog.mjs / release.yml) and satisfies the changelog gate
+// in check-versions.mjs. Idempotent: a no-op if a section for this version
+// already exists, if there's no CHANGELOG.md, or if there's no [Unreleased]
+// heading. Returns true when it rewrote the file.
+export function promoteChangelog(version, root = REPO_ROOT, today = new Date().toISOString().slice(0, 10)) {
+  const path = resolve(root, "CHANGELOG.md");
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return false;
+  }
+  const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`^##\\s*\\[${esc}\\]`, "m").test(text)) return false; // already promoted
+  const after = text.replace(/^(##\s*\[Unreleased\][^\n]*)\n/m, `$1\n\n## [${version}] - ${today}\n`);
+  if (after === text) return false; // no [Unreleased] heading to promote
+  writeFileSync(path, after);
+  return true;
 }
 
 function applyBump(text, target, version) {
@@ -66,6 +89,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error("usage: node scripts/bump-version.mjs <version>");
     process.exit(2);
   }
-  bumpVersion(version);
+  const promoted = bumpVersion(version);
   console.log(`bumped to ${version}`);
+  console.log(
+    promoted
+      ? `promoted CHANGELOG.md [Unreleased] → [${version}]`
+      : `CHANGELOG.md: no [Unreleased] section to promote (or [${version}] already exists)`,
+  );
 }

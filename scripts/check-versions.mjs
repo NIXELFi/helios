@@ -61,8 +61,30 @@ for (const [path, version] of Object.entries(got)) {
   if (version !== expected) ok = false;
   console.log(`${match} ${path}: ${version}`);
 }
+
+// Changelog gate — the GitHub release body + the Slack notification are sourced
+// from CHANGELOG.md (see scripts/extract-changelog.mjs and the publish job in
+// .github/workflows/release.yml), so a tagged release MUST carry a section for
+// its version. This is what makes "add your changelog" non-optional: forget it
+// and the release fails right here.
+let changelogOk = false;
+try {
+  const changelog = readFileSync(resolve(REPO_ROOT, "CHANGELOG.md"), "utf8");
+  const esc = expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  changelogOk = new RegExp(`^##\\s*\\[${esc}\\]`, "m").test(changelog);
+} catch {
+  /* missing file counts as not-ok */
+}
+console.log(`${changelogOk ? "✓" : "✗"} CHANGELOG.md: section for ${expected}`);
+if (!changelogOk) ok = false;
+
 if (!ok) {
-  console.error(`\nVersion fields out of sync with tag ${tag} (expected ${expected}). Run \`node scripts/bump-version.mjs ${expected}\` and re-tag.`);
+  console.error(
+    `\nRelease preflight failed for tag ${tag}:\n` +
+      `  - all version fields must equal ${expected}\n` +
+      `  - CHANGELOG.md must have a "## [${expected}]" section\n` +
+      `Fix both by adding your notes under [Unreleased], then run \`node scripts/bump-version.mjs ${expected}\` and re-tag.`,
+  );
   process.exit(1);
 }
-console.log(`\nAll four fields match ${tag}.`);
+console.log(`\nAll version fields + the CHANGELOG.md section match ${tag}.`);

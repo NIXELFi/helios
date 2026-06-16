@@ -170,17 +170,64 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
-    # Auto-publish only for stable releases (no `-rc`, `-beta`, etc. in the
-    # *resolved tag*). Using needs.build.outputs.tag rather than
-    # github.ref_name so workflow_dispatch (where ref_name is the branch)
-    # correctly gates on the input tag.
-    if: ${{ !contains(needs.build.outputs.tag, '-') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The GitHub release body is sourced from CHANGELOG.md — the single source
+      # of truth for release notes (see CHANGELOG.md's header comment and
+      # scripts/extract-changelog.mjs). Runs for EVERY release (incl. RC drafts)
+      # so the release always carries its notes. check-versions.mjs (build job)
+      # already failed the release if this section was missing.
+      - name: Set release notes from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          NOTES="$(node scripts/extract-changelog.mjs "$RELEASE_TAG")"
+          {
+            echo "$NOTES"
+            echo ""
+            echo "---"
+            echo "First-install instructions: [docs/INSTALL.md](https://github.com/NIXELFi/helios/blob/${RELEASE_TAG}/docs/INSTALL.md)."
+          } > release-notes.md
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md
+
       - name: Promote draft release to published
+        # Auto-publish only for stable releases (no `-rc`, `-beta`, etc. in the
+        # *resolved tag*). Using needs.build.outputs.tag rather than
+        # github.ref_name so workflow_dispatch (where ref_name is the branch)
+        # correctly gates on the input tag.
+        if: ${{ !contains(needs.build.outputs.tag, '-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
         run: gh release edit "${RELEASE_TAG}" --draft=false
+
+      # Announce stable releases in the team Slack channel. The webhook is a
+      # Slack Workflow Builder trigger that expects a single string variable
+      # named "text". The URL lives ONLY in the SLACK_RELEASE_WEBHOOK repo secret
+      # — never hardcoded in this file. Skips cleanly if the secret is unset.
+      - name: Notify Slack
+        if: ${{ !contains(needs.build.outputs.tag, '-') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "SLACK_RELEASE_WEBHOOK not set — skipping Slack notification."
+            exit 0
+          fi
+          NOTES="$(node scripts/extract-changelog.mjs "$RELEASE_TAG")"
+          URL="$(gh release view "$RELEASE_TAG" --json url -q .url)"
+          printf -v TEXT ':rocket: *Helios %s released*\n\n%s\n\n%s' "$RELEASE_TAG" "$NOTES" "$URL"
+          jq -n --arg text "$TEXT" '{text: $text}' \
+            | curl -sf -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK"
