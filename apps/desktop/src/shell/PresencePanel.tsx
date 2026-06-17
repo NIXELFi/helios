@@ -9,7 +9,7 @@ const MODULE_LABEL: Record<ModuleId, string> = {
   cfd: "CFD",
   pm: "PM",
   games: "Games",
-  org: "Org & Access",
+  org: "Admin",
 };
 
 const PANEL_COLLAPSE_KEY = "helios:presenceCollapsed";

@@ -18,7 +18,7 @@ export function OrgModule() {
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 flex-col gap-2 border-b border-helios-line px-5 py-3">
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Org &amp; Access</div>
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Admin</div>
           <p className="mt-0.5 text-[11px] text-helios-dim">
             People, roles, and the subteam ↔ project map — shared across Vault and PM.
           </p>

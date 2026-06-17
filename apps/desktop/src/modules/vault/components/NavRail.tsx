@@ -3,14 +3,15 @@ import {
   IconFolders,
   IconHistory,
   IconSettings,
-  IconShieldLock,
   IconTrash,
   IconUsers,
   type TablerIcon,
 } from "@tabler/icons-react";
 import { VaultSwitcher } from "./VaultSwitcher";
 
-export type VaultScreenId = "browse" | "insights" | "history" | "who" | "deleted" | "settings" | "admin";
+// User & role management moved OUT of the Vault into the top-level Admin module
+// (it governs both Vault and PM), so the Vault rail no longer has an Admin entry.
+export type VaultScreenId = "browse" | "insights" | "history" | "who" | "deleted" | "settings";
 
 const ENTRIES: { id: VaultScreenId; label: string; Icon: TablerIcon }[] = [
   { id: "browse", label: "Browse", Icon: IconFolders },
@@ -21,24 +22,15 @@ const ENTRIES: { id: VaultScreenId; label: string; Icon: TablerIcon }[] = [
   { id: "settings", label: "Settings", Icon: IconSettings },
 ];
 
-// The Admin entry is appended only for admins (gated by the caller via
-// `showAdmin`), so non-admins never even see the user-management screen.
-const ADMIN_ENTRY: { id: VaultScreenId; label: string; Icon: TablerIcon } = {
-  id: "admin",
-  label: "Admin",
-  Icon: IconShieldLock,
-};
-
 export function NavRail(props: {
   active: VaultScreenId;
   onSelect: (id: VaultScreenId) => void;
-  showAdmin?: boolean;
   /** Current user's active checkout count — badged on "Who has what" so a
    *  glance at the rail answers "do I have anything out?". */
   myCheckouts?: number;
 }) {
-  const { active, onSelect, showAdmin, myCheckouts = 0 } = props;
-  const entries = showAdmin ? [...ENTRIES, ADMIN_ENTRY] : ENTRIES;
+  const { active, onSelect, myCheckouts = 0 } = props;
+  const entries = ENTRIES;
   return (
     // Shared secondary-sidebar language (CFD NavRail + PM sidebar): a grey
     // (bg-helios-panel) rail with borderless icon rows — dim by default, a

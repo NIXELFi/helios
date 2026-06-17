@@ -245,7 +245,7 @@ export function ModulePicker(props: Props) {
             everyone else rather than show a disabled control. */}
         {orgEnabled && (
           <NavButton
-            label="Org & Access"
+            label="Admin"
             Icon={MODULE_ICON.org}
             collapsed={collapsed}
             badge="NEW"
