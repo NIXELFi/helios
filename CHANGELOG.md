@@ -28,11 +28,34 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Admin section (new, owner/admin only).** A top-level **Admin** area that
+  manages access across both Vault and PM from one place:
+  - **People & Roles** — assign each person a role; edit their name and subteam.
+    Roles are a clean rank-per-subteam model — Engineer / Lead / VP within a
+    subteam, plus org-wide **Executive** and specific officer titles (President,
+    COO, CFO, Chief Engineer). All grants are guarded server-side (you can only
+    grant what you hold; the Owner can't be removed).
+  - **Org Structure** — map which subteams build which car and tag each car
+    **IC** or **EV**; create and remove subteams (a subteam in two cars is
+    "shared").
+  - **Role Editor** — create and edit roles and exactly which capabilities each
+    one grants — no more hard-coded permissions.
+- **Google Calendar on the PM calendar.** The team Google Calendar is pulled in
+  automatically (refreshed hourly), with recurring meetings expanded to every
+  date and cancellations/changes reflected. Toggle the layer on/off (your choice
+  is remembered) and click any event for full details.
+- **Dashboard photos.** A Photos widget lets a subteam (or the all-team)
+  dashboard carry images — editable by that subteam's lead+ (or an executive),
+  visible to everyone.
 - **Dashboard "Date histogram" widget.** A new customizable dashboard widget
   charts your tasks bucketed across time by their **start** or **due** date —
   from the earliest to the latest — so you can see when work is scheduled to
   ramp. Buckets auto-widen (daily → weekly → monthly) as the span grows, or you
   can pin a fixed size, and filter to all / open / due-window tasks.
+
+### Changed
+- **User & role management moved out of the Vault** into the new **Admin**
+  section, since roles now govern both Vault and PM.
 
 ### Fixed
 - **Shared subsystems can now be picked on tasks.** A subsystem shared into a
