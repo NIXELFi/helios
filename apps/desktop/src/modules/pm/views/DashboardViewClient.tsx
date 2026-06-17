@@ -12,12 +12,13 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { addDays, addMonths, format, parseISO, startOfDay } from "date-fns";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
 import { SubsystemEditor } from "@pm/components/SubsystemEditor";
 import { scopeTasksToSubteam, selectIsAdmin, usePmStore, type CrossTeamRelation } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
+import { useDashboardPhotos, type DashboardPhoto } from "@pm/lib/useDashboardPhotos";
 import {
   GROUP_KEYS,
   GROUP_LABEL,
@@ -190,6 +191,8 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
       }
       case "subteam_table":
         return <SubteamTable stats={subteamStats(owned)} />;
+      case "photos":
+        return <PhotoWidget subteamId={currentTeam?.id ?? null} />;
     }
   }
 
@@ -211,6 +214,8 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         return `${HISTOGRAM_FIELD_LABEL[w.field]} histogram`;
       case "subteam_table":
         return "Subteam comparison";
+      case "photos":
+        return "Photos";
     }
   }
 
@@ -1042,6 +1047,93 @@ function SubteamTable({ stats }: { stats: ReturnType<typeof subteamStats> }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PhotoWidget({ subteamId }: { subteamId: string | null }) {
+  const { loading, error, photos, canManage, uploading, upload, remove } = useDashboardPhotos(subteamId);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset the input so picking the same file again still fires onChange.
+    e.target.value = "";
+    if (file) void upload(file);
+  }
+
+  function onDelete(photo: DashboardPhoto) {
+    if (confirm("Remove this photo?")) void remove(photo);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {canManage ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-1 rounded border border-helios-line bg-helios-base px-2.5 py-1 text-xs text-helios-text hover:border-asu-gold hover:text-asu-gold disabled:opacity-50"
+          >
+            <IconPlus size={13} strokeWidth={1.5} />
+            {uploading ? "Uploading…" : "Add photo"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onPick}
+          />
+        </div>
+      ) : null}
+
+      {error ? <p className="text-xs text-red-400">{error}</p> : null}
+
+      {loading ? (
+        <p className="text-xs text-helios-dim">Loading photos…</p>
+      ) : photos.length === 0 ? (
+        <Empty>No photos yet.</Empty>
+      ) : (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {photos.map((p) => (
+            <li key={p.id} className="group flex flex-col gap-1">
+              <div className="relative overflow-hidden rounded border border-helios-line bg-helios-base">
+                <div className="aspect-square w-full">
+                  {p.url ? (
+                    <img
+                      src={p.url}
+                      alt={p.caption ?? "Dashboard photo"}
+                      loading="lazy"
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-full items-center justify-center text-[10px] text-helios-dim">
+                      Unavailable
+                    </div>
+                  )}
+                </div>
+                {canManage ? (
+                  <button
+                    type="button"
+                    aria-label="Remove photo"
+                    onClick={() => onDelete(p)}
+                    className="absolute right-1 top-1 rounded bg-helios-panel/80 p-0.5 text-helios-dim opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <IconX size={13} strokeWidth={2} />
+                  </button>
+                ) : null}
+              </div>
+              {p.caption ? (
+                <span className="truncate text-[11px] text-helios-dim" title={p.caption}>
+                  {p.caption}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

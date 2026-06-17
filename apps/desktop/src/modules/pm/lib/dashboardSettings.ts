@@ -65,7 +65,8 @@ export type WidgetKind =
   | "cross"
   | "workload"
   | "histogram"
-  | "subteam_table";
+  | "subteam_table"
+  | "photos";
 
 export type ChartKind = "donut" | "bar";
 export type CrossDirection = "prereq" | "dependent";
@@ -89,7 +90,8 @@ export type Widget =
   | (WidgetBase & { kind: "cross"; direction: CrossDirection })
   | (WidgetBase & { kind: "workload"; measure: WorkloadMeasure; set: TaskSet; windowDays: number })
   | (WidgetBase & { kind: "histogram"; field: HistogramDateField; bucket: HistogramBucketSize; set: TaskSet })
-  | (WidgetBase & { kind: "subteam_table" });
+  | (WidgetBase & { kind: "subteam_table" })
+  | (WidgetBase & { kind: "photos" });
 
 export interface WidgetKindMeta {
   kind: WidgetKind;
@@ -150,6 +152,12 @@ export const WIDGET_KIND_META: Record<WidgetKind, WidgetKindMeta> = {
     blurb: "Per-subteam totals, completion, and overdue counts.",
     scope: "all_subteams",
   },
+  photos: {
+    kind: "photos",
+    label: "Photos",
+    blurb: "A gallery of pinned photos for this dashboard.",
+    scope: "any",
+  },
 };
 
 // Whether a widget kind is offered / rendered in the current scope.
@@ -191,6 +199,8 @@ export function makeWidget(kind: WidgetKind): Widget {
       return { id, kind, size: "lg", field: "start", bucket: "auto", set: "all" };
     case "subteam_table":
       return { id, kind, size: "xl" };
+    case "photos":
+      return { id, kind, size: "lg" };
   }
 }
 
@@ -375,6 +385,8 @@ function normalizeWidget(raw: unknown): Widget | null {
       if (oneOf<TaskSet>(o.set, TASK_SETS)) base.set = o.set;
       break;
     case "subteam_table":
+      break;
+    case "photos":
       break;
   }
   return base;
