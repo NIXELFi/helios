@@ -18,14 +18,23 @@ are retained; the helpers are the only switch).
 | `pm.can_edit_task(uid, task)` | `pm.has_capability(uid, 'pm.edit_tasks', task.subteam_id)` (any of the task's subteams) |
 | `support.reports` admin select/update | `pm.has_capability(uid, 'org.grant_roles', null)` |
 
-## ⚠️ Open decision (confirm before applying)
-**Vaults aren't tied to subteams**, so `<scope>` for `vault.*` is ambiguous. Pick one:
-- **(A) Org-level** — `vault.admin`/`vault.edit` checked org-wide only: Owner/Executive
-  administer all vaults; anyone holding `vault.edit` *anywhere* can edit files. Simplest,
-  matches "vault isn't really used right now."
-- **(B) Per-vault map** — add a `pdm.vault_subteam(vault_id, subteam_id)` table and scope
-  the checks to it. More precise, more work.
-Recommend **(A)** for this release.
+## Vault mapping — DECIDED: Org-level (A) ✅ (owner, 2026-06-17)
+`vault.*` is checked **org-wide only** (pass `null` scope to `has_capability`):
+- `pdm.is_admin()` / `pdm.is_admin_in(_)` → `pm.has_capability(auth.uid(), 'vault.admin', null)`
+  (Owner/Executive administer all vaults).
+- `pdm.can_edit_in(_)` → `pm.has_capability(auth.uid(), 'vault.edit', null)` (anyone with
+  Lead+/Engineer-with-vault.edit can edit files; Viewers read-only).
+Per-vault scoping (a `pdm.vault_subteam` map) is a later option if needed.
+
+## Authoring the migration (do this at release, not from memory)
+Capture the EXACT current bodies live so the rollback is faithful:
+`select pg_get_functiondef(oid) ...` for `pdm.is_admin/is_admin_in/can_edit_in`,
+`pm.is_any_admin/can_edit_task/pdm_team_role` (run it in the SQL editor — it didn't
+round-trip through the Management API REST call). Write `…_rls_flip.sql` = those helpers
+`create or replace`d to call `has_capability` per the mapping above; write
+`…_rls_flip_rollback.sql` = the captured original bodies verbatim. The original bodies
+also exist in `20260531000000_pdm_per_vault_roles.sql` and `20260602000000_pm_schema.sql`
+as a cross-check.
 
 ## Repoint list (enumerate ALL consumers — `\df`/grep before writing)
 - `pdm.is_admin()`, `pdm.is_admin_in()`, `pdm.can_edit_in()` (folders/files/locks policies + `force_unlock`, `set_revision`, `add_and_lock`, `admin_list_users`, subteam-create RPC).
