@@ -5,6 +5,7 @@ import { VaultModule } from "./modules/vault";
 import { CfdModule } from "./modules/cfd";
 import { PmModule } from "./modules/pm";
 import { GamesModule } from "./modules/games";
+import { OrgModule } from "./modules/org";
 import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
@@ -98,6 +99,9 @@ function HeliosShell() {
   // mount, so it needs a live signed-in session from the main app.
   const pmEnabled = user !== null;
   const gamesEnabled = user !== null;
+  // Org & Access is admin-only tooling (owner/admin) AND needs a live session —
+  // it hits RLS-protected pm.* tables. Non-admins never see the rail entry.
+  const orgEnabled = user !== null && (myRole === "owner" || myRole === "admin");
   // During the boot getSession() window we don't yet KNOW whether a returning
   // user is signed in. Don't present the disabled "Sign in to use Vault" state
   // (it flashes for a signed-in user) and don't bounce off Vault until auth
@@ -157,7 +161,24 @@ function HeliosShell() {
     });
   }, [active, vaultEnabled, pmEnabled, gamesEnabled, authLoading]);
 
+  // Bounce off Org & Access if access is lost (sign-out, or role no longer
+  // admin) — mirrors the Vault/PM/Games guard but keyed on its own gate.
+  useEffect(() => {
+    if (authLoading) return;
+    if (orgEnabled) return;
+    if (active === "org") setActive("logs");
+    setVisited((prev) => {
+      if (!prev.has("org")) return prev;
+      const next = new Set(prev);
+      next.delete("org");
+      return next;
+    });
+  }, [active, orgEnabled, authLoading]);
+
   function activate(id: ModuleId) {
+    // Org & Access is admin-only; the rail entry is hidden for everyone else, so
+    // a stray activation just no-ops (no auth modal — it isn't a sign-in gate).
+    if (id === "org" && !orgEnabled) return;
     if (
       (id === "vault" && !vaultEnabled) ||
       (id === "pm" && !pmEnabled) ||
@@ -233,6 +254,7 @@ function HeliosShell() {
         vaultEnabled={vaultEnabled}
         pmEnabled={pmEnabled}
         gamesEnabled={gamesEnabled}
+        orgEnabled={orgEnabled}
         authLoading={authLoading}
         presence={
           canSeePresence ? { users: presenceRoster, currentUserId: user?.id ?? null } : null
@@ -282,6 +304,13 @@ function HeliosShell() {
           <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
               <GamesModule paused={active !== "games"} />
+            </ErrorBoundary>
+          </div>
+        )}
+        {visited.has("org") && orgEnabled && (
+          <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
+            <ErrorBoundary label="Org & Access" compact>
+              <OrgModule />
             </ErrorBoundary>
           </div>
         )}

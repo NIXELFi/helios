@@ -7,6 +7,7 @@ import {
   IconChevronsRight,
   IconClipboardList,
   IconDeviceGamepad2,
+  IconShieldLock,
   IconUserCircle,
   IconWind,
   type TablerIcon,
@@ -18,7 +19,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -28,6 +29,7 @@ const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   cfd: IconWind,
   pm: IconClipboardList,
   games: IconDeviceGamepad2,
+  org: IconShieldLock,
 };
 
 // Collapsed/expanded preference for the module rail, persisted per machine.
@@ -92,6 +94,10 @@ interface Props {
   /** True when the user may enter the Games module — same gate as Vault/PM
    *  (leaderboards hit RLS-protected games.* tables). */
   gamesEnabled: boolean;
+  /** True when the user may enter the Org & Access admin module (owner/admin).
+   *  When false the rail entry is hidden entirely (admin-only tooling).
+   *  Optional (defaults false) so existing callers/tests need no change. */
+  orgEnabled?: boolean;
   /** True during boot getSession(), before we know whether a returning user
    *  is signed in. While loading we suppress the disabled "Sign in to use
    *  Vault" presentation so a signed-in user doesn't see it flash. */
@@ -125,6 +131,7 @@ export function ModulePicker(props: Props) {
     vaultEnabled,
     pmEnabled,
     gamesEnabled,
+    orgEnabled = false,
     authLoading = false,
     presence = null,
     onOpenReport,
@@ -234,6 +241,18 @@ export function ModulePicker(props: Props) {
           disabled={gamesDisabled}
           disabledTitle="Sign in to use Games"
         />
+        {/* Org & Access is admin-only tooling — hide the entry entirely for
+            everyone else rather than show a disabled control. */}
+        {orgEnabled && (
+          <NavButton
+            label="Org & Access"
+            Icon={MODULE_ICON.org}
+            collapsed={collapsed}
+            badge="NEW"
+            active={active === "org"}
+            onClick={() => onSelect("org")}
+          />
+        )}
       </div>
 
       <div className="flex-1" />
