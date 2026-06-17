@@ -46,5 +46,33 @@ export function useOrgMutations() {
     [client],
   );
 
-  return { grantRole, revokeRole, setProjectSubteam };
+  const upsertRole = useCallback(
+    async (
+      key: string,
+      label: string,
+      tag: string,
+      scope: "org" | "subteam",
+      capabilities: string[],
+    ): Promise<Result> => {
+      const { error } = await client.schema("pm").rpc("upsert_role", {
+        p_key: key,
+        p_label: label,
+        p_tag: tag,
+        p_scope: scope,
+        p_capabilities: capabilities,
+      });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  const deleteRole = useCallback(
+    async (key: string): Promise<Result> => {
+      const { error } = await client.schema("pm").rpc("delete_role", { p_key: key });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  return { grantRole, revokeRole, setProjectSubteam, upsertRole, deleteRole };
 }

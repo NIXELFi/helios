@@ -102,6 +102,129 @@ export function usePeople() {
   return { data, loading, error, refetch };
 }
 
+export interface Subteam {
+  id: string;
+  name: string;
+  code: string;
+  color: string | null;
+}
+export interface Project {
+  id: string;
+  name: string;
+}
+export interface Capability {
+  key: string;
+  label: string;
+  description: string | null;
+  scope: "org" | "subteam";
+}
+export interface RoleWithCaps extends OrgRole {
+  capabilities: string[];
+}
+
+export function useSubteams() {
+  const client = useSupabaseClient();
+  const [data, setData] = useState<Subteam[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: rows } = await client.schema("pm").from("subteams").select("id,name,code,color").order("name");
+      if (mounted) setData((rows as Subteam[]) ?? []);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
+  return data;
+}
+
+export function useProjects() {
+  const client = useSupabaseClient();
+  const [data, setData] = useState<Project[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: rows } = await client.schema("pm").from("projects").select("id,name").order("name");
+      if (mounted) setData((rows as Project[]) ?? []);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
+  return data;
+}
+
+/** The subteam↔project map, as a Set of `${projectId}:${subteamId}` keys. */
+export function useProjectSubteams() {
+  const client = useSupabaseClient();
+  const [keys, setKeys] = useState<Set<string>>(new Set());
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: rows } = await client.schema("pm").from("project_subteams").select("project_id,subteam_id");
+      if (!mounted) return;
+      const next = new Set<string>();
+      for (const r of (rows as { project_id: string; subteam_id: string }[]) ?? []) {
+        next.add(`${r.project_id}:${r.subteam_id}`);
+      }
+      setKeys(next);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [client, tick]);
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { keys, refetch };
+}
+
+export function useCapabilities() {
+  const client = useSupabaseClient();
+  const [data, setData] = useState<Capability[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: rows } = await client.schema("pm").from("capabilities").select("key,label,description,scope");
+      if (mounted) setData((rows as Capability[]) ?? []);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
+  return data;
+}
+
+/** Roles plus the set of capability keys each one grants. */
+export function useRolesWithCaps() {
+  const client = useSupabaseClient();
+  const [data, setData] = useState<RoleWithCaps[] | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const [roles, links] = await Promise.all([
+        client.schema("pm").from("roles").select("id,key,label,tag,scope,is_system,sort_order").order("sort_order"),
+        client.schema("pm").from("role_capabilities").select("role_id,capability_key"),
+      ]);
+      if (!mounted) return;
+      const byRole = new Map<string, string[]>();
+      for (const l of (links.data as { role_id: string; capability_key: string }[]) ?? []) {
+        const arr = byRole.get(l.role_id) ?? [];
+        arr.push(l.capability_key);
+        byRole.set(l.role_id, arr);
+      }
+      setData(
+        ((roles.data as OrgRole[]) ?? []).map((r) => ({ ...r, capabilities: byRole.get(r.id) ?? [] })),
+      );
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [client, tick]);
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { data, refetch };
+}
+
 /** The role catalog (definitions), sorted for display. */
 export function useRoles() {
   const client = useSupabaseClient();
