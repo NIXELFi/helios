@@ -112,6 +112,20 @@ export function useOrgMutations() {
     [client],
   );
 
+  // Edit a person's display name + signup subteam (writes auth.users metadata via
+  // the existing admin RPC, which lives in the default `pdm` schema — no .schema).
+  const updatePerson = useCallback(
+    async (target: string, displayName: string | null, subteam: string | null): Promise<Result> => {
+      const { error } = await client.rpc("pdm_admin_update_user", {
+        p_target: target,
+        p_display_name: displayName,
+        p_subteam: subteam,
+      });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
   return {
     grantRole,
     revokeRole,
@@ -122,5 +136,6 @@ export function useOrgMutations() {
     createSubteam,
     updateSubteam,
     deleteSubteam,
+    updatePerson,
   };
 }

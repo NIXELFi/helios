@@ -3,6 +3,7 @@ import {
   IconBolt,
   IconDeviceFloppy,
   IconEngine,
+  IconPencil,
   IconPlus,
   IconSearch,
   IconShieldLock,
@@ -165,7 +166,7 @@ function PeopleRolesPanel() {
   const { data: people, loading, error, refetch } = usePeople();
   const { data: roles } = useRoles();
   const { can } = useMyCapabilities();
-  const { grantRole, revokeRole } = useOrgMutations();
+  const { grantRole, revokeRole, updatePerson } = useOrgMutations();
 
   const [subteams, setSubteams] = useState<Subteam[]>([]);
   useEffect(() => {
@@ -214,6 +215,14 @@ function PeopleRolesPanel() {
     setBusyUser(target);
     setActionError(null);
     const r = await revokeRole(target, roleKey, subteamId);
+    if (!r.ok) setActionError(r.error);
+    else refetch();
+    setBusyUser(null);
+  }
+  async function doUpdate(target: string, name: string | null, subteam: string | null) {
+    setBusyUser(target);
+    setActionError(null);
+    const r = await updatePerson(target, name, subteam);
     if (!r.ok) setActionError(r.error);
     else refetch();
     setBusyUser(null);
@@ -292,6 +301,7 @@ function PeopleRolesPanel() {
                   can={can}
                   onGrant={doGrant}
                   onRevoke={doRevoke}
+                  onUpdate={doUpdate}
                 />
               ))}
               {total === 0 && (
@@ -325,11 +335,34 @@ function PersonRow(props: {
   can: (cap: string, subteamId?: string | null) => boolean;
   onGrant: (target: string, roleKey: string, subteamId: string | null) => void;
   onRevoke: (target: string, roleKey: string, subteamId: string | null) => void;
+  onUpdate: (target: string, name: string | null, subteam: string | null) => void;
 }) {
-  const { person, roles, subteams, subteamName, busy, can, onGrant, onRevoke } = props;
+  const { person, roles, subteams, subteamName, busy, can, onGrant, onRevoke, onUpdate } = props;
   const [adding, setAdding] = useState(false);
   const [roleKey, setRoleKey] = useState("");
   const [subteamId, setSubteamId] = useState("");
+  const canManagePeople = can("org.grant_roles");
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(person.display_name ?? "");
+  const [editSubteam, setEditSubteam] = useState(person.signup_subteam ?? "");
+
+  // Subteam options for the editor: the real subteams, plus the current value if
+  // it's a legacy/free-text one (e.g. "President") so editing never loses it.
+  const subteamOptions = useMemo(() => {
+    const names = subteams.map((s) => s.name);
+    const cur = person.signup_subteam?.trim();
+    return cur && !names.includes(cur) ? [cur, ...names] : names;
+  }, [subteams, person.signup_subteam]);
+
+  function startEdit() {
+    setEditName(person.display_name ?? "");
+    setEditSubteam(person.signup_subteam ?? "");
+    setEditing(true);
+  }
+  function saveEdit() {
+    onUpdate(person.user_id, editName.trim() || null, editSubteam.trim() || null);
+    setEditing(false);
+  }
 
   const selectedRole = roles.find((r) => r.key === roleKey) ?? null;
   const needsSubteam = selectedRole?.scope === "subteam";
@@ -348,15 +381,80 @@ function PersonRow(props: {
       <td>
         <div className="flex items-center gap-2.5">
           <Avatar person={person} />
-          <div className="min-w-0">
-            <div className="truncate text-helios-text">{person.display_name ?? person.email ?? "(unknown)"}</div>
-            {person.display_name && person.email ? (
-              <div className="truncate text-[10px] text-helios-dim">{person.email}</div>
-            ) : null}
-          </div>
+          {editing ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Display name"
+                aria-label="Display name"
+                className="w-44 rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold"
+              />
+              <span className="truncate text-[10px] text-helios-dim">{person.email}</span>
+            </div>
+          ) : (
+            <div className="group/edit flex min-w-0 items-center gap-1.5">
+              <div className="min-w-0">
+                <div className="truncate text-helios-text">
+                  {person.display_name ?? person.email ?? "(unknown)"}
+                </div>
+                {person.display_name && person.email ? (
+                  <div className="truncate text-[10px] text-helios-dim">{person.email}</div>
+                ) : null}
+              </div>
+              {canManagePeople && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={`Edit ${person.display_name ?? person.email ?? "user"}`}
+                  onClick={startEdit}
+                  className="rounded p-1 text-helios-dim opacity-0 transition hover:text-asu-gold focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold group-hover/edit:opacity-100 disabled:opacity-40"
+                >
+                  <IconPencil size={13} strokeWidth={1.5} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </td>
-      <td className="text-helios-dim">{person.signup_subteam ?? <span className="text-[#5A5F66]">—</span>}</td>
+      <td className="text-helios-dim">
+        {editing ? (
+          <div className="flex items-center gap-1">
+            <select
+              value={editSubteam}
+              onChange={(e) => setEditSubteam(e.target.value)}
+              aria-label="Subteam"
+              className="rounded-sm border border-helios-line bg-helios-base px-1.5 py-1 text-[11px] text-helios-text outline-none focus:border-asu-gold"
+            >
+              <option value="">— none —</option>
+              {subteamOptions.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              aria-label="Save"
+              onClick={saveEdit}
+              className="rounded bg-asu-gold px-1.5 py-1 text-helios-base hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+            >
+              <IconDeviceFloppy size={12} strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              aria-label="Cancel edit"
+              onClick={() => setEditing(false)}
+              className="rounded p-1 text-helios-dim hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >
+              <IconX size={12} strokeWidth={1.5} />
+            </button>
+          </div>
+        ) : (
+          person.signup_subteam ?? <span className="text-[#5A5F66]">—</span>
+        )}
+      </td>
       <td>
         <div className="flex flex-wrap items-center gap-1.5">
           {person.roles.length === 0 ? (
