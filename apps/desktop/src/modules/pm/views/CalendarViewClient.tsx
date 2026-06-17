@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import {
   IconArrowRight,
+  IconBrandGoogle,
   IconCalendarEvent,
   IconChevronLeft,
   IconChevronRight,
@@ -77,14 +78,39 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
+import { useGcalEvents, type GcalEvent } from "@pm/lib/useGcalEvents";
 
 const FALLBACK_COLOR = "#6B7280";
+
+// Persisted show/hide for the read-only Google Calendar layer. Default = shown.
+const GCAL_SHOW_KEY = "helios:pm:calendarShowGcal";
+
+function recallShowGcal(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    // Only an explicit "0" hides the layer; anything else (incl. missing) shows it.
+    return window.localStorage.getItem(GCAL_SHOW_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function rememberShowGcal(show: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(GCAL_SHOW_KEY, show ? "1" : "0");
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
 
 type CalendarMode = "week" | "month" | "year";
 
 // Stable empty map reused when events are hidden (#25) so gridProps identity is
 // not churned every render.
 const EMPTY_EVENTS_BY_DATE = new Map<string, CalendarEvent[]>();
+// Same idea for the read-only Google Calendar layer when it's toggled off.
+const EMPTY_GCAL_BY_DATE = new Map<string, GcalEvent[]>();
 
 // Expand events (incl. recurring) into a date-keyed map within [rangeStart,
 // rangeEnd]. Occurrences reference the original event object so editing one
@@ -282,6 +308,15 @@ export function CalendarViewClient({
   const [showEvents, setShowEvents] = useState(true);
   const [milestonesMenuOpen, setMilestonesMenuOpen] = useState(false);
 
+  // Read-only Google Calendar layer (org-wide, auto-synced server-side). It
+  // ignores the subteam filter — these events aren't tied to a subteam — and is
+  // shown/hidden by its own persisted toggle (default shown).
+  const { byDate: gcalByDate } = useGcalEvents();
+  const [showGcal, setShowGcal] = useState(recallShowGcal);
+  useEffect(() => {
+    rememberShowGcal(showGcal);
+  }, [showGcal]);
+
   // Per-mode, per-scope body/border color settings (#22). The active mode's
   // choice drives both the week/month chips and the year squares.
   const [calColors, setCalColors] = useState(() =>
@@ -431,6 +466,7 @@ export function CalendarViewClient({
     startByDate,
     dueByDate,
     eventsByDate: showEvents ? eventsByDate : EMPTY_EVENTS_BY_DATE,
+    gcalByDate: showGcal ? gcalByDate : EMPTY_GCAL_BY_DATE,
     milestonesByDate,
     relationByTaskId,
     dimmedById,
@@ -470,6 +506,21 @@ export function CalendarViewClient({
             >
               {showEvents ? <IconEye size={14} strokeWidth={1.5} /> : <IconEyeOff size={14} strokeWidth={1.5} />}
               Events
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGcal((v) => !v)}
+              className={
+                "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-normal " +
+                (showGcal
+                  ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                  : "border-helios-line bg-transparent text-helios-dim hover:bg-helios-base hover:text-helios-text")
+              }
+              title={showGcal ? "Hide Google Calendar events" : "Show Google Calendar events"}
+              aria-pressed={showGcal}
+            >
+              <IconBrandGoogle size={14} strokeWidth={1.5} />
+              Google Calendar
             </button>
             <button
               type="button"
@@ -710,6 +761,7 @@ interface GridShared {
   startByDate: Map<string, TaskRow[]>;
   dueByDate: Map<string, TaskRow[]>;
   eventsByDate: Map<string, CalendarEvent[]>;
+  gcalByDate: Map<string, GcalEvent[]>;
   milestonesByDate: Map<string, Milestone[]>;
   relationByTaskId: Map<string, CrossTeamRelation>;
   dimmedById: Set<string>;
@@ -879,6 +931,7 @@ function DayCell({
   startByDate,
   dueByDate,
   eventsByDate,
+  gcalByDate,
   milestonesByDate,
   relationByTaskId,
   dimmedById,
@@ -902,6 +955,7 @@ function DayCell({
   const startTasks = startByDate.get(dateKey) ?? [];
   const dueTasks = dueByDate.get(dateKey) ?? [];
   const dayEvents = eventsByDate.get(dateKey) ?? [];
+  const dayGcal = gcalByDate.get(dateKey) ?? [];
   const dayMilestones = milestonesByDate.get(dateKey) ?? [];
 
   const inMonth = monthStart === null || isSameMonth(day, monthStart);
@@ -951,6 +1005,10 @@ function DayCell({
             <IconFlag2 size={10} strokeWidth={1.5} />
             {m.name}
           </span>
+        ))}
+
+        {dayGcal.map((ev) => (
+          <GcalEventChip key={ev.uid} event={ev} />
         ))}
 
         {dayEvents.map((ev) => (
@@ -1128,6 +1186,38 @@ function EventChip({
       ) : null}
       <span className="truncate">{event.title}</span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Google Calendar chip — read-only, org-wide, visually distinct (sky accent,
+// Google icon). Not a button: clicking it must NOT open the task/event editor.
+// All detail (time + location) lives in the title tooltip.
+// ---------------------------------------------------------------------------
+
+function GcalEventChip({ event }: { event: GcalEvent }) {
+  const timeLabel = event.allDay ? null : format(event.startsAt, "h:mma").toLowerCase();
+  const tooltip = [
+    event.allDay ? "All day" : format(event.startsAt, "EEE, MMM d · h:mma").toLowerCase(),
+    event.title,
+    event.location ? `📍 ${event.location}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return (
+    <div
+      // Read-only: swallow the click so it doesn't bubble up to the day-cell
+      // create menu, and never open an editor.
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex w-full cursor-default items-center gap-1.5 truncate rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-normal text-sky-300"
+      title={tooltip}
+    >
+      <IconBrandGoogle size={11} strokeWidth={1.5} className="shrink-0 text-sky-300" />
+      {timeLabel ? (
+        <span className="shrink-0 tabular-nums text-sky-300/80">{timeLabel}</span>
+      ) : null}
+      <span className="truncate">{event.title}</span>
+    </div>
   );
 }
 
