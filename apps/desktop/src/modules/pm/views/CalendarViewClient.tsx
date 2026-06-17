@@ -26,6 +26,7 @@ import {
   IconPencil,
   IconPlus,
   IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import {
   addDays,
@@ -312,6 +313,7 @@ export function CalendarViewClient({
   // ignores the subteam filter — these events aren't tied to a subteam — and is
   // shown/hidden by its own persisted toggle (default shown).
   const { byDate: gcalByDate } = useGcalEvents();
+  const [selectedGcal, setSelectedGcal] = useState<GcalEvent | null>(null);
   const [showGcal, setShowGcal] = useState(recallShowGcal);
   useEffect(() => {
     rememberShowGcal(showGcal);
@@ -477,6 +479,7 @@ export function CalendarViewClient({
     borderProperty: calColors[mode].border,
     onChipClick: handleChipClick,
     onEventClick: openEditEvent,
+    onGcalClick: setSelectedGcal,
     onDayClick: openCreateMenu,
   };
 
@@ -748,6 +751,10 @@ export function CalendarViewClient({
         projectId={projectId}
         milestone={editingMilestone}
       />
+
+      {selectedGcal ? (
+        <GcalEventDetail event={selectedGcal} onClose={() => setSelectedGcal(null)} />
+      ) : null}
     </>
   );
 }
@@ -762,6 +769,7 @@ interface GridShared {
   dueByDate: Map<string, TaskRow[]>;
   eventsByDate: Map<string, CalendarEvent[]>;
   gcalByDate: Map<string, GcalEvent[]>;
+  onGcalClick: (ev: GcalEvent) => void;
   milestonesByDate: Map<string, Milestone[]>;
   relationByTaskId: Map<string, CrossTeamRelation>;
   dimmedById: Set<string>;
@@ -941,6 +949,7 @@ function DayCell({
   borderProperty,
   onChipClick,
   onEventClick,
+  onGcalClick,
   onDayClick,
 }: {
   day: Date;
@@ -1008,7 +1017,7 @@ function DayCell({
         ))}
 
         {dayGcal.map((ev) => (
-          <GcalEventChip key={ev.uid} event={ev} />
+          <GcalEventChip key={ev.uid} event={ev} onClick={onGcalClick} />
         ))}
 
         {dayEvents.map((ev) => (
@@ -1195,29 +1204,85 @@ function EventChip({
 // All detail (time + location) lives in the title tooltip.
 // ---------------------------------------------------------------------------
 
-function GcalEventChip({ event }: { event: GcalEvent }) {
+function GcalEventChip({ event, onClick }: { event: GcalEvent; onClick: (ev: GcalEvent) => void }) {
   const timeLabel = event.allDay ? null : format(event.startsAt, "h:mma").toLowerCase();
-  const tooltip = [
-    event.allDay ? "All day" : format(event.startsAt, "EEE, MMM d · h:mma").toLowerCase(),
-    event.title,
-    event.location ? `📍 ${event.location}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
   return (
-    <div
-      // Read-only: swallow the click so it doesn't bubble up to the day-cell
-      // create menu, and never open an editor.
-      onClick={(e) => e.stopPropagation()}
-      className="inline-flex w-full cursor-default items-center gap-1.5 truncate rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-normal text-sky-300"
-      title={tooltip}
+    <button
+      type="button"
+      // Click opens the read-only detail; stop bubbling so the day-cell create
+      // menu doesn't also fire.
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(event);
+      }}
+      className="inline-flex w-full items-center gap-1.5 truncate rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-left text-[11px] font-normal text-sky-300 transition-colors hover:border-sky-400/60 hover:bg-sky-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+      title="Open event details"
     >
       <IconBrandGoogle size={11} strokeWidth={1.5} className="shrink-0 text-sky-300" />
       {timeLabel ? (
         <span className="shrink-0 tabular-nums text-sky-300/80">{timeLabel}</span>
       ) : null}
       <span className="truncate">{event.title}</span>
-    </div>
+    </button>
+  );
+}
+
+// Read-only detail popover for a Google Calendar event (click a gcal chip).
+function GcalEventDetail({ event, onClose }: { event: GcalEvent; onClose: () => void }) {
+  const when = event.allDay
+    ? format(event.startsAt, "EEEE, MMM d, yyyy")
+    : format(event.startsAt, "EEEE, MMM d · h:mma").toLowerCase() +
+      (event.endsAt ? " – " + format(event.endsAt, "h:mma").toLowerCase() : "");
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="fixed inset-0 z-[60] cursor-default bg-black/40"
+      />
+      <div
+        role="dialog"
+        aria-label={event.title}
+        className="fixed left-1/2 top-1/2 z-[70] w-[min(92vw,28rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-helios-line bg-helios-panel p-5 shadow-2xl"
+      >
+        <div className="mb-3 flex items-start gap-2">
+          <IconBrandGoogle size={18} strokeWidth={1.5} className="mt-0.5 shrink-0 text-sky-300" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-snug text-helios-text">{event.title}</h2>
+            <p className="mt-0.5 text-[11px] text-sky-300/80">
+              Google Calendar{event.isRecurring ? " · repeats weekly" : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            <IconX size={16} strokeWidth={1.5} />
+          </button>
+        </div>
+        <div className="flex flex-col gap-2 text-xs">
+          <div className="flex gap-3">
+            <span className="w-14 shrink-0 text-[10px] uppercase tracking-wider text-helios-dim">When</span>
+            <span className="min-w-0 flex-1 text-helios-text">{when}</span>
+          </div>
+          {event.location ? (
+            <div className="flex gap-3">
+              <span className="w-14 shrink-0 text-[10px] uppercase tracking-wider text-helios-dim">Where</span>
+              <span className="min-w-0 flex-1 text-helios-text">{event.location}</span>
+            </div>
+          ) : null}
+          {event.description ? (
+            <div className="flex gap-3">
+              <span className="w-14 shrink-0 text-[10px] uppercase tracking-wider text-helios-dim">Details</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap text-helios-text">{event.description}</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </>
   );
 }
 

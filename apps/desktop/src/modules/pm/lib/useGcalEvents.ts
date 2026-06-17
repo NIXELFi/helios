@@ -15,9 +15,11 @@ interface GcalRow {
   uid: string;
   title: string | null;
   location: string | null;
+  description: string | null;
   starts_at: string;
   ends_at: string | null;
   all_day: boolean | null;
+  is_recurring: boolean | null;
 }
 
 // The small client-facing shape the calendar renders from.
@@ -25,9 +27,11 @@ export interface GcalEvent {
   uid: string;
   title: string;
   location: string | null;
+  description: string | null;
   startsAt: Date;
   endsAt: Date | null;
   allDay: boolean;
+  isRecurring: boolean;
 }
 
 export interface UseGcalEventsResult {
@@ -58,7 +62,7 @@ export function useGcalEvents(): UseGcalEventsResult {
         const res = await client
           .schema("pm")
           .from("gcal_events")
-          .select("uid,title,location,starts_at,ends_at,all_day")
+          .select("uid,title,location,description,starts_at,ends_at,all_day,is_recurring")
           .order("starts_at");
         if (!active) return;
         if (res.error) {
@@ -77,9 +81,11 @@ export function useGcalEvents(): UseGcalEventsResult {
             uid: r.uid,
             title: r.title ?? "(untitled)",
             location: r.location ?? null,
+            description: r.description ?? null,
             startsAt,
             endsAt: ends && !Number.isNaN(ends.getTime()) ? ends : null,
             allDay: Boolean(r.all_day),
+            isRecurring: Boolean(r.is_recurring),
           });
         }
         setEvents(mapped);
