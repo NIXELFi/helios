@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Shared subsystems can now be picked on tasks.** A subsystem shared into a
+  subteam (in the Subsystem Editor) was missing from the Subsystem dropdown when
+  creating or editing a task under that subteam, so only the owning subteam could
+  use it — defeating the point of sharing. The create dialog and task detail
+  panel now list shared subsystems alongside owned ones.
+
 ## [4.4.1] - 2026-06-17
 
 ### Added

@@ -37,6 +37,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { TaskLookup } from "@pm/components/TaskLookup";
 import { usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
+import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
 export const createTaskInput = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
@@ -231,9 +232,14 @@ export function CreateTaskDialog({
     setExtraSubteamIds((prev) => prev.filter((x) => x !== id));
   }
 
+  // Include subsystems SHARED into the chosen subteam, not just those it owns —
+  // otherwise a shared subsystem can't be picked here, defeating the share
+  // feature (see lib/subsystemSharing.ts). Re-read on open so newly-added
+  // sharing from the Subsystem Editor is reflected without a remount.
+  const sharing = useMemo(() => recallSharing(projectId), [projectId, open]);
   const teamSubsystems = useMemo(
-    () => subsystems.filter((s) => s.subteam_id === watchedSubteamId),
-    [subsystems, watchedSubteamId],
+    () => subsystemsForSubteam(subsystems, watchedSubteamId, sharing),
+    [subsystems, watchedSubteamId, sharing],
   );
   // "+ New subsystem…" in the picker (quick-create, scoped to the chosen
   // subteam). The full editor remains on the dashboard; this is the inline path.

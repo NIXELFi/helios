@@ -33,6 +33,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
 import { selectCanEditTask, usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
+import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -197,8 +198,12 @@ export function TaskDetailSheet() {
     [deps, tasks, task],
   );
 
+  // Include subsystems shared into this task's subteam, mirroring the create
+  // dialog and table editors — otherwise a shared subsystem can't be selected
+  // when editing (see lib/subsystemSharing.ts).
+  const sharing = useMemo(() => recallSharing(projectId), [projectId]);
   const teamSubsystems = task
-    ? subsystems.filter((s) => s.subteam_id === task.subteam_id)
+    ? subsystemsForSubteam(subsystems, task.subteam_id, sharing)
     : [];
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
