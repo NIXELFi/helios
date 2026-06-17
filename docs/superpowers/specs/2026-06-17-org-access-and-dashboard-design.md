@@ -1,157 +1,119 @@
 # Org & Access + Dashboard Customization — Design Spec
 
 - **Date:** 2026-06-17
-- **Status:** Draft (for review)
-- **Target release:** v4.4.2 (ships together with the shared-subsystem bug fix already on `feat/v4.4.2-org-access`)
-- **Related:** bug fix `8595e90` (shared subsystems selectable); feature report "Improved Dashboard Customization" (`support.reports`)
+- **Status:** Draft **Rev 2** (post design-review; supersedes Rev 1)
+- **Target release:** v4.4.2 (ships with the shared-subsystem bug fix already on `feat/v4.4.2-org-access`)
+- **Related:** bug fix `8595e90`; feature report "Improved Dashboard Customization" (`support.reports`)
+
+> **Rev 2 note.** A design review corrected Rev 1's central premise. The PM schema **already** models subteam-scoped roles — `pm.subteam_memberships(user_id, subteam_id, role)` and `pm.effective_role()` (the *more permissive* of project/subteam role, with a guard that a global subteam role never grants access to a season the user never joined: `20260602000000_pm_schema.sql:493-547`). It is simply **unwired in the client** (`selectCanEditTask` uses project role only; no UI writes `pm.subteam_memberships`) and **not unified with Vault**. So this is **consolidate + surface + bridge**, not "invent." Rev 1's standalone `org` schema is dropped in favor of building on the existing `pm.*` helpers.
 
 ---
 
 ## 1. Motivation
 
-A v4.4.2 feature report ("dashboard photos editable only by leads/admins of that subteam" + "more statistics") exposed a deeper problem: **the org structure is hardcoded and fragmented.** Subteams are global, EV vs IC isn't modeled, and Vault and PM each have their own separate role system. We cannot gate a dashboard photo on "the lead of that subteam" because *no such concept exists in the data.*
-
-This spec replaces hardcoded structure with **configured data** and unifies access control across Vault + PM, then builds the dashboard feature on top of it. Guiding principle (locked): **no hardcoded org structure — it is editable data with an admin tool.**
+The v4.4.2 "dashboard photos editable by the subteam's lead/admin + more stats" report surfaced a deeper issue: org structure is **hardcoded/fragmented** — subteams are global, EV vs IC isn't modeled, the PM subteam-role engine is dormant, and Vault has a *separate* role system. Principle (locked): **org structure is editable data with an admin tool, never hardcoded.**
 
 ## 2. Current state (verified against live DB `dlmyixonuyckxkknolku`)
 
 | Area | Today |
 |------|-------|
-| Projects | `SDM26`, `SDM27` (IC), `SDM27e` (EV) — `pm.projects` |
-| Subteams | 11, **global** (`pm.subteams`, no project link): Aero Design, Aero Manufacturing, Brakes, Chassis, DAQ, Driver Interface, Drivetrain, Engine, Low Voltage, Suspension, Unknown. A parallel `pdm.subteams` drives the Vault signup picker. |
-| Vault roles | `pdm.user_roles {owner, admin, editor, viewer}`, per-vault (`vault_id` NULL = global). Default-deny. Owner-only grants admin. Helpers `pdm.is_owner/is_admin/is_admin_in/can_edit_in`. UI: `vault/screens/AdminScreen.tsx`. |
-| PM roles | `pm.team_memberships {admin, lead, engineer, viewer}`, per-project. RPC `pm.my_team_roles()`. UI: gated by `selectIsAdmin`/`selectCanEditTask`. |
-| Dashboards | Per-user **localStorage only** (`pm/lib/dashboardSettings.ts`); no shared/server layer. |
+| Projects/seasons | `SDM26`, `SDM27` (IC), `SDM27e` (EV) — `pm.projects` (carry car identity). |
+| Subteams | 11 **global** rows in `pm.subteams`. A **separate** `pdm.subteams` drives the Vault signup picker (different seed list). Signup stores subteam as a **free-text name string** in `auth.users.raw_user_meta_data`, *not* an FK. |
+| PM roles | `pm.team_role {admin,lead,engineer,viewer}`. `pm.team_memberships` (per season) **+ `pm.subteam_memberships` (global per-subteam override)**. Resolver `pm.effective_role` = MAX(project, subteam), season-guarded. **Dormant: no client write path; `selectCanEditTask` ignores subteam roles.** |
+| Vault roles | `pdm.user_roles {owner,admin,editor,viewer}`, per-vault. Default-deny already. UI `vault/screens/AdminScreen.tsx`. **Leak to audit:** `pm.pdm_team_role` collapses *any* pdm admin → PM `admin` regardless of vault scope. |
+| Dashboards | Per-user **localStorage only** (`pm/lib/dashboardSettings.ts`). |
 
 ## 3. Goals / non-goals
 
 **Goals**
-1. **Data-driven org structure:** map each subteam to a program/project (`SDM27` / `SDM27e` / shared), editable in-app.
-2. **One unified role model** consumed by both Vault and PM: `owner → executive → lead/vp → engineer → viewer → none`, cumulative, **default-deny**, grant-down-only.
-3. New **Executive** role = Owner-level capability, displayed as "executive" (collapses President/COO/CFO/Chief).
-4. **Top-level "Org & Access" admin surface** in the main sidebar (moved out of the Vault tool, since it governs both products).
-5. **Dashboard:** task-start **histogram** widget (client-only) + **shared photos** widget (server-backed, role-gated).
+1. **Data-driven structure:** map each subteam → project/program (`SDM27`/`SDM27e`/shared), editable in-app.
+2. **Unify access** across Vault + PM on the **existing** `pm` role engine + a thin org-wide officer tier; cumulative, **default-deny**, grant-down-only.
+3. New **Executive** = owner-level capability, labeled exec (collapses Pres/COO/CFO/Chief).
+4. **Top-level "Org & Access"** admin surface in the main sidebar (out of the Vault tool).
+5. Dashboard **histogram** (client-only) + **shared photos** (server, role-gated).
 
-**Non-goals (this release)**
-- Editable capability matrix / custom role creation (deferred "Phase C" — see §9). Phase A capabilities are fixed in code/SQL.
-- Per-program differentiation of Executive capability (all execs are owner-equivalent for now).
-- Migrating historical audit/role tables away; old tables stay intact during transition.
+**Non-goals (this release):** editable capability matrix / custom roles (Phase C, §9); per-program differentiation of Executive; dropping legacy tables.
 
 ## 4. Role & capability model (Phase A — fixed capabilities)
 
-**Roles (cumulative; each inherits all below within its scope):**
+| Role | Scope | Inherits | Source of truth |
+|------|-------|----------|------------------|
+| `owner` | org-wide | everything | bootstrap (single, Nick) |
+| `executive` | org-wide | lead everywhere | **new** org-officer record |
+| `lead` (`vp` = display alias) | per subteam | engineer (that subteam) | `pm.subteam_memberships` |
+| `engineer` | per subteam | viewer (that subteam) | `pm.subteam_memberships` / `pm.team_memberships` |
+| `viewer` | per subteam/season | — | memberships |
+| _(none)_ | — | — | **default for new accounts** |
 
-| Role | Scope | Inherits | Notes |
-|------|-------|----------|-------|
-| `owner` | org-wide | everything | bootstrap-managed (Nick). Single. |
-| `executive` | org-wide | lead everywhere | = owner power, labeled exec. Chiefs/Pres/COO/CFO. |
-| `lead` / `vp` | per subteam | engineer (that subteam) | "subteam admin": can grant engineer within their subteam. `vp == lead` in capability for now. |
-| `engineer` | per subteam | viewer (that subteam) | can edit tasks/files in subteam. |
-| `viewer` | per subteam | — | read-only. |
-| _(none)_ | — | — | **default for new accounts**; no access. |
+`vp` is a **display alias of `lead`**, *not* a new enum value (avoids an irreversible Postgres enum addition for an unconfirmed label — §11).
 
-**Capability → minimum role (Phase A, fixed):**
+**Capability → minimum role** (Phase A, fixed in SQL helpers):
 
 | Capability | Requires |
 |------------|----------|
-| View tasks/files | `viewer` (in scope) |
-| Edit tasks / check-in files (in subteam) | `engineer` (in subteam) |
-| Manage subteam content (subsystems, dashboard photos) | `lead`/`vp` (subteam) |
-| Grant **engineer/viewer** within a subteam | `lead`/`vp` (subteam) |
-| Edit org structure (subteam↔project map), manage subteams | `executive` / `owner` |
-| Grant **lead/vp/executive** | `executive` / `owner` (you can only grant **at or below your own scope**) |
+| View | `viewer` in scope |
+| Edit tasks / check-in files in a subteam | `engineer` in that subteam (via `pm.effective_role`/`pdm.can_edit_in`) |
+| Manage subteam content (subsystems, dashboard photos) | `lead` (subteam) |
+| Grant **engineer/viewer** within a subteam | `lead` (subteam) |
+| Edit org structure (subteam↔project), manage subteam list, grant **lead/executive** | `executive`/`owner` |
+
+**Grant-down rule:** you may grant only roles **at or below your own scope** (a lead grants engineer/viewer only within subteams they lead; exec grants lead/engineer; only **owner** grants/edits `executive` and `owner` — see §6 bootstrap). Default-deny applies to **new accounts** *and* to the **new lead-grant power** (existing leads do not silently inherit org-wide grant ability — §8).
 
 ## 5. Data model
 
-### 5.1 New `org` schema (single source of truth)
+### 5.1 Build on the existing PM engine (no new `org` schema)
+- **Subteam roles:** reuse `pm.subteam_memberships` + `pm.effective_role` (already correct + season-guarded). Add the **client write path** + RPC `pm.set_subteam_role/revoke_subteam_role` (mirrors the pdm grant RPCs' guards).
+- **Org-wide officer tier (new, shared by Vault+PM):** `pm.org_officers (user_id pk, role text check (role in ('owner','executive')), granted_by, granted_at)`. Both `pm.is_any_admin`/`pm.effective_role` **and** `pdm.is_admin*` consult it (so an exec is admin everywhere in *both* products — the single shared tier that prevents two-sources-of-truth, review #7).
+- **Client role payload:** new `pm.my_org_roles()` returning org-officer role + per-subteam roles, so `selectCanEditTask` can compute effective role across a task's **multiple** subteams (MAX over memberships — `pmStore.ts:438-442`). This is a real client permission-model rewrite, not a one-liner.
 
-```
-org.role  enum: owner | executive | lead | vp | engineer | viewer
-org.memberships (
-  user_id     uuid    references auth.users,
-  role        org.role,
-  subteam_id  uuid    null  references <canonical subteams>,   -- NULL = org-wide (owner/executive)
-  granted_by  uuid,
-  granted_at  timestamptz default now(),
-  unique (user_id, coalesce(subteam_id, '0000…'))   -- one role per (user, scope)
-)
-```
-SECURITY DEFINER helpers (the capability surface both products call):
-`org.is_owner(uid)`, `org.is_exec_or_above(uid)`, `org.role_in_subteam(uid, subteam_id)`,
-`org.can_view/can_edit/can_manage(uid, subteam_id)`. Phase A encodes the §4 matrix inside these.
+### 5.2 Subteam ↔ project mapping
+`pm.project_subteams (project_id, subteam_id, pk(project_id, subteam_id))`. "Shared" = linked to ≥2 projects. **Seed:** existing (project × subteam) cross-product so behavior is unchanged day one; admins prune EV-only/IC-only via the tool. **Do not** derive role grants from this seed (review #3).
 
-### 5.2 Subteam ↔ project mapping (kills the "global" hardcoding)
+### 5.3 Subteam-table reconciliation (load-bearing — its own workstream)
+`pm.subteams` is canonical. Required before any role cutover:
+1. Repoint the Vault signup picker + admin from `pdm.subteams` to `pm.subteams`.
+2. Build a **name→id reconciliation table** mapping every distinct `auth.users.raw_user_meta_data->>'subteam'` string (and every `pdm.subteams` name: Operations/Finance/MarCom/etc.) to a `pm.subteams` id; create any missing canonical subteams.
+3. Backfill so no existing user is left unmapped. **Any unmapped user is a parity failure** (§8).
 
-```
-pm.project_subteams ( project_id uuid, subteam_id uuid, primary key (project_id, subteam_id) )
-```
-- "Shared" is emergent: a subteam linked to ≥2 projects.
-- **Back-compat seed:** insert every (existing project × existing subteam) so current behavior is unchanged on day one; admins then prune EV-only/IC-only via the tool.
-- Subteam *list* stays global; *applicability per car* comes from this join.
-- **Reconcile `pm.subteams` vs `pdm.subteams`:** pick `pm.subteams` as canonical and have the Vault signup picker + `org.memberships.subteam_id` reference it (bridge view during transition). Detailed in the plan.
+### 5.4 Dashboard photos
+- Bucket `dashboard-photos` (private), **path convention `{project_id}/{subteam_id|all}/{uuid}`** so the storage policy can parse subteam and gate it (review #10).
+- `pm.dashboard_photos (id, project_id, subteam_id null, storage_path, caption, sort_order, created_by, created_at)`.
+- RLS: **select** = viewer-in-scope; **insert/update/delete** = `lead`+ of that subteam (or exec/owner) on the **table**, and a storage policy that extracts `subteam_id` from the path and applies the same check.
 
-### 5.3 Dashboard photos
-
-```
-storage bucket: dashboard-photos (private)
-pm.dashboard_photos ( id, project_id, subteam_id null, storage_path, caption, sort_order, created_by, created_at )
-```
-RLS: **select** = any authenticated member with view in scope; **insert/update/delete** = `org.can_manage(uid, subteam_id)` (lead+ of that subteam, or exec/owner). `subteam_id` NULL = the all-team/project dashboard (exec/owner-managed).
-
-## 6. RLS cutover
-
-Rewrite the gates that exist today to consult `org.*` helpers, keeping old helpers as thin shims so nothing breaks mid-migration:
-- **Vault:** `pdm.is_admin_in/can_edit_in` → delegate to `org.*` (admin→exec/lead, editor→engineer mapping). Existing per-vault policies unchanged in shape.
-- **PM:** `pm.my_team_roles()` + `selectCanEditTask` mirror → `org.*`. Task edit requires `engineer`+ in one of the task's subteams.
-- The flip is the **single highest-risk step**; it ships behind verification (§8) and is reversible by repointing the shims.
+## 6. RLS cutover & owner bootstrap
+- Repoint **every** consumer of the old gates, enumerated, not just `is_admin_in/can_edit_in`: `pdm.is_admin()` (no-arg) and its dependents (`force_unlock`, `admin_list_users`, subteam-create RPC, `support.reports` policies, storage policies), `pm.is_any_admin`, **`pm.pdm_team_role`** (fix the any-vault-admin→pm-admin leak). State for each: delegates to the shared tier, or intentionally unchanged. Parity test covers each.
+- **Owner bootstrap / break-glass:** keep "can't change your own role" + "owner is bootstrap-managed," but add a **service-role seed RPC** to set the first owner/exec (recovery path). Resolve the contradiction in Rev 1 (exec must **not** be able to grant `owner`/`executive`; only owner can — §4).
+- Cutover is the **highest-risk step**; ships behind §8 verification and is reversible by repointing helpers (old tables retained).
 
 ## 7. Frontend
-
-### 7.1 "Org & Access" sidebar section (shared, top-level)
-Three panels, backed by `org.*` + `pm.project_subteams`:
-1. **People & Roles** — every account, its role + scope; grant/revoke limited to at-or-below the actor's scope; new accounts shown as **No access**. Absorbs `AdminScreen`'s user table.
-2. **Org Structure** — subteams × projects matrix; toggle membership; shared = multi-checked. Subteam add/remove moves here (from `SubteamsPanel`).
-3. **Roles & Permissions** — role list incl. **Executive**; Phase A shows the §4 capability matrix read-only (editable in Phase C).
-
-Visibility: exec/owner see all; a lead sees People & Roles filtered to their subteam(s).
-
-### 7.2 Histogram widget (client-only, no backend — shippable independently)
-New widget `kind: "histogram"` across `dashboardSettings.ts` (union + `makeWidget` + `normalizeWidget`), `dashboardMetrics.ts` (compute), `DashboardViewClient.tsx` (render + config bar).
-- **Computation:** bucket tasks by `start_date` over `[min start … max start]`; y = count starting per bucket. Config: date field (`start`/`due`), granularity (`week`/`month`, auto-default by span), task set. Empty/clamped like existing widgets.
-- Tests in `dashboardMetrics.test.ts`.
-
-### 7.3 Photos widget (server-backed, role-gated)
-New widget `kind: "photos"`; content from `pm.dashboard_photos` for the current scope; add/replace/remove visible only when `org.can_manage(scope)`; upload via the bucket. Hooks `useDashboardPhotos(scope)`, `useUploadDashboardPhoto`, `useDeleteDashboardPhoto`.
+**7.1 "Org & Access" sidebar section** (shared, top-level): **People & Roles** (grants scoped to actor; new accounts = *No access*; absorbs `AdminScreen`'s table + **grant audit**), **Org Structure** (subteams × projects matrix; subteam add/remove moves here from `SubteamsPanel`), **Roles & Permissions** (roles incl. Executive; Phase A shows §4 matrix read-only).
+**7.2 Histogram widget** (client-only, **independently shippable**): new `kind:"histogram"` in `dashboardSettings.ts` (union + `makeWidget` + `normalizeWidget`), `dashboardMetrics.ts` (compute task counts bucketed by `start_date` over `[min…max]`; config: date field, granularity week/month auto, task set), `DashboardViewClient.tsx` (render + config bar). Tests in `dashboardMetrics.test.ts`.
+**7.3 Photos widget** (server, role-gated): `kind:"photos"`; content from `pm.dashboard_photos` for scope; add/replace/remove gated by `can_manage(scope)`; hooks `useDashboardPhotos/useUpload/useDelete`.
 
 ## 8. Migration & verification (the risky part)
+- **Preserve existing access; default-deny only for new signups.** Seed from **all three** existing sources (review #1): `pm.team_memberships`, **`pm.subteam_memberships`** (do NOT drop these), `pdm.user_roles`.
+  - owner → `org_officers.owner`; **global** (`vault_id IS NULL`) Vault `admin` → `executive`; **per-vault** Vault admin → `lead` on that vault's subteams (NOT org-wide exec — review #2); PM `admin` → `executive`; existing `lead`/`engineer`/`viewer` rows carried over as-is.
+  - **Do not** expand project-`lead` → lead-on-all-subteams-with-grant-power (review #3). Existing project-leads keep edit access; the **grant capability** is default-deny until the owner assigns subteam leads explicitly.
+- Apply via Supabase **Management API** (the `support.reports` precedent), commit SQL mirrors under `infra/pdm-supabase/supabase/migrations/`, and **explicitly expose new schemas/objects in PostgREST** (a known footgun that has bitten every prior schema rollout — make it a checklist item, review #13).
+- **Verification gate before the RLS flip:** parity check that every current user's effective capabilities — including **grant capability**, not just view/edit — are ≥ pre-migration (no lockouts, no new escalations), plus an RLS suite over role × capability across `pm`, `pdm`, `dashboard_photos`. Every unmapped subteam name (§5.3) fails the gate.
+- **Rollback:** helpers are shims; revert by repointing at old tables (never dropped this release).
 
-- **Preserve current access for existing users** (default-deny applies to *new* signups only). Seed `org.memberships` from `pm.team_memberships` + `pdm.user_roles`:
-  - owner → `owner`; PM `admin` / Vault `admin` → `executive`; `lead` → `lead` on every subteam mapped to their project; `engineer`/`editor` → `engineer`; `viewer` → `viewer`.
-  - Ambiguous project-scoped → subteam-scoped expansions are **access-preserving** (broaden within the project, never silently drop). Owner refines via the tool afterward.
-- Apply via the Supabase **Management API** (pattern of `support.reports`), commit SQL mirrors under `infra/pdm-supabase/supabase/migrations/`, expose `org` schema in PostgREST.
-- **Verification gate before the RLS flip:** an automated parity check that *every current user's effective capabilities are ≥ what they had* pre-migration (no lockouts), plus an RLS test suite covering each role × capability across PM, Vault, and `dashboard_photos`.
-- Rollback: helpers are shims; revert by repointing them at the old tables (old tables never dropped this release).
-
-## 9. Phasing (build/verify order — still "shipped at once" in v4.4.2)
-
-1. **Histogram widget** + the shared-subsystem bug fix (done) — zero backend, safe.
-2. `org` schema + `pm.project_subteams` + helpers (additive, no enforcement).
-3. Access-preserving migration into `org.memberships`; run parity verification.
-4. "Org & Access" admin UI reads/writes the new tables.
-5. **RLS flip** to `org.*` (PM + Vault + photos) — gated on §8 verification.
+## 9. Phasing (build/verify order)
+1. **Histogram widget** + bug fix (done) — zero backend, safe → can ship even if the rest slips.
+2. `pm.project_subteams` + `pm.org_officers` + `set_subteam_role` RPC + `my_org_roles()` (additive, no enforcement).
+3. Subteam-table reconciliation + backfill (§5.3); access-preserving migration (§8); run parity verification.
+4. "Org & Access" admin UI (reads/writes new tables; grant audit).
+5. **RLS flip** to the shared tier (PM + Vault + photos), gated on §8.
 6. **Dashboard photos** (depends on 5).
 
-(Phase **C**, a later release: make the §4 capability matrix editable in the Roles & Permissions panel, with lockout guardrails.)
+**Recommended staging if "all at once" is too risky:** PM-side unification + dashboard (steps 1–4, 6-minus-vault) can ship in v4.4.2; the **Vault RLS bridge** (step 5 for `pdm`) is the highest-risk and may warrant its own verified follow-up. Flag for owner decision.
+
+Phase **C** (later): make the §4 matrix editable with lockout guardrails.
 
 ## 10. Testing
-
-- **Unit:** histogram metric; `org.*` capability logic; project-subteam mapping reducers; widget normalization.
-- **Component:** Org & Access panels (grant scoping, default-deny); histogram + photo widgets (gating).
-- **SQL/RLS:** role × capability matrix across `pm`, `pdm`, `dashboard_photos`; storage-bucket policies.
-- **Migration parity:** dry-run asserting no existing user loses access.
+Unit (histogram metric; effective-role/officer logic; mapping reducers; widget normalization); component (Org & Access grant-scoping + default-deny; widgets); SQL/RLS (role × capability across `pm`/`pdm`/`dashboard_photos` + storage path policy); **migration parity** (no user loses view/edit/**grant** access; no unmapped subteam).
 
 ## 11. Open questions
-
-1. `vp` vs `lead` ordering — assumed **equal** capability for now. Confirm.
-2. Canonical subteam table (`pm.subteams` chosen) — confirm the Vault picker can repoint without disrupting existing signups.
-3. Exact Vault `admin` → (`executive` vs subteam `lead`) mapping for *per-vault* admins — current plan maps to `executive` (access-preserving) pending Owner review.
+1. `vp` vs `lead` — shipping `vp` as a **display alias** of `lead`; confirm that's acceptable vs a distinct capability.
+2. Per-vault Vault-admin mapping — plan: → subteam `lead` (not exec). Confirm.
+3. "All at once" vs staged Vault bridge (§9) — owner call.
