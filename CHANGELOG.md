@@ -27,6 +27,27 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-06-17
+
+### Added
+- Admins can leave a **resolution note** on a bug/feature report. The note shows
+  in the reports viewer and is visible to the person who filed the report.
+
+### Fixed
+- **Project tasks: edits that silently reverted now save — or tell you why.**
+  Changing a task's priority, owner, status, or other fields could look like it
+  worked and then revert after switching tabs or restarting, whenever you didn't
+  have permission to edit that task. PM now rolls the change back and shows the
+  real reason (e.g. "engineers can only edit tasks they own or created") instead
+  of silently dropping it. This covers all of PM — tasks, milestones, vendors,
+  calendar events, subteams, subsystems, and dependencies — not just tasks.
+- **You can now edit tasks you created.** New tasks record their creator, so
+  whoever makes a task can edit it even if it isn't assigned to them. (Tasks
+  created before this update keep their existing owner/lead/admin edit rules.)
+- Task detail fields are now **read-only with an explanation** when you can't
+  edit that task, instead of showing editable controls whose changes wouldn't
+  save.
+
 ## [4.4.0] - 2026-06-16
 
 ### Added
