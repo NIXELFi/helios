@@ -13,8 +13,12 @@
 import { scopeKey } from "@pm/lib/nav";
 import {
   GROUP_KEYS,
+  HISTOGRAM_BUCKETS,
+  HISTOGRAM_FIELDS,
   METRIC_KEYS,
   type GroupKey,
+  type HistogramBucketSize,
+  type HistogramDateField,
   type MetricKey,
   type TaskSet,
   type WorkloadMeasure,
@@ -60,6 +64,7 @@ export type WidgetKind =
   | "events"
   | "cross"
   | "workload"
+  | "histogram"
   | "subteam_table";
 
 export type ChartKind = "donut" | "bar";
@@ -83,6 +88,7 @@ export type Widget =
   | (WidgetBase & { kind: "events"; limit: number })
   | (WidgetBase & { kind: "cross"; direction: CrossDirection })
   | (WidgetBase & { kind: "workload"; measure: WorkloadMeasure; set: TaskSet; windowDays: number })
+  | (WidgetBase & { kind: "histogram"; field: HistogramDateField; bucket: HistogramBucketSize; set: TaskSet })
   | (WidgetBase & { kind: "subteam_table" });
 
 export interface WidgetKindMeta {
@@ -132,6 +138,12 @@ export const WIDGET_KIND_META: Record<WidgetKind, WidgetKindMeta> = {
     blurb: "Prerequisites from / dependents on other subteams.",
     scope: "subteam",
   },
+  histogram: {
+    kind: "histogram",
+    label: "Date histogram",
+    blurb: "Tasks bucketed across time by their start or due date.",
+    scope: "any",
+  },
   subteam_table: {
     kind: "subteam_table",
     label: "Subteam comparison",
@@ -175,6 +187,8 @@ export function makeWidget(kind: WidgetKind): Widget {
       return { id, kind, size: "md", direction: "prereq" };
     case "workload":
       return { id, kind, size: "lg", measure: "count", set: "open", windowDays: DEFAULT_WINDOW_DAYS };
+    case "histogram":
+      return { id, kind, size: "lg", field: "start", bucket: "auto", set: "all" };
     case "subteam_table":
       return { id, kind, size: "xl" };
   }
@@ -354,6 +368,11 @@ function normalizeWidget(raw: unknown): Widget | null {
       if (oneOf<WorkloadMeasure>(o.measure, MEASURES)) base.measure = o.measure;
       if (oneOf<TaskSet>(o.set, TASK_SETS)) base.set = o.set;
       base.windowDays = clampInt(o.windowDays, DEADLINE_WINDOW_BOUNDS.min, DEADLINE_WINDOW_BOUNDS.max, base.windowDays);
+      break;
+    case "histogram":
+      if (oneOf<HistogramDateField>(o.field, HISTOGRAM_FIELDS)) base.field = o.field;
+      if (oneOf<HistogramBucketSize>(o.bucket, HISTOGRAM_BUCKETS)) base.bucket = o.bucket;
+      if (oneOf<TaskSet>(o.set, TASK_SETS)) base.set = o.set;
       break;
     case "subteam_table":
       break;

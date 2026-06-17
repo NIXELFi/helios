@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Dashboard "Date histogram" widget.** A new customizable dashboard widget
+  charts your tasks bucketed across time by their **start** or **due** date —
+  from the earliest to the latest — so you can see when work is scheduled to
+  ramp. Buckets auto-widen (daily → weekly → monthly) as the span grows, or you
+  can pin a fixed size, and filter to all / open / due-window tasks.
+
 ### Fixed
 - **Shared subsystems can now be picked on tasks.** A subsystem shared into a
   subteam (in the Subsystem Editor) was missing from the Subsystem dropdown when

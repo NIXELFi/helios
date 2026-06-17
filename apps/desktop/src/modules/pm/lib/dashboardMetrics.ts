@@ -21,6 +21,18 @@ import {
   daysUntilDue,
   ownerColor,
 } from "@helios/pm-ui";
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  differenceInCalendarDays,
+  format,
+  isValid,
+  parseISO,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+} from "date-fns";
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -376,4 +388,132 @@ export function workloadByOwner(
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   const max = rows.reduce((m, r) => Math.max(m, r.value), 0);
   return { rows, max };
+}
+
+// ---------------------------------------------------------------------------
+// Date histogram — distribution of tasks across their planned start/due dates,
+// from the earliest dated task to the latest (the feature request: "task
+// histograms from the first start date to the latest"). Tasks carry planned
+// start_date / due_date (not event history), so this is a snapshot of *when
+// work is scheduled*. Buckets are contiguous (empty intervals included) so the
+// shape — clusters and gaps — reads honestly; granularity auto-widens with span.
+// ---------------------------------------------------------------------------
+
+export type HistogramDateField = "start" | "due";
+export type HistogramGranularity = "day" | "week" | "month";
+export type HistogramBucketSize = "auto" | HistogramGranularity;
+
+export const HISTOGRAM_FIELDS: readonly HistogramDateField[] = ["start", "due"];
+export const HISTOGRAM_BUCKETS: readonly HistogramBucketSize[] = ["auto", "day", "week", "month"];
+
+export const HISTOGRAM_FIELD_LABEL: Record<HistogramDateField, string> = {
+  start: "Start date",
+  due: "Due date",
+};
+export const HISTOGRAM_BUCKET_LABEL: Record<HistogramBucketSize, string> = {
+  auto: "Auto",
+  day: "Daily",
+  week: "Weekly",
+  month: "Monthly",
+};
+
+export interface HistogramBar {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface HistogramResult {
+  bars: HistogramBar[];
+  total: number; // tasks counted (had a valid date in the chosen field)
+  undated: number; // tasks excluded for lack of a date
+  granularity: HistogramGranularity;
+}
+
+// Hard cap so a pathological span can't mint thousands of bars — if a fixed
+// granularity would exceed it, we coarsen to the next size up.
+const MAX_HISTOGRAM_BARS = 60;
+const GRAN_ORDER: readonly HistogramGranularity[] = ["day", "week", "month"];
+
+function pickGranularity(spanDays: number): HistogramGranularity {
+  if (spanDays <= 28) return "day";
+  if (spanDays <= 182) return "week";
+  return "month";
+}
+function bucketStart(d: Date, g: HistogramGranularity): Date {
+  return g === "day" ? startOfDay(d) : g === "week" ? startOfWeek(d, { weekStartsOn: 1 }) : startOfMonth(d);
+}
+function advance(d: Date, g: HistogramGranularity): Date {
+  return g === "day" ? addDays(d, 1) : g === "week" ? addWeeks(d, 1) : addMonths(d, 1);
+}
+function bucketKey(d: Date, g: HistogramGranularity): string {
+  return format(d, g === "month" ? "yyyy-MM" : "yyyy-MM-dd");
+}
+function bucketLabel(d: Date, g: HistogramGranularity): string {
+  return format(d, g === "month" ? "MMM yyyy" : "MMM d");
+}
+
+export function taskDateHistogram(
+  tasks: readonly TaskRow[],
+  field: HistogramDateField,
+  bucketSize: HistogramBucketSize,
+): HistogramResult {
+  const dates: Date[] = [];
+  let undated = 0;
+  for (const t of tasks) {
+    const raw = field === "start" ? t.start_date : t.due_date;
+    if (!raw) {
+      undated += 1;
+      continue;
+    }
+    const d = parseISO(raw);
+    if (!isValid(d)) {
+      undated += 1;
+      continue;
+    }
+    dates.push(d);
+  }
+  if (dates.length === 0) {
+    return { bars: [], total: 0, undated, granularity: bucketSize === "auto" ? "day" : bucketSize };
+  }
+
+  let min = dates[0]!;
+  let max = dates[0]!;
+  for (const d of dates) {
+    if (d < min) min = d;
+    if (d > max) max = d;
+  }
+
+  let gran: HistogramGranularity =
+    bucketSize === "auto" ? pickGranularity(differenceInCalendarDays(max, min)) : bucketSize;
+
+  // Build contiguous buckets [min..max]; if we'd blow the cap, coarsen one step.
+  let bars: HistogramBar[] = [];
+  for (let gi = GRAN_ORDER.indexOf(gran); gi < GRAN_ORDER.length; gi++) {
+    gran = GRAN_ORDER[gi]!;
+    bars = [];
+    let cur = bucketStart(min, gran);
+    const end = bucketStart(max, gran);
+    let capped = false;
+    while (cur <= end) {
+      if (bars.length >= MAX_HISTOGRAM_BARS) {
+        capped = true;
+        break;
+      }
+      bars.push({ key: bucketKey(cur, gran), label: bucketLabel(cur, gran), count: 0 });
+      cur = advance(cur, gran);
+    }
+    if (!capped) break; // it fit at this granularity
+  }
+
+  const byKey = new Map(bars.map((b) => [b.key, b]));
+  let total = 0;
+  for (const d of dates) {
+    const b = byKey.get(bucketKey(bucketStart(d, gran), gran));
+    if (b) {
+      b.count += 1;
+      total += 1;
+    }
+  }
+  return { bars, total, undated, granularity: gran };
 }

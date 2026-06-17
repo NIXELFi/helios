@@ -21,6 +21,10 @@ import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import {
   GROUP_KEYS,
   GROUP_LABEL,
+  HISTOGRAM_BUCKETS,
+  HISTOGRAM_BUCKET_LABEL,
+  HISTOGRAM_FIELDS,
+  HISTOGRAM_FIELD_LABEL,
   METRIC_KEYS,
   METRIC_LABEL,
   PRIORITY_LABEL,
@@ -30,15 +34,20 @@ import {
   filterSet,
   groupTasks,
   subteamStats,
+  taskDateHistogram,
   workloadByOwner,
   type Bucket,
   type GroupKey,
+  type HistogramBucketSize,
+  type HistogramDateField,
+  type HistogramResult,
   type MetricResult,
   type MetricTone,
   type TaskSet,
   type WorkloadMeasure,
 } from "@pm/lib/dashboardMetrics";
 import {
+  DEFAULT_WINDOW_DAYS,
   SIZE_LABEL,
   SIZE_SPAN_CLASS,
   WIDGET_KIND_META,
@@ -172,6 +181,13 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         if (rows.length === 0) return <Empty>No load to show.</Empty>;
         return <WorkloadBars rows={rows} max={max} measure={w.measure} />;
       }
+      case "histogram": {
+        const set = filterSet(owned, w.set, DEFAULT_WINDOW_DAYS);
+        const result = taskDateHistogram(set, w.field, w.bucket);
+        if (result.total === 0)
+          return <Empty>No {HISTOGRAM_FIELD_LABEL[w.field].toLowerCase()}s to chart.</Empty>;
+        return <HistogramColumns result={result} />;
+      }
       case "subteam_table":
         return <SubteamTable stats={subteamStats(owned)} />;
     }
@@ -191,6 +207,8 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         return w.direction === "prereq" ? "Prerequisites from other subteams" : "Subteams depending on us";
       case "workload":
         return `Workload · ${WORKLOAD_MEASURE_LABEL[w.measure]}`;
+      case "histogram":
+        return `${HISTOGRAM_FIELD_LABEL[w.field]} histogram`;
       case "subteam_table":
         return "Subteam comparison";
     }
@@ -580,6 +598,32 @@ function WidgetConfigBar({
         </>
       ) : null}
 
+      {widget.kind === "histogram" ? (
+        <>
+          <MiniSelect
+            label="By"
+            value={widget.field}
+            ariaLabel="Date field"
+            onChange={(v) => onUpdate((w) => (w.kind === "histogram" ? { ...w, field: v as HistogramDateField } : w))}
+            options={HISTOGRAM_FIELDS.map((f) => ({ value: f, label: HISTOGRAM_FIELD_LABEL[f] }))}
+          />
+          <MiniSelect
+            label="Buckets"
+            value={widget.bucket}
+            ariaLabel="Bucket size"
+            onChange={(v) => onUpdate((w) => (w.kind === "histogram" ? { ...w, bucket: v as HistogramBucketSize } : w))}
+            options={HISTOGRAM_BUCKETS.map((b) => ({ value: b, label: HISTOGRAM_BUCKET_LABEL[b] }))}
+          />
+          <MiniSelect
+            label="Set"
+            value={widget.set}
+            ariaLabel="Task set"
+            onChange={(v) => onUpdate((w) => (w.kind === "histogram" ? { ...w, set: v as TaskSet } : w))}
+            options={(Object.keys(TASK_SET_LABEL) as TaskSet[]).map((s) => ({ value: s, label: TASK_SET_LABEL[s] }))}
+          />
+        </>
+      ) : null}
+
       {widget.kind === "deadlines" ? (
         <MiniNumber
           label="Window (days)"
@@ -764,6 +808,39 @@ function BucketBars({ buckets, total }: { buckets: Bucket[]; total: number }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function HistogramColumns({ result }: { result: HistogramResult }) {
+  const max = result.bars.reduce((m, b) => Math.max(m, b.count), 0);
+  const first = result.bars[0]?.label ?? "";
+  const last = result.bars[result.bars.length - 1]?.label ?? "";
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex h-32 items-end gap-1 overflow-x-auto pb-0.5">
+        {result.bars.map((b) => (
+          <div
+            key={b.key}
+            title={`${b.label}: ${b.count}`}
+            className="flex h-full min-w-[12px] flex-1 flex-col items-center justify-end gap-1"
+          >
+            <span className="text-[10px] leading-none tabular-nums text-helios-dim">{b.count || ""}</span>
+            <span
+              className="w-full rounded-t bg-asu-gold/70"
+              style={{ height: `${max ? Math.max(b.count > 0 ? 3 : 0, (b.count / max) * 100) : 0}%` }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[10px] text-helios-dim">
+        <span className="truncate">{first}</span>
+        <span className="shrink-0 uppercase tracking-widest">{result.granularity}</span>
+        <span className="truncate text-right">{last}</span>
+      </div>
+      {result.undated > 0 ? (
+        <span className="text-[10px] text-helios-dim">{result.undated} undated excluded</span>
+      ) : null}
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ import {
   filterSet,
   groupTasks,
   subteamStats,
+  taskDateHistogram,
   workloadByOwner,
 } from "../dashboardMetrics";
 
@@ -190,5 +191,52 @@ describe("workloadByOwner", () => {
   test("drops zero-load owners", () => {
     const { rows } = workloadByOwner([makeTask({ owner: ANA, estimate_days: null })], "estimate");
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("taskDateHistogram", () => {
+  test("contiguous daily buckets over a short span, with empty intervals as zero", () => {
+    const tasks = [
+      makeTask({ start_date: iso(0) }),
+      makeTask({ start_date: iso(1) }),
+      makeTask({ start_date: iso(3) }),
+      makeTask({ start_date: null }), // undated → excluded
+    ];
+    const h = taskDateHistogram(tasks, "start", "auto");
+    expect(h.granularity).toBe("day");
+    expect(h.total).toBe(3);
+    expect(h.undated).toBe(1);
+    // day0..day3 inclusive → 4 bars; the gap at day2 is a zero.
+    expect(h.bars).toHaveLength(4);
+    expect(h.bars.map((b) => b.count)).toEqual([1, 1, 0, 1]);
+  });
+
+  test("auto granularity widens with span (week, then month)", () => {
+    const wk = taskDateHistogram(
+      [makeTask({ start_date: iso(0) }), makeTask({ start_date: iso(60) })],
+      "start",
+      "auto",
+    );
+    expect(wk.granularity).toBe("week");
+    const mo = taskDateHistogram(
+      [makeTask({ start_date: iso(0) }), makeTask({ start_date: iso(400) })],
+      "start",
+      "auto",
+    );
+    expect(mo.granularity).toBe("month");
+  });
+
+  test("can chart the due-date field and excludes tasks missing it", () => {
+    const tasks = [makeTask({ due_date: iso(0) }), makeTask({ due_date: null, start_date: iso(0) })];
+    const h = taskDateHistogram(tasks, "due", "auto");
+    expect(h.total).toBe(1);
+    expect(h.undated).toBe(1);
+  });
+
+  test("empty / all-undated input yields no bars", () => {
+    expect(taskDateHistogram([], "start", "auto").bars).toHaveLength(0);
+    const h = taskDateHistogram([makeTask({ start_date: null })], "start", "auto");
+    expect(h.bars).toHaveLength(0);
+    expect(h.undated).toBe(1);
   });
 });
