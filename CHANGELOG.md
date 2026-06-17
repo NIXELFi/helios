@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.2] - 2026-06-17
+
 ### Added
 - **Admin section (new, owner/admin only).** A top-level **Admin** area that
   manages access across both Vault and PM from one place:
