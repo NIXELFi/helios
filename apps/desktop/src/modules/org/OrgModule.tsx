@@ -297,30 +297,41 @@ function PersonRow(props: {
 
 // --- Org Structure: subteam × project map -----------------------------------
 
+const PROGRAM_OPTS: { v: string; l: string }[] = [
+  { v: "", l: "—" },
+  { v: "ic", l: "IC" },
+  { v: "ev", l: "EV" },
+];
+
 function StructurePanel() {
-  const projects = useProjects();
-  const subteams = useSubteams();
-  const { keys, refetch } = useProjectSubteams();
+  const { data: projects, refetch: refetchProjects } = useProjects();
+  const { data: subteams, refetch: refetchSubteams } = useSubteams();
+  const { keys, refetch: refetchMap } = useProjectSubteams();
   const { can } = useMyCapabilities();
-  const { setProjectSubteam } = useOrgMutations();
+  const { setProjectSubteam, setProjectProgram, createSubteam, deleteSubteam } = useOrgMutations();
   const editable = can("org.manage_structure");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newCode, setNewCode] = useState("");
+  const [newCar, setNewCar] = useState("");
 
-  async function toggle(projectId: string, subteamId: string, present: boolean) {
+  async function run(fn: () => Promise<{ ok: boolean; error: string | null }>, after: () => void) {
     setBusy(true);
     setErr(null);
-    const r = await setProjectSubteam(projectId, subteamId, present);
+    const r = await fn();
     if (!r.ok) setErr(r.error);
-    else refetch();
+    else after();
     setBusy(false);
   }
 
   return (
     <div className="p-4">
       <p className="mb-3 text-[11px] text-helios-dim">
-        Which subteams belong to which car. A subteam checked for two or more projects is{" "}
-        <span className="text-helios-text">shared</span>.
+        Tag each car <span className="text-helios-text">IC</span> or <span className="text-helios-text">EV</span>, map
+        which subteams build which car (a subteam in two cars is <span className="text-helios-text">shared</span>), and
+        add or remove subteams.
         {editable ? "" : " · read-only (needs the Manage-org-structure capability)"}
       </p>
       {err && (
@@ -334,10 +345,42 @@ function StructurePanel() {
             <th className="px-3 py-2 font-normal">Subteam</th>
             {projects.map((p) => (
               <th key={p.id} className="px-3 py-2 text-center font-normal">
-                {p.name}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="normal-case text-helios-text">{p.name}</span>
+                  {editable ? (
+                    <select
+                      value={p.program ?? ""}
+                      disabled={busy}
+                      aria-label={`${p.name} program`}
+                      onChange={(e) =>
+                        run(
+                          () => setProjectProgram(p.id, (e.target.value || null) as "ic" | "ev" | null),
+                          refetchProjects,
+                        )
+                      }
+                      className="rounded-sm border border-helios-line bg-helios-base px-1 py-0.5 text-[10px] text-helios-text"
+                    >
+                      {PROGRAM_OPTS.map((o) => (
+                        <option key={o.v} value={o.v}>
+                          {o.l}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      className={
+                        "rounded-full px-1.5 text-[9px] " +
+                        (p.program ? "bg-asu-gold/15 text-asu-gold" : "text-[#5A5F66]")
+                      }
+                    >
+                      {p.program ? p.program.toUpperCase() : "—"}
+                    </span>
+                  )}
+                </div>
               </th>
             ))}
             <th className="px-3 py-2 text-center font-normal">Shared</th>
+            {editable && <th className="px-3 py-2" />}
           </tr>
         </thead>
         <tbody>
@@ -360,7 +403,7 @@ function StructurePanel() {
                         checked={checked}
                         disabled={!editable || busy}
                         aria-label={`${s.name} in ${p.name}`}
-                        onChange={() => toggle(p.id, s.id, !checked)}
+                        onChange={() => run(() => setProjectSubteam(p.id, s.id, !checked), refetchMap)}
                         className="size-3.5 accent-asu-gold disabled:opacity-40"
                       />
                     </td>
@@ -373,11 +416,105 @@ function StructurePanel() {
                     <span className="text-[#5A5F66]">—</span>
                   )}
                 </td>
+                {editable && (
+                  <td className="px-3 py-2 text-right">
+                    {confirmDel === s.id ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          run(() => deleteSubteam(s.id), () => {
+                            setConfirmDel(null);
+                            refetchSubteams();
+                            refetchMap();
+                          })
+                        }
+                        onBlur={() => setConfirmDel(null)}
+                        className="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-300"
+                      >
+                        remove?
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-label={`Remove ${s.name}`}
+                        onClick={() => setConfirmDel(s.id)}
+                        className="rounded p-1 text-helios-dim hover:text-red-300"
+                      >
+                        <IconTrash size={13} strokeWidth={1.5} />
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      {editable && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!newName.trim()) return;
+            run(
+              () => createSubteam(newName.trim(), newCode.trim(), "", newCar || null),
+              () => {
+                setNewName("");
+                setNewCode("");
+                setNewCar("");
+                refetchSubteams();
+                refetchMap();
+              },
+            );
+          }}
+          className="mt-4 flex flex-wrap items-end gap-2 border-t border-helios-line pt-3"
+        >
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-helios-dim">
+            Subteam name
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. EV Chassis"
+              className="w-44 rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] normal-case tracking-normal text-helios-text outline-none focus:border-asu-gold"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-helios-dim">
+            Code
+            <input
+              value={newCode}
+              onChange={(e) => setNewCode(e.target.value)}
+              placeholder="auto"
+              className="w-20 rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] normal-case tracking-normal text-helios-text outline-none focus:border-asu-gold"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-helios-dim">
+            Add to car
+            <select
+              value={newCar}
+              onChange={(e) => setNewCar(e.target.value)}
+              className="rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] normal-case tracking-normal text-helios-text outline-none focus:border-asu-gold"
+            >
+              <option value="">(none yet)</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.program ? ` · ${p.program.toUpperCase()}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            disabled={busy || !newName.trim()}
+            className="inline-flex items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-[11px] font-semibold text-helios-base hover:bg-asu-gold/90 disabled:opacity-40"
+          >
+            <IconPlus size={14} strokeWidth={1.5} />
+            Add subteam
+          </button>
+        </form>
+      )}
     </div>
   );
 }

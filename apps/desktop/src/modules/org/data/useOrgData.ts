@@ -111,6 +111,7 @@ export interface Subteam {
 export interface Project {
   id: string;
   name: string;
+  program: "ic" | "ev" | null;
 }
 export interface Capability {
   key: string;
@@ -125,6 +126,7 @@ export interface RoleWithCaps extends OrgRole {
 export function useSubteams() {
   const client = useSupabaseClient();
   const [data, setData] = useState<Subteam[]>([]);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -134,24 +136,27 @@ export function useSubteams() {
     return () => {
       mounted = false;
     };
-  }, [client]);
-  return data;
+  }, [client, tick]);
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { data, refetch };
 }
 
 export function useProjects() {
   const client = useSupabaseClient();
   const [data, setData] = useState<Project[]>([]);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: rows } = await client.schema("pm").from("projects").select("id,name").order("name");
+      const { data: rows } = await client.schema("pm").from("projects").select("id,name,program").order("name");
       if (mounted) setData((rows as Project[]) ?? []);
     })();
     return () => {
       mounted = false;
     };
-  }, [client]);
-  return data;
+  }, [client, tick]);
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { data, refetch };
 }
 
 /** The subteam↔project map, as a Set of `${projectId}:${subteamId}` keys. */

@@ -74,5 +74,53 @@ export function useOrgMutations() {
     [client],
   );
 
-  return { grantRole, revokeRole, setProjectSubteam, upsertRole, deleteRole };
+  const setProjectProgram = useCallback(
+    async (projectId: string, program: "ic" | "ev" | null): Promise<Result> => {
+      const { error } = await client
+        .schema("pm")
+        .rpc("set_project_program", { p_project_id: projectId, p_program: program });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  const createSubteam = useCallback(
+    async (name: string, code: string, color: string, projectId: string | null): Promise<Result> => {
+      const { error } = await client
+        .schema("pm")
+        .rpc("create_subteam", { p_name: name, p_code: code, p_color: color, p_project_id: projectId });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  const updateSubteam = useCallback(
+    async (id: string, name: string, color: string): Promise<Result> => {
+      const { error } = await client
+        .schema("pm")
+        .rpc("update_subteam", { p_id: id, p_name: name, p_color: color });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  const deleteSubteam = useCallback(
+    async (id: string): Promise<Result> => {
+      const { error } = await client.schema("pm").rpc("delete_subteam", { p_id: id });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
+  return {
+    grantRole,
+    revokeRole,
+    setProjectSubteam,
+    upsertRole,
+    deleteRole,
+    setProjectProgram,
+    createSubteam,
+    updateSubteam,
+    deleteSubteam,
+  };
 }
