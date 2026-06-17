@@ -35,4 +35,7 @@ export interface ReportRow extends ReportDraft {
   last_error: LastError | null;
   screenshot_path: string | null;
   status: "new" | "triaged" | "fixed";
+  /** Admin triage note describing how the report was resolved. Visible to the
+   *  reporter too (they can read their own row), so keep it factual. */
+  admin_note: string | null;
 }

@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { SupabaseClient } from "@helios/auth";
 import type { CalendarEvent, Subteam, TaskRow } from "@helios/pm-ui";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
-import { scopeTasksToSubteam, usePmStore } from "../pmStore";
+import { scopeTasksToSubteam, selectCanEditTask, usePmStore } from "../pmStore";
 
 // Chainable recorder mock — same slice of supabase-js the write layer uses.
 // `error` controls whether every write resolves ok or fails. Each recorded write
@@ -22,7 +22,14 @@ interface Rpc {
   name: string;
   args: unknown;
 }
-function recorderClient(error: { message: string } | null = null) {
+// `rows` is what `.select()` resolves to on success. The write layer chains
+// `.select()` on every UPDATE/DELETE and treats an empty result as a silent RLS
+// denial, so success must return a non-empty set. Pass `[]` to simulate a write
+// the DB accepted (no error) but RLS silently dropped (zero rows affected).
+function recorderClient(
+  error: { message: string } | null = null,
+  rows: unknown[] = [{ id: "ok" }],
+) {
   const writes: Write[] = [];
   const rpcs: Rpc[] = [];
   function tbl(table: string) {
@@ -37,9 +44,12 @@ function recorderClient(error: { message: string } | null = null) {
           rec.ins.push([col, vals]);
           return chain;
         },
-        then<R>(onF: (v: { data: null; error: typeof error }) => R) {
+        select(_cols?: string) {
+          return chain;
+        },
+        then<R>(onF: (v: { data: unknown[] | null; error: typeof error }) => R) {
           writes.push(rec);
-          return Promise.resolve({ data: null, error }).then(onF);
+          return Promise.resolve({ data: error ? null : rows, error }).then(onF);
         },
       };
       return chain;
@@ -162,7 +172,23 @@ describe("optimistic persistence with rollback", () => {
 
     await flush();
     expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeFalsy(); // rolled back
-    expect(usePmStore.getState().lastWriteError?.message).toMatch(/permission denied/i);
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/don't have permission/i);
+  });
+
+  test("updateTask rolls back + surfaces an error when RLS silently denies (zero rows, no error)", async () => {
+    // The Nora bug: PostgREST returns 200 + no error but updates zero rows
+    // because RLS hid the task from the UPDATE. The edit must NOT stick — it has
+    // to roll back and tell the user why, not look saved and revert on reload.
+    const { client } = recorderClient(null, []);
+    const task = makeTask("t1", { priority: "low" });
+    seed(client, [task]);
+
+    usePmStore.getState().updateTask("t1", { priority: "high" });
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")?.priority).toBe("high"); // optimistic
+
+    await flush();
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")?.priority).toBe("low"); // rolled back
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/don't have permission to edit this task/i);
   });
 
   test("updateTask restores the previous task on a failed write", async () => {
@@ -816,5 +842,37 @@ describe("deleteSubteam with multi-subteam tasks", () => {
     expect(byId("coPrimary")!.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
     expect(usePmStore.getState().subteams.some((s) => s.id === "st1")).toBe(true);
     expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
+  });
+});
+
+describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
+  const base = { project_id: "p1", owner_id: null, created_by: null };
+  const state = (role: string | null, currentUserId = "me") =>
+    ({ projectRoles: role ? { p1: role } : {}, currentUserId }) as never;
+
+  test("admins and leads can edit any task", () => {
+    expect(selectCanEditTask(state("admin"), base).allowed).toBe(true);
+    expect(selectCanEditTask(state("lead"), base).allowed).toBe(true);
+  });
+
+  test("an engineer can edit a task they OWN", () => {
+    const r = selectCanEditTask(state("engineer"), { ...base, owner_id: "me" });
+    expect(r.allowed).toBe(true);
+  });
+
+  test("an engineer can edit a task they CREATED (the created_by fix)", () => {
+    const r = selectCanEditTask(state("engineer"), { ...base, created_by: "me" });
+    expect(r.allowed).toBe(true);
+  });
+
+  test("an engineer CANNOT edit someone else's task, and is told why", () => {
+    const r = selectCanEditTask(state("engineer"), { ...base, owner_id: "someone", created_by: "someone" });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toMatch(/only edit tasks they own or created/i);
+  });
+
+  test("viewers and non-members are blocked with a reason", () => {
+    expect(selectCanEditTask(state("viewer"), base).reason).toMatch(/view-only/i);
+    expect(selectCanEditTask(state(null), base).reason).toMatch(/don't have access/i);
   });
 });

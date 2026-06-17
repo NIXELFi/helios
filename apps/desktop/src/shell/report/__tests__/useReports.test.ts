@@ -10,7 +10,7 @@ const rows: ReportRow[] = [
   { id: "r1", created_at: "2026-06-15T10:00:00Z", reporter_id: "u1", kind: "bug", severity: "annoying",
     title: "A", what_doing: "", details: "", reporter_name: "Nick Murray", reporter_subteam: "Aero",
     reporter_email: "nick@asu.edu", module: "vault", app_version: "4.3.7", os: "win32",
-    breadcrumbs: [], last_error: null, screenshot_path: null, status: "new" },
+    breadcrumbs: [], last_error: null, screenshot_path: null, status: "new", admin_note: null },
 ];
 
 function makeClient() {

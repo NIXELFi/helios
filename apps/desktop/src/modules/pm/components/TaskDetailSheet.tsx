@@ -19,6 +19,7 @@ import {
   IconCornerDownRight,
   IconCornerLeftUp,
   IconFlag,
+  IconLock,
   IconPlus,
   IconSend,
   IconTrash,
@@ -30,7 +31,7 @@ import { TaskLookup } from "@pm/components/TaskLookup";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
-import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
+import { selectCanEditTask, usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -88,13 +89,21 @@ export function TaskDetailSheet() {
   const allComments = usePmStore((s) => s.comments);
   const addComment = usePmStore((s) => s.addComment);
   const currentUserId = usePmStore((s) => s.currentUserId);
-  // Viewers can't write — disable the inline editors so an RLS-rejected write
-  // never optimistically flips the value and then snaps back on auto-refresh.
-  const isViewer = usePmStore(selectMyRole) === "viewer";
+  const projectRoles = usePmStore((s) => s.projectRoles);
 
   const task = selectedTaskId
     ? tasks.find((t) => t.id === selectedTaskId) ?? null
     : null;
+
+  // Per-task edit permission, mirroring RLS, so the inline editors are disabled
+  // (and the reason shown) when the signed-in user can't edit THIS task — not
+  // just when they're a viewer. Without this, an engineer editing a task they
+  // don't own would optimistically flip the value, have the write silently
+  // rejected by RLS, and watch it snap back on the next refresh.
+  const editPerm = task
+    ? selectCanEditTask({ projectRoles, currentUserId }, task)
+    : { allowed: true, reason: null };
+  const canEdit = editPerm.allowed;
 
   // Live critical-path set — the DB `on_critical_path` flag is never populated,
   // so compute it from the same DAG the Gantt/Graph use (single source of truth).
@@ -257,8 +266,9 @@ export function TaskDetailSheet() {
             <input
               type="text"
               value={task.title}
+              disabled={!canEdit}
               onChange={(e) => updateTask(task.id, { title: e.target.value })}
-              className="w-full bg-transparent text-lg font-medium text-helios-text outline-none focus:bg-helios-base/40 rounded px-1 -mx-1"
+              className="w-full bg-transparent text-lg font-medium text-helios-text outline-none focus:bg-helios-base/40 rounded px-1 -mx-1 disabled:opacity-100"
             />
           </div>
           <button
@@ -272,6 +282,14 @@ export function TaskDetailSheet() {
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          {/* Read-only notice: tells the user WHY the fields are locked instead
+              of letting an edit silently fail and revert on the next refresh. */}
+          {!canEdit && editPerm.reason ? (
+            <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-200/90">
+              <IconLock size={14} strokeWidth={1.5} className="mt-0.5 shrink-0" />
+              <span>{editPerm.reason}</span>
+            </div>
+          ) : null}
           {/* Top: status + due countdown */}
           <div className="mb-4 grid grid-cols-2 gap-3">
             <StatBox label="Status">
@@ -279,7 +297,7 @@ export function TaskDetailSheet() {
                 value={task.status}
                 onChange={(v) => updateTask(task.id, { status: v })}
                 options={STATUS_OPTIONS}
-                disabled={isViewer}
+                disabled={!canEdit}
                 ariaLabel="Status"
               />
             </StatBox>
@@ -295,7 +313,7 @@ export function TaskDetailSheet() {
               <Select
                 value={task.owner_id ?? ""}
                 onChange={(v) => updateTask(task.id, { owner_id: v || null })}
-                disabled={isViewer}
+                disabled={!canEdit}
                 ariaLabel="Owner"
                 options={[
                   { value: "", label: "Unassigned" },
@@ -309,7 +327,7 @@ export function TaskDetailSheet() {
                 value={task.priority}
                 onChange={(v) => updateTask(task.id, { priority: v })}
                 options={PRIORITY_OPTIONS}
-                disabled={isViewer}
+                disabled={!canEdit}
                 ariaLabel="Priority"
               />
             </Field>
@@ -319,7 +337,7 @@ export function TaskDetailSheet() {
                 value={task.type}
                 onChange={(v) => updateTask(task.id, { type: v })}
                 options={TYPE_OPTIONS}
-                disabled={isViewer}
+                disabled={!canEdit}
                 ariaLabel="Type"
               />
             </Field>
@@ -330,6 +348,7 @@ export function TaskDetailSheet() {
                 min={1}
                 max={9}
                 value={task.mrl ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   updateTask(task.id, { mrl: e.target.value ? Number(e.target.value) : null })
                 }
@@ -343,7 +362,7 @@ export function TaskDetailSheet() {
           <div className="mb-4 grid grid-cols-2 gap-3">
             <Field label="Subteams">
               <div className="flex min-h-[30px] items-center">
-                <TaskSubteamChips task={task} editable={!isViewer} />
+                <TaskSubteamChips task={task} editable={canEdit} />
               </div>
             </Field>
             <Field label="Subsystem">
@@ -356,12 +375,12 @@ export function TaskDetailSheet() {
                   }
                   updateTask(task.id, { subsystem_id: v || null });
                 }}
-                disabled={isViewer}
+                disabled={!canEdit}
                 ariaLabel="Subsystem"
                 options={[
                   { value: "", label: "—" },
                   ...teamSubsystems.map((s) => ({ value: s.id, label: s.name })),
-                  ...(isViewer ? [] : [{ value: "__new-subsystem__", label: "+ New subsystem…" }]),
+                  ...(!canEdit ? [] : [{ value: "__new-subsystem__", label: "+ New subsystem…" }]),
                 ]}
               />
               {quickCreateOpen && (
@@ -381,6 +400,7 @@ export function TaskDetailSheet() {
               <input
                 type="date"
                 value={task.start_date ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   updateTask(task.id, { start_date: e.target.value || null })
                 }
@@ -391,6 +411,7 @@ export function TaskDetailSheet() {
               <input
                 type="date"
                 value={task.due_date ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   updateTask(task.id, { due_date: e.target.value || null })
                 }
@@ -403,6 +424,7 @@ export function TaskDetailSheet() {
                 min={0}
                 step={0.5}
                 value={task.estimate_days ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   updateTask(task.id, { estimate_days: e.target.value ? Number(e.target.value) : null })
                 }
@@ -417,6 +439,7 @@ export function TaskDetailSheet() {
             <Field label="Description">
               <textarea
                 value={task.description ?? ""}
+                disabled={!canEdit}
                 onChange={(e) =>
                   updateTask(task.id, { description: e.target.value || null })
                 }

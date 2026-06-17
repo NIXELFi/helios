@@ -54,6 +54,7 @@ function makeTask(over: Partial<TaskRow> = {}): TaskRow {
     estimate_days: null,
     mrl: null,
     on_critical_path: false,
+    created_by: null,
     subteam,
     subteams: [subteam],
     subsystem: over.subsystem ?? null,

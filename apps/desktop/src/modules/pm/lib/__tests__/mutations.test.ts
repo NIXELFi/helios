@@ -59,7 +59,14 @@ interface RecordedRpc {
 // A chainable recorder that mimics the slice of supabase-js the write layer
 // uses: client.schema(s).from(t).insert/update/upsert/delete(...).eq(...) and
 // client.schema(s).rpc(name, args).
-function makeClient(error: { message: string } | null = null) {
+// `rows` is what `.select()` resolves to on success — the write layer now chains
+// `.select()` on every UPDATE/DELETE and treats an empty result as a silent RLS
+// denial. Default to one row (the happy path); pass `[]` to simulate RLS hiding
+// the row from the write (HTTP 200, no error, zero rows affected).
+function makeClient(
+  error: { message: string } | null = null,
+  rows: unknown[] = [{ id: "ok" }],
+) {
   const calls: Recorded[] = [];
   const rpcs: RecordedRpc[] = [];
   function table(schema: string, table: string) {
@@ -74,9 +81,12 @@ function makeClient(error: { message: string } | null = null) {
           rec.ins.push([col, vals]);
           return chain;
         },
-        then<R>(onF: (v: { data: null; error: typeof error }) => R) {
+        select(_cols?: string) {
+          return chain;
+        },
+        then<R>(onF: (v: { data: unknown[] | null; error: typeof error }) => R) {
           calls.push(rec);
-          return Promise.resolve({ data: null, error }).then(onF);
+          return Promise.resolve({ data: error ? null : rows, error }).then(onF);
         },
       };
       return chain;
@@ -132,6 +142,7 @@ function makeTask(over: Partial<TaskRow> = {}): TaskRow {
     estimate_days: null,
     mrl: null,
     on_critical_path: false,
+    created_by: null,
     subteam: SUBTEAM,
     subsystem: null,
     owner: null,
@@ -184,10 +195,27 @@ describe("task mutations", () => {
     expect(calls[0]!.eqs).toEqual([]);
   });
 
-  test("batchPatchTasks surfaces a Postgrest error as a thrown Error", async () => {
+  test("batchPatchTasks surfaces a Postgrest error as a friendly thrown Error", async () => {
     const { client } = makeClient({ message: "permission denied for table tasks" });
     await expect(batchPatchTasks(client, ["t1"], { status: "done" })).rejects.toThrow(
-      /update tasks: permission denied/,
+      /don't have permission to edit these tasks/,
+    );
+  });
+
+  test("patchTask throws when RLS silently denies the write (zero rows affected)", async () => {
+    // No Postgrest error, but the row was hidden from the UPDATE by RLS — the
+    // exact silent-failure that made edits 'revert on reload'. `.select()`
+    // returns [], which checkAffected must treat as a permission failure.
+    const { client } = makeClient(null, []);
+    await expect(patchTask(client, "t1", { priority: "high" })).rejects.toThrow(
+      /don't have permission to edit this task/,
+    );
+  });
+
+  test("removeTask throws when the delete affects zero rows", async () => {
+    const { client } = makeClient(null, []);
+    await expect(removeTask(client, "t1")).rejects.toThrow(
+      /don't have permission to delete this task/,
     );
   });
 });
@@ -230,15 +258,13 @@ describe("task ↔ subteam membership mutations", () => {
 
   test("insertTaskSubteam surfaces a Postgrest error as a thrown Error", async () => {
     const { client } = makeClient({ message: "duplicate key value" });
-    await expect(insertTaskSubteam(client, "t1", "st2")).rejects.toThrow(
-      /add task subteam: duplicate key/,
-    );
+    await expect(insertTaskSubteam(client, "t1", "st2")).rejects.toThrow(/already exists/);
   });
 
   test("setPrimarySubteam surfaces an RPC error as a thrown Error", async () => {
     const { client } = makeClient({ message: "permission denied for function" });
     await expect(setPrimarySubteam(client, "t1", "st2")).rejects.toThrow(
-      /set primary subteam: permission denied/,
+      /don't have permission to set primary subteam/,
     );
   });
 });
@@ -445,7 +471,7 @@ describe("error handling", () => {
   test("a write surfaces the Postgrest error as a thrown Error", async () => {
     const { client } = makeClient({ message: "permission denied for table tasks" });
     await expect(insertTask(client, makeTask())).rejects.toThrow(
-      /create task: permission denied/,
+      /don't have permission to create this task/,
     );
   });
 });

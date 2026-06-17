@@ -176,6 +176,12 @@ export const task = z.object({
   estimate_days: z.number().nullable(),
   mrl: z.number().int().min(1).max(9).nullable(),
   on_critical_path: z.boolean(),
+  // The user who created the task. Set server-side by a `default auth.uid()` on
+  // INSERT (the client never writes it), so it can't be spoofed. Null on rows
+  // created before that default existed. Read-only on the client; it drives the
+  // "you can edit tasks you created" branch of the edit-permission check, mirror-
+  // ing the `pm.can_edit_task` RLS function.
+  created_by: z.string().uuid().nullable(),
 });
 export type Task = z.infer<typeof task>;
 

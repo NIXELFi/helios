@@ -214,6 +214,11 @@ function ReportRowView({
             </div>
             {row.what_doing && <div><span className="text-helios-text">What they were doing:</span> {row.what_doing}</div>}
             {row.details && <div><span className="text-helios-text">Details:</span> {row.details}</div>}
+            {row.admin_note && (
+              <div className="rounded-sm border border-asu-gold/30 bg-asu-gold/5 px-2 py-1.5">
+                <span className="text-asu-gold">Resolution note:</span> {row.admin_note}
+              </div>
+            )}
             {row.last_error && <div className="text-helios-danger">last error: {row.last_error.message}</div>}
             {row.breadcrumbs.length > 0 && (
               <div>

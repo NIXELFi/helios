@@ -965,6 +965,12 @@ export const usePmStore = create<PmState>((set, get) => {
       // valid for scoping/activity even before any additional membership writes.
       const seeded: TaskRow = {
         ...task,
+        // Stamp the creator optimistically so the new row is immediately editable
+        // by its author (the DB writes the same value via `default auth.uid()` on
+        // INSERT). Matches the "you can edit tasks you created" branch of the
+        // edit-permission check, so a freshly created task isn't read-only until
+        // the next reload.
+        created_by: task.created_by ?? get().currentUserId ?? null,
         subteams:
           task.subteams && task.subteams.length > 0 ? task.subteams : [task.subteam],
       };
@@ -1648,5 +1654,40 @@ export const selectBuildRecord = (state: PmState, taskId: string) =>
 export const selectMyRole = (state: PmState): TeamRole | null =>
   state.projectRoles[state.activeProjectId] ?? null;
 export const selectIsAdmin = (state: PmState): boolean => selectMyRole(state) === "admin";
+
+// Can the signed-in user edit this task, and if not, why not? Mirrors the
+// `pm.can_edit_task` RLS function so the UI can disable controls and explain the
+// block UP FRONT instead of letting the write fail silently. The DB remains the
+// source of truth — `checkAffected` in the write layer is the backstop if this
+// and RLS ever disagree.
+//
+// Approximation: RLS takes the MAX of the user's project role and their role in
+// the task's subteam; the client only carries project roles, so a subteam-scoped
+// elevation (e.g. lead of one subteam) reads as the lower project role here. That
+// only ever under-permits the UI, never over-permits, and the team currently has
+// no subteam-scoped roles. The reason strings are written for an FSAE teammate.
+export const selectCanEditTask = (
+  state: Pick<PmState, "projectRoles" | "currentUserId">,
+  task: Pick<TaskRow, "project_id" | "owner_id" | "created_by">,
+): { allowed: boolean; reason: string | null } => {
+  const role = state.projectRoles[task.project_id] ?? null;
+  if (role === "admin" || role === "lead") return { allowed: true, reason: null };
+  if (role === "engineer") {
+    const mine =
+      (task.owner_id !== null && task.owner_id === state.currentUserId) ||
+      (task.created_by !== null && task.created_by === state.currentUserId);
+    return mine
+      ? { allowed: true, reason: null }
+      : {
+          allowed: false,
+          reason:
+            "Engineers can only edit tasks they own or created. Ask a subteam lead or admin to make this change, or to assign the task to you.",
+        };
+  }
+  if (role === "viewer") {
+    return { allowed: false, reason: "You have view-only access to this project." };
+  }
+  return { allowed: false, reason: "You don't have access to edit tasks in this project." };
+};
 
 export type { PmState };

@@ -292,6 +292,9 @@ export function CreateTaskDialog({
       estimate_days: input.estimate_days,
       mrl: input.mrl,
       on_critical_path: false,
+      // Recorded server-side via `default auth.uid()`; the store stamps the
+      // current user optimistically in addTask so the creator can edit it now.
+      created_by: null,
       subteam,
       // The insert seeds the PRIMARY membership only; additional memberships are
       // written below via addTaskSubteam so a team-scope remap in onCreate can't
