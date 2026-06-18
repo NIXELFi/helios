@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Games: the **subteam standings** no longer let one game decide everything. Raw
+  scores were summed across games, so 2048 (scores in the thousands) buried Snake,
+  Breakout, and Flappy (scores in the tens). Subteams are now scored **Grand Prix
+  style** — ranked within each game for placement points (10/8/6/5…) that sum
+  across games, so every game counts equally.
+
 ## [4.4.3] - 2026-06-18
 
 ### Added

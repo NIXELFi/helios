@@ -55,8 +55,8 @@ describe("fetchAllTime", () => {
   });
 });
 
-describe("fetchSubteams", () => {
-  it("aggregates per-game subtotals into ranked totals", async () => {
+describe("fetchSubteams (Grand Prix placement scoring)", () => {
+  it("awards placement points per game and sums them, not raw subtotals", async () => {
     const { client } = stubClient({
       data: [
         { subteam: "Aero", game_id: "snake", subtotal: 25 },
@@ -66,9 +66,48 @@ describe("fetchSubteams", () => {
       error: null,
     });
     const rows = await fetchSubteams(client);
+    // snake: Aero 1st (10), Chassis 2nd (8). 2048: Aero 1st (10, only entrant).
     expect(rows).toEqual([
-      { subteam: "Aero", total: 2073, perGame: { snake: 25, "2048": 2048 } },
-      { subteam: "Chassis", total: 15, perGame: { snake: 15 } },
+      { subteam: "Aero", total: 20, perGame: { snake: 10, "2048": 10 } },
+      { subteam: "Chassis", total: 8, perGame: { snake: 8 } },
+    ]);
+  });
+
+  it("does not let a single high-scoring game dominate the standings", async () => {
+    // Aero blows out 2048; Chassis blows out snake. Under raw-sum scoring whoever
+    // won 2048 would win overall by a mile; under placement points it's a tie.
+    const { client } = stubClient({
+      data: [
+        { subteam: "Aero", game_id: "2048", subtotal: 999999 },
+        { subteam: "Aero", game_id: "snake", subtotal: 1 },
+        { subteam: "Chassis", game_id: "2048", subtotal: 1 },
+        { subteam: "Chassis", game_id: "snake", subtotal: 500 },
+      ],
+      error: null,
+    });
+    const rows = await fetchSubteams(client);
+    // Each wins one game (10) and is runner-up in the other (8) -> 18 apiece.
+    expect(rows.map((r) => [r.subteam, r.total])).toEqual([
+      ["Aero", 18],
+      ["Chassis", 18],
+    ]);
+  });
+
+  it("gives tied subteams in a game equal placement points", async () => {
+    const { client } = stubClient({
+      data: [
+        { subteam: "Aero", game_id: "snake", subtotal: 100 },
+        { subteam: "Chassis", game_id: "snake", subtotal: 100 },
+        { subteam: "DAQ", game_id: "snake", subtotal: 50 },
+      ],
+      error: null,
+    });
+    const rows = await fetchSubteams(client);
+    // Aero & Chassis tie for 1st (10 each); DAQ is 3rd (6), 2nd place is skipped.
+    expect(rows).toEqual([
+      { subteam: "Aero", total: 10, perGame: { snake: 10 } },
+      { subteam: "Chassis", total: 10, perGame: { snake: 10 } },
+      { subteam: "DAQ", total: 6, perGame: { snake: 6 } },
     ]);
   });
 });
