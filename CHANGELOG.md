@@ -27,6 +27,15 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- PM: tasks can now have **multiple owners**. The Owner field still sets the
+  primary owner; a new "Co-owners" control on the task detail panel adds other
+  members who can also edit the task. (Requested in-app by Alex Rumer.)
+- PM: attach **hyperlinks** to a task. A new "Links" section on the task detail
+  panel lets you add labeled URLs (docs, drawings, specs) that open in your
+  browser. (Requested in-app by Jaxson Whitelaw.)
+
 ## [4.4.2] - 2026-06-17
 
 ### Added

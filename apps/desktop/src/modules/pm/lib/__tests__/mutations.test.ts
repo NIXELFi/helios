@@ -5,6 +5,7 @@ import type {
   Subteam,
   TaskComment,
   TaskDependency,
+  TaskLink,
   TaskRow,
   Vendor,
 } from "@helios/pm-ui";
@@ -13,6 +14,11 @@ import {
   batchPatchTasks,
   insertComment,
   insertDependency,
+  insertTaskLink,
+  insertTaskOwner,
+  removeTaskLink,
+  removeTaskOwner,
+  setPrimaryOwner,
   insertEvent,
   insertMilestone,
   insertSubteam,
@@ -146,6 +152,7 @@ function makeTask(over: Partial<TaskRow> = {}): TaskRow {
     subteam: SUBTEAM,
     subsystem: null,
     owner: null,
+    owners: [],
     ...over,
   } as TaskRow;
 }
@@ -266,6 +273,78 @@ describe("task ↔ subteam membership mutations", () => {
     await expect(setPrimarySubteam(client, "t1", "st2")).rejects.toThrow(
       /don't have permission to set primary subteam/,
     );
+  });
+});
+
+describe("task owner mutations", () => {
+  test("insertTaskOwner inserts a non-primary owner row", async () => {
+    const { client, calls } = makeClient();
+    await insertTaskOwner(client, "t1", "u2");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!).toMatchObject({ schema: "pm", table: "task_owners", op: "insert" });
+    expect(calls[0]!.payload).toEqual({ task_id: "t1", owner_id: "u2", is_primary: false });
+  });
+
+  test("removeTaskOwner deletes scoped by both task_id and owner_id", async () => {
+    const { client, calls } = makeClient();
+    await removeTaskOwner(client, "t1", "u2");
+    expect(calls[0]!).toMatchObject({ table: "task_owners", op: "delete" });
+    expect(calls[0]!.eqs).toEqual([
+      ["task_id", "t1"],
+      ["owner_id", "u2"],
+    ]);
+  });
+
+  test("setPrimaryOwner calls the pm.set_task_primary_owner RPC with the right args", async () => {
+    const { client, rpcs, calls } = makeClient();
+    await setPrimaryOwner(client, "t1", "u2");
+    expect(calls).toHaveLength(0);
+    expect(rpcs).toHaveLength(1);
+    expect(rpcs[0]!).toEqual({
+      schema: "pm",
+      name: "set_task_primary_owner",
+      args: { p_task_id: "t1", p_owner_id: "u2" },
+    });
+  });
+
+  test("removeTaskOwner with zero rows affected is treated as a permission failure", async () => {
+    // RLS hides the row → PostgREST returns 0 rows; checkAffected must throw.
+    const { client } = makeClient(null, []);
+    await expect(removeTaskOwner(client, "t1", "u2")).rejects.toThrow(/permission/i);
+  });
+
+  test("setPrimaryOwner surfaces an RPC error as a thrown Error", async () => {
+    const { client } = makeClient({ message: "not authorized to edit task" });
+    await expect(setPrimaryOwner(client, "t1", "u2")).rejects.toThrow(/permission to set primary owner/);
+  });
+});
+
+describe("task link mutations", () => {
+  const link: TaskLink = {
+    id: "l1",
+    task_id: "t1",
+    url: "https://example.com/doc",
+    label: "Spec",
+    created_at: "2026-06-17T00:00:00Z",
+    created_by: "u1",
+  };
+
+  test("insertTaskLink inserts the link row into pm.task_links", async () => {
+    const { client, calls } = makeClient();
+    await insertTaskLink(client, link);
+    expect(calls[0]!).toMatchObject({ schema: "pm", table: "task_links", op: "insert", payload: link });
+  });
+
+  test("removeTaskLink deletes by id and verifies a row was affected", async () => {
+    const { client, calls } = makeClient();
+    await removeTaskLink(client, "l1");
+    expect(calls[0]!).toMatchObject({ table: "task_links", op: "delete" });
+    expect(calls[0]!.eqs).toEqual([["id", "l1"]]);
+  });
+
+  test("insertTaskLink surfaces a check-constraint error as a thrown Error", async () => {
+    const { client } = makeClient({ message: "violates check constraint" });
+    await expect(insertTaskLink(client, link)).rejects.toThrow(/isn't allowed/);
   });
 });
 

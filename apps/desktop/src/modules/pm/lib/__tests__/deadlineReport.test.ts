@@ -34,6 +34,7 @@ function makeTask(over: Partial<TaskRow> = {}): TaskRow {
     subteams: [SUBTEAM],
     subsystem: null,
     owner: null,
+    owners: [],
     ...over,
   } as TaskRow;
 }

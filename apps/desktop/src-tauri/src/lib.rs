@@ -206,6 +206,7 @@ pub fn run() {
             commands::parse_refs::parse_sw_refs,
             commands::parse_refs::parse_sw_properties,
             commands::reveal::reveal_in_explorer,
+            commands::open_url::open_external_url,
             bridge::bridge_set_session,
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,

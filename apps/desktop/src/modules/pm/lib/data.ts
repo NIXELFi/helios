@@ -10,6 +10,7 @@ import type {
   Subteam,
   TaskComment,
   TaskDependency,
+  TaskLink,
   TaskRow,
   TeamRole,
   User,
@@ -63,6 +64,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     blocksR,
     vendorsR,
     commentsR,
+    linksR,
     buildR,
     eventsR,
     activityR,
@@ -84,7 +86,10 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
           // `subteams` embed is ambiguous ("more than one relationship found").
           "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color)," +
           "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
-          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color))",
+          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color))," +
+          // Owner ids only (auth.users can't be embedded cross-schema); the User
+          // objects are resolved client-side from the directory, like owner.
+          "task_owners(owner_id,is_primary)",
       ),
     sb.from("task_dependencies").select("predecessor_id,successor_id,dep_type,lag_days"),
     sb
@@ -101,6 +106,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
         "id,project_id,name,category,contact_name,email,phone,website,location,processes,machining,lead_time_days,status,notes",
       ),
     sb.from("task_comments").select("id,task_id,author_id,body,kind,created_at"),
+    sb.from("task_links").select("id,task_id,url,label,created_at,created_by"),
     sb.from("build_records").select("task_id,part_file,drawing_file,drawing_review"),
     sb
       .from("calendar_events")
@@ -136,6 +142,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
   const blocks = unwrap<Block[]>(blocksR, "blocks");
   const vendors = unwrap<Vendor[]>(vendorsR, "vendors");
   const comments = unwrap<TaskComment[]>(commentsR, "task_comments");
+  const links = unwrap<TaskLink[]>(linksR, "task_links");
   const build = unwrap<BuildRecord[]>(buildR, "build_records");
   const events = unwrap<CalendarEvent[]>(eventsR, "calendar_events");
   const rolesRaw = unwrap<Array<{ project_id: string; team_role: TeamRole }>>(
@@ -166,6 +173,16 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     // (should not happen post-backfill, but keep reads resilient).
     const subteams =
       memberships.length > 0 ? memberships.map((m) => m.subteam) : [primary];
+    // Owner membership rows carry just ids; resolve each to a directory User and
+    // order primary-first so the detail sheet renders the primary owner up front.
+    const ownerRows = ((t.task_owners as Array<Record<string, unknown>> | null) ?? [])
+      .map((o) => ({
+        is_primary: Boolean(o.is_primary),
+        user: userById.get(o.owner_id as string) ?? null,
+      }))
+      .filter((o): o is { is_primary: boolean; user: User } => o.user != null);
+    ownerRows.sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+    const owners = ownerRows.map((o) => o.user);
     return {
       id: t.id as string,
       project_id: t.project_id as string,
@@ -188,6 +205,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       subteams,
       subsystem: (t.subsystem as Subsystem | null) ?? null,
       owner: ownerId ? userById.get(ownerId) ?? null : null,
+      owners,
     };
   });
 
@@ -217,6 +235,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       activity: activity.filter((a) => a.project_id === pid),
       vendors: vendors.filter((v) => v.project_id === pid),
       comments: comments.filter((c) => taskProject.get(c.task_id) === pid),
+      links: links.filter((l) => taskProject.get(l.task_id) === pid),
       buildRecords: build.filter((br) => taskProject.get(br.task_id) === pid),
       events: events.filter((e) => e.project_id === pid),
     };

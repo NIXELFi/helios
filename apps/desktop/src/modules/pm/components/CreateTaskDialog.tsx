@@ -308,6 +308,9 @@ export function CreateTaskDialog({
       subteams: [subteam],
       subsystem,
       owner,
+      // The (primary) owner seeds the owners list; co-owners are added later from
+      // the task detail sheet. The DB trigger seeds the same primary membership.
+      owners: owner ? [owner] : [],
     };
 
     onCreate(task);

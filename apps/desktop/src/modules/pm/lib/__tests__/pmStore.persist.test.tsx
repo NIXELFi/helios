@@ -105,6 +105,7 @@ function makeTask(id: string, over: Partial<TaskRow> = {}): TaskRow {
     subteams: [SUBTEAM],
     subsystem: null,
     owner: null,
+    owners: [],
     ...over,
   } as TaskRow;
 }
@@ -437,6 +438,7 @@ describe("selection model", () => {
           activity: [],
           vendors: [],
           comments: [],
+          links: [],
           buildRecords: [],
           events: [],
         },
@@ -474,6 +476,7 @@ describe("selection model", () => {
           activity: [],
           vendors: [],
           comments: [],
+          links: [],
           buildRecords: [],
           events: [],
         },
@@ -846,7 +849,7 @@ describe("deleteSubteam with multi-subteam tasks", () => {
 });
 
 describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
-  const base = { project_id: "p1", owner_id: null, created_by: null };
+  const base = { project_id: "p1", owner_id: null, created_by: null, owners: [] };
   const state = (role: string | null, currentUserId = "me") =>
     ({ projectRoles: role ? { p1: role } : {}, currentUserId }) as never;
 
@@ -862,6 +865,15 @@ describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
 
   test("an engineer can edit a task they CREATED (the created_by fix)", () => {
     const r = selectCanEditTask(state("engineer"), { ...base, created_by: "me" });
+    expect(r.allowed).toBe(true);
+  });
+
+  test("an engineer can edit a task they CO-OWN (multi-owner)", () => {
+    const r = selectCanEditTask(state("engineer"), {
+      ...base,
+      owner_id: "someone",
+      owners: [{ id: "someone", name: "Someone", email: null }, { id: "me", name: "Me", email: null }],
+    });
     expect(r.allowed).toBe(true);
   });
 

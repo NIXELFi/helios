@@ -18,16 +18,20 @@ import {
   IconArrowRight,
   IconCornerDownRight,
   IconCornerLeftUp,
+  IconExternalLink,
   IconFlag,
+  IconLink,
   IconLock,
   IconPlus,
   IconSend,
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { TaskLookup } from "@pm/components/TaskLookup";
+import { TaskOwnerChips } from "@pm/components/TaskOwnerChips";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
@@ -89,6 +93,9 @@ export function TaskDetailSheet() {
   const deleteTask = usePmStore((s) => s.deleteTask);
   const allComments = usePmStore((s) => s.comments);
   const addComment = usePmStore((s) => s.addComment);
+  const allLinks = usePmStore((s) => s.links);
+  const addLink = usePmStore((s) => s.addLink);
+  const deleteLink = usePmStore((s) => s.deleteLink);
   const currentUserId = usePmStore((s) => s.currentUserId);
   const projectRoles = usePmStore((s) => s.projectRoles);
 
@@ -112,6 +119,9 @@ export function TaskDetailSheet() {
 
   const [subtaskDialogOpen, setSubtaskDialogOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [linkUrlDraft, setLinkUrlDraft] = useState("");
+  const [linkLabelDraft, setLinkLabelDraft] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const comments = useMemo(
     () =>
@@ -121,6 +131,15 @@ export function TaskDetailSheet() {
             .sort((a, b) => b.created_at.localeCompare(a.created_at))
         : [],
     [allComments, task],
+  );
+  const links = useMemo(
+    () =>
+      task
+        ? allLinks
+            .filter((l) => l.task_id === task.id)
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        : [],
+    [allLinks, task],
   );
   const userName = useMemo(() => {
     const m = new Map<string, string>();
@@ -363,6 +382,15 @@ export function TaskDetailSheet() {
             </Field>
           </div>
 
+          {/* Co-owners (the Owner field above is the primary owner) */}
+          <div className="mb-4">
+            <Field label="Co-owners" title="Additional members who can edit this task">
+              <div className="flex min-h-[30px] items-center">
+                <TaskOwnerChips task={task} editable={canEdit} />
+              </div>
+            </Field>
+          </div>
+
           {/* Subteams (multi, primary-starred) + Subsystem */}
           <div className="mb-4 grid grid-cols-2 gap-3">
             <Field label="Subteams">
@@ -602,6 +630,95 @@ export function TaskDetailSheet() {
             )}
           </Section>
 
+          {/* Links (hyperlinks to docs/drawings/specs) */}
+          <Section title="Links" count={links.length}>
+            {canEdit ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={linkUrlDraft}
+                    onChange={(e) => {
+                      setLinkUrlDraft(e.target.value);
+                      if (linkError) setLinkError(null);
+                    }}
+                    placeholder="https://…"
+                    className={selectStyle + " flex-1"}
+                  />
+                  <input
+                    type="text"
+                    value={linkLabelDraft}
+                    onChange={(e) => setLinkLabelDraft(e.target.value)}
+                    placeholder="Label (optional)"
+                    className={selectStyle + " w-40"}
+                  />
+                  <button
+                    type="button"
+                    disabled={linkUrlDraft.trim().length === 0}
+                    onClick={() => {
+                      const url = normalizeUrl(linkUrlDraft);
+                      if (!url) {
+                        setLinkError("Enter a valid http(s) URL.");
+                        return;
+                      }
+                      addLink({
+                        id: crypto.randomUUID(),
+                        task_id: task.id,
+                        url,
+                        label: linkLabelDraft.trim() || null,
+                        created_at: new Date().toISOString(),
+                        created_by: currentUserId || null,
+                      });
+                      setLinkUrlDraft("");
+                      setLinkLabelDraft("");
+                      setLinkError(null);
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-xs font-medium text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
+                    aria-label="Add link"
+                  >
+                    <IconPlus size={14} strokeWidth={1.5} />
+                  </button>
+                </div>
+                {linkError ? (
+                  <span className="text-[11px] text-red-400">{linkError}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {links.length === 0 ? (
+              <p className="text-xs text-helios-dim">No links.</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {links.map((l) => (
+                  <li
+                    key={l.id}
+                    className="flex items-center gap-2 rounded border border-helios-line bg-helios-base/40 px-2 py-1.5 text-xs"
+                  >
+                    <IconLink size={12} strokeWidth={1.5} className="shrink-0 text-helios-dim" />
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(l.url)}
+                      className="flex min-w-0 flex-1 items-center gap-1 text-left text-helios-text hover:text-asu-gold"
+                      title={l.url}
+                    >
+                      <span className="truncate">{l.label || linkDisplay(l.url)}</span>
+                      <IconExternalLink size={11} strokeWidth={1.5} className="shrink-0 text-helios-dim" />
+                    </button>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => deleteLink(l.id)}
+                        aria-label="Remove link"
+                        className="shrink-0 rounded p-0.5 text-helios-dim hover:bg-helios-base hover:text-red-400"
+                      >
+                        <IconX size={12} strokeWidth={1.5} />
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
           {/* Dependencies — predecessors */}
           <Section title="Prerequisites" count={predecessors.length}>
             <TaskLookup
@@ -823,6 +940,39 @@ function CountdownPill({
 const selectStyle =
   "rounded border border-helios-line bg-helios-base px-2 py-1.5 text-sm text-helios-text " +
   "focus:border-asu-gold focus:outline-none disabled:opacity-60";
+
+// Normalize a user-entered URL: add an https:// scheme if missing, and accept
+// only http/https (the DB CHECK and the Rust opener enforce the same). Returns
+// null when the value can't be made into a valid http(s) URL.
+function normalizeUrl(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const withScheme = /^https?:\/\//i.test(t) ? t : `https://${t}`;
+  try {
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+// A compact display string for a bare URL (host + path, no scheme/query).
+function linkDisplay(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname === "/" ? "" : u.pathname;
+    return `${u.host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+// Open an external link in the system browser via the Tauri command. Best-effort:
+// swallow errors (e.g. when running outside the desktop shell, as in tests).
+function openExternalUrl(url: string): void {
+  void invoke("open_external_url", { url }).catch(() => {});
+}
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();

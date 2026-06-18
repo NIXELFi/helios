@@ -193,9 +193,25 @@ export const taskRow = task.extend({
   // subteams; the first entry is always the primary (id === subteam_id).
   subteams: z.array(subteam),
   subsystem: subsystem.nullable(),
+  // The PRIMARY owner (mirrors owner_id). Unchanged semantics so every existing
+  // single-owner view keeps reading `owner`/`owner_id`.
   owner: user.nullable(),
+  // The FULL owner list (primary first, when present). A task can have multiple
+  // owners; the first entry — when there is one — is the primary (id === owner_id).
+  owners: z.array(user),
 });
 export type TaskRow = z.infer<typeof taskRow>;
+
+// A hyperlink attached to a task (Drive doc, drawing, spec, meeting notes, …).
+export const taskLink = z.object({
+  id: z.string().uuid(),
+  task_id: z.string().uuid(),
+  url: z.string(),
+  label: z.string().nullable(),
+  created_at: z.string(),
+  created_by: z.string().uuid().nullable(),
+});
+export type TaskLink = z.infer<typeof taskLink>;
 
 export const taskDependency = z.object({
   predecessor_id: z.string().uuid(),

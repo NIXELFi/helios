@@ -11,6 +11,7 @@ import type {
   Subteam,
   TaskComment,
   TaskDependency,
+  TaskLink,
   TaskRow,
   TeamRole,
   User,
@@ -35,6 +36,7 @@ export interface ProjectData {
   activity: Activity[];
   vendors: Vendor[];
   comments: TaskComment[];
+  links: TaskLink[];
   buildRecords: BuildRecord[];
   events: CalendarEvent[];
 }
@@ -72,6 +74,7 @@ function snapshotFlat(s: PmState): ProjectData {
     activity: s.activity,
     vendors: s.vendors,
     comments: s.comments,
+    links: s.links,
     buildRecords: s.buildRecords,
     events: s.events,
   };
@@ -92,6 +95,7 @@ function loadFlat(d: ProjectData) {
     activity: [...d.activity],
     vendors: [...d.vendors],
     comments: [...d.comments],
+    links: [...d.links],
     buildRecords: [...d.buildRecords],
     events: [...d.events],
   };
@@ -112,6 +116,7 @@ function emptyProjectData(org: BaselineOrg): ProjectData {
     activity: [],
     vendors: [],
     comments: [],
+    links: [],
     buildRecords: [],
     events: [],
   };
@@ -309,6 +314,7 @@ interface PmState {
   activity: Activity[];
   vendors: Vendor[];
   comments: TaskComment[];
+  links: TaskLink[];
   buildRecords: BuildRecord[];
   events: CalendarEvent[];
 
@@ -383,6 +389,9 @@ interface PmState {
   addTaskSubteam: (taskId: string, subteamId: string) => void;
   removeTaskSubteam: (taskId: string, subteamId: string) => void;
   setPrimarySubteam: (taskId: string, subteamId: string) => void;
+  addTaskOwner: (taskId: string, ownerId: string) => void;
+  removeTaskOwner: (taskId: string, ownerId: string) => void;
+  setPrimaryOwner: (taskId: string, ownerId: string) => void;
   // Re-home the PRIMARY membership onto a DIFFERENT subteam, dropping the old
   // primary entirely (used to evict the catch-all "Unknown" subteam from a task).
   reassignPrimarySubteam: (taskId: string, newSubteamId: string) => void;
@@ -407,6 +416,8 @@ interface PmState {
   // Comment mutations
   addComment: (c: TaskComment) => void;
   deleteComment: (id: string) => void;
+  addLink: (link: TaskLink) => void;
+  deleteLink: (id: string) => void;
 
   // Calendar event mutations
   addEvent: (e: CalendarEvent) => void;
@@ -477,7 +488,17 @@ function embedTaskPatch(
     next.subsystem = state.subsystems.find((x) => x.id === patch.subsystem_id) ?? null;
   }
   if (patch.owner_id !== undefined) {
-    next.owner = state.users.find((x) => x.id === patch.owner_id) ?? null;
+    const newOwner = patch.owner_id
+      ? state.users.find((x) => x.id === patch.owner_id) ?? null
+      : null;
+    next.owner = newOwner;
+    // Keep the owners list aligned with the primary mirror, like subteams: a
+    // scalar owner change re-homes the PRIMARY slot. Drop the old primary and any
+    // existing copy of the new owner, then lead with the new primary (if any).
+    const rest = (current.owners ?? []).filter(
+      (u) => u.id !== current.owner_id && u.id !== patch.owner_id,
+    );
+    next.owners = newOwner ? [newOwner, ...rest] : rest;
   }
   return next;
 }
@@ -587,6 +608,7 @@ export const usePmStore = create<PmState>((set, get) => {
     activity: [],
     vendors: [],
     comments: [],
+    links: [],
     buildRecords: [],
     events: [],
 
@@ -973,6 +995,14 @@ export const usePmStore = create<PmState>((set, get) => {
         created_by: task.created_by ?? get().currentUserId ?? null,
         subteams:
           task.subteams && task.subteams.length > 0 ? task.subteams : [task.subteam],
+        // Seed the owners list from the (primary) owner so a freshly created task
+        // shows its owner immediately; the DB trigger seeds the same primary row.
+        owners:
+          task.owners && task.owners.length > 0
+            ? task.owners
+            : task.owner
+              ? [task.owner]
+              : [],
       };
       const snap = { tasks: get().tasks, activity: get().activity };
       set((s) => ({
@@ -1215,6 +1245,99 @@ export const usePmStore = create<PmState>((set, get) => {
         };
       });
       persist((c) => db.setPrimarySubteam(c, taskId, subteamId), () => set(snap));
+    },
+
+    addTaskOwner: (taskId, ownerId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      // Already an owner → no-op (the unique PK would reject a double-insert).
+      if ((task.owners ?? []).some((u) => u.id === ownerId)) return;
+      const u =
+        get().users.find((x) => x.id === ownerId) ??
+        get().baselineOrg.users.find((x) => x.id === ownerId);
+      if (!u) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) =>
+          t.id === taskId ? { ...t, owners: [...(t.owners ?? []), u] } : t,
+        );
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: subteamsForTask(task),
+            payload: { added_owner: ownerId },
+          }),
+        };
+      });
+      persist((c) => db.insertTaskOwner(c, taskId, ownerId), () => set(snap));
+    },
+
+    removeTaskOwner: (taskId, ownerId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      if (!(task.owners ?? []).some((u) => u.id === ownerId)) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          const owners = (t.owners ?? []).filter((u) => u.id !== ownerId);
+          // Removing the PRIMARY owner clears the primary mirror — the DB trigger
+          // does the same (with no is_primary row left, tasks.owner_id -> null).
+          if (ownerId === t.owner_id) {
+            return { ...t, owner_id: null, owner: null, owners };
+          }
+          return { ...t, owners };
+        });
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: subteamsForTask(task),
+            payload: { removed_owner: ownerId },
+          }),
+        };
+      });
+      persist((c) => db.removeTaskOwner(c, taskId, ownerId), () => set(snap));
+    },
+
+    setPrimaryOwner: (taskId, ownerId) => {
+      const task = get().tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      if (ownerId === task.owner_id) return; // already primary — no-op
+      const u =
+        get().users.find((x) => x.id === ownerId) ??
+        get().baselineOrg.users.find((x) => x.id === ownerId) ??
+        (task.owners ?? []).find((x) => x.id === ownerId);
+      if (!u) return;
+      const snap = { tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const tasks = s.tasks.map((t) => {
+          if (t.id !== taskId) return t;
+          // Reorder primary-first and re-home the embedded primary owner/id. The
+          // RPC adds the membership if it wasn't already one.
+          const rest = (t.owners ?? []).filter((x) => x.id !== ownerId);
+          return { ...t, owner_id: ownerId, owner: u, owners: [u, ...rest] };
+        });
+        return {
+          tasks,
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "task",
+            target_id: taskId,
+            target_name: task.title,
+            subteam_ids: subteamsForTask(task),
+            payload: { primary_owner: ownerId },
+          }),
+        };
+      });
+      persist((c) => db.setPrimaryOwner(c, taskId, ownerId), () => set(snap));
     },
 
     reassignPrimarySubteam: (taskId, newSubteamId) => {
@@ -1471,6 +1594,18 @@ export const usePmStore = create<PmState>((set, get) => {
       persist((client) => db.removeComment(client, id), () => set(snap));
     },
 
+    addLink: (link) => {
+      const snap = { links: get().links };
+      set((s) => ({ links: [link, ...s.links] }));
+      persist((client) => db.insertTaskLink(client, link), () => set(snap));
+    },
+
+    deleteLink: (id) => {
+      const snap = { links: get().links };
+      set((s) => ({ links: s.links.filter((l) => l.id !== id) }));
+      persist((client) => db.removeTaskLink(client, id), () => set(snap));
+    },
+
     addEvent: (e) => {
       const snap = { events: get().events };
       set((s) => ({
@@ -1668,14 +1803,17 @@ export const selectIsAdmin = (state: PmState): boolean => selectMyRole(state) ==
 // no subteam-scoped roles. The reason strings are written for an FSAE teammate.
 export const selectCanEditTask = (
   state: Pick<PmState, "projectRoles" | "currentUserId">,
-  task: Pick<TaskRow, "project_id" | "owner_id" | "created_by">,
+  task: Pick<TaskRow, "project_id" | "owner_id" | "created_by" | "owners">,
 ): { allowed: boolean; reason: string | null } => {
   const role = state.projectRoles[task.project_id] ?? null;
   if (role === "admin" || role === "lead") return { allowed: true, reason: null };
   if (role === "engineer") {
     const mine =
       (task.owner_id !== null && task.owner_id === state.currentUserId) ||
-      (task.created_by !== null && task.created_by === state.currentUserId);
+      (task.created_by !== null && task.created_by === state.currentUserId) ||
+      // A co-owner (any owners-list entry, not just the primary) can edit too —
+      // the point of multi-owner. Mirrors the can_edit_task RLS function.
+      (task.owners ?? []).some((u) => u.id === state.currentUserId);
     return mine
       ? { allowed: true, reason: null }
       : {

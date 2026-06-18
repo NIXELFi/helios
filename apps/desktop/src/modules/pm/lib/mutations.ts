@@ -8,6 +8,7 @@ import type {
   Subteam,
   TaskComment,
   TaskDependency,
+  TaskLink,
   TaskRow,
   Vendor,
 } from "@helios/pm-ui";
@@ -186,6 +187,68 @@ export async function setPrimarySubteam(
       .schema("pm")
       .rpc("set_task_primary_subteam", { p_task_id: taskId, p_subteam_id: subteamId }),
     "set primary subteam",
+  );
+}
+
+// --- Task ↔ owner memberships -----------------------------------------------
+// A task can have multiple owners. `pm.task_owners` is the join table;
+// `pm.tasks.owner_id` stays the denormalized PRIMARY mirror, kept in sync by DB
+// triggers (bidirectionally — a scalar owner_id write also updates the table).
+// The client writes ADDITIONAL (non-primary) owners directly; promoting one to
+// primary goes through the `set_task_primary_owner` RPC.
+
+export async function insertTaskOwner(
+  client: SupabaseClient,
+  taskId: string,
+  ownerId: string,
+): Promise<void> {
+  check(
+    await pm(client)
+      .from("task_owners")
+      .insert({ task_id: taskId, owner_id: ownerId, is_primary: false }),
+    "add this owner to the task",
+  );
+}
+
+export async function removeTaskOwner(
+  client: SupabaseClient,
+  taskId: string,
+  ownerId: string,
+): Promise<void> {
+  checkAffected(
+    await pm(client)
+      .from("task_owners")
+      .delete()
+      .eq("task_id", taskId)
+      .eq("owner_id", ownerId)
+      .select("task_id"),
+    "remove this owner from the task",
+  );
+}
+
+export async function setPrimaryOwner(
+  client: SupabaseClient,
+  taskId: string,
+  ownerId: string,
+): Promise<void> {
+  check(
+    await client
+      .schema("pm")
+      .rpc("set_task_primary_owner", { p_task_id: taskId, p_owner_id: ownerId }),
+    "set primary owner",
+  );
+}
+
+// --- Task links (hyperlinks) ------------------------------------------------
+
+export async function insertTaskLink(client: SupabaseClient, link: TaskLink): Promise<void> {
+  check(await pm(client).from("task_links").insert(link), "add this link");
+}
+
+export async function removeTaskLink(client: SupabaseClient, id: string): Promise<void> {
+  checkAffected(
+    await pm(client).from("task_links").delete().eq("id", id).select("id"),
+    "remove this link",
   );
 }
 
