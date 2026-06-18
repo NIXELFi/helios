@@ -1,33 +1,39 @@
--- v4.4.6 fix: tasks.owner_id -> task_owners sync can leave two is_primary rows.
+-- v4.4.6 / post-release reconciliation: this migration now MIRRORS the
+-- task_owners owner-sync trigger that is actually LIVE on prod.
 --
--- sync_owner_to_task_owners (20260617012000) only demotes/removes the prior
--- primary on the UPDATE path where old.owner_id changed (and is non-null). On a
--- task INSERT with an owner, or any write where a DIFFERENT user already holds
--- is_primary for the task (e.g. a co-owner promoted via set_task_primary_owner,
--- then a scalar owner_id write), the function promotes the new owner without
--- demoting the existing primary -- briefly two is_primary rows, which the
--- unique partial index then rejects, or drifts under nested writes.
+-- Background: prod had already received two task_owners trigger fixes that were
+-- never committed to this repo -- prod ledger migrations 20260618004103
+-- (pm_task_owners_fix_sync_order) and 20260618004807
+-- (pm_task_owners_primary_replace_semantics). Prod's deliberate design is
+-- "replace the owner": changing a task's Owner from A to B REMOVES A's primary
+-- membership entirely (other co-owners persist). The ORIGINAL version of this
+-- file instead DEMOTED A to a co-owner -- a different UX -- so it was NOT applied
+-- to prod (it would have regressed prod's design) and is recorded in the prod
+-- migration ledger as a no-op. This file is rewritten to the exact prod trigger
+-- so a fresh rebuild reproduces prod, and so this migration can never overwrite
+-- the live 004807 definition.
 --
--- Fix: ALWAYS demote any existing primary for the task (other than the incoming
--- owner) before promoting the new one, regardless of the old.owner_id path.
--- CREATE OR REPLACE only. Idempotent.
+-- NOTE: the narrow "two is_primary rows from a stale membership" edge case the
+-- audit flagged is intentionally NOT addressed here -- fixing it would need a
+-- separate, reconciled change on top of prod's replace-semantics design.
 
-create or replace function pm.sync_owner_to_task_owners() returns trigger
-  language plpgsql security definer set search_path to 'pm','public' as $$
+create or replace function pm.sync_owner_to_task_owners()
+  returns trigger
+  language plpgsql
+  security definer
+  set search_path to 'pm', 'public'
+as $$
 begin
+  -- Drop the prior PRIMARY membership when the primary owner changes or is
+  -- cleared. Co-owner rows (is_primary=false) are left untouched, so the Owner
+  -- dropdown has familiar "replace the owner" semantics while co-owners persist.
+  if tg_op = 'UPDATE' and old.owner_id is not null and old.owner_id is distinct from new.owner_id then
+    delete from pm.task_owners where task_id = new.id and owner_id = old.owner_id and is_primary;
+  end if;
   if new.owner_id is not null then
-    -- Demote any current primary for this task that isn't the incoming owner,
-    -- so promoting the new one can never produce a second is_primary row.
-    update pm.task_owners
-      set is_primary = false
-      where task_id = new.id and is_primary and owner_id <> new.owner_id;
     insert into pm.task_owners (task_id, owner_id, is_primary)
       values (new.id, new.owner_id, true)
       on conflict (task_id, owner_id) do update set is_primary = true;
-  elsif tg_op = 'UPDATE' and old.owner_id is not null then
-    -- Owner cleared: drop the prior primary membership (familiar "clear the
-    -- owner" semantics); co-owner rows (is_primary=false) are left untouched.
-    delete from pm.task_owners where task_id = new.id and owner_id = old.owner_id and is_primary;
   end if;
   return null;
 end; $$;
