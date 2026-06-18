@@ -18,6 +18,10 @@ export interface DynoRef {
   /** Display label, e.g. the imported file's basename. */
   label: string;
   points: DynoPoint[];
+  /** Count of rows with a valid rpm but no usable power/torque cell (e.g.
+   *  numbers lost to an unhandled locale format); present only when > 0 so
+   *  the call site can warn rather than silently dropping data. */
+  skippedRows?: number;
 }
 
 const HP_TO_KW = 0.7456999;
@@ -39,6 +43,16 @@ export function dynoTorqueNm(p: DynoPoint): number | null {
 
 function splitRow(line: string, delim: string): string[] {
   return line.split(delim).map((c) => c.trim().replace(/^"|"$/g, ""));
+}
+
+/** Parse a numeric cell, tolerating the European decimal comma (e.g. "12,5").
+ *  Returns NaN for blank/non-numeric cells (caller treats NaN as "missing"). */
+function parseNum(cell: string | undefined): number {
+  if (cell == null) return NaN;
+  // Only a bare "123,45" is a decimal comma; anything else (thousands groups,
+  // already-dotted numbers) is left to Number() so we never mangle "1,234.5".
+  if (/^-?\d+,\d+$/.test(cell)) return Number(cell.replace(",", "."));
+  return Number(cell);
 }
 
 /** Parse a dyno CSV. Throws a user-facing Error when no rpm column or no
@@ -67,18 +81,24 @@ export function parseDynoCsv(text: string, label: string): DynoRef {
   const torqueScale = torqueCol >= 0 && header[torqueCol]!.includes("lb") ? LBFT_TO_NM : 1;
 
   const points: DynoPoint[] = [];
+  let skipped = 0;
   for (const line of lines.slice(1)) {
     const cells = splitRow(line, delim);
-    const rpm = Number(cells[rpmCol]);
+    // parseNum tolerates the European decimal comma (";"-delimited exports
+    // almost always pair it), so "12,5" no longer silently becomes NaN.
+    const rpm = parseNum(cells[rpmCol]);
     if (!Number.isFinite(rpm) || rpm <= 0) continue; // unit rows, comments, junk
-    const pRaw = powerCol >= 0 ? Number(cells[powerCol]) : NaN;
-    const tRaw = torqueCol >= 0 ? Number(cells[torqueCol]) : NaN;
+    const pRaw = powerCol >= 0 ? parseNum(cells[powerCol]) : NaN;
+    const tRaw = torqueCol >= 0 ? parseNum(cells[torqueCol]) : NaN;
     const powerKw = Number.isFinite(pRaw) ? pRaw * powerScale : null;
     const torqueNm = Number.isFinite(tRaw) ? tRaw * torqueScale : null;
-    if (powerKw == null && torqueNm == null) continue;
+    if (powerKw == null && torqueNm == null) {
+      skipped++; // a real rpm but no usable power/torque — surface it below
+      continue;
+    }
     points.push({ rpm, powerKw, torqueNm });
   }
   if (points.length === 0) throw new Error("Dyno CSV had no numeric data rows.");
   points.sort((a, b) => a.rpm - b.rpm);
-  return { label, points };
+  return { label, points, ...(skipped > 0 ? { skippedRows: skipped } : {}) };
 }

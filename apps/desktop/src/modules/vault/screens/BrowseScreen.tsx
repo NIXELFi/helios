@@ -186,9 +186,12 @@ export function BrowseScreen() {
   }, [folders, vaultFolderPath, vaultId]);
   // Lock-holder names: map each user id → email (fall back to display name) so
   // the FileTable can render "Locked by <person>" instead of "Locked by other".
-  // useVaultUsers errors for non-admins (the RPC is admin-gated); that's fine —
-  // we simply fall back to the generic label, so we don't surface its error.
-  const { data: vaultUsers } = useVaultUsers();
+  // Resolve via the VAULT-SCOPED list (pdm_list_vault_roles): the global RPC
+  // (pdm_admin_list_users) is gated to GLOBAL admins only, so a per-vault admin
+  // got an empty map and saw "Locked by other" for their own teammates. Both
+  // raise for non-members; we ignore the error and fall back to the generic
+  // label, so a viewer still sees the screen.
+  const { data: vaultUsers } = useVaultUsers(vaultId);
   const holderEmailById = useMemo(() => {
     const m = new Map<UserId, string>();
     for (const u of vaultUsers ?? []) {
@@ -1153,7 +1156,7 @@ export function BrowseScreen() {
           const everyDeletable =
             n > 0 &&
             targetFiles.every(
-              (f) => isAdmin || liveLockByFile.get(f.id) === (user?.id ?? ""),
+              (f) => isVaultAdmin || liveLockByFile.get(f.id) === (user?.id ?? ""),
             );
           actions.push({
             label: `Delete ${n} file${n === 1 ? "" : "s"}`,

@@ -19,6 +19,7 @@ import {
   buildOptimizationCurvesCsv,
   buildOptimizationTrialsCsv,
   buildSingleRpmCsv,
+  buildSensitivityTsv,
   buildSweepCsv,
   buildSweepCyclesCsv,
   buildTrialsTsv,
@@ -270,6 +271,19 @@ describe("buildTrialsTsv", () => {
     expect(out[0]).toContain("\t");
     expect(out[0]!.split("\t")).toContain("rank");
     expect(out.length).toBe(3); // 1 header + 2 trials (NO units row)
+  });
+});
+
+describe("buildSensitivityTsv", () => {
+  it("neutralizes embedded tab/newline so cells can't shift columns", () => {
+    const out = lines(
+      buildSensitivityTsv([{ label: "geo\tx\ny", value: 0.5, n: 3 }], "brake\tpower"),
+    );
+    expect(out.length).toBe(2); // header + one data row — the cell newline did not split a row
+    const cells = out[1]!.split("\t");
+    expect(cells.length).toBe(4); // parameter, rho, n, metric — the cell tab did not add a column
+    expect(cells[0]).toBe("geo x y");
+    expect(cells[3]).toBe("brake power");
   });
 });
 

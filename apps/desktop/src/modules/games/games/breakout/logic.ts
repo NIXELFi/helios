@@ -15,6 +15,11 @@ export const BRICK_TOP = 40;
 const LEVEL_BONUS = 50;
 const SPEEDUP = 1.1;
 const MAX_VX = 600; // px/s — fast but can't skip a 48px brick column per step
+// px/s — the per-level SPEEDUP compounds vy with no other bound, so at high
+// levels the ball moved >BRICK_H (16px) per clamped 1/20s step and tunneled
+// straight through a brick row (collision is a single center-cell sample).
+// Cap so MAX_VY * (1/20) < BRICK_H, keeping the coarse collision sound.
+const MAX_VY = 300;
 
 export interface BreakoutState {
   x: number; y: number; vx: number; vy: number; // ball
@@ -76,8 +81,8 @@ export function step(s: BreakoutState, dt: number, paddleX: number): BreakoutSta
     bricks = Array(ROWS * COLS).fill(true);
     x = W / 2;
     y = PADDLE_Y - 40;
-    vx *= SPEEDUP;
-    vy = -Math.abs(vy) * SPEEDUP;
+    vx = Math.sign(vx || 1) * Math.min(Math.abs(vx) * SPEEDUP, MAX_VX);
+    vy = -Math.min(Math.abs(vy) * SPEEDUP, MAX_VY);
   }
 
   const gameOver = y - BALL_R > H;

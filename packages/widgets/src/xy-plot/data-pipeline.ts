@@ -17,13 +17,26 @@ const PALETTE = [
 
 /** Compile filter expressions on demand and cache. The cache lives at
  *  module scope so the same formula reused across renders is parsed
- *  once. Invalid formulas are cached as `null` so we don't reparse. */
+ *  once. Invalid formulas are cached as `null` so we don't reparse.
+ *  Keyed by raw user text, so it's capped + LRU-evicted to stop it growing
+ *  unbounded as the user edits the filter character by character. */
+const EXPR_CACHE_MAX = 64;
 const exprCache = new Map<string, Ast | null>();
 function getCompiledFilter(text: string): Ast | null {
-  if (exprCache.has(text)) return exprCache.get(text)!;
+  const cached = exprCache.get(text);
+  if (cached !== undefined || exprCache.has(text)) {
+    // Refresh recency: delete + re-set moves the key to the end (newest).
+    exprCache.delete(text);
+    exprCache.set(text, cached ?? null);
+    return cached ?? null;
+  }
   const result = parseExpr(text);
   const ast = result.ast ?? null;
   exprCache.set(text, ast);
+  if (exprCache.size > EXPR_CACHE_MAX) {
+    // Evict the oldest (first-inserted) entry — Map preserves insertion order.
+    exprCache.delete(exprCache.keys().next().value!);
+  }
   return ast;
 }
 

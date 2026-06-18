@@ -35,7 +35,9 @@ export class ViewStateEmitter {
    *  below; exposed so a future "reset everything" button can call it. */
   set(state: ViewState): void {
     this.#state = state;
-    for (const cb of this.#listeners) cb(state);
+    // Snapshot first: a listener may subscribe/unsubscribe during its own
+    // callback, and mutating the Set mid-iteration would skip or double-fire.
+    for (const cb of [...this.#listeners]) cb(state);
   }
 
   setZoom(range: ZoomRange | null): void {

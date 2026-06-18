@@ -14,6 +14,55 @@ pub mod sw_detect;
 
 use tauri::{AppHandle, Manager};
 
+/// Write `content` to a freshly-created, per-invocation temp subdirectory and run
+/// an elevated `reg import` (one UAC) on it by absolute path, then clean up.
+///
+/// The subdirectory is created with `create_new` (exclusive create) under a
+/// random name so the path can't be predicted and pre-created by another local
+/// user between write and import — closing the TOCTOU local-privesc window that a
+/// fixed, predictable temp path under an elevated `reg.exe` would open. Returns
+/// the elevated process exit status (success ≠ the keys necessarily landed —
+/// callers still verify the keys exist).
+pub(crate) fn elevated_reg_import(content: &str) -> Result<bool, String> {
+    // Unique-enough per-invocation name: pid + a high-res clock. create_new below
+    // makes the directory creation itself the exclusivity guarantee (fails if the
+    // path somehow already exists) so we never import from an attacker-seeded dir.
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let dir = std::env::temp_dir().join(format!("helios-reg-{nonce}"));
+    std::fs::create_dir(&dir).map_err(|e| format!("create temp dir: {e}"))?;
+    let path = dir.join("import.reg");
+    let write_res = std::fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, content.as_bytes()));
+    if let Err(e) = write_res {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(format!("write reg file: {e}"));
+    }
+
+    // Start-Process … -Verb RunAs triggers the UAC; -Wait so a decline (which
+    // throws) surfaces as a non-zero exit. Import by absolute path.
+    let ps = format!(
+        "$ErrorActionPreference='Stop'; Start-Process -FilePath reg.exe \
+         -ArgumentList @('import', '{}') -Verb RunAs -Wait",
+        path.display().to_string().replace('\'', "''")
+    );
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
+        .status()
+        .map_err(|e| format!("spawn elevation: {e}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(status?.success())
+}
+
 /// Resolve the bundled add-in DLL from Tauri resources (`resources/addin/`).
 fn bundled_dll(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path()
@@ -101,9 +150,14 @@ pub fn run(app: &AppHandle) -> bool {
     // and it needs elevation. Prompt once if missing; the user can retry from
     // Settings (provision_now) if they decline.
     if !registry::hklm_list_entry_present() && !staging::hklm_attempted() {
-        staging::set_hklm_attempted(true);
+        // Latch "attempted" only AFTER a successful elevated write. Latching
+        // before (or on failure) would let one transient failure — a declined
+        // UAC, a policy block, a flaky elevation spawn — permanently suppress the
+        // auto-prompt, leaving the add-in undiscoverable until the user finds the
+        // manual "Install / repair" in Settings.
         match registry::register_hklm_list_elevated() {
             Ok(()) => {
+                staging::set_hklm_attempted(true);
                 did_something = true;
                 eprintln!("injector: HKLM discovery entry installed");
             }

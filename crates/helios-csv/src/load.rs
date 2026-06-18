@@ -70,6 +70,12 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
         let time_cell = rec.get(0).unwrap_or("");
         let t: f64 = time_cell.trim().parse()
             .map_err(|e| CsvLoadError::Malformed(format!("bad time `{}`: {e}", time_cell)))?;
+        // `parse::<f64>()` happily accepts "nan"/"inf"/"-inf"/"infinity".
+        // A non-finite time poisons every downstream span / rate / monotonic
+        // check, so reject it outright rather than carrying it forward.
+        if !t.is_finite() {
+            return Err(CsvLoadError::Malformed(format!("bad time `{}`: not finite", time_cell)));
+        }
         times_raw.push(t);
         for (i, c) in cols.iter_mut().enumerate() {
             let s = rec.get(i + 1).unwrap_or("").trim();
@@ -78,8 +84,10 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
             } else {
                 parse_attempt[i] += 1;
                 match s.parse::<f64>() {
-                    Ok(v) => c.push(Some(v)),
-                    Err(_) => { parse_fail[i] += 1; c.push(None); }
+                    // Coerce non-finite values (NaN/Inf) to None so they never
+                    // enter the Float64 array and poison min/max/sum.
+                    Ok(v) if v.is_finite() => c.push(Some(v)),
+                    _ => { parse_fail[i] += 1; c.push(None); }
                 }
             }
         }
@@ -761,6 +769,52 @@ channels:
         assert!(found_rpm, "engine.rpm missing");
         assert!(found_aps, "engine.aps missing");
         assert!(found_mystery, "Mystery Probe missing");
+    }
+
+    /// `parse::<f64>()` accepts "nan"/"inf"/"-inf"/"infinity". A non-finite
+    /// TIME value must be rejected as Malformed (it would poison the span /
+    /// rate / monotonicity logic), and a non-finite value in a DATA column
+    /// must be null-coerced so NaN/Inf never enter the Float64 array and
+    /// fold silently into min/max/sum.
+    #[test]
+    fn non_finite_time_errors() {
+        for bad in ["nan", "inf", "-inf", "infinity"] {
+            let csv = format!("time,rpm\n0,1000\n{bad},1100\n");
+            let err = load_csv_bytes(csv.as_bytes(), &registry()).unwrap_err();
+            match err {
+                CsvLoadError::Malformed(msg) => {
+                    assert!(msg.contains("not finite"), "got: {msg}");
+                }
+                other => panic!("expected Malformed for time `{bad}`, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn non_finite_data_value_is_null() {
+        // `nan`/`inf` in a data column must coerce to Arrow null, never
+        // entering the Float64 array.
+        let csv: &[u8] = b"time,rpm\n\
+            0,1000\n\
+            0.01,nan\n\
+            0.02,inf\n\
+            0.03,1300\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut checked = false;
+        for rg in &r.rate_groups {
+            if let Ok(arr) = rg.channel_data("engine.rpm") {
+                // Row 0 = 1000. Rows 1 and 2 were nan/inf -> coerced to None,
+                // then forward-filled to the last-known sample (1000), never
+                // NaN/Inf. Confirm no value is non-finite.
+                for i in 0..arr.len() {
+                    if !arr.is_null(i) {
+                        assert!(arr.value(i).is_finite(), "row {i} is non-finite: {}", arr.value(i));
+                    }
+                }
+                checked = true;
+            }
+        }
+        assert!(checked, "engine.rpm column not found in any rate group");
     }
 
     // NB: a `sample_session_loads` test used to load the bundled

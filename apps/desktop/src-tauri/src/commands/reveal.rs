@@ -17,6 +17,13 @@ pub fn reveal_in_explorer(path: String) -> Result<(), String> {
         // the path portion the way Explorer expects.
         use std::os::windows::process::CommandExt;
         let win = path.replace('/', "\\");
+        // The path is interpolated unquoted-internally into a raw, double-quoted
+        // argument. A `"` inside it would break out of the quoting and let the
+        // remainder be reinterpreted as further command tokens. Windows file
+        // paths can't legally contain `"`, so reject rather than try to escape.
+        if win.contains('"') {
+            return Err("path contains an invalid character".into());
+        }
         std::process::Command::new("explorer")
             .raw_arg(format!("/select,\"{win}\""))
             .spawn()

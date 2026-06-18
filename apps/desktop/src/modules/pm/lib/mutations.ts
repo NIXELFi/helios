@@ -242,7 +242,14 @@ export async function setPrimaryOwner(
 // --- Task links (hyperlinks) ------------------------------------------------
 
 export async function insertTaskLink(client: SupabaseClient, link: TaskLink): Promise<void> {
-  check(await pm(client).from("task_links").insert(link), "add this link");
+  // Insert only client-controlled columns; let created_by (default auth.uid())
+  // and created_at default server-side so a spoofed/stale author can't be set.
+  check(
+    await pm(client)
+      .from("task_links")
+      .insert({ id: link.id, task_id: link.task_id, url: link.url, label: link.label }),
+    "add this link",
+  );
 }
 
 export async function removeTaskLink(client: SupabaseClient, id: string): Promise<void> {
@@ -427,7 +434,58 @@ export async function upsertBuildRecord(
   );
 }
 
-// --- Projects (rename only — there is no client INSERT policy) ---------------
+// --- Projects ----------------------------------------------------------------
+// There is intentionally NO client INSERT policy on pm.projects (a direct insert
+// can never pass the admin check — no membership exists yet for a brand-new
+// project). Season creation goes through the SECURITY DEFINER `create_project`
+// RPC, which atomically inserts the project AND the caller's admin membership.
+// It is admin-gated server-side (raises 42501 if the caller isn't already an
+// admin of some season). Renames DO have an UPDATE policy, hence patchProject.
+
+// Create a new season (project) via the admin-only RPC. Returns the new project
+// id. A season requires a year and a UNIQUE car code (e.g. "SDM28"); the name is
+// the human label. Maps the two expected failures to teammate-readable messages.
+export async function createProject(
+  client: SupabaseClient,
+  name: string,
+  carYear: number,
+  carCode: string,
+): Promise<string> {
+  const res = await client
+    .schema("pm")
+    .rpc("create_project", {
+      p_name: name,
+      p_car_year: carYear,
+      p_car_code: carCode,
+    });
+  if (res.error) {
+    const m = res.error.message.toLowerCase();
+    // 42501: pm.create_project raises this when the caller isn't already an admin.
+    if (
+      res.error.code === "42501" ||
+      m.includes("only an existing project admin") ||
+      m.includes("permission denied") ||
+      m.includes("row-level security")
+    ) {
+      throw new Error("Only an admin can create a season.");
+    }
+    // Unique violation on car_code (the only UNIQUE text column the RPC writes).
+    if (
+      res.error.code === "23505" ||
+      m.includes("car_code") ||
+      m.includes("duplicate key") ||
+      m.includes("already exists")
+    ) {
+      throw new Error(`A season with car code ${carCode} already exists.`);
+    }
+    throw new Error(`Couldn't create this season: ${res.error.message}`);
+  }
+  const id = res.data as unknown;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error("Couldn't create this season: the server returned no id.");
+  }
+  return id;
+}
 
 export async function patchProject(
   client: SupabaseClient,

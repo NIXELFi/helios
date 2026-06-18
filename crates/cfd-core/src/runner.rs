@@ -64,6 +64,58 @@ fn cycle_stats_all_finite(cs: &CycleStats) -> bool {
     fields.iter().all(|x| x.is_finite())
 }
 
+// ---------------- Solver-panic isolation ----------------
+//
+// The SDM26 solver `panic!`s on a handful of irrecoverable states
+// (positivity failure, characteristic-junction non-convergence). Those
+// runs happen inside rayon `par_iter` workers, so an un-caught panic
+// unwinds the worker and aborts the WHOLE sweep / optimization job —
+// one bad RPM or one bad trial takes down every sibling.
+//
+// `run_engine_unwind_safe` catches a panic from a single per-RPM /
+// per-trial engine call and converts it into an `Err(message)`, routed
+// into the same `ErrorReason::SolverDiverged` path already used for
+// non-finite results. The engine is freshly constructed per worker and
+// is dropped immediately after a caught panic (never reused), so the
+// `AssertUnwindSafe` wrapper does not let any poisoned state escape.
+//
+fn run_engine_unwind_safe<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    result.map_err(|payload| {
+        if let Some(s) = payload.downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "solver panicked".to_string()
+        }
+    })
+}
+
+/// RAII guard that installs a no-op panic hook for the duration of a
+/// parallel solver region, then restores the previous hook on drop. We
+/// catch solver panics ourselves and surface the message through the job
+/// error event, so the default hook's stderr backtrace is just noise.
+/// Installing it once around the whole `pool.install(..)` block (rather
+/// than per-call) avoids racing `set_hook`/`take_hook` across workers.
+struct SilencedPanicHook {
+    prev: Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>,
+}
+impl SilencedPanicHook {
+    fn install() -> Self {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        Self { prev: Some(prev) }
+    }
+}
+impl Drop for SilencedPanicHook {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            std::panic::set_hook(prev);
+        }
+    }
+}
+
 // ---------------- Convergence detector (mirrors engine-sim::run_single_rpm) ----------------
 //
 // MUST match `SDM26Engine::run_single_rpm` exactly so cfd-core sweeps
@@ -442,6 +494,11 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
         }
     };
 
+    // Silence the default panic hook while workers run: solver panics are
+    // caught per-RPM below and surfaced as SolverDiverged errors, so the
+    // hook's stderr backtrace would just be duplicate noise. Restored on
+    // drop after the parallel region completes.
+    let _hook_guard = SilencedPanicHook::install();
     pool.install(|| {
         let rpms: Vec<(u32, f64)> = params.rpm_list.iter().enumerate()
             .map(|(i, &r)| (i as u32, r))
@@ -470,10 +527,34 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
                 if stop.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst) {
                     return;
                 }
-                let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(&cancel)) {
-                    CycleOutcome::Cycle(stats) => stats,
-                    CycleOutcome::TargetReached => break,
-                    CycleOutcome::Cancelled => break,
+                // Isolate solver panics (positivity / junction non-convergence)
+                // so one bad RPM cannot abort the whole sweep — treat a caught
+                // panic exactly like a diverged cycle.
+                let outcome = run_engine_unwind_safe(|| {
+                    eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(&cancel))
+                });
+                let cs = match outcome {
+                    Ok(CycleOutcome::Cycle(stats)) => stats,
+                    Ok(CycleOutcome::TargetReached) => break,
+                    Ok(CycleOutcome::Cancelled) => break,
+                    Err(msg) => {
+                        let mut e = error_state.lock().unwrap();
+                        if e.is_none() {
+                            *e = Some(JobErrorEvent {
+                                job_id: job_id.clone(),
+                                kind: StudyKind::Sweep,
+                                reason: ErrorReason::SolverDiverged,
+                                message: format!(
+                                    "solver panic at rpm {rpm:.0} cycle {ci}: {msg}",
+                                    ci = cycle_i + 1,
+                                ),
+                                partial_cycles: accumulated.clone(),
+                                partial_points: vec![],
+                            });
+                        }
+                        stop.store(true, Ordering::SeqCst);
+                        return;
+                    }
                 };
                 if probe.is_diverged(&cs) {
                     accumulated.push(cs);
@@ -528,11 +609,18 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
                     .join("sweep")
                     .join(format!("{:.0}", rpm));
                 let prev_steps = loop_state.step_count;
-                capture_one_extra_cycle(
-                    &mut eng, &mut loop_state, rpm,
-                    last_cs.map(|c| c.cycle).unwrap_or(-1),
-                    &rpm_dir, flags, prev_steps,
-                )
+                // The capture pass runs one more solver cycle; isolate any
+                // panic so a capture-only failure can't unwind the worker and
+                // abort the sweep. The SweepPoint is already computed, so a
+                // failed capture just means no artifacts for this RPM.
+                run_engine_unwind_safe(|| {
+                    capture_one_extra_cycle(
+                        &mut eng, &mut loop_state, rpm,
+                        last_cs.map(|c| c.cycle).unwrap_or(-1),
+                        &rpm_dir, flags, prev_steps,
+                    )
+                })
+                .unwrap_or(None)
             } else { None };
 
             if let Some(last) = last_cs {
@@ -633,10 +721,22 @@ fn run_single_rpm_inline<P: DivergenceProbe>(
         if cancel.load(Ordering::SeqCst) {
             return Err("cancelled".to_string());
         }
-        let cs = match eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(cancel)) {
-            CycleOutcome::Cycle(stats) => stats,
-            CycleOutcome::TargetReached => break,
-            CycleOutcome::Cancelled => return Err("cancelled".to_string()),
+        // Isolate solver panics so one bad trial RPM cannot abort the
+        // whole optimization — convert a caught panic into the same Err
+        // path used for a diverged / non-finite cycle.
+        let outcome = run_engine_unwind_safe(|| {
+            eng.advance_one_cycle(rpm, &mut loop_state, None, None, Some(cancel))
+        });
+        let cs = match outcome {
+            Ok(CycleOutcome::Cycle(stats)) => stats,
+            Ok(CycleOutcome::TargetReached) => break,
+            Ok(CycleOutcome::Cancelled) => return Err("cancelled".to_string()),
+            Err(msg) => {
+                return Err(format!(
+                    "solver panic at rpm {rpm:.0} cycle {ci}: {msg}",
+                    ci = cycle_i + 1,
+                ));
+            }
         };
         if probe.is_diverged(&cs) {
             return Err(format!(
@@ -879,6 +979,10 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     let results: Arc<Mutex<Vec<TrialResult>>> =
         Arc::new(Mutex::new(Vec::with_capacity(n_trials as usize)));
 
+    // Solver panics are caught per-RPM inside `run_single_rpm_inline` and
+    // returned as per-trial Errs; silence the default panic hook so the
+    // backtrace noise doesn't flood stderr. Restored on drop.
+    let _hook_guard = SilencedPanicHook::install();
     pool.install(|| {
         use rayon::prelude::*;
         let trials_indexed: Vec<(u32, std::collections::BTreeMap<String, f64>)> = trials_input
@@ -1100,6 +1204,26 @@ mod tests {
     struct AlwaysFinite;
     impl DivergenceProbe for AlwaysFinite {
         fn is_diverged(&self, _: &CycleStats) -> bool { false }
+    }
+
+    #[test]
+    fn unwind_safe_passes_value_through() {
+        let r = run_engine_unwind_safe(|| 41 + 1);
+        assert_eq!(r, Ok(42));
+    }
+
+    #[test]
+    fn unwind_safe_captures_panic_message() {
+        // Silence the default hook so this deliberate panic doesn't print
+        // a backtrace during the test run.
+        let _g = SilencedPanicHook::install();
+        let r: Result<(), String> =
+            run_engine_unwind_safe(|| panic!("positivity failure at theta=123.4°"));
+        let msg = r.expect_err("a panic must be converted into Err");
+        assert!(
+            msg.contains("positivity failure"),
+            "captured message should contain the panic text, got: {msg}"
+        );
     }
 
     struct FailOnCycle { fail_after_count: Mutex<u32>, threshold: u32 }

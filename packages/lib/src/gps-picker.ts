@@ -45,13 +45,15 @@ export class GpsPickerEmitter {
 
   begin(request: GpsPickRequest): void {
     this.#request = request;
-    for (const cb of this.#state) cb(request);
+    // Snapshot first: a listener may subscribe/unsubscribe during its own
+    // callback, and mutating the Set mid-iteration would skip or double-fire.
+    for (const cb of [...this.#state]) cb(request);
   }
 
   cancel(): void {
     if (!this.#request) return;
     this.#request = null;
-    for (const cb of this.#state) cb(null);
+    for (const cb of [...this.#state]) cb(null);
   }
 
   /** Called by the GPS widget after projecting a click back to lat/lon.
@@ -61,7 +63,7 @@ export class GpsPickerEmitter {
     if (!req) return;
     const result: GpsPickResult = { requestId: req.requestId, lat, lon };
     this.#request = null;
-    for (const cb of this.#state) cb(null);
-    for (const cb of this.#results) cb(result);
+    for (const cb of [...this.#state]) cb(null);
+    for (const cb of [...this.#results]) cb(result);
   }
 }

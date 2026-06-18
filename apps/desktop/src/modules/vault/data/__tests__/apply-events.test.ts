@@ -69,6 +69,27 @@ describe("applyFileEvent", () => {
     expect((out as VaultFile[])[0]!.latest?.id).toBe("vA");
   });
 
+  it("prefers a NEWER incoming embedded latest over the existing one (UPDATE racing ahead of a version INSERT)", () => {
+    const list = [file({ id: "a", latest: { ...version({ version_num: 1 }), id: "vOld" } as VaultFile["latest"] })];
+    const out = applyFileEvent(
+      list,
+      ev("UPDATE", file({ id: "a", latest_version_id: "vNew", latest: { ...version({ version_num: 2 }), id: "vNew" } as VaultFile["latest"] }), { id: "a" }),
+      { vaultId: V, belongs: live },
+    );
+    expect((out as VaultFile[])[0]!.latest?.id).toBe("vNew");
+    expect((out as VaultFile[])[0]!.latest?.version_num).toBe(2);
+  });
+
+  it("REFETCH when latest_version_id points past the stale embed and no newer embed is supplied", () => {
+    const list = [file({ id: "a", latest: { ...version({ version_num: 1 }), id: "vOld" } as VaultFile["latest"] })];
+    const out = applyFileEvent(
+      list,
+      ev("UPDATE", file({ id: "a", latest_version_id: "vNew", latest: null }), { id: "a" }),
+      { vaultId: V, belongs: live },
+    );
+    expect(out).toBe(REFETCH);
+  });
+
   it("soft-delete (deleted_at set) REMOVES from the live list", () => {
     const list = [file({ id: "a" }), file({ id: "b" })];
     const out = applyFileEvent(list, ev("UPDATE", file({ id: "a", deleted_at: "now" }), { id: "a" }), { vaultId: V, belongs: live });

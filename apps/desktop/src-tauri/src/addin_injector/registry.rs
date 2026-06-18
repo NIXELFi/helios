@@ -83,23 +83,10 @@ pub fn register_hklm_list_elevated() -> Result<(), String> {
         "REGEDIT4\r\n\r\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\SolidWorks\\AddIns\\{GUID}]\r\n\
          @=dword:00000001\r\n\"Title\"=\"{TITLE}\"\r\n\"Description\"=\"{DESCRIPTION}\"\r\n"
     );
-    let path = std::env::temp_dir().join("helios_addin_hklm.reg");
-    std::fs::write(&path, content).map_err(|e| format!("write reg file: {e}"))?;
-
-    // Start-Process … -Verb RunAs triggers the UAC; -Wait so a decline (which
-    // throws) surfaces as a non-zero exit.
-    let ps = format!(
-        "$ErrorActionPreference='Stop'; Start-Process -FilePath reg.exe \
-         -ArgumentList @('import', '{}') -Verb RunAs -Wait",
-        path.display().to_string().replace('\'', "''")
-    );
-    let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
-        .status()
-        .map_err(|e| format!("spawn elevation: {e}"))?;
-    let _ = std::fs::remove_file(&path);
-
-    if !status.success() {
+    // Write into a freshly-created random per-invocation temp subdir and import
+    // by absolute path — a fixed, predictable path under an elevated reg.exe is a
+    // TOCTOU local-privesc vector (see addin_injector::elevated_reg_import).
+    if !super::elevated_reg_import(&content)? {
         return Err("elevation was declined or the registry import failed".into());
     }
     // reg.exe exiting 0 doesn't guarantee the key landed (policy software can

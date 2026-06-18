@@ -100,8 +100,12 @@ export function objectiveLabel(spec: ObjectiveSpec): string {
   return `${phrase} of ${metricLabel} — ${spec.direction}`;
 }
 
-/** Unit of the objective's underlying metric ('' when the metric is unknown). */
+/** Unit of the objective ('' when the metric is unknown). For the 'auc'
+ *  aggregator the metric is integrated over rpm, so the unit gains a `·rpm`
+ *  factor (e.g. kW·rpm) rather than reporting the bare metric unit. */
 export function objectiveUnit(spec: ObjectiveSpec): string {
   const meta = metricByWire(spec.metric);
-  return meta ? meta.unit : "";
+  if (!meta) return "";
+  if (spec.aggregator.kind === "auc") return meta.unit ? `${meta.unit}·rpm` : "rpm";
+  return meta.unit;
 }

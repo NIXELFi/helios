@@ -113,6 +113,43 @@ describe("pdm.record_refs()", () => {
     expect(error!.message).toMatch(/not authorized/i);
   });
 
+  it("ignores a soft-deleted same-named file when resolving (v4.4.6)", async () => {
+    // A previously-deleted file with the same basename must NOT make the live
+    // name look ambiguous: the ref should still resolve to the single LIVE file.
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const editor = await createTestUser(uniqueEmail("editor"));
+    await setRole(editor.id, "editor");
+    const { vaultId, folderId } = await seedVault(admin.id);
+
+    // Tombstone an old same-named child in a SEPARATE folder (the unique
+    // (folder_id, name) index covers tombstones, so the live copy lives in its
+    // own folder), then add the live one. Resolution is vault-scoped by basename.
+    const svc = serviceClient();
+    const { data: oldFolder } = await svc
+      .from("folders").insert({ vault_id: vaultId, name: "old-parts" }).select().single();
+    const deadId = await addFile(vaultId, oldFolder!.id, "frame-rail.sldprt");
+    await svc.from("files").update({ deleted_at: new Date().toISOString(), deleted_by: admin.id }).eq("id", deadId);
+    const liveId = await addFile(vaultId, folderId, "frame-rail.sldprt");
+    const parentId = await addFile(vaultId, folderId, "asm.sldasm");
+
+    const c = await signInAs(editor.email!);
+    const liveVer = await checkIn(c, editor.id, liveId, "1".repeat(64));
+    const parentVer = await checkIn(c, editor.id, parentId, "2".repeat(64));
+
+    const { data, error } = await c.rpc("pdm_record_refs", {
+      p_parent_version_id: parentVer,
+      p_child_hints: ["..\\parts\\frame-rail.sldprt"],
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(1);
+
+    const { data: rows } = await svc.from("refs").select("*").eq("parent_version_id", parentVer);
+    expect(rows).toHaveLength(1);
+    expect(rows![0].child_file_id).toBe(liveId);
+    expect(rows![0].child_version_id).toBe(liveVer);
+  });
+
   it("is idempotent — re-recording replaces, does not duplicate", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
     await setRole(admin.id, "admin");

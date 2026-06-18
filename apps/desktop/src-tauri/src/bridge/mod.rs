@@ -102,11 +102,28 @@ pub struct Snapshot {
     pub files: Vec<SnapshotFile>,
 }
 
+/// An optimistic, bridge-originated change to a file that the frontend's pushed
+/// snapshot hasn't caught up to yet. Held per file_id so a concurrent
+/// `bridge_set_snapshot` (the UI's periodic full-snapshot push) can't revert a
+/// lock/version the bridge applied a moment ago via a `/checkout` or `/checkin`.
+/// Each override is dropped once an incoming snapshot already reflects it.
+#[derive(Clone, Debug, Default)]
+pub struct OptimisticOverride {
+    /// `Some(lock)` = locked-by-me applied; `Some(None)` inner = explicitly
+    /// cleared (check-in). `None` = no optimistic lock change pending.
+    pub lock: Option<Option<LockInfo>>,
+    /// Optimistic latest-version pointer set on check-in, pending UI confirmation.
+    pub latest_version_id: Option<String>,
+}
+
 /// Mutable bridge state, guarded for access from the HTTP server thread.
 #[derive(Default)]
 pub struct Inner {
     pub session: Option<Session>,
     pub snapshot: Snapshot,
+    /// Per-file optimistic overrides not yet confirmed by a frontend snapshot
+    /// push. Keyed by file_id. Empty in steady state.
+    pub optimistic: HashMap<String, OptimisticOverride>,
 }
 
 /// How long after the last authenticated add-in request we still consider the
@@ -195,15 +212,20 @@ impl BridgeState {
     /// bridge-initiated check-out doesn't fire the in-app lock bus.
     pub(crate) fn mark_locked_by_me(&self, file_id: &str) {
         let Some(session) = self.session() else { return };
+        let lock = LockInfo { user_id: session.user_id, by_me: true };
         let mut inner = self.write();
+        // Record the override FIRST so a concurrent snapshot push that lands
+        // between the two writes still re-applies it on merge.
+        inner.optimistic.entry(file_id.to_string()).or_default().lock = Some(Some(lock.clone()));
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
-            f.lock = Some(LockInfo { user_id: session.user_id, by_me: true });
+            f.lock = Some(lock);
         }
     }
 
     /// Optimistically clear a file's lock (check-in releases it).
     pub(crate) fn clear_lock(&self, file_id: &str) {
         let mut inner = self.write();
+        inner.optimistic.entry(file_id.to_string()).or_default().lock = Some(None);
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
             f.lock = None;
         }
@@ -213,9 +235,26 @@ impl BridgeState {
     /// so `/status` reports the fresh version before the frontend's next push.
     pub(crate) fn set_latest_version_id(&self, file_id: &str, version_id: &str) {
         let mut inner = self.write();
+        inner
+            .optimistic
+            .entry(file_id.to_string())
+            .or_default()
+            .latest_version_id = Some(version_id.to_string());
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
             f.latest_version_id = Some(version_id.to_string());
         }
+    }
+
+    /// Replace the snapshot with the frontend's freshly-pushed one, but re-apply
+    /// any still-pending optimistic overrides so a concurrent UI push can't revert
+    /// a lock/version the bridge applied a moment ago (after a `/checkout` or
+    /// `/checkin`). An override is dropped once the incoming snapshot already
+    /// reflects it — that's the UI confirming the change, making the override
+    /// redundant and letting genuine later remote changes through.
+    pub(crate) fn apply_snapshot(&self, snapshot: Snapshot) {
+        let mut inner = self.write();
+        let Inner { snapshot: cur, optimistic, .. } = &mut *inner;
+        *cur = merge_snapshot(snapshot, optimistic);
     }
 
     /// Write the path→state cache the Windows Explorer shell extensions read for
@@ -412,6 +451,57 @@ pub(crate) fn norm_path(p: &str) -> String {
     p.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
+/// Merge a freshly-pushed snapshot with the still-pending optimistic overrides,
+/// re-applying any the incoming snapshot hasn't caught up to and dropping (from
+/// `optimistic`) any it has confirmed. Pure (no `self`, no I/O) so it can be
+/// unit-tested without constructing a `BridgeState` (which links the bridge's
+/// reqwest/HTTP stack into the test binary — see `build_shell_state`). Returns
+/// the merged snapshot to store.
+fn merge_snapshot(
+    mut snapshot: Snapshot,
+    optimistic: &mut HashMap<String, OptimisticOverride>,
+) -> Snapshot {
+    optimistic.retain(|file_id, ov| {
+        let Some(f) = snapshot.files.iter_mut().find(|f| &f.file_id == file_id) else {
+            // File no longer in the snapshot — nothing to protect; drop it.
+            return false;
+        };
+        let mut still_pending = false;
+
+        if let Some(want_lock) = &ov.lock {
+            if lock_matches(&f.lock, want_lock) {
+                // UI has caught up to our optimistic lock state — confirmed.
+            } else {
+                f.lock = want_lock.clone();
+                still_pending = true;
+            }
+        }
+
+        if let Some(want_ver) = &ov.latest_version_id {
+            if f.latest_version_id.as_deref() == Some(want_ver.as_str()) {
+                // Confirmed by the UI; stop overriding.
+            } else {
+                f.latest_version_id = Some(want_ver.clone());
+                still_pending = true;
+            }
+        }
+
+        still_pending
+    });
+    snapshot
+}
+
+/// Whether two optional lock states are equivalent for the purpose of confirming
+/// an optimistic override: both unlocked, or both held by the same user with the
+/// same by-me flag.
+fn lock_matches(a: &Option<LockInfo>, b: &Option<LockInfo>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x.user_id == y.user_id && x.by_me == y.by_me,
+        _ => false,
+    }
+}
+
 /// Map a file's lock state to the compact state string the shell extensions key
 /// their overlay icons / status text off of.
 pub(crate) fn shell_state_for(f: &SnapshotFile) -> &'static str {
@@ -486,7 +576,10 @@ pub fn bridge_clear_session(state: State<'_, Arc<BridgeState>>) {
 /// metadata endpoints resolve `?path=` and answer without waking the UI.
 #[tauri::command]
 pub fn bridge_set_snapshot(state: State<'_, Arc<BridgeState>>, snapshot: Snapshot) {
-    state.write().snapshot = snapshot;
+    // Merge (not blind replace): re-apply still-pending optimistic lock/version
+    // overrides so a snapshot push racing a just-completed add-in checkout/checkin
+    // can't revert it. Confirmed overrides are dropped inside apply_snapshot.
+    state.apply_snapshot(snapshot);
     // Refresh the Explorer shell-extension cache so overlay icons / columns
     // track the vault without each shell handler hitting the HTTP API.
     state.write_shell_state();
@@ -568,6 +661,69 @@ mod tests {
         // Last request older than the window → idle again.
         assert!(!is_active(1_000_000, 1_000_000 + idle, idle));
         assert!(!is_active(1_000_000, 1_000_000 + idle + 1, idle));
+    }
+
+    #[test]
+    fn lock_matches_equivalence() {
+        let me = LockInfo { user_id: "me".into(), by_me: true };
+        let me2 = LockInfo { user_id: "me".into(), by_me: true };
+        let other = LockInfo { user_id: "him".into(), by_me: false };
+        assert!(lock_matches(&None, &None));
+        assert!(lock_matches(&Some(me.clone()), &Some(me2)));
+        assert!(!lock_matches(&Some(me), &None));
+        assert!(!lock_matches(&None, &Some(other.clone())));
+        assert!(!lock_matches(
+            &Some(LockInfo { user_id: "me".into(), by_me: true }),
+            &Some(other)
+        ));
+    }
+
+    #[test]
+    fn snapshot_merge_preserves_unconfirmed_optimistic_lock() {
+        // Drive `merge_snapshot` directly (no BridgeState — constructing one links
+        // reqwest into the test binary, which on Windows can't launch as a bare
+        // test exe). Simulates: bridge checkout marks f1 locked-by-me, then a
+        // concurrent UI push still showing it unlocked must NOT revert the lock.
+        let mut optimistic: HashMap<String, OptimisticOverride> = HashMap::new();
+        optimistic.insert(
+            "f1".into(),
+            OptimisticOverride {
+                lock: Some(Some(LockInfo { user_id: "me".into(), by_me: true })),
+                latest_version_id: None,
+            },
+        );
+
+        // Stale UI push (still unlocked) — must be overridden back to locked-by-me.
+        let merged = merge_snapshot(
+            Snapshot { vault_root: None, files: vec![sf("f1", "C:/v/a.SLDPRT", None)] },
+            &mut optimistic,
+        );
+        assert_eq!(merged.files[0].lock.as_ref().map(|l| l.by_me), Some(true));
+        assert_eq!(optimistic.len(), 1, "override stays until UI confirms");
+
+        // UI catches up (now shows locked-by-me) — override confirmed + dropped.
+        let merged = merge_snapshot(
+            Snapshot {
+                vault_root: None,
+                files: vec![sf("f1", "C:/v/a.SLDPRT", Some(LockInfo { user_id: "me".into(), by_me: true }))],
+            },
+            &mut optimistic,
+        );
+        assert_eq!(merged.files[0].lock.as_ref().map(|l| l.by_me), Some(true));
+        assert!(optimistic.is_empty(), "confirmed override is dropped");
+
+        // A genuine later remote change (someone else takes it) now flows through.
+        let merged = merge_snapshot(
+            Snapshot {
+                vault_root: None,
+                files: vec![sf("f1", "C:/v/a.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false }))],
+            },
+            &mut optimistic,
+        );
+        assert_eq!(
+            merged.files[0].lock.as_ref().map(|l| l.user_id.clone()),
+            Some("him".into())
+        );
     }
 
     #[test]

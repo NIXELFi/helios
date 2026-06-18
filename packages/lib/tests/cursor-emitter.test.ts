@@ -33,4 +33,21 @@ describe("CursorEmitter", () => {
     e.emit(42);
     expect(e.get()).toBe(42);
   });
+
+  it("a subscriber unsubscribing during emit still delivers to the rest", () => {
+    // Listeners are snapshotted before iterating, so mutating the set inside a
+    // callback doesn't skip a later subscriber.
+    const e = new CursorEmitter();
+    const a = vi.fn();
+    let offA: () => void = () => {};
+    const b = vi.fn(() => offA());
+    const c = vi.fn();
+    e.subscribe(a);
+    offA = e.subscribe(b);
+    e.subscribe(c);
+    e.emit(5);
+    expect(a).toHaveBeenCalledWith(5);
+    expect(b).toHaveBeenCalledWith(5);
+    expect(c).toHaveBeenCalledWith(5);
+  });
 });

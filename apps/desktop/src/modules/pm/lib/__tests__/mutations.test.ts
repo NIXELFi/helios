@@ -329,10 +329,19 @@ describe("task link mutations", () => {
     created_by: "u1",
   };
 
-  test("insertTaskLink inserts the link row into pm.task_links", async () => {
+  test("insertTaskLink inserts only client-controlled columns into pm.task_links", async () => {
     const { client, calls } = makeClient();
     await insertTaskLink(client, link);
-    expect(calls[0]!).toMatchObject({ schema: "pm", table: "task_links", op: "insert", payload: link });
+    // created_by / created_at are intentionally NOT sent so the server defaults
+    // (auth.uid() / now()) apply rather than trusting a client-supplied author.
+    expect(calls[0]!).toMatchObject({
+      schema: "pm",
+      table: "task_links",
+      op: "insert",
+      payload: { id: "l1", task_id: "t1", url: "https://example.com/doc", label: "Spec" },
+    });
+    expect(calls[0]!.payload).not.toHaveProperty("created_by");
+    expect(calls[0]!.payload).not.toHaveProperty("created_at");
   });
 
   test("removeTaskLink deletes by id and verifies a row was affected", async () => {

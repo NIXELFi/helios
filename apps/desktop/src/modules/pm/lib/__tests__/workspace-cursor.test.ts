@@ -7,7 +7,7 @@ import {
 } from "../workspace-cursor";
 
 function cur(p: Partial<PmCursor> = {}): PmCursor {
-  return { tasks: 0, tasksUpdatedAt: "", activity: 0, ...p };
+  return { tasks: 0, tasksUpdatedAt: "", activity: 0, taskOwners: 0, taskLinks: 0, ...p };
 }
 
 describe("pm workspace-cursor pure logic", () => {
@@ -17,6 +17,8 @@ describe("pm workspace-cursor pure logic", () => {
     expect(pmCursorKey(cur({ tasks: 1 }))).not.toBe(pmCursorKey(cur({ tasks: 2 })));
     expect(pmCursorKey(cur({ tasksUpdatedAt: "a" }))).not.toBe(pmCursorKey(cur({ tasksUpdatedAt: "b" })));
     expect(pmCursorKey(cur({ activity: 1 }))).not.toBe(pmCursorKey(cur({ activity: 2 })));
+    expect(pmCursorKey(cur({ taskOwners: 1 }))).not.toBe(pmCursorKey(cur({ taskOwners: 2 })));
+    expect(pmCursorKey(cur({ taskLinks: 1 }))).not.toBe(pmCursorKey(cur({ taskLinks: 2 })));
   });
 
   it("first observation is a baseline, not a change", () => {
@@ -28,11 +30,13 @@ describe("pm workspace-cursor pure logic", () => {
     expect(pmCursorChanged(c, { ...c })).toBe(false);
   });
 
-  it("detects a task edit (updated_at moves), a new/removed task (count), and new activity", () => {
+  it("detects a task edit (updated_at moves), a new/removed task (count), new activity, and owner/link churn", () => {
     const base = cur({ tasks: 5, tasksUpdatedAt: "2026-06-06T00:00:00Z", activity: 9 });
     expect(pmCursorChanged(base, { ...base, tasksUpdatedAt: "2026-06-06T00:05:00Z" })).toBe(true);
     expect(pmCursorChanged(base, { ...base, tasks: 6 })).toBe(true);
     expect(pmCursorChanged(base, { ...base, activity: 10 })).toBe(true);
+    expect(pmCursorChanged(base, { ...base, taskOwners: 1 })).toBe(true);
+    expect(pmCursorChanged(base, { ...base, taskLinks: 1 })).toBe(true);
   });
 });
 
@@ -52,6 +56,8 @@ function makePmClient(opts: {
   tasksCount: number;
   activityCount: number;
   tasksUpdatedAt: string | null;
+  ownersCount?: number;
+  linksCount?: number;
   errorTableHead?: string;
 }) {
   const states: QState[] = [];
@@ -79,7 +85,14 @@ function makePmClient(opts: {
             if (opts.errorTableHead === table) {
               return resolve({ count: null, error: new Error("boom") });
             }
-            const count = table === "tasks" ? opts.tasksCount : opts.activityCount;
+            const count =
+              table === "tasks"
+                ? opts.tasksCount
+                : table === "task_owners"
+                  ? opts.ownersCount ?? 0
+                  : table === "task_links"
+                    ? opts.linksCount ?? 0
+                    : opts.activityCount;
             return resolve({ count, error: null });
           }
           // the updated_at probe
@@ -100,14 +113,26 @@ function makePmClient(opts: {
 }
 
 describe("fetchPmCursor", () => {
-  it("reads the pm schema and returns the task/activity signature", async () => {
-    const h = makePmClient({ tasksCount: 42, activityCount: 130, tasksUpdatedAt: "2026-06-06T01:00:00Z" });
+  it("reads the pm schema and returns the task/activity/owner/link signature", async () => {
+    const h = makePmClient({
+      tasksCount: 42,
+      activityCount: 130,
+      tasksUpdatedAt: "2026-06-06T01:00:00Z",
+      ownersCount: 7,
+      linksCount: 3,
+    });
     const c = await fetchPmCursor(h.client);
-    expect(c).toEqual({ tasks: 42, tasksUpdatedAt: "2026-06-06T01:00:00Z", activity: 130 });
+    expect(c).toEqual({
+      tasks: 42,
+      tasksUpdatedAt: "2026-06-06T01:00:00Z",
+      activity: 130,
+      taskOwners: 7,
+      taskLinks: 3,
+    });
     expect(h.schemaUsed()).toBe("pm");
 
     const heads = h.states.filter((s) => s.head).map((s) => s.table).sort();
-    expect(heads).toEqual(["activity", "tasks"]);
+    expect(heads).toEqual(["activity", "task_links", "task_owners", "tasks"]);
     const upd = h.states.find((s) => s.table === "tasks" && !s.head)!;
     expect(upd.select).toContain("updated_at");
     expect(upd.ordered).toEqual(["updated_at", { ascending: false }]);
@@ -117,7 +142,7 @@ describe("fetchPmCursor", () => {
   it("treats an empty tasks table as an empty updated_at marker", async () => {
     const h = makePmClient({ tasksCount: 0, activityCount: 0, tasksUpdatedAt: null });
     const c = await fetchPmCursor(h.client);
-    expect(c).toEqual({ tasks: 0, tasksUpdatedAt: "", activity: 0 });
+    expect(c).toEqual({ tasks: 0, tasksUpdatedAt: "", activity: 0, taskOwners: 0, taskLinks: 0 });
   });
 
   it("throws if a sub-query errors so the caller falls back to a full refresh", async () => {

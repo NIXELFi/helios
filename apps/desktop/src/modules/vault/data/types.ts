@@ -123,6 +123,13 @@ export interface VaultUser {
   role: VaultRole | null;
   granted_at: string | null;
   created_at: string;
+  /** Where the effective role comes from, populated only by the vault-scoped
+   *  list (pdm_list_vault_roles): "vault" = a per-vault override row, "global" =
+   *  inherited from the user's global role (no per-vault row). Absent on the
+   *  global list (pdm_admin_list_users), where every role IS the global one.
+   *  An inherited row can't be revoked in this vault — there's no per-vault row
+   *  to remove — so Revoke must distinguish the two. */
+  scope?: "vault" | "global";
 }
 
 /** Common shape returned by every data hook. */

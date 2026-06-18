@@ -55,35 +55,49 @@ pub fn staged_version() -> Option<String> {
     read_state().get("version").and_then(|x| x.as_str()).map(str::to_string)
 }
 
-/// Copy `bundled_dll` to `<root>\<version>\HeliosShell.dll` (no-op if present)
-/// and record the version. Returns the staged path.
+/// Copy `bundled_dll` (and its sibling DLL dependencies) to
+/// `<root>\<version>\HeliosShell.dll` and record the version. Each DLL is
+/// refreshed crash-safely (temp-copy + atomic rename) when missing, empty, or a
+/// different size from the bundled source, so a truncated/stale copy is never
+/// left behind. Returns the staged primary path.
 pub fn stage(bundled_dll: &Path, version: &str) -> std::io::Result<PathBuf> {
     let dir = shell_root().join(version);
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join("HeliosShell.dll");
-    if !dest.exists() {
-        // Copy HeliosShell.dll AND its sibling dependencies (SharpShell.dll)
-        // from the bundled resource dir, so the managed assembly resolves them
-        // from its own version folder.
-        if let Some(src_dir) = bundled_dll.parent() {
-            if let Ok(entries) = std::fs::read_dir(src_dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    let is_dll = p.extension().map(|x| x.eq_ignore_ascii_case("dll")).unwrap_or(false);
-                    if is_dll {
-                        if let Some(name) = p.file_name() {
-                            let _ = std::fs::copy(&p, dir.join(name));
-                        }
+    // Copy HeliosShell.dll AND its sibling dependencies (SharpShell.dll) from the
+    // bundled resource dir, so the managed assembly resolves them from its own
+    // version folder. stage_file no-ops when a sibling already matches.
+    if let Some(src_dir) = bundled_dll.parent() {
+        if let Ok(entries) = std::fs::read_dir(src_dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                let is_dll = p.extension().map(|x| x.eq_ignore_ascii_case("dll")).unwrap_or(false);
+                if is_dll {
+                    if let Some(name) = p.file_name() {
+                        let _ = super::staging::stage_file(&p, &dir.join(name));
                     }
                 }
             }
         }
-        if !dest.exists() {
-            std::fs::copy(bundled_dll, &dest)?; // ensure the primary landed
+    }
+    // Ensure the primary landed (and refresh it if stale) regardless of the
+    // sibling sweep above.
+    super::staging::stage_file(bundled_dll, &dest)?;
+    // Atomic: write a sibling .tmp then rename over state.json so a crash
+    // mid-write can't corrupt it (gc() trusts the recorded version).
+    let body = serde_json::json!({ "version": version, "dll": dest });
+    let bytes = serde_json::to_vec_pretty(&body).unwrap();
+    let final_path = shell_root().join("state.json");
+    let tmp = shell_root().join("state.json.tmp");
+    if std::fs::write(&tmp, &bytes).is_ok() {
+        if std::fs::rename(&tmp, &final_path).is_err() {
+            let _ = std::fs::remove_file(&final_path);
+            if std::fs::rename(&tmp, &final_path).is_err() {
+                let _ = std::fs::write(&final_path, &bytes);
+                let _ = std::fs::remove_file(&tmp);
+            }
         }
     }
-    let body = serde_json::json!({ "version": version, "dll": dest });
-    let _ = std::fs::write(shell_root().join("state.json"), serde_json::to_vec_pretty(&body).unwrap());
     Ok(dest)
 }
 
@@ -161,23 +175,20 @@ pub fn register_overlays_hklm_elevated() -> Result<(), String> {
             "[HKEY_LOCAL_MACHINE\\{OVERLAY_ROOT}\\{name}]\r\n@=\"{guid}\"\r\n\r\n"
         ));
     }
-    let path = std::env::temp_dir().join("helios_overlays_hklm.reg");
-    std::fs::write(&path, content).map_err(|e| format!("write reg file: {e}"))?;
-    let ps = format!(
-        "$ErrorActionPreference='Stop'; Start-Process -FilePath reg.exe \
-         -ArgumentList @('import', '{}') -Verb RunAs -Wait",
-        path.display().to_string().replace('\'', "''")
-    );
-    let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
-        .status()
-        .map_err(|e| format!("spawn elevation: {e}"))?;
-    let _ = std::fs::remove_file(&path);
-    if status.success() {
-        Ok(())
-    } else {
-        Err("elevation was declined or the overlay registry import failed".into())
+    // Write into a freshly-created random per-invocation temp subdir and import
+    // by absolute path — a fixed, predictable path under an elevated reg.exe is a
+    // TOCTOU local-privesc vector (see addin_injector::elevated_reg_import).
+    if !super::elevated_reg_import(&content)? {
+        return Err("elevation was declined or the overlay registry import failed".into());
     }
+    // reg.exe exiting 0 doesn't guarantee the keys landed (policy software can
+    // swallow the write, and Start-Process success only proves the process ran).
+    // Verify before reporting success — mirrors register_hklm_list_elevated in
+    // registry.rs so a phantom success doesn't leave overlays inert with no retry.
+    if !overlay_hklm_present() {
+        return Err("registry import reported success but the overlay identifiers are missing — retry from Settings".into());
+    }
+    Ok(())
 }
 
 /// Remove stale shell version folders, keeping `keep`. Best-effort (a folder a

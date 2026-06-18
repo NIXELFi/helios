@@ -3,6 +3,7 @@ import { useUser } from "@helios/auth";
 import { useLocks } from "../data/useLocks";
 import { useForceUnlock } from "../data/useForceUnlock";
 import { useIsAdmin } from "../data/useIsAdmin";
+import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFilesByIds, type LockFileRow } from "../data/useFilesByIds";
 import { useActiveCheckouts } from "../data/useActiveCheckouts";
@@ -89,12 +90,18 @@ export function WhoHasWhatScreen() {
   );
   const { data: lockFiles, loading: filesLoading, error: filesError } = useFilesByIds(lockFileIds);
   const { data: folders, error: foldersError } = useCrossVaultFolders();
-  // Holder resolution. useVaultUsers is admin-gated (the RPC raises for
-  // non-admins) — we ignore its error and fall back to the short id, so a
-  // viewer still sees the screen; an admin gets real names.
-  const { data: users } = useVaultUsers();
+  // Holder resolution. Resolve via the VAULT-SCOPED list for the active vault
+  // (pdm_list_vault_roles) rather than the global pdm_admin_list_users RPC,
+  // which is gated to GLOBAL admins only — a per-vault admin got no names. Both
+  // raise for non-members; we ignore the error and fall back to the short id,
+  // so a viewer still sees the screen.
+  const { data: users } = useVaultUsers(activeVaultId);
   const forceUnlock = useForceUnlock();
+  // Force unlock authorization is per-vault: a global admin can unlock anywhere,
+  // and an admin of the ACTIVE vault can unlock its rows. The server RPC
+  // enforces the real rule regardless of what the button shows.
   const isAdmin = useIsAdmin();
+  const isActiveVaultAdmin = useIsVaultAdmin(activeVaultId ?? null);
   // Which lock id has an in-flight force-unlock. A single shared
   // forceUnlock.loading would disable EVERY row's button; tracking the
   // targeted id keeps the other rows clickable.
@@ -310,7 +317,12 @@ export function WhoHasWhatScreen() {
               : "Nothing checked out right now."}
           </div>
         ) : (
-          visibleGroups.map((g) => (
+          visibleGroups.map((g) => {
+            // Who may force-unlock THIS group's rows: a global admin anywhere,
+            // or the active vault's admin for the active vault's group. Other
+            // vaults' groups show no action unless the user is a global admin.
+            const canForceUnlock = isAdmin || (g.vaultId !== null && g.vaultId === activeVaultId && isActiveVaultAdmin);
+            return (
             <section key={g.vaultId ?? "__other__"} className="mb-4">
               <h3 className="flex items-baseline gap-2 px-3 py-1.5 text-xs uppercase tracking-wider text-asu-gold">
                 {g.vaultName}
@@ -324,7 +336,7 @@ export function WhoHasWhatScreen() {
                     <th className="px-3 py-2 font-normal">File</th>
                     <th className="px-3 py-2 font-normal">Holder</th>
                     <th className="px-3 py-2 font-normal">Since</th>
-                    {isAdmin && <th className="px-3 py-2 font-normal">Actions</th>}
+                    {canForceUnlock && <th className="px-3 py-2 font-normal">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -371,7 +383,7 @@ export function WhoHasWhatScreen() {
                         <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
                           {relativeTime(lock.acquired_at)}
                         </td>
-                        {isAdmin && (
+                        {canForceUnlock && (
                           <td className="px-3 py-2">
                             <button
                               type="button"
@@ -389,7 +401,8 @@ export function WhoHasWhatScreen() {
                 </tbody>
               </table>
             </section>
-          ))
+            );
+          })
         )}
       </div>
       {reasonFor && (

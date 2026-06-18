@@ -160,6 +160,16 @@ function buildLockHolderClient(): SupabaseClient {
     },
     rpc: (name: string) => {
       if (name === "pdm_is_admin") return Promise.resolve({ data: false, error: null });
+      // Holder names now resolve via the vault-scoped pdm_list_vault_roles
+      // (so per-vault admins, not just global admins, can see who holds a lock).
+      // display_name is null here so the label falls back to the email the test
+      // asserts on.
+      if (name === "pdm_list_vault_roles") return Promise.resolve({
+        data: [
+          { user_id: "u2", email: "alice@x.com", display_name: null, subteam: null, role: "editor", scope: "vault", granted_at: "x", created_at: "x" },
+        ],
+        error: null,
+      });
       if (name === "pdm_admin_list_users") return Promise.resolve({
         data: [
           { user_id: "u2", email: "alice@x.com", display_name: "Alice", subteam: null, role: "editor", granted_at: "x", created_at: "x" },

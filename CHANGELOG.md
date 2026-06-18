@@ -27,6 +27,106 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.6] - 2026-06-18
+
+This release is a broad **pre-release polish pass**: a full-repo bug audit followed
+by fixes across the Vault, PM, CFD, Games, the SOLIDWORKS add-in, and the Supabase
+backend. Highlights are the vault data-loss and PM project-loss fixes.
+
+### Added
+
+- PM: **Creating a new project (season) now works end-to-end.** It saves through the
+  secure server path and opens immediately, so the project and any tasks you add
+  persist instead of vanishing on the next refresh. Creating a season is admin-only
+  and now asks for the car year and a unique car code (e.g. `SDM28`); duplicate codes
+  and permission errors are explained instead of failing silently.
+
+### Changed
+
+- PM: co-owner and task-link changes made in other sessions now appear live instead
+  of waiting for the next full refresh.
+- Vault: the Users & roles screen distinguishes an inherited global role from a
+  per-vault override and disables Revoke on inherited rows.
+- Vault: the SOLIDWORKS bridge sync backs off after repeated failures and refreshes
+  an expired session instead of repeatedly re-pulling the catalog with a dead token.
+- CFD: area-under-curve objectives now show the rpm-integrated unit (e.g. `kW·rpm`).
+- Vault: "Set revision" returns a clear message when the revision number is already
+  used on a file, instead of a raw database error.
+
+### Fixed
+
+- Vault: **auto-sync could silently soft-delete a checked-out file for the whole
+  team** when its local copy was momentarily unreadable (e.g. open/locked by
+  SOLIDWORKS). A deletion is now propagated only after confirming the file is
+  actually gone from disk.
+- PM: **a write that failed after you switched projects could overwrite the project
+  you switched to.** Optimistic rollbacks are now scoped to the originating project.
+- CFD: **importing a CSV with `NaN`/`Inf` corrupted the time axis and poisoned
+  channel min/max/sum.** Non-finite times are now rejected and non-finite data cells
+  load as null.
+- CFD: **engine sweeps and optimizations aborted entirely** when the solver hit an
+  unrecoverable state in a single RPM or trial; the failure is now isolated and
+  reported as a divergence while the rest of the run continues.
+- CFD: charts and readouts that mix channels from different sample-rate groups no
+  longer pair data with the wrong time axis (which could show incorrect values).
+- PM: co-owners added while creating a task are now saved (previously only the
+  primary owner persisted); deleting a subteam no longer leaves an orphaned subsystem
+  on re-homed tasks; a background refresh that collided with an in-flight save no
+  longer drops the update; task links no longer record the wrong author.
+- PM: a task can no longer end up with two primary owners.
+- Vault: drag-and-drop import no longer silently overwrites a checked-out (writable)
+  working copy; such files are skipped with a clear message.
+- Vault: a new file version is no longer briefly hidden when a file update and
+  check-in arrive together over realtime.
+- Vault: lock-holder names now resolve for per-vault admins (previously
+  "Locked by other") in both the Browse tree and Who-has-what; file delete in the
+  right-click menu uses per-vault admin rights; Force unlock appears for admins of the
+  active vault; a lock change in an unrelated vault no longer forces a full refresh.
+- Vault: re-adding a file that was previously sent to the recycle bin now resurrects
+  it instead of silently doing nothing; Where-Used no longer shows no results for a
+  part whose name once belonged to a since-deleted file.
+- Vault/SW: launch-on-login is no longer re-enabled on every startup after you disable
+  it; the add-in auto-install prompt is no longer permanently suppressed after a
+  declined or failed elevation; stale/truncated add-in and Explorer shell DLLs are now
+  refreshed; icon-overlay registration no longer reports false success; a just-
+  completed check-out/check-in from the add-in is no longer reverted by a concurrent
+  vault refresh.
+- CFD: dyno CSV import no longer silently drops rows using European decimal commas
+  (skipped rows are counted and a warning shown); the master-report convergence chart
+  is no longer drawn out of trial order; line charts no longer drop duplicate-x
+  samples non-deterministically; clipboard TSV exports now escape tabs/newlines; a job
+  could get stuck showing "running" on a poisoned lock and now records its status.
+- Games: the breakout ball no longer tunnels through bricks at high levels; tied
+  subteams in the standings now share a rank/medal.
+- Org: the role and subteam grant dropdowns no longer offer subteam-only granters
+  options the server would reject; the role editor no longer shows a spurious
+  "unsaved changes" state from a color-case mismatch.
+- Account deletion no longer fails for users who had filed a report or created a task
+  link or co-owner record.
+- Data: reading an empty Arrow IPC stream returns a graceful error instead of
+  crashing; legacy SOLIDWORKS assemblies with UTF-16LE reference paths are now parsed;
+  malformed mass-property vectors no longer render nonsense on the data card.
+- Misc: lap-time/clock displays no longer show garbage for negative values; a rare
+  cursor / view-state / lap-selection update is no longer skipped or double-delivered;
+  the XY-plot filter and formula caches no longer grow unbounded.
+
+### Security
+
+- RBAC: fixed a privilege over-grant where signups whose subteam didn't match a known
+  team received org-wide engineer/lead capabilities; they are now confined to an
+  "Unknown" subteam, and subteam-scoped grants can no longer be saved without a
+  subteam.
+- Vault: checking in or cancelling a checkout is no longer allowed after a user's
+  editor role is revoked while they hold the lock; a user can no longer move their own
+  lock onto a file in a vault they cannot edit.
+- Vault/SW: add-in registry installs now use a per-launch private temp directory,
+  hardening the elevated import against local tampering; "reveal in Explorer" and the
+  read-only file toggle reject malformed/symlinked paths.
+- Database: enabled row-level security (default-deny) and revoked client grants on
+  internal `pm` backup snapshot tables (`tasks_project_move_backup`,
+  `deleted_tasks_backup`, `tasks_status_backup`) that were exposed in an API-visible
+  schema without RLS, resolving the two Supabase Security Advisor errors.
+
 ## [4.4.5] - 2026-06-18
 
 ### Fixed

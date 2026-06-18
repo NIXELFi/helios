@@ -10,6 +10,7 @@ import {
   SegmentedTabs,
   SkeletonRows,
   SubteamRow,
+  subteamRanks,
   useLeaderboardData,
   type Tab,
 } from "./standings";
@@ -34,16 +35,22 @@ export function LobbyStandings({ client, game, onGameChange, refreshToken }: Pro
     useLeaderboardData(client, tab, game, refreshToken);
 
   const isTeams = tab === "subteams";
+  // Competition ranks for the (total-sorted) subteam board so tied totals share
+  // a medal/numeral instead of inheriting their array position.
+  const subteamList = subteams ?? [];
+  const teamRanks = subteamRanks(subteamList);
   // Normalized podium rows so the card renderer doesn't juggle union types.
-  const podium: { key: string; label: string; value: number; sub: string | null }[] = isTeams
-    ? (subteams ?? []).slice(0, 3).map((s) => ({
-        key: s.subteam, label: s.subteam, value: s.total, sub: null,
+  // `rank` is the explicit display rank (competition rank for subteams; the
+  // 1-based slot for players, whose ties aren't medal-bearing here).
+  const podium: { key: string; label: string; value: number; sub: string | null; rank: number }[] = isTeams
+    ? subteamList.slice(0, 3).map((s, i) => ({
+        key: s.subteam, label: s.subteam, value: s.total, sub: null, rank: teamRanks[i]!,
       }))
-    : (entries ?? []).slice(0, 3).map((e) => ({
-        key: e.userId, label: e.displayName, value: e.best, sub: e.subteam,
+    : (entries ?? []).slice(0, 3).map((e, i) => ({
+        key: e.userId, label: e.displayName, value: e.best, sub: e.subteam, rank: i + 1,
       }));
   const restPlayers = isTeams ? [] : (entries ?? []).slice(3, 11);
-  const restSubteams = isTeams ? (subteams ?? []).slice(3) : [];
+  const restSubteams = isTeams ? subteamList.slice(3) : [];
   const isEmpty = !loading && !error && (isTeams ? subteams?.length === 0 : entries?.length === 0);
 
   return (
@@ -104,7 +111,7 @@ export function LobbyStandings({ client, game, onGameChange, refreshToken }: Pro
                     }
                   >
                     <div className="flex items-center gap-1.5 text-xs text-helios-text">
-                      <RankChip rank={i + 1} />
+                      <RankChip rank={p.rank} />
                       <span className="truncate">{p.label}</span>
                     </div>
                     <div className="pl-[26px]">
@@ -121,7 +128,7 @@ export function LobbyStandings({ client, game, onGameChange, refreshToken }: Pro
               ? restSubteams.length > 0 && (
                   <ol className="flex flex-col gap-1 text-xs text-helios-text">
                     {restSubteams.map((s, i) => (
-                      <SubteamRow key={s.subteam} ranking={s} rank={i + 4} />
+                      <SubteamRow key={s.subteam} ranking={s} rank={teamRanks[i + 3]!} />
                     ))}
                   </ol>
                 )

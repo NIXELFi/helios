@@ -107,6 +107,12 @@ function mockClient(
             });
       }
       if (name === "pdm_is_admin") return Promise.resolve({ data: isAdmin, error: null });
+      // Holder names now resolve via the vault-scoped pdm_list_vault_roles
+      // (useVaultUsers(activeVaultId)); it returns display_name + email parity
+      // with the global RPC. Empty list when no users are provided.
+      if (name === "pdm_list_vault_roles") {
+        return Promise.resolve({ data: users ?? [], error: null });
+      }
       if (name === "pdm_admin_list_users") {
         // Non-admins get a raised error from the RPC; admins get the list.
         return users

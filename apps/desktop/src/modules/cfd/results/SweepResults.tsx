@@ -69,6 +69,7 @@ function summaryLine(summary: SweepSummary): string {
 export function SweepResults({ study }: Props) {
   const { state, cancelStudy, setSweepCompare, setSweepDynoRef, renameStudy, bridge } = useCfd();
   const [dynoError, setDynoError] = useState<string | null>(null);
+  const [dynoWarn, setDynoWarn] = useState<string | null>(null);
   const [expandedRpm, setExpandedRpm] = useState<number | null>(null);
   const [waveViewerRpm, setWaveViewerRpm] = useState<number | null>(null);
 
@@ -144,11 +145,19 @@ export function SweepResults({ study }: Props) {
 
   async function importDynoCsv() {
     setDynoError(null);
+    setDynoWarn(null);
     try {
       const picked = await openTextFile("csv");
       if (!picked) return;
       const label = picked.path.split(/[\\/]/).pop() ?? picked.path;
-      setSweepDynoRef(study.id, parseDynoCsv(picked.contents, label));
+      const ref = parseDynoCsv(picked.contents, label);
+      setSweepDynoRef(study.id, ref);
+      // Non-fatal: rows with a valid rpm but no usable power/torque were
+      // dropped (e.g. an unhandled locale/number format) — flag it so the
+      // import isn't silently incomplete.
+      if (ref.skippedRows) {
+        setDynoWarn(`Imported ${ref.points.length} points; skipped ${ref.skippedRows} row${ref.skippedRows === 1 ? "" : "s"} with no usable power/torque.`);
+      }
     } catch (err) {
       setDynoError(err instanceof Error ? err.message : String(err));
     }
@@ -317,6 +326,11 @@ export function SweepResults({ study }: Props) {
         {dynoError && (
           <span role="alert" className="text-[10px] text-red-300">
             {dynoError}
+          </span>
+        )}
+        {!dynoError && dynoWarn && (
+          <span role="status" className="text-[10px] text-amber-300">
+            {dynoWarn}
           </span>
         )}
       </div>

@@ -355,6 +355,13 @@ function UserRow(props: {
 }) {
   const { u, isMe, isOwner, isAdmin, busy, vaultScoped, onSetRole, onRevoke, onEdit, onDelete } = props;
 
+  // In a vault-scoped view, a role with scope "global" is INHERITED from the
+  // user's global role — there's no per-vault override row to remove, so Revoke
+  // would be a no-op (or revoke the global role across every vault). Set a
+  // per-vault role first to override it; only then is there something to revoke
+  // here. The global list never sets `scope`, so this is false there.
+  const inherited = vaultScoped && u.role !== null && u.scope !== "vault";
+
   // Editing rules (mirror the server RPCs):
   //  - your own row: never editable here (prevents self-lockout footguns).
   //  - owner row: never editable here (owner is bootstrap-managed).
@@ -402,7 +409,22 @@ function UserRow(props: {
         {u.subteam ?? <span className="text-[#5A5F66]">—</span>}
       </td>
       <td>
-        <RoleBadge role={u.role} />
+        <div className="flex items-center gap-1.5">
+          <RoleBadge role={u.role} />
+          {vaultScoped && u.role !== null && (
+            <span
+              className={
+                "rounded-sm border px-1 py-0.5 text-[9px] uppercase tracking-wider " +
+                (inherited ? "border-helios-line text-[#5A5F66]" : "border-asu-gold/60 text-asu-gold")
+              }
+              title={inherited
+                ? "Inherited from this user's global role — set a per-vault role to override it"
+                : "A per-vault override role for this vault"}
+            >
+              {inherited ? "inherited" : "override"}
+            </span>
+          )}
+        </div>
       </td>
       <td className="font-mono-num text-[11px] text-helios-dim">
         {u.granted_at ? new Date(u.granted_at).toLocaleDateString() : "—"}
@@ -433,11 +455,12 @@ function UserRow(props: {
           <button
             type="button"
             onClick={() => onRevoke(u)}
-            disabled={!editable || u.role === null || busy}
+            disabled={!editable || u.role === null || inherited || busy}
             className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-red-500/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40 disabled:hover:border-helios-line disabled:hover:text-helios-dim"
             title={
               !editable ? lockReason
               : u.role === null ? "No role to revoke"
+              : inherited ? "Inherited from the global role — nothing to revoke in this vault. Set a per-vault role first to override it, or revoke the global role under the Global scope."
               : "Remove this user's access"
             }
           >

@@ -72,6 +72,32 @@ describe("pdm.check_in()", () => {
     }
   });
 
+  it("rejects check-in after the caller's editor role is revoked, even holding the lock (v4.4.6)", async () => {
+    // A lock acquired while an editor must not keep authorizing check-ins after
+    // the role is gone (matches delete_file / set_revision re-check posture).
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const editor = await createTestUser(uniqueEmail("editor"));
+    await setRole(editor.id, "editor");
+    const { vaultId, fileId } = await seedVaultAndFile(admin.id);
+
+    const c = await signInAs(editor.email!);
+    await c.from("locks").insert({ file_id: fileId, user_id: editor.id });
+
+    // Revoke the editor role (drop to viewer) while the lock is still held.
+    await setRole(editor.id, "viewer");
+
+    const { error } = await c.rpc("pdm_check_in", {
+      p_file_id: fileId,
+      p_sha256: "b".repeat(64),
+      p_size: 1,
+      p_comment: null,
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/editor role required/i);
+    void vaultId;
+  });
+
   it("rejects check-in if the caller doesn't hold the lock", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
     await setRole(admin.id, "admin");

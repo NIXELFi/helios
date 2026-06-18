@@ -18,6 +18,7 @@ import {
   notifyLocalDeletesPropagated,
 } from "./local-delete-events";
 import { useSupabaseClient } from "@helios/auth";
+import { exists } from "@tauri-apps/plugin-fs";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -62,7 +63,10 @@ export interface AutoSyncStatus {
  * THIS machine ever materialized it:
  *   - locked-by-me + in-ledger + gone from disk → the user deleted their
  *     checked-out copy ⇒ propagate as a soft-delete (pdm_delete_file) and drop
- *     the ledger entry. Surfaced via notifyLocalDeletesPropagated.
+ *     the ledger entry. Surfaced via notifyLocalDeletesPropagated. A direct
+ *     on-disk existence probe runs right before the delete RPC so a file that
+ *     is merely unreadable this pass (e.g. open/locked by SolidWorks) is never
+ *     mistaken for a deletion.
  *   - NOT locked + in-ledger + gone from disk → the user deleted a copy they
  *     weren't checked out for ⇒ re-download it (restoring it) AND warn once via
  *     notifyLocalDeleteBlocked. The re-download's own ledgerRecord (below)
@@ -214,8 +218,11 @@ export function useAutoSync(input: {
     // vaultId or on any IO error). Drives the third partition bucket below.
     const ledger = vaultId ? await loadLedger(vaultId) : emptyLedger();
     // Checked-out files the user deleted locally → propagate as a soft-delete
-    // AFTER the worker pool settles (sequential pdm_delete_file calls).
-    const toPropagate: Array<{ fileId: string; name: string; rel: string }> = [];
+    // AFTER the worker pool settles (sequential pdm_delete_file calls). `dest`
+    // is the file's expected on-disk path, re-probed for existence right before
+    // the destructive RPC so a file that is merely unreadable (not deleted) is
+    // never propagated as a vault-wide delete.
+    const toPropagate: Array<{ fileId: string; name: string; rel: string; dest: string }> = [];
     // Non-checked-out files the user deleted locally → re-downloaded below AND
     // warned about once (the re-download's ledgerRecord refreshes the stamp).
     const deleteBlocked: string[] = [];
@@ -241,7 +248,12 @@ export function useAutoSync(input: {
           const m0 = matchLocal(file, localFiles, versionsByFileId, folders);
           const rel = vaultRelativePath(file, folders);
           if (!m0.local && classifyMissing(ledger, rel, false) === "locally-deleted") {
-            toPropagate.push({ fileId: file.id, name: file.name, rel });
+            toPropagate.push({
+              fileId: file.id,
+              name: file.name,
+              rel,
+              dest: localDestPath(vaultRoot, file.folder_id, file.name, folders),
+            });
           }
         }
         skipped++;
@@ -409,6 +421,23 @@ export function useAutoSync(input: {
       if (vaultId && toPropagate.length > 0) {
         for (const p of toPropagate) {
           if (!isCurrent()) break;
+          // CRITICAL GUARD: absence from the local scan is NOT proof of
+          // deletion. `walk()` drops any file whose content read throws — and a
+          // checked-out CAD file currently open in SolidWorks (or held by AV /
+          // any Windows sharing lock) commonly raises a sharing violation on
+          // read, so it vanishes from `localFiles` for that pass while still
+          // sitting on disk. Re-probe the real path before the destructive RPC;
+          // only a file that is genuinely gone may be soft-deleted vault-wide.
+          // Fail safe: if the probe itself errors, assume the file is present
+          // and skip the delete (leaving the vault row and ledger entry intact
+          // so the next pass re-evaluates once the file is readable again).
+          let stillOnDisk = true;
+          try {
+            stillOnDisk = await exists(p.dest);
+          } catch {
+            stillOnDisk = true;
+          }
+          if (stillOnDisk) continue;
           const { error } = await client.rpc("pdm_delete_file", { p_file_id: p.fileId });
           if (!error) {
             await ledgerRemove(vaultId, p.rel);
