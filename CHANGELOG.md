@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.5] - 2026-06-18
+
 ### Fixed
 
 - PM: fixed a crash that could make the Project Management module fail to load
