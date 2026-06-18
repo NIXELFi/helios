@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.4] - 2026-06-18
+
 ### Fixed
 
 - Games: the **subteam standings** no longer let one game decide everything. Raw
