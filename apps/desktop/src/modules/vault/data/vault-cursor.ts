@@ -12,7 +12,7 @@ import type { VaultId } from "./types";
  * - liveFiles   — a file added / soft-deleted / restored
  * - versions    — a check-in (a new version row; versions are append-only)
  * - liveFolders — a folder added / soft-deleted / restored
- * - activeLocks — a lock acquired / released
+ * - activeLocks — a lock acquired / released (scoped to this vault's files)
  *
  * A pure rename/move (no count change) is the only mutation a counts signature
  * can miss, and realtime is the fast path for that; this poll only has to cover
@@ -73,8 +73,13 @@ export async function fetchVaultCursor(
       client.from("versions").select("id, files!inner(vault_id)", head).eq("files.vault_id", vaultId),
     ),
     countOf(client.from("folders").select("id", head).eq("vault_id", vaultId).is("deleted_at", null)),
-    // locks are cross-vault (mirrors useLocks); scope only by "still held".
-    countOf(client.from("locks").select("id", head).is("released_at", null)),
+    // locks have no vault_id — scope to THIS vault via an inner join on the
+    // parent file (like versions). Without this the count is cross-vault, so a
+    // lock change in ANY vault moved the signature and triggered a full
+    // reconcile of the active vault for an event that didn't touch it.
+    countOf(
+      client.from("locks").select("id, files!inner(vault_id)", head).eq("files.vault_id", vaultId).is("released_at", null),
+    ),
   ]);
 
   return { liveFiles, versions, liveFolders, activeLocks };

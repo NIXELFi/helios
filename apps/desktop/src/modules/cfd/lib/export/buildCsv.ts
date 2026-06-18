@@ -23,6 +23,14 @@ function csvCell(s: string): string {
   return s;
 }
 
+/** Neutralize a TSV cell. Tab/CR/LF are the field/row delimiters and TSV has
+ *  no portable quoting, so an embedded delimiter would shift every following
+ *  column — collapse any run of them to a single space. Mirrors csvCell()'s
+ *  role for the clipboard-TSV exporters below. */
+function tsvCell(s: string): string {
+  return s.replace(/[\t\r\n]+/g, " ");
+}
+
 /** Format a number to `decimals`, or empty string when non-finite. The empty
  *  cell is deliberate — old persisted studies and pending trials carry holes
  *  we never want to serialize as "NaN".
@@ -229,7 +237,7 @@ export function buildTrialsTsv(study: OptimizationStudy): string {
     "wall_time_s",
     ...paths,
   ];
-  const lines: string[] = [header.join("\t")];
+  const lines: string[] = [header.map(tsvCell).join("\t")];
   const trials = [...study.trials].sort((a, b) => a.trialIdx - b.trialIdx);
   for (const t of trials) {
     const r = rankByIdx.get(t.trialIdx);
@@ -242,7 +250,7 @@ export function buildTrialsTsv(study: OptimizationStudy): string {
       num(t.wallTimeS ?? undefined, 3),
     ];
     for (const path of paths) cells.push(num(t.parameterValues[path], 6));
-    lines.push(cells.join("\t"));
+    lines.push(cells.map(tsvCell).join("\t"));
   }
   return lines.join("\n");
 }
@@ -255,7 +263,9 @@ export function buildSensitivityTsv(
 ): string {
   const lines = [`parameter\tspearman_rho\tn\tmetric`];
   for (const b of bars) {
-    lines.push(`${b.label}\t${b.value.toFixed(4)}\t${b.n ?? ""}\t${metric}`);
+    lines.push(
+      [tsvCell(b.label), b.value.toFixed(4), String(b.n ?? ""), tsvCell(metric)].join("\t"),
+    );
   }
   return lines.join("\n");
 }

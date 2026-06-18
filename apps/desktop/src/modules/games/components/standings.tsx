@@ -140,6 +140,20 @@ export function useLeaderboardData(
   };
 }
 
+/** Standard competition ranking ("1224") for an already-total-sorted subteam
+ *  list: equal totals share a rank, the next distinct total skips accordingly.
+ *  Returned parallel to the input so callers can pass an explicit rank instead
+ *  of the array index (which would give tied subteams different medals). */
+export function subteamRanks(list: SubteamRanking[]): number[] {
+  const ranks: number[] = [];
+  let rank = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (i === 0 || list[i]!.total !== list[i - 1]!.total) rank = i + 1;
+    ranks.push(rank);
+  }
+  return ranks;
+}
+
 /** Segmented tab control. `compact` renders the slim Orbitron variant used in
  *  the in-game podium strip. */
 export function SegmentedTabs({

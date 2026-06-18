@@ -15,6 +15,8 @@ export const PM_REALTIME_TABLES = [
   "task_comments",
   "task_dependencies",
   "task_subteams",
+  "task_owners",
+  "task_links",
   "milestones",
   "calendar_events",
   "subteams",

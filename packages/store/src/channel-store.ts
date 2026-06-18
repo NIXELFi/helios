@@ -1,5 +1,5 @@
 import { RateGroup } from "./rate-group";
-import { sliceRateGroup } from "./slice";
+import { sliceRateGroup, resampleHold } from "./slice";
 import type { ChannelMeta, ChannelSlice, TimeRange } from "./types";
 
 export class ChannelStore {
@@ -79,11 +79,19 @@ export class ChannelStore {
     rg?.columns.delete(channelId);
     const removed = this.#metas.get(channelId);
     if (removed?.source_header) {
-      this.#bySourceHeader.delete(removed.source_header);
-      // Any canonical override whose target source_header just vanished
-      // gets cleared so reads don't silently fall back to its raw header.
-      for (const [canonical, src] of this.#overrides) {
-        if (src === removed.source_header) this.#overrides.delete(canonical);
+      // #bySourceHeader is first-write-wins: a different channel may own this
+      // source_header binding. Only drop it when THIS channel is the owner,
+      // otherwise we'd orphan the other channel's binding.
+      const ownsBinding = this.#bySourceHeader.get(removed.source_header) === channelId;
+      if (ownsBinding) {
+        this.#bySourceHeader.delete(removed.source_header);
+        // Any canonical override whose active target was this deleted entry
+        // gets cleared so reads don't silently fall back to its raw header.
+        // Overrides pointing at a source_header still owned by a surviving
+        // channel are left intact.
+        for (const [canonical, src] of this.#overrides) {
+          if (src === removed.source_header) this.#overrides.delete(canonical);
+        }
       }
     }
     this.#metas.delete(channelId);
@@ -149,7 +157,19 @@ export class ChannelStore {
    *  Each requested id is translated through `effectiveChannelId` to find
    *  the underlying data; the result is keyed by the *requested* id so
    *  callers ask for `engine.aps` and get data keyed as `engine.aps`
-   *  regardless of any override. */
+   *  regardless of any override.
+   *
+   *  A {@link ChannelSlice} has a single shared `time` axis with every column
+   *  indexed in parallel against it (sampleAt, the strip-chart, the xy-plot
+   *  pipeline and gps-track all rely on that). When the requested channels span
+   *  more than one rate group their native time axes differ, so we can't hand
+   *  back one group's `time` with another group's column glued onto it — the
+   *  column would be paired with the wrong timestamps and read back garbage.
+   *  In that case we resample every requested channel onto a common time base
+   *  (the sorted union of the involved groups' timestamps within `range`) using
+   *  zero-order hold — the last sample at-or-before each base timestamp, which
+   *  matches sampleAt's lookup semantics. The single-group case keeps the exact
+   *  native slice (no resampling) so the common high-rate path is unchanged. */
   slice(channels: string[], range: TimeRange): ChannelSlice {
     // Map requested id → effective id (for the actual data lookup) and the
     // reverse mapping (effective id → list of requested ids so we can fan
@@ -170,19 +190,48 @@ export class ChannelStore {
       }
       bucket.requestedFor.get(effective)!.push(requested);
     }
-    let outTime: BigInt64Array | null = null;
-    const outData = new Map<string, Float64Array>();
+
+    // Fast path: all requested channels live in one rate group (or there are
+    // none). Return the native slice verbatim — its `time` already matches
+    // every column 1:1, no resampling needed.
+    if (byGroup.size <= 1) {
+      const outData = new Map<string, Float64Array>();
+      let outTime: BigInt64Array | null = null;
+      for (const [groupId, { effectiveIds, requestedFor }] of byGroup) {
+        const rg = this.#groups.get(groupId)!;
+        const part = sliceRateGroup(rg, effectiveIds, range);
+        outTime = part.time;
+        for (const [effId, arr] of part.data) {
+          for (const requested of requestedFor.get(effId) ?? [effId]) {
+            outData.set(requested, arr);
+          }
+        }
+      }
+      return { time: outTime ?? new BigInt64Array(0), data: outData, range };
+    }
+
+    // Multi-group path: slice each group natively, then resample onto a shared
+    // time base so every returned column is aligned to the same axis.
+    const parts: { requestedFor: Map<string, string[]>; part: ChannelSlice }[] = [];
+    const baseSet = new Set<bigint>();
     for (const [groupId, { effectiveIds, requestedFor }] of byGroup) {
       const rg = this.#groups.get(groupId)!;
       const part = sliceRateGroup(rg, effectiveIds, range);
-      if (outTime === null) outTime = part.time;
-      for (const [effId, arr] of part.data) {
+      parts.push({ requestedFor, part });
+      for (let i = 0; i < part.time.length; i++) baseSet.add(part.time[i]!);
+    }
+    const base = BigInt64Array.from([...baseSet].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+
+    const outData = new Map<string, Float64Array>();
+    for (const { requestedFor, part } of parts) {
+      for (const [effId, col] of part.data) {
+        const resampled = resampleHold(part.time, col, base);
         for (const requested of requestedFor.get(effId) ?? [effId]) {
-          outData.set(requested, arr);
+          outData.set(requested, resampled);
         }
       }
     }
-    return { time: outTime ?? new BigInt64Array(0), data: outData, range };
+    return { time: base, data: outData, range };
   }
 
   /** Range of [min t, max t] across all groups, in microseconds. */

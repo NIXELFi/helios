@@ -364,7 +364,21 @@ function PersonRow(props: {
     setEditing(false);
   }
 
-  const selectedRole = roles.find((r) => r.key === roleKey) ?? null;
+  // Only offer actions the server would actually accept. An org granter can
+  // grant any role org-wide; a subteam-only granter can grant just the
+  // subteam-scoped roles, and only into subteams it holds the grant cap for.
+  const isOrgGranter = can("org.grant_roles");
+  const grantableRoles = useMemo(
+    () => (isOrgGranter ? roles : roles.filter((r) => r.scope === "subteam")),
+    [roles, isOrgGranter],
+  );
+  const grantableSubteams = useMemo(
+    () =>
+      isOrgGranter ? subteams : subteams.filter((s) => can("pm.grant_subteam_roles", s.id)),
+    [subteams, isOrgGranter, can],
+  );
+
+  const selectedRole = grantableRoles.find((r) => r.key === roleKey) ?? null;
   const needsSubteam = selectedRole?.scope === "subteam";
   const canAdd = !!selectedRole && (!needsSubteam || !!subteamId);
 
@@ -496,7 +510,7 @@ function PersonRow(props: {
                 className="rounded-sm border border-helios-line bg-helios-base px-1.5 py-0.5 text-[11px] text-helios-text outline-none focus:border-asu-gold focus-visible:ring-2 focus-visible:ring-asu-gold"
               >
                 <option value="">role…</option>
-                {roles.map((r) => (
+                {grantableRoles.map((r) => (
                   <option key={r.key} value={r.key}>
                     {r.label}
                   </option>
@@ -510,7 +524,7 @@ function PersonRow(props: {
                   className="rounded-sm border border-helios-line bg-helios-base px-1.5 py-0.5 text-[11px] text-helios-text outline-none focus:border-asu-gold focus-visible:ring-2 focus-visible:ring-asu-gold"
                 >
                   <option value="">subteam…</option>
-                  {subteams.map((s) => (
+                  {grantableSubteams.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -820,7 +834,9 @@ const BLANK_ROLE: RoleWithCaps = {
   id: "",
   key: "",
   label: "",
-  tag: "#6B7280",
+  // Lowercase to match <input type="color">, which always reports lowercase
+  // hex — otherwise the dirty check below trips the moment the picker mounts.
+  tag: "#6b7280",
   scope: "subteam",
   is_system: false,
   sort_order: 100,
@@ -920,7 +936,7 @@ function RoleCard(props: {
   const { role, caps, can, canManage, isNew, onSaved, onCancel, onError, upsertRole, deleteRole } = props;
   const locked = role.is_system || !canManage;
   const [label, setLabel] = useState(role.label);
-  const [tag, setTag] = useState(role.tag ?? "#6B7280");
+  const [tag, setTag] = useState((role.tag ?? "#6b7280").toLowerCase());
   const [scope, setScope] = useState<"org" | "subteam">(role.scope);
   const [selected, setSelected] = useState<Set<string>>(new Set(role.capabilities));
   const [busy, setBusy] = useState(false);
@@ -929,7 +945,9 @@ function RoleCard(props: {
   const dirty =
     isNew ||
     label !== role.label ||
-    tag !== (role.tag ?? "#6B7280") ||
+    // <input type="color"> reports lowercase hex; compare case-insensitively so
+    // an unchanged uppercase stored tag doesn't read as a pending edit.
+    tag !== (role.tag ?? "#6b7280").toLowerCase() ||
     scope !== role.scope ||
     selected.size !== role.capabilities.length ||
     role.capabilities.some((c) => !selected.has(c));

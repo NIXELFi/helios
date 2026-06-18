@@ -9,6 +9,8 @@ use thiserror::Error;
 pub enum ArrowIpcError {
     #[error("arrow error: {0}")]
     Arrow(#[from] arrow::error::ArrowError),
+    #[error("empty IPC stream: expected exactly one batch, found none")]
+    EmptyStream,
 }
 
 /// Serialize a RateGroup's RecordBatch to Arrow IPC stream bytes (zero-copy on the read side).
@@ -25,7 +27,9 @@ pub fn batch_to_ipc(batch: &RecordBatch) -> Result<Vec<u8>, ArrowIpcError> {
 /// Deserialize Arrow IPC stream bytes back into a single RecordBatch.
 pub fn batch_from_ipc(bytes: &[u8]) -> Result<RecordBatch, ArrowIpcError> {
     let mut r = StreamReader::try_new(Cursor::new(bytes), None)?;
-    let batch = r.next().expect("expected exactly one batch")?;
+    // A well-formed but empty IPC stream yields `None` here; return a graceful
+    // error rather than panicking in a `-> Result` API.
+    let batch = r.next().ok_or(ArrowIpcError::EmptyStream)??;
     Ok(batch)
 }
 
@@ -60,5 +64,23 @@ mod tests {
         assert_eq!(back.num_rows(), 3);
         assert_eq!(back.num_columns(), 2);
         assert_eq!(back.schema().field(1).name(), "a");
+    }
+
+    /// A well-formed IPC stream with a schema but zero batches yields `None`
+    /// from the reader. This must surface as a graceful `EmptyStream` error,
+    /// not a panic, in the `-> Result` API.
+    #[test]
+    fn empty_stream_is_graceful_error() {
+        use arrow::datatypes::{DataType as ArrowType, Field, Schema};
+        use std::sync::Arc;
+        // Write a stream with a schema but no record batches.
+        let schema = Arc::new(Schema::new(vec![Field::new("a", ArrowType::Float64, true)]));
+        let mut buf = Vec::new();
+        {
+            let mut w = StreamWriter::try_new(&mut buf, &schema).unwrap();
+            w.finish().unwrap();
+        }
+        let err = batch_from_ipc(&buf).unwrap_err();
+        assert!(matches!(err, ArrowIpcError::EmptyStream), "got: {err:?}");
     }
 }

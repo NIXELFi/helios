@@ -4,13 +4,26 @@ import type { Project } from "@helios/pm-ui";
 import { IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 
+// On RENAME the dialog edits name + description. On CREATE a project IS a season,
+// so it also collects the required car year + UNIQUE car code the server needs.
+export type ProjectDialogValues =
+  | { mode: "rename"; name: string; description: string | null }
+  | { mode: "create"; name: string; carYear: number; carCode: string };
+
 export interface ProjectDialogProps {
   open: boolean;
   onClose: () => void;
-  onSave: (values: { name: string; description: string | null }) => void;
+  onSave: (values: ProjectDialogValues) => void;
   // When set, the dialog renames this project; otherwise it creates a new one.
   project?: Project | null;
+  // An error from the (async) create attempt — e.g. "Only an admin can create a
+  // season." or a duplicate car-code message — surfaced inline so a failed
+  // server-backed create explains itself instead of the dialog just closing.
+  externalError?: string | null;
 }
+
+const CAR_YEAR_MIN = 2000;
+const CAR_YEAR_MAX = 2100;
 
 const inputClass =
   "w-full rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm text-helios-text " +
@@ -21,10 +34,15 @@ export function ProjectDialog({
   onClose,
   onSave,
   project = null,
+  externalError = null,
 }: ProjectDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  // Create-only season fields. Default the year to the upcoming season so the
+  // common case is one keystroke; held as a string so the field can be empty.
+  const [carYear, setCarYear] = useState("");
+  const [carCode, setCarCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const isEdit = project !== null;
@@ -33,6 +51,8 @@ export function ProjectDialog({
     if (open) {
       setName(project?.name ?? "");
       setDescription(project?.description ?? "");
+      setCarYear(String(new Date().getFullYear() + 1));
+      setCarCode("");
       setError(null);
     }
   }, [open, project]);
@@ -59,8 +79,27 @@ export function ProjectDialog({
       setError("Name is required.");
       return;
     }
-    onSave({ name: trimmed, description: description.trim() || null });
-    onClose();
+
+    if (isEdit) {
+      onSave({ mode: "rename", name: trimmed, description: description.trim() || null });
+      onClose();
+      return;
+    }
+
+    // CREATE: a project is a season — require the year and the unique car code.
+    const code = carCode.trim().toUpperCase();
+    if (!code) {
+      setError("Car code is required (e.g. SDM28).");
+      return;
+    }
+    const year = Number.parseInt(carYear.trim(), 10);
+    if (!Number.isInteger(year) || year < CAR_YEAR_MIN || year > CAR_YEAR_MAX) {
+      setError(`Car year must be a number between ${CAR_YEAR_MIN} and ${CAR_YEAR_MAX}.`);
+      return;
+    }
+    onSave({ mode: "create", name: trimmed, carYear: year, carCode: code });
+    // NOTE: the parent closes the dialog only after the async create resolves, so
+    // a failed create (duplicate code / not admin) can show its error here.
   }
 
   return (
@@ -95,30 +134,68 @@ export function ProjectDialog({
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. SDM28"
+              placeholder="e.g. 2028 Season"
               className={inputClass}
             />
           </label>
 
-          <label htmlFor="project-description" className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium uppercase tracking-wide text-helios-dim">
-              Description
-            </span>
-            <input
-              id="project-description"
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional"
-              className={inputClass}
-            />
-          </label>
+          {isEdit ? (
+            <label htmlFor="project-description" className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-helios-dim">
+                Description
+              </span>
+              <input
+                id="project-description"
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional"
+                className={inputClass}
+              />
+            </label>
+          ) : (
+            <div className="flex gap-3">
+              <label htmlFor="project-car-year" className="flex w-28 flex-col gap-1.5">
+                <span className="text-xs font-medium uppercase tracking-wide text-helios-dim">
+                  Car year
+                </span>
+                <input
+                  id="project-car-year"
+                  type="number"
+                  inputMode="numeric"
+                  min={CAR_YEAR_MIN}
+                  max={CAR_YEAR_MAX}
+                  value={carYear}
+                  onChange={(e) => setCarYear(e.target.value)}
+                  placeholder="2028"
+                  className={inputClass}
+                />
+              </label>
+              <label htmlFor="project-car-code" className="flex flex-1 flex-col gap-1.5">
+                <span className="text-xs font-medium uppercase tracking-wide text-helios-dim">
+                  Car code
+                </span>
+                <input
+                  id="project-car-code"
+                  type="text"
+                  value={carCode}
+                  onChange={(e) => setCarCode(e.target.value.toUpperCase())}
+                  placeholder="SDM28"
+                  maxLength={16}
+                  className={inputClass}
+                />
+              </label>
+            </div>
+          )}
 
-          {error ? <p className="text-xs text-red-400">{error}</p> : null}
+          {error || externalError ? (
+            <p className="text-xs text-red-400">{error ?? externalError}</p>
+          ) : null}
 
           {!isEdit ? (
             <p className="text-xs text-helios-dim">
-              New projects start empty but keep the subteam structure.
+              A project is a season. Only admins can create one. The car code must
+              be unique (e.g. SDM28). It starts empty but keeps the subteam structure.
             </p>
           ) : null}
         </div>

@@ -213,7 +213,7 @@ export function Sidebar() {
   const projects = usePmStore((s) => s.projects);
   const activeProjectId = usePmStore((s) => s.activeProjectId);
   const setActiveProject = usePmStore((s) => s.setActiveProject);
-  const addProject = usePmStore((s) => s.addProject);
+  const createProject = usePmStore((s) => s.createProject);
   const renameProject = usePmStore((s) => s.renameProject);
   const addSubteam = usePmStore((s) => s.addSubteam);
   const updateSubteam = usePmStore((s) => s.updateSubteam);
@@ -255,6 +255,9 @@ export function Sidebar() {
   // --- Dialog state ----------------------------------------------------------
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  // Surfaced inside ProjectDialog when an async server-backed create fails
+  // (not admin / duplicate car code), so the dialog stays open and explains why.
+  const [projectError, setProjectError] = useState<string | null>(null);
   const renamingProject = renamingProjectId
     ? (projects.find((p) => p.id === renamingProjectId) ?? null)
     : null;
@@ -263,13 +266,18 @@ export function Sidebar() {
   const [editingSubteam, setEditingSubteam] = useState<Subteam | null>(null);
 
   function openNewProject() {
+    // Only admins can create a season (the create_project RPC is admin-gated);
+    // the button is hidden for non-admins, but guard here too.
+    if (!isAdmin) return;
     setRenamingProjectId(null);
+    setProjectError(null);
     setProjectDialogOpen(true);
     setSwitcherOpen(false);
   }
 
   function openRenameProject(id: string) {
     setRenamingProjectId(id);
+    setProjectError(null);
     setProjectDialogOpen(true);
     setSwitcherOpen(false);
   }
@@ -435,16 +443,18 @@ export function Sidebar() {
                 );
               })}
             </ul>
-            <div className="border-t border-helios-line p-1">
-              <button
-                type="button"
-                onClick={openNewProject}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-normal text-helios-text hover:bg-helios-base"
-              >
-                <IconPlus size={14} strokeWidth={1.5} />
-                New project
-              </button>
-            </div>
+            {isAdmin ? (
+              <div className="border-t border-helios-line p-1">
+                <button
+                  type="button"
+                  onClick={openNewProject}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm font-normal text-helios-text hover:bg-helios-base"
+                >
+                  <IconPlus size={14} strokeWidth={1.5} />
+                  New project
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -635,12 +645,27 @@ export function Sidebar() {
         open={projectDialogOpen}
         onClose={() => setProjectDialogOpen(false)}
         project={renamingProject}
+        externalError={projectError}
         onSave={(values) => {
-          if (renamingProject) {
-            renameProject(renamingProject.id, values);
-          } else {
-            addProject(values.name, values.description ?? undefined);
+          if (values.mode === "rename") {
+            renameProject(
+              renamingProject!.id,
+              { name: values.name, description: values.description },
+            );
+            setProjectDialogOpen(false);
+            return;
           }
+          // Server-backed create: keep the dialog open until the admin-only RPC +
+          // full workspace reload resolve, then close on success or show why it
+          // failed (not admin / duplicate car code) without losing the input.
+          setProjectError(null);
+          void createProject(values.name, values.carYear, values.carCode)
+            .then(() => {
+              setProjectDialogOpen(false);
+            })
+            .catch((err: unknown) => {
+              setProjectError(err instanceof Error ? err.message : String(err));
+            });
         }}
       />
 

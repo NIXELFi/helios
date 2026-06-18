@@ -8,6 +8,7 @@ import {
   RankChip,
   SegmentedTabs,
   SubteamRow,
+  subteamRanks,
   useLeaderboardData,
   type Tab,
 } from "./standings";
@@ -42,15 +43,20 @@ export function GameStandings({ client, gameId, refreshToken, children }: Props)
 
   const isTeams = tab === "subteams";
 
+  // Competition ranks for the (total-sorted) subteam board so tied totals share
+  // a medal/numeral instead of inheriting their array position.
+  const subteamList = subteams ?? [];
+  const teamRanks = subteamRanks(subteamList);
+
   const podium: PodiumRow[] = isTeams
-    ? (subteams ?? []).slice(0, 3).map((s, i) => ({
-        key: s.subteam, rank: i + 1, label: s.subteam, value: s.total,
+    ? subteamList.slice(0, 3).map((s, i) => ({
+        key: s.subteam, rank: teamRanks[i]!, label: s.subteam, value: s.total,
       }))
     : (entries ?? []).slice(0, 3).map((e) => ({
         key: e.userId, rank: e.rank, label: e.displayName, sub: e.subteam, value: e.best,
       }));
   const restPlayers = isTeams ? [] : (entries ?? []).slice(3);
-  const restSubteams = isTeams ? (subteams ?? []).slice(3) : [];
+  const restSubteams = isTeams ? subteamList.slice(3) : [];
   const hasRest = restPlayers.length > 0 || restSubteams.length > 0;
   const isEmpty = !loading && !error && podium.length === 0;
 
@@ -110,7 +116,7 @@ export function GameStandings({ client, gameId, refreshToken, children }: Props)
               restSubteams.length > 0 && (
                 <ol className="flex max-h-44 flex-col gap-1 text-xs text-helios-text">
                   {restSubteams.map((s, i) => (
-                    <SubteamRow key={s.subteam} ranking={s} rank={i + 4} />
+                    <SubteamRow key={s.subteam} ranking={s} rank={teamRanks[i + 3]!} />
                   ))}
                 </ol>
               )

@@ -11,12 +11,25 @@ interface FormulaArtifact {
 }
 
 const SAMPLE_COUNT = 200;
+// Keyed by raw expression text, so cap + LRU-evict to stop the cache growing
+// unbounded as the user types the formula out character by character.
+const CACHE_MAX = 64;
 const cache = new Map<string, { ast: Ast | null; error: string | null }>();
 function compile(expr: string): { ast: Ast | null; error: string | null } {
-  if (cache.has(expr)) return cache.get(expr)!;
+  const cached = cache.get(expr);
+  if (cached) {
+    // Refresh recency: delete + re-set moves the key to the end (newest).
+    cache.delete(expr);
+    cache.set(expr, cached);
+    return cached;
+  }
   const result = parseExpr(expr);
   const entry = { ast: result.ast ?? null, error: result.error ?? null };
   cache.set(expr, entry);
+  if (cache.size > CACHE_MAX) {
+    // Evict the oldest (first-inserted) entry — Map preserves insertion order.
+    cache.delete(cache.keys().next().value!);
+  }
   return entry;
 }
 

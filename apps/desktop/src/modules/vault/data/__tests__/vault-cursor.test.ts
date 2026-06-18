@@ -116,10 +116,13 @@ describe("fetchVaultCursor", () => {
     expect(folders.filters).toContainEqual(["eq", "vault_id", "v1"]);
     expect(folders.filters).toContainEqual(["is", "deleted_at", null]);
 
-    // locks are cross-vault (mirrors useLocks) — scoped only by released_at.
+    // locks have no vault_id column — must scope via an inner join on files so
+    // a lock change in another vault doesn't move this vault's signature.
     const locks = states.find((s) => s.table === "locks")!;
+    expect(locks.opts).toMatchObject({ count: "exact", head: true });
+    expect(locks.select).toContain("files!inner");
+    expect(locks.filters).toContainEqual(["eq", "files.vault_id", "v1"]);
     expect(locks.filters).toContainEqual(["is", "released_at", null]);
-    expect(locks.filters.some((f) => f[0] === "eq" && f[1] === "vault_id")).toBe(false);
   });
 
   it("throws if any sub-count errors so the caller can fall back to a full reconcile", async () => {

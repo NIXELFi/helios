@@ -123,6 +123,19 @@ fn mass_rows(text: &str) -> Option<Vec<SwProperty>> {
     }
     let (com, volume_m3, area_m2, mass_kg) = ((nums[0], nums[1], nums[2]), nums[3], nums[4], nums[5]);
 
+    // The vector is parsed positionally, so a misaligned / malformed stream can
+    // yield garbage (NaN/Inf or negative volume/area, which are physically
+    // impossible). Reject those rather than render nonsense on the card.
+    let all_finite = com.0.is_finite()
+        && com.1.is_finite()
+        && com.2.is_finite()
+        && volume_m3.is_finite()
+        && area_m2.is_finite()
+        && mass_kg.is_finite();
+    if !all_finite || volume_m3 < 0.0 || area_m2 < 0.0 {
+        return None;
+    }
+
     let mut rows = Vec::new();
     if mass_kg > 0.0 {
         rows.push(SwProperty { name: "Mass".into(), value: fmt_mass(mass_kg) });
@@ -517,6 +530,28 @@ mod tests {
         let props = parse_properties(&deflate(xml.as_bytes()));
         assert!(props.iter().all(|p| p.name != "Configuration"));
         assert!(props.iter().any(|p| p.name == "PartNo"));
+    }
+
+    #[test]
+    fn rejects_mass_vector_with_negative_volume_or_area() {
+        // A misaligned/garbage vector can parse positionally into impossible
+        // values (negative volume/area); we must emit no physical rows.
+        let v = "0.0, 0.0, 0.0, -1.0, -2.0, 5.0, 0,0,0,0,0,0,0,0";
+        let xml = format!(r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>{v}</vt:lpstr></property></propertySection></Properties>"#);
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        assert!(props.iter().all(|p| p.name != "Mass"));
+        assert!(props.iter().all(|p| p.name != "Volume"));
+        assert!(props.iter().all(|p| p.name != "Surface Area"));
+        assert!(props.iter().all(|p| p.name != "Center of Mass"));
+    }
+
+    #[test]
+    fn rejects_mass_vector_with_non_finite_values() {
+        let v = "0.0, 0.0, 0.0, 0.0001, NaN, 5.0, 0,0,0,0,0,0,0,0";
+        let xml = format!(r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="SW-MassProp-Config-0"><vt:lpstr>{v}</vt:lpstr></property></propertySection></Properties>"#);
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        assert!(props.iter().all(|p| p.name != "Mass"));
+        assert!(props.iter().all(|p| p.name != "Center of Mass"));
     }
 
     #[test]

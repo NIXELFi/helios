@@ -19,10 +19,24 @@ use tauri::{AppHandle, Manager};
 /// to clearing/setting the owner+group+other write bits on Unix.
 #[tauri::command]
 pub fn set_path_readonly(path: String, readonly: bool) -> Result<(), String> {
-    let meta = fs::metadata(&path).map_err(|e| format!("stat {path}: {e}"))?;
+    // Input hardening: reject symlinks and operate on the canonical target.
+    // `set_path_readonly` is reachable from any renderer context (it's an app
+    // command, not capability-gated — see the module-level note), so a path that
+    // is (or traverses) a symlink could be used to flip the read-only bit on a
+    // file outside the vault. `symlink_metadata` does NOT follow the final
+    // component, so this catches a symlinked leaf; `canonicalize` then resolves
+    // any symlinked ancestors and `..` segments to a real, fully-resolved path we
+    // operate on (so the byte we touch is exactly the one we validated).
+    let lmeta = fs::symlink_metadata(&path).map_err(|e| format!("stat {path}: {e}"))?;
+    if lmeta.file_type().is_symlink() {
+        return Err(format!("refusing to operate on a symlink: {path}"));
+    }
+    let canonical = fs::canonicalize(&path).map_err(|e| format!("resolve {path}: {e}"))?;
+    let meta = fs::metadata(&canonical).map_err(|e| format!("stat {path}: {e}"))?;
     let mut perm = meta.permissions();
     perm.set_readonly(readonly);
-    fs::set_permissions(&path, perm).map_err(|e| format!("set_permissions {path}: {e}"))?;
+    fs::set_permissions(&canonical, perm)
+        .map_err(|e| format!("set_permissions {path}: {e}"))?;
     Ok(())
 }
 

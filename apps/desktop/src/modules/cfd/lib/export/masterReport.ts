@@ -219,7 +219,9 @@ function sweepSection(study: SweepStudy, vehicleConfig: VehicleConfig | null, ba
 }
 
 function optimizationSection(study: OptimizationStudy): string {
-  const done = study.trials.filter((t) => t.status === "done" && t.objectiveValue != null);
+  const done = study.trials
+    .filter((t) => t.status === "done" && t.objectiveValue != null)
+    .sort((a, b) => a.trialIdx - b.trialIdx); // best-so-far is only correct in trial order
   if (done.length === 0) return `<p class="muted">No completed trials.</p>`;
   // Convergence: objective per trial + best-so-far envelope.
   const sign = study.objectiveDirection === "maximize" ? 1 : -1;

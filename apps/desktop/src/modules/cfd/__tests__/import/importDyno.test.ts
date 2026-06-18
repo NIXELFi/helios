@@ -39,6 +39,18 @@ describe("parseDynoCsv", () => {
     expect(() => parseDynoCsv("speed,boost\n1,2\n", "x")).toThrow(/rpm/i);
     expect(() => parseDynoCsv("rpm,egt\n8000,900\n", "x")).toThrow(/power.*torque/i);
   });
+
+  it("parses a semicolon-delimited European-decimal export (comma decimals)", () => {
+    const ref = parseDynoCsv("rpm;power_kW;torque_Nm\n5000;17,159;32,770\n", "eu.csv");
+    expect(ref.points).toHaveLength(1);
+    expect(ref.points[0]).toEqual({ rpm: 5000, powerKw: 17.159, torqueNm: 32.77 });
+  });
+
+  it("counts rows with a valid rpm but no usable power/torque as skippedRows", () => {
+    const ref = parseDynoCsv("rpm,power_kW\n5000,17\n6000,bad\n7000,29\n", "x.csv");
+    expect(ref.points).toHaveLength(2);
+    expect(ref.skippedRows).toBe(1);
+  });
 });
 
 describe("compareDyno", () => {

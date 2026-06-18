@@ -48,28 +48,74 @@ pub fn extract_refs<F: Read + Seek>(comp: &mut CompoundFile<F>) -> Vec<RefHint> 
 }
 
 fn scan_bytes_for_paths(bytes: &[u8]) -> Vec<RefHint> {
-    // Strategy: collect maximal runs of printable-ASCII bytes (and the path
-    // separators / : drive letter), then keep each run that ends in one of
-    // the SW extensions. Caps output at MAX_HINTS to bound memory on
-    // adversarial input.
+    // Two passes, since SW reference streams encode paths differently across
+    // versions. Both cap output at MAX_HINTS to bound memory on adversarial
+    // input. (1) Single-byte printable-ASCII runs (modern streams). (2)
+    // UTF-16LE wide runs — every printable ASCII char followed by 0x00 — which
+    // legacy CFB reference streams use; without this pass those paths yield
+    // zero hints.
     let mut out = Vec::new();
+    scan_ascii_runs(bytes, &mut out);
+    if out.len() < MAX_HINTS {
+        scan_wide_runs(bytes, &mut out);
+    }
+    if out.len() > MAX_HINTS {
+        out.truncate(MAX_HINTS);
+    }
+    out
+}
+
+/// Pass 1: collect maximal runs of printable-ASCII bytes (and the path
+/// separators / : drive letter), then keep each run that ends in one of the SW
+/// extensions.
+fn scan_ascii_runs(bytes: &[u8], out: &mut Vec<RefHint>) {
     let mut current = String::new();
     for &b in bytes {
         if is_printable(b) {
             current.push(b as char);
         } else {
-            check_and_push(&mut current, &mut out);
+            check_and_push(&mut current, out);
             current.clear();
             if out.len() >= MAX_HINTS {
-                return out;
+                return;
             }
         }
     }
-    check_and_push(&mut current, &mut out);
-    if out.len() > MAX_HINTS {
-        out.truncate(MAX_HINTS);
+    check_and_push(&mut current, out);
+}
+
+/// Pass 2: collect maximal runs of UTF-16LE code units whose low byte is a
+/// printable ASCII char and whose high byte is 0x00, decode them via
+/// `String::from_utf16_lossy`, and keep any that end in a SW extension. This is
+/// how legacy CFB reference streams store paths.
+fn scan_wide_runs(bytes: &[u8], out: &mut Vec<RefHint>) {
+    let mut units: Vec<u16> = Vec::new();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        let (lo, hi) = (bytes[i], bytes[i + 1]);
+        if hi == 0x00 && is_printable(lo) {
+            units.push(lo as u16);
+            i += 2;
+        } else {
+            flush_wide(&mut units, out);
+            // Advance a single byte so we re-align on the next potential wide
+            // run rather than skipping past it.
+            i += 1;
+            if out.len() >= MAX_HINTS {
+                return;
+            }
+        }
     }
-    out
+    flush_wide(&mut units, out);
+}
+
+fn flush_wide(units: &mut Vec<u16>, out: &mut Vec<RefHint>) {
+    if units.is_empty() {
+        return;
+    }
+    let mut run = String::from_utf16_lossy(units);
+    units.clear();
+    check_and_push(&mut run, out);
 }
 
 fn is_printable(b: u8) -> bool {
@@ -119,5 +165,22 @@ mod tests {
         let hints = scan_bytes_for_paths(bytes);
         assert_eq!(hints.len(), 1);
         assert_eq!(hints[0].path, "../parts/foo.sldprt");
+    }
+
+    #[test]
+    fn scan_bytes_for_paths_finds_utf16le_wide_path() {
+        // Legacy CFB reference streams store paths as UTF-16LE (each ASCII char
+        // followed by 0x00). Surround with non-aligned junk to exercise the
+        // re-alignment logic.
+        let mut bytes: Vec<u8> = vec![0x01, 0x02, 0x03];
+        for u in "foo.sldprt".encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        bytes.extend_from_slice(&[0xff, 0xff]);
+        let hints = scan_bytes_for_paths(&bytes);
+        assert!(
+            hints.iter().any(|h| h.path == "foo.sldprt"),
+            "wide (UTF-16LE) path must be decoded into a RefHint; got {hints:?}"
+        );
     }
 }

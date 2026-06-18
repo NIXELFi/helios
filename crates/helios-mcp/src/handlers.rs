@@ -132,10 +132,14 @@ pub fn dispatch(name: &str, args: &Value) -> Result<Value> {
             library_api::validate_results(&ndjson, checks.as_deref())
         }
         "read_finding" => {
-            let id = args
+            let id_u64 = args
                 .get("id")
                 .and_then(Value::as_u64)
-                .context("missing or non-integer 'id'")? as u32;
+                .context("missing or non-integer 'id'")?;
+            // `as u32` would silently wrap an out-of-range id; reject it as an
+            // invalid parameter instead.
+            let id = u32::try_from(id_u64)
+                .map_err(|_| anyhow::anyhow!("'id' out of range (must fit in u32): {id_u64}"))?;
             library_api::read_finding(id)
         }
         "list_findings" => {

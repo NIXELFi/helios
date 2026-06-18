@@ -59,22 +59,81 @@ fn read_state() -> serde_json::Value {
 }
 
 fn write_state(v: &serde_json::Value) {
-    let _ = std::fs::write(
-        addin_root().join("state.json"),
-        serde_json::to_vec_pretty(v).unwrap(),
-    );
+    // Atomic: write a sibling .tmp then rename over state.json. A crash mid-write
+    // must never leave a truncated/half-written state.json — gc() trusts the
+    // recorded "version" to decide which version folder to keep, so a corrupt
+    // read (→ no version) would let gc() delete the live folder out from under a
+    // running SOLIDWORKS. rename within the same dir is atomic on Windows/NTFS.
+    let dir = addin_root();
+    let final_path = dir.join("state.json");
+    let tmp = dir.join("state.json.tmp");
+    let bytes = serde_json::to_vec_pretty(v).unwrap();
+    if std::fs::write(&tmp, &bytes).is_ok() {
+        // Windows rename fails if the destination exists; fall back to a
+        // remove+rename, then to a direct write as a last resort.
+        if std::fs::rename(&tmp, &final_path).is_err() {
+            let _ = std::fs::remove_file(&final_path);
+            if std::fs::rename(&tmp, &final_path).is_err() {
+                let _ = std::fs::write(&final_path, &bytes);
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+    }
+}
+
+/// Stage `src` to `dest` crash-safely, re-copying only when needed.
+///
+/// Skips the copy when `dest` already matches `src` byte-length (the common
+/// steady-state case). Otherwise — `dest` missing, zero-length (a prior crashed
+/// copy), or a different size (a truncated or same-version-different-bytes DLL) —
+/// copies to a temp file in the SAME directory and atomically renames it over
+/// `dest`, so a crash mid-copy can never leave a half-written DLL that SW would
+/// fail to load. Verifies the final file is non-empty.
+pub(crate) fn stage_file(src: &Path, dest: &Path) -> std::io::Result<()> {
+    let src_len = std::fs::metadata(src)?.len();
+    let up_to_date = std::fs::metadata(dest)
+        .map(|m| m.len() == src_len && src_len != 0)
+        .unwrap_or(false);
+    if up_to_date {
+        return Ok(());
+    }
+
+    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = dir.join(format!(
+        "{}.tmp-{}",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("staged"),
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::copy(src, &tmp)?;
+    // Windows rename fails if dest exists — remove the stale copy first. dest is
+    // version-folder-scoped, so a running SW has THIS version loaded only when the
+    // bytes already matched (handled by the early return above); a mismatch means
+    // the staged copy was never a good load target.
+    let _ = std::fs::remove_file(dest);
+    if let Err(e) = std::fs::rename(&tmp, dest) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if std::fs::metadata(dest).map(|m| m.len() == 0).unwrap_or(true) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "staged DLL is empty after copy",
+        ));
+    }
+    Ok(())
 }
 
 /// Copy `bundled_dll` to <root>\<version>\HeliosVault.dll and record it in
-/// state.json (merging — preserves other flags like `hklmAttempted`). No-op copy
-/// if the target already exists. Returns the staged path.
+/// state.json (merging — preserves other flags like `hklmAttempted`). Refreshes
+/// the copy when the staged file is missing, empty, or differs in size from the
+/// bundled DLL (a truncated/stale/same-version-different-bytes copy). Returns the
+/// staged path.
 pub fn stage(bundled_dll: &Path, version: &str) -> std::io::Result<PathBuf> {
     let dir = addin_root().join(version);
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join("HeliosVault.dll");
-    if !dest.exists() {
-        std::fs::copy(bundled_dll, &dest)?;
-    }
+    stage_file(bundled_dll, &dest)?;
     let mut v = read_state();
     v["version"] = serde_json::json!(version);
     v["dll"] = serde_json::json!(dest);

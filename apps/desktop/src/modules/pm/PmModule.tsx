@@ -211,6 +211,19 @@ export function PmModule() {
       });
     };
 
+    // Expose an authoritative, awaitable full reload to the store so a
+    // server-backed create (createProject → the admin-only RPC) can re-pull the
+    // whole workspace the moment it commits — reusing this exact loadWorkspace +
+    // hydrate path rather than a separate one. Unlike the background refresh()
+    // below, this has no in-flight/epoch guard: it runs right after a committed
+    // RPC, so there's no optimistic local edit to clobber, and it must not be
+    // silently skipped. saveSnapshot keeps the cold-launch cache current.
+    usePmStore.getState().registerReloadWorkspace(async () => {
+      const ws = await loadWorkspace(c);
+      hydrateFrom(ws);
+      saveSnapshot(ws, u.id, new Date().toISOString());
+    });
+
     // 1. Stale-while-revalidate: paint instantly from the cached snapshot so PM
     //    cold-launch shows the last workspace sub-frame instead of a spinner.
     const cached = loadSnapshot(u.id);
@@ -239,6 +252,9 @@ export function PmModule() {
     })();
     return () => {
       active = false;
+      // Drop the reload hook so a server-backed create can't fire against a
+      // stale client/user after sign-out or a client swap.
+      usePmStore.getState().registerReloadWorkspace(null);
     };
   }, [client, user]);
 
@@ -261,6 +277,12 @@ export function PmModule() {
     const c = client;
     const u = user;
     let running = false;
+    // Set when a refresh aborts because a write started/finished mid-fetch. We
+    // can't just drop that refresh — the change that triggered it (a probe/
+    // realtime/focus signal) would be lost until the next cycle. Instead we
+    // re-arm one retry the moment all in-flight writes drain (see the store
+    // subscription below), so the pending change lands promptly.
+    let retryPending = false;
     async function refresh() {
       const st = usePmStore.getState();
       if (!st.hydrated || st.inFlightWrites > 0 || running) return;
@@ -271,7 +293,10 @@ export function PmModule() {
         const cur = usePmStore.getState();
         // Abort if any write started (and maybe finished) during the fetch — the
         // snapshot may predate it, so re-hydrating would clobber that edit.
-        if (cur.inFlightWrites > 0 || cur.writeEpoch !== epochBefore) return;
+        if (cur.inFlightWrites > 0 || cur.writeEpoch !== epochBefore) {
+          retryPending = true;
+          return;
+        }
         const keep =
           cur.activeProjectId && ws.projectData[cur.activeProjectId]
             ? cur.activeProjectId
@@ -288,6 +313,7 @@ export function PmModule() {
         // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
         // huge workspace just isn't persisted rather than janking the write.
         saveSnapshot(ws, u.id, new Date().toISOString());
+        retryPending = false; // this refresh succeeded — nothing left to re-arm
       } catch {
         // transient refresh failure — the next focus/interval retries
       } finally {
@@ -344,12 +370,27 @@ export function PmModule() {
     };
     const unsubscribeRealtime = subscribePmRealtime(c, onRealtime);
 
+    // Re-arm a refresh that was aborted mid-fetch by an in-flight write: the
+    // moment all writes drain (inFlightWrites → 0) and a retry is pending, run
+    // one full refresh so the change that triggered the aborted refresh isn't
+    // dropped until the next probe/backstop tick.
+    let lastInFlight = usePmStore.getState().inFlightWrites;
+    const unsubscribeStore = usePmStore.subscribe((state) => {
+      const now = state.inFlightWrites;
+      if (lastInFlight > 0 && now === 0 && retryPending) {
+        retryPending = false;
+        fullRefresh();
+      }
+      lastInFlight = now;
+    });
+
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearInterval(probeInterval);
       window.clearInterval(backstopInterval);
       if (realtimeDebounce) clearTimeout(realtimeDebounce);
       unsubscribeRealtime();
+      unsubscribeStore();
     };
   }, [client, user]);
 

@@ -102,8 +102,16 @@ export function LinePlot({
       // below) connects each series across the other grids' points.
       const cols: (number | null)[][] = series.map((s) => {
         const sx = s.xs ?? xs ?? [];
+        // Dedup policy: a series may carry repeated x values (e.g. two trials
+        // sampled at the same rpm). uPlot's aligned data is keyed by x, so a
+        // duplicate must collapse to one y — we keep the FIRST sample at each x
+        // (set only when absent) rather than letting a later, possibly stale or
+        // unsorted, sample silently overwrite it.
         const map = new Map<number, number>();
-        for (let i = 0; i < sx.length; i++) map.set(sx[i] as number, s.y[i] as number);
+        for (let i = 0; i < sx.length; i++) {
+          const x = sx[i] as number;
+          if (!map.has(x)) map.set(x, s.y[i] as number);
+        }
         return xUnion.map((x) => (map.has(x) ? (map.get(x) as number) : null));
       });
       return [xUnion, ...cols] as uPlot.AlignedData;

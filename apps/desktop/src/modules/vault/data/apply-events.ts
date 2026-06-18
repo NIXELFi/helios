@@ -48,11 +48,32 @@ export function applyFileEvent(
 
   const i = files.findIndex((f) => f.id === row.id);
   // A files UPDATE/INSERT payload has no embedded `latest` (that's a join), so
-  // carry the existing embed forward; applyVersionEvent maintains it on check-in.
-  const merged: VaultFile =
-    i !== -1
-      ? { ...files[i], ...row, latest: files[i]!.latest ?? row.latest ?? null }
-      : { ...row, latest: row.latest ?? null };
+  // normally we carry the existing embed forward; applyVersionEvent maintains
+  // it on check-in. BUT a files UPDATE can race AHEAD of the versions INSERT
+  // that created a new latest — if we blindly keep the existing embed here we'd
+  // hide that new version. Detect the race two ways:
+  //   1. the row carries its own newer `latest` (greater version_num) → use it;
+  //   2. the row's latest_version_id no longer matches the embed's id, and the
+  //      payload gave us no replacement embed → we can't patch it safely, so
+  //      reconcile rather than show a stale version.
+  let merged: VaultFile;
+  if (i === -1) {
+    merged = { ...row, latest: row.latest ?? null };
+  } else {
+    const prev = files[i]!;
+    const incoming = row.latest ?? null;
+    const newerIncoming =
+      incoming != null && (prev.latest == null || incoming.version_num > prev.latest.version_num);
+    if (
+      !newerIncoming &&
+      row.latest_version_id != null &&
+      prev.latest != null &&
+      row.latest_version_id !== prev.latest.id
+    ) {
+      return REFETCH; // embed is for an older version than the row points at
+    }
+    merged = { ...prev, ...row, latest: newerIncoming ? incoming : (prev.latest ?? incoming) };
+  }
 
   if (opts.belongs(merged)) {
     if (i !== -1) {

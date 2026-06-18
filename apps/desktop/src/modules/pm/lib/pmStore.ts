@@ -361,7 +361,21 @@ interface PmState {
 
   // Project actions
   setActiveProject: (id: string) => void;
-  addProject: (name: string, description?: string) => void;
+  // Server-backed season create: calls the admin-only `create_project` RPC, then
+  // does a full authoritative workspace reload (via `reloadWorkspace`, registered
+  // by PmModule) so the new project + its empty data land from the server, and
+  // switches to it. Resolves with the new project id; rejects with a friendly
+  // Error on failure (not admin / duplicate car code / no reload wired). REPLACES
+  // the old client-only addProject, whose localStorage-only project was silently
+  // destroyed on the next background hydrate.
+  createProject: (name: string, carYear: number, carCode: string) => Promise<string>;
+  // Registered by PmModule with its `loadWorkspace` + `hydrate` reload. Lets a
+  // store action force a full authoritative re-pull (the SAME path the probe /
+  // realtime / focus refresh uses) without duplicating it or importing data.ts
+  // (which would create a cycle — data.ts imports types from this module). Null
+  // in tests / before mount: createProject then surfaces a clear error.
+  reloadWorkspace: (() => Promise<void>) | null;
+  registerReloadWorkspace: (fn: (() => Promise<void>) | null) => void;
   renameProject: (id: string, patch: { name?: string; description?: string | null }) => void;
   // Reconcile browser-persisted project list + active id over the seed.
   reconcilePersisted: (persisted: {
@@ -531,9 +545,17 @@ export const usePmStore = create<PmState>((set, get) => {
   ): void {
     const client = get().client;
     if (!client) return;
+    // Capture the project the write targets. A rollback restores this project's
+    // flat fields (the snapshot was taken from it), so if the user switched to a
+    // different project before the write rejected, rolling back would overwrite
+    // the NOW-active project's data with the old one's. Skip the rollback in that
+    // case — the stale flat fields aren't on screen anymore (the outgoing
+    // project's snapshotFlat already captured the optimistic state on switch).
+    const proj = get().activeProjectId;
     set((s) => ({ inFlightWrites: s.inFlightWrites + 1, writeEpoch: s.writeEpoch + 1 }));
     void run(client)
       .catch((err: unknown) => {
+        if (get().activeProjectId !== proj) return;
         rollback();
         const message = err instanceof Error ? err.message : String(err);
         set({ lastWriteError: { message, at: Date.now() } });
@@ -595,6 +617,8 @@ export const usePmStore = create<PmState>((set, get) => {
     projectId: "",
     currentUserId: "",
     client: null,
+    reloadWorkspace: null,
+    registerReloadWorkspace: (fn) => set({ reloadWorkspace: fn }),
     lastWriteError: null,
     clearWriteError: () => set({ lastWriteError: null }),
     inFlightWrites: 0,
@@ -699,36 +723,42 @@ export const usePmStore = create<PmState>((set, get) => {
         };
       }),
 
-    // Note: project CREATE has no client RLS insert path on pm.projects, so a
-    // new project lives in localStorage only (re-created empty on next load)
-    // until an admin seeds it server-side. Rename DOES persist (see below).
-    addProject: (name, description) =>
-      set((s) => {
-        const id = crypto.randomUUID();
-        const project: Project = {
-          id,
-          name: name.trim() || "Untitled project",
-          description: description?.trim() || null,
-        };
-        const data = emptyProjectData(s.baselineOrg);
-        const projects = [...s.projects, project];
-        const projectData = {
-          ...s.projectData,
-          [s.activeProjectId]: snapshotFlat(s),
-          [id]: data,
-        };
-        persistProjects(projects);
-        persistActiveProject(id);
-        return {
-          projects,
-          projectData,
-          activeProjectId: id,
-          projectId: id,
-          selectedTaskId: null,
-          selectedMilestoneId: null,
-          ...loadFlat(data),
-        };
-      }),
+    // Server-backed season create. pm.projects has NO client INSERT policy, so
+    // creation goes through the admin-only `create_project` RPC (which atomically
+    // inserts the project + the caller's admin membership). A new season needs a
+    // year and a UNIQUE car code (e.g. "SDM28"). On success we do a FULL workspace
+    // reload through the SAME loadWorkspace + hydrate path the background refresh
+    // uses (registered as `reloadWorkspace` by PmModule), so the new project and
+    // its empty per-project data arrive authoritatively from the server — then we
+    // switch to it. This replaces the old client-only addProject, whose project
+    // existed only in localStorage and was silently wiped on the next hydrate.
+    createProject: async (name, carYear, carCode) => {
+      const { client, reloadWorkspace } = get();
+      if (!client) {
+        throw new Error("You must be signed in to create a season.");
+      }
+      const id = await db.createProject(
+        client,
+        name.trim(),
+        carYear,
+        carCode.trim().toUpperCase(),
+      );
+      // Re-pull the whole workspace so the new project + its (empty) data land
+      // from the server. If the reload isn't wired (tests / pre-mount), the create
+      // still succeeded server-side; surface that so the caller can prompt a
+      // reload rather than us inventing a fragile local-only insert path.
+      if (!reloadWorkspace) {
+        throw new Error(
+          "Season created. Reload to see it (workspace refresh is not available).",
+        );
+      }
+      await reloadWorkspace();
+      // The reload hydrated the new project into projectData; make it active.
+      if (get().projectData[id]) {
+        get().setActiveProject(id);
+      }
+      return id;
+    },
 
     renameProject: (id, patch) => {
       const snap = { projects: get().projects };
@@ -746,6 +776,12 @@ export const usePmStore = create<PmState>((set, get) => {
       );
     },
 
+    // NOTE: the "recreate empty" branch below used to revive client-only
+    // projects created by the old addProject (which never reached the server).
+    // Now that createProject is server-backed and always reloads from the `pm`
+    // schema, no new client-only project enters the persisted list, so that
+    // branch is effectively dead for fresh creates. It's left in place as a
+    // harmless guard for any stale localStorage list written by an older build.
     reconcilePersisted: (persisted) =>
       set((s) => {
         let projects = s.projects;
@@ -911,6 +947,17 @@ export const usePmStore = create<PmState>((set, get) => {
         }
       }
       const soleSet = new Set(sole);
+      // Sole/reassign tasks lose their subsystem (it belonged to the doomed
+      // subteam). The store nulls subsystem_id below; capture which of those
+      // tasks actually HAD a subsystem so we can null it server-side explicitly
+      // rather than relying solely on a DB cascade firing.
+      const clearedSubsystem = tasksNow
+        .filter(
+          (t) =>
+            (soleSet.has(t.id) || (t.subteam_id === id && !soleSet.has(t.id))) &&
+            t.subsystem_id != null,
+        )
+        .map((t) => t.id);
 
       set((s) => {
         const tasks = s.tasks.map((t) => {
@@ -979,6 +1026,12 @@ export const usePmStore = create<PmState>((set, get) => {
           for (const r of reassign) {
             await db.setPrimarySubteam(c, r.taskId, r.newPrimaryId);
           }
+          // The re-homed primary's old subsystem can't belong to its new subteam,
+          // so null it explicitly (matches the in-store update) rather than
+          // relying solely on a DB cascade.
+          for (const taskId of clearedSubsystem) {
+            await db.patchTask(c, taskId, { subsystem_id: null });
+          }
           for (const taskId of demember) {
             await db.removeTaskSubteam(c, taskId, id);
           }
@@ -1026,10 +1079,14 @@ export const usePmStore = create<PmState>((set, get) => {
       // The DB auto-seeds the PRIMARY membership from subteam_id on INSERT, so we
       // only persist any ADDITIONAL memberships the task was created with.
       const extras = seeded.subteams.filter((s) => s.id !== seeded.subteam_id);
+      // Same for owners: the DB trigger seeds the PRIMARY owner from owner_id, so
+      // we only persist the ADDITIONAL co-owners the task was created with.
+      const ownerExtras = seeded.owners.filter((u) => u.id !== seeded.owner_id);
       persist(
         async (c) => {
           await db.insertTask(c, seeded);
           for (const st of extras) await db.insertTaskSubteam(c, seeded.id, st.id);
+          for (const u of ownerExtras) await db.insertTaskOwner(c, seeded.id, u.id);
         },
         () => set(snap),
       );

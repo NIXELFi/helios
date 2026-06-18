@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
+import { mkdir, writeFile, exists, stat } from "@tauri-apps/plugin-fs";
 import { useAddLocalFile, sha256Hex } from "./useAddLocalFile";
 import { folderNamePath, folderPath, sanitizePathSegment } from "./folder-paths";
 import { resolveDropFolder } from "./drop-target";
@@ -274,6 +274,22 @@ export function useVaultDropImport({
           const relSan = item.relativePath.split("/").map(sanitizePathSegment).join("/");
           const localRel = sanitizedPrefix ? `${sanitizedPrefix}/${relSan}` : relSan;
           absolutePath = `${root}/${localRel}`;
+          // Never clobber a writable existing working copy: a writable file on
+          // disk is (or may be) a checked-out copy holding unsaved edits, so
+          // overwriting it would silently destroy that work. A read-only copy
+          // is a clean synced file and is safe to overwrite. `readonly` may be
+          // absent on some platforms (stat blocked / type gap) — treat unknown
+          // as writable (skip) to err on the side of preserving local work.
+          if (await exists(absolutePath)) {
+            const writable = await stat(absolutePath)
+              .then((info) => (info as { readonly?: boolean }).readonly !== true)
+              .catch(() => true);
+            if (writable) {
+              collected.push({ name, ok: false, error: "Would overwrite a checked-out copy — skipped" });
+              setResults([...collected]);
+              continue;
+            }
+          }
           const dir = absolutePath.slice(0, absolutePath.lastIndexOf("/"));
           await mkdir(dir, { recursive: true }).catch(() => { /* may exist */ });
           await writeFile(absolutePath, bytes);

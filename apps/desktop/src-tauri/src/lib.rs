@@ -20,12 +20,38 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
+/// Marker file recording that the first-run autostart default has been applied.
+/// Its presence means the user has an explicit launch-on-login preference (either
+/// the default we set on first launch, or a later Settings toggle), so `.setup`
+/// must NOT re-enable autostart and clobber a user who turned it off.
+fn autostart_marker() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Helios")
+        .join("autostart.applied")
+}
+
+/// Record that the user now has an explicit autostart preference, so the
+/// first-run default in `.setup` won't override it on the next launch.
+fn mark_autostart_preference_set() {
+    let path = autostart_marker();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, b"1");
+}
+
 /// Enable/disable launch-on-login (Settings toggle).
 #[tauri::command]
 fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let a = app.autolaunch();
-    if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())
+    if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())?;
+    // The user made an explicit choice — stop the first-run default from
+    // re-enabling autostart on the next launch.
+    mark_autostart_preference_set();
+    Ok(())
 }
 
 /// Current launch-on-login state (for the Settings toggle).
@@ -167,11 +193,16 @@ pub fn run() {
                 let _ = tray.build(app)?;
             }
 
-            // Auto-start on login (enabled by default; user can disable in
-            // Settings). When launched via autostart (--hidden), go to the tray.
+            // Auto-start on login: enabled by default ONLY on first run. Once a
+            // preference has been recorded (the first-run default, or a later
+            // Settings toggle), respect it — re-enabling here every launch would
+            // silently undo a user who turned launch-on-login off in Settings.
             {
                 use tauri_plugin_autostart::ManagerExt;
-                let _ = app.autolaunch().enable();
+                if !autostart_marker().exists() {
+                    let _ = app.autolaunch().enable();
+                    mark_autostart_preference_set();
+                }
             }
             if std::env::args().any(|a| a == "--hidden") {
                 if let Some(w) = app.get_webview_window("main") {

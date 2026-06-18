@@ -177,15 +177,29 @@ fn pid_is_running(pid: u32) -> bool {
         fn OpenProcess(desired_access: u32, inherit_handle: Bool, pid: u32) -> HANDLE;
         fn GetExitCodeProcess(handle: HANDLE, exit_code: *mut u32) -> Bool;
         fn CloseHandle(handle: HANDLE) -> Bool;
+        fn GetLastError() -> u32;
     }
     const SYNCHRONIZE: u32 = 0x0010_0000;
     const STILL_ACTIVE: u32 = 259;
+    // OpenProcess can fail for two very different reasons. ERROR_INVALID_PARAMETER
+    // means there is no such process (dead). ERROR_ACCESS_DENIED means the
+    // process IS alive but owned by another user, so we must NOT treat it as
+    // dead — otherwise a live mutex holder gets its lock reclaimed out from
+    // under it.
+    const ERROR_INVALID_PARAMETER: u32 = 87;
     // SAFETY: All pointers passed to Win32 are valid for the call's
     // lifetime; we close the handle before returning.
     unsafe {
         let h = OpenProcess(SYNCHRONIZE, 0, pid);
         if h.is_null() {
-            return false;
+            // Distinguish "no such process" from "alive but not ours".
+            let err = GetLastError();
+            // Only ERROR_INVALID_PARAMETER (no such pid) counts as not running.
+            // ERROR_ACCESS_DENIED means the process IS alive but owned by another
+            // user (ERROR_ACCESS_DENIED == 5); any other failure likewise means
+            // it's present. Err on the side of "alive" so a live mutex holder is
+            // never reclaimed.
+            return err != ERROR_INVALID_PARAMETER;
         }
         let mut code: u32 = 0;
         let ok = GetExitCodeProcess(h, &mut code) != 0;

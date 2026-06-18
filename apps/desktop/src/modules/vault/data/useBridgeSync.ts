@@ -50,6 +50,19 @@ function safeInvoke(cmd: string, args?: Record<string, unknown>): void {
   }
 }
 
+// After a failed reload, skip this many interval ticks before retrying so a
+// persistent error (network down, RLS denial) doesn't hammer Supabase.
+const SKIP_AFTER_ERROR = 4;
+
+/** Detect an expired/invalid-token failure. fetchAllRows flattens the PostgREST
+ *  error to its message, so we match the auth-failure messages (JWT expired /
+ *  invalid credentials / PGRST301) rather than an HTTP status code. */
+function isAuthError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e ?? "")).toLowerCase();
+  return msg.includes("jwt expired") || msg.includes("invalid authentication") ||
+    msg.includes("invalid jwt") || msg.includes("pgrst301") || msg.includes("token is expired");
+}
+
 function folderSub(folderId: string | null, byId: Map<string, Folder>, depth = 0): string {
   if (!folderId || depth > 256) return "";
   const f = byId.get(folderId);
@@ -98,23 +111,60 @@ export function useBridgeSync(): void {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [locks, setLocks] = useState<Lock[]>([]);
 
+  // Failure backoff: after a failed reload, skip the next SKIP_AFTER_ERROR
+  // interval ticks before trying again, so a persistent error (network down,
+  // RLS denial) doesn't hammer Supabase every interval. `skipTicks` is consumed
+  // by the interval gate below and reset to 0 on any success. A ref (not state)
+  // so updating it never re-renders this app-wide hook.
+  const skipTicks = useRef(0);
+  // Guards a single in-flight token refresh so concurrent failing loaders don't
+  // each kick off their own refresh.
+  const refreshing = useRef(false);
+
+  // On an auth failure, refresh the session ONCE (the auth provider pushes the
+  // new token via the session effect above and re-runs the loaders) instead of
+  // blindly re-pulling the whole catalog with a dead token. Best-effort: any
+  // failure just leaves the backoff in place until the next attempt.
+  const refreshSession = useCallback(() => {
+    if (refreshing.current || !client) return;
+    refreshing.current = true;
+    void (async () => {
+      try {
+        await (client as any).auth?.refreshSession?.();
+      } catch (e) {
+        console.error("useBridgeSync: session refresh failed", e);
+      } finally {
+        refreshing.current = false;
+      }
+    })();
+  }, [client]);
+
   // Both loaders are best-effort and called from several places (initial mount,
   // lock-change bus, intervals) — they must never reject, or an unfed bridge
-  // turns into an unhandled rejection. Swallow + log instead.
+  // turns into an unhandled rejection. On failure we log, arm the backoff, and
+  // (for an auth failure) trigger a session refresh.
+  const onReloadError = useCallback((label: string, e: unknown) => {
+    console.error(`useBridgeSync: failed to reload ${label}`, e);
+    skipTicks.current = SKIP_AFTER_ERROR;
+    if (isAuthError(e)) refreshSession();
+  }, [refreshSession]);
+
   const reloadLocks = useCallback(async () => {
     if (!client) return;
     try {
-      const { rows } = await fetchAllRows<Lock>(
+      const { rows, error } = await fetchAllRows<Lock>(
         () => (client.from("locks") as any)
           .select("*")
           .is("released_at", null)
           .order("id", { ascending: true }),
       );
+      if (error) throw error;
       setLocks(rows);
+      skipTicks.current = 0;
     } catch (e) {
-      console.error("useBridgeSync: failed to reload locks", e);
+      onReloadError("locks", e);
     }
-  }, [client]);
+  }, [client, onReloadError]);
 
   const reloadStructure = useCallback(async () => {
     if (!client) return;
@@ -127,13 +177,18 @@ export function useBridgeSync(): void {
         fetchAllRows<Folder>(() => (client.from("folders") as any)
           .select("id,vault_id,parent_id,name").order("id", { ascending: true })),
       ]);
+      // fetchAllRows resolves with an error field rather than rejecting — surface
+      // the first sub-error so the backoff/refresh path runs.
+      const firstErr = v.error ?? f.error ?? fo.error;
+      if (firstErr) throw firstErr;
       setVaults(v.rows);
       setFiles(f.rows);
       setFolders(fo.rows);
+      skipTicks.current = 0;
     } catch (e) {
-      console.error("useBridgeSync: failed to reload vault structure", e);
+      onReloadError("vault structure", e);
     }
-  }, [client]);
+  }, [client, onReloadError]);
 
   // Is the SOLIDWORKS add-in currently connected? The bridge snapshot (and its
   // locks) are consumed ONLY by the add-in, so with no add-in we skip the
@@ -190,13 +245,19 @@ export function useBridgeSync(): void {
 
   // Periodic refreshes, but only while the add-in is connected — an idle session
   // (no SOLIDWORKS) does zero bridge network traffic. The cheap addinActive()
-  // check is a local IPC call, not a network request.
+  // check is a local IPC call, not a network request. After a failed reload the
+  // backoff (skipTicks) elapses a few ticks before retrying, shared across both
+  // intervals so a persistent error doesn't hammer Supabase every cycle.
+  const backoffElapsed = useCallback((): boolean => {
+    if (skipTicks.current > 0) { skipTicks.current -= 1; return false; }
+    return true;
+  }, []);
   useInterval(
-    () => void (async () => { if (await addinActive()) void reloadStructure(); })(),
+    () => void (async () => { if (backoffElapsed() && await addinActive()) void reloadStructure(); })(),
     client ? FILES_REFRESH_MS : null,
   );
   useInterval(
-    () => void (async () => { if (await addinActive()) void reloadLocks(); })(),
+    () => void (async () => { if (backoffElapsed() && await addinActive()) void reloadLocks(); })(),
     client ? LOCKS_REFRESH_MS : null,
   );
 

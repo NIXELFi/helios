@@ -30,3 +30,24 @@ function lowerBound(arr: BigInt64Array, target: bigint): number {
   }
   return lo;
 }
+
+/**
+ * Resample a (srcTime, srcVals) column onto `base` using zero-order hold: each
+ * output sample is the source value at the largest src index with
+ * srcTime[idx] <= base[i] — i.e. the last known reading at or before that
+ * timestamp. Matches sampleAt's lookup so a multi-rate slice reads back the
+ * same value a single-channel sampleAt would. Base timestamps before the
+ * column's first sample get NaN (no reading exists yet). Both `srcTime` and
+ * `base` must be sorted ascending. O((N + M) · log N) via galloping.
+ */
+export function resampleHold(srcTime: BigInt64Array, srcVals: Float64Array, base: BigInt64Array): Float64Array {
+  const out = new Float64Array(base.length);
+  if (srcTime.length === 0) { out.fill(NaN); return out; }
+  let idx = -1; // largest src index with srcTime[idx] <= current base ts
+  for (let i = 0; i < base.length; i++) {
+    const t = base[i]!;
+    while (idx + 1 < srcTime.length && srcTime[idx + 1]! <= t) idx++;
+    out[i] = idx < 0 ? NaN : srcVals[idx]!;
+  }
+  return out;
+}

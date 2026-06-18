@@ -16,7 +16,9 @@ export class CursorEmitter {
 
   emit(timeUs: number): void {
     this.#last = timeUs;
-    for (const cb of this.#listeners) cb(timeUs);
+    // Snapshot first: a listener may subscribe/unsubscribe during its own
+    // callback, and mutating the Set mid-iteration would skip or double-fire.
+    for (const cb of [...this.#listeners]) cb(timeUs);
   }
 
   get(): number { return this.#last; }

@@ -191,8 +191,12 @@ pub fn cfd_start_job(
             RunOutcome::Cancelled => JobStatus::Cancelled,
             RunOutcome::Errored => JobStatus::Error,
         };
-        *status.lock().unwrap() = final_status;
-        *finished_at_arc.lock().unwrap() = Some(now_ms());
+        // Poison-tolerant: if a prior holder panicked, recover the guard instead
+        // of panicking here — that would skip recording the final status and
+        // leave the job stuck "running" forever. The protected data is plain
+        // status/timestamp values, so a poisoned lock is safe to take over.
+        *status.lock().unwrap_or_else(|e| e.into_inner()) = final_status;
+        *finished_at_arc.lock().unwrap_or_else(|e| e.into_inner()) = Some(now_ms());
     });
 
     Ok(StartJobResponse { job_id })
