@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.4.3] - 2026-06-18
+
 ### Added
 
 - PM: tasks can now have **multiple owners**. The Owner field still sets the
