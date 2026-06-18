@@ -10,7 +10,12 @@ import type { Workspace } from "./data";
  * Namespaced by user id so a different account never reads another's cache.
  */
 
-const SNAPSHOT_VERSION = 1;
+// Bump whenever the cached ProjectData/Workspace shape gains or drops a field, so
+// stale snapshots from an older app version are rejected and refetched instead of
+// hydrating a record that's missing a field. v2: added `links` (task hyperlinks,
+// 4.4.3) — a v1 snapshot has no `links`, which crashed hydration before loadFlat
+// was made null-safe.
+const SNAPSHOT_VERSION = 2;
 // localStorage is ~5-10 MB; cap well under that. An oversize workspace simply
 // isn't cached (revalidate still works) rather than throwing a quota error.
 const MAX_BYTES = 3_000_000;

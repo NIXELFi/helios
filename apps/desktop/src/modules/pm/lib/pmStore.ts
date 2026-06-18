@@ -82,22 +82,29 @@ function snapshotFlat(s: PmState): ProjectData {
 
 // Load a ProjectData record into the flat fields (fresh array instances so
 // later mutations never alias another project's stored arrays).
+//
+// Every field is spread through `?? []` defensively: a ProjectData can come from
+// a persisted localStorage snapshot written by an OLDER app version that predates
+// a field (e.g. `links`, added in 4.4.3). Without the guard, `[...undefined]`
+// throws "Spread syntax requires ...iterable" and the whole PM module dies on
+// load. The snapshot version gate (SNAPSHOT_VERSION) also rejects stale snapshots,
+// but this keeps hydration crash-proof regardless of where the record came from.
 function loadFlat(d: ProjectData) {
   return {
-    tasks: [...d.tasks],
-    subteams: [...d.subteams],
-    subsystems: [...d.subsystems],
-    users: [...d.users],
-    dependencies: [...d.dependencies],
-    milestones: [...d.milestones],
-    pages: [...d.pages],
-    blocks: [...d.blocks],
-    activity: [...d.activity],
-    vendors: [...d.vendors],
-    comments: [...d.comments],
-    links: [...d.links],
-    buildRecords: [...d.buildRecords],
-    events: [...d.events],
+    tasks: [...(d.tasks ?? [])],
+    subteams: [...(d.subteams ?? [])],
+    subsystems: [...(d.subsystems ?? [])],
+    users: [...(d.users ?? [])],
+    dependencies: [...(d.dependencies ?? [])],
+    milestones: [...(d.milestones ?? [])],
+    pages: [...(d.pages ?? [])],
+    blocks: [...(d.blocks ?? [])],
+    activity: [...(d.activity ?? [])],
+    vendors: [...(d.vendors ?? [])],
+    comments: [...(d.comments ?? [])],
+    links: [...(d.links ?? [])],
+    buildRecords: [...(d.buildRecords ?? [])],
+    events: [...(d.events ?? [])],
   };
 }
 

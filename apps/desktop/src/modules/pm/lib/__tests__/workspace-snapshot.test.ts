@@ -41,6 +41,15 @@ describe("serialize/deserialize snapshot", () => {
     expect(deserializeSnapshot(JSON.stringify(bumped), "u1")).toBeNull();
   });
 
+  it("rejects a v1 snapshot (pre-`links`) so PM refetches instead of hydrating a links-less record", () => {
+    // Regression: a v1 snapshot's ProjectData has no `links`, which crashed
+    // hydration. The version gate must reject it so the app reloads fresh data.
+    const json = serializeSnapshot(ws(), "u1", "t")!;
+    const v1 = JSON.parse(json);
+    v1.version = 1;
+    expect(deserializeSnapshot(JSON.stringify(v1), "u1")).toBeNull();
+  });
+
   it("returns null on corrupt / non-object / null input", () => {
     expect(deserializeSnapshot("not json", "u1")).toBeNull();
     expect(deserializeSnapshot("123", "u1")).toBeNull();

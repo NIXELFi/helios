@@ -888,3 +888,29 @@ describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
     expect(selectCanEditTask(state(null), base).reason).toMatch(/don't have access/i);
   });
 });
+
+describe("hydrate tolerates a stale snapshot missing newer fields (PM-dead regression)", () => {
+  // A localStorage snapshot written before 4.4.3 has no `links` field. Before the
+  // fix, loadFlat did `[...d.links]` -> "Spread syntax requires ...iterable" and
+  // the whole PM module crashed on load. Hydration must now be crash-proof.
+  test("a ProjectData without `links` hydrates without throwing", () => {
+    const staleProject = {
+      tasks: [], subteams: [], subsystems: [], users: [], dependencies: [],
+      milestones: [], pages: [], blocks: [], activity: [], vendors: [],
+      comments: [], buildRecords: [], events: [],
+      // NOTE: no `links` — exactly the shape of a pre-4.4.3 cached snapshot.
+    };
+    expect(() =>
+      usePmStore.getState().hydrate({
+        projects: [{ id: "p1", name: "P", description: null }],
+        projectData: { p1: staleProject },
+        activeProjectId: "p1",
+        currentUserId: "u1",
+        baselineOrg: { subteams: [], subsystems: [], users: [] },
+        client: null,
+        roles: { p1: "admin" },
+      } as never),
+    ).not.toThrow();
+    expect(usePmStore.getState().links).toEqual([]);
+  });
+});

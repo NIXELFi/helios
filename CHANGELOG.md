@@ -27,10 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
-## [4.4.4] - 2026-06-18
-
 ### Fixed
 
+- PM: fixed a crash that could make the Project Management module fail to load
+  ("Spread syntax requires ...iterable") right after updating, when a workspace
+  cached by an older version was missing a newer field. Hydration is now
+  crash-proof and stale caches refresh automatically.
 - Games: the **subteam standings** no longer let one game decide everything. Raw
   scores were summed across games, so 2048 (scores in the thousands) buried Snake,
   Breakout, and Flappy (scores in the tens). Subteams are now scored
