@@ -122,6 +122,10 @@ backend. Highlights are the vault data-loss and PM project-loss fixes.
 - Vault/SW: add-in registry installs now use a per-launch private temp directory,
   hardening the elevated import against local tampering; "reveal in Explorer" and the
   read-only file toggle reject malformed/symlinked paths.
+- Database: enabled row-level security (default-deny) and revoked client grants on
+  internal `pm` backup snapshot tables (`tasks_project_move_backup`,
+  `deleted_tasks_backup`, `tasks_status_backup`) that were exposed in an API-visible
+  schema without RLS, resolving the two Supabase Security Advisor errors.
 
 ## [4.4.5] - 2026-06-18
 
