@@ -218,7 +218,7 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
     // There are two Delete buttons now (the bar and the modal confirm).
     // Click the one inside the modal (the second one).
     const allDeleteBtns = screen.getAllByRole("button", { name: /^delete$/i });
-    await act(async () => { fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]); });
+    await act(async () => { fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]!); });
 
     // First delete call is in flight.
     await waitFor(() => expect(deleteFileRun).toHaveBeenCalledTimes(1));
@@ -276,7 +276,7 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
       expect(screen.getByText(/move to this vault.s deleted tab/i)).toBeInTheDocument(),
     );
     const allDeleteBtns = screen.getAllByRole("button", { name: /^delete$/i });
-    await act(async () => { fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]); });
+    await act(async () => { fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]!); });
 
     // Status must appear, naming the failure
     await waitFor(() => {
