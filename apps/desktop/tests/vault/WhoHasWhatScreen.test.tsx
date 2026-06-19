@@ -6,6 +6,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { WhoHasWhatScreen } from "../../src/modules/vault/screens/WhoHasWhatScreen";
 import { resetLockOverlay } from "../../src/modules/vault/data/lock-overlay";
 
+// usePeople (org module, pm.list_people) is a SECONDARY cross-vault holder-name
+// source added for M19. It calls client.schema(...) which this screen's mock
+// client doesn't implement; stub it to an empty list so the vault-scoped
+// resolution path is exercised here. The cross-vault merge itself is unit-tested
+// in resolveHolderName.test.ts.
+vi.mock("../../src/modules/org/data/useOrgData", () => ({
+  usePeople: () => ({ data: [], loading: false, error: null }),
+}));
+
 // The optimistic lock overlay is a module singleton; a force-unlock in one test
 // leaves an entry that would hide the lock row in the next. Reset between tests.
 // localStorage holds the active-vault id (useActiveVault) — clear so a vault id
@@ -167,8 +176,10 @@ describe("<WhoHasWhatScreen>", () => {
     expect(screen.getByText("sdm26")).toBeInTheDocument();
     expect(screen.queryByText("file-1")).toBeNull();
 
-    // Short user id appears (raw UUID does not).
-    expect(screen.getByText("00000000")).toBeInTheDocument();
+    // An unresolved holder (no user list provided here) shows a friendly label,
+    // never a raw/short hex id (M19). The full id remains available on hover.
+    expect(screen.getByText(/unknown member/i)).toBeInTheDocument();
+    expect(screen.queryByText("00000000")).toBeNull();
     expect(screen.queryByText("00000000-0000-0000-0000-000000000abc")).toBeNull();
 
     // Relative time appears (not the raw ISO timestamp).

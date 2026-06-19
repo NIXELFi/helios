@@ -66,13 +66,24 @@ describe("useContains", () => {
 });
 
 describe("useWhereUsed", () => {
-  it("lists parent files that reference a file", async () => {
+  it("lists parent files that reference a file (at their current/head version)", async () => {
     const refs = [{ parent_version_id: "pv1", child_file_id: "cf1" }];
     const versions = [{ id: "pv1", file_id: "pf1" }];
-    const files = [{ id: "pf1", name: "asm.sldasm" }];
+    // pf1's latest_version_id IS the referencing version → it's a current user.
+    const files = [{ id: "pf1", name: "asm.sldasm", latest_version_id: "pv1" }];
     const { result } = renderHook(() => useWhereUsed("cf1" as any), { wrapper: wrap(mockClient({ refs, versions, files })) });
     await waitFor(() => expect(result.current.data?.length).toBe(1));
     expect(result.current.data?.[0].parentName).toBe("asm.sldasm");
+  });
+
+  it("excludes a parent that referenced the file only in an OLD (non-head) version", async () => {
+    // The ref points at pv-old, but the assembly's latest version is pv-new
+    // (re-checked-in without the part) → it is NOT a current user of cf1.
+    const refs = [{ parent_version_id: "pv-old", child_file_id: "cf1" }];
+    const versions = [{ id: "pv-old", file_id: "pf1" }];
+    const files = [{ id: "pf1", name: "asm.sldasm", latest_version_id: "pv-new" }];
+    const { result } = renderHook(() => useWhereUsed("cf1" as any), { wrapper: wrap(mockClient({ refs, versions, files })) });
+    await waitFor(() => expect(result.current.data).toEqual([]));
   });
 
   it("returns an empty list when nothing references the file", async () => {
@@ -90,8 +101,8 @@ describe("useWhereUsed", () => {
       { id: "pv2", file_id: "pf2" },
     ];
     const files = [
-      { id: "pf1", name: "live.sldasm" },
-      { id: "pf2", name: "deleted.sldasm", deleted_at: "2026-06-09T00:00:00Z" },
+      { id: "pf1", name: "live.sldasm", latest_version_id: "pv1" },
+      { id: "pf2", name: "deleted.sldasm", latest_version_id: "pv2", deleted_at: "2026-06-09T00:00:00Z" },
     ];
     const { result } = renderHook(() => useWhereUsed("cf1" as any), { wrapper: wrap(mockClient({ refs, versions, files })) });
     await waitFor(() => expect(result.current.data?.length).toBe(1));
