@@ -5,6 +5,7 @@ import { GetVersionButton, RestoreVersionButton } from "../components/RowActions
 import { ReferencesPanel } from "../components/ReferencesPanel";
 import { PropertiesPanel } from "../components/PropertiesPanel";
 import { BomPanel } from "../components/BomPanel";
+import { WatchToggleButton } from "../components/WatchToggleButton";
 import { useSetRevision } from "../data/useSetRevision";
 import { useVaultBom } from "../data/useVaultBom";
 import type { FileId, FolderId, Folder, VaultFile, VaultId, Version } from "../data/types";
@@ -27,9 +28,13 @@ interface Props {
   canEdit?: boolean;
   /** Active vault id — required to load the BOM graph for assembly files. */
   vaultId?: VaultId | null;
+  /** Watch/unwatch callbacks from useWatchedFiles — when provided the panel
+   *  header shows a star toggle button. */
+  isWatched?: boolean;
+  onToggleWatch?: (fileId: FileId) => void;
 }
 
-export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, vaultId }: Props) {
+export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, vaultId, isWatched, onToggleWatch }: Props) {
   if (!fileId) {
     // Placeholder panel is hidden on narrow windows — it carries no content,
     // and the space matters more (SQUEEZE). Selecting a file still shows the
@@ -68,6 +73,8 @@ export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, va
       folders={folders ?? []}
       canEdit={canEdit ?? false}
       vaultId={vaultId ?? null}
+      isWatched={isWatched}
+      onToggleWatch={onToggleWatch}
     />
   );
 }
@@ -78,7 +85,7 @@ function isAssembly(name: string | null): boolean {
 }
 
 function FileDetailLoader({
-  fileId, fileName, folderId, vaultRoot, folders, canEdit, vaultId,
+  fileId, fileName, folderId, vaultRoot, folders, canEdit, vaultId, isWatched, onToggleWatch,
 }: {
   fileId: FileId;
   fileName: string | null;
@@ -87,6 +94,8 @@ function FileDetailLoader({
   folders: Folder[];
   canEdit: boolean;
   vaultId: VaultId | null;
+  isWatched?: boolean;
+  onToggleWatch?: (fileId: FileId) => void;
 }) {
   const [showBom, setShowBom] = useState(false);
   const { data, loading, error, refetch } = useVersions(fileId);
@@ -145,12 +154,24 @@ function FileDetailLoader({
       <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
         {/* Show the file's name so a stale empty-history selection is
             distinguishable from a real file that simply has no versions. */}
-        {fileName ? (
-          <span className="block truncate text-helios-text" title={fileName}>{fileName}</span>
-        ) : (
-          "History"
-        )}
-        {fileName && <span className="mt-0.5 block text-[10px] normal-case tracking-normal text-helios-dim">History</span>}
+        <div className="flex items-start gap-1">
+          <div className="min-w-0 flex-1">
+            {fileName ? (
+              <span className="block truncate text-helios-text" title={fileName}>{fileName}</span>
+            ) : (
+              "History"
+            )}
+            {fileName && <span className="mt-0.5 block text-[10px] normal-case tracking-normal text-helios-dim">History</span>}
+          </div>
+          {/* Watch toggle — available whenever we have the file's id. */}
+          {onToggleWatch && (
+            <WatchToggleButton
+              fileId={fileId}
+              isWatched={isWatched ?? false}
+              onToggle={onToggleWatch}
+            />
+          )}
+        </div>
       </header>
       {/* Set Revision (SW-PDM): stamp the next numeric revision onto the latest
           version. Editor+ only; the RPC enforces perms regardless. */}

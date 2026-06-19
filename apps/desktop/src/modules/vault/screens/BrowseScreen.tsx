@@ -56,6 +56,7 @@ import { toast } from "../data/toast";
 import { fetchWhereUsed } from "../data/useReferences";
 import { whereUsedWarning } from "../data/whereUsedWarning";
 import { FileDetailPanel } from "./FileDetailPanel";
+import { useWatchedFiles } from "../data/useWatchedFiles";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
 // How often to fall back to a full local rescan if the filesystem watcher
@@ -95,6 +96,9 @@ export function BrowseScreen() {
   // Per-vault admin, unioned with the global admin role — same shape as
   // `canEdit` above. Gates deleting a folder that still contains live files.
   const isVaultAdmin = useIsVaultAdmin(vaultId) || isAdmin;
+
+  // Watch set — per-vault localStorage, used by the notification feed.
+  const { isWatched, toggle: toggleWatch } = useWatchedFiles(vaultId ?? undefined);
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -988,7 +992,16 @@ export function BrowseScreen() {
       {/* Pass `undefined` (not `[]`) while allFiles is still loading so the
           panel shows its normal state, not a false "file deleted" message. It
           only treats a selection as missing once the list has actually loaded. */}
-      <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} vaultRoot={vaultFolderPath} folders={folders ?? []} canEdit={canEdit} vaultId={vaultId ?? null} />
+      <FileDetailPanel
+        fileId={selectedFile}
+        files={allFiles ?? undefined}
+        vaultRoot={vaultFolderPath}
+        folders={folders ?? []}
+        canEdit={canEdit}
+        vaultId={vaultId ?? null}
+        isWatched={selectedFile ? isWatched(selectedFile) : false}
+        onToggleWatch={toggleWatch}
+      />
       </div>
       {/* Full-pane drag overlay: names the live drop target so a drop is never
           a guess. pointer-events-none keeps the underlying hit-testing (tree
