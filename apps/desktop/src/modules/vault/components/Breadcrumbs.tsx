@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Folder, FolderId } from "../data/types";
+import { resolveBreadcrumbPath } from "../data/folder-paths";
 
 /**
  * Clickable path bar for the Browse screen: `vaultName / Chassis / Subframe`.
@@ -18,19 +19,12 @@ export function Breadcrumbs({
   selectedFolder: FolderId | null;
   onNavigate: (id: FolderId | null) => void;
 }) {
-  const segments = useMemo(() => {
-    const out: Folder[] = [];
-    const byId = new Map(folders.map((f) => [f.id, f]));
-    let cur = selectedFolder ? byId.get(selectedFolder) : undefined;
-    // Walk up parent_id; cap the walk so a cyclic parent chain (corrupt data)
-    // can't hang the render.
-    let guard = 0;
-    while (cur && guard++ < 64) {
-      out.unshift(cur);
-      cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
-    }
-    return out;
-  }, [folders, selectedFolder]);
+  // M12: use resolveBreadcrumbPath so a missing/deleted folder in the ancestor
+  // chain stops the walk gracefully instead of rendering ghost/broken links.
+  const segments = useMemo(
+    () => (selectedFolder ? resolveBreadcrumbPath(folders, selectedFolder) : []),
+    [folders, selectedFolder],
+  );
 
   return (
     <nav

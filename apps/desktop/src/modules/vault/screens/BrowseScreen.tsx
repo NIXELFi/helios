@@ -13,7 +13,7 @@ import { useCreateFolder } from "../data/useCreateFolder";
 import { useDeleteFolder } from "../data/useDeleteFolder";
 import { useDeleteFile } from "../data/useDeleteFile";
 import { useVaultDropImport } from "../data/useVaultDropImport";
-import { folderPath } from "../data/folder-paths";
+import { folderPath, isDescendantOf, nearestLiveAncestor, selectionAfterPartialDelete } from "../data/folder-paths";
 import { matchLocal } from "../data/local-match";
 import { revealInExplorer } from "../data/reveal";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -1128,7 +1128,31 @@ export function BrowseScreen() {
                 onConfirm: async () => {
                   const ok = await deleteFolder.run(folder.id);
                   if (ok) {
-                    if (selectedFolder === folder.id) setSelectedFolder(null);
+                    // M16: reset selectedFolder if it IS the deleted folder or
+                    // any descendant of it. Navigate to the nearest still-live
+                    // ancestor (or null/root if all ancestors are also gone).
+                    if (
+                      selectedFolder !== null &&
+                      (selectedFolder === folder.id ||
+                        isDescendantOf(folders ?? [], selectedFolder, folder.id))
+                    ) {
+                      const allFolders = folders ?? [];
+                      // Build the set of ids that will still be live after the
+                      // deletion: everything except the deleted folder and all
+                      // its descendants (the server soft-deletes the whole subtree).
+                      const deletedSubtree = new Set<FolderId>([folder.id]);
+                      for (const f of allFolders) {
+                        if (isDescendantOf(allFolders, f.id, folder.id)) {
+                          deletedSubtree.add(f.id);
+                        }
+                      }
+                      const liveIds = new Set(
+                        allFolders.map((f) => f.id).filter((id) => !deletedSubtree.has(id)),
+                      );
+                      setSelectedFolder(
+                        nearestLiveAncestor(allFolders, liveIds, selectedFolder),
+                      );
+                    }
                     toast(`Moved ${folder.name} to Deleted`, "info");
                     afterMutate();
                   } else {
@@ -1174,11 +1198,16 @@ export function BrowseScreen() {
                 body: `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`,
                 confirmLabel: "Delete",
                 onConfirm: async () => {
-                  let failed = 0;
+                  const succeeded: FileId[] = [];
                   for (const f of targetFiles) {
                     const ok = await deleteFile.run(f.id);
-                    if (!ok) failed++;
+                    if (ok) succeeded.push(f.id);
                   }
+                  const failed = n - succeeded.length;
+                  // M14: remove successfully-deleted ids from the selection even
+                  // on partial failure, mirroring BulkActionBar.bulkDelete which
+                  // keeps only the failed ids selected so the user can retry.
+                  setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
                   if (failed > 0) {
                     setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
                   } else {

@@ -1,4 +1,4 @@
-import type { Folder, FolderId } from "./types";
+import type { Folder, FolderId, FileId } from "./types";
 
 /**
  * Sanitize ONE path segment (a single folder or file name) before it's joined
@@ -112,4 +112,131 @@ export function vaultRelPathFor(
   const sub = folderPath(folderId, folders);
   const name = sanitizePathSegment(fileName);
   return sub ? `${sub}/${name}` : name;
+}
+
+// ── Navigation-state helpers (M12 / M14 / M16) ───────────────────────────────
+
+/**
+ * Returns true iff `folderId` is a strict descendant of `ancestorId` in the
+ * live `folders` list (i.e. NOT the folder itself). Walks the `parent_id`
+ * chain upward from `folderId`; returns false if `folderId` is not present in
+ * the list or if the walk never reaches `ancestorId`.
+ *
+ * Used by M16 to check whether the currently-open folder is inside a subtree
+ * that has just been deleted.
+ */
+export function isDescendantOf(
+  folders: Folder[],
+  folderId: FolderId,
+  ancestorId: FolderId,
+): boolean {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  let cur = byId.get(folderId);
+  if (!cur) return false;
+  // Walk upward from the folder's own parent (so a folder is NOT a descendant
+  // of itself).
+  let parentId = cur.parent_id;
+  let guard = 0;
+  while (parentId && guard++ < 64) {
+    if (parentId === ancestorId) return true;
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    parentId = parent.parent_id;
+  }
+  return false;
+}
+
+/**
+ * Finds the nearest ancestor of `folderId` that is present in `liveIds`.
+ * Walks up `parent_id` chains using `allFolders` (the full pre-deletion
+ * folder list, so parent_id links are intact even for deleted folders) and
+ * skips any ancestor whose id is not in `liveIds`.
+ *
+ * Parameters:
+ *   allFolders — the complete folder list INCLUDING the folder being deleted
+ *                (call this before the post-mutation refetch, or pass the
+ *                stale list; only parent_id links matter, not live state).
+ *   liveIds    — the Set of folder ids that are still live (i.e. not deleted).
+ *   folderId   — the folder whose nearest live ancestor is requested.
+ *
+ * Returns:
+ *   - the id of the nearest live ancestor, or
+ *   - null if no live ancestor exists (folder is at the root level or all
+ *     ancestors have been deleted / are unknown).
+ *
+ * Used by M16: when a folder is deleted and `selectedFolder` is the deleted
+ * folder or a descendant of it, BrowseScreen resets to the nearest live
+ * ancestor instead of jumping all the way to root.
+ */
+export function nearestLiveAncestor(
+  allFolders: Folder[],
+  liveIds: Set<FolderId>,
+  folderId: FolderId,
+): FolderId | null {
+  const byId = new Map(allFolders.map((f) => [f.id, f]));
+  const startFolder = byId.get(folderId);
+  if (!startFolder) return null; // completely unknown id
+
+  let parentId: FolderId | null = startFolder.parent_id;
+  let guard = 0;
+  while (parentId && guard++ < 64) {
+    if (liveIds.has(parentId)) return parentId; // found a live ancestor
+    // parentId is not live — keep walking up using allFolders for parent links
+    const parentFolder = byId.get(parentId);
+    if (!parentFolder) break; // parent unknown entirely
+    parentId = parentFolder.parent_id;
+  }
+  return null;
+}
+
+/**
+ * Compute the breadcrumb path for `selectedFolderId` using only resolvable
+ * (live) folders. Walks up `parent_id` chains the same way the existing
+ * breadcrumb `useMemo` does, but stops at the first missing link instead of
+ * silently dropping that ancestor.
+ *
+ * Returns an array of Folder objects ordered from the highest resolvable
+ * ancestor down to `selectedFolderId`. If `selectedFolderId` itself is not in
+ * the live list, returns [].
+ *
+ * Used by M12 (Breadcrumbs.tsx) to replace the inline `useMemo`.
+ */
+export function resolveBreadcrumbPath(
+  folders: Folder[],
+  selectedFolderId: FolderId,
+): Folder[] {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const out: Folder[] = [];
+  let cur = byId.get(selectedFolderId);
+  if (!cur) return [];
+  // Walk upward collecting each resolvable folder.
+  let guard = 0;
+  while (cur && guard++ < 64) {
+    out.unshift(cur);
+    if (!cur.parent_id) break; // reached a root-level folder
+    const parent = byId.get(cur.parent_id);
+    if (!parent) break; // chain broken — stop here, don't emit ghost links
+    cur = parent;
+  }
+  return out;
+}
+
+/**
+ * Returns a new Set containing only the ids from `selected` that are NOT in
+ * `succeededIds`. In other words: keeps only the failed ids so the user can
+ * retry, clearing the rows that were successfully deleted.
+ *
+ * Used by M14 (context-menu multi-file delete in BrowseScreen) to mirror
+ * how BulkActionBar.bulkDelete keeps the selection for retryable failures.
+ */
+export function selectionAfterPartialDelete(
+  selected: Set<FileId>,
+  succeededIds: FileId[],
+): Set<FileId> {
+  const done = new Set(succeededIds);
+  const next = new Set<FileId>();
+  for (const id of selected) {
+    if (!done.has(id)) next.add(id);
+  }
+  return next;
 }
