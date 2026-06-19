@@ -27,6 +27,43 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+This is a focused **Vault audit pass**: a deep bug + feature sweep of the Vault
+module (SolidWorks PDM parity) followed by TDD'd fixes. Highlights are several
+data-loss / data-integrity fixes in local sync and the recycle bin.
+
+### Fixed
+
+- Vault: **a checked-out file you delete locally and then "undo check-out" is no
+  longer soft-deleted for the whole team.** Deletion propagation now re-checks
+  that you still hold the lock at the moment of deletion, not just at the start of
+  the sync pass.
+- Vault: **a file you intentionally deleted no longer silently comes back.** When
+  a copy reappears on disk (SOLIDWORKS rewriting it, antivirus restore, a re-copy),
+  auto-add is suppressed for a cool-off window instead of re-vaulting it and undoing
+  the deletion.
+- Vault: **the SOLIDWORKS bridge "get latest" no longer overwrites a writable local
+  copy** that may hold unsaved edits — it now skips the same way the drop-import and
+  auto-sync paths do.
+- Vault: deleting a folder you're currently inside now navigates to the nearest
+  still-existing parent folder instead of leaving an empty file list; the breadcrumb
+  no longer shows a dead path.
+- Vault: a partial multi-file delete now un-checks only the files that were actually
+  deleted, keeping the failures selected so you can retry.
+- Vault: right-clicking a folder always shows the folder actions (New folder, Delete
+  folder) even when other files/folders are selected.
+- Vault: bulk check-out and bulk delete now stop immediately when you change the
+  selection, switch vaults, or close the panel; an interrupted bulk delete reports
+  how many files were removed.
+- Vault: **Where Used** now lists only assemblies whose current version actually
+  references the part — assemblies that dropped the part in a later check-in no longer
+  appear, so archive/rename decisions are safe.
+- Vault: a file's property data card now refreshes when another member's check-in
+  changes a property value (not only when the number of properties changes).
+- Vault: **Who Has What** now shows the holder's name for checkouts held by members
+  of other vaults, instead of a raw id.
+- Vault: an admin can no longer edit the owner account's profile from the Users &
+  roles screen (the owner row is now protected, matching the role/revoke controls).
+
 ## [4.4.6] - 2026-06-18
 
 This release is a broad **pre-release polish pass**: a full-repo bug audit followed
