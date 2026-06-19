@@ -338,6 +338,29 @@ function SubteamsPanel({ canManage }: { canManage: boolean }) {
   );
 }
 
+/** Pure helper — determines whether an admin may click Edit on a user row.
+ *  Mirrors the `editable` predicate used by the Revoke / role-select controls
+ *  (lines 370-373) and adds the pre-existing busy + vaultScoped guards.
+ *
+ *  lockedByOwnership = isOwnerRow || (isAdminRow && !isOwner)
+ *  editable          = isAdmin && !isMe && !lockedByOwnership
+ *  canEdit           = editable && !busy && !vaultScoped
+ */
+export function canEditUserProfile(opts: {
+  isAdmin: boolean;
+  isOwner: boolean;
+  isOwnerRow: boolean;
+  isMe: boolean;
+  busy: boolean;
+  vaultScoped: boolean;
+  isAdminRow?: boolean;
+}): boolean {
+  const { isAdmin, isOwner, isOwnerRow, isMe, busy, vaultScoped, isAdminRow = false } = opts;
+  const lockedByOwnership = isOwnerRow || (isAdminRow && !isOwner);
+  const editable = isAdmin && !isMe && !lockedByOwnership;
+  return editable && !busy && !vaultScoped;
+}
+
 function UserRow(props: {
   u: VaultUser;
   isMe: boolean;
@@ -469,10 +492,12 @@ function UserRow(props: {
           <button
             type="button"
             onClick={() => onEdit(u)}
-            disabled={!isAdmin || busy || vaultScoped}
+            disabled={!canEditUserProfile({ isAdmin, isOwner, isOwnerRow, isMe, busy, vaultScoped, isAdminRow })}
             title={vaultScoped
               ? "Switch the scope to Global to edit name & subteam — the per-vault list doesn't load them, so saving here would blank the real values"
-              : "Edit name & subteam"}
+              : !editable
+                ? lockReason
+                : "Edit name & subteam"}
             className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[11px] text-helios-dim hover:border-asu-gold hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
           >
             Edit
