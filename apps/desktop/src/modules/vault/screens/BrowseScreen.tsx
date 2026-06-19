@@ -49,6 +49,7 @@ import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { VaultSearch } from "../components/VaultSearch";
+import { useVaultProperties } from "../data/useVaultProperties";
 import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
 import { RecentActivity } from "../components/RecentActivity";
 import { useMoveFile } from "../data/useMoveFile";
@@ -154,6 +155,9 @@ export function BrowseScreen() {
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
   const { data: allFiles, error: allFilesError, refetch: refetchAllFiles, patch: patchAllFiles } = useAllFiles(vaultId ?? undefined);
+  // Property map for search (lazy, loads once per vault). When null (loading)
+  // VaultSearch falls back to filename-only matching — no errors.
+  const vaultPropertiesMap = useVaultProperties(vaultId ?? undefined, allFiles);
   // Soft-deleted files (the recycle bin). Threaded into the realtime/poll
   // refetch below so a delete by another member lands here promptly, and fed to
   // the reaper that removes their local working copies on this machine.
@@ -797,6 +801,7 @@ export function BrowseScreen() {
             <VaultSearch
               allFiles={allFiles ?? []}
               folders={folders ?? []}
+              propertiesMap={vaultPropertiesMap}
               onPick={jumpToFile}
             />
           </div>
