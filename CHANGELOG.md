@@ -63,6 +63,9 @@ data-loss / data-integrity fixes in local sync and the recycle bin.
   of other vaults, instead of a raw id.
 - Vault: an admin can no longer edit the owner account's profile from the Users &
   roles screen (the owner row is now protected, matching the role/revoke controls).
+- Vault: custom properties (Material, Mass, Description, Part Number, …) are now
+  extracted from very large assemblies (> 24 MB) instead of occasionally coming back
+  empty when SOLIDWORKS stored the property block in the middle of the file.
 
 ## [4.4.6] - 2026-06-18
 
