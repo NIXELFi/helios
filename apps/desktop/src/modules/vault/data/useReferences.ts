@@ -2,6 +2,44 @@ import { useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, VersionId } from "./types";
 
+// ---------------------------------------------------------------------------
+// Pure helper — extracted so it can be unit-tested without a live DB
+// ---------------------------------------------------------------------------
+
+/** Raw shapes the helper operates on (subset of what the DB returns). */
+interface _RefRow       { parent_version_id: string }
+interface _VersionRow   { id: string; file_id: string }
+interface _FileRow      { id: string; name: string; latest_version_id: string | null; deleted_at?: string | null }
+
+/**
+ * Given the raw rows fetched during a where-used query, return only the
+ * parents whose referencing version IS their file's current latest version
+ * AND whose file has not been soft-deleted.
+ *
+ * This matches SolidWorks PDM behaviour: only the HEAD revision of each
+ * assembly counts as a live "user" of the child part.
+ */
+export function filterWhereUsedToLatest(
+  refs: _RefRow[],
+  versionsById: Map<string, _VersionRow>,
+  filesById: Map<string, _FileRow>,
+): WhereUsedRow[] {
+  const seen = new Set<string>();
+  const result: WhereUsedRow[] = [];
+  for (const ref of refs) {
+    const version = versionsById.get(ref.parent_version_id);
+    if (!version) continue;
+    const file = filesById.get(version.file_id);
+    if (!file) continue;                          // soft-deleted parents were excluded from filesById
+    if (file.deleted_at) continue;               // belt-and-suspenders soft-delete guard
+    if (file.latest_version_id !== ref.parent_version_id) continue; // stale ref — not current head
+    if (seen.has(file.id)) continue;             // de-duplicate
+    seen.add(file.id);
+    result.push({ parentFileId: file.id, parentVersionId: ref.parent_version_id, parentName: file.name });
+  }
+  return result;
+}
+
 export interface ContainsRow {
   childPathHint: string;
   childFileId: FileId | null;
@@ -88,16 +126,17 @@ export function useWhereUsed(fileId: FileId | null) {
       const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
       // LIVE parents only — a soft-deleted assembly is not a current "user"
       // of this part; listing it would block/confuse delete decisions.
+      // latest_version_id is fetched so we can filter to head-revision refs only.
       const { data: files } = await (client.from("files") as any)
-        .select("id,name").in("id", fileIds).is("deleted_at", null);
+        .select("id,name,latest_version_id").in("id", fileIds).is("deleted_at", null);
       if (!alive) return;
-      const fileName = new Map<string, string>();
-      for (const f of files ?? []) fileName.set(f.id, f.name);
-      setData((versions ?? [])
-        .filter((v: any) => fileName.has(v.file_id))
-        .map((v: any): WhereUsedRow => ({
-          parentFileId: v.file_id, parentVersionId: v.id, parentName: fileName.get(v.file_id)!,
-        })));
+      const versionsById = new Map<string, { id: string; file_id: string }>(
+        (versions ?? []).map((v: any) => [v.id, v]),
+      );
+      const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: null }>(
+        (files ?? []).map((f: any) => [f.id, { ...f, deleted_at: null }]),
+      );
+      setData(filterWhereUsedToLatest(refs ?? [], versionsById, filesById));
       setLoading(false);
     })();
     return () => { alive = false; };
