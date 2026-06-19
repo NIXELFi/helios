@@ -15,6 +15,19 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue(null),
 }));
 
+// BrowseScreen now consumes WatchedFilesContext (provided by VaultHome in the
+// app). These tests render BrowseScreen in isolation and don't exercise the
+// watch feature, so stub the context to a no-op instance.
+vi.mock("../../src/modules/vault/data/WatchedFilesContext", () => ({
+  useWatchedFilesContext: () => ({
+    watched: new Set<string>(),
+    isWatched: () => false,
+    watch: () => {},
+    unwatch: () => {},
+    toggle: () => {},
+  }),
+}));
+
 function buildMockClient(isAdmin = false): SupabaseClient {
   return {
     auth: {

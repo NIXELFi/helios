@@ -57,7 +57,7 @@ import { toast } from "../data/toast";
 import { fetchWhereUsed } from "../data/useReferences";
 import { whereUsedWarning } from "../data/whereUsedWarning";
 import { FileDetailPanel } from "./FileDetailPanel";
-import { useWatchedFiles } from "../data/useWatchedFiles";
+import { useWatchedFilesContext } from "../data/WatchedFilesContext";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
 // How often to fall back to a full local rescan if the filesystem watcher
@@ -98,8 +98,10 @@ export function BrowseScreen() {
   // `canEdit` above. Gates deleting a folder that still contains live files.
   const isVaultAdmin = useIsVaultAdmin(vaultId) || isAdmin;
 
-  // Watch set — per-vault localStorage, used by the notification feed.
-  const { isWatched, toggle: toggleWatch } = useWatchedFiles(vaultId ?? undefined);
+  // Watch set — consume the single instance owned by VaultHome (via context).
+  // Previously a second independent useWatchedFiles call here caused the
+  // notification feed to miss toggles made in FileDetailPanel (HIGH defect).
+  const { isWatched, toggle: toggleWatch } = useWatchedFilesContext();
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -580,6 +582,15 @@ export function BrowseScreen() {
   // Root element of this screen — the drop-import listeners attach HERE, not
   // on window, so they go inert when the Shell hides the Vault module.
   const browseRootRef = useRef<HTMLDivElement | null>(null);
+  // Unmount guard for the fire-and-forget single-file delete path.  The async
+  // buildBody() fetches where-used references before opening the confirm dialog;
+  // if the component unmounts while that fetch is in-flight the .then() callback
+  // would still call setConfirm() on a dead component tree (MED defect).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const dropImport = useVaultDropImport({
     enabled: canEdit && !!vaultId,
     containerRef: browseRootRef,
@@ -1230,6 +1241,11 @@ export function BrowseScreen() {
                 return baseBody;
               };
               void buildBody().then((body) => {
+                // Guard: the component may have unmounted while fetchWhereUsed
+                // was in-flight (e.g. vault switch).  Setting state on an
+                // unmounted tree would be a no-op in React 18 but can surface
+                // as a warning in test/strict-mode environments (MED defect).
+                if (!mountedRef.current) return;
                 setConfirm({
                   title: `Delete ${n} file${n === 1 ? "" : "s"}`,
                   body,

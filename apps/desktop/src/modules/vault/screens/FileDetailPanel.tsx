@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
 import { GetVersionButton, RestoreVersionButton } from "../components/RowActions";
@@ -98,6 +98,10 @@ function FileDetailLoader({
   onToggleWatch?: (fileId: FileId) => void;
 }) {
   const [showBom, setShowBom] = useState(false);
+  // Reset the BOM panel whenever the selected file changes so opening the BOM
+  // for assembly A then selecting file B doesn't leave the BOM panel showing
+  // for B (MED defect).
+  useEffect(() => { setShowBom(false); }, [fileId]);
   const { data, loading, error, refetch } = useVersions(fileId);
   const setRevision = useSetRevision();
   // Load BOM graph only when the file is an assembly and the user opened the panel.

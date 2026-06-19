@@ -15,6 +15,7 @@ import { useActiveVault } from "./data/useActiveVault";
 import { useAllFiles } from "./data/useAllFiles";
 import { useWatchedFiles } from "./data/useWatchedFiles";
 import { useNotifications } from "./data/useNotifications";
+import { WatchedFilesContext } from "./data/WatchedFilesContext";
 
 export function VaultHome() {
   const [active, setActive] = useState<VaultScreenId>("browse");
@@ -31,14 +32,18 @@ export function VaultHome() {
 
   const { activeVaultId: vaultId } = useActiveVault();
 
-  // File watch + notification feed (v1: localStorage-only, frontend-only).
-  const { watched, toggle: toggleWatch } = useWatchedFiles(vaultId ?? undefined);
+  // Single useWatchedFiles instance owned here and shared via WatchedFilesContext
+  // so FileDetailPanel's star and this notification feed both read/write the
+  // same React state.  A second independent instance (formerly in BrowseScreen)
+  // caused the notification feed to miss stars toggled in the detail panel
+  // within the same session (HIGH defect).
+  const watchedFiles = useWatchedFiles(vaultId ?? undefined);
   // useAllFiles provides a flat file list across the whole vault — used to
   // resolve fileId → name in notifications without requiring a per-folder query.
   const { data: allFiles } = useAllFiles(vaultId ?? undefined);
   const { items: notifItems, unread, markAllRead, clear: clearNotifs } = useNotifications(
     vaultId ?? undefined,
-    watched,
+    watchedFiles.watched,
     allFiles ?? [],
   );
 
@@ -49,37 +54,34 @@ export function VaultHome() {
     setActive("browse");
   }
 
-  // Expose toggle to child screens via a Context would be cleaner; for v1 we
-  // pass it down through BrowseScreen props once we wire FileDetailPanel.
-  // Until then, the toggle is available in VaultHome for future use.
-  void toggleWatch;
-
   return (
-    <div className="flex h-full">
-      <NavRail
-        active={active}
-        onSelect={setActive}
-        myCheckouts={myCheckouts}
-        notificationFeed={
-          <NotificationFeed
-            items={notifItems}
-            unread={unread}
-            onMarkAllRead={markAllRead}
-            onClear={clearNotifs}
-            onJumpToFile={handleJumpToFile}
-          />
-        }
-      />
-      <main className="flex-1 overflow-hidden">
-        {active === "browse" ? <BrowseScreen /> : null}
-        {active === "insights" ? <InsightsScreen /> : null}
-        {active === "history" ? <HistoryScreen /> : null}
-        {active === "who" ? <WhoHasWhatScreen /> : null}
-        {active === "deleted" ? <RecycleScreen /> : null}
-        {active === "settings" ? <SettingsScreen /> : null}
-      </main>
-      <DownloadModeWelcome />
-      <ToastHost />
-    </div>
+    <WatchedFilesContext.Provider value={watchedFiles}>
+      <div className="flex h-full">
+        <NavRail
+          active={active}
+          onSelect={setActive}
+          myCheckouts={myCheckouts}
+          notificationFeed={
+            <NotificationFeed
+              items={notifItems}
+              unread={unread}
+              onMarkAllRead={markAllRead}
+              onClear={clearNotifs}
+              onJumpToFile={handleJumpToFile}
+            />
+          }
+        />
+        <main className="flex-1 overflow-hidden">
+          {active === "browse" ? <BrowseScreen /> : null}
+          {active === "insights" ? <InsightsScreen /> : null}
+          {active === "history" ? <HistoryScreen /> : null}
+          {active === "who" ? <WhoHasWhatScreen /> : null}
+          {active === "deleted" ? <RecycleScreen /> : null}
+          {active === "settings" ? <SettingsScreen /> : null}
+        </main>
+        <DownloadModeWelcome />
+        <ToastHost />
+      </div>
+    </WatchedFilesContext.Provider>
   );
 }
