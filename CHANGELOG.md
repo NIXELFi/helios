@@ -31,6 +31,24 @@ This is a focused **Vault audit pass**: a deep bug + feature sweep of the Vault
 module (SolidWorks PDM parity) followed by TDD'd fixes. Highlights are several
 data-loss / data-integrity fixes in local sync and the recycle bin.
 
+> Note: the backend (Supabase) changes below are migrations that still need to be
+> applied to the database and run against a staging/local Supabase — they could not
+> be exercised from this working copy.
+
+### Security
+
+- Vault: **closed a cross-vault audit-log leak** — a member of one vault could read
+  another vault's activity (check-ins, force-unlocks, role changes) by reading the
+  audit log directly. Reads are now limited to your own activity, with full access
+  for global admins/owners.
+- Vault: **only the owner can edit the owner account** is now enforced on the server
+  (not just hidden in the UI), matching the existing owner-delete protection.
+- Vault: restoring a file or folder from the recycle bin now requires you to
+  **currently** hold edit rights — a member whose role was revoked after deleting can
+  no longer restore.
+- Vault: deleting a file that someone else has checked out now **records who broke the
+  checkout** (force-unlock attribution + audit entry) instead of releasing it silently.
+
 ### Fixed
 
 - Vault: **a checked-out file you delete locally and then "undo check-out" is no
@@ -66,6 +84,17 @@ data-loss / data-integrity fixes in local sync and the recycle bin.
 - Vault: custom properties (Material, Mass, Description, Part Number, …) are now
   extracted from very large assemblies (> 24 MB) instead of occasionally coming back
   empty when SOLIDWORKS stored the property block in the middle of the file.
+- Vault: restoring a single file whose folder was deleted now brings the folder back
+  too, so the file is browsable again instead of being stranded in a deleted folder.
+- Vault: **Where Used / Contains stay correct across delete and restore** — deleting a
+  part now marks references to it unresolved, and restoring it re-links them, instead
+  of waiting for the next check-in.
+- Vault: restoring an old version now points its references at each child's current
+  version rather than re-pinning stale ones.
+- Vault: assembly references can now be recorded for imported (migrated) versions.
+- Vault: Insights no longer count recycle-bin files in its totals, and the "orphans"
+  metric now counts genuinely unreferenced parts (it previously missed top-level
+  assemblies).
 
 ## [4.4.6] - 2026-06-18
 
