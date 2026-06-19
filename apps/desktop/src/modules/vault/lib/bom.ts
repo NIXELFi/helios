@@ -61,10 +61,18 @@ function basenameFromHint(hint: string): string {
   return i >= 0 ? cleaned.slice(i + 1) : cleaned;
 }
 
-/** CSV-quote a single cell value if it contains commas, quotes, or newlines. */
+/** CSV-quote a single cell value if it contains commas, quotes, or newlines.
+ *
+ * Formula injection guard: any value beginning with = + - @ (characters that
+ * spreadsheet apps treat as formula initiators) is prefixed with a single quote
+ * so the cell is interpreted as literal text rather than a formula.
+ */
 function csvCell(s: string): string {
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+  // Neutralize formula-injection triggers before any quoting.
+  const needsNeutralize = /^[=+\-@\t\r]/.test(s);
+  const neutralized = needsNeutralize ? `'${s}` : s;
+  if (/[",\n\r]/.test(neutralized)) return `"${neutralized.replace(/"/g, '""')}"`;
+  return neutralized;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +143,7 @@ function _buildChildren(
     const massGrams = fileMeta?.massGrams ?? null;
 
     // Cycle guard: if this file is already an ancestor in the current path,
-    // skip it entirely to prevent infinite recursion.
+    // skip (drop) it entirely to prevent infinite recursion.
     if (ancestors.has(childFileId)) {
       continue;
     }
@@ -177,6 +185,14 @@ export function flattenBom(tree: BomNode[]): FlatBomRow[] {
     for (const node of nodes) {
       const qty = node.quantity * parentMultiplier;
       const key = node.fileId != null ? `id:${node.fileId}` : `name:${node.name}`;
+      const isAssembly = node.children.length > 0;
+
+      // Assembly nodes are included in the flat list (for display/qty) but their
+      // own massGrams is suppressed. SolidWorks stores a computed rollup mass on
+      // assembly versions; counting it here alongside the children's masses would
+      // double-count every gram already contributed by the leaf parts below.
+      const effectiveMass = isAssembly ? null : node.massGrams;
+
       const existing = accum.get(key);
       if (existing) {
         existing.totalQty += qty;
@@ -185,11 +201,12 @@ export function flattenBom(tree: BomNode[]): FlatBomRow[] {
           name: node.name,
           fileId: node.fileId,
           totalQty: qty,
-          massGrams: node.massGrams,
+          massGrams: effectiveMass,
         });
       }
+
       // Recurse into sub-assemblies; pass the multiplied qty downward.
-      if (node.children.length > 0) {
+      if (isAssembly) {
         walk(node.children, qty);
       }
     }

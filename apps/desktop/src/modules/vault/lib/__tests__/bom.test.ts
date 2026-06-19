@@ -160,27 +160,212 @@ describe("buildBomTree — unresolved child references", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FIX 1: flattenBom/bomTotals — assembly nodes must not double-count mass
+// ---------------------------------------------------------------------------
+
+describe("flattenBom — assembly with massGrams AND massed children (double-count fix)", () => {
+  // SolidWorks stores a computed rollup mass on assembly versions.
+  // If we count the assembly's own massGrams AND its children's masses, the
+  // total is wrong. Only leaf parts (nodes with no children) should contribute
+  // to the mass total.
+  //
+  // TopAsm (massGrams=500 — SW rollup stored on the assembly row)
+  //   └── PartA ×1 (massGrams=200)
+  //   └── PartB ×1 (massGrams=300)
+  // Correct total: 200 + 300 = 500 (not 500 + 200 + 300 = 1000)
+  const graph = makeGraph(
+    [
+      { id: "top", name: "TopAsm.SLDASM", massGrams: 500 }, // rollup stored on asm
+      { id: "partA", name: "PartA.SLDPRT", massGrams: 200 },
+      { id: "partB", name: "PartB.SLDPRT", massGrams: 300 },
+    ],
+    [
+      { parentFileId: "top", childFileId: "partA" },
+      { parentFileId: "top", childFileId: "partB" },
+    ],
+  );
+
+  const tree = buildBomTree("top", graph);
+
+  test("flattenBom: only leaf parts appear in flat list (assembly is root, not in tree)", () => {
+    // buildBomTree returns the CHILDREN of the root, so 'top' itself is never
+    // a BomNode in the returned tree. The flat list contains only the leaf parts.
+    const flat = flattenBom(tree);
+    expect(flat.map((r) => r.fileId).sort()).toEqual(["partA", "partB"].sort());
+  });
+
+  test("bomTotals: total mass equals sum of leaf parts only (not assembly + leaves)", () => {
+    const totals = bomTotals(tree);
+    // leaf total: 200 + 300 = 500; must NOT be 500 + 200 + 300 = 1000
+    expect(totals.totalMass).toBeCloseTo(500);
+  });
+
+  test("bomTotals: distinctParts counts only the leaf parts (assembly is root)", () => {
+    const totals = bomTotals(tree);
+    // PartA + PartB = 2 distinct leaf parts (top is the root, not in tree)
+    expect(totals.distinctParts).toBe(2);
+  });
+});
+
+describe("flattenBom — nested assemblies: mid-level asm with massGrams + massed leaves", () => {
+  // VehicleAsm (massGrams=null)
+  //   └── SuspAsm ×2 (massGrams=950 — SW rollup)
+  //         └── Upright ×1 (massGrams=800)
+  //         └── BallJoint ×2 (massGrams=75)
+  // Correct total: 2×(800 + 2×75) = 2×950 = 1900 (NOT 2×950 + 2×800 + 4×75)
+  const graph = makeGraph(
+    [
+      { id: "vehicle", name: "Vehicle.SLDASM", massGrams: null },
+      { id: "susp", name: "SuspAsm.SLDASM", massGrams: 950 },
+      { id: "upright", name: "Upright.SLDPRT", massGrams: 800 },
+      { id: "bj", name: "BallJoint.SLDPRT", massGrams: 75 },
+    ],
+    [
+      { parentFileId: "vehicle", childFileId: "susp" },
+      { parentFileId: "vehicle", childFileId: "susp" },
+      { parentFileId: "susp", childFileId: "upright" },
+      { parentFileId: "susp", childFileId: "bj" },
+      { parentFileId: "susp", childFileId: "bj" },
+    ],
+  );
+
+  const tree = buildBomTree("vehicle", graph);
+
+  test("total mass counts only leaves: 2×(800 + 2×75) = 1900", () => {
+    const totals = bomTotals(tree);
+    // upright: qty=2×1=2, mass=800 → 1600
+    // balljoint: qty=2×2=4, mass=75 → 300
+    // total = 1900 (not 1900 + 2×950 = 3800)
+    expect(totals.totalMass).toBeCloseTo(1900);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2: bomToCsv — formula injection neutralization
+// ---------------------------------------------------------------------------
+
+describe("bomToCsv — CSV formula injection neutralization", () => {
+  const injectionRows: FlatBomRow[] = [
+    {
+      fileId: "evil1",
+      name: "=cmd()|' /C calc",
+      totalQty: 1,
+      massGrams: 10,
+      extMassGrams: 10,
+    },
+    {
+      fileId: "evil2",
+      name: "+HYPERLINK(\"http://evil.com\",\"click\")",
+      totalQty: 1,
+      massGrams: 10,
+      extMassGrams: 10,
+    },
+    {
+      fileId: "evil3",
+      name: "-1+2",
+      totalQty: 1,
+      massGrams: 10,
+      extMassGrams: 10,
+    },
+    {
+      fileId: "evil4",
+      name: "@SUM(A1:A10)",
+      totalQty: 1,
+      massGrams: 10,
+      extMassGrams: 10,
+    },
+    {
+      fileId: "safe",
+      name: "NormalPart.SLDPRT",
+      totalQty: 2,
+      massGrams: 50,
+      extMassGrams: 100,
+    },
+  ];
+
+  const csv = bomToCsv(injectionRows);
+  const lines = csv.split("\n");
+
+  test("name starting with '=' is neutralized (prefixed with single-quote)", () => {
+    const evilLine = lines.find((l) => l.includes("cmd()"))!;
+    expect(evilLine).toBeDefined();
+    // The cell must not start with = — it should be prefixed with '
+    // The cell value (quoted or not) must not begin with = after stripping outer quotes
+    expect(evilLine).not.toMatch(/^"?=cmd/);
+    expect(evilLine).toContain("'=cmd()");
+  });
+
+  test("name starting with '+' is neutralized", () => {
+    const line = lines.find((l) => l.includes("HYPERLINK"))!;
+    expect(line).toBeDefined();
+    expect(line).toContain("'+HYPERLINK");
+  });
+
+  test("name starting with '-' is neutralized", () => {
+    const line = lines.find((l) => l.includes("1+2"))!;
+    expect(line).toBeDefined();
+    expect(line).toContain("'-1+2");
+  });
+
+  test("name starting with '@' is neutralized", () => {
+    const line = lines.find((l) => l.includes("SUM(A1"))!;
+    expect(line).toBeDefined();
+    expect(line).toContain("'@SUM");
+  });
+
+  test("safe part name is NOT prefixed with single-quote", () => {
+    const safeLine = lines.find((l) => l.includes("NormalPart"))!;
+    expect(safeLine).toBeDefined();
+    expect(safeLine).not.toContain("'NormalPart");
+    expect(safeLine).toContain("NormalPart.SLDPRT");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildBomTree — CYCLE GUARD (self-reference + mutual)
 // ---------------------------------------------------------------------------
 
 describe("buildBomTree — cycle guard (self-reference)", () => {
   // asm → asm (direct self-loop)
-  const graph = makeGraph(
+  // FIX 4: strengthen this test so it would genuinely fail if the cycle guard
+  // were removed. We verify: (a) the self-edge child is dropped from the tree
+  // (not present as a child), AND (b) the call does not hang (enforced by the
+  // fact that we also inspect the structure, not just that it "doesn't throw").
+  const selfGraph = makeGraph(
     [{ id: "asm", name: "BadAsm.SLDASM", massGrams: null }],
     [{ parentFileId: "asm", childFileId: "asm" }],
   );
 
-  test("self-referencing assembly terminates and returns empty children", () => {
-    const tree = buildBomTree("asm", graph);
-    // The root node's child is itself; the cycle guard must cut the recursion.
-    // Depending on implementation the child entry may be omitted or returned as
-    // a leaf with no children — either way the call must not throw or hang.
-    expect(() => tree).not.toThrow();
-    // No infinite recursion: the total node count is finite (0 or 1 child nodes).
-    expect(tree.length).toBeLessThanOrEqual(1);
-    if (tree.length === 1) {
-      expect(tree[0]!.children).toHaveLength(0);
-    }
+  test("self-referencing assembly: the self-edge child is dropped (cycle guard removes it)", () => {
+    const tree = buildBomTree("asm", selfGraph);
+    // Without the cycle guard this would recurse infinitely and never reach here.
+    // The self-edge must be dropped: root has no children.
+    expect(tree).toHaveLength(0);
+  });
+
+  test("self-referencing assembly: no node in the result has the same fileId as itself in children", () => {
+    // Build a more elaborate self-referencing graph: A → B → A (three-node cycle)
+    const cycleGraph = makeGraph(
+      [
+        { id: "a", name: "A.SLDASM" },
+        { id: "b", name: "B.SLDASM" },
+        { id: "c", name: "C.SLDPRT", massGrams: 10 },
+      ],
+      [
+        { parentFileId: "a", childFileId: "b" },
+        { parentFileId: "b", childFileId: "a" }, // back-edge (cycle)
+        { parentFileId: "b", childFileId: "c" }, // legitimate leaf
+      ],
+    );
+
+    const tree = buildBomTree("a", cycleGraph);
+    // a → b (qty 1), b → a is cut (cycle), b → c (qty 1)
+    expect(tree).toHaveLength(1);
+    const bNode = tree[0]!;
+    expect(bNode.fileId).toBe("b");
+    // b's children: back-edge to a is dropped, c survives
+    expect(bNode.children).toHaveLength(1);
+    expect(bNode.children[0]!.fileId).toBe("c");
   });
 });
 
