@@ -29,26 +29,54 @@ pub struct SwProperty {
 /// first — the most useful at-a-glance facts — followed by the modeler's custom
 /// properties (de-duplicated by name).
 pub fn parse_properties(bytes: &[u8]) -> Vec<SwProperty> {
+    // For large files we first scan only the two edges (fast path), because the
+    // bulk of the middle is geometry. If the fast path finds no properties — which
+    // can happen for unusual assemblies where SolidWorks placed the property block
+    // outside the expected front/back windows — we fall back to a full scan so
+    // nothing is silently dropped.
+    parse_properties_windowed(
+        bytes,
+        24 * 1024 * 1024, // SCAN_ALL_MAX
+        8 * 1024 * 1024,  // HEAD_WINDOW
+        12 * 1024 * 1024, // TAIL_WINDOW
+    )
+}
+
+/// Inner implementation that accepts window sizes so the windowing logic can be
+/// tested at small scale without allocating multi-MB fixtures.
+///
+/// For files ≤ `scan_all_max` bytes the entire file is scanned. For larger
+/// files we first scan the HEAD (`[0, head_window)`) and TAIL
+/// (`[n - tail_window, n)`); if no properties are found in those two windows we
+/// fall back to a full scan. The fallback handles the rare case where SolidWorks
+/// placed a property block in the middle of the container (e.g. an assembly that
+/// was re-saved after property editing), preventing silent data loss at the cost
+/// of a slower parse for that unusual file.
+fn parse_properties_windowed(
+    bytes: &[u8],
+    scan_all_max: usize,
+    head_window: usize,
+    tail_window: usize,
+) -> Vec<SwProperty> {
     let mut physical: Vec<SwProperty> = Vec::new();
     let mut custom: Vec<SwProperty> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut have_physical = false;
     let n = bytes.len();
 
-    // The property parts sit near the FRONT of the container (most parts) or at
-    // the very END (assemblies); the bulk in between is geometry. Decompressing
-    // all of it just to reach the property block is what made a 139 MB assembly
-    // take ~25 s. For large files we scan only the two edges and skip the middle
-    // (which never holds the property block) — the same 139 MB file drops to a
-    // few seconds. Small files are scanned whole (already fast).
-    const SCAN_ALL_MAX: usize = 24 * 1024 * 1024;
-    const HEAD_WINDOW: usize = 8 * 1024 * 1024;
-    const TAIL_WINDOW: usize = 12 * 1024 * 1024;
-    if n <= SCAN_ALL_MAX {
+    if n <= scan_all_max {
         scan_region(bytes, 0, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
     } else {
-        scan_region(bytes, 0, HEAD_WINDOW, &mut physical, &mut custom, &mut seen, &mut have_physical);
-        scan_region(bytes, n - TAIL_WINDOW, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        // Fast path: scan the two edges where property blocks almost always live.
+        scan_region(bytes, 0, head_window, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        scan_region(bytes, n - tail_window, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+
+        // Fallback: if nothing was found in either edge window, the property
+        // block must be in the skipped middle region. Scan the full file so the
+        // caller never silently gets an empty result from a large but valid file.
+        if physical.is_empty() && custom.is_empty() {
+            scan_region(bytes, head_window, n - tail_window, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        }
     }
     physical.into_iter().chain(custom).collect()
 }
@@ -561,5 +589,66 @@ mod tests {
         let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
         assert_eq!(get("Mass"), Some("785.0 g"));
         assert_eq!(get("PartNo"), Some("ABC-123"));
+    }
+
+    /// A "large" file whose property deflate stream falls in the MIDDLE gap —
+    /// past the HEAD window and more than TAIL_WINDOW from the end. The
+    /// head+tail fast path must NOT silently drop these properties; the
+    /// fallback full-middle scan must recover them.
+    ///
+    /// We use tiny window constants (scan_all_max=1000, head=200, tail=400)
+    /// so the fixture is only a few kilobytes and the test runs in
+    /// microseconds, while still exercising exactly the same code path as
+    /// a real 139 MB assembly.
+    ///
+    /// Layout of the 1500-byte synthetic file:
+    ///   [0..200)   — 0x01 filler  (HEAD window, no properties)
+    ///   [200..250) — 0x01 filler  (middle gap begins here)
+    ///   [300..300+stream) — property deflate stream  (inside middle gap)
+    ///   [..1100)   — 0x01 filler  (TAIL window covers [1100..1500))
+    #[test]
+    fn windowed_scan_fallback_finds_properties_in_middle_gap() {
+        let xml = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="Description" pid="2"><vt:lpstr>Mid Assembly</vt:lpstr></property><property name="PartNo" pid="3"><vt:lpstr>ASM-MID-001</vt:lpstr></property></propertySection></Properties>"#;
+        let stream = deflate(xml.as_bytes());
+
+        // Small window constants that keep the fixture tiny.
+        const SCAN_ALL_MAX: usize = 1_000;
+        const HEAD: usize = 200;
+        const TAIL: usize = 400;
+        // Total = 1500 bytes (> SCAN_ALL_MAX=1000). TAIL window covers [1100..1500).
+        // Property stream is injected at offset 300, which is in the middle gap
+        // [HEAD=200 .. TOTAL-TAIL=1100). Neither edge window will find it.
+        const TOTAL: usize = 1_500;
+        const PROP_OFFSET: usize = 300;
+
+        assert!(
+            PROP_OFFSET >= HEAD,
+            "stream must be outside the HEAD window"
+        );
+        assert!(
+            PROP_OFFSET + stream.len() <= TOTAL - TAIL,
+            "stream must be outside the TAIL window"
+        );
+        assert!(
+            TOTAL > SCAN_ALL_MAX,
+            "file must be above scan_all_max to trigger the windowed path"
+        );
+
+        let mut file = vec![0x01u8; TOTAL];
+        file[PROP_OFFSET..PROP_OFFSET + stream.len()].copy_from_slice(&stream);
+
+        // Call the internal windowed helper directly with the tiny constants.
+        let props = parse_properties_windowed(&file, SCAN_ALL_MAX, HEAD, TAIL);
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(
+            get("Description"),
+            Some("Mid Assembly"),
+            "properties in the middle gap must be recovered by the fallback scan; got: {props:?}"
+        );
+        assert_eq!(
+            get("PartNo"),
+            Some("ASM-MID-001"),
+            "PartNo in middle gap must be recovered; got: {props:?}"
+        );
     }
 }
