@@ -42,6 +42,15 @@ data-loss / data-integrity fixes in local sync and the recycle bin.
   admin-set target mass, all from the Mass already parsed off each part's data card.
 - Vault: **impact warning before checking out or deleting a referenced part** — if
   other assemblies currently use the part, you're shown which ones first.
+- Vault: **bill of materials (BOM)** for assemblies — open it from a `.sldasm` file's
+  details for an indented or flattened parts list with quantity roll-up, total mass,
+  and CSV export, built from the stored reference graph.
+- Vault: **search by custom property** — type a value like `7075` to find parts by
+  their data-card properties, or use `prop:Material=7075` / `prop:Status="In Review"`
+  filters, in addition to filename search.
+- Vault: **watch files + a notification feed** — star a file to get a bell-icon feed of
+  check-ins, check-outs, force-unlocks, deletes and restores on the parts you care
+  about. (v1 is per-device; a shared server-side feed is a planned follow-up.)
 
 ### Security
 
