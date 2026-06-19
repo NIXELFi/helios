@@ -9,6 +9,7 @@ import { useFilesByIds, type LockFileRow } from "../data/useFilesByIds";
 import { useActiveCheckouts } from "../data/useActiveCheckouts";
 import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
+import { usePeople } from "../../org/data/useOrgData";
 import { folderPath } from "../data/folder-paths";
 import type { Lock, VaultUser } from "../data/types";
 
@@ -19,6 +20,25 @@ import type { Lock, VaultUser } from "../data/types";
  *  Standardized on display_name-first. */
 export function holderLabel(u: Pick<VaultUser, "display_name" | "email">): string | null {
   return u.display_name ?? u.email ?? null;
+}
+
+/** Resolve a lock-holder's display name from an ordered list of id→name maps.
+ *  Sources are checked left-to-right; the first hit wins (active-vault list
+ *  should come first so any per-vault override takes precedence over the global
+ *  people list). Returns a friendly "Unknown member" placeholder — NEVER a raw
+ *  hex id — when the user is absent from every source. This closes the
+ *  cross-vault holder bug (M19): the old code only looked in the active vault's
+ *  user list, so holders from other vaults resolved to a raw hex fragment. */
+export function resolveHolderName(
+  userId: string,
+  sources: ReadonlyArray<ReadonlyMap<string, string>>,
+): string {
+  if (!userId) return "Unknown member";
+  for (const map of sources) {
+    const name = map.get(userId);
+    if (name) return name;
+  }
+  return "Unknown member";
 }
 
 /** Format an ISO timestamp as a short relative-time string ("3h ago",
@@ -93,9 +113,14 @@ export function WhoHasWhatScreen() {
   // Holder resolution. Resolve via the VAULT-SCOPED list for the active vault
   // (pdm_list_vault_roles) rather than the global pdm_admin_list_users RPC,
   // which is gated to GLOBAL admins only — a per-vault admin got no names. Both
-  // raise for non-members; we ignore the error and fall back to the short id,
-  // so a viewer still sees the screen.
+  // raise for non-members; we ignore the error and fall back gracefully so a
+  // viewer still sees the screen.
   const { data: users } = useVaultUsers(activeVaultId);
+  // Cross-vault fallback: pm.list_people returns every org member with a
+  // display_name/email. Also admin-gated; error is silently ignored — if both
+  // sources miss a holder we show "Unknown member" rather than a raw hex id
+  // (cross-vault holder name bug M19).
+  const { data: people } = usePeople();
   const forceUnlock = useForceUnlock();
   // Force unlock authorization is per-vault: a global admin can unlock anywhere,
   // and an admin of the ACTIVE vault can unlock its rows. The server RPC
@@ -118,7 +143,7 @@ export function WhoHasWhatScreen() {
   }, [lockFiles]);
 
   // user-id → display name / email for holder resolution (display_name-first
-  // via the shared holderLabel helper).
+  // via the shared holderLabel helper). Active-vault list is the primary source.
   const userById = useMemo(() => {
     const m = new Map<string, string>();
     for (const u of users ?? []) {
@@ -127,6 +152,18 @@ export function WhoHasWhatScreen() {
     }
     return m;
   }, [users]);
+
+  // Cross-vault fallback: pm.list_people spans all vaults. Error is silently
+  // ignored (admin-gated); empty map when unavailable causes graceful fallback
+  // via resolveHolderName (M19 fix).
+  const peopleById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of people ?? []) {
+      const label = p.display_name ?? p.email ?? null;
+      if (label) m.set(p.user_id, label);
+    }
+    return m;
+  }, [people]);
 
   const vaultNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -341,7 +378,7 @@ export function WhoHasWhatScreen() {
                 </thead>
                 <tbody>
                   {g.rows.map(({ lock, file, path, nameHidden, isDraft }) => {
-                    const holderName = userById.get(lock.user_id);
+                    const holderName = resolveHolderName(lock.user_id, [userById, peopleById]);
                     return (
                       <tr key={lock.id} className="border-t border-helios-line">
                         <td className="px-3 py-2 text-helios-text">
@@ -374,11 +411,7 @@ export function WhoHasWhatScreen() {
                           )}
                         </td>
                         <td className="px-3 py-2 text-helios-text" title={lock.user_id}>
-                          {holderName ? (
-                            holderName
-                          ) : (
-                            <span className="font-mono-num text-xs">{shortId(lock.user_id)}</span>
-                          )}
+                          {holderName}
                         </td>
                         <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
                           {relativeTime(lock.acquired_at)}
