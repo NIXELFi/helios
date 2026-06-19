@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, VersionId } from "./types";
+import { fetchByIdsChunked } from "./vault-bulk";
 
 type SupabaseClientLike = ReturnType<typeof useSupabaseClient>;
 
@@ -121,18 +122,38 @@ export async function fetchWhereUsed(
   if (e1) throw e1;
   const verIds = Array.from(new Set((refs ?? []).map((r: any) => r.parent_version_id)));
   if (!verIds.length) return [];
-  const { data: versions } = await (client.from("versions") as any).select("id,file_id").in("id", verIds);
-  const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
-  // LIVE parents only — a soft-deleted assembly is not a current "user"
-  // of this part; listing it would block/confuse delete decisions.
-  // latest_version_id is fetched so we can filter to head-revision refs only.
-  const { data: files } = await (client.from("files") as any)
-    .select("id,name,latest_version_id").in("id", fileIds).is("deleted_at", null);
-  const versionsById = new Map<string, { id: string; file_id: string }>(
-    (versions ?? []).map((v: any) => [v.id, v]),
+  // Chunked .in() to avoid the PostgREST 1 000-row cap and HTTP 414 for large
+  // version-id lists (a highly-referenced part can appear in thousands of
+  // assembly versions).
+  const versions = await fetchByIdsChunked<{ id: string; file_id: string }>(
+    client,
+    "versions",
+    "id,file_id",
+    verIds as string[],
   );
-  const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: null }>(
-    (files ?? []).map((f: any) => [f.id, { ...f, deleted_at: null }]),
+  const fileIds = Array.from(new Set(versions.map((v) => v.file_id)));
+  if (!fileIds.length) return [];
+  // LIVE parents only — exclude soft-deleted files. fetchByIdsChunked issues a
+  // plain .in("id", ...) without extra filters, so we select deleted_at and
+  // filter client-side. This is equivalent to the original
+  // `.in("id", fileIds).is("deleted_at", null)` query.
+  const liveFetchFields = await fetchByIdsChunked<{
+    id: string;
+    name: string;
+    latest_version_id: string | null;
+    deleted_at: string | null;
+  }>(
+    client,
+    "files",
+    "id,name,latest_version_id,deleted_at",
+    fileIds,
+  );
+  const versionsById = new Map<string, { id: string; file_id: string }>(
+    versions.map((v) => [v.id, v]),
+  );
+  const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: string | null }>(
+    // Include all files — filterWhereUsedToLatest's deleted_at guard excludes soft-deleted ones.
+    liveFetchFields.map((f) => [f.id, f]),
   );
   return filterWhereUsedToLatest(refs ?? [], versionsById, filesById);
 }

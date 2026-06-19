@@ -7,15 +7,17 @@
 //   a secondary, on-demand view — fetching properties only when the Insights
 //   screen is mounted is the right trade-off.
 //
-// Implementation: one Supabase query on `pdm.versions` that selects
+// Implementation: chunked queries on `pdm.versions` that select
 //   (file_id, properties)
-// filtered to the vault's live latest_version_ids. No pagination needed —
-// we request exactly N rows for N files (max ≈ 5 000 for the largest vaults).
+// filtered to the vault's live latest_version_ids via fetchLatestVersionProperties
+// (vault-bulk.ts). Chunking prevents the PostgREST 1 000-row cap and HTTP 414
+// URL-length errors for large vaults (SDM26: 4 446 files).
 
 import { useCallback, useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { SwProperty, QueryResult, VaultId, VaultFile } from "./types";
 import type { FileMassRow } from "../lib/massStats";
+import { fetchLatestVersionProperties } from "./vault-bulk";
 
 /** Vault file augmented with its latest-version properties. */
 export type FileMassRecord = FileMassRow;
@@ -73,29 +75,22 @@ export function useVaultMass(
     setError(null);
 
     (async () => {
-      // Select only the fields we need: file_id + properties.
-      // Filter to exactly the latest_version_ids for this vault's live files.
-      // PostgREST will return at most versionIds.length rows — well under 1 000
-      // for most vaults and under 5 000 even for the largest SDM26 import, so
-      // a single un-paginated call is safe here.
-      const { data: rows, error: err } = await (client.from("versions") as any)
-        .select("file_id, properties")
-        .in("id", versionIds);
-
-      if (!mounted) return;
-
-      if (err) {
-        setError(err instanceof Error ? err : new Error(String(err.message ?? err)));
+      // Fetch file_id → properties via the shared chunked helper.
+      // fetchLatestVersionProperties chunks the .in("id", versionIds) query at
+      // 300 IDs per request, preventing the PostgREST 1 000-row cap and HTTP 414
+      // URL-length errors that would silently truncate large vaults (SDM26: 4 446 files).
+      let propsByFileId: Map<string, SwProperty[]>;
+      try {
+        propsByFileId = await fetchLatestVersionProperties(client, files);
+      } catch (err) {
+        if (!mounted) return;
+        setError(err instanceof Error ? err : new Error(String(err)));
         setData(null);
         setLoading(false);
         return;
       }
 
-      // Build a map from file_id → properties for O(1) join.
-      const propsByFileId = new Map<string, SwProperty[] | null>();
-      for (const row of rows as { file_id: string; properties: SwProperty[] | null }[]) {
-        propsByFileId.set(row.file_id, row.properties);
-      }
+      if (!mounted) return;
 
       const enriched: FileMassRecord[] = files.map((f) => ({
         id: f.id,

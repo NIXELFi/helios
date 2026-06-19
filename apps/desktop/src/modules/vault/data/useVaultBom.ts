@@ -19,6 +19,8 @@ import { parseMassGrams } from "../lib/massStats";
 import type { BomGraph } from "../lib/bom";
 import type { QueryResult, VaultId } from "./types";
 import type { SwProperty } from "./types";
+import { fetchAllRows } from "./paginate";
+import { fetchByIdsChunked, fetchLatestVersionProperties } from "./vault-bulk";
 
 export type VaultBomResult = QueryResult<BomGraph>;
 
@@ -50,60 +52,74 @@ export function useVaultBom(vaultId: VaultId | undefined): VaultBomResult {
 
     (async () => {
       // ── Query 1: All live files in the vault ──────────────────────────────
-      const { data: fileRows, error: e1 } = await (client.from("files") as any)
-        .select("id,name,latest_version_id")
-        .eq("vault_id", vaultId)
-        .is("deleted_at", null);
+      // Paginated via fetchAllRows — vaults can hold thousands of files and
+      // PostgREST's default response cap is 1 000 rows. The SDM26 vault has
+      // 4 446 files; without pagination the BOM graph silently truncated.
+      const { rows: fileRows, error: e1 } = await fetchAllRows<{
+        id: string;
+        name: string;
+        latest_version_id: string | null;
+      }>(
+        () => (client.from("files") as any)
+          .select("id,name,latest_version_id")
+          .eq("vault_id", vaultId)
+          .is("deleted_at", null)
+          .order("id", { ascending: true }),
+      );
 
       if (!mounted) return;
       if (e1) {
-        setError(e1 instanceof Error ? e1 : new Error(String(e1.message ?? e1)));
+        setError(e1);
         setData(null);
         setLoading(false);
         return;
       }
 
-      const files = (fileRows ?? []) as { id: string; name: string; latest_version_id: string | null }[];
+      const files = fileRows;
+
+      // ── Query 2: Properties for all latest versions ───────────────────────
+      // Chunked via fetchLatestVersionProperties (DRY: same helper used by
+      // useVaultMass and useVaultProperties) to avoid the 1 000-row cap and
+      // HTTP 414 URL-length errors for large version-id lists.
+      let propsByFileId: Map<string, SwProperty[]>;
+      try {
+        propsByFileId = await fetchLatestVersionProperties(client, files);
+      } catch (e2) {
+        if (!mounted) return;
+        setError(e2 instanceof Error ? e2 : new Error(String(e2)));
+        setData(null);
+        setLoading(false);
+        return;
+      }
+
+      if (!mounted) return;
+
       const versionIds = files
         .map((f) => f.latest_version_id)
         .filter((id): id is string => id !== null);
 
-      // ── Query 2: Properties for all latest versions ───────────────────────
-      const propsByFileId = new Map<string, SwProperty[] | null>();
-
-      if (versionIds.length > 0) {
-        const { data: versionRows, error: e2 } = await (client.from("versions") as any)
-          .select("file_id,properties")
-          .in("id", versionIds);
-
-        if (!mounted) return;
-        if (e2) {
-          setError(e2 instanceof Error ? e2 : new Error(String(e2.message ?? e2)));
-          setData(null);
-          setLoading(false);
-          return;
-        }
-
-        for (const v of (versionRows ?? []) as { file_id: string; properties: SwProperty[] | null }[]) {
-          propsByFileId.set(v.file_id, v.properties);
-        }
-      }
-
       // ── Query 3: All refs whose parent version is in our live version set ─
+      // Chunked via fetchByIdsChunked — large vaults produce large versionIds
+      // lists that can exceed 1 000 rows or the URL length limit.
       const refsMap = new Map<string, { childFileId: string | null; childPathHint: string }[]>();
 
       if (versionIds.length > 0) {
-        const { data: refRows, error: e3 } = await (client.from("refs") as any)
-          .select("parent_version_id,child_file_id,child_path_hint")
-          .in("parent_version_id", versionIds);
-
-        if (!mounted) return;
-        if (e3) {
-          setError(e3 instanceof Error ? e3 : new Error(String(e3.message ?? e3)));
+        let refRows: { parent_version_id: string; child_file_id: string | null; child_path_hint: string }[];
+        try {
+          refRows = await fetchByIdsChunked<{
+            parent_version_id: string;
+            child_file_id: string | null;
+            child_path_hint: string;
+          }>(client, "refs", "parent_version_id,child_file_id,child_path_hint", versionIds, "parent_version_id");
+        } catch (e3) {
+          if (!mounted) return;
+          setError(e3 instanceof Error ? e3 : new Error(String(e3)));
           setData(null);
           setLoading(false);
           return;
         }
+
+        if (!mounted) return;
 
         // Build a version_id → file_id lookup so we can key refsMap by fileId
         // (the assembler graph uses file IDs, not version IDs, as keys).
@@ -113,11 +129,7 @@ export function useVaultBom(vaultId: VaultId | undefined): VaultBomResult {
             .map((f) => [f.latest_version_id!, f.id]),
         );
 
-        for (const r of (refRows ?? []) as {
-          parent_version_id: string;
-          child_file_id: string | null;
-          child_path_hint: string;
-        }[]) {
+        for (const r of refRows) {
           const parentFileId = versionToFile.get(r.parent_version_id);
           if (!parentFileId) continue; // version not in our live set (race), skip
 
