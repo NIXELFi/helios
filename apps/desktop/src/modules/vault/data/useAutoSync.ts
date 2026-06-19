@@ -10,7 +10,7 @@ import {
   classifyMissing,
   emptyLedger,
   ledgerRecord,
-  ledgerRemove,
+  ledgerTombstone,
   loadLedger,
 } from "./sync-ledger";
 import {
@@ -414,8 +414,9 @@ export function useAutoSync(input: {
       // Propagate local deletions of CHECKED-OUT files (spec 2c). Done after
       // the worker pool so a download in-flight can't race the soft-delete, and
       // sequentially so each pdm_delete_file settles before the next. Each
-      // success drops the ledger entry (so the now-deleted file isn't seen as
-      // "locally-deleted" again) and collects the name for the success event.
+      // success writes a tombstone ledger entry (so the now-deleted file can't
+      // be re-added during the cool-off window if it reappears on disk) and
+      // collects the name for the success event.
       // Guarded by isCurrent() per iteration like every other write in the pass.
       const propagated: string[] = [];
       if (vaultId && toPropagate.length > 0) {
@@ -438,9 +439,19 @@ export function useAutoSync(input: {
             stillOnDisk = true;
           }
           if (stillOnDisk) continue;
+          // LIVE-LOCK GUARD: `toPropagate` was built from `myLocks`, a snapshot
+          // taken at pass START. The user may have released the lock (undo
+          // check-out) while the worker pool was running. Re-check the LIVE lock
+          // set here — ownership can change mid-pass, and we must never
+          // soft-delete a vault file the user no longer controls.
+          if (!myLocksLiveRef.current.has(p.fileId)) continue;
           const { error } = await client.rpc("pdm_delete_file", { p_file_id: p.fileId });
           if (!error) {
-            await ledgerRemove(vaultId, p.rel);
+            // Write a tombstone instead of dropping the entry entirely: if the
+            // deleted file reappears on disk (SolidWorks rewrite, AV restore,
+            // user re-copy), the tombstone suppresses auto-add during the
+            // TOMBSTONE_COOLOFF_MS window so the deletion is not silently undone.
+            await ledgerTombstone(vaultId, p.rel);
             propagated.push(p.name);
           }
         }

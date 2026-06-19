@@ -11,16 +11,20 @@
 //    (the scanner skips them);
 //  - the file must be STABLE: mtime older than STABLE_AGE_MS, so a CAD save
 //    still streaming to disk isn't vaulted half-written;
-//  - the sync ledger must have NO entry for the path: a ledgered file was
-//    materialized FROM the vault (a deleted file awaiting the reaper, or a
-//    discarded draft) — re-adding it would resurrect deletions in a loop;
+//  - the sync ledger guard: a live (non-tombstone) entry means the file was
+//    materialized FROM the vault — re-adding it would resurrect deletions in a
+//    loop. A tombstone entry (deletedAt set) means the file was propagated as an
+//    intentional vault-wide deletion; auto-add is suppressed during the
+//    TOMBSTONE_COOLOFF_MS window so a reappearing copy is not silently re-vaulted
+//    (which would undo the deletion). Past the cool-off the file is treated as
+//    genuinely new and is allowed through;
 //  - one failed attempt per path per RETRY_MS (no hot-loop on a bad file).
 
 import { useEffect, useRef, useState } from "react";
 import { stat } from "@tauri-apps/plugin-fs";
 
 import { useAddLocalFile } from "./useAddLocalFile";
-import { loadLedger, type SyncLedger } from "./sync-ledger";
+import { loadLedger, TOMBSTONE_COOLOFF_MS, type SyncLedger } from "./sync-ledger";
 import { normalizePathForCompare } from "./local-match";
 import type { LocalFile } from "./useLocalFolderScan";
 import type { VaultId } from "./types";
@@ -41,7 +45,14 @@ export function selectAutoAddCandidates(
     if (!f.sha256) return false;
     const mtime = mtimes.get(f.relativePath);
     if (mtime == null || now - mtime < STABLE_AGE_MS) return false;
-    if (ledger.entries[normalizePathForCompare(f.relativePath)]) return false;
+    const e = ledger.entries[normalizePathForCompare(f.relativePath)];
+    if (e) {
+      if (!e.deletedAt) return false; // materialized & live in vault — don't re-add
+      // tombstone: suppress auto-add during the cool-off so a reappearing copy of
+      // a just-deleted file isn't silently re-vaulted (would undo the deletion).
+      if (now - new Date(e.deletedAt).getTime() < TOMBSTONE_COOLOFF_MS) return false;
+      // past cool-off → fall through and allow re-add as a genuinely new file
+    }
     const lastTry = attempts.get(f.relativePath);
     if (lastTry != null && now - lastTry < RETRY_MS) return false;
     return true;
