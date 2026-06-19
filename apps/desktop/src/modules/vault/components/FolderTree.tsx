@@ -596,7 +596,7 @@ export function FolderTree({
             // multi-selection yet, act on just this folder. Otherwise act on
             // the entire current selection (folder + file mix).
             const sel = treeSelection;
-            if (contextMenuTargetIsSelection(sel, node.folder.id)) {
+            if (sel && contextMenuTargetIsSelection(sel, node.folder.id)) {
               const files = resolveSelectionToFiles(sel);
               onContextMenu?.({ kind: "files", files }, e.clientX, e.clientY);
             } else {
