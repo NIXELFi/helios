@@ -208,12 +208,14 @@ export function eventToNotification(
     if (!kind) return null;
 
     const fileName = str(newRow.name) ?? ctx.fileNames.get(fileId) ?? fileId;
+    // deleted_by is set by the soft-delete RPC; use it as actorId when present.
+    const actorId = str(newRow.deleted_by);
     return {
       id: makeId(table, eventType + ":" + kind, fileId, at),
       fileId,
       kind,
       fileName,
-      actorId: null,
+      actorId,
       at,
       read: false,
     };

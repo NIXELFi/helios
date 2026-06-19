@@ -7,7 +7,7 @@
 //       `target_mass_grams` column to pdm.vaults and expose it via the vault
 //       settings admin panel. The localStorage fallback is intentional for v1.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChartCard, StatCard, EmptyChart } from "./charts/ChartCard";
 import { HBars } from "./charts/HBars";
 import { aggregateMass, formatMass } from "../lib/massStats";
@@ -79,6 +79,15 @@ export function MassPanel({
   const [targetGrams, setTargetGrams] = useState<number | null>(() =>
     loadTargetGrams(vaultId),
   );
+
+  // Reload the target from localStorage whenever the active vault changes so
+  // the previous vault's target (and its budget delta) is never shown for a
+  // different vault.
+  useEffect(() => {
+    setTargetGrams(loadTargetGrams(vaultId));
+    setEditingTarget(false);
+    setTargetInput("");
+  }, [vaultId]);
 
   // Build folder id → top-level folder name map (walk hierarchy once)
   const folderById = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);

@@ -36,9 +36,19 @@ pub enum AuditAction {
     ParseRefsFailed,
 
     // ── file lifecycle (soft-delete RPCs) ────────────────────────────────────
-    /// File soft-deleted via pdm.delete_file RPC. target_type = "file"
+    /// Subject soft-deleted via pdm.delete_file or pdm.delete_folder RPC.
+    ///
+    /// The DB writes action `'delete'` for **both** files (delete_file) and
+    /// folders (delete_folder), so this variant is emitted for either subject.
+    /// `canonical_target_type` returns `"file"` as a convenience default; callers
+    /// that need the actual subject type must read `AuditEntry.target_type`.
     Delete,
-    /// Soft-deleted file undeleted via pdm.restore_file RPC. target_type = "file"
+    /// Soft-deleted subject undeleted via pdm.restore_file or pdm.restore_folder RPC.
+    ///
+    /// The DB writes action `'restore'` for **both** files (restore_file) and
+    /// folders (restore_folder), so this variant is emitted for either subject.
+    /// `canonical_target_type` returns `"file"` as a convenience default; callers
+    /// that need the actual subject type must read `AuditEntry.target_type`.
     Restore,
 
     // ── structural events (trg_files_audit) ──────────────────────────────────
@@ -83,6 +93,11 @@ impl AuditAction {
     /// and subsequent structural-events / role migrations.
     ///
     /// Returns `"unknown"` for the forward-compat `Other` variant.
+    ///
+    /// **Caveat — `Delete` / `Restore`:** the DB emits `'delete'`/`'restore'` for
+    /// both files *and* folders, so this function returns `"file"` for those variants
+    /// as a convenience default only.  If you need the authoritative subject type,
+    /// read `AuditEntry.target_type` directly instead of calling this method.
     pub fn canonical_target_type(self) -> &'static str {
         match self {
             // lock lifecycle

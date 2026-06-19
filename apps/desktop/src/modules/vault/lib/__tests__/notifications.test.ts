@@ -65,22 +65,22 @@ function lockForceRelease(fileId: string, byUserId: string): RealtimePayload {
 }
 
 /** Files UPDATE: deleted_at set → deleted */
-function fileDelete(fileId: string): RealtimePayload {
+function fileDelete(fileId: string, deletedBy?: string): RealtimePayload {
   return {
     table: "files",
     eventType: "UPDATE",
-    new: { id: fileId, name: "frame.SLDPRT", deleted_at: AT },
-    old: { id: fileId, name: "frame.SLDPRT", deleted_at: null },
+    new: { id: fileId, name: "frame.SLDPRT", deleted_at: AT, deleted_by: deletedBy ?? null },
+    old: { id: fileId, name: "frame.SLDPRT", deleted_at: null, deleted_by: null },
   };
 }
 
 /** Files UPDATE: deleted_at cleared → restored */
-function fileRestore(fileId: string): RealtimePayload {
+function fileRestore(fileId: string, deletedBy?: string): RealtimePayload {
   return {
     table: "files",
     eventType: "UPDATE",
-    new: { id: fileId, name: "frame.SLDPRT", deleted_at: null },
-    old: { id: fileId, name: "frame.SLDPRT", deleted_at: AT },
+    new: { id: fileId, name: "frame.SLDPRT", deleted_at: null, deleted_by: deletedBy ?? null },
+    old: { id: fileId, name: "frame.SLDPRT", deleted_at: AT, deleted_by: null },
   };
 }
 
@@ -145,6 +145,18 @@ describe("eventToNotification — files UPDATE deleted_at set → deleted", () =
     expect(n!.kind).toBe("deleted");
     expect(n!.fileName).toBe("frame.SLDPRT");
   });
+
+  test("actorId is deleted_by from the row when present", () => {
+    const n = eventToNotification(fileDelete("file-A", "admin-1"), WATCHED, ctx(), AT);
+    expect(n).not.toBeNull();
+    expect(n!.actorId).toBe("admin-1");
+  });
+
+  test("actorId is null when deleted_by is absent", () => {
+    const n = eventToNotification(fileDelete("file-A"), WATCHED, ctx(), AT);
+    expect(n).not.toBeNull();
+    expect(n!.actorId).toBeNull();
+  });
 });
 
 describe("eventToNotification — files UPDATE deleted_at cleared → restored", () => {
@@ -152,6 +164,18 @@ describe("eventToNotification — files UPDATE deleted_at cleared → restored",
     const n = eventToNotification(fileRestore("file-A"), WATCHED, ctx(), AT);
     expect(n).not.toBeNull();
     expect(n!.kind).toBe("restored");
+  });
+
+  test("actorId is deleted_by from the row when present", () => {
+    const n = eventToNotification(fileRestore("file-A", "admin-2"), WATCHED, ctx(), AT);
+    expect(n).not.toBeNull();
+    expect(n!.actorId).toBe("admin-2");
+  });
+
+  test("actorId is null when deleted_by is absent", () => {
+    const n = eventToNotification(fileRestore("file-A"), WATCHED, ctx(), AT);
+    expect(n).not.toBeNull();
+    expect(n!.actorId).toBeNull();
   });
 });
 
