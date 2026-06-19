@@ -35,6 +35,14 @@ data-loss / data-integrity fixes in local sync and the recycle bin.
 > applied to the database and run against a staging/local Supabase — they could not
 > be exercised from this working copy.
 
+### Added
+
+- Vault: **mass / weight-budget dashboard** on the Insights screen — total vehicle
+  mass, heaviest parts, mass by subsystem, parts missing mass data, and a delta vs an
+  admin-set target mass, all from the Mass already parsed off each part's data card.
+- Vault: **impact warning before checking out or deleting a referenced part** — if
+  other assemblies currently use the part, you're shown which ones first.
+
 ### Security
 
 - Vault: **closed a cross-vault audit-log leak** — a member of one vault could read
