@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, VersionId } from "./types";
 
+type SupabaseClientLike = ReturnType<typeof useSupabaseClient>;
+
 // ---------------------------------------------------------------------------
 // Pure helper — extracted so it can be unit-tested without a live DB
 // ---------------------------------------------------------------------------
@@ -105,6 +107,36 @@ export function useContains(versionId: VersionId | null) {
   return { data, loading, error };
 }
 
+/**
+ * Async helper: fetch the current where-used parents for a file on demand.
+ * Usable outside React (e.g. in click handlers). Same query + filter logic
+ * as useWhereUsed.
+ */
+export async function fetchWhereUsed(
+  client: SupabaseClientLike,
+  fileId: FileId,
+): Promise<WhereUsedRow[]> {
+  const { data: refs, error: e1 } = await (client.from("refs") as any)
+    .select("parent_version_id").eq("child_file_id", fileId);
+  if (e1) throw e1;
+  const verIds = Array.from(new Set((refs ?? []).map((r: any) => r.parent_version_id)));
+  if (!verIds.length) return [];
+  const { data: versions } = await (client.from("versions") as any).select("id,file_id").in("id", verIds);
+  const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
+  // LIVE parents only — a soft-deleted assembly is not a current "user"
+  // of this part; listing it would block/confuse delete decisions.
+  // latest_version_id is fetched so we can filter to head-revision refs only.
+  const { data: files } = await (client.from("files") as any)
+    .select("id,name,latest_version_id").in("id", fileIds).is("deleted_at", null);
+  const versionsById = new Map<string, { id: string; file_id: string }>(
+    (versions ?? []).map((v: any) => [v.id, v]),
+  );
+  const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: null }>(
+    (files ?? []).map((f: any) => [f.id, { ...f, deleted_at: null }]),
+  );
+  return filterWhereUsedToLatest(refs ?? [], versionsById, filesById);
+}
+
 /** Parents that reference a given file ("Where Used"). */
 export function useWhereUsed(fileId: FileId | null) {
   const client = useSupabaseClient();
@@ -116,27 +148,15 @@ export function useWhereUsed(fileId: FileId | null) {
     let alive = true;
     setLoading(true); setError(null);
     (async () => {
-      const { data: refs, error: e1 } = await (client.from("refs") as any)
-        .select("parent_version_id").eq("child_file_id", fileId);
-      if (!alive) return;
-      if (e1) { setError(e1); setData(null); setLoading(false); return; }
-      const verIds = Array.from(new Set((refs ?? []).map((r: any) => r.parent_version_id)));
-      if (!verIds.length) { setData([]); setLoading(false); return; }
-      const { data: versions } = await (client.from("versions") as any).select("id,file_id").in("id", verIds);
-      const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
-      // LIVE parents only — a soft-deleted assembly is not a current "user"
-      // of this part; listing it would block/confuse delete decisions.
-      // latest_version_id is fetched so we can filter to head-revision refs only.
-      const { data: files } = await (client.from("files") as any)
-        .select("id,name,latest_version_id").in("id", fileIds).is("deleted_at", null);
-      if (!alive) return;
-      const versionsById = new Map<string, { id: string; file_id: string }>(
-        (versions ?? []).map((v: any) => [v.id, v]),
-      );
-      const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: null }>(
-        (files ?? []).map((f: any) => [f.id, { ...f, deleted_at: null }]),
-      );
-      setData(filterWhereUsedToLatest(refs ?? [], versionsById, filesById));
+      try {
+        const rows = await fetchWhereUsed(client, fileId);
+        if (!alive) return;
+        setData(rows);
+      } catch (e) {
+        if (!alive) return;
+        setError(e as Error);
+        setData(null);
+      }
       setLoading(false);
     })();
     return () => { alive = false; };

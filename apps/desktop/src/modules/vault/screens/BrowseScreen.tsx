@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
-import { useUser } from "@helios/auth";
+import { useUser, useSupabaseClient } from "@helios/auth";
 import { FILE_MANAGER } from "../../../lib/platform";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
@@ -53,6 +53,8 @@ import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
 import { RecentActivity } from "../components/RecentActivity";
 import { useMoveFile } from "../data/useMoveFile";
 import { toast } from "../data/toast";
+import { fetchWhereUsed } from "../data/useReferences";
+import { whereUsedWarning } from "../data/whereUsedWarning";
 import { FileDetailPanel } from "./FileDetailPanel";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
@@ -76,6 +78,7 @@ const VAULT_INCREMENTAL_APPLY = true;
 
 export function BrowseScreen() {
   const user = useUser();
+  const supabase = useSupabaseClient();
   // Global admin — used only for truly global affordances (e.g. "you can
   // create a vault" messaging). In-vault edit/admin checks are per-vault below.
   const isAdmin = useIsAdmin();
@@ -1193,28 +1196,45 @@ export function BrowseScreen() {
                   : "Only files you have checked out (or admins) can be deleted",
             onClick: () => {
               setActionError(null);
-              setConfirm({
-                title: `Delete ${n} file${n === 1 ? "" : "s"}`,
-                body: `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`,
-                confirmLabel: "Delete",
-                onConfirm: async () => {
-                  const succeeded: FileId[] = [];
-                  for (const f of targetFiles) {
-                    const ok = await deleteFile.run(f.id);
-                    if (ok) succeeded.push(f.id);
-                  }
-                  const failed = n - succeeded.length;
-                  // M14: remove successfully-deleted ids from the selection even
-                  // on partial failure, mirroring BulkActionBar.bulkDelete which
-                  // keeps only the failed ids selected so the user can retry.
-                  setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
-                  if (failed > 0) {
-                    setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
-                  } else {
-                    toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
-                  }
-                  afterMutate();
-                },
+              // For a single-file delete, query where-used first and prepend an
+              // impact warning to the confirm body so the user knows which
+              // assemblies reference this file. Mirrors SW PDM impact warning.
+              // Best-effort: if the query fails we fall through with no warning.
+              const buildBody = async (): Promise<string> => {
+                const baseBody = `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`;
+                if (n !== 1) return baseBody;
+                try {
+                  const f = targetFiles[0]!;
+                  const parents = await fetchWhereUsed(supabase, f.id);
+                  const warning = whereUsedWarning(parents);
+                  if (warning) return `${warning.message}\n\n${baseBody}`;
+                } catch { /* ignore */ }
+                return baseBody;
+              };
+              void buildBody().then((body) => {
+                setConfirm({
+                  title: `Delete ${n} file${n === 1 ? "" : "s"}`,
+                  body,
+                  confirmLabel: "Delete",
+                  onConfirm: async () => {
+                    const succeeded: FileId[] = [];
+                    for (const f of targetFiles) {
+                      const ok = await deleteFile.run(f.id);
+                      if (ok) succeeded.push(f.id);
+                    }
+                    const failed = n - succeeded.length;
+                    // M14: remove successfully-deleted ids from the selection even
+                    // on partial failure, mirroring BulkActionBar.bulkDelete which
+                    // keeps only the failed ids selected so the user can retry.
+                    setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
+                    if (failed > 0) {
+                      setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                    } else {
+                      toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
+                    }
+                    afterMutate();
+                  },
+                });
               });
             },
           });
