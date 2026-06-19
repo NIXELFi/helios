@@ -109,6 +109,27 @@ describe("selectAutoAddCandidates", () => {
     expect(out.map((f) => f.relativePath)).toEqual(["d.sldprt"]);
   });
 
+  it("treats a garbage/unparseable deletedAt as still-suppressing (NaN guard)", () => {
+    // A corrupt tombstone (e.g. deletedAt = "not-a-date" or "") must suppress
+    // auto-add — a NaN result from getTime() used to evaluate to false for the
+    // cool-off comparison (NaN < anything = false), letting the file through
+    // and silently re-vaulting a deletion.
+    const ledger: ReturnType<typeof emptyLedger> = {
+      entries: {
+        "corrupt.sldprt": {
+          sha256: "sha-corrupt",
+          recordedAt: new Date(NOW - 1000).toISOString(),
+          deletedAt: "not-a-date", // unparseable → NaN guard must suppress
+        },
+      },
+    };
+    const out = selectAutoAddCandidates(
+      [lf("corrupt.sldprt")], ledger,
+      new Map([["corrupt.sldprt", old]]), new Map(), NOW,
+    );
+    expect(out).toEqual([]);
+  });
+
   it("tombstoneEntry within cool-off is suppressed; past cool-off is a candidate", () => {
     // Use tombstoneEntry helper to build the ledger, supply explicit `now` to
     // selectAutoAddCandidates so the cool-off math is deterministic.

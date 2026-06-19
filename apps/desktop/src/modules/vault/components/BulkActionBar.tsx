@@ -271,7 +271,7 @@ export function BulkActionBar({
         const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
         const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
         if (ver && stale) {
-          const got = await download.run(ver.sha256, dest);
+          const got = await download.run(ver.sha256, dest, signal);
           if (signal.aborted) return;
           if (!got) { await releaseLock.run(id); fail++; continue; }
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);

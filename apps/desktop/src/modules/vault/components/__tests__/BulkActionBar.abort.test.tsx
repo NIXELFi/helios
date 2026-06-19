@@ -243,16 +243,11 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
     expect(deleteFileRun).toHaveBeenCalledTimes(1);
   });
 
-  it("still surfaces partial-delete status when loop aborts mid-run", async () => {
-    // Even if the operation is aborted, the files that DID get deleted should
-    // be surfaced in the status (matching how bulkCheckIn/bulkGetLatest report
-    // partial progress). This test verifies the status is shown up to the abort
-    // point rather than being silently swallowed.
-    //
-    // We do NOT test the exact text here (that would be over-specifying) —
-    // we just assert a status element is rendered after the run completes
-    // normally (no abort) with a failed file in the batch, confirming the
-    // failure-path status reporting works.
+  it("surfaces partial-delete status on normal (non-aborted) partial failure", async () => {
+    // Normal path: loop runs to completion but one file fails. Status must name
+    // the failure — this is NOT an abort test. (Renamed from the misleading
+    // "still surfaces partial-delete status when loop aborts mid-run" which
+    // ran to completion without any abort and tested the normal failure path.)
     deleteFileRun
       .mockResolvedValueOnce(true)   // f1 succeeds
       .mockResolvedValueOnce(false); // f2 fails
@@ -283,6 +278,96 @@ describe("BulkActionBar — M13: bulkDelete respects abort signal", () => {
       const status = container.querySelector("[role='status']");
       expect(status).not.toBeNull();
       expect(status!.textContent).toMatch(/failed|part-b/i);
+    });
+  });
+
+  it("surfaces an interrupted status when selection is cleared mid-delete loop", async () => {
+    // True abort path: use THREE files so that the first delete completes and
+    // counts (ok=1), the SECOND delete is gated mid-flight while the abort fires,
+    // and the third never starts.
+    //
+    // Timing strategy:
+    //   1. f1 delete resolves immediately (ok=1 is counted).
+    //   2. f2 delete is gated — the loop is suspended waiting on the gate.
+    //   3. Rerender with a different selection → useEffect cleanup → signal.aborted = true.
+    //   4. Release the gate → f2 delete resolves → the post-await `signal.aborted`
+    //      check fires → loop breaks with ok=1 → abort block:
+    //      setStatus("Deleted 1/3 (interrupted)") + setBusy(false).
+    //   5. f3 delete never starts.
+    //
+    // We keep ≥1 file selected on rerender so the component stays mounted and
+    // can render the status span (selectedIds=[] makes BulkActionBar return null).
+    const gate = deferred();
+    deleteFileRun
+      .mockResolvedValueOnce(true)          // f1 succeeds immediately (ok=1)
+      .mockImplementationOnce(async () => { // f2 gated
+        await gate.promise;
+        return true;
+      })
+      .mockResolvedValue(true);              // f3 would succeed but must not be called
+
+    const { container, rerender } = render(
+      <BulkActionBar
+        selectedIds={["f1", "f2", "f3"]}
+        onClear={() => {}}
+        onDone={() => {}}
+        vaultId="v1"
+        files={[
+          { id: "f1", vault_id: "v1", folder_id: null, name: "part-a.sldprt", latest_version_id: null, created_at: "x" } as any,
+          { id: "f2", vault_id: "v1", folder_id: null, name: "part-b.sldprt", latest_version_id: null, created_at: "x" } as any,
+          { id: "f3", vault_id: "v1", folder_id: null, name: "part-c.sldprt", latest_version_id: null, created_at: "x" } as any,
+        ]}
+      />,
+    );
+
+    // Open confirmation modal and confirm
+    const deleteBtn = screen.getByRole("button", { name: /^delete$/i });
+    fireEvent.click(deleteBtn);
+    await waitFor(() =>
+      expect(screen.getByText(/move to this vault.s deleted tab/i)).toBeInTheDocument(),
+    );
+    const allDeleteBtns = screen.getAllByRole("button", { name: /^delete$/i });
+    await act(async () => { fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]!); });
+
+    // Wait for f1 to complete (call 1) AND f2's gate to be hit (call 2).
+    await waitFor(() => expect(deleteFileRun).toHaveBeenCalledTimes(2));
+
+    // f2 is now in-flight, suspended on gate. Trigger the abort by changing the
+    // selection — useEffect cleanup fires → signal.aborted = true.
+    await act(async () => {
+      rerender(
+        <BulkActionBar
+          selectedIds={["f99"]}
+          onClear={() => {}}
+          onDone={() => {}}
+          vaultId="v1"
+          files={[
+            { id: "f1", vault_id: "v1", folder_id: null, name: "part-a.sldprt", latest_version_id: null, created_at: "x" } as any,
+            { id: "f2", vault_id: "v1", folder_id: null, name: "part-b.sldprt", latest_version_id: null, created_at: "x" } as any,
+            { id: "f3", vault_id: "v1", folder_id: null, name: "part-c.sldprt", latest_version_id: null, created_at: "x" } as any,
+          ]}
+        />,
+      );
+      await flushAsync(5); // let the useEffect cleanup flush → signal.aborted = true
+    });
+
+    // Release the f2 gate → f2 delete resolves → post-await `signal.aborted`
+    // check fires (true) → loop breaks → abort block:
+    // setStatus("Deleted 1/3 (interrupted)") + setBusy(false).
+    await act(async () => {
+      gate.resolve();
+      await flushAsync();
+    });
+
+    // f3 must never have been called (only f1 + f2 = 2 total calls).
+    expect(deleteFileRun).toHaveBeenCalledTimes(2);
+
+    // The aborted branch must have rendered the "interrupted" status.
+    await waitFor(() => {
+      const status = container.querySelector("[role='status']");
+      expect(status).not.toBeNull();
+      expect(status!.textContent).toMatch(/interrupted/i);
+      expect(status!.textContent).toMatch(/1\//);
     });
   });
 });

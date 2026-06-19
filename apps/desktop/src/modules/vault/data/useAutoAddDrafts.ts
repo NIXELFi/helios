@@ -50,7 +50,12 @@ export function selectAutoAddCandidates(
       if (!e.deletedAt) return false; // materialized & live in vault — don't re-add
       // tombstone: suppress auto-add during the cool-off so a reappearing copy of
       // a just-deleted file isn't silently re-vaulted (would undo the deletion).
-      if (now - new Date(e.deletedAt).getTime() < TOMBSTONE_COOLOFF_MS) return false;
+      // Also treat an unparseable deletedAt (NaN) as still-suppressing: a corrupt
+      // tombstone is safer to hold than to silently re-vault (matches the
+      // classifyMissing truthiness check which treats any truthy deletedAt as a
+      // tombstone).
+      const dt = new Date(e.deletedAt).getTime();
+      if (Number.isNaN(dt) || now - dt < TOMBSTONE_COOLOFF_MS) return false;
       // past cool-off → fall through and allow re-add as a genuinely new file
     }
     const lastTry = attempts.get(f.relativePath);
