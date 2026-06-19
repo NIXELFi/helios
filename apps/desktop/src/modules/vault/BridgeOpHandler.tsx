@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { readFile, exists, stat } from "@tauri-apps/plugin-fs";
 import { useCheckIn } from "./data/useCheckIn";
 import { useDownloadVersion } from "./data/useDownloadVersion";
 import { useAddLocalFile } from "./data/useAddLocalFile";
@@ -21,6 +21,26 @@ type OpPayload =
   | { id: string; op: "checkin"; fileId: string; path: string; comment: string | null }
   | { id: string; op: "getLatest"; sha: string; destPath: string }
   | { id: string; op: "add"; path: string };
+
+/**
+ * Decide whether a bridge `getLatest` write should be skipped to prevent
+ * clobbering an unsaved local edit.
+ *
+ * Mirrors the guard in useVaultDropImport.ts (~283-291) and the model described
+ * in useAutoSync.ts (~281-293):
+ *   - file absent           → safe to write (no local copy exists)
+ *   - file present, read-only → safe to write (clean synced copy, no edits)
+ *   - file present, writable  → SKIP (may hold unsaved edits — err on safe side)
+ *
+ * `destWritable` should be derived as `stat().readonly !== true` (with `catch
+ * → true` so an unreadable stat is treated as writable / skip).
+ */
+export function shouldSkipBridgeOverwrite(
+  destExists: boolean,
+  destWritable: boolean,
+): boolean {
+  return destExists && destWritable;
+}
 
 /** Resolve which vault a local path belongs to (it lives at
  *  `<root>/<sanitize(vaultName)>/<relativePath>`), so an untracked file can be
@@ -80,6 +100,20 @@ export function BridgeOpHandler(): null {
             ? { ok: true, versionNum: ver.version_num, versionId: ver.id }
             : { ok: false, error: "check-in failed" });
         } else if (p.op === "getLatest") {
+          // Guard: refuse to clobber a writable destination — it may hold
+          // unsaved edits. Mirrors useVaultDropImport.ts ~283-291 and the
+          // model in useAutoSync.ts ~281-293. Unknown stat → treat as writable.
+          const destExists = await exists(p.destPath);
+          const destWritable = destExists
+            ? await stat(p.destPath)
+                .then((info) => (info as { readonly?: boolean }).readonly !== true)
+                .catch(() => true)
+            : false;
+          if (shouldSkipBridgeOverwrite(destExists, destWritable)) {
+            console.warn(`[vault] bridge getLatest skipped — writable copy at ${p.destPath}`);
+            respond({ ok: false, error: "Would overwrite a checked-out copy — skipped" });
+            return;
+          }
           const ok = await downloadRef.current(p.sha, p.destPath);
           respond(ok ? { ok: true } : { ok: false, error: "download failed" });
         } else if (p.op === "add") {
