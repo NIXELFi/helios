@@ -16,6 +16,22 @@ export function emptyTreeSelection(): TreeSelection {
 }
 
 /**
+ * Returns true when a right-click on `folderId` should use the
+ * multi-selection ("files") context-menu variant — i.e. the clicked folder
+ * is explicitly part of the current selection.
+ *
+ * Intentionally ignores `sel.files.size` and `sel.folders.size`: an
+ * unrelated selection elsewhere must NOT hijack the folder-specific menu
+ * of a folder that the user did not include in that selection.
+ */
+export function contextMenuTargetIsSelection(
+  sel: TreeSelection | null | undefined,
+  folderId: FolderId,
+): boolean {
+  return sel != null && sel.folders.has(folderId);
+}
+
+/**
  * Target of a right-click in the tree. Either a single folder (with all its
  * descendant files), or a set of files (the current multi-selection).
  */
@@ -580,7 +596,7 @@ export function FolderTree({
             // multi-selection yet, act on just this folder. Otherwise act on
             // the entire current selection (folder + file mix).
             const sel = treeSelection;
-            if (sel && (sel.folders.has(node.folder.id) || sel.files.size > 0 || sel.folders.size > 0)) {
+            if (contextMenuTargetIsSelection(sel, node.folder.id)) {
               const files = resolveSelectionToFiles(sel);
               onContextMenu?.({ kind: "files", files }, e.clientX, e.clientY);
             } else {
