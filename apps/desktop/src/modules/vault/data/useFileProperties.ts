@@ -1,7 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSupabaseClient } from "@helios/auth";
 import type { SwProperty, Version } from "./types";
+
+/**
+ * Stable primitive key that captures both the count AND values of a properties
+ * array. Used as a `useEffect` dependency so value-only updates (same length,
+ * different values) are detected — `properties.length` alone misses those.
+ */
+export function propertiesDepKey(props: SwProperty[] | null | undefined): string {
+  if (!props || props.length === 0) return "";
+  return props.map((p) => `${p.name}=${p.value}`).join("|");
+}
 
 const SW_EXTS = [".sldprt", ".sldasm", ".slddrw"];
 const isSwFile = (n: string) => SW_EXTS.some((e) => n.toLowerCase().endsWith(e));
@@ -50,6 +60,9 @@ export function useFileProperties(
     notDownloaded: false,
   });
 
+  // Stable primitive — changes when count OR any value changes.
+  const propertiesKey = useMemo(() => propertiesDepKey(version?.properties), [version?.properties]);
+
   useEffect(() => {
     let alive = true;
     if (!version || !fileName || !isSwFile(fileName)) {
@@ -83,8 +96,10 @@ export function useFileProperties(
     // populate in place (another user's check-in / backfill updates
     // version.properties on the same version.id via realtime — keying on id
     // alone left the panel stuck on "download to read" until re-selection).
+    // propertiesKey captures content (name=value pairs), not just count, so
+    // value-only updates (same length, different values) also trigger a re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version?.id, version?.properties?.length]);
+  }, [version?.id, propertiesKey]);
 
   return state;
 }
