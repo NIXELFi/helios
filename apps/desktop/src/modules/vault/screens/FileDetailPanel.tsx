@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useVersions } from "../data/useVersions";
 import { VersionList } from "../components/VersionList";
 import { GetVersionButton, RestoreVersionButton } from "../components/RowActions";
 import { ReferencesPanel } from "../components/ReferencesPanel";
 import { PropertiesPanel } from "../components/PropertiesPanel";
+import { BomPanel } from "../components/BomPanel";
 import { useSetRevision } from "../data/useSetRevision";
-import type { FileId, FolderId, Folder, VaultFile, Version } from "../data/types";
+import { useVaultBom } from "../data/useVaultBom";
+import type { FileId, FolderId, Folder, VaultFile, VaultId, Version } from "../data/types";
 
 interface Props {
   fileId: FileId | null;
@@ -22,9 +25,11 @@ interface Props {
   /** Whether the current user may edit (editor/admin/owner). Gates the
    *  "Set Revision" action — viewers don't see it. */
   canEdit?: boolean;
+  /** Active vault id — required to load the BOM graph for assembly files. */
+  vaultId?: VaultId | null;
 }
 
-export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit }: Props) {
+export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit, vaultId }: Props) {
   if (!fileId) {
     // Placeholder panel is hidden on narrow windows — it carries no content,
     // and the space matters more (SQUEEZE). Selecting a file still shows the
@@ -62,12 +67,18 @@ export function FileDetailPanel({ fileId, files, vaultRoot, folders, canEdit }: 
       vaultRoot={vaultRoot ?? null}
       folders={folders ?? []}
       canEdit={canEdit ?? false}
+      vaultId={vaultId ?? null}
     />
   );
 }
 
+/** True when the file name looks like a SolidWorks assembly. */
+function isAssembly(name: string | null): boolean {
+  return !!name && /\.sldasm$/i.test(name);
+}
+
 function FileDetailLoader({
-  fileId, fileName, folderId, vaultRoot, folders, canEdit,
+  fileId, fileName, folderId, vaultRoot, folders, canEdit, vaultId,
 }: {
   fileId: FileId;
   fileName: string | null;
@@ -75,9 +86,13 @@ function FileDetailLoader({
   vaultRoot: string | null;
   folders: Folder[];
   canEdit: boolean;
+  vaultId: VaultId | null;
 }) {
+  const [showBom, setShowBom] = useState(false);
   const { data, loading, error, refetch } = useVersions(fileId);
   const setRevision = useSetRevision();
+  // Load BOM graph only when the file is an assembly and the user opened the panel.
+  const bomResult = useVaultBom(showBom && vaultId ? vaultId : undefined);
   async function handleSetRevision() {
     const ok = await setRevision.run(fileId);
     if (ok) refetch();
@@ -111,6 +126,20 @@ function FileDetailLoader({
         </span>
       )
     : undefined;
+  // When BOM panel is open and graph is loaded, show BomPanel full-pane.
+  if (showBom && bomResult.data && fileName) {
+    return (
+      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+        <BomPanel
+          fileId={fileId}
+          fileName={fileName}
+          graph={bomResult.data}
+          onClose={() => setShowBom(false)}
+        />
+      </aside>
+    );
+  }
+
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
       <header className="border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
@@ -141,6 +170,24 @@ function FileDetailLoader({
             }
           >
             {setRevision.loading ? "…" : setRevision.error ? "Retry Set Revision" : "Set Revision"}
+          </button>
+        </div>
+      )}
+      {/* BOM button — only for .sldasm files with a vaultId available */}
+      {isAssembly(fileName) && vaultId && (
+        <div className="flex items-center justify-end border-b border-helios-line px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setShowBom(true)}
+            disabled={showBom && bomResult.loading}
+            title="View Bill of Materials for this assembly"
+            className={
+              "rounded border px-2 py-0.5 text-xs disabled:opacity-50 " +
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+              "border-helios-line text-helios-text hover:bg-helios-line"
+            }
+          >
+            {showBom && bomResult.loading ? "Loading BOM…" : "View BOM"}
           </button>
         </div>
       )}

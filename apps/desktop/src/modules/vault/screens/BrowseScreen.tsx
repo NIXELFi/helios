@@ -988,7 +988,7 @@ export function BrowseScreen() {
       {/* Pass `undefined` (not `[]`) while allFiles is still loading so the
           panel shows its normal state, not a false "file deleted" message. It
           only treats a selection as missing once the list has actually loaded. */}
-      <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} vaultRoot={vaultFolderPath} folders={folders ?? []} canEdit={canEdit} />
+      <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} vaultRoot={vaultFolderPath} folders={folders ?? []} canEdit={canEdit} vaultId={vaultId ?? null} />
       </div>
       {/* Full-pane drag overlay: names the live drop target so a drop is never
           a guess. pointer-events-none keeps the underlying hit-testing (tree
