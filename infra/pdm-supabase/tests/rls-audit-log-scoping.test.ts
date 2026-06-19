@@ -4,8 +4,19 @@
 //
 // Policy under test (20260619000400_pdm_audit_log_vault_scoped_read.sql):
 //
-//   user_id = auth.uid()   -- own rows
-//   OR pdm.is_admin()      -- global admin/owner: full read
+//   user_id = auth.uid()                     -- own rows
+//   OR exists (                              -- GLOBAL admin/owner only
+//       select 1 from pdm.user_roles
+//       where user_id = auth.uid()
+//         and role in ('owner','admin')
+//         and vault_id is null               -- vault_id IS NULL = global grant
+//     )
+//
+// WHY NOT pdm.is_admin(): pdm.is_admin() has no vault_id filter. After
+// 20260531000000, a per-vault admin row (role='admin', vault_id=X) satisfies
+// it, so any per-vault admin could read every vault's audit rows. The policy
+// inlines a vault_id IS NULL guard instead. See migration header for full
+// analysis.
 //
 // Each test seeds audit rows via the service role (bypasses RLS) so the
 // SELECT policy is isolated. We do NOT rely on trigger-generated rows so
@@ -87,7 +98,40 @@ describe("audit_log vault-scoped reads (20260619000400)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // M6 regression: per-vault member CANNOT read another vault's audit rows
+  // M6 regression: per-vault ADMIN CANNOT read another vault's audit rows.
+  //
+  // This is the critical regression guard for the is_admin() vulnerability:
+  // pdm.is_admin() has no vault_id filter, so a user with role='admin' and a
+  // non-null vault_id still satisfies it. The fixed policy requires vault_id IS
+  // NULL (global grant) for cross-vault read. A per-vault admin (vault_id set)
+  // must NOT be able to see audit rows from a vault they have no role in.
+  // -------------------------------------------------------------------------
+  it("a per-vault admin (vault_id non-null) cannot read audit rows from a different vault", async () => {
+    const owner = await createTestUser(uniqueEmail("owner"));
+    await setRole(owner.id, "owner");
+    const perVaultAdmin = await createTestUser(uniqueEmail("pvadmin"));
+
+    const a = await seedVault(owner.id);
+    const b = await seedVault(owner.id);
+    // Grant admin role ONLY in vault A (per-vault, vault_id non-null).
+    // This user would satisfy the old pdm.is_admin() and could read vault B.
+    await setVaultRole(perVaultAdmin.id, "admin", a.vaultId);
+
+    // Seed an audit row for an action in vault B (not vault A).
+    const rowIdB = await seedAuditRow(owner.id, b.fileId);
+
+    const c = await signInAs(perVaultAdmin.email!);
+    const { data, error } = await c
+      .from("audit_log")
+      .select("id")
+      .eq("id", rowIdB);
+
+    expect(error).toBeNull(); // RLS filters silently, not an error
+    expect(data ?? []).toHaveLength(0); // vault-B row must be invisible to per-vault admin
+  });
+
+  // -------------------------------------------------------------------------
+  // M6 regression: per-vault VIEWER CANNOT read another vault's audit rows
   // -------------------------------------------------------------------------
   it("a per-vault-only member cannot read audit rows from a vault they are NOT in", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
@@ -136,13 +180,14 @@ describe("audit_log vault-scoped reads (20260619000400)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // A global admin reads ALL audit rows (cross-vault admin visibility)
+  // A GLOBAL admin (vault_id IS NULL) reads ALL audit rows (cross-vault).
+  // Contrast with the per-vault-admin test above: setRole sets vault_id=null.
   // -------------------------------------------------------------------------
-  it("a global admin can read audit rows from any vault", async () => {
+  it("a global admin (vault_id null) can read audit rows from any vault", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
-    await setRole(admin.id, "admin");
+    await setRole(admin.id, "admin"); // vault_id IS NULL — global grant
     const editor = await createTestUser(uniqueEmail("editor"));
-    await setRole(editor.id, "editor");
+    await setRole(editor.id, "editor"); // global editor
 
     const a = await seedVault(admin.id);
     const b = await seedVault(admin.id);
