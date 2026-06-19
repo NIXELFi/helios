@@ -137,6 +137,30 @@ describe("computeVaultInsights", () => {
     expect(r.recentlyUpdated.map((x) => x.name)).toEqual(["new.SLDPRT", "old.SLDPRT"]);
     expect(r.staleCount).toBe(1); // old.SLDPRT is >180d before 2026-06-02
   });
+
+  test("recentlyUpdated is strictly newest-first across multiple files in arbitrary insertion order", () => {
+    // Files inserted oldest→newest so a stable ascending sort would pass — only
+    // a true descending comparator produces the expected newest-first result.
+    const t1 = file("a2024.SLDPRT", { size: 10, created_at: "2024-03-10T00:00:00Z" });
+    const t2 = file("b2025.SLDPRT", { size: 10, created_at: "2025-07-22T00:00:00Z" });
+    const t3 = file("c2026jan.SLDPRT", { size: 10, created_at: "2026-01-05T00:00:00Z" });
+    const t4 = file("d2026apr.SLDPRT", { size: 10, created_at: "2026-04-18T00:00:00Z" });
+    const t5 = file("e2026jun.SLDPRT", { size: 10, created_at: "2026-06-15T00:00:00Z" });
+    // Pass them in ascending (oldest-first) order to surface a wrong comparator.
+    const r = computeVaultInsights([t1, t2, t3, t4, t5], [], [], []);
+    const names = r.recentlyUpdated.map((x) => x.name);
+    expect(names).toEqual([
+      "e2026jun.SLDPRT",  // newest
+      "d2026apr.SLDPRT",
+      "c2026jan.SLDPRT",
+      "b2025.SLDPRT",
+      "a2024.SLDPRT",     // oldest
+    ]);
+    // Each successive timestamp must be ≤ the previous one (strictly descending here).
+    for (let i = 1; i < r.recentlyUpdated.length; i++) {
+      expect(r.recentlyUpdated[i]!.when! < r.recentlyUpdated[i - 1]!.when!).toBe(true);
+    }
+  });
 });
 
 describe("fillMonths", () => {
