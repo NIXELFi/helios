@@ -27,13 +27,15 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-06-20
+
 This is a focused **Vault audit pass**: a deep bug + feature sweep of the Vault
 module (SolidWorks PDM parity) followed by TDD'd fixes. Highlights are several
-data-loss / data-integrity fixes in local sync and the recycle bin.
+data-loss / data-integrity fixes in local sync and the recycle bin, plus a fix
+for new members landing without vault access.
 
-> Note: the backend (Supabase) changes below are migrations that still need to be
-> applied to the database and run against a staging/local Supabase — they could not
-> be exercised from this working copy.
+> Note: the backend (Supabase) migrations below have been applied to the hosted
+> database and verified.
 
 ### Added
 
@@ -112,6 +114,22 @@ data-loss / data-integrity fixes in local sync and the recycle bin.
 - Vault: Insights no longer count recycle-bin files in its totals, and the "orphans"
   metric now counts genuinely unreferenced parts (it previously missed top-level
   assemblies).
+- Vault: **new members now get vault access automatically on sign-up** — every new
+  account is granted the baseline Editor role instead of landing with no access at
+  all (officers/leads are still promoted to Admin by an admin). Existing members who
+  had slipped through without a role were backfilled.
+- Vault: the bill of materials no longer merges two different unresolved parts that
+  happen to share a filename into one row with a combined quantity.
+- Vault: opening a bill of materials that fails to load now shows an error with a
+  Retry instead of hanging on "Loading…"; deleting a file shows its where-used impact
+  without a blank pause.
+- Vault: restoring an old assembly version no longer shows parts that were deleted in
+  the meantime as still-present, and restoring a part no longer re-links it under an
+  assembly that is itself in the recycle bin.
+- Vault: Insights/mass dashboard now resets cleanly when you switch vaults instead of
+  briefly showing the previous vault's numbers.
+- Internal: audit-log entries carrying an action from a newer server build no longer
+  fail to load in older clients.
 
 ## [4.4.6] - 2026-06-18
 
