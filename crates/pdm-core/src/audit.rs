@@ -1,19 +1,22 @@
 use crate::ids::UserId;
+use alloc::borrow::ToOwned;
 use alloc::string::String;
 use chrono::{DateTime, Utc};
+use core::fmt;
+use serde::de::{self, Deserializer, Visitor};
+use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
 /// Every action string the Postgres triggers / RPCs write to `pdm.audit_log.action`.
 ///
-/// Variants map 1-to-1 with the DB string via `#[serde(rename_all = "snake_case")]`.
-/// `Other` is a forward-compatibility catch-all: any action string not listed here
-/// deserializes to `Other` instead of returning a hard error (`#[serde(other)]`).
-///
-/// Note: `Other` cannot carry the original string because `#[serde(other)]` requires
-/// a unit variant.  Callers that need the raw string should read `AuditEntry.target_type`
-/// or the raw JSON before deserializing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// Known variants map 1-to-1 with the DB string (snake_case).  `Other(String)` is a
+/// forward-compatibility catch-all: any action string not listed here deserializes to
+/// `Other("the_raw_string")` instead of returning a hard error, and — crucially —
+/// serializes *back* to that same raw string, so an `AuditEntry` carrying an unknown
+/// action round-trips losslessly (read from the DB -> send to the UI/cache) instead of
+/// panicking on re-serialization.  (De)serialization is implemented manually below
+/// precisely so `Other` can carry and re-emit the original value.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AuditAction {
     // ── lock lifecycle ───────────────────────────────────────────────────────
     /// File checked out (lock created). target_type = "lock"
@@ -80,14 +83,71 @@ pub enum AuditAction {
     RoleRevoke,
 
     // ── forward-compatibility catch-all ──────────────────────────────────────
-    /// Any action string not recognised by this version of the crate.
-    /// Use this to avoid hard deserialization failures when new actions are
-    /// added to the DB before the crate is updated.
-    #[serde(other)]
-    Other,
+    /// Any action string not recognised by this version of the crate, with the
+    /// original Postgres string preserved.  Avoids hard deserialization failures
+    /// when new actions are added to the DB before the crate is updated, and
+    /// re-serializes to the preserved string so entries round-trip losslessly.
+    Other(String),
 }
 
 impl AuditAction {
+    /// The wire / Postgres `action` string for this variant.  Known variants use
+    /// their snake_case name; `Other` returns the preserved original string.
+    pub fn as_str(&self) -> &str {
+        match self {
+            AuditAction::CheckOut => "check_out",
+            AuditAction::CheckIn => "check_in",
+            AuditAction::CancelCheckout => "cancel_checkout",
+            AuditAction::ForceUnlock => "force_unlock",
+            AuditAction::LockReleased => "lock_released",
+            AuditAction::SetRevision => "set_revision",
+            AuditAction::RestoreVersion => "restore_version",
+            AuditAction::ParseRefsFailed => "parse_refs_failed",
+            AuditAction::Delete => "delete",
+            AuditAction::Restore => "restore",
+            AuditAction::FileCreate => "file_create",
+            AuditAction::FileRename => "file_rename",
+            AuditAction::FileMove => "file_move",
+            AuditAction::FileDelete => "file_delete",
+            AuditAction::FolderCreate => "folder_create",
+            AuditAction::FolderRename => "folder_rename",
+            AuditAction::FolderMove => "folder_move",
+            AuditAction::FolderDelete => "folder_delete",
+            AuditAction::RoleGrant => "role_grant",
+            AuditAction::RoleChange => "role_change",
+            AuditAction::RoleRevoke => "role_revoke",
+            AuditAction::Other(s) => s.as_str(),
+        }
+    }
+
+    /// Map a wire / Postgres `action` string to a variant.  Unknown strings are
+    /// preserved in `Other` rather than rejected.
+    pub fn from_wire(s: &str) -> AuditAction {
+        match s {
+            "check_out" => AuditAction::CheckOut,
+            "check_in" => AuditAction::CheckIn,
+            "cancel_checkout" => AuditAction::CancelCheckout,
+            "force_unlock" => AuditAction::ForceUnlock,
+            "lock_released" => AuditAction::LockReleased,
+            "set_revision" => AuditAction::SetRevision,
+            "restore_version" => AuditAction::RestoreVersion,
+            "parse_refs_failed" => AuditAction::ParseRefsFailed,
+            "delete" => AuditAction::Delete,
+            "restore" => AuditAction::Restore,
+            "file_create" => AuditAction::FileCreate,
+            "file_rename" => AuditAction::FileRename,
+            "file_move" => AuditAction::FileMove,
+            "file_delete" => AuditAction::FileDelete,
+            "folder_create" => AuditAction::FolderCreate,
+            "folder_rename" => AuditAction::FolderRename,
+            "folder_move" => AuditAction::FolderMove,
+            "folder_delete" => AuditAction::FolderDelete,
+            "role_grant" => AuditAction::RoleGrant,
+            "role_change" => AuditAction::RoleChange,
+            "role_revoke" => AuditAction::RoleRevoke,
+            other => AuditAction::Other(other.to_owned()),
+        }
+    }
     /// What `pdm.audit_log.target_type` the Postgres triggers / RPCs use for this action.
     /// Matches the conventions defined in migration `20260507000900_pdm_audit_triggers.sql`
     /// and subsequent structural-events / role migrations.
@@ -98,7 +158,7 @@ impl AuditAction {
     /// both files *and* folders, so this function returns `"file"` for those variants
     /// as a convenience default only.  If you need the authoritative subject type,
     /// read `AuditEntry.target_type` directly instead of calling this method.
-    pub fn canonical_target_type(self) -> &'static str {
+    pub fn canonical_target_type(&self) -> &'static str {
         match self {
             // lock lifecycle
             AuditAction::CheckOut => "lock",
@@ -128,8 +188,34 @@ impl AuditAction {
             AuditAction::RoleChange => "user_role",
             AuditAction::RoleRevoke => "user_role",
             // forward-compat catch-all
-            AuditAction::Other => "unknown",
+            AuditAction::Other(_) => "unknown",
         }
+    }
+}
+
+// Manual (de)serialization so the `Other(String)` catch-all round-trips losslessly:
+// a known variant (de)serializes via its snake_case wire string, and an unknown
+// string is preserved in `Other` and re-emitted verbatim — serialization can never
+// fail or panic on an entry read from a newer database.
+impl Serialize for AuditAction {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AuditAction {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ActionVisitor;
+        impl Visitor<'_> for ActionVisitor {
+            type Value = AuditAction;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("an audit action string")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<AuditAction, E> {
+                Ok(AuditAction::from_wire(v))
+            }
+        }
+        deserializer.deserialize_str(ActionVisitor)
     }
 }
 

@@ -14,7 +14,7 @@ fn action_round_trips_through_postgres_strings() {
         (ForceUnlock, "force_unlock"),
         (ParseRefsFailed, "parse_refs_failed"),
     ] {
-        let serialized = serde_json::to_value(a).unwrap();
+        let serialized = serde_json::to_value(&a).unwrap();
         assert_eq!(serialized, json!(s));
         let back: AuditAction = serde_json::from_value(json!(s)).unwrap();
         assert_eq!(back, a);
@@ -78,18 +78,47 @@ fn all_db_action_strings_deserialize_to_correct_variant() {
 }
 
 #[test]
-fn unknown_action_string_deserializes_to_other() {
-    // Forward-compat: an action string we don't know about must NOT panic/error.
+fn unknown_action_string_deserializes_to_other_preserving_value() {
+    // Forward-compat: an action string we don't know about must NOT panic/error,
+    // and the original string must be preserved on the Other variant.
     let back: AuditAction = serde_json::from_value(json!("some_future_action")).unwrap();
-    assert_eq!(back, AuditAction::Other);
+    assert_eq!(back, AuditAction::Other("some_future_action".to_string()));
 
     let back2: AuditAction = serde_json::from_value(json!("totally_unknown_xyz")).unwrap();
-    assert_eq!(back2, AuditAction::Other);
+    assert_eq!(back2, AuditAction::Other("totally_unknown_xyz".to_string()));
+}
+
+#[test]
+fn unknown_action_serializes_back_to_its_raw_string_without_panicking() {
+    // The whole point of carrying the string: an entry read from a newer DB and
+    // re-serialized (to UI / cache / IPC) must NOT error. Previously `#[serde(other)]`
+    // gave a unit `Other` with no serialize mapping -> runtime failure.
+    let action = AuditAction::Other("merge".to_string());
+    let v = serde_json::to_value(&action).expect("serializing Other must not fail");
+    assert_eq!(v, json!("merge"));
+
+    // Full lossless round-trip through an AuditEntry.
+    let entry = AuditEntry {
+        id: 7,
+        user_id: Some(UserId::new()),
+        action: AuditAction::Other("merge".to_string()),
+        target_type: "version".to_string(),
+        target_id: VersionId::new().to_string(),
+        payload: None,
+        ts: Utc::now(),
+    };
+    let s = serde_json::to_string(&entry).expect("serializing entry must not fail");
+    let back: AuditEntry = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, entry);
+    assert_eq!(back.action, AuditAction::Other("merge".to_string()));
 }
 
 #[test]
 fn other_variant_canonical_target_type_is_unknown() {
-    assert_eq!(AuditAction::Other.canonical_target_type(), "unknown");
+    assert_eq!(
+        AuditAction::Other("whatever".to_string()).canonical_target_type(),
+        "unknown"
+    );
 }
 
 #[test]
