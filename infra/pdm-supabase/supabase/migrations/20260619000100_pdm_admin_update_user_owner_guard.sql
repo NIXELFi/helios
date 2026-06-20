@@ -7,10 +7,12 @@
 -- looks up the target's GLOBAL role and raises if it is 'owner' and the caller
 -- is not pdm.is_owner().
 --
--- This is a verbatim copy of the 20260603080000 body with one guard block added
--- immediately after the existing is_admin() check. The wrapper function and
--- grants already exist and are idempotent here. Applies to production via
--- CREATE OR REPLACE.
+-- This is a verbatim copy of the 20260603080000 body with two guard blocks added
+-- immediately after the existing is_admin() check, for full parity with
+-- admin_delete_user: (1) only the owner may edit the owner account, and
+-- (2) a non-owner admin may not edit another admin's account. The wrapper
+-- function and grants already exist and are idempotent here. Applies to
+-- production via CREATE OR REPLACE.
 
 create or replace function pdm.admin_update_user(p_target uuid, p_display_name text, p_subteam text)
 returns void
@@ -30,6 +32,11 @@ begin
    where user_id = p_target and vault_id is null;
   if v_target_role = 'owner' and not pdm.is_owner() then
     raise exception 'only the owner can edit the owner account';
+  end if;
+  -- Admin-tier guard (full parity with admin_delete_user): a non-owner admin
+  -- cannot act on another admin's account.
+  if v_target_role = 'admin' and not pdm.is_owner() then
+    raise exception 'only the owner can edit an admin';
   end if;
 
   update auth.users

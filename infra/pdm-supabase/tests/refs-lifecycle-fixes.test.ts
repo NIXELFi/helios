@@ -188,6 +188,54 @@ describe("H7: refs re-resolve trigger on deleted_at (20260619000300)", () => {
     const { data: after } = await svc.from("refs").select("child_file_id").eq("parent_version_id", parentVer);
     expect(after![0].child_file_id).toBeNull();
   });
+
+  it("M-3: does NOT re-resolve refs owned by a soft-deleted PARENT assembly when the child is restored", async () => {
+    // Restoring a child must only re-resolve refs belonging to LIVE parents.
+    // If the parent assembly is itself in the recycle bin, its refs must stay
+    // unresolved (live-only philosophy), even though the basename now matches a
+    // unique live child.
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const editor = await createTestUser(uniqueEmail("editor"));
+    await setRole(editor.id, "editor");
+    const { vaultId, folderId } = await seedVault(admin.id);
+
+    const childId = await addFile(vaultId, folderId, "gusset.sldprt");
+    const parentId = await addFile(vaultId, folderId, "deleted-asm.sldasm");
+
+    const svc = serviceClient();
+    const c = await signInAs(editor.email!);
+    const childVer = await checkIn(c, editor.id, childId, "c".repeat(64));
+    const parentVer = await checkIn(c, editor.id, parentId, "p".repeat(64));
+
+    // Resolve the ref, then delete the CHILD (H7 nulls the ref out → dangling).
+    await c.rpc("pdm_record_refs", {
+      p_parent_version_id: parentVer,
+      p_child_hints: ["gusset.sldprt"],
+    });
+    await svc
+      .from("files")
+      .update({ deleted_at: new Date().toISOString(), deleted_by: admin.id })
+      .eq("id", childId);
+
+    // Now soft-delete the PARENT assembly too.
+    await svc
+      .from("files")
+      .update({ deleted_at: new Date().toISOString(), deleted_by: admin.id })
+      .eq("id", parentId);
+
+    const { data: mid } = await svc.from("refs").select("child_file_id").eq("parent_version_id", parentVer);
+    expect(mid![0].child_file_id).toBeNull(); // dangling
+
+    // Restore ONLY the child. Without the M-3 fix the restore trigger would
+    // re-resolve the dangling ref even though its parent is still deleted.
+    await svc.from("files").update({ deleted_at: null, deleted_by: null }).eq("id", childId);
+
+    const { data: after } = await svc.from("refs").select("child_file_id").eq("parent_version_id", parentVer);
+    // M-3: parent assembly is soft-deleted → its refs must remain unresolved.
+    expect(after![0].child_file_id).toBeNull();
+    void childVer;
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,10 +289,13 @@ describe("M9: restore_version re-pins child refs to current latest (202606190003
     expect(refs![0].child_version_id).not.toBe(childV1);
   });
 
-  it("leaves child_version_id from old version when child has since been soft-deleted (no live latest)", async () => {
-    // If the child is deleted its latest_version_id may still be set but
-    // deleted_at is not null — the M9 fix skips it (cf.deleted_at is null).
-    // The ref should keep the old child_version_id rather than be cleared to null.
+  it("M-2: nulls out copied refs whose child has since been soft-deleted (no dangling resolved ref)", async () => {
+    // The copied ref carries forward child_file_id from the target version.
+    // If that child file is now soft-deleted, the M9 re-pin skips it
+    // (cf.deleted_at is null) — but leaving the stale child_file_id pointing
+    // into the recycle bin is the same H7 dangling-ref bug on the restore path.
+    // The M-2 fix nulls out BOTH child pointers for any copied ref whose child
+    // is no longer live, matching handle_file_deleted_at_change().
     const admin = await createTestUser(uniqueEmail("admin"));
     await setRole(admin.id, "admin");
     const editor = await createTestUser(uniqueEmail("editor"));
@@ -277,7 +328,8 @@ describe("M9: restore_version re-pins child refs to current latest (202606190003
       .update({ deleted_at: new Date().toISOString(), deleted_by: admin.id })
       .eq("id", childId);
 
-    // Restore parent to v1 — child is deleted, so M9 re-pin must be skipped.
+    // Restore parent to v1 — child is deleted, so the copied ref must be
+    // cleared by the M-2 hygiene step (not left pointing into the recycle bin).
     await c.from("locks").insert({ file_id: parentId, user_id: editor.id });
     const { data: restored, error } = await c.rpc("pdm_restore_version", {
       p_file_id: parentId,
@@ -285,21 +337,22 @@ describe("M9: restore_version re-pins child refs to current latest (202606190003
     });
     expect(error).toBeNull();
 
-    // H7 trigger fires on the child's deleted_at update, which nulls out the
-    // child_file_id in existing refs — but the restored version's refs are
-    // inserted AFTER that event and don't go through the trigger.  The M9 fix
-    // skips the deleted child (deleted_at is not null), so child_version_id
-    // retains the value copied from v_target.
-    // Verify the ref still has child_file_id (H7 trigger only acts on existing
-    // rows, not on the insert inside restore_version which happens after the
-    // delete event).
+    // The restored version's ref is inserted by restore_version (it does not go
+    // through the H7 deleted_at trigger).  Without the M-2 fix it would carry a
+    // stale child_file_id/child_version_id pointing at the soft-deleted child.
+    // With the fix, both pointers are nulled out — the ref is unresolved/dangling
+    // exactly like a live delete would leave it.
     const { data: refs } = await svc
       .from("refs")
-      .select("child_file_id,child_version_id")
+      .select("child_path_hint,child_file_id,child_version_id")
       .eq("parent_version_id", (restored as any).id);
     expect(refs).toHaveLength(1);
-    // child_version_id is not overwritten to null by M9 fix (deleted child skipped).
-    expect(refs![0].child_version_id).toBe(childV1);
+    // The path hint is preserved so the ref can re-resolve if the child is restored.
+    expect(refs![0].child_path_hint).toBe("deleted-part.sldprt");
+    // M-2: both child pointers cleared because the child is soft-deleted.
+    expect(refs![0].child_file_id).toBeNull();
+    expect(refs![0].child_version_id).toBeNull();
+    void childV1; // (was the stale pin we must NOT carry forward)
   });
 });
 

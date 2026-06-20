@@ -80,6 +80,7 @@ begin
       join pdm.files    pf on pf.id = pv.file_id
       where pv.id = r.parent_version_id
         and pf.vault_id = new.vault_id
+        and pf.deleted_at is null   -- M-3: don't re-resolve refs owned by a soft-deleted PARENT assembly
         and r.child_file_id is null
         and lower(regexp_replace(r.child_path_hint, '^.*[/\\]', '')) = lower(new.name);
     end if;
@@ -183,6 +184,20 @@ begin
     and cf.deleted_at is null
     and cf.latest_version_id is not null
     and cf.latest_version_id is distinct from r.child_version_id;
+
+  -- M-2 fix (same H7 dangling-ref bug on the restore path): the copied refs
+  -- carry forward whatever child_file_id the target version had.  If that child
+  -- file has since been SOFT-DELETED, the copied ref would resolve into the
+  -- recycle bin (a stale "resolved" pointer).  Null out both child pointers for
+  -- any copied ref whose child is no longer live, matching the live-only
+  -- philosophy of handle_file_deleted_at_change().
+  update pdm.refs r
+  set child_file_id = null,
+      child_version_id = null
+  from pdm.files cf
+  where r.parent_version_id = v_new.id
+    and r.child_file_id = cf.id
+    and cf.deleted_at is not null;
 
   update pdm.files
      set latest_version_id = v_new.id,

@@ -38,6 +38,7 @@ declare
   v_deleter uuid;
   v_folder  uuid;
   v_parent  uuid;
+  v_guard   int := 0;
 begin
   if v_caller is null then raise exception 'authentication required'; end if;
   select vault_id, deleted_by, folder_id
@@ -62,8 +63,14 @@ begin
   --     soft-deleted ancestor folder so the file is browsable after restore.
   --     We do NOT restore files inside those folders — only the folder rows
   --     themselves (matching the pattern used by restore_folder).
+  --     Bounded against a (corrupt) parent_id cycle so a bad chain can never
+  --     spin until statement timeout.
   v_parent := v_folder;
   while v_parent is not null loop
+    v_guard := v_guard + 1;
+    if v_guard > 10000 then
+      exit;  -- defensive: folder hierarchy far deeper than possible => cycle.
+    end if;
     update pdm.folders
        set deleted_at = null, deleted_by = null, delete_batch = null
      where id = v_parent and deleted_at is not null;
@@ -92,6 +99,7 @@ declare
   v_deleter uuid;
   v_batch   uuid;
   v_parent  uuid;
+  v_guard   int := 0;
 begin
   if v_caller is null then raise exception 'authentication required'; end if;
   select vault_id, deleted_by, delete_batch, parent_id
@@ -121,7 +129,13 @@ begin
   -- Re-anchor: if any ancestor of the restored folder is itself deleted
   -- (a different batch), restore the ancestor FOLDER chain (not its files)
   -- so nothing comes back orphaned. (Existing logic from 20260606000000.)
+  -- Bounded against a (corrupt) parent_id cycle so a bad chain can never spin
+  -- until statement timeout.
   while v_parent is not null loop
+    v_guard := v_guard + 1;
+    if v_guard > 10000 then
+      exit;  -- defensive: folder hierarchy far deeper than possible => cycle.
+    end if;
     update pdm.folders set deleted_at = null, deleted_by = null, delete_batch = null
       where id = v_parent and deleted_at is not null;
     select parent_id into v_parent from pdm.folders where id = v_parent;

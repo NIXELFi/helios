@@ -77,3 +77,12 @@ begin
       values (v_caller, 'delete', 'file', p_file_id, jsonb_build_object('soft', true));
   exception when others then null; end;
 end; $function$;
+
+-- ---------------------------------------------------------------------------
+-- audit_log sequence grant (correctness): pdm.audit_log.id is a bigserial.
+-- 20260507000000 grants `all on all tables in schema pdm to service_role` but
+-- never grants USAGE on the backing sequence, so a direct INSERT into
+-- pdm.audit_log by service_role fails with "permission denied for sequence
+-- audit_log_id_seq". `authenticated` has only SELECT on pdm tables (no INSERT)
+-- so it does not need the sequence. Grant USAGE to service_role here.
+grant usage on sequence pdm.audit_log_id_seq to service_role;
