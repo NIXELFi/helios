@@ -491,7 +491,16 @@ export function BrowseScreen() {
   // / delete files). Held as a render-prop bundle so one <ConfirmDialog> serves
   // every call site. `error` surfaces an RPC failure message inline afterward.
   const [confirm, setConfirm] = useState<
-    | { title: string; body: string; confirmLabel: string; onConfirm: () => void | Promise<void> }
+    | {
+        title: string;
+        body: string;
+        confirmLabel: string;
+        onConfirm: () => void | Promise<void>;
+        // Optional where-used impact line, populated asynchronously after the
+        // dialog is already open (so a slow/hung fetch never blocks the dialog
+        // from appearing). null = nothing extra to show.
+        whereUsedNote?: string | null;
+      }
     | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1225,51 +1234,63 @@ export function BrowseScreen() {
                   : "Only files you have checked out (or admins) can be deleted",
             onClick: () => {
               setActionError(null);
-              // For a single-file delete, query where-used first and prepend an
-              // impact warning to the confirm body so the user knows which
-              // assemblies reference this file. Mirrors SW PDM impact warning.
-              // Best-effort: if the query fails we fall through with no warning.
-              const buildBody = async (): Promise<string> => {
-                const baseBody = `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`;
-                if (n !== 1) return baseBody;
-                try {
-                  const f = targetFiles[0]!;
-                  const parents = await fetchWhereUsed(supabase, f.id);
-                  const warning = whereUsedWarning(parents);
-                  if (warning) return `${warning.message}\n\n${baseBody}`;
-                } catch { /* ignore */ }
-                return baseBody;
+              const baseBody = `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`;
+              const onConfirm = async () => {
+                const succeeded: FileId[] = [];
+                for (const f of targetFiles) {
+                  const ok = await deleteFile.run(f.id);
+                  if (ok) succeeded.push(f.id);
+                }
+                const failed = n - succeeded.length;
+                // M14: remove successfully-deleted ids from the selection even
+                // on partial failure, mirroring BulkActionBar.bulkDelete which
+                // keeps only the failed ids selected so the user can retry.
+                setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
+                if (failed > 0) {
+                  setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                } else {
+                  toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
+                }
+                afterMutate();
               };
-              void buildBody().then((body) => {
-                // Guard: the component may have unmounted while fetchWhereUsed
-                // was in-flight (e.g. vault switch).  Setting state on an
-                // unmounted tree would be a no-op in React 18 but can surface
-                // as a warning in test/strict-mode environments (MED defect).
-                if (!mountedRef.current) return;
-                setConfirm({
-                  title: `Delete ${n} file${n === 1 ? "" : "s"}`,
-                  body,
-                  confirmLabel: "Delete",
-                  onConfirm: async () => {
-                    const succeeded: FileId[] = [];
-                    for (const f of targetFiles) {
-                      const ok = await deleteFile.run(f.id);
-                      if (ok) succeeded.push(f.id);
-                    }
-                    const failed = n - succeeded.length;
-                    // M14: remove successfully-deleted ids from the selection even
-                    // on partial failure, mirroring BulkActionBar.bulkDelete which
-                    // keeps only the failed ids selected so the user can retry.
-                    setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
-                    if (failed > 0) {
-                      setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
-                    } else {
-                      toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
-                    }
-                    afterMutate();
-                  },
-                });
+
+              // Open the confirm dialog IMMEDIATELY so a slow/hung where-used
+              // query can never prevent it from appearing. For a single-file
+              // delete we then fetch where-used in the background and patch the
+              // impact line in once it resolves (mirrors SW PDM impact warning).
+              if (n !== 1) {
+                setConfirm({ title: `Delete ${n} files`, body: baseBody, confirmLabel: "Delete", whereUsedNote: null, onConfirm });
+                return;
+              }
+
+              const f = targetFiles[0]!;
+              setConfirm({
+                title: "Delete 1 file",
+                body: baseBody,
+                confirmLabel: "Delete",
+                whereUsedNote: "Checking where this file is used...",
+                onConfirm,
               });
+              void fetchWhereUsed(supabase, f.id).then(
+                (parents) => {
+                  if (!mountedRef.current) return;
+                  const warning = whereUsedWarning(parents);
+                  // Only patch the note if the dialog is still the one we opened.
+                  setConfirm((prev) =>
+                    prev && prev.onConfirm === onConfirm
+                      ? { ...prev, whereUsedNote: warning ? warning.message : null }
+                      : prev,
+                  );
+                },
+                () => {
+                  if (!mountedRef.current) return;
+                  setConfirm((prev) =>
+                    prev && prev.onConfirm === onConfirm
+                      ? { ...prev, whereUsedNote: "Couldn't check where this file is used." }
+                      : prev,
+                  );
+                },
+              );
             },
           });
           // Single-file local affordances. matchLocal resolves the on-disk copy.
@@ -1305,7 +1326,16 @@ export function BrowseScreen() {
       {confirm && (
         <ConfirmDialog
           title={confirm.title}
-          body={confirm.body}
+          body={
+            confirm.whereUsedNote != null ? (
+              <div className="space-y-2">
+                <div className="text-[#FFB300] whitespace-pre-line">{confirm.whereUsedNote}</div>
+                <div className="whitespace-pre-line">{confirm.body}</div>
+              </div>
+            ) : (
+              <span className="whitespace-pre-line">{confirm.body}</span>
+            )
+          }
           confirmLabel={confirm.confirmLabel}
           confirmTone="danger"
           cancelLabel="Cancel"

@@ -139,6 +139,37 @@ function FileDetailLoader({
         </span>
       )
     : undefined;
+  // When BOM panel is open but the graph failed to load, surface the error
+  // with retry/dismiss instead of silently hanging on "Loading BOM…"
+  // (useVaultBom sets data=null on error, so the loaded-panel branch below
+  // never fires). Mirrors the version-history error path further down.
+  if (showBom && bomResult.error) {
+    return (
+      <aside className="flex h-full w-72 shrink-0 flex-col border-l border-helios-line bg-helios-base xl:w-80">
+        <header className="flex items-center justify-between border-b border-helios-line px-3 py-2 text-xs uppercase tracking-wider text-helios-dim">
+          <span>Bill of Materials</span>
+          <button
+            type="button"
+            onClick={() => setShowBom(false)}
+            className="rounded border border-helios-line px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Close
+          </button>
+        </header>
+        <div className="flex-1 overflow-auto p-3">
+          <div className="text-sm text-[#EF5350]">Couldn't load the BOM: {bomResult.error.message}</div>
+          <button
+            type="button"
+            onClick={() => bomResult.refetch()}
+            disabled={bomResult.loading}
+            className="mt-2 rounded border border-helios-line px-2 py-0.5 text-xs text-helios-text hover:bg-helios-line disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            {bomResult.loading ? "Loading BOM…" : "Retry"}
+          </button>
+        </div>
+      </aside>
+    );
+  }
   // When BOM panel is open and graph is loaded, show BomPanel full-pane.
   if (showBom && bomResult.data && fileName) {
     return (

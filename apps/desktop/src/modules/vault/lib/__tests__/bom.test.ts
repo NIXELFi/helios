@@ -552,6 +552,39 @@ describe("bomToCsv", () => {
 });
 
 // ---------------------------------------------------------------------------
+// flattenBom — two distinct broken refs sharing a basename stay separate rows
+// ---------------------------------------------------------------------------
+
+describe("flattenBom — same-basename unresolved refs do NOT merge", () => {
+  // Two unresolved children with the SAME basename (Bracket.SLDPRT) but
+  // DIFFERENT full paths must remain two distinct parts-list rows. Keying by
+  // basename (the old bug) summed their quantities into a single row.
+  const graph = makeGraph(
+    [{ id: "asm", name: "TopAsm.SLDASM", massGrams: null }],
+    [
+      { parentFileId: "asm", childFileId: null, childPathHint: "/front/Bracket.SLDPRT" },
+      { parentFileId: "asm", childFileId: null, childPathHint: "/rear/Bracket.SLDPRT" },
+    ],
+  );
+
+  const tree = buildBomTree("asm", graph);
+  const flat = flattenBom(tree);
+
+  test("buildBomTree keeps the two broken refs as separate nodes", () => {
+    expect(tree).toHaveLength(2);
+  });
+
+  test("flattenBom keeps two distinct rows (not one merged row)", () => {
+    const brackets = flat.filter((r) => r.name === "Bracket.SLDPRT");
+    expect(brackets).toHaveLength(2);
+    // Each retains its own quantity of 1 — they are NOT summed into qty 2.
+    for (const r of brackets) {
+      expect(r.totalQty).toBe(1);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // bomToCsv — unresolved child rows
 // ---------------------------------------------------------------------------
 

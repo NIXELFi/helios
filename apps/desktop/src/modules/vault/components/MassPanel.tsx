@@ -243,7 +243,7 @@ export function MassPanel({
                     overBudget ? "font-semibold text-red-400" : "font-semibold text-green-400"
                   }
                 >
-                  {overBudget ? "+" : "−"}
+                  {overBudget ? "+" : "-"}
                   {formatMass(Math.abs(deltaGrams))}
                 </span>
               </div>

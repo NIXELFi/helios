@@ -112,7 +112,10 @@ export function eventToNotification(
     if (!newRow) return null;
     const fileId = str(newRow.file_id);
     if (!fileId || !watchedFileIds.has(fileId)) return null;
-    const rowId = str(newRow.id) ?? "?";
+    // Fall back to the fileId (not a bare "?") when the row carries no id, so
+    // two id-less events on different files don't collide into one id and get
+    // silently de-duped by mergeNotifications.
+    const rowId = str(newRow.id) ?? fileId;
     const actorId = str(newRow.author_id);
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
@@ -133,7 +136,10 @@ export function eventToNotification(
     if (!newRow) return null;
     const fileId = str(newRow.file_id);
     if (!fileId || !watchedFileIds.has(fileId)) return null;
-    const rowId = str(newRow.id) ?? "?";
+    // Fall back to the fileId (not a bare "?") when the row carries no id, so
+    // two id-less events on different files don't collide into one id and get
+    // silently de-duped by mergeNotifications.
+    const rowId = str(newRow.id) ?? fileId;
     const actorId = str(newRow.user_id);
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
@@ -174,7 +180,7 @@ export function eventToNotification(
 
     if (!kind) return null; // nothing notification-worthy changed
 
-    const rowId = str(newRow.id) ?? "?";
+    const rowId = str(newRow.id) ?? fileId;
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
       id: makeId(table, eventType + ":" + kind, rowId, at),
@@ -195,8 +201,10 @@ export function eventToNotification(
     const fileId = str(newRow.id);
     if (!fileId || !watchedFileIds.has(fileId)) return null;
 
-    const newDeleted = newRow.deleted_at ?? null;
-    const oldDeleted = oldRow?.deleted_at ?? null;
+    // Route deleted_at through str() (same helper the lock fields use) so an
+    // empty-string timestamp is treated as "not deleted" rather than truthy.
+    const newDeleted = str(newRow.deleted_at);
+    const oldDeleted = str(oldRow?.deleted_at ?? null);
 
     let kind: NotificationKind | null = null;
     if (newDeleted && !oldDeleted) {

@@ -21,6 +21,12 @@ export interface BomNode {
   /** null for unresolved (broken) references. */
   fileId: string | null;
   name: string;
+  /** For unresolved refs only: the full child path hint that this node was
+   *  grouped by in buildBomTree. Distinct broken refs that share a basename
+   *  (e.g. two different folders each missing a `Bracket.SLDPRT`) carry
+   *  distinct hints, so flattenBom can keep them as separate rows instead of
+   *  merging them by basename. Undefined for resolved (fileId !== null) nodes. */
+  pathHint?: string;
   /** How many times this exact file appears under this parent. */
   quantity: number;
   massGrams: number | null;
@@ -127,10 +133,13 @@ function _buildChildren(
 
   for (const { childFileId, childPathHint, count } of grouped.values()) {
     if (childFileId === null) {
-      // Unresolved reference — leaf node with name from path hint.
+      // Unresolved reference — leaf node with name from path hint. Carry the
+      // full hint so flattenBom can group by the SAME key buildBomTree used
+      // (two distinct broken refs sharing a basename must stay distinct rows).
       nodes.push({
         fileId: null,
         name: basenameFromHint(childPathHint),
+        pathHint: childPathHint,
         quantity: count,
         massGrams: null,
         children: [],
@@ -178,13 +187,18 @@ function _buildChildren(
  * a sub-assembly used 2× contributes 2× its children's quantities.
  */
 export function flattenBom(tree: BomNode[]): FlatBomRow[] {
-  // Key: same as in buildBomTree — `id:<fileId>` or `name:<name>` for unresolved.
+  // Key: same as in buildBomTree — `id:<fileId>` for resolved refs and
+  // `hint:<pathHint>` for unresolved ones. Keying unresolved rows by the full
+  // path hint (not the basename) keeps two distinct broken refs that happen to
+  // share a basename as separate rows, matching the tree grouping.
   const accum = new Map<string, { name: string; fileId: string | null; totalQty: number; massGrams: number | null }>();
 
   function walk(nodes: BomNode[], parentMultiplier: number): void {
     for (const node of nodes) {
       const qty = node.quantity * parentMultiplier;
-      const key = node.fileId != null ? `id:${node.fileId}` : `name:${node.name}`;
+      const key = node.fileId != null
+        ? `id:${node.fileId}`
+        : `hint:${node.pathHint ?? node.name}`;
       const isAssembly = node.children.length > 0;
 
       // Assembly nodes are included in the flat list (for display/qty) but their

@@ -184,6 +184,7 @@ export function InsightsScreen() {
 
           {vaultId ? (
             <MassPanel
+              key={vaultId}
               vaultId={vaultId}
               massRows={massRows}
               folders={folderList}
