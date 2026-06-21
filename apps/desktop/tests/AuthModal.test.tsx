@@ -37,18 +37,12 @@ vi.mock("@helios/auth", async () => {
           verifyOtp,
           updateUser,
         },
-        // The signup step loads the subteam picker from pdm.subteams.
-        from: () => ({
-          select: () => ({
-            order: () =>
-              subteamsShouldError
-                ? Promise.resolve({ data: null, error: { message: "permission denied" } })
-                : Promise.resolve({
-                    data: [{ id: "st1", name: "Engine", sort_order: 1 }],
-                    error: null,
-                  }),
-          }),
-        }),
+        // The signup step loads the subteam picker via the list_signup_subteams
+        // RPC (de-duplicated union of pdm.subteams + pm.subteams).
+        rpc: () =>
+          subteamsShouldError
+            ? Promise.resolve({ data: null, error: { message: "permission denied" } })
+            : Promise.resolve({ data: [{ name: "Engine" }], error: null }),
       } as any);
     },
   };

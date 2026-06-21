@@ -296,7 +296,7 @@ function CredentialsStep(props: {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [subteam, setSubteam] = useState("");
-  const [subteams, setSubteams] = useState<{ id: string; name: string }[]>([]);
+  const [subteams, setSubteams] = useState<{ name: string }[]>([]);
   // Track the subteam-picker load separately from the form-level error so a
   // failed fetch surfaces a distinct inline message instead of silently
   // leaving an empty picker that dead-ends sign-up.
@@ -312,8 +312,11 @@ function CredentialsStep(props: {
     setInfo(null);
   }, [mode]);
 
-  // Load the managed subteam list for the sign-up picker. pdm.subteams is
-  // readable by anon, so this works even though the user isn't signed in yet.
+  // Load the managed subteam list for the sign-up picker. Sign-up happens before
+  // auth, so we read through the anon-callable list_signup_subteams() RPC, which
+  // returns the de-duplicated UNION of both subteam sources (pdm.subteams for
+  // identity/officer roles + pm.subteams for PM engineering subsystems). This
+  // way a subteam added in EITHER admin surface shows up here.
   useEffect(() => {
     if (mode !== "signup") return;
     let on = true;
@@ -321,9 +324,7 @@ function CredentialsStep(props: {
     setSubteamsError(null);
     (async () => {
       try {
-        const { data, error } = await (client.from("subteams") as any)
-          .select("id,name,sort_order")
-          .order("sort_order", { ascending: true });
+        const { data, error } = await (client.rpc("list_signup_subteams") as any);
         if (!on) return;
         if (error) {
           // Don't swallow: an empty picker silently dead-ends sign-up. Surface
@@ -331,7 +332,7 @@ function CredentialsStep(props: {
           setSubteamsError(error.message ?? "Couldn't load subteams.");
           return;
         }
-        setSubteams((data as { id: string; name: string }[]) ?? []);
+        setSubteams((data as { name: string }[]) ?? []);
       } catch (e) {
         if (on) setSubteamsError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -458,7 +459,7 @@ function CredentialsStep(props: {
               {subteamsLoading ? "Loading subteams…" : "Select your subteam…"}
             </option>
             {subteams.map((s) => (
-              <option key={s.id} value={s.name}>{s.name}</option>
+              <option key={s.name} value={s.name}>{s.name}</option>
             ))}
           </select>
           {subteamsError && (
