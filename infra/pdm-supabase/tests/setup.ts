@@ -36,7 +36,14 @@ export const anonClient = (): SupabaseClient<any, any, any> =>
     db: { schema: "pdm" },
   });
 
-/** Creates a confirmed test user via the admin API and returns the User row. */
+/** Creates a confirmed test user via the admin API and returns the User row.
+ *
+ *  Since 20260619000700, an on_auth_user_created trigger auto-grants every new
+ *  account a baseline GLOBAL 'editor' role. The RLS/role suite assumes a freshly
+ *  created user starts with NO role (each test then assigns exactly what it needs
+ *  via setRole/setVaultRole), so we clear the auto-provisioned row here to restore
+ *  that baseline. Tests that specifically exercise the auto-provision trigger
+ *  create their user via the admin API directly (see auto-provision-role-on-signup). */
 export async function createTestUser(
   email: string,
   password = "test-password-123",
@@ -48,6 +55,8 @@ export async function createTestUser(
     email_confirm: true,
   });
   if (error) throw error;
+  // Strip the auto-provisioned baseline role so tests start from a clean slate.
+  await svc.from("user_roles").delete().eq("user_id", data.user!.id);
   return data.user!;
 }
 
