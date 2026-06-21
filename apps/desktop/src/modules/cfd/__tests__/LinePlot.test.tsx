@@ -4,31 +4,44 @@
 // plot with the new range — setData alone leaves the old pinned axis. uPlot is
 // mocked to capture constructor options (axes are canvas-drawn, not DOM).
 
-import { render } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 interface FakePlot {
   opts: {
     scales?: { x?: { range?: [number, number] } };
     series?: { spanGaps?: boolean }[];
+    cursor?: { drag?: { x?: boolean; y?: boolean } };
+    hooks?: { setScale?: ((u: FakePlot, key: string) => void)[] };
   };
   data: (number | null)[][];
   setDataCalls: number;
+  scales: { x: { min: number | null; max: number | null } };
+  setScaleCalls: { key: string; min: number; max: number }[];
+  setScale: (key: string, opts: { min: number; max: number }) => void;
 }
 const instances: FakePlot[] = [];
 
 vi.mock("uplot", () => ({
   default: class {
-    opts: unknown;
+    opts: { hooks?: { setScale?: ((u: unknown, key: string) => void)[] } };
     data: unknown;
     setDataCalls = 0;
+    scales = { x: { min: null as number | null, max: null as number | null } };
+    setScaleCalls: { key: string; min: number; max: number }[] = [];
     constructor(opts: unknown, data: unknown) {
-      this.opts = opts;
+      this.opts = opts as { hooks?: { setScale?: ((u: unknown, key: string) => void)[] } };
       this.data = data;
       instances.push(this as unknown as FakePlot);
     }
     setData() {
       (this as unknown as FakePlot).setDataCalls++;
+    }
+    // Mirror uPlot: applying a scale updates u.scales and fires the setScale hooks.
+    setScale(key: string, o: { min: number; max: number }) {
+      this.setScaleCalls.push({ key, min: o.min, max: o.max });
+      if (key === "x") this.scales.x = { min: o.min, max: o.max };
+      for (const h of this.opts.hooks?.setScale ?? []) h(this, key);
     }
     setSize() {}
     destroy() {}
@@ -98,5 +111,41 @@ describe("LinePlot x-axis range", () => {
     rerender(<LinePlot title="t" xs={xs} series={[{ label: "speed", y: ys.map((v) => v * 2) }]} />);
     expect(instances.length).toBe(1); // same plot...
     expect(instances[0]!.setDataCalls).toBeGreaterThan(0); // ...updated via setData
+  });
+});
+
+describe("LinePlot zoom/pan", () => {
+  it("enables x-axis drag-zoom by default (cursor.drag.x = true, y = false)", () => {
+    render(<LinePlot title="t" xs={dist(795)} series={[{ label: "speed", y: ys }]} />);
+    const cur = instances[0]!.opts.cursor;
+    expect(cur!.drag!.x).toBe(true);
+    expect(cur!.drag!.y).toBe(false);
+  });
+
+  it("disables drag-zoom when zoomable={false}", () => {
+    render(<LinePlot title="t" xs={dist(795)} series={[{ label: "speed", y: ys }]} zoomable={false} />);
+    expect(instances[0]!.opts.cursor!.drag!.x).toBe(false);
+  });
+
+  it("shows Reset zoom after a zoom and restores the full extent on click", () => {
+    const { getByLabelText, queryByLabelText } = render(
+      <LinePlot title="t" xs={dist(795)} series={[{ label: "speed", y: ys }]} />,
+    );
+    // No reset button until the user actually zooms in.
+    expect(queryByLabelText("Reset zoom")).toBeNull();
+
+    // Simulate a drag-zoom: uPlot narrows the x scale and fires setScale.
+    const p = instances[0]!;
+    act(() => p.setScale("x", { min: 100, max: 300 }));
+
+    const btn = getByLabelText("Reset zoom");
+    expect(btn).toBeTruthy();
+
+    // Click resets the scale back to the captured full extent [0, 795].
+    fireEvent.click(btn);
+    const last = p.setScaleCalls[p.setScaleCalls.length - 1]!;
+    expect(last).toEqual({ key: "x", min: 0, max: 795 });
+    // ...and the button disappears once we're back at the full extent.
+    expect(queryByLabelText("Reset zoom")).toBeNull();
   });
 });

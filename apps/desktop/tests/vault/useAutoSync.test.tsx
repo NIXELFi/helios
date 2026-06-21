@@ -49,6 +49,9 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
 const seededRels = new Set<string>();
 const ledgerRecordCalls: Array<{ vaultId: string; rel: string; sha: string }> = [];
 const ledgerRemoveCalls: Array<{ vaultId: string; rel: string }> = [];
+// H1: propagation now writes a tombstone (ledgerTombstone) instead of removing
+// the ledger entry, so a reappearing copy of a deleted file isn't auto-re-added.
+const ledgerTombstoneCalls: Array<{ vaultId: string; rel: string }> = [];
 function seedLedger(...rels: string[]) {
   for (const r of rels) seededRels.add(r.normalize("NFC").toLowerCase());
 }
@@ -74,6 +77,10 @@ vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
   }),
   ledgerRemove: vi.fn((vaultId: string, rel: string) => {
     ledgerRemoveCalls.push({ vaultId, rel });
+    return Promise.resolve();
+  }),
+  ledgerTombstone: vi.fn((vaultId: string, rel: string) => {
+    ledgerTombstoneCalls.push({ vaultId, rel });
     return Promise.resolve();
   }),
 }));
@@ -144,6 +151,7 @@ describe("useAutoSync", () => {
     seededRels.clear();
     ledgerRecordCalls.length = 0;
     ledgerRemoveCalls.length = 0;
+    ledgerTombstoneCalls.length = 0;
     localStorage.clear(); // reset the per-vault read-only migration flag
   });
 
@@ -581,10 +589,10 @@ describe("useAutoSync", () => {
 
   // ── T7: local-deletion detection + propagation (third bucket) ──────────────
 
-  it("propagates a locally-deleted CHECKED-OUT file: pdm_delete_file + ledgerRemove + event", async () => {
+  it("propagates a locally-deleted CHECKED-OUT file: pdm_delete_file + ledgerTombstone + event", async () => {
     // File is locked by me, in the ledger, missing from disk → I deleted my
-    // checked-out copy. The pass soft-deletes it in the vault and drops the
-    // ledger entry. No download happens.
+    // checked-out copy. The pass soft-deletes it in the vault and tombstones the
+    // ledger entry (H1: so a reappearing copy isn't auto-re-added). No download.
     const files: VaultFile[] = [makeFile("f1", "frame.sldprt")];
     const versionsByFileId = new Map<string, Version[]>([["f1", [makeVersion("f1", "sha-1")]]]);
     const locks: Lock[] = [
@@ -607,8 +615,8 @@ describe("useAutoSync", () => {
     expect(downloadCalls).toHaveLength(0);
     // Soft-deleted in the vault.
     expect(rpcCalls).toContainEqual({ name: "pdm_delete_file", args: { p_file_id: "f1" } });
-    // Ledger entry dropped.
-    expect(ledgerRemoveCalls).toContainEqual({ vaultId: "v1", rel: "frame.sldprt" });
+    // Ledger entry tombstoned (not removed) so a reappearing copy isn't re-added.
+    expect(ledgerTombstoneCalls).toContainEqual({ vaultId: "v1", rel: "frame.sldprt" });
     // Event fired with the file name.
     expect(propagated).toEqual(["frame.sldprt"]);
     unsub();
@@ -639,7 +647,7 @@ describe("useAutoSync", () => {
     await act(async () => { resolveDownload("sha-1", true); });
     await waitFor(() => { expect(result.current.busy).toBe(false); });
     expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
-    expect(ledgerRemoveCalls).toHaveLength(0);
+    expect(ledgerTombstoneCalls).toHaveLength(0);
   });
 
   it("does NOT propagate when the file is NOT in the ledger (never downloaded here)", async () => {
@@ -662,7 +670,7 @@ describe("useAutoSync", () => {
 
     await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
     expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
-    expect(ledgerRemoveCalls).toHaveLength(0);
+    expect(ledgerTombstoneCalls).toHaveLength(0);
   });
 
   it("warn-once: a blocked (not-checked-out) local delete is BOTH warned about AND re-downloaded in one pass", async () => {
@@ -719,7 +727,7 @@ describe("useAutoSync", () => {
 
     await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
     expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
-    expect(ledgerRemoveCalls).toHaveLength(0);
+    expect(ledgerTombstoneCalls).toHaveLength(0);
     expect(ledgerRecordCalls).toHaveLength(0);
   });
 });

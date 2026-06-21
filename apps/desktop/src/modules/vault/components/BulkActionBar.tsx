@@ -242,10 +242,14 @@ export function BulkActionBar({
   }
 
   async function bulkCheckOut() {
+    const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
     let ok = 0, fail = 0, lockedByOther = 0, alreadyMine = 0;
     for (const id of selectedIds) {
+      // Bail the moment the run is superseded (unmount / selection cleared) so
+      // we stop acquiring locks for rows the user is no longer acting on.
+      if (signal.aborted) return;
       const kind = lockKindFor(id);
       // Skip rows that would fail / no-op at the RPC layer. Pre-filtering
       // here turns "0/3 (3 failed)" into "1/3 (2 locked by other user)" —
@@ -253,6 +257,7 @@ export function BulkActionBar({
       if (kind === "me") { alreadyMine++; continue; }
       if (kind === "other") { lockedByOther++; continue; }
       const r = await acquireLock.run(id);
+      if (signal.aborted) return;
       if (!r) { fail++; continue; }
       // P0: make the local copy editable — get the latest first if ours is
       // missing/stale (so the user doesn't edit an outdated base and then check
@@ -266,15 +271,18 @@ export function BulkActionBar({
         const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
         const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
         if (ver && stale) {
-          const got = await download.run(ver.sha256, dest);
+          const got = await download.run(ver.sha256, dest, signal);
+          if (signal.aborted) return;
           if (!got) { await releaseLock.run(id); fail++; continue; }
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
         }
         await setReadonly(dest, false);
+        if (signal.aborted) return;
         flipSwReadonly(dest, false);
       }
       ok++;
     }
+    if (signal.aborted) return;
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
     if (lockedByOther) detail.push(`${lockedByOther} locked by other user`);
@@ -341,15 +349,36 @@ export function BulkActionBar({
 
   async function bulkDelete() {
     setConfirmDelete(false);
+    const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
     const nameById = new Map(files.map((f) => [f.id, f.name]));
     let ok = 0;
     const failed: string[] = [];
     for (const id of selectedIds) {
+      // Bail the moment the run is superseded (unmount / selection cleared) so
+      // we stop deleting files the user is no longer acting on. Surface partial
+      // progress the same way as a normal partial failure (failed list stays so
+      // the user can see which files were/weren't deleted).
+      if (signal.aborted) break;
       const r = await deleteFile.run(id);
+      if (signal.aborted) break;
       if (r) ok++;
       else failed.push(nameById.get(id) ?? String(id));
+    }
+    if (signal.aborted) {
+      // Surface whatever progress we made before the abort — same pattern as
+      // the other bulk ops (bulkCheckInChanges / bulkGetLatest use `return` so
+      // they surface nothing; bulkDelete keeps partial status because a delete
+      // is destructive and the user must know what was removed).
+      if (ok > 0 || failed.length > 0) {
+        setStatus(
+          `Deleted ${ok}/${selectedIds.length} (interrupted)` +
+            (failed.length ? ` — failed: ${failed.join(", ")}` : ""),
+        );
+        setBusy(false);
+      }
+      return;
     }
     if (failed.length > 0) {
       // Name the failures (hover shows the full list via the status title) and

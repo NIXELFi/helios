@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
+import { useSupabaseClient } from "@helios/auth";
 import { useAcquireLock } from "../data/useAcquireLock";
 import { useCheckIn } from "../data/useCheckIn";
 import { useReleaseLock } from "../data/useReleaseLock";
@@ -15,6 +16,8 @@ import { ledgerRecord } from "../data/sync-ledger";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 import { toast } from "../data/toast";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
+import { fetchWhereUsed } from "../data/useReferences";
+import { whereUsedWarning } from "../data/whereUsedWarning";
 import type { FileId, FolderId, Folder, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -77,13 +80,23 @@ interface CheckInButtonProps extends LocalCtx {
 export function CheckOutButton({
   fileId, onDone, vaultRoot, folderId, fileName, folders, vaultId, latestSha, localFile,
 }: ActionProps) {
+  const client = useSupabaseClient();
   const acquireLock = useAcquireLock();
   const release = useReleaseLock();
   const download = useDownloadVersion();
   const [rollbackErr, setRollbackErr] = useState<string | null>(null);
+  const [whereUsedConfirm, setWhereUsedConfirm] = useState<string | null>(null);
+  // In-flight guard: fetchWhereUsed is async but acquireLock.loading is still
+  // false during the fetch, so the button is not yet disabled. Without this a
+  // rapid double-click re-enters handleClick and can fire doCheckOut() twice or
+  // thrash the where-used dialog. `checkingRef` enforces the single-entry
+  // contract synchronously (no await between the guard check and set), and
+  // `checking` mirrors it as state so the button's disabled prop re-renders
+  // immediately, giving the user visual feedback during the fetch.
+  const checkingRef = useRef(false);
+  const [checking, setChecking] = useState(false);
 
-  async function handleClick(e: React.MouseEvent) {
-    e.stopPropagation();
+  async function doCheckOut() {
     setRollbackErr(null);
     const result = await acquireLock.run(fileId);
     if (!result) return;
@@ -121,26 +134,67 @@ export function CheckOutButton({
     onDone?.();
   }
 
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    // Guard against rapid double-clicks: the button is only disabled while
+    // acquireLock.loading (still false during the fetchWhereUsed await), so
+    // without this a second click would re-enter and double-fire doCheckOut().
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    setChecking(true);
+    try {
+      // Where-Used impact check: if other assemblies currently reference this
+      // file, warn the user before they check it out so they know downstream
+      // assemblies may be affected. Mirrors SW PDM's impact warning on checkout.
+      // Best-effort: if the query fails, proceed silently (don't block checkout).
+      const parents = await fetchWhereUsed(client, fileId);
+      const warning = whereUsedWarning(parents);
+      if (warning) {
+        setWhereUsedConfirm(warning.message);
+        return; // wait for user confirmation (checkingRef/checking cleared in finally)
+      }
+    } catch {
+      // ignore — network hiccup shouldn't block a checkout
+    } finally {
+      checkingRef.current = false;
+      setChecking(false);
+    }
+    void doCheckOut();
+  }
+
   // Surface the hook's error like GetLatestButton — hover tells the user what
   // went wrong (e.g. "already checked out") and the button tints red instead
   // of silently doing nothing.
   const err = acquireLock.error?.message ?? rollbackErr;
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={acquireLock.loading}
-      title={err ? `Check-out failed: ${err}` : "Check out this file (lock it for editing)"}
-      className={
-        "whitespace-nowrap rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-        (err
-          ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
-          : "bg-asu-gold text-white hover:bg-asu-gold/90")
-      }
-    >
-      {acquireLock.loading ? "…" : err ? "Retry" : "Check Out"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={checking || acquireLock.loading}
+        title={err ? `Check-out failed: ${err}` : "Check out this file (lock it for editing)"}
+        className={
+          "whitespace-nowrap rounded px-2 py-0.5 text-xs disabled:opacity-50 " +
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+          (err
+            ? "border border-[#EF5350] bg-[#EF5350]/10 text-[#EF5350] hover:bg-[#EF5350]/20"
+            : "bg-asu-gold text-white hover:bg-asu-gold/90")
+        }
+      >
+        {checking || acquireLock.loading ? "…" : err ? "Retry" : "Check Out"}
+      </button>
+      {whereUsedConfirm && (
+        <ConfirmDialog
+          title={`Check out ${fileName ?? "file"}?`}
+          body={whereUsedConfirm}
+          confirmLabel="Check Out Anyway"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => { void doCheckOut(); }}
+          onClose={() => setWhereUsedConfirm(null)}
+        />
+      )}
+    </>
   );
 }
 

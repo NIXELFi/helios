@@ -1,6 +1,47 @@
 import { useEffect, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, VersionId } from "./types";
+import { fetchByIdsChunked } from "./vault-bulk";
+
+type SupabaseClientLike = ReturnType<typeof useSupabaseClient>;
+
+// ---------------------------------------------------------------------------
+// Pure helper — extracted so it can be unit-tested without a live DB
+// ---------------------------------------------------------------------------
+
+/** Raw shapes the helper operates on (subset of what the DB returns). */
+interface _RefRow       { parent_version_id: string }
+interface _VersionRow   { id: string; file_id: string }
+interface _FileRow      { id: string; name: string; latest_version_id: string | null; deleted_at?: string | null }
+
+/**
+ * Given the raw rows fetched during a where-used query, return only the
+ * parents whose referencing version IS their file's current latest version
+ * AND whose file has not been soft-deleted.
+ *
+ * This matches SolidWorks PDM behaviour: only the HEAD revision of each
+ * assembly counts as a live "user" of the child part.
+ */
+export function filterWhereUsedToLatest(
+  refs: _RefRow[],
+  versionsById: Map<string, _VersionRow>,
+  filesById: Map<string, _FileRow>,
+): WhereUsedRow[] {
+  const seen = new Set<string>();
+  const result: WhereUsedRow[] = [];
+  for (const ref of refs) {
+    const version = versionsById.get(ref.parent_version_id);
+    if (!version) continue;
+    const file = filesById.get(version.file_id);
+    if (!file) continue;                          // soft-deleted parents were excluded from filesById
+    if (file.deleted_at) continue;               // belt-and-suspenders soft-delete guard
+    if (file.latest_version_id !== ref.parent_version_id) continue; // stale ref — not current head
+    if (seen.has(file.id)) continue;             // de-duplicate
+    seen.add(file.id);
+    result.push({ parentFileId: file.id, parentVersionId: ref.parent_version_id, parentName: file.name });
+  }
+  return result;
+}
 
 export interface ContainsRow {
   childPathHint: string;
@@ -67,6 +108,56 @@ export function useContains(versionId: VersionId | null) {
   return { data, loading, error };
 }
 
+/**
+ * Async helper: fetch the current where-used parents for a file on demand.
+ * Usable outside React (e.g. in click handlers). Same query + filter logic
+ * as useWhereUsed.
+ */
+export async function fetchWhereUsed(
+  client: SupabaseClientLike,
+  fileId: FileId,
+): Promise<WhereUsedRow[]> {
+  const { data: refs, error: e1 } = await (client.from("refs") as any)
+    .select("parent_version_id").eq("child_file_id", fileId);
+  if (e1) throw e1;
+  const verIds = Array.from(new Set((refs ?? []).map((r: any) => r.parent_version_id)));
+  if (!verIds.length) return [];
+  // Chunked .in() to avoid the PostgREST 1 000-row cap and HTTP 414 for large
+  // version-id lists (a highly-referenced part can appear in thousands of
+  // assembly versions).
+  const versions = await fetchByIdsChunked<{ id: string; file_id: string }>(
+    client,
+    "versions",
+    "id,file_id",
+    verIds as string[],
+  );
+  const fileIds = Array.from(new Set(versions.map((v) => v.file_id)));
+  if (!fileIds.length) return [];
+  // LIVE parents only — exclude soft-deleted files. fetchByIdsChunked issues a
+  // plain .in("id", ...) without extra filters, so we select deleted_at and
+  // filter client-side. This is equivalent to the original
+  // `.in("id", fileIds).is("deleted_at", null)` query.
+  const liveFetchFields = await fetchByIdsChunked<{
+    id: string;
+    name: string;
+    latest_version_id: string | null;
+    deleted_at: string | null;
+  }>(
+    client,
+    "files",
+    "id,name,latest_version_id,deleted_at",
+    fileIds,
+  );
+  const versionsById = new Map<string, { id: string; file_id: string }>(
+    versions.map((v) => [v.id, v]),
+  );
+  const filesById = new Map<string, { id: string; name: string; latest_version_id: string | null; deleted_at: string | null }>(
+    // Include all files — filterWhereUsedToLatest's deleted_at guard excludes soft-deleted ones.
+    liveFetchFields.map((f) => [f.id, f]),
+  );
+  return filterWhereUsedToLatest(refs ?? [], versionsById, filesById);
+}
+
 /** Parents that reference a given file ("Where Used"). */
 export function useWhereUsed(fileId: FileId | null) {
   const client = useSupabaseClient();
@@ -78,26 +169,15 @@ export function useWhereUsed(fileId: FileId | null) {
     let alive = true;
     setLoading(true); setError(null);
     (async () => {
-      const { data: refs, error: e1 } = await (client.from("refs") as any)
-        .select("parent_version_id").eq("child_file_id", fileId);
-      if (!alive) return;
-      if (e1) { setError(e1); setData(null); setLoading(false); return; }
-      const verIds = Array.from(new Set((refs ?? []).map((r: any) => r.parent_version_id)));
-      if (!verIds.length) { setData([]); setLoading(false); return; }
-      const { data: versions } = await (client.from("versions") as any).select("id,file_id").in("id", verIds);
-      const fileIds = Array.from(new Set((versions ?? []).map((v: any) => v.file_id)));
-      // LIVE parents only — a soft-deleted assembly is not a current "user"
-      // of this part; listing it would block/confuse delete decisions.
-      const { data: files } = await (client.from("files") as any)
-        .select("id,name").in("id", fileIds).is("deleted_at", null);
-      if (!alive) return;
-      const fileName = new Map<string, string>();
-      for (const f of files ?? []) fileName.set(f.id, f.name);
-      setData((versions ?? [])
-        .filter((v: any) => fileName.has(v.file_id))
-        .map((v: any): WhereUsedRow => ({
-          parentFileId: v.file_id, parentVersionId: v.id, parentName: fileName.get(v.file_id)!,
-        })));
+      try {
+        const rows = await fetchWhereUsed(client, fileId);
+        if (!alive) return;
+        setData(rows);
+      } catch (e) {
+        if (!alive) return;
+        setError(e as Error);
+        setData(null);
+      }
       setLoading(false);
     })();
     return () => { alive = false; };

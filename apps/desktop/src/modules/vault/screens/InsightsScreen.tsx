@@ -19,6 +19,8 @@ import { SpotlightCard } from "../components/SpotlightCard";
 import { SpotlightPicker } from "../components/SpotlightPicker";
 import { DeepAnalytics } from "../components/DeepAnalytics";
 import { useVaultInsightsExtra } from "../data/useVaultInsightsExtra";
+import { useVaultMass } from "../data/useVaultMass";
+import { MassPanel } from "../components/MassPanel";
 import { holderLabel } from "./WhoHasWhatScreen";
 import type { VaultFile } from "../data/types";
 
@@ -31,6 +33,7 @@ export function InsightsScreen() {
   const isAdmin = useIsAdmin();
   const setSpotlight = useSetSpotlight();
   const { data: extra, loading: extraLoading } = useVaultInsightsExtra(vaultId ?? undefined);
+  const { data: massRows, loading: massLoading } = useVaultMass(vaultId ?? undefined, files);
   const [picking, setPicking] = useState(false);
 
   const folderList = useMemo(() => folders ?? [], [folders]);
@@ -178,6 +181,16 @@ export function InsightsScreen() {
               <RecentList items={insights.recentlyUpdated} />
             </ChartCard>
           </div>
+
+          {vaultId ? (
+            <MassPanel
+              key={vaultId}
+              vaultId={vaultId}
+              massRows={massRows}
+              folders={folderList}
+              loading={massLoading}
+            />
+          ) : null}
 
           <DeepAnalytics
             extra={extra}

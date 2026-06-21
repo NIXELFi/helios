@@ -3,6 +3,7 @@ import { useUser } from "@helios/auth";
 import { NavRail, type VaultScreenId } from "./components/NavRail";
 import { DownloadModeWelcome } from "./components/DownloadModeWelcome";
 import { ToastHost } from "./components/ToastHost";
+import { NotificationFeed } from "./components/NotificationFeed";
 import { BrowseScreen } from "./screens/BrowseScreen";
 import { InsightsScreen } from "./screens/InsightsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
@@ -10,6 +11,11 @@ import { WhoHasWhatScreen } from "./screens/WhoHasWhatScreen";
 import { RecycleScreen } from "./screens/RecycleScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { useLocks } from "./data/useLocks";
+import { useActiveVault } from "./data/useActiveVault";
+import { useAllFiles } from "./data/useAllFiles";
+import { useWatchedFiles } from "./data/useWatchedFiles";
+import { useNotifications } from "./data/useNotifications";
+import { WatchedFilesContext } from "./data/WatchedFilesContext";
 
 export function VaultHome() {
   const [active, setActive] = useState<VaultScreenId>("browse");
@@ -24,19 +30,58 @@ export function VaultHome() {
     [locks, user],
   );
 
+  const { activeVaultId: vaultId } = useActiveVault();
+
+  // Single useWatchedFiles instance owned here and shared via WatchedFilesContext
+  // so FileDetailPanel's star and this notification feed both read/write the
+  // same React state.  A second independent instance (formerly in BrowseScreen)
+  // caused the notification feed to miss stars toggled in the detail panel
+  // within the same session (HIGH defect).
+  const watchedFiles = useWatchedFiles(vaultId ?? undefined);
+  // useAllFiles provides a flat file list across the whole vault — used to
+  // resolve fileId → name in notifications without requiring a per-folder query.
+  const { data: allFiles } = useAllFiles(vaultId ?? undefined);
+  const { items: notifItems, unread, markAllRead, clear: clearNotifs } = useNotifications(
+    vaultId ?? undefined,
+    watchedFiles.watched,
+    allFiles ?? [],
+  );
+
+  // Jump to file: switch to browse screen. Full navigation (open the folder +
+  // select the file) requires more wiring; for v1 this at least surfaces the
+  // browse tab so the user knows where to look.
+  function handleJumpToFile(_fileId: string) {
+    setActive("browse");
+  }
+
   return (
-    <div className="flex h-full">
-      <NavRail active={active} onSelect={setActive} myCheckouts={myCheckouts} />
-      <main className="flex-1 overflow-hidden">
-        {active === "browse" ? <BrowseScreen /> : null}
-        {active === "insights" ? <InsightsScreen /> : null}
-        {active === "history" ? <HistoryScreen /> : null}
-        {active === "who" ? <WhoHasWhatScreen /> : null}
-        {active === "deleted" ? <RecycleScreen /> : null}
-        {active === "settings" ? <SettingsScreen /> : null}
-      </main>
-      <DownloadModeWelcome />
-      <ToastHost />
-    </div>
+    <WatchedFilesContext.Provider value={watchedFiles}>
+      <div className="flex h-full">
+        <NavRail
+          active={active}
+          onSelect={setActive}
+          myCheckouts={myCheckouts}
+          notificationFeed={
+            <NotificationFeed
+              items={notifItems}
+              unread={unread}
+              onMarkAllRead={markAllRead}
+              onClear={clearNotifs}
+              onJumpToFile={handleJumpToFile}
+            />
+          }
+        />
+        <main className="flex-1 overflow-hidden">
+          {active === "browse" ? <BrowseScreen /> : null}
+          {active === "insights" ? <InsightsScreen /> : null}
+          {active === "history" ? <HistoryScreen /> : null}
+          {active === "who" ? <WhoHasWhatScreen /> : null}
+          {active === "deleted" ? <RecycleScreen /> : null}
+          {active === "settings" ? <SettingsScreen /> : null}
+        </main>
+        <DownloadModeWelcome />
+        <ToastHost />
+      </div>
+    </WatchedFilesContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
-import { useUser } from "@helios/auth";
+import { useUser, useSupabaseClient } from "@helios/auth";
 import { FILE_MANAGER } from "../../../lib/platform";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
@@ -13,7 +13,7 @@ import { useCreateFolder } from "../data/useCreateFolder";
 import { useDeleteFolder } from "../data/useDeleteFolder";
 import { useDeleteFile } from "../data/useDeleteFile";
 import { useVaultDropImport } from "../data/useVaultDropImport";
-import { folderPath } from "../data/folder-paths";
+import { folderPath, isDescendantOf, nearestLiveAncestor, selectionAfterPartialDelete } from "../data/folder-paths";
 import { matchLocal } from "../data/local-match";
 import { revealInExplorer } from "../data/reveal";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -49,11 +49,15 @@ import { useAutoAddDrafts } from "../data/useAutoAddDrafts";
 import { LocalDeleteBanner } from "../components/LocalDeleteBanner";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { VaultSearch } from "../components/VaultSearch";
+import { useVaultProperties } from "../data/useVaultProperties";
 import { SkeletonRows, SkeletonTree } from "../components/Skeleton";
 import { RecentActivity } from "../components/RecentActivity";
 import { useMoveFile } from "../data/useMoveFile";
 import { toast } from "../data/toast";
+import { fetchWhereUsed } from "../data/useReferences";
+import { whereUsedWarning } from "../data/whereUsedWarning";
 import { FileDetailPanel } from "./FileDetailPanel";
+import { useWatchedFilesContext } from "../data/WatchedFilesContext";
 import type { FileId, FolderId, UserId, VaultFile, Version } from "../data/types";
 
 // How often to fall back to a full local rescan if the filesystem watcher
@@ -76,6 +80,7 @@ const VAULT_INCREMENTAL_APPLY = true;
 
 export function BrowseScreen() {
   const user = useUser();
+  const supabase = useSupabaseClient();
   // Global admin — used only for truly global affordances (e.g. "you can
   // create a vault" messaging). In-vault edit/admin checks are per-vault below.
   const isAdmin = useIsAdmin();
@@ -92,6 +97,11 @@ export function BrowseScreen() {
   // Per-vault admin, unioned with the global admin role — same shape as
   // `canEdit` above. Gates deleting a folder that still contains live files.
   const isVaultAdmin = useIsVaultAdmin(vaultId) || isAdmin;
+
+  // Watch set — consume the single instance owned by VaultHome (via context).
+  // Previously a second independent useWatchedFiles call here caused the
+  // notification feed to miss toggles made in FileDetailPanel (HIGH defect).
+  const { isWatched, toggle: toggleWatch } = useWatchedFilesContext();
 
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
@@ -147,6 +157,9 @@ export function BrowseScreen() {
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
   const { data: allFiles, error: allFilesError, refetch: refetchAllFiles, patch: patchAllFiles } = useAllFiles(vaultId ?? undefined);
+  // Property map for search (lazy, loads once per vault). When null (loading)
+  // VaultSearch falls back to filename-only matching — no errors.
+  const vaultPropertiesMap = useVaultProperties(vaultId ?? undefined, allFiles);
   // Soft-deleted files (the recycle bin). Threaded into the realtime/poll
   // refetch below so a delete by another member lands here promptly, and fed to
   // the reaper that removes their local working copies on this machine.
@@ -478,7 +491,16 @@ export function BrowseScreen() {
   // / delete files). Held as a render-prop bundle so one <ConfirmDialog> serves
   // every call site. `error` surfaces an RPC failure message inline afterward.
   const [confirm, setConfirm] = useState<
-    | { title: string; body: string; confirmLabel: string; onConfirm: () => void | Promise<void> }
+    | {
+        title: string;
+        body: string;
+        confirmLabel: string;
+        onConfirm: () => void | Promise<void>;
+        // Optional where-used impact line, populated asynchronously after the
+        // dialog is already open (so a slow/hung fetch never blocks the dialog
+        // from appearing). null = nothing extra to show.
+        whereUsedNote?: string | null;
+      }
     | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -569,6 +591,15 @@ export function BrowseScreen() {
   // Root element of this screen — the drop-import listeners attach HERE, not
   // on window, so they go inert when the Shell hides the Vault module.
   const browseRootRef = useRef<HTMLDivElement | null>(null);
+  // Unmount guard for the fire-and-forget single-file delete path.  The async
+  // buildBody() fetches where-used references before opening the confirm dialog;
+  // if the component unmounts while that fetch is in-flight the .then() callback
+  // would still call setConfirm() on a dead component tree (MED defect).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const dropImport = useVaultDropImport({
     enabled: canEdit && !!vaultId,
     containerRef: browseRootRef,
@@ -790,6 +821,7 @@ export function BrowseScreen() {
             <VaultSearch
               allFiles={allFiles ?? []}
               folders={folders ?? []}
+              propertiesMap={vaultPropertiesMap}
               onPick={jumpToFile}
             />
           </div>
@@ -985,7 +1017,16 @@ export function BrowseScreen() {
       {/* Pass `undefined` (not `[]`) while allFiles is still loading so the
           panel shows its normal state, not a false "file deleted" message. It
           only treats a selection as missing once the list has actually loaded. */}
-      <FileDetailPanel fileId={selectedFile} files={allFiles ?? undefined} vaultRoot={vaultFolderPath} folders={folders ?? []} canEdit={canEdit} />
+      <FileDetailPanel
+        fileId={selectedFile}
+        files={allFiles ?? undefined}
+        vaultRoot={vaultFolderPath}
+        folders={folders ?? []}
+        canEdit={canEdit}
+        vaultId={vaultId ?? null}
+        isWatched={selectedFile ? isWatched(selectedFile) : false}
+        onToggleWatch={toggleWatch}
+      />
       </div>
       {/* Full-pane drag overlay: names the live drop target so a drop is never
           a guess. pointer-events-none keeps the underlying hit-testing (tree
@@ -1128,7 +1169,31 @@ export function BrowseScreen() {
                 onConfirm: async () => {
                   const ok = await deleteFolder.run(folder.id);
                   if (ok) {
-                    if (selectedFolder === folder.id) setSelectedFolder(null);
+                    // M16: reset selectedFolder if it IS the deleted folder or
+                    // any descendant of it. Navigate to the nearest still-live
+                    // ancestor (or null/root if all ancestors are also gone).
+                    if (
+                      selectedFolder !== null &&
+                      (selectedFolder === folder.id ||
+                        isDescendantOf(folders ?? [], selectedFolder, folder.id))
+                    ) {
+                      const allFolders = folders ?? [];
+                      // Build the set of ids that will still be live after the
+                      // deletion: everything except the deleted folder and all
+                      // its descendants (the server soft-deletes the whole subtree).
+                      const deletedSubtree = new Set<FolderId>([folder.id]);
+                      for (const f of allFolders) {
+                        if (isDescendantOf(allFolders, f.id, folder.id)) {
+                          deletedSubtree.add(f.id);
+                        }
+                      }
+                      const liveIds = new Set(
+                        allFolders.map((f) => f.id).filter((id) => !deletedSubtree.has(id)),
+                      );
+                      setSelectedFolder(
+                        nearestLiveAncestor(allFolders, liveIds, selectedFolder),
+                      );
+                    }
                     toast(`Moved ${folder.name} to Deleted`, "info");
                     afterMutate();
                   } else {
@@ -1169,24 +1234,63 @@ export function BrowseScreen() {
                   : "Only files you have checked out (or admins) can be deleted",
             onClick: () => {
               setActionError(null);
+              const baseBody = `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`;
+              const onConfirm = async () => {
+                const succeeded: FileId[] = [];
+                for (const f of targetFiles) {
+                  const ok = await deleteFile.run(f.id);
+                  if (ok) succeeded.push(f.id);
+                }
+                const failed = n - succeeded.length;
+                // M14: remove successfully-deleted ids from the selection even
+                // on partial failure, mirroring BulkActionBar.bulkDelete which
+                // keeps only the failed ids selected so the user can retry.
+                setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
+                if (failed > 0) {
+                  setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                } else {
+                  toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
+                }
+                afterMutate();
+              };
+
+              // Open the confirm dialog IMMEDIATELY so a slow/hung where-used
+              // query can never prevent it from appearing. For a single-file
+              // delete we then fetch where-used in the background and patch the
+              // impact line in once it resolves (mirrors SW PDM impact warning).
+              if (n !== 1) {
+                setConfirm({ title: `Delete ${n} files`, body: baseBody, confirmLabel: "Delete", whereUsedNote: null, onConfirm });
+                return;
+              }
+
+              const f = targetFiles[0]!;
               setConfirm({
-                title: `Delete ${n} file${n === 1 ? "" : "s"}`,
-                body: `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`,
+                title: "Delete 1 file",
+                body: baseBody,
                 confirmLabel: "Delete",
-                onConfirm: async () => {
-                  let failed = 0;
-                  for (const f of targetFiles) {
-                    const ok = await deleteFile.run(f.id);
-                    if (!ok) failed++;
-                  }
-                  if (failed > 0) {
-                    setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
-                  } else {
-                    toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
-                  }
-                  afterMutate();
-                },
+                whereUsedNote: "Checking where this file is used...",
+                onConfirm,
               });
+              void fetchWhereUsed(supabase, f.id).then(
+                (parents) => {
+                  if (!mountedRef.current) return;
+                  const warning = whereUsedWarning(parents);
+                  // Only patch the note if the dialog is still the one we opened.
+                  setConfirm((prev) =>
+                    prev && prev.onConfirm === onConfirm
+                      ? { ...prev, whereUsedNote: warning ? warning.message : null }
+                      : prev,
+                  );
+                },
+                () => {
+                  if (!mountedRef.current) return;
+                  setConfirm((prev) =>
+                    prev && prev.onConfirm === onConfirm
+                      ? { ...prev, whereUsedNote: "Couldn't check where this file is used." }
+                      : prev,
+                  );
+                },
+              );
             },
           });
           // Single-file local affordances. matchLocal resolves the on-disk copy.
@@ -1222,7 +1326,16 @@ export function BrowseScreen() {
       {confirm && (
         <ConfirmDialog
           title={confirm.title}
-          body={confirm.body}
+          body={
+            confirm.whereUsedNote != null ? (
+              <div className="space-y-2">
+                <div className="text-[#FFB300] whitespace-pre-line">{confirm.whereUsedNote}</div>
+                <div className="whitespace-pre-line">{confirm.body}</div>
+              </div>
+            ) : (
+              <span className="whitespace-pre-line">{confirm.body}</span>
+            )
+          }
           confirmLabel={confirm.confirmLabel}
           confirmTone="danger"
           cancelLabel="Cancel"

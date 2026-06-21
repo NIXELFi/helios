@@ -7,6 +7,7 @@ import {
   IconUsers,
   type TablerIcon,
 } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import { VaultSwitcher } from "./VaultSwitcher";
 
 // User & role management moved OUT of the Vault into the top-level Admin module
@@ -28,8 +29,11 @@ export function NavRail(props: {
   /** Current user's active checkout count — badged on "Who has what" so a
    *  glance at the rail answers "do I have anything out?". */
   myCheckouts?: number;
+  /** Rendered at the bottom of the rail — the NotificationFeed bell widget.
+   *  Passed as a slot so NavRail stays free of hook dependencies. */
+  notificationFeed?: ReactNode;
 }) {
-  const { active, onSelect, myCheckouts = 0 } = props;
+  const { active, onSelect, myCheckouts = 0, notificationFeed } = props;
   const entries = ENTRIES;
   return (
     // Shared secondary-sidebar language (CFD NavRail + PM sidebar): a grey
@@ -72,6 +76,13 @@ export function NavRail(props: {
         })}
         </div>
       </div>
+      {/* Notification bell — rendered at the bottom of the rail so it stays
+          visually separated from screen navigation. */}
+      {notificationFeed && (
+        <div className="mt-auto border-t border-helios-line p-2">
+          {notificationFeed}
+        </div>
+      )}
     </nav>
   );
 }

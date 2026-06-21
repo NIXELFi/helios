@@ -2,7 +2,7 @@
 // pipe profiles. Title + legend rendered outside the canvas so Helios
 // chrome stays consistent across charts. ResizeObserver-driven.
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
@@ -30,6 +30,9 @@ interface LinePlotProps {
   yLog?: boolean;
   xLog?: boolean;
   height?: number;
+  /** Enable click-drag zoom on the X axis (Y stays auto). Default: true.
+   *  A "Reset zoom" affordance appears in the header once the user zooms. */
+  zoomable?: boolean;
 }
 
 const DEFAULT_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
@@ -39,10 +42,14 @@ export function LinePlot({
   xLabel, yLabel, y2Label,
   yLog = false, xLog = false,
   height = 220,
+  zoomable = true,
 }: LinePlotProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const plotHostRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
+  // Whether the user has drag-zoomed away from the full x extent. Drives the
+  // "Reset zoom" affordance; cleared on reset and on any plot rebuild.
+  const [zoomed, setZoomed] = useState(false);
 
   // Structural key — rebuild plot when series shape changes OR when
   // data arrives for the first time. The "ready" suffix is critical:
@@ -73,6 +80,18 @@ export function LinePlot({
   for (const s of series) scanX(s.xs);
   const haveXRange = isFinite(xMin) && isFinite(xMax) && xMax > xMin;
   const xRange = haveXRange ? ([xMin, xMax] as [number, number]) : undefined;
+  // Full-extent x range captured for the "Reset zoom" affordance — restoring
+  // this via setScale("x", ...) returns the chart to its un-zoomed domain.
+  const fullXRangeRef = useRef<[number, number] | null>(null);
+  fullXRangeRef.current = xRange ?? null;
+
+  function resetZoom() {
+    const r = fullXRangeRef.current;
+    if (r && plotRef.current) {
+      plotRef.current.setScale("x", { min: r[0], max: r[1] });
+    }
+    setZoomed(false);
+  }
 
   const fieldKey = `ready=${dataReady}|x=${haveXRange ? `${xMin}:${xMax}` : "auto"}|` + series.map((s) =>
     `${s.label}:${s.color ?? ""}:${s.axis ?? "y"}:${s.xs ? "own" : "shared"}`
@@ -178,7 +197,27 @@ export function LinePlot({
         })),
       ],
       legend: { show: false },
-      cursor: { drag: { x: false, y: false }, points: { show: true, size: 5 } },
+      // X-axis drag-zoom (Y stays auto so vertical extent is never clipped).
+      // A small "Reset zoom" button (rendered in the header below) restores the
+      // full extent via setScale; the setScale hook tracks whether we're zoomed.
+      cursor: { drag: { x: zoomable, y: false }, points: { show: true, size: 5 } },
+      hooks: zoomable
+        ? {
+            setScale: [
+              (u: uPlot, key: string) => {
+                if (key !== "x") return;
+                const full = fullXRangeRef.current;
+                const sx = u.scales.x;
+                if (!full || !sx || sx.min == null || sx.max == null) return;
+                // Treat a near-full domain as "not zoomed" (float slack).
+                const span = full[1] - full[0] || 1;
+                const eps = span * 1e-6;
+                const atFull = sx.min <= full[0] + eps && sx.max >= full[1] - eps;
+                setZoomed(!atFull);
+              },
+            ],
+          }
+        : {},
       padding: [10, 12, 4, 4],
     };
 
@@ -194,12 +233,17 @@ export function LinePlot({
       plotRef.current = null;
     }
 
+    // A fresh plot starts at the full extent — clear any stale zoomed flag so a
+    // leftover "Reset zoom" button doesn't persist across a rebuild (study
+    // switch, new sweep point, overlay toggle).
+    setZoomed(false);
+
     return () => {
       plotRef.current?.destroy();
       plotRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fieldKey, xLabel, yLabel, y2Label, yLog, xLog, height]);
+  }, [fieldKey, xLabel, yLabel, y2Label, yLog, xLog, height, zoomable]);
 
   useEffect(() => {
     try {
@@ -230,6 +274,16 @@ export function LinePlot({
       <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
         <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
         <div className="flex flex-wrap items-center gap-2">
+          {zoomable && zoomed && (
+            <button
+              type="button"
+              aria-label="Reset zoom"
+              onClick={resetZoom}
+              className="rounded-sm border border-[#FFC627]/40 px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+            >
+              Reset zoom
+            </button>
+          )}
           {series.map((s, i) => (
             <span key={s.label + i} className="flex items-center gap-1 text-[10px] text-[#5A5F66]">
               <span

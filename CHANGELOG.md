@@ -35,6 +35,128 @@ follow [semver](https://semver.org/).
   (Harmless before this -- it only meant local-deletion detection lagged a pass --
   but it logged a console warning on check-in.)
 
+## [4.5.1] - 2026-06-21
+
+A small follow-up addressing three member feature requests.
+
+### Added
+
+- CFD: **overlay multiple sweep runs** on the result graphs — pick several past
+  sweeps from the Overlay strip to compare them on the same charts (e.g. to find
+  the best collector length), each with its own color and legend (up to 5).
+- CFD: **zoom into result graphs** — click-drag on a chart to zoom the RPM axis;
+  a "Reset zoom" button restores the full range.
+
+### Fixed
+
+- Sign-up: the **subteam dropdown now includes every subteam** an admin has added
+  in either admin area (e.g. the EV subteams High Voltage / Low Voltage / Battery),
+  instead of only the original identity list.
+
+## [4.5.0] - 2026-06-20
+
+This is a focused **Vault audit pass**: a deep bug + feature sweep of the Vault
+module (SolidWorks PDM parity) followed by TDD'd fixes. Highlights are several
+data-loss / data-integrity fixes in local sync and the recycle bin, plus a fix
+for new members landing without vault access.
+
+> Note: the backend (Supabase) migrations below have been applied to the hosted
+> database and verified.
+
+### Added
+
+- Vault: **mass / weight-budget dashboard** on the Insights screen — total vehicle
+  mass, heaviest parts, mass by subsystem, parts missing mass data, and a delta vs an
+  admin-set target mass, all from the Mass already parsed off each part's data card.
+- Vault: **impact warning before checking out or deleting a referenced part** — if
+  other assemblies currently use the part, you're shown which ones first.
+- Vault: **bill of materials (BOM)** for assemblies — open it from a `.sldasm` file's
+  details for an indented or flattened parts list with quantity roll-up, total mass,
+  and CSV export, built from the stored reference graph.
+- Vault: **search by custom property** — type a value like `7075` to find parts by
+  their data-card properties, or use `prop:Material=7075` / `prop:Status="In Review"`
+  filters, in addition to filename search.
+- Vault: **watch files + a notification feed** — star a file to get a bell-icon feed of
+  check-ins, check-outs, force-unlocks, deletes and restores on the parts you care
+  about. (v1 is per-device; a shared server-side feed is a planned follow-up.)
+
+### Security
+
+- Vault: **closed a cross-vault audit-log leak** — a member of one vault could read
+  another vault's activity (check-ins, force-unlocks, role changes) by reading the
+  audit log directly. Reads are now limited to your own activity, with full access
+  for global admins/owners.
+- Vault: **only the owner can edit the owner account** is now enforced on the server
+  (not just hidden in the UI), matching the existing owner-delete protection.
+- Vault: restoring a file or folder from the recycle bin now requires you to
+  **currently** hold edit rights — a member whose role was revoked after deleting can
+  no longer restore.
+- Vault: deleting a file that someone else has checked out now **records who broke the
+  checkout** (force-unlock attribution + audit entry) instead of releasing it silently.
+
+### Fixed
+
+- Vault: **a checked-out file you delete locally and then "undo check-out" is no
+  longer soft-deleted for the whole team.** Deletion propagation now re-checks
+  that you still hold the lock at the moment of deletion, not just at the start of
+  the sync pass.
+- Vault: **a file you intentionally deleted no longer silently comes back.** When
+  a copy reappears on disk (SOLIDWORKS rewriting it, antivirus restore, a re-copy),
+  auto-add is suppressed for a cool-off window instead of re-vaulting it and undoing
+  the deletion.
+- Vault: **the SOLIDWORKS bridge "get latest" no longer overwrites a writable local
+  copy** that may hold unsaved edits — it now skips the same way the drop-import and
+  auto-sync paths do.
+- Vault: deleting a folder you're currently inside now navigates to the nearest
+  still-existing parent folder instead of leaving an empty file list; the breadcrumb
+  no longer shows a dead path.
+- Vault: a partial multi-file delete now un-checks only the files that were actually
+  deleted, keeping the failures selected so you can retry.
+- Vault: right-clicking a folder always shows the folder actions (New folder, Delete
+  folder) even when other files/folders are selected.
+- Vault: bulk check-out and bulk delete now stop immediately when you change the
+  selection, switch vaults, or close the panel; an interrupted bulk delete reports
+  how many files were removed.
+- Vault: **Where Used** now lists only assemblies whose current version actually
+  references the part — assemblies that dropped the part in a later check-in no longer
+  appear, so archive/rename decisions are safe.
+- Vault: a file's property data card now refreshes when another member's check-in
+  changes a property value (not only when the number of properties changes).
+- Vault: **Who Has What** now shows the holder's name for checkouts held by members
+  of other vaults, instead of a raw id.
+- Vault: an admin can no longer edit the owner account's profile from the Users &
+  roles screen (the owner row is now protected, matching the role/revoke controls).
+- Vault: custom properties (Material, Mass, Description, Part Number, …) are now
+  extracted from very large assemblies (> 24 MB) instead of occasionally coming back
+  empty when SOLIDWORKS stored the property block in the middle of the file.
+- Vault: restoring a single file whose folder was deleted now brings the folder back
+  too, so the file is browsable again instead of being stranded in a deleted folder.
+- Vault: **Where Used / Contains stay correct across delete and restore** — deleting a
+  part now marks references to it unresolved, and restoring it re-links them, instead
+  of waiting for the next check-in.
+- Vault: restoring an old version now points its references at each child's current
+  version rather than re-pinning stale ones.
+- Vault: assembly references can now be recorded for imported (migrated) versions.
+- Vault: Insights no longer count recycle-bin files in its totals, and the "orphans"
+  metric now counts genuinely unreferenced parts (it previously missed top-level
+  assemblies).
+- Vault: **new members now get vault access automatically on sign-up** — every new
+  account is granted the baseline Editor role instead of landing with no access at
+  all (officers/leads are still promoted to Admin by an admin). Existing members who
+  had slipped through without a role were backfilled.
+- Vault: the bill of materials no longer merges two different unresolved parts that
+  happen to share a filename into one row with a combined quantity.
+- Vault: opening a bill of materials that fails to load now shows an error with a
+  Retry instead of hanging on "Loading…"; deleting a file shows its where-used impact
+  without a blank pause.
+- Vault: restoring an old assembly version no longer shows parts that were deleted in
+  the meantime as still-present, and restoring a part no longer re-links it under an
+  assembly that is itself in the recycle bin.
+- Vault: Insights/mass dashboard now resets cleanly when you switch vaults instead of
+  briefly showing the previous vault's numbers.
+- Internal: audit-log entries carrying an action from a newer server build no longer
+  fail to load in older clients.
+
 ## [4.4.6] - 2026-06-18
 
 This release is a broad **pre-release polish pass**: a full-repo bug audit followed

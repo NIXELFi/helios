@@ -18,7 +18,15 @@ import { normalizePathForCompare } from "./local-match";
 export interface LedgerEntry {
   sha256: string;
   recordedAt: string;
+  /** ISO timestamp set when this path was propagated as a soft-delete (tombstone).
+   *  Presence means the file was intentionally deleted vault-wide from this machine.
+   *  Used to suppress auto-re-add during the cool-off window so a reappearing copy
+   *  of a just-deleted file is never silently re-vaulted (which would undo the deletion). */
+  deletedAt?: string;
 }
+
+/** How long (ms) a tombstone suppresses auto-add after a propagated deletion. 7 days. */
+export const TOMBSTONE_COOLOFF_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface SyncLedger {
   /** relPath (normalized via normalizePathForCompare) → entry. */
@@ -50,6 +58,27 @@ export function removeEntry(ledger: SyncLedger, relPath: string): SyncLedger {
   return { entries: next };
 }
 
+/** Mark `relPath` as a tombstone: the file was propagated as a vault-wide soft-delete.
+ *  Preserves the existing sha256/recordedAt if an entry already exists (so the stamp
+ *  survives for diagnostics). Returns a NEW ledger (never mutates). The tombstone
+ *  suppresses auto-add during TOMBSTONE_COOLOFF_MS so a reappearing copy of the
+ *  just-deleted file is never silently re-vaulted — which would undo the deletion. */
+export function tombstoneEntry(ledger: SyncLedger, relPath: string): SyncLedger {
+  const key = normalizePathForCompare(relPath);
+  const existing = ledger.entries[key];
+  const now = new Date().toISOString();
+  return {
+    entries: {
+      ...ledger.entries,
+      [key]: {
+        sha256: existing?.sha256 ?? "",
+        recordedAt: existing?.recordedAt ?? now,
+        deletedAt: now,
+      },
+    },
+  };
+}
+
 /** Parse ledger JSON, returning an empty ledger on any parse/shape error so a
  *  truncated or hand-corrupted file can never crash the sync pass. */
 export function parseLedger(text: string): SyncLedger {
@@ -61,9 +90,12 @@ export function parseLedger(text: string): SyncLedger {
     const out: Record<string, LedgerEntry> = {};
     for (const [k, v] of Object.entries(entries as Record<string, unknown>)) {
       if (v && typeof v === "object") {
-        const e = v as { sha256?: unknown; recordedAt?: unknown };
+        const e = v as { sha256?: unknown; recordedAt?: unknown; deletedAt?: unknown };
         if (typeof e.sha256 === "string" && typeof e.recordedAt === "string") {
-          out[k] = { sha256: e.sha256, recordedAt: e.recordedAt };
+          const entry: LedgerEntry = { sha256: e.sha256, recordedAt: e.recordedAt };
+          // Only carry deletedAt through if it's a string (tombstone marker).
+          if (typeof e.deletedAt === "string") entry.deletedAt = e.deletedAt;
+          out[k] = entry;
         }
       }
     }
@@ -81,7 +113,13 @@ export function classifyMissing(
 ): MissingClass {
   if (presentLocally) return "present";
   const key = normalizePathForCompare(relPath);
-  return key in ledger.entries ? "locally-deleted" : "never-downloaded";
+  const e = ledger.entries[key];
+  if (!e) return "never-downloaded";
+  // A tombstone means the file was already propagated as an intentional vault-wide
+  // deletion. Never re-classify it as "locally-deleted" (which would re-propagate
+  // or re-download it); treat it as never-downloaded so the auto-sync pass ignores it.
+  if (e.deletedAt) return "never-downloaded";
+  return "locally-deleted";
 }
 
 // ── IO half (best-effort; never throws) ──────────────────────────────────────
@@ -161,4 +199,12 @@ export function ledgerRecord(vaultId: string, relPath: string, sha256: string): 
 /** Load-modify-save removing one entry, serialized per vault. Best-effort. */
 export function ledgerRemove(vaultId: string, relPath: string): Promise<void> {
   return enqueue(vaultId, (l) => removeEntry(l, relPath));
+}
+
+/** Load-modify-save writing a tombstone for one entry, serialized per vault.
+ *  Use after a successful pdm_delete_file propagation instead of ledgerRemove so
+ *  a reappearing copy of the just-deleted file is not auto-re-vaulted during the
+ *  TOMBSTONE_COOLOFF_MS window. Best-effort. */
+export function ledgerTombstone(vaultId: string, relPath: string): Promise<void> {
+  return enqueue(vaultId, (l) => tombstoneEntry(l, relPath));
 }

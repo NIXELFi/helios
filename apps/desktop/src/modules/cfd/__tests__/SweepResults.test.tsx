@@ -2,7 +2,8 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 
-import { CfdProvider } from "../state/CfdContext";
+import { CfdProvider, useCfd } from "../state/CfdContext";
+import { savePersisted } from "../lib/cfdStorage";
 import { SweepResults } from "../results/SweepResults";
 import { makeFakeBridge } from "./fakes/tauri";
 import { makeSweepStudy, makeSweepPoint } from "./fakes/study";
@@ -28,6 +29,9 @@ const saveTextFileMock = vi.mocked(saveTextFile);
 beforeEach(() => {
   copyTextMock.mockClear();
   saveTextFileMock.mockClear();
+  // Seeded compare studies are persisted to localStorage; clear so they don't
+  // leak into tests that expect an empty overlay strip.
+  window.localStorage.clear();
 });
 
 /** Render SweepResults inside a CfdProvider (so useCfd works). The study is
@@ -39,6 +43,41 @@ function renderSweep(study: SweepStudy) {
     <CfdProvider bridge={fake.bridge} skipRehydrate>{children}</CfdProvider>
   );
   return render(<SweepResults study={study} />, { wrapper });
+}
+
+/** Render SweepResults with extra studies SEEDED into the provider's map so the
+ *  overlay multi-select has other sweeps to pick. The provider always rehydrates
+ *  from localStorage on mount (the rehydrate dispatch isn't gated by
+ *  skipRehydrate), so we seed there and let the provider load them — matching how
+ *  the app actually persists studies. The PRIMARY study is passed via props. */
+function renderSweepWithOthers(primary: SweepStudy, others: SweepStudy[]) {
+  savePersisted({ lastConfigPath: null, studies: others });
+  const fake = makeFakeBridge();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <CfdProvider bridge={fake.bridge} skipRehydrate>{children}</CfdProvider>
+  );
+  return render(<SweepResults study={primary} />, { wrapper });
+}
+
+/** Like renderSweepWithOthers, but the PRIMARY study also lives in the provider
+ *  map and is re-read from state on each render — so overlay-selection changes
+ *  (which mutate the map via setSweepCompareMulti) flow back into the screen,
+ *  exactly as the real app re-passes the active study from state. */
+function ConnectedSweep({ id }: { id: string }) {
+  const { state } = useCfd();
+  const study = state.studies[id];
+  if (!study || study.kind !== "sweep") return null;
+  return <SweepResults study={study} />;
+}
+
+function renderConnectedSweep(primary: SweepStudy, others: SweepStudy[]) {
+  savePersisted({ lastConfigPath: null, studies: [primary, ...others] });
+  const fake = makeFakeBridge();
+  return render(
+    <CfdProvider bridge={fake.bridge} skipRehydrate>
+      <ConnectedSweep id={primary.id} />
+    </CfdProvider>,
+  );
 }
 
 describe("SweepResults — summary band", () => {
@@ -167,6 +206,44 @@ describe("SweepResults — table columns", () => {
     });
     renderSweep(study);
     expect(screen.getByText("61.12")).toBeInTheDocument();
+  });
+});
+
+describe("SweepResults — multi-overlay compare", () => {
+  it("renders overlay series for each selected compare run (N-way)", async () => {
+    const primary = makeSweepStudy({
+      id: "sweep-primary",
+      compareWithStudyIds: ["sweep-a", "sweep-b"],
+    });
+    const a = makeSweepStudy({ id: "sweep-a", name: "Run A", configPath: "C:/configs/a.json" });
+    const b = makeSweepStudy({ id: "sweep-b", name: "Run B", configPath: "C:/configs/b.json" });
+    renderSweepWithOthers(primary, [a, b]);
+    // Each chart's legend carries a "<run name> <metric>" overlay label for
+    // BOTH selected compares — proving N>1 series render, not just one.
+    // importStudies seeds the compare targets in an effect, so wait for it.
+    await waitFor(() => expect(screen.getAllByText("Run A IMEP").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Run B IMEP").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run A VE").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run B P_ind").length).toBeGreaterThan(0);
+  });
+
+  it("toggling a checkbox updates the overlay selection (adds a run)", async () => {
+    const primary = makeSweepStudy({ id: "sweep-primary" });
+    const a = makeSweepStudy({ id: "sweep-a", name: "Run A", configPath: "C:/configs/a.json" });
+    renderConnectedSweep(primary, [a]);
+    // The multi-select exposes a checkbox per other sweep, labeled by name.
+    const checkbox = await screen.findByLabelText("Run A");
+    // No overlay series before selection.
+    expect(screen.queryByText("Run A IMEP")).toBeNull();
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(screen.getAllByText("Run A IMEP").length).toBeGreaterThan(0));
+  });
+
+  it("folds the legacy compareWithStudyId into the overlay", async () => {
+    const primary = makeSweepStudy({ id: "sweep-primary", compareWithStudyId: "sweep-a" });
+    const a = makeSweepStudy({ id: "sweep-a", name: "Run A", configPath: "C:/configs/a.json" });
+    renderSweepWithOthers(primary, [a]);
+    await waitFor(() => expect(screen.getAllByText("Run A IMEP").length).toBeGreaterThan(0));
   });
 });
 
