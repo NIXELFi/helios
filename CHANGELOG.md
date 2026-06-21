@@ -27,6 +27,24 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-06-21
+
+A small follow-up addressing three member feature requests.
+
+### Added
+
+- CFD: **overlay multiple sweep runs** on the result graphs — pick several past
+  sweeps from the Overlay strip to compare them on the same charts (e.g. to find
+  the best collector length), each with its own color and legend (up to 5).
+- CFD: **zoom into result graphs** — click-drag on a chart to zoom the RPM axis;
+  a "Reset zoom" button restores the full range.
+
+### Fixed
+
+- Sign-up: the **subteam dropdown now includes every subteam** an admin has added
+  in either admin area (e.g. the EV subteams High Voltage / Low Voltage / Battery),
+  instead of only the original identity list.
+
 ## [4.5.0] - 2026-06-20
 
 This is a focused **Vault audit pass**: a deep bug + feature sweep of the Vault
