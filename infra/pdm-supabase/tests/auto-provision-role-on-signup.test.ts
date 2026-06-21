@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  createTestUser,
   resetAuthUsers,
   serviceClient,
   uniqueEmail,
@@ -13,13 +12,29 @@ import {
 // got NO role row, so every new member was silently locked out of the vault with no
 // automated remedy. The on_auth_user_created trigger now grants the baseline global
 // 'editor' role on signup.
+//
+// NOTE: these tests create the user via the admin API DIRECTLY rather than the
+// createTestUser() helper, because that helper deliberately strips the
+// auto-provisioned role (to give the rest of the suite a clean-slate baseline).
+// Here we want to observe the trigger's effect, so we must not strip it.
+
+async function signUpRaw(email: string) {
+  const svc = serviceClient();
+  const { data, error } = await svc.auth.admin.createUser({
+    email,
+    password: "test-password-123",
+    email_confirm: true,
+  });
+  if (error) throw error;
+  return data.user!;
+}
 
 describe("auto-provision vault role on signup", () => {
   beforeEach(async () => { await resetAuthUsers(); });
   afterEach(async () => { await resetAuthUsers(); });
 
   it("grants a new signup a baseline global 'editor' role", async () => {
-    const user = await createTestUser(uniqueEmail("newbie"));
+    const user = await signUpRaw(uniqueEmail("newbie"));
 
     const svc = serviceClient();
     const { data, error } = await svc
@@ -34,7 +49,7 @@ describe("auto-provision vault role on signup", () => {
   });
 
   it("does NOT auto-grant admin/owner (no escalation via self-selected subteam)", async () => {
-    const user = await createTestUser(uniqueEmail("notanadmin"));
+    const user = await signUpRaw(uniqueEmail("notanadmin"));
 
     const svc = serviceClient();
     const { data } = await svc
