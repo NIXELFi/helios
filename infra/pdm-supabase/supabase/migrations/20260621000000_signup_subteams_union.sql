@@ -26,14 +26,23 @@ stable
 security definer
 set search_path = pdm, pm, public
 as $$
-  select distinct s.name
+  -- Preserve the team's curated (non-alphabetical) ordering: pdm.subteams is the
+  -- identity list and seeds a deliberate order (Engine first, officer roles last),
+  -- so order by its sort_order first; subteams that exist only in pm.subteams
+  -- (e.g. new EV subsystems) are appended afterwards, alphabetically.
+  select g.name
   from (
-    select name from pdm.subteams
-    union all
-    select name from pm.subteams
-  ) s
-  where lower(s.name) <> 'unknown'
-  order by s.name;
+    select s.name,
+           min(case when s.src = 'pdm' then s.sort_order end) as pdm_ord
+    from (
+      select 'pdm' as src, name, sort_order from pdm.subteams
+      union all
+      select 'pm'  as src, name, sort_order from pm.subteams
+    ) s
+    where lower(s.name) <> 'unknown'
+    group by s.name
+  ) g
+  order by (g.pdm_ord is null), g.pdm_ord, g.name;
 $$;
 
 -- Anon must call this from the sign-up form (pre-auth); authenticated too.

@@ -233,12 +233,15 @@ export function LinePlot({
       plotRef.current = null;
     }
 
+    // A fresh plot starts at the full extent — clear any stale zoomed flag so a
+    // leftover "Reset zoom" button doesn't persist across a rebuild (study
+    // switch, new sweep point, overlay toggle).
+    setZoomed(false);
+
     return () => {
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-    // A fresh plot starts at the full extent — clear any stale zoomed flag.
-    setZoomed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldKey, xLabel, yLabel, y2Label, yLog, xLog, height, zoomable]);
 
