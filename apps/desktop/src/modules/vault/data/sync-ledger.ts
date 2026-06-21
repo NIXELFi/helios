@@ -12,7 +12,7 @@
 // corrupt ledger degrades to "we've downloaded nothing", which is safe (it only
 // means we won't propagate a local deletion until the file is re-materialized).
 
-import { BaseDirectory, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { BaseDirectory, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { normalizePathForCompare } from "./local-match";
 
 export interface LedgerEntry {
@@ -128,22 +128,42 @@ export function classifyMissing(
 // under %LOCALAPPDATA% (e.g. %LOCALAPPDATA%\<bundle-identifier>) — NOT
 // necessarily ...\Helios. That's fine: the ledger only needs a stable
 // per-machine home outside the vault root, and AppLocalData provides one.
+//
+// Ledgers live in a `sync-ledgers/` subdir so saveLedger can `mkdir` it with
+// `recursive: true` and be guaranteed the whole path exists. The AppLocalData
+// folder itself may not exist yet (a fresh profile, or nothing else has written
+// there this session), and Tauri's writeTextFile does NOT create parent dirs —
+// which surfaced as intermittent `saveLedger failed: ... No such file or
+// directory (os error 2)`.
+const LEDGER_DIR = "sync-ledgers";
 function ledgerFile(vaultId: string): string {
+  return `${LEDGER_DIR}/sync-ledger-${vaultId}.json`;
+}
+// Pre-subdir ledgers sat directly under AppLocalData. Read them as a fallback so
+// the move doesn't silently reset every machine's deletion-detection.
+function legacyLedgerFile(vaultId: string): string {
   return `sync-ledger-${vaultId}.json`;
 }
 
 export async function loadLedger(vaultId: string): Promise<SyncLedger> {
-  try {
-    const text = await readTextFile(ledgerFile(vaultId), { baseDir: BaseDirectory.AppLocalData });
-    return parseLedger(text);
-  } catch {
-    // Missing file (first run) or read error → start fresh. Safe.
-    return emptyLedger();
+  for (const file of [ledgerFile(vaultId), legacyLedgerFile(vaultId)]) {
+    try {
+      const text = await readTextFile(file, { baseDir: BaseDirectory.AppLocalData });
+      return parseLedger(text);
+    } catch {
+      // Missing/unreadable at this path → try the legacy path, then start fresh.
+    }
   }
+  // Missing file (first run) or read error → start fresh. Safe.
+  return emptyLedger();
 }
 
 export async function saveLedger(vaultId: string, ledger: SyncLedger): Promise<void> {
   try {
+    // Ensure the directory exists first — recursive creates AppLocalData itself
+    // if missing, and is a no-op when it's already there. Without this the write
+    // intermittently fails with ENOENT (os error 2) on the not-yet-created dir.
+    await mkdir(LEDGER_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
     await writeTextFile(ledgerFile(vaultId), JSON.stringify(ledger), {
       baseDir: BaseDirectory.AppLocalData,
     });

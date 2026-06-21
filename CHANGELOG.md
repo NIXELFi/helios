@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Vault: the sync ledger no longer fails intermittently with "No such file or
+  directory" when checking files in. The app-data folder it writes to may not
+  exist yet, and the write did not create it; the directory is now ensured first.
+  (Harmless before this -- it only meant local-deletion detection lagged a pass --
+  but it logged a console warning on check-in.)
+
 ## [4.5.1] - 2026-06-21
 
 A small follow-up addressing three member feature requests.
