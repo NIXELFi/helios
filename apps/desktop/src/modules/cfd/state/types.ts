@@ -260,7 +260,13 @@ export interface SweepStudy extends StudyBase {
   /** In-flight per-RPM cycle buffers, keyed by `rpmIdx` as a string. */
   inFlight?: Record<string, { idx: number; rpm: number; cycles: CycleStats[] }>;
   summary?: SweepDoneSummary;
+  /** Legacy single-overlay selection. Superseded by `compareWithStudyIds`
+   *  (multi-overlay). Kept for backward-compat with persisted studies: when
+   *  the array is absent it folds into the array (see SweepResults). */
   compareWithStudyId?: string;
+  /** Multi-overlay selection: zero or more OTHER sweep study ids overlaid on
+   *  this study's charts. Missing/empty = no overlay. */
+  compareWithStudyIds?: string[];
   /** Imported dyno reference (rpm + power/torque points) overlaid on the
    *  curves with an on-screen RMSE/bias readout. Persisted with the study so
    *  the validation survives reloads and rides along in exports. */

@@ -61,6 +61,7 @@ export type Action =
   | { type: "sweepCycle"; id: string; rpmIdx: number; rpm: number; cycleStats: CycleStats }
   | { type: "sweepRpmDone"; id: string; point: Omit<SweepPoint, "cycles" | "captureDir">; captureDir?: string }
   | { type: "setSweepCompare"; id: string; compareWithStudyId?: string }
+  | { type: "setSweepCompareMulti"; id: string; compareWithStudyIds: string[] }
   | { type: "setSweepDynoRef"; id: string; dynoRef?: DynoRef }
   | { type: "renameStudy"; id: string; name: string | null }
   | { type: "deleteStudy"; id: string }
@@ -199,6 +200,20 @@ export function reducer(s: State, a: Action): State {
         },
       };
     }
+    case "setSweepCompareMulti": {
+      const existing = s.studies[a.id];
+      if (!existing || existing.kind !== "sweep") return s;
+      // Write the array as the canonical selection and drop the legacy single
+      // field so stale state can't shadow the array on the next read.
+      const { compareWithStudyId: _legacy, ...rest } = existing;
+      return {
+        ...s,
+        studies: {
+          ...s.studies,
+          [a.id]: { ...rest, compareWithStudyIds: a.compareWithStudyIds },
+        },
+      };
+    }
     case "setSweepDynoRef": {
       const existing = s.studies[a.id];
       if (!existing || existing.kind !== "sweep") return s;
@@ -316,6 +331,8 @@ export interface CfdContextValue {
    *  last one becomes active; returns the active id (or null if none added). */
   importStudies: (studies: Study[]) => string | null;
   setSweepCompare: (id: string, compareWithStudyId?: string) => void;
+  /** Multi-overlay: set the full list of OTHER sweep ids to overlay (empty = none). */
+  setSweepCompareMulti: (id: string, compareWithStudyIds: string[]) => void;
   /** Attach (or clear) an imported dyno reference overlay on a sweep. */
   setSweepDynoRef: (id: string, dynoRef?: DynoRef) => void;
   setVehicleConfig: (config: VehicleConfig) => void;
@@ -611,6 +628,7 @@ export function CfdProvider({ children, bridge = realBridge, skipRehydrate = fal
         return lastId;
       },
       setSweepCompare: (id, compareWithStudyId) => dispatch({ type: "setSweepCompare", id, compareWithStudyId }),
+      setSweepCompareMulti: (id, compareWithStudyIds) => dispatch({ type: "setSweepCompareMulti", id, compareWithStudyIds }),
       setSweepDynoRef: (id, dynoRef) => dispatch({ type: "setSweepDynoRef", id, dynoRef }),
       setVehicleConfig: (config) => dispatch({ type: "setVehicleConfig", config }),
       setReferenceBaseline: (baseline) => dispatch({ type: "setReferenceBaseline", baseline }),

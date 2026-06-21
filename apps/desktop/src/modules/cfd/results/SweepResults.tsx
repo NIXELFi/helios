@@ -32,6 +32,13 @@ interface Props {
   study: SweepStudy;
 }
 
+/** Distinct stroke colors for overlaid compare runs (cycled if more runs than
+ *  colors). Chosen to stay readable against the primary run's bright series and
+ *  the magenta dyno overlay. */
+const COMPARE_COLORS = ["#8A8F96", "#80CBC4", "#BCAAA4", "#9FA8DA", "#C5E1A5"];
+/** Cap on overlaid compares so charts stay legible. */
+const MAX_COMPARES = 5;
+
 /** Round-to-int rpm with a thousands separator, e.g. 11480 → "11,480". */
 function fmtRpm(rpm: number): string {
   return Math.round(rpm).toLocaleString();
@@ -67,7 +74,7 @@ function summaryLine(summary: SweepSummary): string {
 }
 
 export function SweepResults({ study }: Props) {
-  const { state, cancelStudy, setSweepCompare, setSweepDynoRef, renameStudy, bridge } = useCfd();
+  const { state, cancelStudy, setSweepCompareMulti, setSweepDynoRef, renameStudy, bridge } = useCfd();
   const [dynoError, setDynoError] = useState<string | null>(null);
   const [dynoWarn, setDynoWarn] = useState<string | null>(null);
   const [expandedRpm, setExpandedRpm] = useState<number | null>(null);
@@ -81,12 +88,39 @@ export function SweepResults({ study }: Props) {
     [study.points],
   );
 
-  const compare = useMemo(() => {
-    if (!study.compareWithStudyId) return null;
-    const s = state.studies[study.compareWithStudyId];
-    if (!s || s.kind !== "sweep") return null;
-    return s as SweepStudy;
-  }, [study.compareWithStudyId, state.studies]);
+  // Selected overlay ids: prefer the multi-select array; fold the legacy
+  // single field in for studies persisted before multi-overlay. De-duped and
+  // capped so charts stay legible.
+  const selectedCompareIds = useMemo(() => {
+    const ids = study.compareWithStudyIds
+      ?? (study.compareWithStudyId ? [study.compareWithStudyId] : []);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const id of ids) {
+      if (id && id !== study.id && !seen.has(id)) {
+        seen.add(id);
+        out.push(id);
+      }
+    }
+    return out.slice(0, MAX_COMPARES);
+  }, [study.compareWithStudyIds, study.compareWithStudyId, study.id]);
+
+  // Resolved compare studies (only existing sweeps), each with its own color
+  // and pre-sorted points. Drives every chart's overlay series + the chip strip.
+  const compares = useMemo(() => {
+    return selectedCompareIds
+      .map((id, i) => {
+        const s = state.studies[id];
+        if (!s || s.kind !== "sweep") return null;
+        const sweep = s as SweepStudy;
+        return {
+          study: sweep,
+          color: COMPARE_COLORS[i % COMPARE_COLORS.length] as string,
+          points: [...sweep.points].sort((a, b) => a.rpm - b.rpm),
+        };
+      })
+      .filter((c): c is { study: SweepStudy; color: string; points: SweepStudy["points"] } => c != null);
+  }, [selectedCompareIds, state.studies]);
 
   const otherSweeps = useMemo(
     () => Object.values(state.studies).filter(
@@ -108,11 +142,6 @@ export function SweepResults({ study }: Props) {
     () => [...study.points].sort((a, b) => a.rpm - b.rpm),
     [study.points],
   );
-  const comparePoints = useMemo(
-    () => compare ? [...compare.points].sort((a, b) => a.rpm - b.rpm) : [],
-    [compare],
-  );
-
   // Roll-up summary (peaks, powerband, KI). Shown once ≥2 points exist.
   const summary = useMemo(() => summarizeSweep(points), [points]);
 
@@ -165,6 +194,22 @@ export function SweepResults({ study }: Props) {
 
   const showSummary = points.length >= 2;
   const hasKnock = summary.maxKnockIntegral != null;
+
+  // Build one overlay LineSeries per selected compare run for a given metric.
+  // Each gets a distinct color and a "<run name> <metric>" label; compares are
+  // drawn as lines (no points) over their OWN rpm grid (disjoint-grid safe).
+  function compareSeries(
+    metricLabel: string,
+    pick: (p: SweepStudy["points"][number]) => number,
+  ) {
+    return compares.map((c) => ({
+      label: `${studyName(c.study)} ${metricLabel}`,
+      xs: c.points.map((p) => p.rpm),
+      y: c.points.map(pick),
+      color: c.color,
+      showPoints: false,
+    }));
+  }
 
   // ExportMenu items: the per-kind export actions + a "Copy summary" item.
   // Adapt each ExportAction → ExportMenuItem: a written path becomes an
@@ -262,31 +307,54 @@ export function SweepResults({ study }: Props) {
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#16171B] px-3 py-2 text-[11px] text-[#D8DCE2]">
         <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Overlay</span>
         <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Compare to</span>
-        <select
+        <div
+          role="group"
           aria-label="Compare to"
-          className="rounded-sm border border-[#FFC627]/40 bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] hover:border-[#FFC627] focus:border-[#FFC627] focus:outline-none"
-          value={study.compareWithStudyId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setSweepCompare(study.id, v ? v : undefined);
-          }}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1"
         >
-          <option value="">(none — no overlay)</option>
-          {otherSweeps.map((s) => (
-            <option key={s.id} value={s.id}>
-              {studyName(s)} · {s.params.rpmList.length} rpm · {s.params.junctionKind} · {new Date(s.startedAt).toLocaleTimeString()}
-            </option>
-          ))}
-        </select>
-        {compare ? (
-          <span className="flex items-center gap-1 text-[10px] text-[#9097A0]">
-            <span className="inline-block h-[2px] w-3 bg-[#8A8F96]" />
-            <span>{basename(compare.configPath)} ({compare.params.junctionKind})</span>
+          {otherSweeps.length === 0 ? (
+            <span className="text-[10px] text-[#5A5F66]">Run another sweep to enable overlay comparison.</span>
+          ) : (
+            otherSweeps.map((s) => {
+              const idx = selectedCompareIds.indexOf(s.id);
+              const checked = idx >= 0;
+              const atCap = !checked && selectedCompareIds.length >= MAX_COMPARES;
+              const color = checked ? (COMPARE_COLORS[idx % COMPARE_COLORS.length] as string) : null;
+              return (
+                <label
+                  key={s.id}
+                  className={
+                    "flex items-center gap-1 text-[10px] " +
+                    (atCap ? "text-[#5A5F66]" : "text-[#9097A0] hover:text-[#D8DCE2]")
+                  }
+                  title={`${studyName(s)} · ${s.params.rpmList.length} rpm · ${s.params.junctionKind} · ${new Date(s.startedAt).toLocaleTimeString()}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-[#FFC627]"
+                    aria-label={studyName(s)}
+                    checked={checked}
+                    disabled={atCap}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? [...selectedCompareIds, s.id]
+                        : selectedCompareIds.filter((id) => id !== s.id);
+                      setSweepCompareMulti(study.id, next);
+                    }}
+                  />
+                  {color && <span className="inline-block h-[2px] w-3" style={{ background: color }} />}
+                  <span className="max-w-[180px] truncate">{studyName(s)}</span>
+                </label>
+              );
+            })
+          )}
+        </div>
+        {otherSweeps.length > 0 && (
+          <span className="text-[10px] text-[#5A5F66]">
+            {compares.length > 0
+              ? `${compares.length} overlaid (max ${MAX_COMPARES})`
+              : `${otherSweeps.length} sweep${otherSweeps.length === 1 ? "" : "s"} available to overlay (max ${MAX_COMPARES})`}
           </span>
-        ) : otherSweeps.length === 0 ? (
-          <span className="text-[10px] text-[#5A5F66]">Run another sweep to enable overlay comparison.</span>
-        ) : (
-          <span className="text-[10px] text-[#5A5F66]">{otherSweeps.length} sweep{otherSweeps.length === 1 ? "" : "s"} available to overlay.</span>
         )}
 
         {/* Dyno reference: import → overlay + RMSE/bias readout (sim − dyno). */}
@@ -396,9 +464,7 @@ export function SweepResults({ study }: Props) {
                     { label: "IMEP", y: points.map((p) => p.lastCycle.imepBar), color: "#FFC627", showPoints: true },
                     { label: "BMEP", y: points.map((p) => p.lastCycle.bmepBar), color: "#A5D6A7", showPoints: true },
                     { label: "FMEP", y: points.map((p) => p.lastCycle.fmepBar), color: "#FF8A65", showPoints: true },
-                    ...(compare ? [
-                      { label: "IMEP (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.imepBar), color: "#5A5F66", showPoints: false },
-                    ] : []),
+                    ...compareSeries("IMEP", (p) => p.lastCycle.imepBar),
                   ]}
                   xLabel="rpm" yLabel="bar" height={340}
                 />
@@ -409,9 +475,7 @@ export function SweepResults({ study }: Props) {
                   xs={points.map((p) => p.rpm)}
                   series={[
                     { label: "VE", y: points.map((p) => p.lastCycle.veAtm), color: "#4FC3F7", showPoints: true },
-                    ...(compare ? [
-                      { label: "VE (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.veAtm), color: "#5A5F66", showPoints: false },
-                    ] : []),
+                    ...compareSeries("VE", (p) => p.lastCycle.veAtm),
                   ]}
                   xLabel="rpm" yLabel="VE" height={340}
                 />
@@ -422,9 +486,7 @@ export function SweepResults({ study }: Props) {
                   xs={points.map((p) => p.rpm)}
                   series={[
                     { label: "EGT", y: points.map((p) => p.lastCycle.egtMean), color: "#F48FB1", showPoints: true },
-                    ...(compare ? [
-                      { label: "EGT (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.egtMean), color: "#5A5F66", showPoints: false },
-                    ] : []),
+                    ...compareSeries("EGT", (p) => p.lastCycle.egtMean),
                   ]}
                   xLabel="rpm" yLabel="K" height={340}
                 />
@@ -436,9 +498,7 @@ export function SweepResults({ study }: Props) {
                   series={[
                     { label: "P_ind", y: points.map((p) => p.lastCycle.indicatedPowerKW), color: "#FFC627", showPoints: true },
                     { label: "P_brake", y: points.map((p) => p.lastCycle.brakePowerKW), color: "#A5D6A7", showPoints: true },
-                    ...(compare ? [
-                      { label: "P_ind (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.indicatedPowerKW), color: "#5A5F66", showPoints: false },
-                    ] : []),
+                    ...compareSeries("P_ind", (p) => p.lastCycle.indicatedPowerKW),
                     ...(dynoPowerSeries ? [
                       { label: "P dyno", xs: dynoPowerSeries.map((d) => d.rpm), y: dynoPowerSeries.map((d) => d.v), color: "#CE93D8", showPoints: true },
                     ] : []),
@@ -452,9 +512,7 @@ export function SweepResults({ study }: Props) {
                   xs={points.map((p) => p.rpm)}
                   series={[
                     { label: "τ_brake", y: points.map((p) => p.lastCycle.brakeTorqueNm), color: "#FF8A65", showPoints: true },
-                    ...(compare ? [
-                      { label: "τ_brake (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.brakeTorqueNm), color: "#5A5F66", showPoints: false },
-                    ] : []),
+                    ...compareSeries("τ_brake", (p) => p.lastCycle.brakeTorqueNm),
                     ...(dynoTorqueSeries ? [
                       { label: "τ dyno", xs: dynoTorqueSeries.map((d) => d.rpm), y: dynoTorqueSeries.map((d) => d.v), color: "#CE93D8", showPoints: true },
                     ] : []),
@@ -469,9 +527,7 @@ export function SweepResults({ study }: Props) {
                     xs={points.map((p) => p.rpm)}
                     series={[
                       { label: "KI", y: points.map((p) => p.lastCycle.knockIntegral ?? NaN), color: "#F48FB1", showPoints: true },
-                      ...(compare ? [
-                        { label: "KI (cmp)", xs: comparePoints.map((p) => p.rpm), y: comparePoints.map((p) => p.lastCycle.knockIntegral ?? NaN), color: "#5A5F66", showPoints: false },
-                      ] : []),
+                      ...compareSeries("KI", (p) => p.lastCycle.knockIntegral ?? NaN),
                     ]}
                     xLabel="rpm" yLabel="KI" height={340}
                   />
