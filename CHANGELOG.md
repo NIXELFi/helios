@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.2] - 2026-06-22
+
 ### Changed
 
 - Org admin panel now surfaces the full set of grantable permissions for each
@@ -64,8 +66,10 @@ follow [semver](https://semver.org/).
 
 - New self-signup accounts are now provisioned as read-only viewers instead of
   global editors, so a newly created account cannot read or modify vault contents
-  until an admin promotes it. (A signup email-domain allowlist plus confirmation /
-  captcha is scaffolded in config for production enablement.)
+  until an admin promotes it.
+- Sign-up is now restricted to approved email domains, enforced server-side
+  (seeded with asu.edu and configurable in the database -- not hardcoded in the
+  app), so only organization accounts can register.
 - Per-vault (subteam-scoped) admins can no longer act as global admins: deleting,
   updating, or listing users org-wide, viewing other vaults' rosters, or granting
   and revoking global roles now requires a true global admin.
