@@ -126,6 +126,20 @@ fn hook_state() -> &'static Mutex<HookState> {
     STATE.get_or_init(|| Mutex::new(HookState { depth: 0, saved: None }))
 }
 
+// Test-only serialization for the process-global panic hook. `set_hook` /
+// `take_hook` are shared across the whole process, so two unit tests that
+// install a SilencedPanicHook concurrently (directly, or via a run_* job) would
+// corrupt each other's depth bookkeeping — the source of an intermittent
+// macOS-CI failure of `nested_silenced_hook_restores_original_after_last_guard`.
+// Every such test and the run_* install sites take this lock for their duration.
+// Acquired BEFORE hook_state() everywhere (consistent lock order, no deadlock),
+// once per call on the calling thread, and compiled out of non-test builds.
+#[cfg(test)]
+fn test_hook_serial() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: Mutex<()> = Mutex::new(());
+    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl SilencedPanicHook {
     fn install() -> Self {
         let mut st = hook_state().lock().unwrap_or_else(|e| e.into_inner());
@@ -366,6 +380,8 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
     // (positivity failure, junction non-convergence). We catch those
     // ourselves below and surface them as SolverDiverged, so the hook's
     // stderr backtrace would just be noise. Restored on drop.
+    #[cfg(test)]
+    let _serial_hook = test_hook_serial();
     let _hook_guard = SilencedPanicHook::install();
 
     for cycle_i in 0..params.n_cycles_max {
@@ -566,6 +582,8 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
     // caught per-RPM below and surfaced as SolverDiverged errors, so the
     // hook's stderr backtrace would just be duplicate noise. Restored on
     // drop after the parallel region completes.
+    #[cfg(test)]
+    let _serial_hook = test_hook_serial();
     let _hook_guard = SilencedPanicHook::install();
     pool.install(|| {
         let rpms: Vec<(u32, f64)> = params.rpm_list.iter().enumerate()
@@ -1072,6 +1090,8 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     // Solver panics are caught per-RPM inside `run_single_rpm_inline` and
     // returned as per-trial Errs; silence the default panic hook so the
     // backtrace noise doesn't flood stderr. Restored on drop.
+    #[cfg(test)]
+    let _serial_hook = test_hook_serial();
     let _hook_guard = SilencedPanicHook::install();
     pool.install(|| {
         use rayon::prelude::*;
@@ -1304,6 +1324,7 @@ mod tests {
 
     #[test]
     fn nested_silenced_hook_restores_original_after_last_guard() {
+        let _serial_hook = test_hook_serial();
         // Two concurrent CFD jobs install/restore the process-global panic
         // hook through SilencedPanicHook. The refcounted design must restore
         // the ORIGINAL hook only when the LAST guard drops — never leave a
@@ -1334,6 +1355,7 @@ mod tests {
     fn unwind_safe_captures_panic_message() {
         // Silence the default hook so this deliberate panic doesn't print
         // a backtrace during the test run.
+        let _serial_hook = test_hook_serial();
         let _g = SilencedPanicHook::install();
         let r: Result<(), String> =
             run_engine_unwind_safe(|| panic!("positivity failure at theta=123.4°"));
