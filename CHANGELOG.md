@@ -37,6 +37,9 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 
+- Sign-up: the **subteam picker loads again**. The `list_signup_subteams` lookup
+  was addressed to the wrong Postgres schema (`pdm` instead of `public`), so the
+  picker errored out with "Could not find the function" and dead-ended sign-up.
 - Vault: the sync ledger no longer fails intermittently with "No such file or
   directory" when checking files in. The app-data folder it writes to may not
   exist yet, and the write did not create it; the directory is now ensured first.

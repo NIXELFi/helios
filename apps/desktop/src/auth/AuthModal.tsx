@@ -324,7 +324,10 @@ function CredentialsStep(props: {
     setSubteamsError(null);
     (async () => {
       try {
-        const { data, error } = await (client.rpc("list_signup_subteams") as any);
+        // The client defaults to the `pdm` schema, but list_signup_subteams()
+        // lives in `public` (anon-callable), so target it explicitly — otherwise
+        // PostgREST looks for pdm.list_signup_subteams() and 404s the picker.
+        const { data, error } = await (client.schema("public").rpc("list_signup_subteams") as any);
         if (!on) return;
         if (error) {
           // Don't swallow: an empty picker silently dead-ends sign-up. Surface
