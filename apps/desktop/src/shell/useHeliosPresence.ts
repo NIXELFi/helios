@@ -31,6 +31,7 @@ const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set<ModuleId>([
   "cfd",
   "pm",
   "games",
+  "org",
 ]);
 
 /** Coerce an off-the-wire module string to a known ModuleId (a newer/renamed

@@ -11,6 +11,28 @@ export interface UseFileOpenerProps {
   onPending: (perFile: PerFileResult[]) => void;
 }
 
+/** Read and parse a list of .helios bundle paths, returning a PerFileResult
+ *  for each. Exported so drag-drop flows can share the same parsing logic as
+ *  OS-launched file opens without duplicating the readTextFile + parseBundle
+ *  logic. */
+export async function processBundlePaths(paths: string[]): Promise<PerFileResult[]> {
+  if (paths.length === 0) return [];
+  return Promise.all(
+    paths.map(async (path): Promise<PerFileResult> => {
+      const filename = basename(path);
+      let text: string;
+      try {
+        text = await readTextFile(path);
+      } catch {
+        return { kind: "invalid", filename, reason: "Could not read file." };
+      }
+      const r = parseBundle(text);
+      if (!r.ok) return { kind: "invalid", filename, reason: r.reason };
+      return { kind: "valid", filename, workspaces: r.bundle.workspaces };
+    }),
+  );
+}
+
 /** Subscribes to OS-launched file opens (.helios files via the Tauri single-
  *  instance handler), reads + parses each, and surfaces the aggregated
  *  per-file result to the consumer. The consumer decides what to do (open a
@@ -26,20 +48,7 @@ export function useFileOpener({ onPending }: UseFileOpenerProps) {
 
     async function processPaths(paths: string[]) {
       if (paths.length === 0) return;
-      const perFile: PerFileResult[] = await Promise.all(
-        paths.map(async (path): Promise<PerFileResult> => {
-          const filename = basename(path);
-          let text: string;
-          try {
-            text = await readTextFile(path);
-          } catch {
-            return { kind: "invalid", filename, reason: "Could not read file." };
-          }
-          const r = parseBundle(text);
-          if (!r.ok) return { kind: "invalid", filename, reason: r.reason };
-          return { kind: "valid", filename, workspaces: r.bundle.workspaces };
-        }),
-      );
+      const perFile = await processBundlePaths(paths);
       if (!cancelled) onPending(perFile);
     }
 

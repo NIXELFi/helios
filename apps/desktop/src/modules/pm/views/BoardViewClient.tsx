@@ -263,12 +263,20 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
       <CreateTaskDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onCreate={(task) => {
+        onCreate={(task, extra) => {
+          const reHomed = !!(currentTeam && task.subteam_id !== currentTeam.id);
           const teamPatched =
-            currentTeam && task.subteam_id !== currentTeam.id
+            currentTeam && reHomed
               ? { ...task, subteam_id: currentTeam.id, subteam: currentTeam, subsystem_id: null, subsystem: null }
               : task;
-          addTask(teamPatched);
+          // When this view re-homes the primary to the scoped team, drop that
+          // team from the staged extras so it isn't ALSO added as a stray
+          // secondary membership (bug: team-scoped onCreate stray membership).
+          const scopedExtra =
+            reHomed && currentTeam && extra
+              ? { ...extra, extraSubteamIds: (extra.extraSubteamIds ?? []).filter((id) => id !== currentTeam.id) }
+              : extra;
+          addTask(teamPatched, scopedExtra);
         }}
         projectId={projectId}
         subteams={subteams}

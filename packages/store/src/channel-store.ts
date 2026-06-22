@@ -60,6 +60,22 @@ export class ChannelStore {
     if (values.length !== rg.time.length) {
       throw new Error(`channel ${meta.id}: ${values.length} values vs ${rg.time.length} samples`);
     }
+    // Replace path: if this channel already exists and had a source_header
+    // binding, remove the old binding before installing the new meta so the
+    // #bySourceHeader map stays consistent. Without this, replacing a channel
+    // whose source_header changed leaves the old header pointing at this id
+    // while the new header (if different) might also try to claim it.
+    const existing = this.#metas.get(meta.id);
+    if (existing?.source_header && existing.source_header !== meta.source_header) {
+      const ownsOld = this.#bySourceHeader.get(existing.source_header) === meta.id;
+      if (ownsOld) {
+        this.#bySourceHeader.delete(existing.source_header);
+        // Clear any override pointing at the old source_header for this channel.
+        for (const [canonical, src] of this.#overrides) {
+          if (src === existing.source_header) this.#overrides.delete(canonical);
+        }
+      }
+    }
     rg.columns.set(meta.id, values);
     this.#metas.set(meta.id, meta);
     this.#channelToGroup.set(meta.id, groupId);

@@ -206,10 +206,15 @@ token_verifications = 30
 web3 = 30
 
 # Configure one of the supported captcha providers: `hcaptcha`, `turnstile`.
-# [auth.captcha]
-# enabled = true
-# provider = "hcaptcha"
-# secret = ""
+# H-1: a captcha throttles automated self-signup with the public anon key. Set
+# the site key in the desktop AuthModal and the secret here via an env var; flip
+# `enabled = true` once the provider is provisioned. (Left disabled by default so
+# local `supabase start` / the test suite don't require a live captcha service.)
+[auth.captcha]
+enabled = false
+provider = "hcaptcha"
+# DO NOT commit your captcha secret to git. Use environment variable substitution:
+secret = "env(SUPABASE_AUTH_CAPTCHA_SECRET)"
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
@@ -221,10 +226,15 @@ double_confirm_changes = true
 # confirmation link's redirect to `site_url` (a web URL) can't be caught by
 # the app — leaving the user stuck "unconfirmed". With this off, sign-up
 # returns a session immediately and the AuthModal logs the user straight in.
-# (Authorization is still gated server-side: a new user has no
-# pdm.user_roles row, so they can't read bytes / write until an admin grants
-# a role. Email confirmation was never the access gate.) Re-enable only if
-# you wire custom SMTP + a deep-link redirect scheme.
+#
+# SECURITY (C-1 / H-1): authorization is gated server-side by pdm.user_roles.
+# Since 20260619000700 a NEW signup is auto-provisioned a baseline role, so a
+# fresh user is NOT role-less. As of 20260622000200 that baseline is 'viewer'
+# (read-only) — NOT 'editor' — so a self-signup cannot upload/modify until an
+# admin promotes it. To fully close the open-signup hole, restrict WHO can
+# self-register by enabling the before_user_created hook below (email-domain
+# allowlist, e.g. @asu.edu) and/or a captcha provider (see [auth.captcha]).
+# Re-enable confirmations only if you wire custom SMTP + a deep-link redirect.
 enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
@@ -278,9 +288,15 @@ max_frequency = "5s"
 # inactivity_timeout = "8h"
 
 # This hook runs before a new user is created and allows developers to reject the request based on the incoming user object.
+# H-1 (open-signup hardening): wire a before_user_created hook to enforce an
+# email-DOMAIN ALLOWLIST (e.g. only @asu.edu may self-register), closing the
+# enabling condition of C-1 (arbitrary anon-key self-signup). Implement the
+# target function to RAISE when the incoming user's email domain is not allowed,
+# then flip `enabled = true`. Left disabled by default so local `supabase start`
+# / the test suite (which create arbitrary @helios.test users) keep working.
 # [auth.hook.before_user_created]
 # enabled = true
-# uri = "pg-functions://postgres/auth/before-user-created-hook"
+# uri = "pg-functions://postgres/auth/before_user_created"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]

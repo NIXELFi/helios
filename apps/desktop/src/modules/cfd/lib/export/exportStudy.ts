@@ -84,16 +84,15 @@ function sweepActions(study: SweepStudy): ExportAction[] {
       run: () => saveTextFile(`${stem}-per-rpm`, "csv", buildSweepCsv(study)),
     },
   ];
-  // Cycles CSV only when at least one point captured per-cycle data.
-  if (buildSweepCyclesCsv(study) != null) {
+  // Cycles CSV only when at least one point captured per-cycle data. Build the
+  // CSV ONCE (it's the expensive part) and reuse it for both the availability
+  // check and the action — the previous code rebuilt it on every menu render.
+  const cyclesCsv = buildSweepCyclesCsv(study);
+  if (cyclesCsv != null) {
     actions.push({
       id: "sweep-cycles-csv",
       label: "Cycles CSV",
-      run: () => {
-        const csv = buildSweepCyclesCsv(study);
-        if (csv == null) return Promise.resolve(null);
-        return saveTextFile(`${stem}-cycles`, "csv", csv);
-      },
+      run: () => saveTextFile(`${stem}-cycles`, "csv", cyclesCsv),
     });
   }
   actions.push({
@@ -117,15 +116,13 @@ function optimizationActions(study: OptimizationStudy, deps: ExportDeps): Export
     },
   ];
   // Trial curves CSV only when at least one done trial recorded sweepPoints.
-  if (buildOptimizationCurvesCsv(study) != null) {
+  // Build ONCE and reuse for the check + action (was rebuilt per menu render).
+  const curvesCsv = buildOptimizationCurvesCsv(study);
+  if (curvesCsv != null) {
     actions.push({
       id: "opt-curves-csv",
       label: "Trial curves CSV",
-      run: () => {
-        const csv = buildOptimizationCurvesCsv(study);
-        if (csv == null) return Promise.resolve(null);
-        return saveTextFile(`${stem}-curves`, "csv", csv);
-      },
+      run: () => saveTextFile(`${stem}-curves`, "csv", curvesCsv),
     });
   }
   actions.push({

@@ -12,7 +12,9 @@ import { lapAggregate } from "@helios/lib";
 
 /** Central-difference time derivative. d/dt of `values` against `timeUs`.
  *  Edge samples (i = 0 and i = N-1) use forward/backward difference instead.
- *  Output units are inputs-per-second. */
+ *  Output units are inputs-per-second. Duplicate (zero-delta) adjacent
+ *  timestamps emit NaN instead of ±Infinity so widgets render a gap rather
+ *  than an infinite spike. */
 export function derivative(values: Float64Array, timeUs: BigInt64Array): Float64Array {
   const n = values.length;
   const out = new Float64Array(n);
@@ -23,20 +25,23 @@ export function derivative(values: Float64Array, timeUs: BigInt64Array): Float64
     const v0 = values[0]!, v1 = values[1]!;
     const t0 = Number(timeUs[0]!) / 1_000_000;
     const t1 = Number(timeUs[1]!) / 1_000_000;
-    out[0] = (v1 - v0) / (t1 - t0);
+    const dt = t1 - t0;
+    out[0] = dt === 0 ? NaN : (v1 - v0) / dt;
   }
   // Central difference for the interior
   for (let i = 1; i < n - 1; i++) {
     const tm = Number(timeUs[i - 1]!) / 1_000_000;
     const tp = Number(timeUs[i + 1]!) / 1_000_000;
-    out[i] = (values[i + 1]! - values[i - 1]!) / (tp - tm);
+    const dt = tp - tm;
+    out[i] = dt === 0 ? NaN : (values[i + 1]! - values[i - 1]!) / dt;
   }
   // Backward difference at i=N-1
   {
     const vN1 = values[n - 1]!, vN2 = values[n - 2]!;
     const tN1 = Number(timeUs[n - 1]!) / 1_000_000;
     const tN2 = Number(timeUs[n - 2]!) / 1_000_000;
-    out[n - 1] = (vN1 - vN2) / (tN1 - tN2);
+    const dt = tN1 - tN2;
+    out[n - 1] = dt === 0 ? NaN : (vN1 - vN2) / dt;
   }
   return out;
 }

@@ -31,13 +31,19 @@ pub fn execute(args: Args) -> Result<()> {
     let a_trials = load_trials(&args.a)?;
     let b_trials = load_trials(&args.b)?;
 
-    let mut a_by_key: BTreeMap<String, Value> = BTreeMap::new();
-    for t in &a_trials {
-        a_by_key.insert(alignment_key(t), t.clone());
-    }
-    let mut b_by_key: BTreeMap<String, Value> = BTreeMap::new();
-    for t in &b_trials {
-        b_by_key.insert(alignment_key(t), t.clone());
+    let (a_by_key, a_collisions) = index_by_key(&a_trials);
+    let (b_by_key, b_collisions) = index_by_key(&b_trials);
+
+    // A duplicate alignment key means two distinct trials in one file align to
+    // the same `(rpm, overrides)` pair, so all but the last would be silently
+    // dropped from the comparison. Surface that on stderr rather than quietly
+    // losing trials — the user needs to know the result file is ambiguous.
+    for (side, label, collisions) in [("a", args.a.display().to_string(), &a_collisions), ("b", args.b.display().to_string(), &b_collisions)] {
+        for (key, count) in collisions {
+            eprintln!(
+                "warning: {side} (`{label}`) has {count} trials sharing alignment key `{key}`; only the last is compared (the others are dropped). Add a distinguishing field to disambiguate.",
+            );
+        }
     }
 
     // Aligned trials: keys present in both.
@@ -120,6 +126,23 @@ pub fn execute(args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Index trials by their alignment key, keeping the last trial for any given
+/// key (matching the historical BTreeMap-overwrite behaviour) but also
+/// returning, for every key that appeared more than once, that key and its
+/// total occurrence count so the caller can warn about silently-dropped trials.
+fn index_by_key(trials: &[Value]) -> (BTreeMap<String, Value>, BTreeMap<String, usize>) {
+    let mut by_key: BTreeMap<String, Value> = BTreeMap::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for t in trials {
+        let k = alignment_key(t);
+        *counts.entry(k.clone()).or_insert(0) += 1;
+        by_key.insert(k, t.clone());
+    }
+    let collisions: BTreeMap<String, usize> =
+        counts.into_iter().filter(|&(_, c)| c > 1).collect();
+    (by_key, collisions)
 }
 
 fn load_trials(path: &std::path::Path) -> Result<Vec<Value>> {

@@ -48,13 +48,20 @@ export function useRecordRefs() {
           for (const r of (refs ?? []) as { child_path_hint: string; child_file_id: string | null }[]) {
             if (r.child_file_id != null) continue;
             const base = r.child_path_hint.split(/[\\/]/).pop() ?? r.child_path_hint;
+            // `base` is a raw filename — escape the LIKE metacharacters `_` and
+            // `%` (and the escape char `\` itself) before feeding it to ilike,
+            // or a name like "frame_v2.sldprt" would treat `_` as "any single
+            // char" and a name containing `%` as "any run", producing false
+            // ambiguous/missing classifications. With them escaped, ilike is a
+            // true case-insensitive equality match as intended.
+            const baseEsc = base.replace(/([\\%_])/g, "\\$1");
             let reason: "missing" | "ambiguous" = "missing";
             if (vaultId) {
               const { count } = await (client.from("files") as any)
                 .select("id", { count: "exact", head: true })
                 .eq("vault_id", vaultId)
                 .is("deleted_at", null)
-                .ilike("name", base); // no wildcards → case-insensitive equality
+                .ilike("name", baseEsc); // escaped → case-insensitive equality
               if ((count ?? 0) > 1) reason = "ambiguous";
             }
             unresolved.push({ hint: base, reason });

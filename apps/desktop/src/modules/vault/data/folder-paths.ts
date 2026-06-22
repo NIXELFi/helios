@@ -50,11 +50,24 @@ export function sanitizePathSegment(name: string): string {
  */
 export function folderPath(folderId: FolderId | null, folders: Folder[]): string {
   if (!folderId) return "";
-  const f = folders.find((x) => x.id === folderId);
-  if (!f) return "";
-  const parent = folderPath(f.parent_id, folders);
-  const name = sanitizePathSegment(f.name);
-  return parent ? `${parent}/${name}` : name;
+  const byId = new Map(folders.map((x) => [x.id, x]));
+  // Iterative walk up the parent_id chain with a cycle/depth guard. A corrupt
+  // chain (self-parent or a loop) must never stack-overflow — folderPath is on
+  // the hot sync-match path, so a single bad row would otherwise make the whole
+  // Vault UI unopenable. Mirrors the guard the sibling walkers in this file use.
+  const segments: string[] = [];
+  let cur = byId.get(folderId);
+  if (!cur) return "";
+  const visited = new Set<FolderId>();
+  let guard = 0;
+  while (cur && guard++ < 64) {
+    if (visited.has(cur.id)) break; // cycle — stop walking
+    visited.add(cur.id);
+    segments.unshift(sanitizePathSegment(cur.name));
+    if (!cur.parent_id) break;
+    cur = byId.get(cur.parent_id);
+  }
+  return segments.join("/");
 }
 
 /**
@@ -77,10 +90,22 @@ export function folderPath(folderId: FolderId | null, folders: Folder[]): string
  */
 export function folderNamePath(folderId: FolderId | null, folders: Folder[]): string {
   if (!folderId) return "";
-  const f = folders.find((x) => x.id === folderId);
-  if (!f) return "";
-  const parent = folderNamePath(f.parent_id, folders);
-  return parent ? `${parent}/${f.name}` : f.name;
+  const byId = new Map(folders.map((x) => [x.id, x]));
+  // Iterative walk with the same cycle/depth guard as folderPath — a corrupt
+  // parent_id chain must never stack-overflow (uses RAW names, see warning above).
+  const segments: string[] = [];
+  let cur = byId.get(folderId);
+  if (!cur) return "";
+  const visited = new Set<FolderId>();
+  let guard = 0;
+  while (cur && guard++ < 64) {
+    if (visited.has(cur.id)) break; // cycle — stop walking
+    visited.add(cur.id);
+    segments.unshift(cur.name);
+    if (!cur.parent_id) break;
+    cur = byId.get(cur.parent_id);
+  }
+  return segments.join("/");
 }
 
 /** Compute the local destination path for a vault file. */

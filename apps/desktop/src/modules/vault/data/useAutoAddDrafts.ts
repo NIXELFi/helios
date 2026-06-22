@@ -93,7 +93,16 @@ export function useAutoAddDrafts(opts: {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!enabled || !vaultId || unmatched.length === 0 || busyRef.current) return;
+    if (!enabled || !vaultId || unmatched.length === 0) return;
+    // A prior run is still in flight. The deps that brought us here (a changed
+    // `unmatched` list, a new tick) won't fire again on their own once that run
+    // finishes, so without a re-trigger any candidate observed during the busy
+    // window would stall until something ELSE re-runs the effect. Schedule a
+    // re-check shortly after the current run should have drained.
+    if (busyRef.current) {
+      const t = setTimeout(() => setTick((x) => x + 1), 1_000);
+      return () => clearTimeout(t);
+    }
     let cancelled = false;
     busyRef.current = true;
 

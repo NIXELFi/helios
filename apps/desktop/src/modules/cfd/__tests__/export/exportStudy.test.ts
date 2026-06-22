@@ -23,6 +23,28 @@ vi.mock("../../lib/export/io", () => ({
   slugify: (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
 }));
 
+// Spy on the CSV builders while keeping their real behavior, so we can assert
+// each is built at most ONCE per exportActionsFor call (regression for the
+// double-build: the availability check + action both rebuilt the same CSV).
+const cyclesSpy = vi.fn();
+const curvesSpy = vi.fn();
+vi.mock("../../lib/export/buildCsv", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/export/buildCsv")>(
+    "../../lib/export/buildCsv",
+  );
+  return {
+    ...actual,
+    buildSweepCyclesCsv: (s: SweepStudy) => {
+      cyclesSpy();
+      return actual.buildSweepCyclesCsv(s);
+    },
+    buildOptimizationCurvesCsv: (s: OptimizationStudy) => {
+      curvesSpy();
+      return actual.buildOptimizationCurvesCsv(s);
+    },
+  };
+});
+
 import { exportActionsFor } from "../../lib/export/exportStudy";
 
 function cyc(overrides: Partial<CycleStats> = {}): CycleStats {
@@ -63,7 +85,11 @@ function optStudy(overrides: Partial<OptimizationStudy> = {}): OptimizationStudy
   };
 }
 
-beforeEach(() => saveTextFile.mockClear());
+beforeEach(() => {
+  saveTextFile.mockClear();
+  cyclesSpy.mockClear();
+  curvesSpy.mockClear();
+});
 
 describe("exportActionsFor — single-rpm", () => {
   it("offers Cycles CSV + Study JSON", () => {
@@ -99,6 +125,16 @@ describe("exportActionsFor — sweep", () => {
       "Per-RPM CSV", "Cycles CSV", "Study JSON",
     ]);
   });
+
+  it("builds the Cycles CSV at most once per exportActionsFor call", () => {
+    const study: SweepStudy = {
+      id: "sw", kind: "sweep", status: "done", configPath: "c.json", startedAt: 1,
+      params: {} as never,
+      points: [sweepPoint(8000, { cycles: [cyc()] })],
+    };
+    exportActionsFor(study);
+    expect(cyclesSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("exportActionsFor — optimization", () => {
@@ -113,6 +149,14 @@ describe("exportActionsFor — optimization", () => {
     expect(exportActionsFor(study).map((a) => a.label)).toEqual([
       "Trials CSV", "Trial curves CSV", "Study JSON",
     ]);
+  });
+
+  it("builds the Trial curves CSV at most once per exportActionsFor call", () => {
+    const study = optStudy({
+      trials: [{ trialIdx: 0, parameterValues: {}, status: "done", objectiveValue: 18, sweepPoints: [sweepPoint(8000)], wallTimeS: 5 }],
+    });
+    exportActionsFor(study);
+    expect(curvesSpy).toHaveBeenCalledTimes(1);
   });
 
   it("fetches schema best-effort and survives a rejecting getSchema (catch → null)", async () => {

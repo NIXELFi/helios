@@ -91,6 +91,11 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
   const { config, overlays } = props;
   const visible = overlays && overlays.length > 0 ? overlays : [];
 
+  // Stable key: only session ids + config drive the report content. The
+  // `visible` array identity changes every parent render but session ids are
+  // what actually matter; using a string key prevents defeating the memo.
+  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
+
   const blocks = useMemo(() => {
     const list: { session: OverlaySession; rows: Array<{ lap: Lap; cells: number[][] }> }[] = [];
     for (const session of visible) {
@@ -110,7 +115,8 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
       list.push({ session, rows });
     }
     return list;
-  }, [visible, config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey, config]);
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (

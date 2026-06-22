@@ -45,6 +45,7 @@ export function useMyCapabilities() {
   const [caps, setCaps] = useState<MyCapability[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -58,7 +59,7 @@ export function useMyCapabilities() {
     return () => {
       mounted = false;
     };
-  }, [client]);
+  }, [client, tick]);
 
   const can = useCallback(
     (cap: string, subteamId?: string | null) =>
@@ -68,7 +69,11 @@ export function useMyCapabilities() {
     [caps],
   );
 
-  return { caps, can, loading, error };
+  // Re-run my_capabilities so newly-granted/revoked/edited permissions take
+  // effect immediately instead of staying stale until a full reload.
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+
+  return { caps, can, loading, error, refetch };
 }
 
 /** Every account + their roles (admin-gated server-side; raises for others). */
@@ -121,6 +126,30 @@ export interface Capability {
 }
 export interface RoleWithCaps extends OrgRole {
   capabilities: string[];
+}
+
+/** A `can(cap, subteamId?)` predicate, as returned by {@link useMyCapabilities}. */
+export type CanFn = (cap: string, subteamId?: string | null) => boolean;
+
+/** Server-side grant-subset rule (`pm.grant_role`/`pm.upsert_role`), mirrored on
+ *  the client so the UI never offers a role/cap the RPC would reject: every
+ *  capability the role grants must be one the caller holds in the target scope
+ *  (`scopeSubteamId = null` ⇒ org scope). An org-wide grant of a cap satisfies
+ *  every subteam, which `can` already encodes. */
+export function roleCapsHeldInScope(
+  capabilities: string[],
+  can: CanFn,
+  scopeSubteamId: string | null,
+): boolean {
+  return capabilities.every((capKey) => can(capKey, scopeSubteamId));
+}
+
+/** The capability set safe to send to `pm.upsert_role`: only caps the caller can
+ *  actually grant org-wide. Filtering here prevents a disabled-but-selected cap
+ *  (one the admin lacks) from being included in the payload and tripping the
+ *  server's subset check — which previously made every save fail. */
+export function grantableCapsPayload(selected: Iterable<string>, can: CanFn): string[] {
+  return [...selected].filter((capKey) => can(capKey));
 }
 
 export function useSubteams() {

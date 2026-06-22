@@ -272,6 +272,11 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     if (!lapSelectionEmitter) return;
     return lapSelectionEmitter.subscribe((s) => setLiveSelection(s));
   }, [lapSelectionEmitter]);
+  // Stable key representing the set of visible session ids. Used as a memo
+  // dep instead of the `visible` array so identity changes on the array object
+  // (which happen every parent render) don't defeat memoization.
+  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
+
   // For distance mode, look up speed channels per session via lap config or
   // gps.speed fallback. Captured here so buildDistanceData stays pure.
   const speedByOverlay = useMemo(() => {
@@ -292,7 +297,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [xMode, JSON.stringify(visible.map((v) => v.id)), slice]);
+  }, [xMode, visibleIdsKey]);
   void speedToMs;  // keep import alive — used at the lib boundary
 
   // Stable refs for values that pointer handlers need but should NOT trigger a
@@ -313,7 +318,6 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   // Build the aligned data + meta. This is a pure derivation from
   // visible/config/xMode/selection — memoize so re-renders with stable inputs
   // don't trigger downstream setData calls.
-  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
   const liveSelectionKey = JSON.stringify(liveSelection);
   const dataPack = useMemo(() => {
     let buildResult: ReturnType<typeof buildTimeData> | (ReturnType<typeof buildDistanceData> & { emptyReason?: string });

@@ -91,7 +91,7 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
               </thead>
             )}
             <tbody>
-              {laps.map((lap, idxInList) => {
+              {laps.map((lap) => {
                 // We need the index in the ORIGINAL laps array (with untrusted),
                 // since LapRef.lapIndex points there.
                 const allIdx = (session.laps?.laps ?? []).indexOf(lap);
@@ -103,7 +103,7 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
                 const overlay = isSelected("overlay", ref);
                 return (
                   <tr
-                    key={`${session.id}-${idxInList}`}
+                    key={`${session.id}-${allIdx}`}
                     onClick={(e) => selectLap(ref, e)}
                     className={
                       "border-b border-[#23252B] cursor-pointer " +
@@ -143,6 +143,13 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
  *  config (a hand-entered list of lap numbers and times). New configs leave
  *  `config.laps` empty and rely on the session's LapSet. */
 function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
+  if (laps.length === 0) {
+    return (
+      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
+        no laps configured
+      </div>
+    );
+  }
   const best = laps.reduce((a, b) => (b.time_ms < a.time_ms ? b : a)).time_ms;
   return (
     <div className="w-full h-full bg-[#16171B] overflow-auto">

@@ -72,6 +72,21 @@ describe("parseStudyImport", () => {
     expect(r.warnings[0]).toMatch(/Skipped study 2/);
   });
 
+  it("drops sweep points missing lastCycle so downstream readers can't crash", () => {
+    const good = JSON.parse(buildStudyJson(makeSweepStudy()));
+    // Inject a malformed point with no lastCycle alongside the real points.
+    good.results.points = [
+      ...good.results.points,
+      { rpm: 99999, cycles: [] }, // no lastCycle → must be dropped
+    ];
+    const r = parseStudyImport(JSON.stringify(good), idFor);
+    expect(r.studies).toHaveLength(1);
+    const sweep = r.studies[0] as import("../../state/types").SweepStudy;
+    // The bad point is gone; every surviving point has a usable lastCycle.
+    expect(sweep.points.every((p) => p.lastCycle != null)).toBe(true);
+    expect(sweep.points.some((p) => p.rpm === 99999)).toBe(false);
+  });
+
   it("derives objective direction from params when derived is absent", () => {
     const bundle = {
       meta: { kind: "optimization", configPath: "/x/sdm26.json", status: "done", startedAt: 1 },

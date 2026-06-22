@@ -72,8 +72,12 @@ export function VaultSearch({
 
     // The "filename text" part — use the free-text portion for scoring if
     // there are prop tokens; use the whole raw query otherwise (preserves
-    // existing behaviour when no prop: tokens are present).
-    const scoreText = hasPropFilters ? parsed.text : rawQ.toLowerCase();
+    // existing behaviour when no prop: tokens are present). Lowercase either way:
+    // `score()` lowercases the filename but NOT the needle, so without this the
+    // free text left after stripping prop: tokens (parseSearchQuery keeps plain
+    // words verbatim) would make filename matching case-SENSITIVE — typing
+    // "Frame prop:Material=7075" wouldn't match "frame.sldprt".
+    const scoreText = (hasPropFilters ? parsed.text : rawQ).toLowerCase();
 
     const scored: Array<{ hit: Hit; s: number }> = [];
     for (const f of allFiles) {

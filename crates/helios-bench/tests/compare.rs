@@ -72,6 +72,39 @@ fn compare_aligns_matching_trial_and_reports_unmatched() {
 }
 
 #[test]
+fn compare_warns_on_alignment_key_collision() {
+    // Two distinct trials in file A share the same (rpm, overrides) pair, so
+    // they collide on the alignment key. The compare used to silently drop the
+    // first via BTreeMap overwrite; it must now surface a stderr warning so the
+    // user knows a trial was dropped.
+    let dir = tempdir().unwrap();
+    let a = dir.path().join("a.ndjson");
+    let b = dir.path().join("b.ndjson");
+    write_ndjson(
+        &a,
+        &[
+            r#"{"kind":"trial","rpm":9000,"overrides":{"wiebe_a":5.0},"imep_bar":9.0,"brake_power_kW":40.0}"#,
+            r#"{"kind":"trial","rpm":9000,"overrides":{"wiebe_a":5.0},"imep_bar":9.4,"brake_power_kW":41.0}"#,
+        ],
+    );
+    write_ndjson(
+        &b,
+        &[r#"{"kind":"trial","rpm":9000,"overrides":{"wiebe_a":5.0},"imep_bar":9.5,"brake_power_kW":42.0}"#],
+    );
+    let r = bin()
+        .args(["compare", a.to_str().unwrap(), b.to_str().unwrap()])
+        .output()
+        .expect("spawn");
+    assert!(r.status.success(), "stderr={}", String::from_utf8_lossy(&r.stderr));
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("alignment key") && stderr.contains("dropped"),
+        "expected collision warning on stderr, got: {stderr}"
+    );
+    assert!(stderr.contains('2'), "expected the collision count (2) in the warning: {stderr}");
+}
+
+#[test]
 fn compare_fails_on_missing_file() {
     let out = bin()
         .args(["compare", "no-such-a.ndjson", "no-such-b.ndjson"])

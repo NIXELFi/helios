@@ -58,6 +58,12 @@ interface HydrateInput {
   client: SupabaseClient | null;
   // The signed-in user's PM role per project (admin/lead/engineer/viewer).
   roles: Record<string, TeamRole>;
+  // A BACKGROUND refresh (probe/realtime/focus/backstop re-hydrate) passes this
+  // so it does NOT wipe a pending `lastWriteError`. A failed write surfaces the
+  // "Change not saved" toast; a refresh firing right after must keep showing it
+  // until the user dismisses it / it auto-expires, instead of silently clearing
+  // it. The initial cold load leaves it false so a fresh sign-in starts clean.
+  preserveWriteError?: boolean;
 }
 
 // Snapshot the active flat fields back into a ProjectData record.
@@ -396,8 +402,19 @@ interface PmState {
   updateSubsystem: (id: string, patch: Partial<Subsystem>) => void;
   removeSubsystem: (id: string) => void;
 
-  // Task mutations
-  addTask: (task: TaskRow) => void;
+  // Task mutations. `extra` lets the create dialog hand off ADDITIONAL subteam
+  // memberships and dependencies so they persist in the SAME persist() as the
+  // task INSERT — sequentially AFTER insertTask commits — instead of racing
+  // separate fire-and-forget writes that can hit Postgres before the task row
+  // exists and violate the FK (bug H-10).
+  addTask: (
+    task: TaskRow,
+    extra?: {
+      extraSubteamIds?: string[];
+      prerequisiteIds?: string[];
+      dependentIds?: string[];
+    },
+  ) => void;
   updateTask: (id: string, patch: Partial<TaskRow>, opts?: { withHistory?: boolean }) => void;
   bulkUpdateTasks: (
     ids: string[],
@@ -688,7 +705,9 @@ export const usePmStore = create<PmState>((set, get) => {
           currentUserId: input.currentUserId,
           client: input.client,
           projectRoles: input.roles,
-          lastWriteError: null,
+          // A background refresh keeps any pending write error visible; only a
+          // fresh (cold) load resets it (bug: refresh suppressing the toast).
+          ...(input.preserveWriteError ? {} : { lastWriteError: null }),
           projects: input.projects.map((p) => ({ ...p })),
           projectData: input.projectData,
           baselineOrg: {
@@ -1041,7 +1060,7 @@ export const usePmStore = create<PmState>((set, get) => {
       );
     },
 
-    addTask: (task) => {
+    addTask: (task, extra) => {
       // Every task carries at least its primary subteam in the membership list.
       // The dialog may pass `subteams`; default to [primary] so the new row is
       // valid for scoping/activity even before any additional membership writes.
@@ -1064,9 +1083,48 @@ export const usePmStore = create<PmState>((set, get) => {
               ? [task.owner]
               : [],
       };
-      const snap = { tasks: get().tasks, activity: get().activity };
+
+      // Resolve any ADDITIONAL subteam memberships the dialog handed off, folding
+      // them into the seeded membership list so the new row shows them right away.
+      // Skip the primary and de-dupe; persist them sequentially below.
+      const resolveSubteam = (id: string) =>
+        get().subteams.find((x) => x.id === id) ??
+        get().baselineOrg.subteams.find((x) => x.id === id) ??
+        null;
+      const seenSubteam = new Set(seeded.subteams.map((s) => s.id));
+      const extraSubteams: Subteam[] = [];
+      for (const id of extra?.extraSubteamIds ?? []) {
+        if (id === seeded.subteam_id || seenSubteam.has(id)) continue;
+        const st = resolveSubteam(id);
+        if (!st) continue;
+        seenSubteam.add(id);
+        extraSubteams.push(st);
+      }
+      seeded.subteams = [...seeded.subteams, ...extraSubteams];
+
+      // Build the dependency rows now that the task id exists. Dedupe against
+      // self and any reverse already implied; the optimistic store apply + the
+      // sequential persist both use this list so they can't drift.
+      const newDeps: TaskDependency[] = [];
+      const seenDep = new Set<string>();
+      const pushDep = (predecessor_id: string, successor_id: string) => {
+        if (predecessor_id === successor_id) return;
+        const key = `${predecessor_id}->${successor_id}`;
+        if (seenDep.has(key)) return;
+        seenDep.add(key);
+        newDeps.push({ predecessor_id, successor_id, dep_type: "FS", lag_days: 0 });
+      };
+      for (const pid of extra?.prerequisiteIds ?? []) pushDep(pid, seeded.id);
+      for (const did of extra?.dependentIds ?? []) pushDep(seeded.id, did);
+
+      const snap = {
+        tasks: get().tasks,
+        activity: get().activity,
+        dependencies: get().dependencies,
+      };
       set((s) => ({
         tasks: [seeded, ...s.tasks],
+        dependencies: [...s.dependencies, ...newDeps],
         activity: logActivity(s, {
           action: "created",
           target_type: "task",
@@ -1084,9 +1142,13 @@ export const usePmStore = create<PmState>((set, get) => {
       const ownerExtras = seeded.owners.filter((u) => u.id !== seeded.owner_id);
       persist(
         async (c) => {
+          // Order is FK-critical: the task row MUST commit before any membership
+          // or dependency that references it (bug H-10 — these used to be
+          // separate fire-and-forget writes that raced the INSERT).
           await db.insertTask(c, seeded);
           for (const st of extras) await db.insertTaskSubteam(c, seeded.id, st.id);
           for (const u of ownerExtras) await db.insertTaskOwner(c, seeded.id, u.id);
+          for (const d of newDeps) await db.insertDependency(c, d);
         },
         () => set(snap),
       );

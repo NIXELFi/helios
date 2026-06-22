@@ -134,6 +134,14 @@ export function CheckOutButton({
     onDone?.();
   }
 
+  /** Clear the in-flight guard so the button re-enables. Called when the
+   *  where-used confirm dialog finally resolves (both confirm and close), or
+   *  in `handleClick`'s finally when no dialog opened. */
+  function clearChecking() {
+    checkingRef.current = false;
+    setChecking(false);
+  }
+
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     // Guard against rapid double-clicks: the button is only disabled while
@@ -142,6 +150,11 @@ export function CheckOutButton({
     if (checkingRef.current) return;
     checkingRef.current = true;
     setChecking(true);
+    // True iff we opened the where-used confirm dialog and are now waiting on
+    // the user. In that case the guard MUST stay set (the dialog is open and a
+    // second click could fire doCheckOut() concurrently → duplicate lock RPC);
+    // it's cleared only when the dialog resolves, not here.
+    let awaitingConfirm = false;
     try {
       // Where-Used impact check: if other assemblies currently reference this
       // file, warn the user before they check it out so they know downstream
@@ -150,14 +163,17 @@ export function CheckOutButton({
       const parents = await fetchWhereUsed(client, fileId);
       const warning = whereUsedWarning(parents);
       if (warning) {
+        awaitingConfirm = true;
         setWhereUsedConfirm(warning.message);
-        return; // wait for user confirmation (checkingRef/checking cleared in finally)
+        return; // wait for user confirmation — guard stays set until it resolves
       }
     } catch {
       // ignore — network hiccup shouldn't block a checkout
     } finally {
-      checkingRef.current = false;
-      setChecking(false);
+      // Only release the guard when we did NOT open the confirm dialog. While
+      // the dialog is open the guard must remain held so a second click can't
+      // start a concurrent checkout.
+      if (!awaitingConfirm) clearChecking();
     }
     void doCheckOut();
   }
@@ -190,8 +206,11 @@ export function CheckOutButton({
           confirmLabel="Check Out Anyway"
           confirmTone="danger"
           cancelLabel="Cancel"
-          onConfirm={() => { void doCheckOut(); }}
-          onClose={() => setWhereUsedConfirm(null)}
+          // Release the re-click guard only now that the dialog has resolved —
+          // on BOTH confirm and close — so the button stays disabled (no
+          // concurrent doCheckOut / duplicate lock RPC) the whole time it's open.
+          onConfirm={() => { clearChecking(); void doCheckOut(); }}
+          onClose={() => { clearChecking(); setWhereUsedConfirm(null); }}
         />
       )}
     </>

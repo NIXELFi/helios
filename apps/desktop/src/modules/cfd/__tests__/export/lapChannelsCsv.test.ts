@@ -80,4 +80,24 @@ describe("buildLapChannelsCsv", () => {
     const noCh = simLap(CURVE, VEHICLE, synthesizeAutocross());
     expect(() => buildLapChannelsCsv(META, noCh)).toThrow(/channels/);
   });
+
+  it("escapes newlines in provenance names so they can't inject a comment/row", () => {
+    // A config name carrying a CR/LF would otherwise break out of its "#"
+    // comment line and forge an extra line in the output.
+    const csv = buildLapChannelsCsv(
+      { ...META, configName: "evil\nrpm,9999", vehicleName: "v\r\nx" },
+      lap,
+    );
+    const lines = csv.trimEnd().split("\n");
+    const commentLines = lines.filter((l) => l.startsWith("#"));
+    // The config name collapses onto a single comment line — no extra line
+    // that starts with the injected "rpm,9999".
+    expect(commentLines.some((l) => l.includes("config: evil rpm,9999"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("rpm,9999"))).toBe(false);
+    // Every non-comment, non-header line is still a clean 11-column row.
+    const headerIdx = lines.findIndex((l) => l.startsWith("dist_m,"));
+    for (const r of lines.slice(headerIdx + 1)) {
+      expect(r.split(",").length).toBe(11);
+    }
+  });
 });

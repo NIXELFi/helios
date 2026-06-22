@@ -394,6 +394,35 @@ describe("BulkActionBar selectable-id intersection", () => {
     expect(taskUpdates).toHaveLength(1);
     expect((taskUpdates[0]!.payload as { due_date: string }).due_date).toBe("2026-09-01");
   });
+
+  test("blurring the EMPTY due input does NOT wipe the selected tasks' due dates (H-3)", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1", { due_date: "2026-05-01" })]);
+    usePmStore.setState({ selectedTaskIds: new Set(["t1"]) });
+
+    render(<BulkActionBar selectableIds={new Set(["t1"])} />);
+    const dueInput = screen.getByLabelText("Set due date for selected tasks");
+
+    // Merely focusing and tabbing away (blur with an empty value) must not write.
+    fireEvent.focus(dueInput);
+    fireEvent.blur(dueInput);
+    await flush();
+    expect(writes.filter((w) => w.table === "tasks" && w.op === "update")).toHaveLength(0);
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")!.due_date).toBe("2026-05-01");
+  });
+
+  test("the explicit Clear-due action DOES null the due date", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client, [makeTask("t1", { due_date: "2026-05-01" })]);
+    usePmStore.setState({ selectedTaskIds: new Set(["t1"]) });
+
+    render(<BulkActionBar selectableIds={new Set(["t1"])} />);
+    fireEvent.click(screen.getByLabelText("Clear due date for selected tasks"));
+    await flush();
+    const taskUpdates = writes.filter((w) => w.table === "tasks" && w.op === "update");
+    expect(taskUpdates).toHaveLength(1);
+    expect((taskUpdates[0]!.payload as { due_date: string | null }).due_date).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -912,5 +941,90 @@ describe("hydrate tolerates a stale snapshot missing newer fields (PM-dead regre
       } as never),
     ).not.toThrow();
     expect(usePmStore.getState().links).toEqual([]);
+  });
+});
+
+describe("addTask serializes dependent inserts after the task INSERT (H-10)", () => {
+  test("extra subteams + dependencies persist AFTER insertTask, in one persist", async () => {
+    const { client, writes } = recorderClient(null);
+    // A prerequisite task already exists so the dependency targets a real row.
+    seed(client, [makeTask("pre", { subteam_id: "st1", subteams: [SUBTEAM] })]);
+    const task = makeTask("t-new", { subteam_id: "st1", subteams: [SUBTEAM] });
+
+    usePmStore.getState().addTask(task, {
+      extraSubteamIds: ["st2"],
+      prerequisiteIds: ["pre"],
+    });
+
+    // Optimistic: the membership + dependency show immediately.
+    const created = usePmStore.getState().tasks.find((t) => t.id === "t-new")!;
+    expect(created.subteams.map((s) => s.id)).toEqual(["st1", "st2"]);
+    expect(
+      usePmStore.getState().dependencies.some(
+        (d) => d.predecessor_id === "pre" && d.successor_id === "t-new",
+      ),
+    ).toBe(true);
+
+    await flush();
+    expect(usePmStore.getState().lastWriteError).toBeNull();
+
+    // Ordering: the task INSERT must come before the membership + dependency
+    // inserts (an FK on the dependent rows references the task row).
+    const idxTask = writes.findIndex((w) => w.table === "tasks" && w.op === "insert");
+    const idxSubteam = writes.findIndex(
+      (w) => w.table === "task_subteams" && w.op === "insert",
+    );
+    const idxDep = writes.findIndex(
+      (w) => w.table === "task_dependencies" && w.op === "insert",
+    );
+    expect(idxTask).toBeGreaterThanOrEqual(0);
+    expect(idxSubteam).toBeGreaterThan(idxTask);
+    expect(idxDep).toBeGreaterThan(idxTask);
+  });
+
+  test("a primary already in extraSubteamIds is not double-inserted", async () => {
+    const { client, writes } = recorderClient(null);
+    seed(client);
+    const task = makeTask("t-dup", { subteam_id: "st1", subteams: [SUBTEAM] });
+
+    // st1 is the primary — passing it as an extra must be ignored (no stray).
+    usePmStore.getState().addTask(task, { extraSubteamIds: ["st1"] });
+
+    const created = usePmStore.getState().tasks.find((t) => t.id === "t-dup")!;
+    expect(created.subteams.map((s) => s.id)).toEqual(["st1"]);
+
+    await flush();
+    expect(writes.some((w) => w.table === "task_subteams" && w.op === "insert")).toBe(false);
+  });
+});
+
+describe("background re-hydrate preserves a pending write error (toast not suppressed)", () => {
+  test("preserveWriteError keeps lastWriteError set", () => {
+    usePmStore.setState({ lastWriteError: { message: "denied", at: Date.now() } });
+    usePmStore.getState().hydrate({
+      projects: [{ id: "p1", name: "P", description: null }],
+      projectData: {},
+      activeProjectId: "p1",
+      currentUserId: "u1",
+      baselineOrg: { subteams: [], subsystems: [], users: [] },
+      client: null,
+      roles: { p1: "admin" },
+      preserveWriteError: true,
+    } as never);
+    expect(usePmStore.getState().lastWriteError?.message).toBe("denied");
+  });
+
+  test("a cold load (no flag) still clears the error", () => {
+    usePmStore.setState({ lastWriteError: { message: "denied", at: Date.now() } });
+    usePmStore.getState().hydrate({
+      projects: [{ id: "p1", name: "P", description: null }],
+      projectData: {},
+      activeProjectId: "p1",
+      currentUserId: "u1",
+      baselineOrg: { subteams: [], subsystems: [], users: [] },
+      client: null,
+      roles: { p1: "admin" },
+    } as never);
+    expect(usePmStore.getState().lastWriteError).toBeNull();
   });
 });

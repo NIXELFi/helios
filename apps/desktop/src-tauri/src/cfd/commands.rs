@@ -156,40 +156,51 @@ pub fn cfd_start_job(
     std::thread::spawn(move || {
         let emitter = TauriEmitter { window };
         let probe = DefaultDivergenceProbe;
-        let outcome = match request_clone {
-            StartJobRequest::SingleRpm { config_path, params } => run_single_rpm_job(
-                &emitter, &probe,
-                job_id_owned.clone(),
-                PathBuf::from(config_path),
-                params,
-                Arc::clone(&cancel),
-                started_at,
-                capture_root.clone(),
-            ),
-            StartJobRequest::Sweep { config_path, params } => run_sweep_job(
-                &emitter, &probe,
-                job_id_owned.clone(),
-                PathBuf::from(config_path),
-                params,
-                Arc::clone(&cancel),
-                started_at,
-                capture_root.clone(),
-            ),
-            StartJobRequest::Optimization { config_path, params } => run_optimization_job(
-                &emitter, &probe,
-                job_id_owned.clone(),
-                PathBuf::from(config_path),
-                params,
-                Arc::clone(&cancel),
-                started_at,
-            ),
-        };
+        // Belt-and-suspenders: the runners isolate solver panics internally
+        // (run_engine_unwind_safe + SilencedPanicHook on every path), but
+        // wrap the whole dispatch in catch_unwind so that even a panic from
+        // somewhere NOT covered by those guards still records a terminal
+        // status. Otherwise an unwinding panic would skip the status write
+        // below and leave the job stuck "Running" forever — permanently
+        // blocking any future same-kind study for the session.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match request_clone {
+                StartJobRequest::SingleRpm { config_path, params } => run_single_rpm_job(
+                    &emitter, &probe,
+                    job_id_owned.clone(),
+                    PathBuf::from(config_path),
+                    params,
+                    Arc::clone(&cancel),
+                    started_at,
+                    capture_root.clone(),
+                ),
+                StartJobRequest::Sweep { config_path, params } => run_sweep_job(
+                    &emitter, &probe,
+                    job_id_owned.clone(),
+                    PathBuf::from(config_path),
+                    params,
+                    Arc::clone(&cancel),
+                    started_at,
+                    capture_root.clone(),
+                ),
+                StartJobRequest::Optimization { config_path, params } => run_optimization_job(
+                    &emitter, &probe,
+                    job_id_owned.clone(),
+                    PathBuf::from(config_path),
+                    params,
+                    Arc::clone(&cancel),
+                    started_at,
+                ),
+            }
+        }));
         let final_status = match outcome {
-            RunOutcome::Completed(_)
-            | RunOutcome::CompletedSweep(_)
-            | RunOutcome::CompletedOptimization => JobStatus::Done,
-            RunOutcome::Cancelled => JobStatus::Cancelled,
-            RunOutcome::Errored => JobStatus::Error,
+            Ok(RunOutcome::Completed(_))
+            | Ok(RunOutcome::CompletedSweep(_))
+            | Ok(RunOutcome::CompletedOptimization) => JobStatus::Done,
+            Ok(RunOutcome::Cancelled) => JobStatus::Cancelled,
+            // A caught panic (unwind) or an explicit Errored both terminate
+            // the job in the Error state so the registry never wedges.
+            Ok(RunOutcome::Errored) | Err(_) => JobStatus::Error,
         };
         // Poison-tolerant: if a prior holder panicked, recover the guard instead
         // of panicking here — that would skip recording the final status and
@@ -296,6 +307,14 @@ pub fn cfd_load_capture(
         "single-rpm" | "sweep" => {}
         _ => return Err(format!("invalid study_kind: {study_kind}")),
     }
+    // Reject directory-traversal in `job_id` before it is joined into the
+    // read path. Without this a `job_id` like `../../..` escapes the
+    // captures root and a compromised renderer could read any
+    // JSON-parseable file whose path tail matches the capture pattern.
+    // Mirrors `cfd_core::load::load_waves_from_dir`.
+    if job_id.contains("..") || job_id.contains('/') || job_id.contains('\\') {
+        return Err(format!("invalid job_id: {job_id}"));
+    }
     let docs = app
         .path()
         .document_dir()
@@ -308,6 +327,13 @@ pub fn cfd_load_capture(
         .join(&file);
     if !p.exists() {
         return Err(format!("capture not found: {}", p.display()));
+    }
+    // Defense-in-depth: even after the per-segment checks above, confirm
+    // the canonicalized target really resolves under the captures root
+    // before reading (the same `path_under` guard used elsewhere in this
+    // file).
+    if !cfd_core::load::path_under(&p, &root) {
+        return Err("invalid capture path".into());
     }
     let bytes = std::fs::read(&p)
         .map_err(|e| format!("read {}: {}", p.display(), e))?;

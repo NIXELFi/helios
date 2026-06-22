@@ -30,7 +30,7 @@ import {
 } from "./lib/math-channels";
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
-import { useFileOpener } from "./lib/use-file-opener";
+import { useFileOpener, processBundlePaths } from "./lib/use-file-opener";
 import { formatFileOpenSummary } from "./lib/file-open-summary";
 import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
@@ -155,7 +155,16 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   // workspace bundles are routed away from this hook (they belong to the
   // useFileOpener path above). Fires for any drop over the webview, so the
   // user doesn't have to aim at the sessions panel specifically.
-  useFileDrop({ onDrop: (paths) => void handleAddSessionFiles(paths) });
+  useFileDrop({
+    onDrop: (paths) => void handleAddSessionFiles(paths),
+    // Forward drag-dropped .helios workspace bundles to the same import flow
+    // as OS-launched file opens. Previously these were silently discarded.
+    onDropBundles: (paths) => {
+      processBundlePaths(paths).then((perFile) => {
+        if (perFile.length > 0) handleFileOpenPending(perFile);
+      }).catch(() => {});
+    },
+  });
   type ConfirmRequest = {
     title: string;
     body: string | ReactNode;

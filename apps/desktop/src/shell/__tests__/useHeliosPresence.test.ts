@@ -60,4 +60,14 @@ describe("dedupePresence", () => {
   it("is empty for an empty presence state", () => {
     expect(dedupePresence({})).toEqual([]);
   });
+
+  it("recognizes 'org' as a valid module (regression: was coerced to 'logs')", () => {
+    // Before the fix, 'org' was absent from KNOWN_MODULES so any user on the
+    // Org tab would show as "Logs" in everyone else's presence panel.
+    const state = {
+      c: [{ user_id: "u1", name: "Nick", module: "org", online_at: 1 }],
+    };
+    const out = dedupePresence(state as any);
+    expect(out[0]!.module).toBe("org");
+  });
 });

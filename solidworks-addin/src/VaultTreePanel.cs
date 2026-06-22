@@ -216,7 +216,17 @@ namespace HeliosVault
                 if (e.Node == _vaultRootNode && _model == null && !_vaultLoading)
                 {
                     _vaultLoading = true;
-                    await LoadVaultModel();
+                    try
+                    {
+                        await LoadVaultModel();
+                    }
+                    finally
+                    {
+                        // Always clear the guard so a failed /files call doesn't
+                        // permanently wedge the branch on "Loading…". A subsequent
+                        // expand (or the header Refresh button) will retry.
+                        _vaultLoading = false;
+                    }
                     if (_model != null) PopulateChildren(_vaultRootNode, _model);
                 }
                 else if (e.Node.Tag is Node n && !n.IsFile && IsPlaceholder(e.Node))

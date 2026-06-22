@@ -299,7 +299,7 @@ export function BulkActionBar({
     const signal = beginAbortScope();
     setBusy(true);
     setStatus(null);
-    let ok = 0, fail = 0, notMine = 0, discarded = 0;
+    let ok = 0, fail = 0, notMine = 0, discarded = 0, restoreFailed = 0;
     for (const id of selectedIds) {
       if (signal.aborted) return;
       // Only rows the user owns can be released — releasing someone else's lock
@@ -319,6 +319,13 @@ export function BulkActionBar({
       const rel = await releaseLock.run(id);
       if (signal.aborted) return;
       if (!rel) { fail++; continue; }
+      // The checkout IS undone the moment the lock is released — count it as a
+      // success NOW. A later failure to materialize the restored bytes locally
+      // is a separate, non-authoritative concern (the vault row is already
+      // correct; the next sync self-heals the local copy), so it's tracked as
+      // `restoreFailed` rather than inflating the hard `fail` count and
+      // undercounting `ok`.
+      ok++;
       // P0: undo check-out is destructive in the real-vault model — discard local
       // edits by restoring the latest vaulted version, THEN re-protect read-only.
       // Only freeze on a SUCCESSFUL restore: a failed download leaves the local
@@ -328,17 +335,17 @@ export function BulkActionBar({
         const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
         const restored = await download.run(ver.sha256, dest, signal);
         if (signal.aborted) return;
-        if (!restored) { fail++; continue; }
+        if (!restored) { restoreFailed++; continue; }
         await setReadonly(dest, true);
         flipSwReadonly(dest, true);
         if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
       }
-      ok++;
     }
     if (signal.aborted) return;
     const detail: string[] = [];
     if (discarded) detail.push(`${discarded} draft${discarded === 1 ? "" : "s"} discarded`);
     if (fail) detail.push(`${fail} failed`);
+    if (restoreFailed) detail.push(`${restoreFailed} released but local restore failed`);
     if (notMine) detail.push(`${notMine} not yours`);
     setStatus(
       `Cancelled ${ok}/${selectedIds.length}` + (detail.length ? ` (${detail.join(", ")})` : ""),

@@ -74,8 +74,19 @@ function studyFromBundle(bundle: unknown, id: string): Study {
 
   if (kind === "sweep") {
     const points = Array.isArray(results.points) ? (results.points as SweepPoint[]) : [];
-    // Defensively ensure each point has a cycles array (older bundles may omit).
-    const safePoints = points.map((p) => ({ ...p, cycles: Array.isArray(p.cycles) ? p.cycles : [] }));
+    // Defensively ensure each point has a cycles array (older bundles may omit)
+    // AND a usable `lastCycle`: the per-RPM readers (torqueCurve / sweepStats /
+    // fuelMap) all dereference `p.lastCycle.<field>`, so a malformed bundle with
+    // a point missing `lastCycle` would crash them. Drop those points here so a
+    // single corrupt row can't sink the whole study (skip-with-warning).
+    const usable = points.filter((p) => isObj(p) && isObj((p as Record<string, unknown>).lastCycle));
+    const dropped = points.length - usable.length;
+    const safePoints = usable.map((p) => ({ ...p, cycles: Array.isArray(p.cycles) ? p.cycles : [] }));
+    if (dropped > 0) {
+      // Surface, but don't abort: the remaining points are still viewable.
+      // eslint-disable-next-line no-console
+      console.warn(`Sweep import: dropped ${dropped} point(s) with no lastCycle.`);
+    }
     const study: SweepStudy = {
       ...base,
       kind: "sweep",

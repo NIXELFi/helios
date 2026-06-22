@@ -27,7 +27,7 @@ import {
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { TaskLookup } from "@pm/components/TaskLookup";
@@ -279,14 +279,24 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
   const sharing = useMemo(() => recallSharing(activeProjectId), [activeProjectId]);
 
   // Subsystems offered for a task: only those of its PRIMARY subteam (plus any
-  // shared to it), with a "No subsystem" clear option first.
-  const subsystemOptionsFor = (task: TaskRow): SelectOption<string>[] => {
-    const opts: SelectOption<string>[] = [{ value: "", label: "No subsystem" }];
-    for (const ss of subsystemsForSubteam(subsystems, task.subteam_id, sharing)) {
-      opts.push({ value: ss.id, label: ss.name, swatch: ss.color ?? task.subteam.color ?? "#6B7280" });
-    }
-    return opts;
-  };
+  // shared to it), with a "No subsystem" clear option first. Memoized per subteam
+  // (the options depend only on the subteam, its subsystems, and the sharing
+  // overlay) so the SAME array reference is returned across renders — without this
+  // a fresh array each render would defeat the memoized row's bailout (bug #10).
+  const subsystemOptionsByTeam = useMemo(() => {
+    const cache = new Map<string, SelectOption<string>[]>();
+    return (task: TaskRow): SelectOption<string>[] => {
+      const cached = cache.get(task.subteam_id);
+      if (cached) return cached;
+      const opts: SelectOption<string>[] = [{ value: "", label: "No subsystem" }];
+      for (const ss of subsystemsForSubteam(subsystems, task.subteam_id, sharing)) {
+        opts.push({ value: ss.id, label: ss.name, swatch: ss.color ?? task.subteam.color ?? "#6B7280" });
+      }
+      cache.set(task.subteam_id, opts);
+      return opts;
+    };
+  }, [subsystems, sharing]);
+  const subsystemOptionsFor = subsystemOptionsByTeam;
 
   function renderRow(task: TaskRow, depth: number) {
     const kids = childrenOf.get(task.id) ?? [];
@@ -429,16 +439,23 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
           setDialogOpen(false);
           setCreateParentId(null);
         }}
-        onCreate={(task) => {
+        onCreate={(task, extra) => {
           // If we're in a subteam scope, force the new task into this team
+          const reHomed = !!(currentTeam && task.subteam_id !== currentTeam.id);
           const teamPatched =
-            currentTeam && task.subteam_id !== currentTeam.id
+            currentTeam && reHomed
               ? { ...task, subteam_id: currentTeam.id, subteam: currentTeam, subsystem_id: null, subsystem: null }
               : task;
           const finalTask = createParentId
             ? { ...teamPatched, parent_task_id: createParentId }
             : teamPatched;
-          addTask(finalTask);
+          // Drop the scoped team from staged extras when re-homing the primary
+          // to it, so it isn't also added as a stray secondary membership.
+          const scopedExtra =
+            reHomed && currentTeam && extra
+              ? { ...extra, extraSubteamIds: (extra.extraSubteamIds ?? []).filter((id) => id !== currentTeam.id) }
+              : extra;
+          addTask(finalTask, scopedExtra);
           if (createParentId) {
             setExpanded((prev) => {
               const next = new Set(prev);
@@ -538,7 +555,7 @@ function SortHeader({
   );
 }
 
-function RowFragment({
+function RowFragmentInner({
   task,
   depth,
   kids,
@@ -770,6 +787,32 @@ function RowFragment({
     </>
   );
 }
+
+// Memoized so a render that doesn't touch a given row's DATA bails out instead of
+// re-rendering every row (bug: renderRow built fresh closures every render, so
+// even unchanged rows re-rendered). The per-row callback props are inline arrows
+// rebuilt each render, but they only ever close over the row's `task.id` and the
+// stable store actions, so they are BEHAVIORALLY identical across renders for the
+// same row — the comparator therefore ignores the function props and compares
+// only the data props (incl. `children`, which carries nested rows). Leaf rows
+// (children === null) bail out cleanly; parents still re-render when their
+// subtree changes, which is correct.
+const RowFragment = memo(RowFragmentInner, (prev, next) => {
+  return (
+    prev.task === next.task &&
+    prev.depth === next.depth &&
+    prev.kids === next.kids &&
+    prev.isOpen === next.isOpen &&
+    prev.isCritical === next.isCritical &&
+    prev.relation === next.relation &&
+    prev.dimmed === next.dimmed &&
+    prev.users === next.users &&
+    prev.isViewer === next.isViewer &&
+    prev.selected === next.selected &&
+    prev.subsystemOptions === next.subsystemOptions &&
+    prev.children === next.children
+  );
+});
 
 function CountdownCell({ days, done }: { days: number | null; done: boolean }) {
   if (days === null) return <span className="text-helios-dim">—</span>;

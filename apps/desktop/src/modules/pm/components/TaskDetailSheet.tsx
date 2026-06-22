@@ -118,6 +118,13 @@ export function TaskDetailSheet() {
   const criticalSet = useMemo(() => computeCriticalPath(tasks, deps), [tasks, deps]);
 
   const [subtaskDialogOpen, setSubtaskDialogOpen] = useState(false);
+  // Local controlled drafts for the free-text title/description so typing does
+  // NOT fire a DB write (and an undo entry + activity row) per keystroke — the
+  // store write only happens on blur / Enter / explicit commit (bug H-4). Seeded
+  // from the task and re-synced whenever the selected task or its persisted value
+  // changes (e.g. a teammate's edit arrives via realtime).
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descDraft, setDescDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [linkUrlDraft, setLinkUrlDraft] = useState("");
   const [linkLabelDraft, setLinkLabelDraft] = useState("");
@@ -226,15 +233,26 @@ export function TaskDetailSheet() {
     : [];
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
+  // Re-seed the local title/description drafts whenever the selected task or its
+  // persisted value changes (task switch, or a teammate's realtime edit). Keyed
+  // on the values themselves so an external change overwrites a stale draft, but
+  // local typing (which doesn't change the store yet) leaves the draft alone.
+  useEffect(() => {
+    setTitleDraft(task?.title ?? "");
+    setDescDraft(task?.description ?? "");
+  }, [task?.id, task?.title, task?.description]);
+
   // When the PRIMARY subteam changes (e.g. promoted via the chips), a previously
   // chosen subsystem may no longer belong to it — clear it, matching the old
-  // single-Select behavior that reset subsystem on a subteam switch.
+  // single-Select behavior that reset subsystem on a subteam switch. Gated on
+  // canEdit so a view-only user never fires a (RLS-rejected) optimistic write
+  // that snaps back on the next refresh.
   useEffect(() => {
-    if (!task || !task.subsystem_id) return;
+    if (!task || !task.subsystem_id || !canEdit) return;
     if (!teamSubsystems.some((s) => s.id === task.subsystem_id)) {
       updateTask(task.id, { subsystem_id: null });
     }
-  }, [task, teamSubsystems, updateTask]);
+  }, [task, teamSubsystems, updateTask, canEdit]);
 
   // Tasks already linked (either direction) plus self — excluded from the lookups.
   const depExcludeIds = useMemo(() => {
@@ -289,9 +307,24 @@ export function TaskDetailSheet() {
             </div>
             <input
               type="text"
-              value={task.title}
+              value={titleDraft}
               disabled={!canEdit}
-              onChange={(e) => updateTask(task.id, { title: e.target.value })}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                const next = titleDraft.trim();
+                // Title is required — ignore an empty commit and revert the draft.
+                if (!next) {
+                  setTitleDraft(task.title);
+                  return;
+                }
+                if (next !== task.title) updateTask(task.id, { title: next });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
               className="w-full bg-transparent text-lg font-medium text-helios-text outline-none focus:bg-helios-base/40 rounded px-1 -mx-1 disabled:opacity-100"
             />
           </div>
@@ -371,11 +404,22 @@ export function TaskDetailSheet() {
                 type="number"
                 min={1}
                 max={9}
+                step={1}
                 value={task.mrl ?? ""}
                 disabled={!canEdit}
-                onChange={(e) =>
-                  updateTask(task.id, { mrl: e.target.value ? Number(e.target.value) : null })
-                }
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    updateTask(task.id, { mrl: null });
+                    return;
+                  }
+                  // MRL is a Manufacturing Readiness Level: an integer 1..9.
+                  // Reject out-of-range / non-integer values instead of writing
+                  // them (the DB CHECK would otherwise reject the write anyway).
+                  const n = Number(raw);
+                  if (!Number.isInteger(n) || n < 1 || n > 9) return;
+                  updateTask(task.id, { mrl: n });
+                }}
                 placeholder="—"
                 className={selectStyle}
               />
@@ -434,9 +478,15 @@ export function TaskDetailSheet() {
                 type="date"
                 value={task.start_date ?? ""}
                 disabled={!canEdit}
-                onChange={(e) =>
-                  updateTask(task.id, { start_date: e.target.value || null })
-                }
+                // Native max keeps the picker from offering an invalid date; the
+                // onChange guard rejects a typed start that lands after the due
+                // date so start never exceeds due (cross-field validation).
+                max={task.due_date ?? undefined}
+                onChange={(e) => {
+                  const next = e.target.value || null;
+                  if (next && task.due_date && next > task.due_date) return;
+                  updateTask(task.id, { start_date: next });
+                }}
                 className={selectStyle}
               />
             </Field>
@@ -445,9 +495,12 @@ export function TaskDetailSheet() {
                 type="date"
                 value={task.due_date ?? ""}
                 disabled={!canEdit}
-                onChange={(e) =>
-                  updateTask(task.id, { due_date: e.target.value || null })
-                }
+                min={task.start_date ?? undefined}
+                onChange={(e) => {
+                  const next = e.target.value || null;
+                  if (next && task.start_date && next < task.start_date) return;
+                  updateTask(task.id, { due_date: next });
+                }}
                 className={selectStyle}
               />
             </Field>
@@ -471,11 +524,15 @@ export function TaskDetailSheet() {
           <div className="mb-4">
             <Field label="Description">
               <textarea
-                value={task.description ?? ""}
+                value={descDraft}
                 disabled={!canEdit}
-                onChange={(e) =>
-                  updateTask(task.id, { description: e.target.value || null })
-                }
+                onChange={(e) => setDescDraft(e.target.value)}
+                onBlur={() => {
+                  const next = descDraft.trim() || null;
+                  if (next !== (task.description ?? null)) {
+                    updateTask(task.id, { description: next });
+                  }
+                }}
                 placeholder="Add a description…"
                 rows={3}
                 className={selectStyle + " resize-none"}
@@ -843,8 +900,17 @@ export function TaskDetailSheet() {
       <CreateTaskDialog
         open={subtaskDialogOpen}
         onClose={() => setSubtaskDialogOpen(false)}
-        onCreate={(newTask) => {
-          addTask({ ...newTask, parent_task_id: task.id, subteam_id: task.subteam_id, subteam: task.subteam });
+        onCreate={(newTask, extra) => {
+          // Re-home the subtask onto THIS task's primary subteam; drop that team
+          // from staged extras so it isn't also added as a stray secondary.
+          const scopedExtra =
+            newTask.subteam_id !== task.subteam_id && extra
+              ? { ...extra, extraSubteamIds: (extra.extraSubteamIds ?? []).filter((id) => id !== task.subteam_id) }
+              : extra;
+          addTask(
+            { ...newTask, parent_task_id: task.id, subteam_id: task.subteam_id, subteam: task.subteam },
+            scopedExtra,
+          );
         }}
         projectId={projectId}
         subteams={subteams}

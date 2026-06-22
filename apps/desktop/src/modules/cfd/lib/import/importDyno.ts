@@ -41,17 +41,60 @@ export function dynoTorqueNm(p: DynoPoint): number | null {
   return null;
 }
 
+/** Split a delimited line, honoring double-quoted fields so a quoted thousands
+ *  group ("11,480") survives a comma delimiter intact instead of being torn in
+ *  two. Quotes are stripped; doubled quotes ("") inside a field unescape to one. */
 function splitRow(line: string, delim: string): string[] {
-  return line.split(delim).map((c) => c.trim().replace(/^"|"$/g, ""));
+  const out: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { field += '"'; i++; } // escaped quote
+        else inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delim) {
+      out.push(field.trim());
+      field = "";
+    } else {
+      field += ch;
+    }
+  }
+  out.push(field.trim());
+  return out;
 }
 
-/** Parse a numeric cell, tolerating the European decimal comma (e.g. "12,5").
+/** Parse a numeric cell. The meaning of a comma is LOCALE-dependent and would
+ *  otherwise be ambiguous (is "1,234" the number 1234 or 1.234?), so the caller
+ *  resolves the locale ONCE from the delimiter (see parseDynoCsv) and passes it
+ *  in via `commaIsDecimal`:
+ *
+ *    - `commaIsDecimal=true`  (";"/tab export, European convention): a single
+ *      comma is the decimal point → "12,5" = 12.5, "17,159" = 17.159.
+ *    - `commaIsDecimal=false` (US "," CSV): a comma can only be a thousands
+ *      group separator (it survives splitRow only inside a quoted cell) →
+ *      "11,480" = 11480, "1,234,567" = 1234567. This is the case the old
+ *      `^-?\d+,\d+$` rule mangled, turning "11,480" rpm into 11.48 (~1000×).
+ *
  *  Returns NaN for blank/non-numeric cells (caller treats NaN as "missing"). */
-function parseNum(cell: string | undefined): number {
+function parseNum(cell: string | undefined, commaIsDecimal: boolean): number {
   if (cell == null) return NaN;
-  // Only a bare "123,45" is a decimal comma; anything else (thousands groups,
-  // already-dotted numbers) is left to Number() so we never mangle "1,234.5".
-  if (/^-?\d+,\d+$/.test(cell)) return Number(cell.replace(",", "."));
+  if (commaIsDecimal) {
+    // Single comma, no dot → decimal comma. (A dotted value with commas is an
+    // unexpected mix; leave it to Number(), which yields NaN and is skipped.)
+    if (/^-?\d+,\d+$/.test(cell) && !cell.includes(".")) return Number(cell.replace(",", "."));
+    return Number(cell);
+  }
+  // US locale: commas are thousands groups. Strip them when the value is a
+  // well-formed grouped number ("1,234", "1,234,567", "1,234.5"); otherwise
+  // leave it to Number().
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(cell)) return Number(cell.replace(/,/g, ""));
   return Number(cell);
 }
 
@@ -64,6 +107,10 @@ export function parseDynoCsv(text: string, label: string): DynoRef {
   // Delimiter: whichever splits the header into the most columns.
   const delim = [",", ";", "\t"].reduce((best, d) =>
     splitRow(lines[0]!, d).length > splitRow(lines[0]!, best).length ? d : best, ",");
+  // Locale: a ";"/tab export uses the comma as the DECIMAL point (European
+  // convention); a "," CSV reserves the comma for the delimiter, so any comma
+  // surviving inside a (quoted) cell is a thousands group, not a decimal.
+  const commaIsDecimal = delim !== ",";
   const header = splitRow(lines[0]!, delim).map((h) => h.toLowerCase());
 
   const rpmCol = header.findIndex((h) => h.includes("rpm"));
@@ -84,12 +131,13 @@ export function parseDynoCsv(text: string, label: string): DynoRef {
   let skipped = 0;
   for (const line of lines.slice(1)) {
     const cells = splitRow(line, delim);
-    // parseNum tolerates the European decimal comma (";"-delimited exports
-    // almost always pair it), so "12,5" no longer silently becomes NaN.
-    const rpm = parseNum(cells[rpmCol]);
+    // parseNum is locale-aware (commaIsDecimal): "12,5" → 12.5 on a ";" export,
+    // while a quoted "11,480" → 11480 on a "," CSV (thousands group), instead
+    // of the old rule that mangled "11,480" into 11.48.
+    const rpm = parseNum(cells[rpmCol], commaIsDecimal);
     if (!Number.isFinite(rpm) || rpm <= 0) continue; // unit rows, comments, junk
-    const pRaw = powerCol >= 0 ? parseNum(cells[powerCol]) : NaN;
-    const tRaw = torqueCol >= 0 ? parseNum(cells[torqueCol]) : NaN;
+    const pRaw = powerCol >= 0 ? parseNum(cells[powerCol], commaIsDecimal) : NaN;
+    const tRaw = torqueCol >= 0 ? parseNum(cells[torqueCol], commaIsDecimal) : NaN;
     const powerKw = Number.isFinite(pRaw) ? pRaw * powerScale : null;
     const torqueNm = Number.isFinite(tRaw) ? tRaw * torqueScale : null;
     if (powerKw == null && torqueNm == null) {

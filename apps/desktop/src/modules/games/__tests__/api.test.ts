@@ -11,9 +11,10 @@ function stubClient(result: { data: unknown; error: { message: string } | null }
   }
   (chain as { then?: unknown }).then = (resolve: (v: unknown) => void) => resolve(result);
   const insert = vi.fn().mockResolvedValue(result);
-  const from = vi.fn().mockReturnValue({ ...chain, insert });
+  const upsert = vi.fn().mockResolvedValue(result);
+  const from = vi.fn().mockReturnValue({ ...chain, insert, upsert });
   const schema = vi.fn().mockReturnValue({ from });
-  return { client: { schema } as unknown as SupabaseClient, schema, from, insert, chain };
+  return { client: { schema } as unknown as SupabaseClient, schema, from, insert, upsert, chain };
 }
 
 describe("submitScore", () => {
@@ -52,6 +53,44 @@ describe("fetchAllTime", () => {
       { userId: "a", displayName: "Ann", subteam: "Aero", best: 25, rank: 1 },
       { userId: "b", displayName: "Unknown", subteam: null, best: 15, rank: 2 },
     ]);
+  });
+
+  it("assigns equal ranks to tied scores (standard competition ranking)", async () => {
+    // Bug fix: previously ties got consecutive ranks i+1; now they share the
+    // better rank and the next distinct score skips the consumed positions.
+    const { client } = stubClient({
+      data: [
+        { user_id: "a", display_name: "Ann", subteam: null, best: 100 },
+        { user_id: "b", display_name: "Bob", subteam: null, best: 100 },
+        { user_id: "c", display_name: "Cal", subteam: null, best: 50 },
+      ],
+      error: null,
+    });
+    const rows = await fetchAllTime(client, "snake");
+    // Ann and Bob both tied for 1st; Cal is rank 3 (position 2 consumed by tie)
+    expect(rows.map((r) => [r.displayName, r.rank])).toEqual([
+      ["Ann", 1],
+      ["Bob", 1],
+      ["Cal", 3],
+    ]);
+  });
+
+  it("upserts with the submission_nonce when one is provided to submitScore", async () => {
+    // Bug fix: a retry submit without a nonce would always insert a fresh row.
+    // With a nonce we upsert against the unique (user_id, game_id,
+    // submission_nonce) index so a retry that already committed is a no-op.
+    const { client, upsert } = stubClient({ data: null, error: null });
+    await submitScore(client, "snake", 42, "test-nonce-abc");
+    expect(upsert).toHaveBeenCalledWith(
+      { game_id: "snake", score: 42, submission_nonce: "test-nonce-abc" },
+      { onConflict: "user_id,game_id,submission_nonce", ignoreDuplicates: true },
+    );
+  });
+
+  it("omits submission_nonce when none is supplied", async () => {
+    const { client, insert } = stubClient({ data: null, error: null });
+    await submitScore(client, "snake", 42);
+    expect(insert).toHaveBeenCalledWith({ game_id: "snake", score: 42 });
   });
 });
 

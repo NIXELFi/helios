@@ -106,7 +106,16 @@ export function CycleChart({
     };
 
     plotRef.current?.destroy();
-    plotRef.current = new uPlot(opts, data, plotHostRef.current);
+    try {
+      plotRef.current = new uPlot(opts, data, plotHostRef.current);
+    } catch (e) {
+      // uPlot can throw on degenerate data shapes (e.g. transiently-empty
+      // cycles during study loading). Don't let the failure propagate up and
+      // unmount the whole results page — mirror LinePlot's guard.
+      // eslint-disable-next-line no-console
+      console.warn("CycleChart uPlot create failed:", e);
+      plotRef.current = null;
+    }
 
     return () => {
       plotRef.current?.destroy();
@@ -123,7 +132,12 @@ export function CycleChart({
       xs,
       ...series.map((s) => cycles.map((c) => Number(c[s.field]))),
     ];
-    plotRef.current.setData(data);
+    try {
+      plotRef.current.setData(data);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("CycleChart setData failed:", e);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycles]);
 

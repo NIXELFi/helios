@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
 
 export interface ZoneStatsConfig {
@@ -55,13 +55,38 @@ function fmtDur(s: number): string {
 export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
   const { config, slice, cursorEmitter, viewState } = props;
   const [datums, setDatums] = useState<number[]>(viewState?.get().datums ?? []);
-  const [cursorUs, setCursorUs] = useState<number>(cursorEmitter.get());
+  // Mirror datums into a ref so the cursor subscription can read the current
+  // value without being listed as a dep (which would tear down and re-attach
+  // the subscription on every datum change).
+  const datumsRef = useRef<number[]>(datums);
+  // State is only updated when the resolved zone boundary changes (datum-cursor
+  // mode only — 0 or 2+ datums don't depend on cursor at all).
+  const [cursorZone, setCursorZone] = useState<{ startUs: number; endUs: number } | null>(null);
 
   useEffect(() => {
     if (!viewState) return;
-    return viewState.subscribe((s) => setDatums(s.datums));
+    return viewState.subscribe((s) => {
+      datumsRef.current = s.datums;
+      setDatums(s.datums);
+    });
   }, [viewState]);
-  useEffect(() => cursorEmitter.subscribe((t) => setCursorUs(t)), [cursorEmitter]);
+
+  useEffect(() => {
+    return cursorEmitter.subscribe((t) => {
+      // Only commit React state when in datum-cursor mode (exactly 1 datum).
+      // With 0 or 2+ datums the zone doesn't depend on the cursor; skipping
+      // setState avoids a full React re-render + aggregate on every 60Hz tick.
+      const prev = datumsRef.current;
+      if (prev.length === 1) {
+        const a = prev[0]!;
+        if (Math.abs(a - t) >= 1) {
+          setCursorZone({ startUs: Math.min(a, t), endUs: Math.max(a, t) });
+        } else {
+          setCursorZone(null);
+        }
+      }
+    });
+  }, [cursorEmitter]);
 
   // Determine the active zone:
   //   2+ datums → between the two most recent (last two in sorted array)
@@ -74,13 +99,12 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
       return { startUs: Math.min(a, b), endUs: Math.max(a, b), kind: "datum-datum" as const };
     }
     if (datums.length === 1) {
-      const a = datums[0]!;
-      const b = cursorUs;
-      if (Math.abs(a - b) < 1) return null;
-      return { startUs: Math.min(a, b), endUs: Math.max(a, b), kind: "datum-cursor" as const };
+      if (!cursorZone) return null;
+      return { ...cursorZone, kind: "datum-cursor" as const };
     }
     return null;
-  }, [datums, cursorUs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datums, cursorZone]);
 
   if (!zone) {
     return (

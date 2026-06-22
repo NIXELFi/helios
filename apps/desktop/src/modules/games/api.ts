@@ -32,11 +32,26 @@ export async function submitScore(
   client: SupabaseClient,
   gameId: GameId,
   score: number,
+  /** Caller-supplied idempotency nonce: same nonce → same logical submission.
+   *  Pass the same value on retry so a network hiccup that already inserted
+   *  the row doesn't produce a duplicate.  Defaults to a fresh uuid when
+   *  omitted (i.e. each call with no nonce is always a new submission). */
+  nonce?: string,
 ): Promise<void> {
   if (!Number.isInteger(score) || score < 0) {
     throw new Error(`invalid score: ${score}`);
   }
-  const res = await client.schema("games").from("scores").insert({ game_id: gameId, score });
+  const table = client.schema("games").from("scores");
+  // With a nonce, upsert against the (user_id, game_id, submission_nonce) unique
+  // index so a retry that already committed the row is a no-op instead of a
+  // duplicate row (or a 409). Without one, fall back to a plain insert.
+  const res =
+    nonce !== undefined
+      ? await table.upsert(
+          { game_id: gameId, score, submission_nonce: nonce },
+          { onConflict: "user_id,game_id,submission_nonce", ignoreDuplicates: true },
+        )
+      : await table.insert({ game_id: gameId, score });
   if (res.error) throw new Error(`submit score: ${res.error.message}`);
 }
 
@@ -48,15 +63,22 @@ interface BoardRow {
 }
 
 function toEntries(rows: BoardRow[]): LeaderboardEntry[] {
-  return [...rows]
-    .sort((a, b) => Number(b.best) - Number(a.best))
-    .map((r, i) => ({
+  const sorted = [...rows].sort((a, b) => Number(b.best) - Number(a.best));
+  // Standard competition ranking ("1224"): equal scores share the better rank;
+  // the next distinct score skips the positions consumed by the tied group.
+  let rank = 0;
+  return sorted.map((r, i) => {
+    if (i === 0 || Number(sorted[i]!.best) !== Number(sorted[i - 1]!.best)) {
+      rank = i + 1;
+    }
+    return {
       userId: r.user_id,
       displayName: r.display_name ?? "Unknown",
       subteam: r.subteam,
       best: Number(r.best),
-      rank: i + 1,
-    }));
+      rank,
+    };
+  });
 }
 
 async function fetchBoard(

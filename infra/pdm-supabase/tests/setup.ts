@@ -39,7 +39,8 @@ export const anonClient = (): SupabaseClient<any, any, any> =>
 /** Creates a confirmed test user via the admin API and returns the User row.
  *
  *  Since 20260619000700, an on_auth_user_created trigger auto-grants every new
- *  account a baseline GLOBAL 'editor' role. The RLS/role suite assumes a freshly
+ *  account a baseline GLOBAL role ('viewer' as of 20260622000200; was 'editor').
+ *  The RLS/role suite assumes a freshly
  *  created user starts with NO role (each test then assigns exactly what it needs
  *  via setRole/setVaultRole), so we clear the auto-provisioned row here to restore
  *  that baseline. Tests that specifically exercise the auto-provision trigger

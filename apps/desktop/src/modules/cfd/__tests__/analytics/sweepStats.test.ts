@@ -13,6 +13,20 @@ describe("peakOf", () => {
     expect(peakOf([], power)).toBeNull();
   });
 
+  it("tolerates malformed points missing lastCycle (drops them, no throw)", () => {
+    const pts = [
+      makeSweepPoint({ rpm: 8000, lastCycle: { brakePowerKW: 50 } }),
+      // A malformed/imported point with no lastCycle — must be skipped, not
+      // dereferenced (regression for the sweep-import crash).
+      { rpm: 9000 } as unknown as ReturnType<typeof makeSweepPoint>,
+      makeSweepPoint({ rpm: 10000, lastCycle: { brakePowerKW: 64 } }),
+    ];
+    expect(() => summarizeSweep(pts)).not.toThrow();
+    const peak = peakOf(pts, power)!;
+    expect(peak.value).toBe(64);
+    expect(summarizeSweep(pts).nPoints).toBe(2);
+  });
+
   it("uses the sampled point as interp when <3 points", () => {
     const pts = [
       makeSweepPoint({ rpm: 8000, lastCycle: { brakePowerKW: 50 } }),

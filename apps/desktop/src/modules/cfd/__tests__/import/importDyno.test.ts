@@ -51,6 +51,22 @@ describe("parseDynoCsv", () => {
     expect(ref.points).toHaveLength(2);
     expect(ref.skippedRows).toBe(1);
   });
+
+  it("parses US thousands-grouped integers without ~1000x corruption", () => {
+    // Regression: in a comma-delimited (US) CSV a quoted "11,480" rpm must stay
+    // 11480, not collapse to 11.48 (the old rule mangled any "d+,d+" cell). The
+    // comma is the delimiter here, so an in-cell comma is a thousands group.
+    const ref = parseDynoCsv('rpm,power_kW\n"11,480","1,234"\n', "us.csv");
+    expect(ref.points).toHaveLength(1);
+    expect(ref.points[0]!.rpm).toBe(11480);
+    expect(ref.points[0]!.powerKw).toBe(1234);
+  });
+
+  it("treats the comma as a decimal on a semicolon-delimited (European) export", () => {
+    // "12,5" on a ";" export is a European decimal, NOT a thousands group.
+    const ref = parseDynoCsv("rpm;power_kW\n5000;12,5\n", "eu2.csv");
+    expect(ref.points[0]!.powerKw).toBeCloseTo(12.5, 6);
+  });
 });
 
 describe("compareDyno", () => {

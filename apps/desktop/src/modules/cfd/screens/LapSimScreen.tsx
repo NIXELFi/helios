@@ -380,8 +380,9 @@ export function LapSimScreen() {
               <SectorTable sectors={sectors} deltas={secDeltas} runB={runB} />
             )}
 
-            {/* Delta-T (compare mode) */}
-            {runB && deltaT && (
+            {/* Delta-T (compare mode) — require a non-empty trace so the
+                `final … s` readout (deltaT[last]) can't deref an empty array. */}
+            {runB && deltaT && deltaT.length > 0 && (
               <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
                 <LinePlot
                   title={`Δ time (B − A) vs distance — +ve = A ahead · final ${deltaT[deltaT.length - 1]!.toFixed(2)} s`}

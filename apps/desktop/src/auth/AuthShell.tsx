@@ -166,10 +166,13 @@ export function useMyRole(): string | null {
         return;
       }
       const rows = (data ?? []) as Array<{ role: string; vault_id: string | null }>;
-      const RANK: Record<string, number> = { owner: 4, admin: 3, editor: 2, viewer: 1 };
+      // Only surface the GLOBAL (vault_id = null) role in the sidebar pill.
+      // Falling back to the most-privileged vault-scoped role would over-report:
+      // a per-vault admin would see "admin" even though they have no global
+      // elevated access. If the user holds no global row, show null so the pill
+      // reflects their actual org-wide standing.
       const global = rows.find((r) => r.vault_id == null);
-      const best = rows.slice().sort((a, b) => (RANK[b.role] ?? 0) - (RANK[a.role] ?? 0))[0];
-      setRole((global?.role ?? best?.role) ?? null);
+      setRole(global?.role ?? null);
     })();
     return () => { on = false; };
   }, [client, userId]);

@@ -71,11 +71,15 @@ function str(v: unknown): string | null {
 }
 
 /**
- * Build a deterministic notification id from its key fields so that
- * replaying the same event twice de-dupes cleanly.
+ * Build a deterministic notification id from STABLE event-row data only so that
+ * replaying the same event twice de-dupes cleanly. The receive-time `at`
+ * timestamp is deliberately NOT part of the id — it's stamped by the hook at
+ * delivery time, so a re-delivered event (realtime reconnect / missed-ack
+ * replay) would otherwise carry a different `at` and dodge de-duplication.
+ * `at` is kept on the Notification for display ("2m ago") only.
  */
-function makeId(table: string, eventType: string, rowId: string, at: string): string {
-  return `${table}:${eventType}:${rowId}:${at}`;
+function makeId(table: string, eventType: string, rowId: string): string {
+  return `${table}:${eventType}:${rowId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +123,7 @@ export function eventToNotification(
     const actorId = str(newRow.author_id);
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
-      id: makeId(table, eventType, rowId, at),
+      id: makeId(table, eventType, rowId),
       fileId,
       kind: "checked_in",
       fileName,
@@ -143,7 +147,7 @@ export function eventToNotification(
     const actorId = str(newRow.user_id);
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
-      id: makeId(table, eventType, rowId, at),
+      id: makeId(table, eventType, rowId),
       fileId,
       kind: "checked_out",
       fileName,
@@ -183,7 +187,7 @@ export function eventToNotification(
     const rowId = str(newRow.id) ?? fileId;
     const fileName = ctx.fileNames.get(fileId) ?? fileId;
     return {
-      id: makeId(table, eventType + ":" + kind, rowId, at),
+      id: makeId(table, eventType + ":" + kind, rowId),
       fileId,
       kind,
       fileName,
@@ -219,7 +223,7 @@ export function eventToNotification(
     // deleted_by is set by the soft-delete RPC; use it as actorId when present.
     const actorId = str(newRow.deleted_by);
     return {
-      id: makeId(table, eventType + ":" + kind, fileId, at),
+      id: makeId(table, eventType + ":" + kind, fileId),
       fileId,
       kind,
       fileName,

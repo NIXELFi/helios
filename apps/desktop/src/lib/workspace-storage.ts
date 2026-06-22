@@ -46,6 +46,11 @@ export function loadWorkspaces(): Workspace[] {
       throw new Error("malformed");
     }
     if (parsed.version === CURRENT_VERSION) {
+      // Validate each workspace has the required shape before returning.
+      // A truncated or partially-written blob could have valid version/array
+      // shape but corrupt individual entries — reject the whole blob rather
+      // than handing the app poisoned workspaces.
+      if (!parsed.workspaces.every(isValidWorkspace)) throw new Error("malformed workspace");
       return parsed.workspaces;
     }
     if (parsed.version === 1) {
@@ -144,30 +149,36 @@ function migrateV4ToV5(workspaces: Workspace[]): Workspace[] {
     // futile if they've fully customized. Just append; the user can
     // move/resize. The default-builtin layout (still has its original IDs)
     // gets the precision treatment so first-run users see a tidy grid.
-    const tiles = [...w.tiles];
-    if (tiles.some((t) => t.id === "time-report" && t.w >= 0.30 && t.y < 0.05)) {
+    if (w.tiles.some((t) => t.id === "time-report" && t.w >= 0.30 && t.y < 0.05)) {
       // Default layout — shrink time-report + lap-panel and slot sector-table.
-      for (const t of tiles) {
-        if (t.id === "time-report" && t.y < 0.05) { t.w = 0.22; }
-        else if (t.id === "lap-panel" && t.y < 0.05) { t.x = 0.42; t.w = 0.13; }
-        else if (t.id === "gps-track" && t.y < 0.05) { t.x = 0.55; t.w = 0.45; }
-      }
+      // Spread each tile to avoid mutating the original tile objects (the
+      // caller's array was shallow-copied, so the tile references are shared).
+      const tiles = w.tiles.map((t) => {
+        if (t.id === "time-report" && t.y < 0.05) return { ...t, w: 0.22 };
+        if (t.id === "lap-panel" && t.y < 0.05) return { ...t, x: 0.42, w: 0.13 };
+        if (t.id === "gps-track" && t.y < 0.05) return { ...t, x: 0.55, w: 0.45 };
+        return t;
+      });
       tiles.push({
         id: "sector-table",
         widgetType: "sector_table",
         config: { sectorCount: 3, maxRows: 6, hideUntrusted: true },
         x: 0.22, y: 0, w: 0.20, h: 0.45,
       });
+      return { ...w, tiles };
     } else {
       // User-customized layout — just append at the bottom; they can move.
-      tiles.push({
-        id: "sector-table",
-        widgetType: "sector_table",
-        config: { sectorCount: 3, maxRows: 6, hideUntrusted: true },
-        x: 0, y: 0.85, w: 0.5, h: 0.15,
-      });
+      const tiles = [
+        ...w.tiles,
+        {
+          id: "sector-table",
+          widgetType: "sector_table" as const,
+          config: { sectorCount: 3, maxRows: 6, hideUntrusted: true },
+          x: 0, y: 0.85, w: 0.5, h: 0.15,
+        },
+      ];
+      return { ...w, tiles };
     }
-    return { ...w, tiles };
   });
 }
 
@@ -190,4 +201,17 @@ function cloneBuiltins(): Workspace[] {
   // Deep-clone so user edits can't mutate the source-of-truth defaults at
   // module level.
   return JSON.parse(JSON.stringify(BUILTIN_WORKSPACES)) as Workspace[];
+}
+
+/** Minimal structural validation for a persisted workspace entry. Rejects
+ *  blobs where the id/label/tiles fields are missing or wrong type so a
+ *  truncated write can't surface as a workspace with undefined properties. */
+function isValidWorkspace(w: unknown): w is Workspace {
+  if (!w || typeof w !== "object") return false;
+  const ww = w as Record<string, unknown>;
+  return (
+    typeof ww.id === "string" &&
+    typeof ww.label === "string" &&
+    Array.isArray(ww.tiles)
+  );
 }

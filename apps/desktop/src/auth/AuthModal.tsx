@@ -350,6 +350,12 @@ function CredentialsStep(props: {
     setError(null);
     setInfo(null);
     if (mode === "signin") {
+      // Catch an obviously-malformed email inline rather than round-tripping a
+      // generic "invalid credentials" from the server.
+      if (!EMAIL_RE.test(email.trim())) {
+        setError("Enter a valid email address.");
+        return;
+      }
       setBusy(true);
       try {
         const { error } = await client.auth.signInWithPassword({ email, password });
@@ -367,9 +373,15 @@ function CredentialsStep(props: {
         setBusy(false);
       }
     } else {
-      // Sign-up. Display name + subteam are mandatory and land in
-      // user_metadata (display_name drives the sidebar pill; subteam shows
-      // in the admin panel).
+      // Sign-up. Validate the email format / domain first (H-1 hardening) so a
+      // malformed or disallowed address is rejected inline before any round-trip.
+      const emailErr = validateSignupEmail(email);
+      if (emailErr) {
+        setError(emailErr);
+        return;
+      }
+      // Display name + subteam are mandatory and land in user_metadata
+      // (display_name drives the sidebar pill; subteam shows in the admin panel).
       if (!displayName.trim()) {
         setError("Display name is required.");
         return;
@@ -516,6 +528,34 @@ function CredentialsStep(props: {
 // ──────────────────────────────────────────────────────────────────────
 
 const MIN_PASSWORD_LEN = 12;
+
+// H-1 (open-signup hardening): client-side email validation so a malformed or
+// disallowed address is rejected inline before any auth round-trip — the first
+// of the layered defenses (the others being the server-side before_user_created
+// hook / captcha in config.toml). A reasonable, intentionally-strict single-`@`
+// pattern: non-space local part, a dotted domain with a 2+ char TLD.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Optional email-DOMAIN allowlist. Empty = allow any well-formed address (the
+// default, so self-hosters / the test suite aren't blocked). To lock the
+// production vault to ASU accounts, set e.g. ["asu.edu"] — it pairs with the
+// server-side before_user_created hook (the client check is UX only; the hook
+// is the real gate). Compared case-insensitively against the email's domain.
+const SIGNUP_EMAIL_DOMAINS: readonly string[] = [];
+
+/** Validates an email's format and (optionally) its domain against the
+ *  allowlist. Returns an error string to display, or null when acceptable. */
+function validateSignupEmail(email: string): string | null {
+  const trimmed = email.trim().toLowerCase();
+  if (!EMAIL_RE.test(trimmed)) return "Enter a valid email address.";
+  if (SIGNUP_EMAIL_DOMAINS.length > 0) {
+    const domain = trimmed.slice(trimmed.lastIndexOf("@") + 1);
+    if (!SIGNUP_EMAIL_DOMAINS.includes(domain)) {
+      return `Sign-up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(", ")} accounts.`;
+    }
+  }
+  return null;
+}
 
 function ForgotStep(props: {
   client: SupabaseClient;

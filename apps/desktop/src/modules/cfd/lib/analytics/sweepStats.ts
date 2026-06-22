@@ -16,9 +16,11 @@ export interface PeakInfo {
   valueInterp: number;
 }
 
-// Sort a copy by rpm so callers may pass points in any order.
+// Sort a copy by rpm so callers may pass points in any order. Points lacking a
+// usable `lastCycle` (malformed/imported bundles) are dropped here so every
+// downstream accessor `p.lastCycle.<field>` is safe.
 function sortedByRpm(points: SweepPoint[]): SweepPoint[] {
-  return [...points].sort((a, b) => a.rpm - b.rpm);
+  return points.filter((p) => p?.lastCycle != null).sort((a, b) => a.rpm - b.rpm);
 }
 
 /** Peak of an accessor over the sweep, with parabolic-vertex interpolation.

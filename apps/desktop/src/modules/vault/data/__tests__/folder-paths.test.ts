@@ -16,6 +16,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  folderPath,
+  folderNamePath,
   isDescendantOf,
   nearestLiveAncestor,
   resolveBreadcrumbPath,
@@ -46,6 +48,48 @@ const TREE: Folder[] = [
   folder("subframe", "frame"),
   folder("aero", "root"),
 ];
+
+// ── folderPath / folderNamePath (H-2: cycle guard) ────────────────────────────
+
+describe("folderPath", () => {
+  it("joins the sanitized folder chain root → leaf", () => {
+    expect(folderPath("subframe", TREE)).toBe("root/chassis/frame/subframe");
+  });
+
+  it('returns "" for the vault root (null) and for an unknown id', () => {
+    expect(folderPath(null, TREE)).toBe("");
+    expect(folderPath("ghost", TREE)).toBe("");
+  });
+
+  it("does not stack-overflow on a self-parenting folder (cycle guard)", () => {
+    // A corrupt row whose parent_id is itself would infinitely recurse without
+    // the guard — folderPath is on the hot sync-match path, so this would make
+    // the whole Vault UI unopenable.
+    const cyclic: Folder[] = [folder("loop", "loop")];
+    expect(() => folderPath("loop", cyclic)).not.toThrow();
+    expect(folderPath("loop", cyclic)).toBe("loop");
+  });
+
+  it("does not stack-overflow on a multi-node parent_id cycle", () => {
+    // a → b → a (mutual parents). The walk must terminate.
+    const cyclic: Folder[] = [folder("a", "b"), folder("b", "a")];
+    expect(() => folderPath("a", cyclic)).not.toThrow();
+    // Whatever it returns, it must be a finite, bounded string.
+    expect(folderPath("a", cyclic).split("/").length).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("folderNamePath", () => {
+  it("joins the RAW folder names root → leaf", () => {
+    expect(folderNamePath("frame", TREE)).toBe("root/chassis/frame");
+  });
+
+  it("does not stack-overflow on a parent_id cycle (guard)", () => {
+    const cyclic: Folder[] = [folder("a", "b"), folder("b", "a")];
+    expect(() => folderNamePath("a", cyclic)).not.toThrow();
+    expect(folderNamePath("a", cyclic).split("/").length).toBeLessThanOrEqual(64);
+  });
+});
 
 // ── isDescendantOf ────────────────────────────────────────────────────────────
 

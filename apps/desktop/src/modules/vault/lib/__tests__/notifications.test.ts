@@ -109,6 +109,22 @@ describe("eventToNotification — versions INSERT → checked_in", () => {
     const n2 = eventToNotification(versionInsert("file-A"), WATCHED, ctx(), AT);
     expect(n1!.id).toBe(n2!.id);
   });
+
+  test("id ignores the receive-time `at` so re-delivered events de-dupe", () => {
+    // The SAME event row delivered twice but stamped at different wall-clock
+    // times must produce the SAME id (it embeds stable row data only), so the
+    // second delivery de-dupes instead of appearing as a fresh notification.
+    const LATER = "2026-06-19T10:05:00.000Z";
+    const n1 = eventToNotification(versionInsert("file-A"), WATCHED, ctx(), AT);
+    const n2 = eventToNotification(versionInsert("file-A"), WATCHED, ctx(), LATER);
+    expect(n1!.id).toBe(n2!.id);
+    // `at` still reflects each delivery time for display.
+    expect(n1!.at).toBe(AT);
+    expect(n2!.at).toBe(LATER);
+    // And the merge de-dupes them to a single entry.
+    const merged = mergeNotifications([n1!], [n2!], 50);
+    expect(merged).toHaveLength(1);
+  });
 });
 
 describe("eventToNotification — locks INSERT → checked_out", () => {

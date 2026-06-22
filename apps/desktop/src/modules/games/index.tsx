@@ -22,6 +22,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
   const [active, setActive] = useState<GameDef | null>(null);
   const [run, setRun] = useState(0); // key bump remounts the game = restart
   const [over, setOver] = useState<{ score: number; status: SubmitStatus } | null>(null);
+  // Idempotency nonce for the current game-over submission: generated once when
+  // the game ends, then reused on every retry so a duplicate-insert can never
+  // occur on a flaky network.
+  const submitNonceRef = useRef<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [boardGame, setBoardGame] = useState<GameId>(() => {
     try {
@@ -50,6 +54,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
   }
 
   function play(game: GameDef) {
+    submitNonceRef.current = null; // fresh game → fresh submission nonce
     setActive(game);
     setOver(null);
     setRun((n) => n + 1);
@@ -63,9 +68,14 @@ export function GamesModule({ paused }: GamesModuleProps) {
 
   async function handleGameOver(score: number) {
     if (!active || !client) return;
+    // Lazily mint the nonce the first time this game-over fires, then reuse it
+    // on every retry so we never insert duplicate rows for the same play.
+    if (!submitNonceRef.current) {
+      submitNonceRef.current = crypto.randomUUID();
+    }
     setOver({ score, status: "submitting" });
     try {
-      await submitScore(client, active.id, score);
+      await submitScore(client, active.id, score, submitNonceRef.current);
       setOver({ score, status: "submitted" });
       setRefreshToken((n) => n + 1);
     } catch {
@@ -113,6 +123,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                     status={over.status}
                     onRetrySubmit={() => void handleGameOver(over.score)}
                     onRestart={() => {
+                      submitNonceRef.current = null; // fresh game → fresh nonce
                       setOver(null);
                       setRun((n) => n + 1);
                     }}

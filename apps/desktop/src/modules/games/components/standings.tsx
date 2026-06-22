@@ -22,13 +22,18 @@ interface BoardData {
  * (including by the mount-time prefetch) renders instantly everywhere.
  * `token` records which refreshToken a board was fetched under — a bump
  * (score submitted) makes every board refetch in the background while the
- * old data stays on screen. */
+ * old data stays on screen.
+ *
+ * The cache is keyed by user identity: when the signed-in user changes
+ * (sign-out → sign-in) the entire cache is purged so one user's boards are
+ * never served to a different user (cross-user data exposure). */
 interface CacheEntry { data: BoardData; token: number }
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<void>>();
 let cacheVersion = 0;
 const listeners = new Set<() => void>();
 let cacheClient: SupabaseClient | null = null;
+let cacheUserId: string | null | undefined = undefined; // undefined = never set
 
 function notify() {
   cacheVersion++;
@@ -47,16 +52,20 @@ function keyFor(tab: Tab, gameId: GameId): string {
 
 /** Fetch a board into the cache unless it's already fresh for `token`.
  *  Deduplicates concurrent requests per board. */
-function ensureBoard(
+async function ensureBoard(
   client: SupabaseClient,
   tab: Tab,
   gameId: GameId,
   token: number,
 ): Promise<void> {
-  // Boards are global, but a different Supabase connection is a different
-  // world — drop everything if the client identity changes.
-  if (cacheClient !== client) {
+  // Boards are user-specific: drop the cache when the Supabase client changes
+  // OR when the signed-in user changes (sign-out → sign-in on the same client
+  // singleton would otherwise serve stale cached boards to the new user).
+  const { data: { user } } = await client.auth.getUser();
+  const userId = user?.id ?? null;
+  if (cacheClient !== client || cacheUserId !== userId) {
     cacheClient = client;
+    cacheUserId = userId;
     cache.clear();
     inflight.clear();
     notify();

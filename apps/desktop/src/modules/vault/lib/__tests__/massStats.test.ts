@@ -124,36 +124,39 @@ describe("aggregateMass", () => {
     folderNames,
   );
 
-  test("totals grams across all parseable parts", () => {
-    // f1: 1200g, f2: 3500g, f3: 300g → 5000g
-    expect(result.totalGrams).toBeCloseTo(5000);
+  test("totals grams across leaf parts only — assembly rollup mass excluded", () => {
+    // f1 (Chassis_Main.SLDASM, 1200g) is an ASSEMBLY: its rollup Mass is the sum
+    // of its children and would double-count. So the total is the leaf parts:
+    // f2: 3500g, f3: 300g → 3800g.
+    expect(result.totalGrams).toBeCloseTo(3800);
   });
 
-  test("counts parts with mass and without", () => {
-    // f1, f2, f3 have parseable mass → 3
-    expect(result.withMassCount).toBe(3);
-    // f4 (no Mass prop) + f5 (bad data) → 2
+  test("counts leaf parts with mass; assemblies are excluded entirely", () => {
+    // Only f2, f3 are leaf parts with parseable mass → 2 (f1 is an assembly).
+    expect(result.withMassCount).toBe(2);
+    // Assemblies are skipped from BOTH counts (a rollup, not a leaf), so only
+    // the missing/unparseable LEAF parts count: f4 (no Mass prop) + f5 (bad). → 2
     expect(result.missingCount).toBe(2);
   });
 
-  test("ranks heaviest parts in descending order", () => {
+  test("ranks heaviest LEAF parts in descending order (assemblies excluded)", () => {
     const labels = result.heaviest.map((b) => b.label);
-    // Engine_Block (3500g) > Chassis_Main (1200g) > Rotor (300g)
+    // Engine_Block (3500g) > Rotor (300g); Chassis_Main.SLDASM is an assembly.
     expect(labels[0]).toBe("Engine_Block.SLDPRT");
-    expect(labels[1]).toBe("Chassis_Main.SLDASM");
-    expect(labels[2]).toBe("Rotor.SLDPRT");
+    expect(labels[1]).toBe("Rotor.SLDPRT");
+    expect(labels).not.toContain("Chassis_Main.SLDASM");
   });
 
   test("heaviest values are in grams", () => {
     expect(result.heaviest[0]!.value).toBeCloseTo(3500);
-    expect(result.heaviest[1]!.value).toBeCloseTo(1200);
+    expect(result.heaviest[1]!.value).toBeCloseTo(300);
   });
 
-  test("groups mass by subsystem (top-level folder name)", () => {
+  test("groups mass by subsystem (top-level folder name), assembly rollup excluded", () => {
     const chassis = result.bySubsystem.find((b) => b.label === "Chassis");
     const engine = result.bySubsystem.find((b) => b.label === "Engine");
-    // f1 + f3 = 1200 + 300 = 1500g
-    expect(chassis?.value).toBeCloseTo(1500);
+    // Chassis: f1 is an assembly (excluded), only f3 = 300g.
+    expect(chassis?.value).toBeCloseTo(300);
     // f2 = 3500g
     expect(engine?.value).toBeCloseTo(3500);
   });
@@ -166,10 +169,35 @@ describe("aggregateMass", () => {
   });
 
   test("files at vault root (no folder) appear as (root) subsystem", () => {
-    // f4 has no mass, f5 has bad mass; neither appear. But if a root file has mass:
-    const rootFile = fileWithMass("TopAssembly.SLDASM", { folder_id: null, massValue: "50 g" });
+    // A root LEAF part with mass shows up under (root). (An assembly's rollup
+    // mass is deliberately excluded — see the assembly double-count test below.)
+    const rootFile = fileWithMass("TopBracket.SLDPRT", { folder_id: null, massValue: "50 g" });
     const r = aggregateMass([rootFile] as any, new Map());
     expect(r.bySubsystem.find((b) => b.label === "(root)")?.value).toBeCloseTo(50);
+  });
+
+  test("assembly (.SLDASM) rollup mass is excluded so leaf parts aren't double-counted", () => {
+    // An assembly whose Mass equals the sum of its two child parts. Counting the
+    // assembly's rollup alongside the parts would report 200g instead of 100g.
+    const assembly = fileWithMass("Sub.SLDASM", { folder_id: "f", massValue: "100 g" });
+    const partA = fileWithMass("A.SLDPRT", { folder_id: "f", massValue: "60 g" });
+    const partB = fileWithMass("B.SLDPRT", { folder_id: "f", massValue: "40 g" });
+    const r = aggregateMass([assembly, partA, partB] as any, new Map([["f", "Frame"]]));
+    // Only the leaf parts contribute: 60 + 40 = 100g (NOT 200g).
+    expect(r.totalGrams).toBeCloseTo(100);
+    expect(r.withMassCount).toBe(2);
+    expect(r.bySubsystem.find((b) => b.label === "Frame")?.value).toBeCloseTo(100);
+    // The assembly never appears in the heaviest-parts ranking.
+    expect(r.heaviest.map((h) => h.label)).not.toContain("Sub.SLDASM");
+  });
+
+  test("an assembly (.SLDASM) is case-insensitive for the suffix and is excluded", () => {
+    const assembly = fileWithMass("Big.sldasm", { folder_id: null, massValue: "999 g" });
+    const r = aggregateMass([assembly] as any, new Map());
+    expect(r.totalGrams).toBe(0);
+    expect(r.withMassCount).toBe(0);
+    // An assembly is a rollup, not a leaf — it counts toward NEITHER total.
+    expect(r.missingCount).toBe(0);
   });
 
   test("empty file list returns zeroed result", () => {

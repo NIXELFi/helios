@@ -17,6 +17,17 @@ interface Props {
   /** Optional: if provided, clicking a notification item calls this with the
    *  file id so the caller can navigate to it. */
   onJumpToFile?: (fileId: FileId) => void;
+  /** Optional: maps an actor user-id → a human label (email / display name).
+   *  When absent or missing the actor, the row falls back to the id prefix. */
+  actorNames?: Map<string, string>;
+}
+
+/** Human label for an actor: the resolved display name/email when known, else
+ *  a short id prefix so the row still says *who* (not a bare 36-char UUID). */
+function actorLabel(actorId: string, actorNames?: Map<string, string>): string {
+  const name = actorNames?.get(actorId);
+  if (name && name.trim()) return name;
+  return `${actorId.slice(0, 8)}…`;
 }
 
 const KIND_LABELS: Record<Notification["kind"], string> = {
@@ -42,7 +53,7 @@ function relTime(iso: string): string {
   return `${day}d ago`;
 }
 
-export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJumpToFile }: Props) {
+export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJumpToFile, actorNames }: Props) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -187,8 +198,8 @@ export function NotificationFeed({ items, unread, onMarkAllRead, onClear, onJump
                           {KIND_LABELS[n.kind]}
                         </span>
                         {n.actorId && (
-                          <span className="truncate" title={n.actorId}>
-                            by {n.actorId.slice(0, 8)}…
+                          <span className="truncate" title={actorNames?.get(n.actorId) ?? n.actorId}>
+                            by {actorLabel(n.actorId, actorNames)}
                           </span>
                         )}
                       </div>

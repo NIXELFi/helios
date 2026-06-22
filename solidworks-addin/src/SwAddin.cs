@@ -149,6 +149,10 @@ namespace HeliosVault
                 Marshal.ReleaseComObject(_taskpane);
                 _taskpane = null;
             }
+            // Dispose before nulling: stops the 4-second poll timer and releases
+            // the GDI handles owned by the control and its child VaultTreePanel
+            // ImageList. Without this they leak for the entire SW process lifetime.
+            _control?.Dispose();
             _control = null;
             if (_sw != null)
             {

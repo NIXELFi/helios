@@ -66,6 +66,16 @@ describe("parseSearchQuery", () => {
     expect(r.propFilters[0]!.value).toBe("prototype");
   });
 
+  test("free text is normalised to lowercase (case-insensitive filename scoring)", () => {
+    // The free text left after stripping prop: tokens must be lowercased so the
+    // downstream filename scorer (which lowercases the candidate name only)
+    // stays case-insensitive. "Frame" → "frame".
+    const r = parseSearchQuery("Frame prop:Material=7075");
+    expect(r.text).toBe("frame");
+    const r2 = parseSearchQuery("BRACKET ARM");
+    expect(r2.text).toBe("bracket arm");
+  });
+
   test("prop token with equals sign in value is handled correctly", () => {
     // Only the first '=' splits key from value
     const r = parseSearchQuery("prop:Description=A=B");

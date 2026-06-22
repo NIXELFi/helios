@@ -1783,12 +1783,19 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
       <CreateTaskDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onCreate={(task) => {
+        onCreate={(task, extra) => {
+          const reHomed = !!(currentTeam && task.subteam_id !== currentTeam.id);
           const teamPatched =
-            currentTeam && task.subteam_id !== currentTeam.id
+            currentTeam && reHomed
               ? { ...task, subteam_id: currentTeam.id, subteam: currentTeam, subsystem_id: null, subsystem: null }
               : task;
-          addTask(teamPatched);
+          // Drop the scoped team from staged extras when re-homing the primary
+          // to it, so it isn't also added as a stray secondary membership.
+          const scopedExtra =
+            reHomed && currentTeam && extra
+              ? { ...extra, extraSubteamIds: (extra.extraSubteamIds ?? []).filter((id) => id !== currentTeam.id) }
+              : extra;
+          addTask(teamPatched, scopedExtra);
         }}
         projectId={projectId}
         subteams={subteams}

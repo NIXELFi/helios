@@ -41,6 +41,8 @@ export function fuelMapFromSweep(points: SweepPoint[]): EngineFuelMap | null {
   const rows = points
     .filter(
       (p) =>
+        // Guard malformed/imported points missing `lastCycle` before deref.
+        p?.lastCycle != null &&
         Number.isFinite(p.lastCycle.indicatedPowerKW) &&
         Number.isFinite(p.lastCycle.brakePowerKW) &&
         Number.isFinite(p.lastCycle.intakeMassPerCycleG) &&

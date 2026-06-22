@@ -43,6 +43,18 @@ export interface MassBar {
 const LB_TO_G = 453.592;
 const TOP_N = 10;
 
+/**
+ * SolidWorks stores a computed ROLLUP Mass on `.SLDASM` (assembly) versions
+ * equal to the sum of all its children's masses. Summing that alongside the
+ * leaf-part masses double-counts every gram already contributed by the parts
+ * below — nesting compounds it, inflating the KPI 2x+. So we exclude assembly
+ * rollup mass from the totals, exactly the way bom.ts suppresses an assembly
+ * node's own `massGrams` (effectiveMass = isAssembly ? null : node.massGrams).
+ */
+function isAssemblyFile(name: string): boolean {
+  return name.toLowerCase().endsWith(".sldasm");
+}
+
 // ---------------------------------------------------------------------------
 // parseMassGrams
 // ---------------------------------------------------------------------------
@@ -107,6 +119,14 @@ export function aggregateMass(
   const partWeights: MassBar[] = [];
 
   for (const file of files) {
+    // Exclude assemblies entirely from the budget. SolidWorks stores a computed
+    // ROLLUP Mass on `.SLDASM` versions equal to the sum of its children, so
+    // counting it alongside the leaf parts double-counts every gram below it
+    // (nesting compounds). Assemblies are neither a counted part nor a "missing"
+    // leaf — they're a rollup of parts already accounted for, so skip them from
+    // every total/count. Mirrors bom.ts (effectiveMass = isAssembly ? null : …).
+    if (isAssemblyFile(file.name)) continue;
+
     const massGrams = extractMassGrams(file._properties);
 
     if (massGrams === null) {

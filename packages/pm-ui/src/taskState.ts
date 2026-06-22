@@ -30,7 +30,8 @@ export function taskOutlineState(
   if (task.due_date) {
     const due = parseDate(task.due_date);
     if (due) {
-      const ms = due.getTime() - today.setHours(0, 0, 0, 0);
+      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const ms = due.getTime() - todayMidnight.getTime();
       const days = Math.floor(ms / (1000 * 60 * 60 * 24));
       if (days < 0) return "past_due";
       // "Approaching" = days remaining is less than or equal to the
@@ -66,7 +67,8 @@ export function daysUntilDue(
   if (!due_date) return null;
   const d = parseDate(due_date);
   if (!d) return null;
-  const ms = d.getTime() - today.setHours(0, 0, 0, 0);
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const ms = d.getTime() - todayMidnight.getTime();
   return Math.floor(ms / (1000 * 60 * 60 * 24));
 }
 

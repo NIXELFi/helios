@@ -676,15 +676,23 @@ export function BrowseScreen() {
       byParent.set(f.parent_id, arr);
     }
     const total = new Map<string, number>();
-    function count(id: string): number {
+    function count(id: string, visiting: Set<string>): number {
       const cached = total.get(id);
       if (cached !== undefined) return cached;
+      // Cycle guard: a corrupt parent_id chain (a folder transitively under
+      // itself) would otherwise recurse forever and stack-overflow the whole
+      // screen. Seed the cache BEFORE recursing and skip any id already on the
+      // current path so the walk always terminates.
+      if (visiting.has(id)) return 0;
+      visiting.add(id);
+      total.set(id, 0);
       let n = direct.get(id) ?? 0;
-      for (const child of byParent.get(id) ?? []) n += count(child);
+      for (const child of byParent.get(id) ?? []) n += count(child, visiting);
+      visiting.delete(id);
       total.set(id, n);
       return n;
     }
-    for (const f of folders ?? []) count(f.id);
+    for (const f of folders ?? []) count(f.id, new Set());
     return total;
   }, [allFiles, folders]);
 
@@ -1237,17 +1245,27 @@ export function BrowseScreen() {
               const baseBody = `Move ${n} file${n === 1 ? "" : "s"} to Deleted? They can be restored from the recycle bin.`;
               const onConfirm = async () => {
                 const succeeded: FileId[] = [];
+                // Collect the NAMES of the files that failed locally. `deleteFile`
+                // is a single shared hook instance, so its `.error` only ever holds
+                // the LAST call's message — reading it after the loop would clobber
+                // every earlier failure. Naming the failed files here (mirroring
+                // BulkActionBar.bulkDelete) tells the user exactly which rows still
+                // need attention instead of a bare count whose message is stale.
+                const failedNames: string[] = [];
                 for (const f of targetFiles) {
                   const ok = await deleteFile.run(f.id);
                   if (ok) succeeded.push(f.id);
+                  else failedNames.push(f.name);
                 }
-                const failed = n - succeeded.length;
+                const failed = failedNames.length;
                 // M14: remove successfully-deleted ids from the selection even
                 // on partial failure, mirroring BulkActionBar.bulkDelete which
                 // keeps only the failed ids selected so the user can retry.
                 setSelected((prev) => selectionAfterPartialDelete(prev, succeeded));
                 if (failed > 0) {
-                  setActionError(`${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted.`);
+                  setActionError(
+                    `${failed} of ${n} file${failed === 1 ? "" : "s"} couldn't be deleted: ${failedNames.join(", ")}`,
+                  );
                 } else {
                   toast(`Moved ${n} file${n === 1 ? "" : "s"} to Deleted`, "info");
                 }

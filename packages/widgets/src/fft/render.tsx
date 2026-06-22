@@ -30,6 +30,11 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
   const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
 
+  // Stabilize the visible sessions identity: only the session ids drive which
+  // sessions are in the FFT — the slice objects change identity on every parent
+  // render but their data is only different when the id set changes.
+  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
+
   const spectra = useMemo(() => {
     const zoom = config.useZoomRange ? viewState?.get().zoomRange ?? null : null;
     const out: { session: OverlaySession; freq: Float64Array; mag: Float64Array; n: number; fs: number }[] = [];
@@ -54,7 +59,8 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
       out.push({ session: s, freq: freqHz, mag: magnitude, n, fs });
     }
     return out;
-  }, [visible, config, viewState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey, config, viewState]);
 
   // Subscribe to zoom changes so the windowed FFT recomputes when the user
   // drag-zooms a strip chart.
@@ -112,9 +118,15 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     if (mMax === mMin) mMax = mMin + 1;
 
     const fMinPlot = config.freqScale === "log" ? Math.max(1, spectra[0]!.freq[1] ?? 1) : 0;
+    const logSpan = config.freqScale === "log"
+      ? Math.log10(fMax) - Math.log10(fMinPlot)
+      : 1;
+    // Guard against fMax === fMinPlot (degenerate single-bin FFT) which would
+    // produce division by zero and NaN x-coordinates for every sample.
+    const safeLogSpan = logSpan > 0 ? logSpan : 1;
     const xToCanvas = config.freqScale === "log"
       ? (f: number) => padL + plotW * (Math.log10(Math.max(fMinPlot, f)) - Math.log10(fMinPlot))
-                                  / (Math.log10(fMax) - Math.log10(fMinPlot))
+                                  / safeLogSpan
       : (f: number) => padL + plotW * (f / fMax);
     const yToCanvas = (v: number) => padT + plotH * (1 - (v - mMin) / (mMax - mMin));
 

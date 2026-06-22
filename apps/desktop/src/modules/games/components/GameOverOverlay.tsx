@@ -12,7 +12,9 @@ interface Props {
 
 /** Count up from 0 to `target` over ~500ms; snaps instantly under reduced motion. */
 function useCountUp(target: number): number {
-  const [value, setValue] = useState(target);
+  // Initialize to 0 so the animation always starts from 0 rather than flashing
+  // the final value on first render before the effect runs and resets to 0.
+  const [value, setValue] = useState(0);
 
   useEffect(() => {
     const reduced =

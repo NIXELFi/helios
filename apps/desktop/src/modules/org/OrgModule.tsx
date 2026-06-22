@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   IconBolt,
   IconDeviceFloppy,
@@ -20,11 +20,11 @@ import {
   usePeople,
   useProjects,
   useProjectSubteams,
-  useRoles,
   useRolesWithCaps,
   useSubteams,
+  grantableCapsPayload,
+  roleCapsHeldInScope,
   type Capability,
-  type OrgRole,
   type Person,
   type RoleWithCaps,
 } from "./data/useOrgData";
@@ -164,8 +164,11 @@ interface Subteam {
 function PeopleRolesPanel() {
   const client = useSupabaseClient();
   const { data: people, loading, error, refetch } = usePeople();
-  const { data: roles } = useRoles();
-  const { can } = useMyCapabilities();
+  // Pull each role's capability set too, so we can apply the server's
+  // grant-subset rule client-side (only offer roles the granter can actually
+  // grant) instead of always failing the RPC.
+  const { data: roles } = useRolesWithCaps();
+  const { can, refetch: refetchMyCaps } = useMyCapabilities();
   const { grantRole, revokeRole, updatePerson } = useOrgMutations();
 
   const [subteams, setSubteams] = useState<Subteam[]>([]);
@@ -208,7 +211,12 @@ function PeopleRolesPanel() {
     setActionError(null);
     const r = await grantRole(target, roleKey, subteamId);
     if (!r.ok) setActionError(r.error);
-    else refetch();
+    else {
+      refetch();
+      // If the granter just changed their own roles, refresh their capabilities
+      // so the UI grant/revoke gates reflect it without a reload.
+      refetchMyCaps();
+    }
     setBusyUser(null);
   }
   async function doRevoke(target: string, roleKey: string, subteamId: string | null) {
@@ -216,7 +224,10 @@ function PeopleRolesPanel() {
     setActionError(null);
     const r = await revokeRole(target, roleKey, subteamId);
     if (!r.ok) setActionError(r.error);
-    else refetch();
+    else {
+      refetch();
+      refetchMyCaps();
+    }
     setBusyUser(null);
   }
   async function doUpdate(target: string, name: string | null, subteam: string | null) {
@@ -328,7 +339,7 @@ function PeopleRolesPanel() {
 
 function PersonRow(props: {
   person: Person;
-  roles: OrgRole[];
+  roles: RoleWithCaps[];
   subteams: Subteam[];
   subteamName: Map<string, string>;
   busy: boolean;
@@ -368,19 +379,59 @@ function PersonRow(props: {
   // grant any role org-wide; a subteam-only granter can grant just the
   // subteam-scoped roles, and only into subteams it holds the grant cap for.
   const isOrgGranter = can("org.grant_roles");
-  const grantableRoles = useMemo(
-    () => (isOrgGranter ? roles : roles.filter((r) => r.scope === "subteam")),
-    [roles, isOrgGranter],
-  );
   const grantableSubteams = useMemo(
     () =>
       isOrgGranter ? subteams : subteams.filter((s) => can("pm.grant_subteam_roles", s.id)),
     [subteams, isOrgGranter, can],
   );
 
+  // Server-side grant-subset rule (pm.grant_role): the role's capability set
+  // must be a subset of what the granter holds in the target scope. Mirror it
+  // client-side so we never offer a role the RPC would reject.
+  //   - org role into org scope → every cap must be held org-wide
+  //   - subteam role into subteam S → every cap must be held in scope S
+  //     (an org-wide grant of a cap counts in every subteam, per `can`)
+  const grantableInScope = useCallback(
+    (r: RoleWithCaps, scopeSubteamId: string | null) =>
+      roleCapsHeldInScope(r.capabilities, can, scopeSubteamId),
+    [can],
+  );
+
+  // Subteams this role could actually be granted into (caps-subset satisfied).
+  const subteamsForRole = useCallback(
+    (r: RoleWithCaps) => grantableSubteams.filter((s) => grantableInScope(r, s.id)),
+    [grantableSubteams, grantableInScope],
+  );
+
+  // The owner/executive org roles have an extra server gate (org.manage_admins)
+  // beyond the caps-subset rule; only offer them when the granter holds it.
+  const canGrantAdmins = can("org.manage_admins");
+  const grantableRoles = useMemo(() => {
+    const base = isOrgGranter ? roles : roles.filter((r) => r.scope === "subteam");
+    return base.filter((r) => {
+      if (r.scope === "org") {
+        if ((r.key === "owner" || r.key === "executive") && !canGrantAdmins) return false;
+        return grantableInScope(r, null);
+      }
+      // A subteam role is offerable only if there's at least one subteam the
+      // granter can grant it into; if a subteam is already picked, it must be
+      // grantable specifically there.
+      if (subteamId) return grantableInScope(r, subteamId);
+      return subteamsForRole(r).length > 0;
+    });
+  }, [roles, isOrgGranter, grantableInScope, subteamId, subteamsForRole, canGrantAdmins]);
+
   const selectedRole = grantableRoles.find((r) => r.key === roleKey) ?? null;
   const needsSubteam = selectedRole?.scope === "subteam";
-  const canAdd = !!selectedRole && (!needsSubteam || !!subteamId);
+  // When a subteam role is selected, restrict the subteam picker to subteams the
+  // granter can actually grant THAT role into.
+  const subteamChoices = useMemo(
+    () => (selectedRole && needsSubteam ? subteamsForRole(selectedRole) : grantableSubteams),
+    [selectedRole, needsSubteam, subteamsForRole, grantableSubteams],
+  );
+  const canAdd =
+    !!selectedRole &&
+    (!needsSubteam || (!!subteamId && grantableInScope(selectedRole, subteamId)));
 
   function submit() {
     if (!selectedRole) return;
@@ -524,7 +575,7 @@ function PersonRow(props: {
                   className="rounded-sm border border-helios-line bg-helios-base px-1.5 py-0.5 text-[11px] text-helios-text outline-none focus:border-asu-gold focus-visible:ring-2 focus-visible:ring-asu-gold"
                 >
                   <option value="">subteam…</option>
-                  {grantableSubteams.map((s) => (
+                  {subteamChoices.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -846,11 +897,18 @@ const BLANK_ROLE: RoleWithCaps = {
 function RoleEditorPanel() {
   const { data: roles, refetch } = useRolesWithCaps();
   const caps = useCapabilities();
-  const { can } = useMyCapabilities();
+  const { can, refetch: refetchMyCaps } = useMyCapabilities();
   const { upsertRole, deleteRole } = useOrgMutations();
   const canManage = can("org.manage_roles");
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Editing a role's capability set can change the current admin's own effective
+  // capabilities (if they hold that role), so refresh them alongside the catalog.
+  const onSaved = () => {
+    refetch();
+    refetchMyCaps();
+  };
 
   return (
     <div className="p-4">
@@ -891,7 +949,7 @@ function RoleEditorPanel() {
             isNew
             onSaved={() => {
               setCreating(false);
-              refetch();
+              onSaved();
             }}
             onCancel={() => setCreating(false)}
             onError={setErr}
@@ -906,7 +964,7 @@ function RoleEditorPanel() {
             caps={caps}
             can={can}
             canManage={canManage}
-            onSaved={refetch}
+            onSaved={onSaved}
             onError={setErr}
             upsertRole={upsertRole}
             deleteRole={deleteRole}
@@ -934,7 +992,21 @@ function RoleCard(props: {
   deleteRole: (key: string) => Promise<{ ok: boolean; error: string | null }>;
 }) {
   const { role, caps, can, canManage, isNew, onSaved, onCancel, onError, upsertRole, deleteRole } = props;
-  const locked = role.is_system || !canManage;
+  // A capability is grantable by this admin iff they hold it themselves (the
+  // server enforces the same subset rule in pm.upsert_role). Caps the admin
+  // lacks are shown but disabled — they can neither add nor remove them.
+  const canGrant = (key: string) => can(key);
+  // Caps this role already has that the admin CANNOT grant. The server's subset
+  // check would reject an upsert that includes them, so a partial-cap admin must
+  // not be able to reshape a role that depends on caps they lack — otherwise
+  // every save fails (or, worse, silently strips those caps). Lock such cards.
+  const ungrantableExisting = useMemo(
+    () => role.capabilities.filter((c) => !canGrant(c)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [role.capabilities, can],
+  );
+  const blockedByCaps = !isNew && ungrantableExisting.length > 0;
+  const locked = role.is_system || !canManage || blockedByCaps;
   const [label, setLabel] = useState(role.label);
   const [tag, setTag] = useState((role.tag ?? "#6b7280").toLowerCase());
   const [scope, setScope] = useState<"org" | "subteam">(role.scope);
@@ -953,6 +1025,9 @@ function RoleCard(props: {
     role.capabilities.some((c) => !selected.has(c));
 
   function toggleCap(key: string) {
+    // Defense in depth: never let a disabled cap mutate the selection, so the
+    // saved set can never include a disabled-but-checked cap the admin lacks.
+    if (!canGrant(key)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -967,9 +1042,13 @@ function RoleCard(props: {
       onError("Give the role a name.");
       return;
     }
+    // Only send caps the admin can actually grant. This prevents a disabled
+    // (un-grantable) cap from being included in the payload and tripping the
+    // server's subset check — which previously made every save fail.
+    const payloadCaps = grantableCapsPayload(selected, can);
     setBusy(true);
     onError(null);
-    const r = await upsertRole(key, label.trim(), tag, scope, [...selected]);
+    const r = await upsertRole(key, label.trim(), tag, scope, payloadCaps);
     if (!r.ok) onError(r.error);
     else onSaved();
     setBusy(false);
@@ -987,25 +1066,48 @@ function RoleCard(props: {
   const orgCaps = caps.filter((c) => c.scope === "org");
   const subteamCaps = caps.filter((c) => c.scope === "subteam");
 
-  const capCheckbox = (c: Capability) => (
-    <label
-      key={c.key}
-      className={
-        "flex items-start gap-1.5 rounded-md px-1.5 py-1 text-[11px] transition-colors " +
-        (locked ? "text-helios-dim" : "text-helios-text hover:bg-helios-base/60")
-      }
-      title={c.description ?? undefined}
-    >
-      <input
-        type="checkbox"
-        checked={selected.has(c.key)}
-        disabled={locked || busy || !can(c.key)}
-        onChange={() => toggleCap(c.key)}
-        className="mt-0.5 size-3 cursor-pointer accent-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:cursor-not-allowed disabled:opacity-40"
-      />
-      <span>{c.label}</span>
-    </label>
-  );
+  // Surface the FULL grantable catalog: every capability is shown. Caps the
+  // admin can grant are enabled; caps they lack are shown disabled with a
+  // tooltip explaining why, so an admin can see the complete permission set for
+  // a role/subteam and exactly which ones they're allowed to grant.
+  const capCheckbox = (c: Capability) => {
+    const grantable = canGrant(c.key);
+    const reason = !canManage
+      ? "You can only view roles."
+      : role.is_system
+        ? "This role is protected and cannot be edited."
+        : !grantable
+          ? "You don't hold this capability, so you can't grant or revoke it."
+          : (c.description ?? undefined);
+    return (
+      <label
+        key={c.key}
+        className={
+          "flex items-start gap-1.5 rounded-md px-1.5 py-1 text-[11px] transition-colors " +
+          (locked || !grantable ? "text-helios-dim" : "text-helios-text hover:bg-helios-base/60")
+        }
+        title={reason}
+      >
+        <input
+          type="checkbox"
+          checked={selected.has(c.key)}
+          disabled={locked || busy || !grantable}
+          onChange={() => toggleCap(c.key)}
+          className="mt-0.5 size-3 cursor-pointer accent-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:cursor-not-allowed disabled:opacity-40"
+        />
+        <span>{c.label}</span>
+        {!grantable && canManage && !role.is_system ? (
+          <span
+            aria-hidden
+            className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-[#5A5F66]"
+            title="You don't hold this capability"
+          >
+            locked
+          </span>
+        ) : null}
+      </label>
+    );
+  };
 
   return (
     <section className="relative overflow-hidden rounded-lg border border-helios-line bg-helios-panel p-3 pl-4">
@@ -1064,6 +1166,14 @@ function RoleCard(props: {
           {selected.size} {selected.size === 1 ? "capability" : "capabilities"}
         </span>
       </div>
+
+      {blockedByCaps && (
+        <div className="mb-3 rounded-md border border-helios-line bg-helios-base/60 px-2.5 py-1.5 text-[10px] leading-relaxed text-helios-dim">
+          This role includes {ungrantableExisting.length}{" "}
+          {ungrantableExisting.length === 1 ? "capability" : "capabilities"} you don't hold, so you can't
+          edit it. An admin with those capabilities must make changes.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
         <div>

@@ -64,21 +64,59 @@ fn parse_properties_windowed(
     let mut have_physical = false;
     let n = bytes.len();
 
+    // Adversarial-input guard: a maliciously crafted file can present a deflate
+    // stream at (nearly) every byte offset, each of which expands hugely (a
+    // "zip bomb"). `try_inflate` decompresses each candidate fully just to learn
+    // its input length, so without a global ceiling the worst case is
+    // O(file_len) attempts × tens of MB each. We cap BOTH the total number of
+    // inflate attempts and the total number of decompressed bytes for the whole
+    // parse; once either is exhausted the scan stops early and returns whatever
+    // legitimate properties it already found.
+    let mut budget = DecodeBudget::new();
+
     if n <= scan_all_max {
-        scan_region(bytes, 0, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        scan_region(bytes, 0, n, &mut physical, &mut custom, &mut seen, &mut have_physical, &mut budget);
     } else {
         // Fast path: scan the two edges where property blocks almost always live.
-        scan_region(bytes, 0, head_window, &mut physical, &mut custom, &mut seen, &mut have_physical);
-        scan_region(bytes, n - tail_window, n, &mut physical, &mut custom, &mut seen, &mut have_physical);
+        scan_region(bytes, 0, head_window, &mut physical, &mut custom, &mut seen, &mut have_physical, &mut budget);
+        scan_region(bytes, n - tail_window, n, &mut physical, &mut custom, &mut seen, &mut have_physical, &mut budget);
 
         // Fallback: if nothing was found in either edge window, the property
         // block must be in the skipped middle region. Scan the full file so the
         // caller never silently gets an empty result from a large but valid file.
         if physical.is_empty() && custom.is_empty() {
-            scan_region(bytes, head_window, n - tail_window, &mut physical, &mut custom, &mut seen, &mut have_physical);
+            scan_region(bytes, head_window, n - tail_window, &mut physical, &mut custom, &mut seen, &mut have_physical, &mut budget);
         }
     }
     physical.into_iter().chain(custom).collect()
+}
+
+/// Whole-parse work budget for the deflate scanner. Bounds both how many
+/// candidate streams we attempt to inflate and the total decompressed volume,
+/// so a crafted file cannot turn the byte-by-byte scan into a decompression
+/// bomb. Generously sized so any real SolidWorks file finishes well within it.
+struct DecodeBudget {
+    attempts_remaining: usize,
+    bytes_remaining: usize,
+}
+
+impl DecodeBudget {
+    /// ~256k inflate attempts and ~512 MB of total decompressed output across the
+    /// entire parse — orders of magnitude above what any genuine file needs,
+    /// while still bounding worst-case adversarial work.
+    const MAX_ATTEMPTS: usize = 256 * 1024;
+    const MAX_TOTAL_DECODED_BYTES: usize = 512 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self {
+            attempts_remaining: Self::MAX_ATTEMPTS,
+            bytes_remaining: Self::MAX_TOTAL_DECODED_BYTES,
+        }
+    }
+
+    fn exhausted(&self) -> bool {
+        self.attempts_remaining == 0 || self.bytes_remaining == 0
+    }
 }
 
 /// Scan deflate streams whose start offset falls in `[start, end)`, extracting
@@ -93,10 +131,16 @@ fn scan_region(
     custom: &mut Vec<SwProperty>,
     seen: &mut BTreeSet<String>,
     have_physical: &mut bool,
+    budget: &mut DecodeBudget,
 ) {
     let mut i = start;
     while i + 2 < end {
-        match try_inflate(&bytes[i..]) {
+        if budget.exhausted() {
+            // Adversarial work cap hit: stop scanning rather than risk a
+            // decompression-bomb hang. Properties found so far are returned.
+            break;
+        }
+        match try_inflate(&bytes[i..], budget) {
             Some((head, consumed)) => {
                 // Cheap byte-level marker check on the (capped) head; only the
                 // small property streams pay for UTF-8 conversion + parsing, so
@@ -273,7 +317,13 @@ const INSPECT_CAP: usize = 256 * 1024;
 /// past the cap (discarding output) only to learn the full input length, so the
 /// caller advances cleanly past the stream instead of crawling byte-by-byte —
 /// but bail on absurdly large streams to bound worst-case work.
-fn try_inflate(input: &[u8]) -> Option<(Vec<u8>, usize)> {
+fn try_inflate(input: &[u8], budget: &mut DecodeBudget) -> Option<(Vec<u8>, usize)> {
+    // Each call is one inflate attempt against the whole-parse budget.
+    if budget.attempts_remaining == 0 {
+        return None;
+    }
+    budget.attempts_remaining -= 1;
+
     let mut dec = flate2::read::DeflateDecoder::new(input);
     let mut head: Vec<u8> = Vec::new();
     let mut buf = [0u8; 65536];
@@ -283,11 +333,14 @@ fn try_inflate(input: &[u8]) -> Option<(Vec<u8>, usize)> {
             Ok(0) => break,
             Ok(k) => {
                 total_out += k;
+                // Charge decompressed output against the global byte budget so a
+                // single highly-compressible stream can't expand without bound.
+                budget.bytes_remaining = budget.bytes_remaining.saturating_sub(k);
                 if head.len() < INSPECT_CAP {
                     let take = (INSPECT_CAP - head.len()).min(k);
                     head.extend_from_slice(&buf[..take]);
                 }
-                if total_out > 64 * 1024 * 1024 {
+                if total_out > 64 * 1024 * 1024 || budget.bytes_remaining == 0 {
                     break;
                 }
             }
@@ -377,8 +430,26 @@ fn extract_props_in(text: &str, out: &mut Vec<SwProperty>, seen: &mut BTreeSet<S
             Some(name)
         };
         let Some(label) = label else { continue };
-        // Value: the first <vt:TYPE>…</vt:TYPE> after the name attribute.
-        let rest = &text[search..];
+        // Value: the first <vt:TYPE>…</vt:TYPE> after the name attribute, but
+        // bounded to THIS property element. A property with no <vt:> value
+        // (e.g. an empty `<property name="X"/>`) must not borrow the value of a
+        // later sibling: without the bound, `rest.find("<vt:")` would scan to
+        // the end of the section and mis-attribute another property's value to
+        // this name. We cap the search slice at the element's closing
+        // `</property>` (or the start of the next `<property`, whichever comes
+        // first) so a value-less property yields nothing instead of stealing.
+        let rest_full = &text[search..];
+        let elem_end = {
+            let close = rest_full.find("</property>");
+            let next = rest_full.find("<property name=\"");
+            match (close, next) {
+                (Some(c), Some(n)) => c.min(n),
+                (Some(c), None) => c,
+                (None, Some(n)) => n,
+                (None, None) => rest_full.len(),
+            }
+        };
+        let rest = &rest_full[..elem_end];
         if let Some(vt) = rest.find("<vt:") {
             let after_tag = &rest[vt + 4..];
             if let (Some(gt), ()) = (after_tag.find('>'), ()) {
@@ -464,6 +535,58 @@ mod tests {
         assert_eq!(get("Material"), Some("Steel"));
         // The empty-name pid placeholder must be skipped.
         assert!(props.iter().all(|p| !p.name.is_empty()));
+    }
+
+    /// A `<property>` element that has NO `<vt:>` value of its own must not
+    /// borrow the value of a later sibling property. Before the per-element
+    /// bound, the unbounded `find("<vt:")` would scan past this element's
+    /// `</property>` and mis-attribute the next property's value to this name.
+    #[test]
+    fn valueless_property_does_not_steal_next_value() {
+        let xml = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="Empty" pid="2"></property><property name="PartNo" pid="3"><vt:lpstr>ABC-123</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        // The value-less "Empty" property must NOT have stolen PartNo's value.
+        assert_eq!(get("Empty"), None, "value-less property must not borrow a sibling value: {props:?}");
+        // PartNo must still be read correctly.
+        assert_eq!(get("PartNo"), Some("ABC-123"));
+    }
+
+    /// A self-closed value-less property likewise must not reach forward into a
+    /// later element for its value.
+    #[test]
+    fn self_closed_property_does_not_steal_next_value() {
+        let xml = r#"<Properties xmlns:vt="x"><propertySection name="UserDefinedProperties"><property name="Flag"/><property name="Description" pid="3"><vt:lpstr>Real Desc</vt:lpstr></property></propertySection></Properties>"#;
+        let props = parse_properties(&deflate(xml.as_bytes()));
+        let get = |k: &str| props.iter().find(|p| p.name == k).map(|p| p.value.as_str());
+        assert_eq!(get("Flag"), None);
+        assert_eq!(get("Description"), Some("Real Desc"));
+    }
+
+    /// The whole-parse decode budget must bound worst-case work: once the
+    /// inflate-attempt budget is exhausted `try_inflate` returns None without
+    /// decompressing, and `exhausted()` halts the scan. We exercise the budget
+    /// plumbing directly rather than constructing a multi-GB bomb fixture.
+    #[test]
+    fn decode_budget_caps_inflate_attempts() {
+        let mut budget = DecodeBudget::new();
+        budget.attempts_remaining = 0;
+        assert!(budget.exhausted(), "zero attempts left must read as exhausted");
+        // A real deflate stream is ignored once the attempt budget is spent.
+        let stream = deflate(b"hello world hello world");
+        assert!(
+            try_inflate(&stream, &mut budget).is_none(),
+            "try_inflate must refuse to decode once the attempt budget is spent"
+        );
+    }
+
+    /// The byte budget halts the scan: with a tiny remaining byte budget, the
+    /// scanner stops early instead of decompressing without bound.
+    #[test]
+    fn decode_budget_caps_total_bytes() {
+        let mut budget = DecodeBudget::new();
+        budget.bytes_remaining = 0;
+        assert!(budget.exhausted(), "zero bytes left must read as exhausted");
     }
 
     #[test]

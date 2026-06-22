@@ -13,6 +13,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { useLocks } from "./data/useLocks";
 import { useActiveVault } from "./data/useActiveVault";
 import { useAllFiles } from "./data/useAllFiles";
+import { useVaultUsers } from "./data/useVaultUsers";
 import { useWatchedFiles } from "./data/useWatchedFiles";
 import { useNotifications } from "./data/useNotifications";
 import { WatchedFilesContext } from "./data/WatchedFilesContext";
@@ -46,6 +47,18 @@ export function VaultHome() {
     watchedFiles.watched,
     allFiles ?? [],
   );
+  // Resolve notification actor ids → human labels (email / display name) so the
+  // feed shows "by jane@asu.edu" instead of a raw UUID prefix. Best-effort: the
+  // RPC raises for non-members and the feed falls back to the id prefix.
+  const { data: vaultUsers } = useVaultUsers(vaultId);
+  const actorNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of vaultUsers ?? []) {
+      const label = u.email ?? u.display_name;
+      if (label) m.set(u.user_id, label);
+    }
+    return m;
+  }, [vaultUsers]);
 
   // Jump to file: switch to browse screen. Full navigation (open the folder +
   // select the file) requires more wiring; for v1 this at least surfaces the
@@ -68,6 +81,7 @@ export function VaultHome() {
               onMarkAllRead={markAllRead}
               onClear={clearNotifs}
               onJumpToFile={handleJumpToFile}
+              actorNames={actorNames}
             />
           }
         />

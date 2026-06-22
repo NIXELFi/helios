@@ -78,8 +78,11 @@ export function parseSearchQuery(raw: string): ParsedSearchQuery {
         value: m[4].toLowerCase(),
       });
     } else if (m[5] !== undefined) {
-      // plain word
-      textTokens.push(m[5]);
+      // Plain word → free text. Normalised to lowercase like the prop key/value
+      // above so downstream filename scoring (which lowercases the candidate
+      // name but NOT the needle) stays case-insensitive even when prop: tokens
+      // are present.
+      textTokens.push(m[5].toLowerCase());
     }
   }
 

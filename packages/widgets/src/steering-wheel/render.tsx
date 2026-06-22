@@ -33,16 +33,17 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
   const { config, slice, cursorEmitter } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const valueRef = useRef<number | null>(sampleAt(slice, config.channelId, cursorEmitter.get()));
+  const drawRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const off = cursorEmitter.subscribe((t) => {
       valueRef.current = sampleAt(slice, config.channelId, t);
-      draw();
+      drawRef.current();
     });
     return off;
   }, [slice, config, cursorEmitter]);
 
-  useEffect(() => { draw(); }, [config]);
+  useEffect(() => { drawRef.current(); }, [config]);
 
   // If the wheel asset is still decoding when this widget mounts, redraw once
   // it's ready so the wheel actually appears (not just the readout).
@@ -121,6 +122,10 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
     ctx.fillText("L", cx - r - 18, cy + 4);
     ctx.fillText("R", cx + r + 18, cy + 4);
   }
+
+  // Keep drawRef current so cursor subscriptions always call the latest draw
+  // closure (with up-to-date config / channelId / maxAngle / invert).
+  drawRef.current = draw;
 
   return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
 }

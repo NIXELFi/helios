@@ -27,6 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Org admin panel now surfaces the full set of grantable permissions for each
+  role and subteam, clearly distinguishing the ones you're allowed to grant from
+  the ones you aren't (rather than silently rejecting on save).
+
 ### Fixed
 
 - Vault: the sync ledger no longer fails intermittently with "No such file or
@@ -34,6 +40,38 @@ follow [semver](https://semver.org/).
   exist yet, and the write did not create it; the directory is now ensured first.
   (Harmless before this -- it only meant local-deletion detection lagged a pass --
   but it logged a console warning on check-in.)
+- Vault: a corrupted folder parent chain no longer hangs or crashes the whole
+  Vault -- folder-path lookups are now cycle-guarded.
+- Vault: the vehicle mass KPI no longer double-counts assembly rollup mass
+  against its own parts (it was inflated 2x or more).
+- CFD: result, lap, and sweep pages no longer white-screen on empty or
+  degenerate data; a single-RPM study no longer gets permanently stuck after a
+  solver error (which previously blocked all further single-RPM runs that session).
+- PM: the bulk "Due date" field no longer clears the due date on every selected
+  task when left empty and blurred; task title/description edits no longer write
+  to the database on every keystroke (which also destroyed the undo stack); and
+  creating a task with dependencies or extra subteams no longer races and
+  silently drops them.
+- Games: retrying a score submission on a flaky network can no longer create
+  duplicate leaderboard rows, and tied scores now share a rank.
+- CSV import: semicolon/tab-delimited MoTeC and Link exports, and
+  thousands-separated dyno values, now import correctly.
+- Many additional correctness, state-reset, and stale-data fixes across CFD,
+  Vault, PM, Org, and shared chart widgets. See
+  docs/audits/2026-06-22-v4-bug-vault.md.
+
+### Security
+
+- New self-signup accounts are now provisioned as read-only viewers instead of
+  global editors, so a newly created account cannot read or modify vault contents
+  until an admin promotes it. (A signup email-domain allowlist plus confirmation /
+  captcha is scaffolded in config for production enablement.)
+- Per-vault (subteam-scoped) admins can no longer act as global admins: deleting,
+  updating, or listing users org-wide, viewing other vaults' rosters, or granting
+  and revoking global roles now requires a true global admin.
+- CFD capture loading rejects directory-traversal in job identifiers, confining
+  reads to the captures folder.
+- CSV exports are now guarded against spreadsheet formula injection.
 
 ## [4.5.1] - 2026-06-21
 

@@ -36,14 +36,31 @@ namespace HeliosSwReadonly
                 if (sw == null) return 0; // SW not running — nothing to flip
 
                 if (!(sw.GetDocuments() is object[] docs)) { Diag("GetDocuments: none"); return 0; }
-                Diag($"open docs={docs.Length}");
+                // Canonical form of the target for robust comparison (resolves
+                // mapped drives, UNC paths, 8.3 names, trailing separators).
+                string targetCanon = TryCanon(target);
+                // Filename-only fallback for when GetFullPath can't resolve a UNC
+                // or mapped drive from a different session context.
+                string targetFile = System.IO.Path.GetFileName(args[0]).ToLowerInvariant();
+                Diag($"open docs={docs.Length} targetCanon={targetCanon} targetFile={targetFile}");
                 foreach (var o in docs)
                 {
                     if (!(o is IModelDoc2 doc)) continue;
                     string path;
                     try { path = doc.GetPathName(); } catch { continue; }
                     Diag($"  doc: {path}");
-                    if (string.IsNullOrEmpty(path) || Norm(path) != target) continue;
+                    if (string.IsNullOrEmpty(path)) continue;
+                    // Primary match: canonical path comparison handles UNC / mapped
+                    // drive / 8.3 / mixed-slash variants pointing to the same file.
+                    // Fallback: exact normalised string (original behaviour), then
+                    // filename-only match as a last resort for unusual path forms.
+                    string pathNorm   = Norm(path);
+                    string pathCanon  = TryCanon(pathNorm);
+                    string pathFile   = System.IO.Path.GetFileName(path).ToLowerInvariant();
+                    bool matched = (targetCanon != null && pathCanon != null && targetCanon == pathCanon)
+                                || pathNorm == target
+                                || (!string.IsNullOrEmpty(targetFile) && pathFile == targetFile);
+                    if (!matched) continue;
 
                     bool isReadOnly;
                     try { isReadOnly = doc.IsOpenedReadOnly(); } catch { isReadOnly = !readOnly; }
@@ -65,6 +82,16 @@ namespace HeliosSwReadonly
 
         private static string Norm(string p) =>
             (p ?? "").Replace('/', '\\').TrimEnd('\\').ToLowerInvariant();
+
+        /// <summary>Return the canonical (GetFullPath) form of a path for
+        /// identity comparison across UNC, mapped drives, and 8.3 name variants,
+        /// or null if the path cannot be resolved (e.g. file doesn't exist).</summary>
+        private static string TryCanon(string p)
+        {
+            if (string.IsNullOrEmpty(p)) return null;
+            try { return System.IO.Path.GetFullPath(p).TrimEnd('\\').ToLowerInvariant(); }
+            catch { return null; }
+        }
 
         /// <summary>Append a line to %TEMP%\helios_sw_helper.log when
         /// HELIOS_SW_HELPER_DEBUG is set — for diagnosing the COM connect/flip

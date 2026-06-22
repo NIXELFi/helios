@@ -309,6 +309,8 @@ export function PmModule() {
           baselineOrg: ws.baselineOrg,
           roles: ws.roles,
           client: c,
+          // Background re-hydrate: don't wipe a pending "Change not saved" toast.
+          preserveWriteError: true,
         });
         // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
         // huge workspace just isn't persisted rather than janking the write.

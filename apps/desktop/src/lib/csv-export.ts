@@ -73,8 +73,12 @@ export async function exportSessionCsv(
 }
 
 function csvCell(s: string): string {
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+  // Spreadsheet formula-injection guard: prefix cells that begin with a
+  // formula-trigger character so a crafted channel id/unit can't be
+  // executed as a formula when the CSV is opened in Excel/Sheets.
+  const injectionPrefix = /^[=+\-@\t\r]/.test(s) ? "'" : "";
+  if (/[",\n]/.test(s)) return `"${injectionPrefix}${s.replace(/"/g, '""')}"`;
+  return injectionPrefix + s;
 }
 
 function formatValue(v: number, dp: number): string {

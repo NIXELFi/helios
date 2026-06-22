@@ -93,25 +93,59 @@ fn run_engine_unwind_safe<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 }
 
 /// RAII guard that installs a no-op panic hook for the duration of a
-/// parallel solver region, then restores the previous hook on drop. We
-/// catch solver panics ourselves and surface the message through the job
-/// error event, so the default hook's stderr backtrace is just noise.
-/// Installing it once around the whole `pool.install(..)` block (rather
-/// than per-call) avoids racing `set_hook`/`take_hook` across workers.
+/// solver region, then restores the previous hook on drop. We catch
+/// solver panics ourselves and surface the message through the job error
+/// event, so the default hook's stderr backtrace is just noise.
+///
+/// `set_hook`/`take_hook` are *process-global*: two CFD jobs running
+/// concurrently (e.g. a single-RPM study and a sweep — different kinds,
+/// both admitted by `CfdState::register`) would race the save/restore and
+/// permanently clobber the real hook with a no-op:
+///   A installs (prev=default), B installs (prev=A's no-op),
+///   A drops (restores default), B drops (restores A's no-op) → leaked.
+///
+/// To make installs safe under concurrency we refcount through a single
+/// process-global lock: the FIRST guard saves the real hook and installs
+/// the no-op; nested/concurrent guards just bump the count; the LAST guard
+/// to drop restores the originally-saved hook. The lock is only held for
+/// the brief install/restore bookkeeping, never across the solver region,
+/// so jobs still run in parallel.
 struct SilencedPanicHook {
-    prev: Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>,
+    _private: (),
 }
+
+type BoxedHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+struct HookState {
+    depth: usize,
+    saved: Option<BoxedHook>,
+}
+
+fn hook_state() -> &'static Mutex<HookState> {
+    static STATE: std::sync::OnceLock<Mutex<HookState>> = std::sync::OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(HookState { depth: 0, saved: None }))
+}
+
 impl SilencedPanicHook {
     fn install() -> Self {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        Self { prev: Some(prev) }
+        let mut st = hook_state().lock().unwrap_or_else(|e| e.into_inner());
+        if st.depth == 0 {
+            // First active guard: save the real hook and silence.
+            st.saved = Some(std::panic::take_hook());
+            std::panic::set_hook(Box::new(|_| {}));
+        }
+        st.depth += 1;
+        Self { _private: () }
     }
 }
 impl Drop for SilencedPanicHook {
     fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            std::panic::set_hook(prev);
+        let mut st = hook_state().lock().unwrap_or_else(|e| e.into_inner());
+        st.depth -= 1;
+        if st.depth == 0 {
+            if let Some(prev) = st.saved.take() {
+                std::panic::set_hook(prev);
+            }
         }
     }
 }
@@ -327,6 +361,13 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
     let mut accumulated: Vec<CycleStats> = Vec::with_capacity(params.n_cycles_max as usize);
     let mut converged_cycle: i64 = -1;
 
+    // Silence the default panic hook for the cycle loop + capture pass:
+    // the SDM26 solver `panic!`s on a handful of irrecoverable states
+    // (positivity failure, junction non-convergence). We catch those
+    // ourselves below and surface them as SolverDiverged, so the hook's
+    // stderr backtrace would just be noise. Restored on drop.
+    let _hook_guard = SilencedPanicHook::install();
+
     for cycle_i in 0..params.n_cycles_max {
         if cancel.load(Ordering::SeqCst) {
             emitter.emit_cancelled(JobCancelledEvent {
@@ -337,10 +378,31 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
             });
             return RunOutcome::Cancelled;
         }
-        let cs = match eng.advance_one_cycle(params.rpm, &mut loop_state, None, None, Some(&cancel)) {
-            CycleOutcome::Cycle(stats) => stats,
-            CycleOutcome::TargetReached => break,
-            CycleOutcome::Cancelled => break,
+        // Isolate solver panics so an irrecoverable cycle surfaces as a
+        // SolverDiverged error instead of unwinding the worker thread and
+        // leaving the job stuck "Running" forever (which would block every
+        // future single-RPM study for the session).
+        let outcome = run_engine_unwind_safe(|| {
+            eng.advance_one_cycle(params.rpm, &mut loop_state, None, None, Some(&cancel))
+        });
+        let cs = match outcome {
+            Ok(CycleOutcome::Cycle(stats)) => stats,
+            Ok(CycleOutcome::TargetReached) => break,
+            Ok(CycleOutcome::Cancelled) => break,
+            Err(msg) => {
+                emitter.emit_error(JobErrorEvent {
+                    job_id: job_id.clone(),
+                    kind: StudyKind::SingleRpm,
+                    reason: ErrorReason::SolverDiverged,
+                    message: format!(
+                        "solver panic at cycle {ci}: {msg}",
+                        ci = cycle_i + 1,
+                    ),
+                    partial_cycles: accumulated,
+                    partial_points: vec![],
+                });
+                return RunOutcome::Errored;
+            }
         };
         if probe.is_diverged(&cs) {
             accumulated.push(cs);
@@ -384,11 +446,17 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
             .join("single-rpm")
             .join(format!("{:.0}", params.rpm));
         let prev_steps = loop_state.step_count;
-        capture_one_extra_cycle(
-            &mut eng, &mut loop_state, params.rpm,
-            accumulated.last().map(|s| s.cycle).unwrap_or(-1),
-            &rpm_dir, flags, prev_steps,
-        )
+        // The capture pass runs one more solver cycle; isolate any panic so
+        // a capture-only failure can't unwind the worker. The run is already
+        // done, so a failed capture just means no artifacts.
+        run_engine_unwind_safe(|| {
+            capture_one_extra_cycle(
+                &mut eng, &mut loop_state, params.rpm,
+                accumulated.last().map(|s| s.cycle).unwrap_or(-1),
+                &rpm_dir, flags, prev_steps,
+            )
+        })
+        .unwrap_or(None)
     } else { None };
 
     emitter.emit_done(JobDoneEvent {
@@ -643,6 +711,28 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
                         capture_dir: capture_dir.map(|p| p.to_string_lossy().into_owned()),
                     },
                 });
+            } else if !(stop.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst)) {
+                // Zero cycles completed and we were NOT stopped/cancelled
+                // (e.g. n_cycles_max == 0, or the first cycle immediately
+                // returned TargetReached). Without this branch the RPM
+                // silently vanishes — no point AND no error — leaving a
+                // sweep with fewer points than requested RPMs and no
+                // explanation. Surface it as a hard error so the user knows.
+                let mut e = error_state.lock().unwrap();
+                if e.is_none() {
+                    *e = Some(JobErrorEvent {
+                        job_id: job_id.clone(),
+                        kind: StudyKind::Sweep,
+                        reason: ErrorReason::Other,
+                        message: format!(
+                            "no cycles completed at rpm {rpm:.0} (n_cycles_max={})",
+                            params.n_cycles_max,
+                        ),
+                        partial_cycles: vec![],
+                        partial_points: vec![],
+                    });
+                }
+                stop.store(true, Ordering::SeqCst);
             }
         });
     });
@@ -1213,6 +1303,34 @@ mod tests {
     }
 
     #[test]
+    fn nested_silenced_hook_restores_original_after_last_guard() {
+        // Two concurrent CFD jobs install/restore the process-global panic
+        // hook through SilencedPanicHook. The refcounted design must restore
+        // the ORIGINAL hook only when the LAST guard drops — never leave a
+        // permanent no-op hook (the v4 bug). We can't observe the hook
+        // closure directly, but we can prove panics are still caught
+        // (catch_unwind works regardless) and that the depth bookkeeping
+        // returns to 0 with the saved hook cleared.
+        {
+            let _a = SilencedPanicHook::install();
+            {
+                let _b = SilencedPanicHook::install();
+                let st = hook_state().lock().unwrap();
+                assert_eq!(st.depth, 2, "two active guards");
+                assert!(st.saved.is_some(), "original hook saved while silenced");
+            }
+            // Inner guard dropped: still silenced (outer holds), depth 1.
+            let st = hook_state().lock().unwrap();
+            assert_eq!(st.depth, 1);
+            assert!(st.saved.is_some());
+        }
+        // All guards dropped: depth back to 0, saved hook handed back.
+        let st = hook_state().lock().unwrap();
+        assert_eq!(st.depth, 0, "depth must return to 0");
+        assert!(st.saved.is_none(), "saved hook must be restored, not leaked");
+    }
+
+    #[test]
     fn unwind_safe_captures_panic_message() {
         // Silence the default hook so this deliberate panic doesn't print
         // a backtrace during the test run.
@@ -1473,6 +1591,33 @@ mod tests {
                         "partial_points should be 0..=3, got {}", c.partial_points.len());
             }
             other => panic!("expected Cancelled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sweep_zero_cycles_emits_error_not_silent_drop() {
+        // With n_cycles_max == 0 a worker completes no cycles, so it has no
+        // SweepPoint to report. Previously the RPM vanished silently — no
+        // point AND no error — yielding a sweep with fewer points than
+        // requested and no explanation. It must now surface as an error.
+        let emitter = VecEmitter::default();
+        let outcome = run_sweep_job(
+            &emitter, &AlwaysFinite,
+            "sw-zero".into(), sdm26_config_path(),
+            default_sweep_params(vec![6000.0], 0),
+            Arc::new(AtomicBool::new(false)), 100, None,
+        );
+        assert!(matches!(outcome, RunOutcome::Errored), "zero-cycle sweep must error");
+        let events = emitter.events.lock().unwrap().clone();
+        match events.last().unwrap() {
+            RecordedEvent::Error(e) => {
+                assert_eq!(e.kind, StudyKind::Sweep);
+                assert!(
+                    e.message.contains("no cycles completed"),
+                    "unexpected error message: {}", e.message,
+                );
+            }
+            other => panic!("expected Error, got {other:?}"),
         }
     }
 

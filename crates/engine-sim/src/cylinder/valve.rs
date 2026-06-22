@@ -164,6 +164,14 @@ pub fn valve_cd(lift: f64, diameter: f64,
     if lift <= 0.0 {
         return 0.0;
     }
+    // Empty (or mismatched) tables would otherwise panic on the `[0]`/
+    // `len()-1` indexing below. The config loader rejects empty Cd tables,
+    // but this function is also called directly with caller-supplied slices,
+    // so guard here too: with no table there is no flow coefficient to
+    // interpolate.
+    if ld_table.is_empty() || cd_table.is_empty() {
+        return 0.0;
+    }
     let ld = lift / diameter;
     if ld <= ld_table[0] {
         return cd_table[0] * (ld / ld_table[0]);
@@ -227,4 +235,31 @@ pub fn valve_effective_area_profile(
     let cd = valve_cd(l, diameter, ld_table, cd_table);
     let a_ref = valve_reference_area(l, diameter, seat_angle_rad);
     (n_valves as f64) * cd * a_ref
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valve_cd_empty_tables_return_zero_not_panic() {
+        // Empty L/D or Cd table must not index out of bounds. With no table
+        // there's no coefficient to interpolate, so the safe answer is 0.
+        assert_eq!(valve_cd(0.005, 0.03, &[], &[]), 0.0);
+        assert_eq!(valve_cd(0.005, 0.03, &[], &INTAKE_CD_TABLE), 0.0);
+        assert_eq!(valve_cd(0.005, 0.03, &INTAKE_LD_TABLE, &[]), 0.0);
+    }
+
+    #[test]
+    fn valve_cd_zero_lift_returns_zero() {
+        assert_eq!(valve_cd(0.0, 0.03, &INTAKE_LD_TABLE, &INTAKE_CD_TABLE), 0.0);
+    }
+
+    #[test]
+    fn valve_cd_interpolates_on_a_normal_table() {
+        // Above the last L/D returns the last Cd; this also confirms the
+        // empty-table guard didn't change the normal path.
+        let cd = valve_cd(1.0, 0.01, &INTAKE_LD_TABLE, &INTAKE_CD_TABLE);
+        assert_eq!(cd, *INTAKE_CD_TABLE.last().unwrap());
+    }
 }

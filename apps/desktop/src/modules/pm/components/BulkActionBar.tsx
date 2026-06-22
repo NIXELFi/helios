@@ -98,8 +98,17 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
     bulkUpdateTasks(ids, patch);
   };
 
+  // Commit a chosen due date to every selected task. An EMPTY value is ignored:
+  // merely focusing the date input and tabbing away (which fires onBlur with "")
+  // must never wipe the due_date of every selected task (data-loss bug H-3).
+  // Clearing a due date in bulk requires the explicit "Clear due" action below.
   const commitDue = (value: string) => {
-    apply({ due_date: value === "" ? null : value });
+    if (value === "") return;
+    apply({ due_date: value });
+  };
+
+  const clearDue = () => {
+    apply({ due_date: null });
   };
 
   return (
@@ -223,6 +232,16 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
               }
             }}
           />
+          <button
+            type="button"
+            onClick={clearDue}
+            disabled={isViewer}
+            aria-label="Clear due date for selected tasks"
+            title="Clear due date"
+            className="rounded p-0.5 text-helios-dim hover:bg-helios-base hover:text-red-400 disabled:opacity-60"
+          >
+            <IconX size={12} strokeWidth={1.5} />
+          </button>
         </label>
 
         <span className="mx-0.5 h-5 w-px shrink-0 bg-helios-line" aria-hidden />

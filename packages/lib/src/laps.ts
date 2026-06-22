@@ -154,8 +154,11 @@ export function lapIndexAt(set: LapSet, tUs: number): number {
     if (tUs >= l.startUs && tUs < l.endUs) return i;
   }
   if (set.laps.length === 0) return -1;
+  // Tail-inclusive: the very last sample of the session sits exactly at
+  // last.endUs and belongs to the last lap. Guard with startUs so timestamps
+  // that precede the first lap are correctly reported as -1.
   const last = set.laps[set.laps.length - 1]!;
-  return tUs <= last.endUs ? set.laps.length - 1 : -1;
+  return tUs >= last.startUs && tUs <= last.endUs ? set.laps.length - 1 : -1;
 }
 
 // ─── crossings ──────────────────────────────────────────────────────────────
@@ -488,7 +491,9 @@ export function lapAggregate(
     for (let i = 0; i < n; i++) {
       const tUs = Number(timeUs[i]!);
       if (tUs < lap.startUs) continue;
-      if (tUs > lap.endUs) break;
+      // Laps are half-open [startUs, endUs) — exclude the boundary sample
+      // so it isn't double-attributed to both this lap and the next.
+      if (tUs >= lap.endUs) break;
       const v = values[i]!;
       if (!Number.isFinite(v)) continue;
       if (Number.isNaN(first)) first = v;

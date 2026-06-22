@@ -58,8 +58,18 @@ impl Client {
 
     pub async fn release_lock(&self, lock_id: LockId) -> Result<(), ClientError> {
         let session = self.session().ok_or(ClientError::Unauthenticated)?;
-        // TODO: backend-side now() — currently the client clock is the source of
-        // truth for released_at; a separate finding tracks switching to server now().
+        // KNOWN LIMITATION (audit 2026-06-22): `released_at` is stamped from the
+        // CLIENT clock here, so a skewed client writes a wrong release time.
+        // The correct fix is server-authoritative `now()`, but this lock_id-keyed
+        // path PATCHes the `pdm.locks` table directly — PostgREST cannot evaluate
+        // `now()` in a table-update body, so it requires a new
+        // `pdm_release_lock(p_lock_id)` SECURITY DEFINER RPC (mirroring
+        // `pdm_cancel_checkout`, which already sets `released_at = now()`
+        // server-side for the file_id-keyed path). That RPC lives in
+        // `infra/pdm-supabase` (owned by the DB migration work), so it is tracked
+        // there; this client call switches to it once it exists. Until then we
+        // keep the client timestamp to preserve the existing
+        // released_at=is.null + return=representation concurrency contract.
         let body = build_release_lock_body();
         let res = self
             .http()

@@ -328,15 +328,29 @@ export function CalendarViewClient({
     rememberCalendarSettings(teamSlug, calColors);
   }, [teamSlug, calColors]);
 
+  // Earliest due/milestone date in the current scope — used to seed the visible
+  // month. Computed live so it tracks the data (a previous empty-dep useMemo
+  // froze it to `new Date()` on the first render, before the async workspace
+  // load populated baseTasks/milestones, so the calendar never jumped to the
+  // first real deadline).
   const seedAnchor = useMemo(() => {
     const candidates: string[] = [];
     for (const t of baseTasks) if (t.due_date) candidates.push(t.due_date);
     for (const m of milestones) candidates.push(m.target_date);
     candidates.sort();
     return candidates[0] ? parseISO(candidates[0]) : new Date();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [baseTasks, milestones]);
   const [anchor, setAnchor] = useState<Date>(seedAnchor);
+  // Seed the anchor to the first real deadline ONCE, the first time data is
+  // available. After that the user owns the anchor (paging/Today), so we never
+  // yank it back. `seeded` guards the one-shot.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (baseTasks.length === 0 && milestones.length === 0) return;
+    seededRef.current = true;
+    setAnchor(seedAnchor);
+  }, [baseTasks, milestones, seedAnchor]);
 
   // Events expanded into per-date occurrences (#24). Recurring events repeat from
   // their start date through recurrence_end, bounded to a window around the
@@ -411,7 +425,18 @@ export function CalendarViewClient({
     const dateKey = String(e.over.id);
     const relation = relationByTaskId.get(taskId) ?? "owned";
     if (relation !== "owned") return;
-    updateTask(taskId, kind === "start" ? { start_date: dateKey } : { due_date: dateKey });
+    // Keep start <= due. Dragging the START chip past the due date, or the DUE
+    // chip before the start date, would invert the span — reject that drop
+    // rather than persist an out-of-order pair (which the date inputs also
+    // guard against).
+    const dragged = tasks.find((t) => t.id === taskId);
+    if (kind === "start") {
+      if (dragged?.due_date && dateKey > dragged.due_date) return;
+      updateTask(taskId, { start_date: dateKey });
+    } else {
+      if (dragged?.start_date && dateKey < dragged.start_date) return;
+      updateTask(taskId, { due_date: dateKey });
+    }
   }
 
   const activeDragTask = activeDrag ? tasks.find((t) => t.id === activeDrag.taskId) ?? null : null;
@@ -694,12 +719,19 @@ export function CalendarViewClient({
           setTaskDialogOpen(false);
           setTaskPrefill({});
         }}
-        onCreate={(task) => {
+        onCreate={(task, extra) => {
+          const reHomed = !!(currentTeam && task.subteam_id !== currentTeam.id);
           const finalTask =
-            currentTeam && task.subteam_id !== currentTeam.id
+            currentTeam && reHomed
               ? { ...task, subteam_id: currentTeam.id, subteam: currentTeam, subsystem_id: null, subsystem: null }
               : task;
-          addTask(finalTask);
+          // Drop the scoped team from staged extras when re-homing the primary
+          // to it, so it isn't also added as a stray secondary membership.
+          const scopedExtra =
+            reHomed && currentTeam && extra
+              ? { ...extra, extraSubteamIds: (extra.extraSubteamIds ?? []).filter((id) => id !== currentTeam.id) }
+              : extra;
+          addTask(finalTask, scopedExtra);
         }}
         projectId={projectId}
         subteams={subteams}

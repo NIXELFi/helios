@@ -113,10 +113,19 @@ function rememberLastSubteam(id: string): void {
   }
 }
 
+// Additional inserts the dialog stages alongside the task itself. They are
+// handed to the store's addTask so they persist SEQUENTIALLY after the task
+// INSERT commits, instead of racing it (bug H-10).
+export interface CreateTaskExtra {
+  extraSubteamIds?: string[];
+  prerequisiteIds?: string[];
+  dependentIds?: string[];
+}
+
 export interface CreateTaskDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (task: TaskRow) => void;
+  onCreate: (task: TaskRow, extra?: CreateTaskExtra) => void;
   projectId: string;
   subteams: ReadonlyArray<Subteam>;
   subsystems: ReadonlyArray<Subsystem>;
@@ -141,8 +150,6 @@ export function CreateTaskDialog({
   defaultStatus = "not_started",
 }: CreateTaskDialogProps) {
   const allTasks = usePmStore((s) => s.tasks);
-  const addDependency = usePmStore((s) => s.addDependency);
-  const addTaskSubteam = usePmStore((s) => s.addTaskSubteam);
 
   // Last subteam the user created a task under (persisted) — so consecutive
   // new tasks don't reset to the first subteam in the list. An explicit
@@ -303,8 +310,9 @@ export function CreateTaskDialog({
       created_by: null,
       subteam,
       // The insert seeds the PRIMARY membership only; additional memberships are
-      // written below via addTaskSubteam so a team-scope remap in onCreate can't
-      // leave a stale subteams[0].
+      // handed to addTask via the onCreate `extra` arg so they persist AFTER the
+      // task INSERT commits (and a team-scope remap in onCreate can't leave a
+      // stale subteams[0]).
       subteams: [subteam],
       subsystem,
       owner,
@@ -313,23 +321,18 @@ export function CreateTaskDialog({
       owners: owner ? [owner] : [],
     };
 
-    onCreate(task);
+    // Hand the staged ADDITIONAL subteams + dependencies to addTask (via the
+    // view's onCreate) so they persist SEQUENTIALLY after the task INSERT
+    // commits, never racing it into an FK violation (bug H-10). The store
+    // resolves/de-dupes these and skips the primary, so passing them raw is safe
+    // even if a team-scoped onCreate re-homes the primary.
+    onCreate(task, {
+      extraSubteamIds: [...extraSubteamIds],
+      prerequisiteIds: [...prereqIds],
+      dependentIds: [...dependentIds],
+    });
     // Remember the chosen subteam so the next new-task form starts there.
     rememberLastSubteam(subteam.id);
-    // Attach any ADDITIONAL (non-primary) subteams now that the task exists.
-    // addTaskSubteam no-ops on the primary / already-members, so this is safe
-    // even if onCreate re-homed the primary into the current team scope.
-    for (const id of extraSubteamIds) {
-      if (id === subteam.id) continue;
-      addTaskSubteam(task.id, id);
-    }
-    // Author staged dependencies now that the task exists in the store.
-    for (const pid of prereqIds) {
-      addDependency({ predecessor_id: pid, successor_id: task.id, dep_type: "FS", lag_days: 0 });
-    }
-    for (const did of dependentIds) {
-      addDependency({ predecessor_id: task.id, successor_id: did, dep_type: "FS", lag_days: 0 });
-    }
     reset(defaults);
     setPrereqIds([]);
     setDependentIds([]);

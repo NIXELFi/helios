@@ -93,8 +93,11 @@ export function LinePlot({
     setZoomed(false);
   }
 
+  // showPoints/width are structural — they're baked into the uPlot series at
+  // create time, so they MUST be part of the rebuild key or a toggle leaves the
+  // chart rendering with the stale options.
   const fieldKey = `ready=${dataReady}|x=${haveXRange ? `${xMin}:${xMax}` : "auto"}|` + series.map((s) =>
-    `${s.label}:${s.color ?? ""}:${s.axis ?? "y"}:${s.xs ? "own" : "shared"}`
+    `${s.label}:${s.color ?? ""}:${s.axis ?? "y"}:${s.xs ? "own" : "shared"}:${s.showPoints ?? "auto"}:${s.width ?? "auto"}`
   ).join("|");
 
   // Build aligned uPlot data. If any series carries its own xs, we must

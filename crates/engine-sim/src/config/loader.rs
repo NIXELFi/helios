@@ -43,16 +43,44 @@ fn unpack_cd_table(v: &Value, key: &str) -> Result<(Vec<f64>, Vec<f64>), ConfigL
     let arr = v.get(key).and_then(|x| x.as_array()).ok_or_else(|| {
         ConfigLoadError::Schema(format!("missing array {key:?}"))
     })?;
+    // An empty Cd table would make `valve_cd` index `[0]` out of bounds at
+    // solve time. Reject it here with a schema error rather than panicking
+    // mid-run.
+    if arr.is_empty() {
+        return Err(ConfigLoadError::Schema(format!("{key} must have at least one [L/D, Cd] row")));
+    }
     let mut ld = Vec::with_capacity(arr.len());
     let mut cd = Vec::with_capacity(arr.len());
     for row in arr {
         let r = row.as_array().ok_or_else(|| {
             ConfigLoadError::Schema(format!("{key} row must be a 2-array"))
         })?;
+        // Guard the [0]/[1] indexing — a short row (e.g. `[0.1]`) would
+        // otherwise panic.
+        if r.len() < 2 {
+            return Err(ConfigLoadError::Schema(format!("{key} row must be a [L/D, Cd] pair")));
+        }
         ld.push(r[0].as_f64().ok_or_else(|| ConfigLoadError::Schema("cd_table L/D".into()))?);
         cd.push(r[1].as_f64().ok_or_else(|| ConfigLoadError::Schema("cd_table Cd".into()))?);
     }
     Ok((ld, cd))
+}
+
+/// Required f64 field on every element of a pipe array. Returns a schema
+/// error (never panics) when a pipe is missing the field or it is
+/// non-numeric. `what` names the pipe group for the error message.
+fn pipe_field(pipes: &[Value], key: &str, what: &str) -> Result<Vec<f64>, ConfigLoadError> {
+    pipes
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            p.get(key)
+                .and_then(|x| x.as_f64())
+                .ok_or_else(|| ConfigLoadError::Schema(format!(
+                    "{what}[{i}] missing or non-numeric {key:?}"
+                )))
+        })
+        .collect()
 }
 
 fn all_same(values: &[f64]) -> bool {
@@ -87,24 +115,34 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     let (intake_ld, intake_cd) = unpack_cd_table(iv, "cd_table")?;
     let (exhaust_ld, exhaust_cd) = unpack_cd_table(ev, "cd_table")?;
 
-    let runner_lengths: Vec<f64> = runners.iter().map(|p| p["length"].as_f64().unwrap()).collect();
-    let runner_diameters_in: Vec<f64> = runners.iter().map(|p| p["diameter"].as_f64().unwrap()).collect();
+    // `intake_pipes` / `exhaust_primaries` must be non-empty: we index
+    // `[0]` below to seed the scalar config fields. Reject empty here with
+    // a schema error rather than panicking on the index.
+    if runners.is_empty() {
+        return Err(ConfigLoadError::Schema("intake_pipes must have at least one pipe".into()));
+    }
+    if primaries.is_empty() {
+        return Err(ConfigLoadError::Schema("exhaust_primaries must have at least one pipe".into()));
+    }
+
+    let runner_lengths: Vec<f64> = pipe_field(runners, "length", "intake_pipes")?;
+    let runner_diameters_in: Vec<f64> = pipe_field(runners, "diameter", "intake_pipes")?;
     let runner_diameters_out: Vec<Option<f64>> = runners.iter()
         .map(|p| p.get("diameter_out").and_then(|x| x.as_f64()))
         .collect();
-    let runner_wall_ts: Vec<f64> = runners.iter().map(|p| p["wall_temperature"].as_f64().unwrap()).collect();
+    let runner_wall_ts: Vec<f64> = pipe_field(runners, "wall_temperature", "intake_pipes")?;
 
-    let primary_lengths: Vec<f64> = primaries.iter().map(|p| p["length"].as_f64().unwrap()).collect();
-    let primary_diameters_in: Vec<f64> = primaries.iter().map(|p| p["diameter"].as_f64().unwrap()).collect();
+    let primary_lengths: Vec<f64> = pipe_field(primaries, "length", "exhaust_primaries")?;
+    let primary_diameters_in: Vec<f64> = pipe_field(primaries, "diameter", "exhaust_primaries")?;
     let primary_diameters_out: Vec<Option<f64>> = primaries.iter()
         .map(|p| p.get("diameter_out").and_then(|x| x.as_f64())).collect();
-    let primary_wall_ts: Vec<f64> = primaries.iter().map(|p| p["wall_temperature"].as_f64().unwrap()).collect();
+    let primary_wall_ts: Vec<f64> = pipe_field(primaries, "wall_temperature", "exhaust_primaries")?;
 
-    let secondary_lengths: Vec<f64> = secondaries.iter().map(|p| p["length"].as_f64().unwrap()).collect();
-    let secondary_diameters_in: Vec<f64> = secondaries.iter().map(|p| p["diameter"].as_f64().unwrap()).collect();
+    let secondary_lengths: Vec<f64> = pipe_field(&secondaries, "length", "exhaust_secondaries")?;
+    let secondary_diameters_in: Vec<f64> = pipe_field(&secondaries, "diameter", "exhaust_secondaries")?;
     let secondary_diameters_out: Vec<Option<f64>> = secondaries.iter()
         .map(|p| p.get("diameter_out").and_then(|x| x.as_f64())).collect();
-    let secondary_wall_ts: Vec<f64> = secondaries.iter().map(|p| p["wall_temperature"].as_f64().unwrap()).collect();
+    let secondary_wall_ts: Vec<f64> = pipe_field(&secondaries, "wall_temperature", "exhaust_secondaries")?;
 
     let mut cfg = SDM26Config::default();
     cfg.bore = req_f64(cyl, "bore")?;
@@ -112,8 +150,17 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.con_rod = req_f64(cyl, "con_rod_length")?;
     cfg.cr = req_f64(cyl, "compression_ratio")?;
     cfg.n_cylinders = req_u(&data, "n_cylinders")?;
-    cfg.firing_order = data["firing_order"].as_array().unwrap().iter()
-        .map(|v| v.as_i64().unwrap() as i32).collect();
+    let firing_order = data.get("firing_order").and_then(|x| x.as_array())
+        .ok_or_else(|| ConfigLoadError::Schema("missing array \"firing_order\"".into()))?;
+    cfg.firing_order = firing_order.iter().enumerate()
+        .map(|(i, v)| {
+            v.as_i64()
+                .map(|n| n as i32)
+                .ok_or_else(|| ConfigLoadError::Schema(format!(
+                    "firing_order[{i}] must be an integer"
+                )))
+        })
+        .collect::<Result<Vec<i32>, _>>()?;
     cfg.firing_interval = req_f64(&data, "firing_interval")?;
 
     cfg.runner_length = runner_lengths[0];
@@ -354,6 +401,74 @@ mod tests {
         let res = load_v1_json(&p);
         let _ = fs::remove_file(&p);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn empty_cd_table_is_rejected_not_panic() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["intake_valve"]["cd_table"] = serde_json::json!([]);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        match res {
+            Err(ConfigLoadError::Schema(_)) => {}
+            other => panic!("expected Schema error for empty cd_table, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn short_cd_table_row_is_rejected_not_panic() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        // A row with only one element must be a schema error, not an
+        // out-of-bounds index panic.
+        data["exhaust_valve"]["cd_table"] = serde_json::json!([[0.1]]);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    #[test]
+    fn missing_pipe_field_is_schema_error_not_panic() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        // Drop a required numeric field from the first intake pipe. Old
+        // code did `p["length"].as_f64().unwrap()` → panic.
+        if let Some(arr) = data["intake_pipes"].as_array_mut() {
+            if let Some(obj) = arr.get_mut(0).and_then(|v| v.as_object_mut()) {
+                obj.remove("length");
+            }
+        }
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    #[test]
+    fn empty_intake_pipes_is_schema_error_not_panic() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        // Empty array would otherwise panic on the `runners[0]` index.
+        data["intake_pipes"] = serde_json::json!([]);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    #[test]
+    fn non_integer_firing_order_is_schema_error_not_panic() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        // A non-integer firing-order entry used to panic via `.unwrap()`.
+        data["firing_order"] = serde_json::json!([1, "two", 3, 4]);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
     }
 
     #[test]

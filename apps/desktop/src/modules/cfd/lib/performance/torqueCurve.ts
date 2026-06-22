@@ -17,6 +17,9 @@ export type TorqueCurve = TorquePoint[];
  *  converged cycle), dropping non-finite entries and sorting by RPM. */
 export function torqueCurveFromSweep(points: SweepPoint[]): TorqueCurve {
   return points
+    // A malformed/imported point may lack `lastCycle` entirely — skip it rather
+    // than throwing on the dereference (mirrors importStudy's drop-with-warning).
+    .filter((p) => p?.lastCycle != null)
     .map((p) => ({ rpm: p.rpm, torqueNm: p.lastCycle.brakeTorqueNm }))
     .filter((p) => Number.isFinite(p.rpm) && Number.isFinite(p.torqueNm))
     .sort((a, b) => a.rpm - b.rpm);

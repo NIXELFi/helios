@@ -35,10 +35,16 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     // a dependency for perfect Windows-1252 decoding — the goal is to let
     // the file load at all.
     let raw_cow = String::from_utf8_lossy(bytes);
-    let prepared = prepare_csv_input(&raw_cow);
-    let first_line = prepared.text.lines().next()
-        .ok_or_else(|| CsvLoadError::Malformed("empty file".into()))?;
-    let delim = detect_delimiter(first_line);
+    // Detect the field delimiter from the ORIGINAL data up front so that the
+    // preamble-stripping helpers (which re-read header / units / data rows with
+    // their own little CSV readers) use the same delimiter the file actually
+    // uses. MoTeC and Link can export semicolon- or tab-delimited CSVs; before
+    // this was carried through, those exports failed to load because the strip
+    // helpers hard-assumed a comma. We pick the delimiter from the first line
+    // that contains a candidate separator (skipping any single-cell preamble
+    // lines like `"Format","MoTeC ..."` whose own delimiter is already comma).
+    let delim = detect_delimiter_for_file(&raw_cow);
+    let prepared = prepare_csv_input(&raw_cow, delim);
 
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delim)
@@ -286,28 +292,51 @@ struct CsvInput {
     units: Vec<String>,
 }
 
-fn prepare_csv_input(raw: &str) -> CsvInput {
-    if let Some(prep) = strip_motec(raw) {
+fn prepare_csv_input(raw: &str, delim: u8) -> CsvInput {
+    if let Some(prep) = strip_motec(raw, delim) {
         return prep;
     }
-    if let Some(prep) = strip_link(raw) {
+    if let Some(prep) = strip_link(raw, delim) {
         return prep;
     }
     CsvInput { text: raw.to_string(), units: Vec::new() }
+}
+
+/// Pick the field delimiter for a whole file, not just its first physical line.
+/// MoTeC/Link exports begin with a single-cell preamble line (`"Format",...`
+/// for MoTeC, `"Name",...` for Link) whose only separator is the comma that
+/// joins those two quoted cells — so keying off line 0 alone would wrongly lock
+/// in a comma for a semicolon/tab export. We scan the first several lines and
+/// take the delimiter from the first line that actually has a multi-column
+/// shape, falling back to the line-0 detection if none does.
+fn detect_delimiter_for_file(raw: &str) -> u8 {
+    const MAX_PROBE_LINES: usize = 16;
+    for line in raw.lines().take(MAX_PROBE_LINES) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let d = detect_delimiter(line);
+        // A line with at least one of the non-comma candidates is decisive; a
+        // comma-only / single-cell line is ambiguous, so keep probing.
+        if line.bytes().any(|b| b == d) && (d != b',' || line.bytes().filter(|&b| b == b',').count() >= 2) {
+            return d;
+        }
+    }
+    detect_delimiter(raw.lines().find(|l| !l.trim().is_empty()).unwrap_or(""))
 }
 
 /// MoTeC-style CSV files start with ~12 lines of metadata, then a quoted
 /// channel-names row, then a units row, then blanks, then data. The standard
 /// `csv` crate handles quoted values fine, but the metadata block must be
 /// stripped first. Detection is keyed off the literal `"Format","MoTeC` prefix.
-fn strip_motec(text: &str) -> Option<CsvInput> {
+fn strip_motec(text: &str, delim: u8) -> Option<CsvInput> {
     let first = text.lines().next().unwrap_or("");
     if !(first.starts_with("\"Format\"") && first.contains("MoTeC")) {
         return None;
     }
     let lines: Vec<&str> = text.lines().collect();
     let header_idx = lines.iter().position(|l| {
-        first_csv_cell(l).map(|c| c == "Time").unwrap_or(false)
+        first_csv_cell(l, delim).map(|c| c == "Time").unwrap_or(false)
     })?;
     // Skip past the header itself, capturing the units row if it's the next
     // non-blank non-data line. MoTeC's row immediately after the header is the
@@ -318,15 +347,15 @@ fn strip_motec(text: &str) -> Option<CsvInput> {
     while data_start < lines.len() {
         let trimmed = lines[data_start].trim();
         if trimmed.is_empty() { data_start += 1; continue; }
-        let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
+        let first_cell = first_csv_cell(lines[data_start], delim).unwrap_or("");
         if first_cell.parse::<f64>().is_ok() { break; }
         if units_line.is_none() {
             units_line = Some(lines[data_start]);
         }
         data_start += 1;
     }
-    let header_unique = dedupe_csv_header(lines[header_idx]);
-    let units = parse_units_line(units_line, count_csv_cells(&header_unique));
+    let header_unique = dedupe_csv_header(lines[header_idx], delim);
+    let units = parse_units_line(units_line, count_csv_cells(&header_unique, delim), delim);
     let mut out = String::with_capacity(text.len());
     out.push_str(&header_unique);
     out.push('\n');
@@ -340,10 +369,10 @@ fn strip_motec(text: &str) -> Option<CsvInput> {
 /// Link ECU CSV exports start with a single quoted preamble line:
 ///   "Name","ECU Internal Datalog - 2026-05-03 13;33;03"
 /// Then the channel-name row, units row, blank line, then data.
-fn strip_link(text: &str) -> Option<CsvInput> {
+fn strip_link(text: &str, delim: u8) -> Option<CsvInput> {
     let mut iter = text.lines();
     let first = iter.next().unwrap_or("");
-    if first_csv_cell(first).map(|c| c != "Name").unwrap_or(true) { return None; }
+    if first_csv_cell(first, delim).map(|c| c != "Name").unwrap_or(true) { return None; }
     if !first.contains("ECU") { return None; }
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() < 3 { return None; }
@@ -353,15 +382,15 @@ fn strip_link(text: &str) -> Option<CsvInput> {
     while data_start < lines.len() {
         let trimmed = lines[data_start].trim();
         if trimmed.is_empty() { data_start += 1; continue; }
-        let first_cell = first_csv_cell(lines[data_start]).unwrap_or("");
+        let first_cell = first_csv_cell(lines[data_start], delim).unwrap_or("");
         if first_cell.parse::<f64>().is_ok() { break; }
         if units_line.is_none() {
             units_line = Some(lines[data_start]);
         }
         data_start += 1;
     }
-    let header_unique = dedupe_csv_header(header);
-    let units = parse_units_line(units_line, count_csv_cells(&header_unique));
+    let header_unique = dedupe_csv_header(header, delim);
+    let units = parse_units_line(units_line, count_csv_cells(&header_unique, delim), delim);
     let mut out = String::with_capacity(text.len());
     out.push_str(&header_unique);
     out.push('\n');
@@ -372,18 +401,19 @@ fn strip_link(text: &str) -> Option<CsvInput> {
     Some(CsvInput { text: out, units })
 }
 
-fn first_csv_cell(line: &str) -> Option<&str> {
+fn first_csv_cell(line: &str, delim: u8) -> Option<&str> {
     let line = line.trim_start();
     if let Some(rest) = line.strip_prefix('"') {
         let end = rest.find('"')?;
         Some(&rest[..end])
     } else {
-        Some(line.split(',').next()?.trim())
+        Some(line.split(delim as char).next()?.trim())
     }
 }
 
-fn count_csv_cells(line: &str) -> usize {
+fn count_csv_cells(line: &str, delim: u8) -> usize {
     let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(delim)
         .has_headers(false)
         .from_reader(line.as_bytes());
     rdr.records().next()
@@ -394,9 +424,10 @@ fn count_csv_cells(line: &str) -> usize {
 
 /// Parse the source's units row into a Vec<String>, padded to `expected_len`
 /// with empty strings. Returns an empty Vec when no units row was found.
-fn parse_units_line(line: Option<&str>, expected_len: usize) -> Vec<String> {
+fn parse_units_line(line: Option<&str>, expected_len: usize, delim: u8) -> Vec<String> {
     let Some(line) = line else { return Vec::new(); };
     let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(delim)
         .has_headers(false)
         .from_reader(line.as_bytes());
     let Some(Ok(record)) = rdr.records().next() else { return Vec::new(); };
@@ -405,8 +436,9 @@ fn parse_units_line(line: Option<&str>, expected_len: usize) -> Vec<String> {
     out
 }
 
-fn dedupe_csv_header(line: &str) -> String {
+fn dedupe_csv_header(line: &str, delim: u8) -> String {
     let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(delim)
         .has_headers(false)
         .from_reader(line.as_bytes());
     let mut record = csv::StringRecord::new();
@@ -422,7 +454,12 @@ fn dedupe_csv_header(line: &str) -> String {
         *c += 1;
         out.push(name);
     }
+    // Rewrite with the SAME delimiter the file uses so the main reader (which
+    // is configured with `delim`) parses the cleaned header back into the same
+    // columns. Using the default comma here would re-merge a semicolon/tab
+    // file's columns into a single field.
     let mut wtr = csv::WriterBuilder::new()
+        .delimiter(delim)
         .has_headers(false)
         .from_writer(Vec::new());
     let _ = wtr.write_record(&out);
@@ -815,6 +852,71 @@ channels:
             }
         }
         assert!(checked, "engine.rpm column not found in any rate group");
+    }
+
+    /// A plain (no-preamble) semicolon-delimited CSV must load: the file-wide
+    /// delimiter detection picks `;`, and the main reader is configured with it.
+    #[test]
+    fn loads_semicolon_delimited_plain_csv() {
+        let csv: &[u8] = b"time;rpm;tps\n0;1000;14\n0.01;1100;15\n0.02;1200;16\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut rpm_first: Option<f64> = None;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.rpm").is_some() {
+                rpm_first = Some(rg.channel_data("engine.rpm").unwrap().value(0));
+            }
+        }
+        assert_eq!(rpm_first, Some(1000.0), "engine.rpm not loaded from semicolon CSV");
+    }
+
+    /// A MoTeC-style export that uses SEMICOLON as its field delimiter used to
+    /// fail to load: the preamble-strip helpers hard-assumed a comma, so the
+    /// `"Time"` header row was never located and the data columns never split.
+    /// The file-wide delimiter is now detected from the header/data shape
+    /// (skipping the single-cell `"Format";"MoTeC..."` preamble) and threaded
+    /// through every strip helper.
+    #[test]
+    fn loads_semicolon_delimited_motec_export() {
+        let csv: &[u8] = b"\"Format\";\"MoTeC CSV File\"\n\
+            \"Time\";\"Engine Speed\";\"Throttle Position\"\n\
+            \"s\";\"rpm\";\"%\"\n\
+            \n\
+            0.000;1000;14\n\
+            0.001;1100;15\n\
+            0.002;1200;16\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut rpm_first: Option<f64> = None;
+        let mut tps_first: Option<f64> = None;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.rpm").is_some() {
+                rpm_first = Some(rg.channel_data("engine.rpm").unwrap().value(0));
+            }
+            if rg.meta("engine.tps").is_some() {
+                tps_first = Some(rg.channel_data("engine.tps").unwrap().value(0));
+            }
+        }
+        assert_eq!(rpm_first, Some(1000.0), "engine.rpm not loaded from semicolon MoTeC export");
+        assert_eq!(tps_first, Some(14.0), "engine.tps not loaded from semicolon MoTeC export");
+    }
+
+    /// A TAB-delimited Link ECU export must also load through the strip path.
+    #[test]
+    fn loads_tab_delimited_link_export() {
+        let csv: &[u8] = b"\"Name\"\t\"ECU Internal Datalog\"\n\
+            \"Time\"\t\"Engine Speed\"\n\
+            \"s\"\t\"rpm\"\n\
+            \n\
+            0\t1000\n\
+            0.001\t1100\n\
+            0.002\t1200\n";
+        let r = load_csv_bytes(csv, &registry()).unwrap();
+        let mut rpm_first: Option<f64> = None;
+        for rg in &r.rate_groups {
+            if rg.meta("engine.rpm").is_some() {
+                rpm_first = Some(rg.channel_data("engine.rpm").unwrap().value(0));
+            }
+        }
+        assert_eq!(rpm_first, Some(1000.0), "engine.rpm not loaded from tab Link export");
     }
 
     // NB: a `sample_session_loads` test used to load the bundled

@@ -48,7 +48,7 @@ export function GGDiagram({ latG, longG, limit, muLat, muLong, height = 280 }: P
 
   const pad = 28;
   const maxLat = Math.max(muLat * 1.2, ...latG.map(Math.abs).filter(Number.isFinite)) * 1.06;
-  const maxLong = Math.max(muLat * 1.2, ...longG.map(Math.abs).filter(Number.isFinite)) * 1.06;
+  const maxLong = Math.max(muLong * 1.2, ...longG.map(Math.abs).filter(Number.isFinite)) * 1.06;
   const cx = width / 2;
   const sx = (width / 2 - pad) / Math.max(1e-6, maxLat);
   const sy = (height - 2 * pad) / Math.max(1e-6, 2 * maxLong);
@@ -66,8 +66,10 @@ export function GGDiagram({ latG, longG, limit, muLat, muLong, height = 280 }: P
       pts.push(`${px(lat).toFixed(1)},${py(lon).toFixed(1)}`);
     }
     return pts.join(" ");
+    // maxLat/maxLong feed px()/py() via sx/sy — without them the ellipse keeps
+    // a stale pixel mapping when only the data (latG/longG extent) changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [muLat, muLong, width, height]);
+  }, [muLat, muLong, maxLat, maxLong, width, height]);
 
   const gridG = Math.ceil(Math.max(maxLat, maxLong));
 
