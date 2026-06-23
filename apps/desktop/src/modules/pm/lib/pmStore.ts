@@ -1922,31 +1922,25 @@ export const selectIsAdmin = (state: PmState): boolean => selectMyRole(state) ==
 // source of truth — `checkAffected` in the write layer is the backstop if this
 // and RLS ever disagree.
 //
-// Approximation: RLS takes the MAX of the user's project role and their role in
-// the task's subteam; the client only carries project roles, so a subteam-scoped
-// elevation (e.g. lead of one subteam) reads as the lower project role here. That
-// only ever under-permits the UI, never over-permits, and the team currently has
-// no subteam-scoped roles. The reason strings are written for an FSAE teammate.
+// Any EDITOR (engineer or above) of the project/subteam may edit ANY task in it,
+// not just tasks they personally own or created — see the can_edit_task RLS
+// migration (2026-06-23). The role here comes from `my_team_roles`, which uses
+// the same `user_role_in_project` resolution as RLS (including the global-PDM
+// fallback), so engineer→allow matches the broadened RLS for the common case.
+// The client can still UNDER-permit: a user whose only editor access is a
+// subteam-scoped role (e.g. engineer in a subteam a task is shared into, but a
+// lower project role) reads as the lower project role here, because the client
+// carries one role per project with no subteam dimension. Subteam roles DO exist
+// in prod, so this path is real — but under-permitting only disables a control
+// the DB would have allowed; it never over-permits. The reason strings are
+// written for an FSAE teammate.
 export const selectCanEditTask = (
   state: Pick<PmState, "projectRoles" | "currentUserId">,
-  task: Pick<TaskRow, "project_id" | "owner_id" | "created_by" | "owners">,
+  task: Pick<TaskRow, "project_id">,
 ): { allowed: boolean; reason: string | null } => {
   const role = state.projectRoles[task.project_id] ?? null;
-  if (role === "admin" || role === "lead") return { allowed: true, reason: null };
-  if (role === "engineer") {
-    const mine =
-      (task.owner_id !== null && task.owner_id === state.currentUserId) ||
-      (task.created_by !== null && task.created_by === state.currentUserId) ||
-      // A co-owner (any owners-list entry, not just the primary) can edit too —
-      // the point of multi-owner. Mirrors the can_edit_task RLS function.
-      (task.owners ?? []).some((u) => u.id === state.currentUserId);
-    return mine
-      ? { allowed: true, reason: null }
-      : {
-          allowed: false,
-          reason:
-            "Engineers can only edit tasks they own or created. Ask a subteam lead or admin to make this change, or to assign the task to you.",
-        };
+  if (role === "admin" || role === "lead" || role === "engineer") {
+    return { allowed: true, reason: null };
   }
   if (role === "viewer") {
     return { allowed: false, reason: "You have view-only access to this project." };

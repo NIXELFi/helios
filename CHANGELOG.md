@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **PM task editing**: any **editor (engineer or above)** of a project or subteam
+  can now edit every task in their scope — including reassigning its owner and
+  changing any other property — not just tasks they personally own or created.
+  Admins and leads were already unrestricted; viewers remain read-only.
+
 ## [4.5.2] - 2026-06-22
 
 ### Changed

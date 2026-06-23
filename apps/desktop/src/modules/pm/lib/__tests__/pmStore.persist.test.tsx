@@ -878,7 +878,11 @@ describe("deleteSubteam with multi-subteam tasks", () => {
 });
 
 describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
-  const base = { project_id: "p1", owner_id: null, created_by: null, owners: [] };
+  // Permission now turns on the project/subteam ROLE only — ownership is no longer
+  // an input (broadened 2026-06-23, support report: any editor edits all tasks in
+  // their subteam). The narrowed `Pick<TaskRow, "project_id">` signature is itself
+  // the regression guard: re-introducing an ownership check would no longer typecheck.
+  const base = { project_id: "p1" };
   const state = (role: string | null, currentUserId = "me") =>
     ({ projectRoles: role ? { p1: role } : {}, currentUserId }) as never;
 
@@ -887,29 +891,10 @@ describe("selectCanEditTask (mirrors pm.can_edit_task RLS)", () => {
     expect(selectCanEditTask(state("lead"), base).allowed).toBe(true);
   });
 
-  test("an engineer can edit a task they OWN", () => {
-    const r = selectCanEditTask(state("engineer"), { ...base, owner_id: "me" });
+  test("an engineer can edit any task in their project, regardless of who owns it", () => {
+    const r = selectCanEditTask(state("engineer"), base);
     expect(r.allowed).toBe(true);
-  });
-
-  test("an engineer can edit a task they CREATED (the created_by fix)", () => {
-    const r = selectCanEditTask(state("engineer"), { ...base, created_by: "me" });
-    expect(r.allowed).toBe(true);
-  });
-
-  test("an engineer can edit a task they CO-OWN (multi-owner)", () => {
-    const r = selectCanEditTask(state("engineer"), {
-      ...base,
-      owner_id: "someone",
-      owners: [{ id: "someone", name: "Someone", email: null }, { id: "me", name: "Me", email: null }],
-    });
-    expect(r.allowed).toBe(true);
-  });
-
-  test("an engineer CANNOT edit someone else's task, and is told why", () => {
-    const r = selectCanEditTask(state("engineer"), { ...base, owner_id: "someone", created_by: "someone" });
-    expect(r.allowed).toBe(false);
-    expect(r.reason).toMatch(/only edit tasks they own or created/i);
+    expect(r.reason).toBeNull();
   });
 
   test("viewers and non-members are blocked with a reason", () => {
