@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.3] - 2026-06-23
+
 ### Changed
 
 - **PM task editing**: any **editor (engineer or above)** of a project or subteam
