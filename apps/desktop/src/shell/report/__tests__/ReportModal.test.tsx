@@ -74,6 +74,24 @@ describe("ReportModal", () => {
     expect(screen.getByRole("button", { name: "Upload screenshot" })).toBeInTheDocument();
   });
 
+  it("autofocuses the Title input on initial mount", () => {
+    open("bug");
+    expect(screen.getByPlaceholderText("Short summary of the problem")).toHaveFocus();
+  });
+
+  it("keeps focus in Details when the parent re-renders with a new onClose reference", () => {
+    const { rerender } = render(
+      <ReportModal kind="bug" module="vault" appVersion="4.3.7" onClose={() => {}} />,
+    );
+    const detailsBox = screen.getByLabelText("Details");
+    detailsBox.focus();
+    expect(detailsBox).toHaveFocus();
+    // The shell passes a fresh inline onClose closure on every render (presence
+    // events re-render it). Re-mounting the effect must not steal focus back.
+    rerender(<ReportModal kind="bug" module="vault" appVersion="4.3.7" onClose={() => {}} />);
+    expect(detailsBox).toHaveFocus();
+  });
+
   it("on failure shows the error and keeps the typed title", () => {
     h.submit = vi.fn(async () => false);
     h.error = "insert failed";

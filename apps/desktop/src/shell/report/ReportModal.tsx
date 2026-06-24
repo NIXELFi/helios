@@ -52,6 +52,11 @@ export function ReportModal({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const firstRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // Hold onClose in a ref so the open-effect can run once-per-open. The shell
+  // passes a fresh onClose closure every render (presence events re-render it);
+  // depending on it would re-run this effect and steal focus back to Title.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const restoreTo = document.activeElement as HTMLElement | null;
@@ -60,7 +65,7 @@ export function ReportModal({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        onClose();
+        onCloseRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -68,7 +73,8 @@ export function ReportModal({
       window.removeEventListener("keydown", onKey);
       restoreTo?.focus?.();
     };
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const shotUrl = useMemo(() => (shot ? URL.createObjectURL(shot) : null), [shot]);
   useEffect(() => () => { if (shotUrl) URL.revokeObjectURL(shotUrl); }, [shotUrl]);
@@ -179,6 +185,7 @@ export function ReportModal({
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
                 rows={3}
+                aria-label="Details"
                 className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-sm outline-none focus:border-asu-gold"
               />
             </label>
