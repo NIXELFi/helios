@@ -269,3 +269,58 @@ describe("StudiesScreen — per-row export", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Cancelled"));
   });
 });
+
+describe("StudiesScreen — sortable headers", () => {
+  it("clicking a header shows the active caret and persists the pref to localStorage", async () => {
+    const { ui } = renderScreen();
+    render(ui);
+    await waitFor(() => expect(ctx.state.hydrated).toBe(true));
+    await seedSingleRpm({ imepBar: 10, done: true });
+
+    // Click the Name column header → ascending by default (DEFAULT_DIR.name).
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+
+    // Active caret rendered on the Name header.
+    const nameHeader = screen.getByRole("button", { name: /^Name/ });
+    expect(nameHeader).toHaveTextContent("▲");
+    // aria-sort on the owning <th> reflects the direction.
+    expect(nameHeader.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    // Preference persisted.
+    expect(window.localStorage.getItem("helios:cfd:studiesSort")).toBe("name:asc");
+
+    // Clicking again toggles to descending.
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    expect(screen.getByRole("button", { name: /^Name/ })).toHaveTextContent("▼");
+    expect(window.localStorage.getItem("helios:cfd:studiesSort")).toBe("name:desc");
+  });
+
+  it("reorders the data rows when sorting by Name ascending then descending", async () => {
+    const { ui } = renderScreen();
+    render(ui);
+    await waitFor(() => expect(ctx.state.hydrated).toBe(true));
+
+    // Two studies with KNOWN distinct names (the config basename is shared, so
+    // give them custom names to make the Name ordering deterministic).
+    const idA = await seedSingleRpm({ imepBar: 10, done: true });
+    const idZ = await seedSingleRpm({ imepBar: 11, done: true });
+    act(() => {
+      ctx.renameStudy(idA, "Alpha");
+      ctx.renameStudy(idZ, "Zeta");
+    });
+
+    // The first DATA row's name cell — getAllByRole("row") includes the thead
+    // row, so skip it (rows.slice(1)).
+    const firstDataName = () => {
+      const rows = screen.getAllByRole("row");
+      return within(rows[1]!).getByRole("button", { name: /^Rename / }).textContent ?? "";
+    };
+
+    // Ascending: Alpha sorts before Zeta → first data row is Alpha.
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    expect(firstDataName()).toContain("Alpha");
+
+    // Descending toggle: order flips → first data row is now Zeta.
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    expect(firstDataName()).toContain("Zeta");
+  });
+});

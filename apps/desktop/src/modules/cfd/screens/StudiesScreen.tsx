@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useCfd } from "../state/CfdContext";
+import { sortStudies, type SortKey, type SortDir, type SortPref } from "../lib/sortStudies";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ExportMenu, type ExportMenuItem } from "../components/ExportMenu";
 import { OptimizationParamsModal } from "../components/optimization/OptimizationParamsModal";
@@ -67,6 +68,48 @@ function bestPeakText(study: Study): string {
   return `IMEP ${last.imepBar.toFixed(2)}`;
 }
 
+// Sort preference persisted per machine (ModulePicker localStorage idiom).
+// Default stays newest-first so the list looks unchanged on first run.
+const SORT_PREF_KEY = "helios:cfd:studiesSort";
+const DEFAULT_SORT: SortPref = { key: "startedAt", dir: "desc" };
+const SORT_KEYS: readonly SortKey[] = ["startedAt", "name", "kind", "status"];
+const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
+
+// Sensible default direction when first sorting by a column: text/categorical
+// keys ascend, time descends (newest-first).
+const DEFAULT_DIR: Record<SortKey, SortDir> = {
+  startedAt: "desc",
+  name: "asc",
+  kind: "asc",
+  status: "asc",
+};
+
+function isSortKey(v: unknown): v is SortKey {
+  return typeof v === "string" && (SORT_KEYS as readonly string[]).includes(v);
+}
+function isSortDir(v: unknown): v is SortDir {
+  return typeof v === "string" && (SORT_DIRS as readonly string[]).includes(v);
+}
+
+function readSortPref(): SortPref {
+  try {
+    const raw = localStorage.getItem(SORT_PREF_KEY);
+    if (!raw) return DEFAULT_SORT;
+    const [key, dir] = raw.split(":");
+    if (isSortKey(key) && isSortDir(dir)) return { key, dir };
+  } catch {
+    // ignore (private mode / quota) → fall through to default
+  }
+  return DEFAULT_SORT;
+}
+function writeSortPref(pref: SortPref): void {
+  try {
+    localStorage.setItem(SORT_PREF_KEY, `${pref.key}:${pref.dir}`);
+  } catch {
+    // ignore (private mode / quota)
+  }
+}
+
 export function StudiesScreen() {
   const { state, bridge, startSingleRpm, startSweep, startOptimization, cancelStudy, deleteStudy, renameStudy, setActiveStudy, importStudies, navigateTo } = useCfd();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -77,9 +120,26 @@ export function StudiesScreen() {
   const [exportAllBusy, setExportAllBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
+  const [sort, setSort] = useState<SortPref>(() => readSortPref());
 
-  const studies = Object.values(state.studies).sort((a, b) => b.startedAt - a.startedAt);
+  const studies = useMemo(
+    () => sortStudies(Object.values(state.studies), sort),
+    [state.studies, sort],
+  );
   const noConfig = !state.loadedConfig;
+
+  // Clicking a sortable header: toggle direction if already active, else switch
+  // to that column with its default direction. Persist the choice per machine.
+  function onHeaderClick(key: SortKey) {
+    setSort((prev) => {
+      const next: SortPref =
+        prev.key === key
+          ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+          : { key, dir: DEFAULT_DIR[key] };
+      writeSortPref(next);
+      return next;
+    });
+  }
 
   // Export-all writes a single workspace bundle (every study's self-describing
   // JSON). Disabled with no studies. Surfaces a transient toast on success /
@@ -217,13 +277,13 @@ export function StudiesScreen() {
           <table className="w-full text-left font-mono text-[11px]">
             <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
               <tr className="border-b border-[#2A2C32] [&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
-                <th>Kind</th>
-                <th>Name</th>
+                <SortHeader label="Kind" sortKey="kind" sort={sort} onSort={onHeaderClick} />
+                <SortHeader label="Name" sortKey="name" sort={sort} onSort={onHeaderClick} />
                 <th>Params</th>
-                <th>Status</th>
+                <SortHeader label="Status" sortKey="status" sort={sort} onSort={onHeaderClick} />
                 <th>Best/Peak</th>
                 <th className="text-right">Cycles</th>
-                <th>Started</th>
+                <SortHeader label="Started" sortKey="startedAt" sort={sort} onSort={onHeaderClick} />
                 <th className="text-right">Actions</th>
               </tr>
             </thead>
@@ -322,6 +382,36 @@ export function StudiesScreen() {
         </div>
       )}
     </div>
+  );
+}
+
+// A clickable column header. Shows a ▲/▼ caret on the active sort column and
+// toggles asc/desc on click (delegated to onSort). Keeps the surrounding
+// uppercase header styling; aria-sort exposes state to assistive tech.
+function SortHeader({
+  label, sortKey, sort, onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortPref;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sort.key === sortKey;
+  const caret = active ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
+  return (
+    <th aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={
+          "uppercase tracking-wider hover:text-[#D8DCE2] " +
+          (active ? "text-[#FFC627]" : "text-[#5A5F66]")
+        }
+      >
+        {label}
+        <span aria-hidden="true">{caret}</span>
+      </button>
+    </th>
   );
 }
 
