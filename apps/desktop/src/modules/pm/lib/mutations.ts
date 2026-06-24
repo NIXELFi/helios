@@ -393,6 +393,40 @@ export async function removeSubteam(client: SupabaseClient, id: string): Promise
   );
 }
 
+// --- Per-project subteam DISPLAY hides (sidebar nav list only) ---------------
+// `pm.project_hidden_subteams` is RLS-locked for direct writes; the only write
+// path is these SECURITY DEFINER RPCs, which re-check the org-scoped capability
+// `pm.manage_project_subteams`. This is DISPLAY-ONLY: it never touches task
+// assignment, membership (`task_subteams`/`project_subteams`), or permissions.
+
+export async function hideProjectSubteam(
+  client: SupabaseClient,
+  projectId: string,
+  subteamId: string,
+): Promise<void> {
+  check(
+    await pm(client).rpc("hide_project_subteam", {
+      p_project_id: projectId,
+      p_subteam_id: subteamId,
+    }),
+    "hide this subteam for the project",
+  );
+}
+
+export async function showProjectSubteam(
+  client: SupabaseClient,
+  projectId: string,
+  subteamId: string,
+): Promise<void> {
+  check(
+    await pm(client).rpc("show_project_subteam", {
+      p_project_id: projectId,
+      p_subteam_id: subteamId,
+    }),
+    "show this subteam for the project",
+  );
+}
+
 // --- Subsystems (admin-gated) -----------------------------------------------
 
 export async function insertSubsystem(client: SupabaseClient, ss: Subsystem): Promise<void> {

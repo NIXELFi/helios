@@ -14,8 +14,10 @@ import type { Workspace } from "./data";
 // stale snapshots from an older app version are rejected and refetched instead of
 // hydrating a record that's missing a field. v2: added `links` (task hyperlinks,
 // 4.4.3) — a v1 snapshot has no `links`, which crashed hydration before loadFlat
-// was made null-safe.
-const SNAPSHOT_VERSION = 2;
+// was made null-safe. v3: added `hiddenSubteams` (per-project sidebar display
+// hides, 4.5.x) — a v2 snapshot has no `hiddenSubteams` (loadFlat is null-safe,
+// but bumping forces a refetch so the field arrives authoritatively).
+const SNAPSHOT_VERSION = 3;
 // localStorage is ~5-10 MB; cap well under that. An oversize workspace simply
 // isn't cached (revalidate still works) rather than throwing a quota error.
 const MAX_BYTES = 3_000_000;

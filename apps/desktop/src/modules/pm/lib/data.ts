@@ -121,6 +121,24 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     sb.rpc("my_team_roles"),
   ]);
 
+  // Per-project DISPLAY hides for the sidebar nav list (server-wide default).
+  // World-readable; absence of a row = the subteam is shown. This does NOT
+  // affect task data, membership, or permissions — only what the sidebar lists.
+  //
+  // FAIL-SOFT (intentionally OUTSIDE the strict Promise.all above): if the
+  // migration that creates pm.project_hidden_subteams has not been applied yet,
+  // this read errors with "relation does not exist". We must NOT let that throw
+  // out of loadWorkspace — that would take down the ENTIRE PM workspace over a
+  // display-only filter. So we await it on its own, default to [] on any error,
+  // and treat the absence as "nothing hidden". Every other read stays strict.
+  const hiddenSubteamsR = await sb
+    .from("project_hidden_subteams")
+    .select("project_id,subteam_id")
+    .then(
+      (res) => res,
+      () => ({ data: [] as Array<{ project_id: string; subteam_id: string }>, error: null }),
+    );
+
   const projectsRaw = unwrap<
     Array<{ id: string; name: string; description: string | null; car_code: string }>
   >(projectsR, "projects");
@@ -152,6 +170,14 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
   const roles: Record<string, TeamRole> = {};
   for (const r of rolesRaw) roles[r.project_id] = r.team_role;
   const activity = unwrap<Activity[]>(activityR, "activity");
+  // Do NOT route through unwrap (which throws on res.error): a PostgREST error
+  // here (e.g. the table not yet migrated) must degrade to "nothing hidden".
+  const hiddenSubteamsRaw = (hiddenSubteamsR.error
+    ? []
+    : hiddenSubteamsR.data ?? []) as Array<{
+    project_id: string;
+    subteam_id: string;
+  }>;
 
   const userById = new Map(users.map((u) => [u.id, u]));
 
@@ -220,6 +246,14 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
 
   const baselineOrg: BaselineOrg = { subteams, subsystems, users };
 
+  // Server-hidden subteam ids grouped per project (display-only).
+  const hiddenByProject = new Map<string, string[]>();
+  for (const h of hiddenSubteamsRaw) {
+    const arr = hiddenByProject.get(h.project_id) ?? [];
+    arr.push(h.subteam_id);
+    hiddenByProject.set(h.project_id, arr);
+  }
+
   const projectData: Record<string, ProjectData> = {};
   for (const p of projectsRaw) {
     const pid = p.id;
@@ -238,6 +272,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       links: links.filter((l) => taskProject.get(l.task_id) === pid),
       buildRecords: build.filter((br) => taskProject.get(br.task_id) === pid),
       events: events.filter((e) => e.project_id === pid),
+      hiddenSubteams: hiddenByProject.get(pid) ?? [],
     };
   }
 

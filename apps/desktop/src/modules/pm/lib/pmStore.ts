@@ -39,6 +39,9 @@ export interface ProjectData {
   links: TaskLink[];
   buildRecords: BuildRecord[];
   events: CalendarEvent[];
+  // Server-wide hidden subteam ids for THIS project (display-only: filters the
+  // sidebar nav list, never task data/membership/permissions). Absence = shown.
+  hiddenSubteams: string[];
 }
 
 export interface BaselineOrg {
@@ -83,6 +86,7 @@ function snapshotFlat(s: PmState): ProjectData {
     links: s.links,
     buildRecords: s.buildRecords,
     events: s.events,
+    hiddenSubteams: s.hiddenSubteams,
   };
 }
 
@@ -111,6 +115,7 @@ function loadFlat(d: ProjectData) {
     links: [...(d.links ?? [])],
     buildRecords: [...(d.buildRecords ?? [])],
     events: [...(d.events ?? [])],
+    hiddenSubteams: [...(d.hiddenSubteams ?? [])],
   };
 }
 
@@ -132,6 +137,7 @@ function emptyProjectData(org: BaselineOrg): ProjectData {
     links: [],
     buildRecords: [],
     events: [],
+    hiddenSubteams: [],
   };
 }
 
@@ -330,6 +336,10 @@ interface PmState {
   links: TaskLink[];
   buildRecords: BuildRecord[];
   events: CalendarEvent[];
+  // Server-wide hidden subteam ids for the ACTIVE project (display-only; mirrors
+  // the active ProjectData like the other flat fields). Drives the sidebar's
+  // hidden-subteam filter via the pure `visibleSubteams` selector.
+  hiddenSubteams: string[];
 
   // UI state: the task whose detail sheet is open, or null
   selectedTaskId: string | null;
@@ -395,6 +405,14 @@ interface PmState {
   // Non-destructive: sole-membership tasks are REASSIGNED to `fallbackId`
   // instead of being deleted. The caller (Sidebar) must pass a fallback subteam.
   deleteSubteam: (id: string, fallbackId: string) => void;
+
+  // DISPLAY-ONLY server-wide subteam hide/show for the ACTIVE project's sidebar
+  // nav list. Gated server-side by `pm.manage_project_subteams` (the RPC re-checks
+  // the capability and is the source of truth). These ONLY change what the sidebar
+  // lists — never task assignment, membership, or permissions. Optimistically
+  // updates `hiddenSubteams` + the active ProjectData; realtime reconciles.
+  hideProjectSubteam: (subteamId: string) => void;
+  showProjectSubteam: (subteamId: string) => void;
 
   // Subsystem mutations (admin-gated). Single primary subteam (schema limit);
   // delete relies on the tasks.subsystem_id ON DELETE SET NULL FK.
@@ -659,6 +677,7 @@ export const usePmStore = create<PmState>((set, get) => {
     links: [],
     buildRecords: [],
     events: [],
+    hiddenSubteams: [],
 
     selectedTaskId: null,
     selectTask: (id) => set({ selectedTaskId: id }),
@@ -1056,6 +1075,49 @@ export const usePmStore = create<PmState>((set, get) => {
           }
           await db.removeSubteam(c, id);
         },
+        () => set(snap),
+      );
+    },
+
+    // Server-wide DISPLAY hide of a subteam from THIS project's sidebar nav list.
+    // No-op if already hidden. Optimistically appends to `hiddenSubteams` (+ the
+    // active ProjectData) and persists via the capability-gated RPC; the realtime
+    // refresh reconciles the authoritative set. DISPLAY-ONLY — no task/membership
+    // mutation happens here.
+    hideProjectSubteam: (subteamId) => {
+      if (get().hiddenSubteams.includes(subteamId)) return;
+      const projectId = get().activeProjectId;
+      const snap = { hiddenSubteams: get().hiddenSubteams };
+      set((s) => {
+        const hiddenSubteams = [...s.hiddenSubteams, subteamId];
+        const prev = s.projectData[s.activeProjectId];
+        const projectData = prev
+          ? { ...s.projectData, [s.activeProjectId]: { ...prev, hiddenSubteams } }
+          : s.projectData;
+        return { hiddenSubteams, projectData };
+      });
+      persist(
+        (c) => db.hideProjectSubteam(c, projectId, subteamId),
+        () => set(snap),
+      );
+    },
+
+    // Server-wide DISPLAY un-hide (removes the row so the subteam shows for
+    // everyone again). Mirror of hideProjectSubteam.
+    showProjectSubteam: (subteamId) => {
+      if (!get().hiddenSubteams.includes(subteamId)) return;
+      const projectId = get().activeProjectId;
+      const snap = { hiddenSubteams: get().hiddenSubteams };
+      set((s) => {
+        const hiddenSubteams = s.hiddenSubteams.filter((x) => x !== subteamId);
+        const prev = s.projectData[s.activeProjectId];
+        const projectData = prev
+          ? { ...s.projectData, [s.activeProjectId]: { ...prev, hiddenSubteams } }
+          : s.projectData;
+        return { hiddenSubteams, projectData };
+      });
+      persist(
+        (c) => db.showProjectSubteam(c, projectId, subteamId),
         () => set(snap),
       );
     },

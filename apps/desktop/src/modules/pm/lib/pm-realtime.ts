@@ -21,6 +21,9 @@ export const PM_REALTIME_TABLES = [
   "calendar_events",
   "subteams",
   "activity",
+  // Per-project sidebar DISPLAY hides — publish so a chief engineer's server-wide
+  // hide/show propagates live to everyone's sidebar (display-only; no task data).
+  "project_hidden_subteams",
 ] as const;
 
 const BASE_BACKOFF_MS = 5000;

@@ -11,6 +11,7 @@ import {
   IconClipboardList,
   IconClockExclamation,
   IconColumns3,
+  IconEyeOff,
   IconFileText,
   IconGraph,
   IconLayoutDashboard,
@@ -44,7 +45,15 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ProjectDialog } from "@pm/components/ProjectDialog";
 import { SubteamDialog } from "@pm/components/SubteamDialog";
+import { HiddenSubteamsMenu, type HiddenRow } from "@pm/components/HiddenSubteamsMenu";
 import { usePmStore, selectIsAdmin } from "@pm/lib/pmStore";
+import {
+  recallVisibility,
+  rememberVisibility,
+  visibleSubteams,
+  type SubteamVisibility,
+} from "@pm/lib/subteamVisibility";
+import { useMyCapabilities } from "../../org/data/useOrgData";
 import {
   BUILD_LABELS,
   BUILD_SEGMENTS,
@@ -222,6 +231,58 @@ export function Sidebar() {
   // Deleting a subteam re-homes its sole-membership tasks server-side, which RLS
   // only permits for admins — gate the whole affordance behind the admin role.
   const isAdmin = usePmStore(selectIsAdmin);
+
+  // --- Per-project subteam DISPLAY filter (sidebar nav list only) ------------
+  // Server-wide hides for the active project + this user's per-project local
+  // overrides combine via the pure `visibleSubteams` selector. DISPLAY-ONLY: it
+  // filters ONLY this nav list, never task data or view-level filter dropdowns.
+  const hiddenSubteams = usePmStore((s) => s.hiddenSubteams);
+  const hideProjectSubteam = usePmStore((s) => s.hideProjectSubteam);
+  const showProjectSubteam = usePmStore((s) => s.showProjectSubteam);
+  // The server-wide write affordance is gated on the NEW capability
+  // pm.manage_project_subteams (org-scoped) — NOT the legacy team_memberships
+  // `isAdmin`, which would lock out the Chief Engineer (mapped to 'lead').
+  const { can } = useMyCapabilities();
+  const canManageSubteamDisplay = can("pm.manage_project_subteams");
+
+  // Per-user overrides, reloaded whenever the active project changes.
+  const [userVis, setUserVis] = useState<SubteamVisibility>(() => ({ hide: [], unhide: [] }));
+  useEffect(() => {
+    setUserVis(recallVisibility(activeProjectId));
+  }, [activeProjectId]);
+  function updateUserVis(next: SubteamVisibility) {
+    setUserVis(next);
+    rememberVisibility(activeProjectId, next);
+  }
+
+  const serverHidden = new Set(hiddenSubteams);
+  const shownSubteams = visibleSubteams(subteams, serverHidden, userVis);
+  // The complement: subteams NOT shown in the nav (for the Hidden menu below).
+  const shownIds = new Set(shownSubteams.map((s) => s.id));
+  const hiddenRows: HiddenRow[] = subteams
+    .filter((s) => !shownIds.has(s.id))
+    .map((s) => ({ subteam: s, serverHidden: serverHidden.has(s.id) }));
+
+  // Hide a subteam from THIS user's sidebar (per-user localStorage). Drop any
+  // stale unhide of the same id so the two prefs never contradict.
+  function hideForMe(subteamId: string) {
+    updateUserVis({
+      hide: [...new Set([...userVis.hide, subteamId])],
+      unhide: userVis.unhide.filter((x) => x !== subteamId),
+    });
+  }
+  // Reveal a hidden subteam for THIS user: if it's user-hidden, drop that hide;
+  // if it's server-hidden, add a per-user unhide override.
+  function revealForMe(row: HiddenRow) {
+    if (userVis.hide.includes(row.subteam.id)) {
+      updateUserVis({ ...userVis, hide: userVis.hide.filter((x) => x !== row.subteam.id) });
+    } else if (row.serverHidden) {
+      updateUserVis({
+        ...userVis,
+        unhide: [...new Set([...userVis.unhide, row.subteam.id])],
+      });
+    }
+  }
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
@@ -553,7 +614,7 @@ export function Sidebar() {
                   <span className="truncate">All subteams</span>
                 </Link>
               </li>
-              {subteams.map((s) => {
+              {shownSubteams.map((s) => {
                 const active = currentTeamSlug === s.slug;
                 return (
                   <li key={s.id} className="group flex items-center">
@@ -584,6 +645,26 @@ export function Sidebar() {
                       >
                         <IconPencil size={13} strokeWidth={1.5} />
                       </button>
+                      {/* Display hide. A capability holder hides it server-wide
+                          (for everyone, via the RPC); everyone else hides it just
+                          for themselves (per-user localStorage). DISPLAY-ONLY. */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          canManageSubteamDisplay ? hideProjectSubteam(s.id) : hideForMe(s.id)
+                        }
+                        aria-label={
+                          canManageSubteamDisplay
+                            ? `Hide ${s.name} for everyone`
+                            : `Hide ${s.name} for me`
+                        }
+                        title={
+                          canManageSubteamDisplay ? "Hide for everyone" : "Hide for me"
+                        }
+                        className="rounded p-1 text-helios-dim hover:bg-helios-base hover:text-asu-gold"
+                      >
+                        <IconEyeOff size={13} strokeWidth={1.5} />
+                      </button>
                       {isAdmin ? (
                         <button
                           type="button"
@@ -600,6 +681,13 @@ export function Sidebar() {
               })}
             </ul>
           </div>
+
+          <HiddenSubteamsMenu
+            rows={hiddenRows}
+            canManage={canManageSubteamDisplay}
+            onRevealForMe={revealForMe}
+            onRevealForEveryone={showProjectSubteam}
+          />
         </>
       )}
 
