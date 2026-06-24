@@ -27,6 +27,33 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.4] - 2026-06-24
+
+### Added
+
+- **CFD Lap Sim — vehicle-dynamics (VD) parameter sweeps**: sweep total mass,
+  roll-stiffness distribution (RSD), and tire-µ load-sensitivity ("%dropoff")
+  across the existing lap sim, with a "lap time vs parameter" plot (baseline
+  marked) and a sweep-summary CSV export, reusing the A/B compare workflow. CG
+  height is also surfaced as an editor input; CG-height sweeps run on
+  lumped-model vehicles, while on roll-config cars they're gated pending the
+  quasi-steady-state model work (the current per-axle model keys lateral load
+  transfer on roll-arm height, not raw CG).
+- **PM — per-project subteam visibility**: a new "Hidden subteams" menu below
+  the project subteam sidebar. Project owners/executives can hide subteams that
+  aren't relevant to a project for everyone; any member can unhide them for
+  themselves or hide additional subteams in their own view. Display-only —
+  hidden subteams' tasks stay assigned and remain filterable everywhere else.
+- **CFD — sortable Studies list**: sort saved studies by name, kind, status, or
+  start date (ascending/descending) via clickable column headers; your choice is
+  remembered.
+
+### Fixed
+
+- **Report a bug/feature dialog**: typing in the Details field no longer
+  randomly jumps the cursor back to the Title field (it was triggered whenever a
+  teammate's presence update re-rendered the app while the dialog was open).
+
 ## [4.5.3] - 2026-06-23
 
 ### Changed
