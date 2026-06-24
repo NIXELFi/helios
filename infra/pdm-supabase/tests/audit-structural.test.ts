@@ -58,6 +58,10 @@ describe("audit log — structural + role events", () => {
     const { data: rows } = await svc
       .from("audit_log").select("action,payload").eq("target_id", u.id).eq("action", "role_grant");
     expect(rows!.length).toBeGreaterThanOrEqual(1);
-    expect(rows![0].payload).toMatchObject({ role: "editor" });
+    // A new signup is auto-provisioned a baseline 'viewer' role (audited as its own
+    // role_grant), then this test grants 'editor' — so there are two role_grant rows
+    // for the same target with no guaranteed query order. Assert the editor grant was
+    // audited rather than assuming it is row [0] (which made this test flaky).
+    expect(rows!.some((r) => (r.payload as { role?: string }).role === "editor")).toBe(true);
   });
 });
