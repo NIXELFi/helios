@@ -46,7 +46,7 @@ import {
 } from "../lib/performance";
 import { sourcesFrom } from "../lib/curveSources";
 import { compareDynoBanded } from "../lib/analytics/dynoCompare";
-import { distillTir, tirMuLat, tirMuLong, loadTeamData, G } from "../lib/performance";
+import { distillTir, tirMuLat, tirMuLong, loadTeamData, G, dropoffPctFromSens } from "../lib/performance";
 import { openTextFile, openDirectory } from "../lib/export/io";
 import { ReportButton } from "../components/ReportButton";
 
@@ -849,12 +849,25 @@ function VehicleEditor({
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
         <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
+        <NumField label="CG height" unit="m" value={vehicle.cgHeightM} step={0.005} onChange={(n) => set({ cgHeightM: n })} />
         <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })}
           disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
         <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })}
           disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
-        <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })}
-          disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+        <div className="flex items-end gap-2">
+          <NumField label="tire load sens" value={vehicle.tireLoadSensitivity} step={0.01} onChange={(n) => set({ tireLoadSensitivity: n })}
+            disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
+          {/* Same exponent, in the vehicle team's units: grip lost per load
+              doubling = (1 − 2^(−sens))·100 (see loadSensitivity.ts). */}
+          {!tire && Number.isFinite(vehicle.tireLoadSensitivity) && (
+            <span
+              className="mb-1.5 whitespace-nowrap font-mono text-[9px] tabular-nums text-[#9097A0]"
+              title="μ drop per load DOUBLING implied by the load-sensitivity exponent — the affordance the lap-sim VD sweep uses"
+            >
+              ≈ {dropoffPctFromSens(vehicle.tireLoadSensitivity).toFixed(1)}% µ drop/doubling
+            </span>
+          )}
+        </div>
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
         <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />

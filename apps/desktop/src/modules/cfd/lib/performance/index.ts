@@ -26,6 +26,18 @@ export { parseAeroMap, sampleAero, distillAero, type AeroMap, type AeroNominal }
 export { fuelMapFromSweep, fuelFlowKgS, type EngineFuelMap } from "./fuelMap";
 export { loadTeamData, type TeamData } from "./teamData";
 export { designSensitivities, type SensitivityRow } from "./sensitivity";
+export { dropoffPctFromSens, sensFromDropoffPct } from "./loadSensitivity";
+export {
+  applyVdParam,
+  runVdSweep,
+  vdSweepValues,
+  VD_PARAMS,
+  VD_PARAM_META,
+  VD_PARAM_RANGE,
+  type VdParam,
+  type VdSweepSpec,
+  type VdSweepRow,
+} from "./vdSweep";
 export { cachedTrialEvents } from "./eventsCache";
 export {
   torqueCurveFromSweep,

@@ -29,6 +29,12 @@ import {
   cornerSignsAtFracs,
   lapSectors,
   sectorDeltas,
+  applyVdParam,
+  runVdSweep,
+  vdSweepValues,
+  VD_PARAMS,
+  VD_PARAM_META,
+  VD_PARAM_RANGE,
   AUTOCROSS_2026,
   ENDURANCE_2026,
   AUTOCROSS_2026_VISUAL,
@@ -38,6 +44,9 @@ import {
   type LapSector,
   type LimitState,
   type VehicleConfig,
+  type VdParam,
+  type VdSweepRow,
+  type LapOpts,
 } from "../lib/performance";
 
 type EventKey = "autocross" | "endurance";
@@ -112,17 +121,37 @@ export function LapSimScreen() {
   const [channel, setChannel] = useState<ChannelKey>("speed");
   const [exportMsg, setExportMsg] = useState<string | null>(null);
 
+  // VD-sweep mode: vary ONE vehicle-dynamics knob on source A's engine across a
+  // range. Gated behind `vdMode` so the default study A/B path is untouched
+  // when it's off. The B-run becomes source A's curve on the swept vehicle.
+  const [vdMode, setVdMode] = useState<boolean>(false);
+  const [vdParam, setVdParam] = useState<VdParam>("massKg");
+  const [vdStart, setVdStart] = useState<number>(VD_PARAM_RANGE.massKg.start);
+  const [vdStop, setVdStop] = useState<number>(VD_PARAM_RANGE.massKg.stop);
+  const [vdStep, setVdStep] = useState<number>(VD_PARAM_RANGE.massKg.step);
+
   const sourceA = sources.find((s) => s.id === sourceId) ?? sources[0] ?? null;
   const sourceB = sources.find((s) => s.id === compareId && s.id !== sourceA?.id) ?? null;
 
   const track = event === "autocross" ? AUTOCROSS_2026 : ENDURANCE_2026;
   const visual = event === "autocross" ? AUTOCROSS_2026_VISUAL : ENDURANCE_2026_VISUAL;
 
-  const runFor = (src: CurveSource | null): LapRun | null => {
+  // Resolve the vehicle a CurveSource scores with (preset identity + the user's
+  // tuning) — the SAME resolution the A/B path uses. Exposed so VD-sweep mode
+  // can patch the RESOLVED vehicle (post-identity-forcing) and feed it back in
+  // via `vehicleOverride`, without re-running vehicleForCar (which would clobber
+  // a mass sweep back to the preset — see vehicle.ts IDENTITY_KEYS).
+  const resolveVehicle = (src: CurveSource): VehicleConfig =>
+    vehicleForCar(carKeyForConfig(src.configName), state.vehicleConfig);
+
+  // `vehicleOverride` runs the SAME engine curve (source A) with a DIFFERENT
+  // vehicle — the seam the VD sweep needs (its B-run is source A's curve on a
+  // swept vehicle). Omitted → the default A/B path (vehicle derived from src).
+  const runFor = (src: CurveSource | null, vehicleOverride?: VehicleConfig): LapRun | null => {
     if (!src) return null;
     const curve = torqueCurveFromSweep(src.points);
     if (curve.length === 0) return null;
-    const vehicle = vehicleForCar(carKeyForConfig(src.configName), state.vehicleConfig);
+    const vehicle = vehicleOverride ?? resolveVehicle(src);
     const opts = event === "autocross" ? autocrossLapOpts() : enduranceLapOpts();
     // Variable-throttle fuel (Willans from the solver sweep) when available.
     const fuelMap = fuelMapFromSweep(src.points) ?? undefined;
@@ -135,7 +164,89 @@ export function LapSimScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const runA = useMemo(() => runFor(sourceA), [sourceA, event, state.vehicleConfig]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const runB = useMemo(() => runFor(sourceB), [sourceB, event, state.vehicleConfig]);
+  const studyRunB = useMemo(() => runFor(sourceB), [sourceB, event, state.vehicleConfig]);
+
+  // ---- VD sweep (vehicle-dynamics knob, gated by vdMode) -------------------
+  // The RESOLVED baseline vehicle for source A (identity already forced) — the
+  // patch target for applyVdParam (must NOT go back through vehicleForCar).
+  const baseVehicleA = useMemo(
+    () => (sourceA ? resolveVehicle(sourceA) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sourceA, state.vehicleConfig],
+  );
+  // A measured tire (.tir) overrides μ(Fz) entirely → the %dropoff sweep is
+  // meaningless then (mass/cg/rsd stay valid). Gate that param.
+  const tirLoaded = !!baseVehicleA?.tire;
+  // With a roll config present, lateral load transfer keys on the CG-to-roll-axis
+  // arm `hRollArmM`, NOT raw `cgHeightM` (lapSim.ts axleCaps) — so a cgHeightM
+  // sweep freezes lateral capacity and the lap-time trend INVERTS (higher CG
+  // reads as faster via the longitudinal traction path only). A wrong-way plot,
+  // so gate cgHeightM the same way muDropoffPct is gated under a .tir. Correct on
+  // a lumped-model car (no roll), where chi() uses cgHeightM directly.
+  const rollPresent = !!baseVehicleA?.roll;
+  const vdParamDisabled = (p: VdParam): boolean =>
+    (p === "muDropoffPct" && tirLoaded) || (p === "cgHeightM" && rollPresent);
+
+  // A disabled param must never be the active sweep param — fall back to the
+  // first still-selectable one (massKg is always valid). Runs on the resolved
+  // baseline changing (e.g. loading a .tir, switching to a roll-config car).
+  useEffect(() => {
+    if (vdParamDisabled(vdParam)) {
+      const next = VD_PARAMS.find((p) => !vdParamDisabled(p));
+      if (next) selectVdParam(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tirLoaded, rollPresent, vdParam]);
+
+  // Full sweep table (value, lapTimeS, maxLatG, balanceMargin, fuelKg).
+  const vdRows = useMemo<VdSweepRow[]>(() => {
+    if (!vdMode || !sourceA || !baseVehicleA || vdParamDisabled(vdParam)) return [];
+    const curve = torqueCurveFromSweep(sourceA.points);
+    if (curve.length === 0) return [];
+    const opts = event === "autocross" ? autocrossLapOpts() : enduranceLapOpts();
+    const fuelMap = fuelMapFromSweep(sourceA.points) ?? undefined;
+    const lapOpts: LapOpts = { ...opts, fuelMap };
+    return runVdSweep(curve, baseVehicleA, track, { param: vdParam, start: vdStart, stop: vdStop, step: vdStep }, lapOpts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vdMode, sourceA, baseVehicleA, vdParam, vdStart, vdStop, vdStep, event, track]);
+
+  // The baseline value of the swept param on A's resolved vehicle — drives the
+  // "you are here" marker on the sweep plot and the baseline B-run choice.
+  const vdBaselineValue = useMemo<number | null>(() => {
+    if (!baseVehicleA) return null;
+    switch (vdParam) {
+      case "massKg": return baseVehicleA.massKg;
+      case "cgHeightM": return baseVehicleA.cgHeightM;
+      case "rsdFront": return baseVehicleA.roll?.rsdFront ?? null;
+      case "muDropoffPct": return null; // shown via the chip, not on this axis
+    }
+  }, [baseVehicleA, vdParam]);
+
+  // The raw stop need not land on the inclusive value grid (e.g. RSD 0.376→0.605
+  // step 0.02 stops at ≈0.596). The plot only draws grid points, so snap the
+  // B-run / headline to the LAST grid value — using the SAME vdSweepValues() the
+  // plot uses — so B is always a plotted point rather than an off-grid setup with
+  // no marker. Falls back to vdStop if the grid is somehow empty.
+  const vdStopSnapped = useMemo(() => {
+    const grid = vdSweepValues({ param: vdParam, start: vdStart, stop: vdStop, step: vdStep });
+    return grid.at(-1) ?? vdStop;
+  }, [vdParam, vdStart, vdStop, vdStep]);
+
+  // VD-mode B-run: source A's engine curve on the SWEPT vehicle at the sweep's
+  // last GRID value — so the existing A/B visuals (deltaT, sectors, g-g, headline)
+  // immediately read "baseline vs swept setup" against a setup that's plotted.
+  // Built via the runFor seam.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const vdRunB = useMemo(() => {
+    if (!vdMode || !sourceA || !baseVehicleA || vdParamDisabled(vdParam)) return null;
+    return runFor(sourceA, applyVdParam(baseVehicleA, vdParam, vdStopSnapped));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vdMode, sourceA, baseVehicleA, vdParam, vdStopSnapped, event]);
+
+  // The B the rest of the screen compares against: the swept vehicle in VD mode,
+  // else the chosen study source. This is the ONLY join point — everything below
+  // (deltaT, sectors, plots, headline) is unchanged.
+  const runB = vdMode ? vdRunB : studyRunB;
 
   // Cumulative time delta B−A on A's distance grid (positive = A ahead).
   const deltaT = useMemo(() => {
@@ -174,6 +285,39 @@ export function LapSimScreen() {
     const { colors, min, max } = rampColors(values);
     return { fracs, colors, min, max };
   }, [runA, channel]);
+
+  // Pick a VD param and seed its physical default start/stop/step (RSD spans the
+  // ARB-calculator window, %dropoff spans sens 0–~0.3, etc. — see VD_PARAM_RANGE).
+  function selectVdParam(p: VdParam) {
+    setVdParam(p);
+    const r = VD_PARAM_RANGE[p];
+    setVdStart(r.start);
+    setVdStop(r.stop);
+    setVdStep(r.step);
+  }
+
+  // Small sweep-summary CSV: one row per swept value with the headline metrics.
+  async function exportVdSweepCsv() {
+    if (!sourceA || vdRows.length === 0) return;
+    try {
+      const meta = VD_PARAM_META[vdParam];
+      const header = `# CFD lap-sim VD sweep — ${meta.label} (${meta.unit})\n# source ${sourceA.configName} · ${event} · ${track.name}\n# generated ${new Date().toISOString()}\n`;
+      const cols = `value,lapTimeS,maxLatG,balanceMargin,fuelKg\n`;
+      const body = vdRows
+        .map((r) =>
+          [r.value, r.lapTimeS, r.maxLatG, r.balanceMargin ?? "", r.fuelKg]
+            .map((x) => (typeof x === "number" ? x.toFixed(6) : x))
+            .join(","),
+        )
+        .join("\n");
+      const stem = `cfd-lapsim-vdsweep-${vdParam}-${slugify(sourceA.configName)}-${fileTimestamp()}`;
+      const path = await saveTextFile(stem, "csv", header + cols + body + "\n");
+      setExportMsg(path == null ? "Cancelled" : `Saved → ${path.split(/[\\/]/).pop()}`);
+    } catch (e) {
+      setExportMsg(e instanceof Error ? e.message : String(e));
+    }
+    setTimeout(() => setExportMsg(null), 4000);
+  }
 
   async function exportCsv() {
     if (!runA) return;
@@ -244,7 +388,9 @@ export function LapSimScreen() {
             vs
             <select
               aria-label="Lap source B (compare)"
-              className="max-w-[220px] rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+              disabled={vdMode}
+              title={vdMode ? "VD-sweep mode compares against the swept vehicle (B = swept setup)" : undefined}
+              className="max-w-[220px] rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:opacity-50"
               value={sourceB?.id ?? ""}
               onChange={(e) => setCompareId(e.target.value || null)}
             >
@@ -254,6 +400,22 @@ export function LapSimScreen() {
               ))}
             </select>
           </label>
+          {/* VD-sweep mode toggle — gates all VD additions; default A/B path is
+              untouched when off. */}
+          <button
+            type="button"
+            onClick={() => setVdMode((m) => !m)}
+            aria-pressed={vdMode}
+            title="Sweep one vehicle-dynamics knob (mass / CG / ARB balance / tire µ dropoff) on source A's engine"
+            className={
+              "rounded-sm border px-2 py-1 text-[10px] uppercase tracking-wider " +
+              (vdMode
+                ? "border-[#FFC627] bg-[#FFC627] font-semibold text-[#0E0E10]"
+                : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]")
+            }
+          >
+            VD sweep
+          </button>
           <button
             type="button"
             onClick={() => void exportCsv()}
@@ -296,6 +458,26 @@ export function LapSimScreen() {
               {runB && <HeadlineRow tag="B" run={runB} deltaVs={runA} />}
               <LimitBar run={runA} />
             </section>
+
+            {/* VD sweep — vary one vehicle-dynamics knob across a range. The
+                B-run above is the swept setup at the sweep STOP value. */}
+            {vdMode && (
+              <VdSweepPanel
+                param={vdParam}
+                onParam={selectVdParam}
+                paramDisabled={vdParamDisabled}
+                start={vdStart}
+                stop={vdStop}
+                step={vdStep}
+                onStart={setVdStart}
+                onStop={setVdStop}
+                onStep={setVdStep}
+                rows={vdRows}
+                baselineValue={vdBaselineValue}
+                rollPresent={rollPresent}
+                onExport={() => void exportVdSweepCsv()}
+              />
+            )}
 
             {/* Track map + g-g */}
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
@@ -1254,6 +1436,130 @@ function histSeries(run: LapRun, get: (ch: LapChannels, i: number) => number, la
     color,
     label,
   };
+}
+
+/** VD-sweep control panel + "lap time vs swept value" plot (roadmap #13). Pure
+ *  presentational: the parent owns the sweep state + the runVdSweep result. The
+ *  swept value at `stop` is what the A/B comparison above uses as B. */
+function VdSweepPanel({
+  param, onParam, paramDisabled,
+  start, stop, step, onStart, onStop, onStep,
+  rows, baselineValue, rollPresent, onExport,
+}: {
+  param: VdParam;
+  onParam: (p: VdParam) => void;
+  paramDisabled: (p: VdParam) => boolean;
+  start: number; stop: number; step: number;
+  onStart: (n: number) => void; onStop: (n: number) => void; onStep: (n: number) => void;
+  rows: VdSweepRow[];
+  baselineValue: number | null;
+  rollPresent: boolean;
+  onExport: () => void;
+}) {
+  const meta = VD_PARAM_META[param];
+  const disabled = paramDisabled(param);
+  const xs = rows.map((r) => r.value);
+  const lapY = rows.map((r) => r.lapTimeS);
+  // Baseline "you are here" marker: a thin vertical series at the resolved
+  // baseline value, spanning the lap-time range so it reads as a reference line.
+  const yLo = lapY.length ? Math.min(...lapY) : 0;
+  const yHi = lapY.length ? Math.max(...lapY) : 1;
+  const fastest = rows.length ? rows.reduce((a, b) => (b.lapTimeS < a.lapTimeS ? b : a)) : null;
+  const inputCls =
+    "w-20 rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none";
+
+  return (
+    <section className="rounded-sm border border-[#FFC627]/30 bg-[#0E0E10]">
+      <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+        <span className="pb-1.5 text-[10px] uppercase tracking-wider text-[#FFC627]">VD sweep</span>
+        <label className="flex flex-col gap-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+          parameter
+          <select
+            aria-label="VD sweep parameter"
+            title={
+              rollPresent
+                ? "CG-height sweeps need the quasi-steady-state model (roadmap): on the current roll model, CG changes only longitudinal load transfer, so the lap trend would be misleading. Available on lumped-model vehicles."
+                : undefined
+            }
+            className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+            value={param}
+            onChange={(e) => onParam(e.target.value as VdParam)}
+          >
+            {VD_PARAMS.map((p) => (
+              <option key={p} value={p} disabled={paramDisabled(p)}>
+                {VD_PARAM_META[p].label}
+                {paramDisabled(p) ? (p === "cgHeightM" ? " (roll model)" : " (.tir)") : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+          start
+          <input type="number" aria-label="VD sweep start" className={inputCls} value={start} step={step}
+            onChange={(e) => onStart(Number(e.target.value))} />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+          stop (= B)
+          <input type="number" aria-label="VD sweep stop" className={inputCls} value={stop} step={step}
+            onChange={(e) => onStop(Number(e.target.value))} />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+          step
+          <input type="number" aria-label="VD sweep step" className={inputCls} value={step} step={step}
+            onChange={(e) => onStep(Number(e.target.value) || step)} />
+        </label>
+        <span className="pb-1.5 text-[9px] text-[#5A5F66]">{meta.unit}</span>
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={rows.length === 0}
+          title="Export the sweep summary (value, lapTimeS, maxLatG, balanceMargin, fuelKg) as CSV"
+          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+        >
+          Export sweep CSV
+        </button>
+      </div>
+      {disabled ? (
+        <div className="px-3 py-4 text-[10px] text-[#FF8A65]">
+          {param === "cgHeightM" ? (
+            <>
+              CG-height sweeps need the quasi-steady-state model (roadmap): on the current roll model, CG changes only
+              longitudinal load transfer, so the lap trend would be misleading. Available on lumped-model vehicles —
+              pick mass, ARB balance, or µ-dropoff.
+            </>
+          ) : (
+            <>
+              A measured tire model (.tir) overrides µ(Fz), so the µ-dropoff sweep is disabled — pick mass, CG height,
+              or ARB balance, or remove the tire model in Performance.
+            </>
+          )}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="px-3 py-4 text-[10px] text-[#5A5F66]">No sweep points — check the start/stop/step range.</div>
+      ) : (
+        <>
+          <LinePlot
+            title={`lap time vs ${meta.label} — fastest ${fastest!.lapTimeS.toFixed(2)} s @ ${fastest!.value.toFixed(param === "cgHeightM" || param === "rsdFront" ? 3 : 1)} ${meta.unit}`}
+            xs={xs}
+            series={[
+              { label: "lap time (s)", y: lapY, color: "#FFC627", width: 2, showPoints: true },
+              ...(baselineValue != null
+                ? [{ label: "baseline", xs: [baselineValue, baselineValue], y: [yLo, yHi], color: "#4FC3F7", width: 1, showPoints: false }]
+                : []),
+            ]}
+            xLabel={`${meta.label} (${meta.unit})`}
+            yLabel="lap time (s)"
+            height={240}
+          />
+          <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
+            Source A&apos;s engine on the swept vehicle; everything else held. Blue line = the current resolved baseline.
+            The A/B headline + traces above compare baseline (A) vs the swept setup at the STOP value (B).
+            {param === "rsdFront" && " A balance sweet spot shows as a lap-time minimum, not a monotone trend."}
+          </p>
+        </>
+      )}
+    </section>
+  );
 }
 
 function HeadlineRow({ tag, run, accent, deltaVs }: { tag: string; run: LapRun; accent?: boolean; deltaVs?: LapRun }) {

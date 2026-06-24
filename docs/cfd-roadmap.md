@@ -153,14 +153,43 @@ anchor — still saturating 0.2% short at the geometric line cap),
 ENDURANCE_PACE 0.540 → **0.5405** (159.600 s exact), ENDURANCE_THERMAL_EFF
 0.221 → **0.2125** (0.9786 kg CO₂/lap exact on the shipped curve).
 
-## 13. Lap-time sensitivity panel (vehicle knobs)
+## 13. Lap-time sensitivity panel (vehicle knobs) — 🟡 v1 SHIPPED (2026-06-24)
 
 **Why:** "What's a kg worth? What's 0.1 CLA worth?" is the first question
 every design review asks. The optimizer answers it for engine params only.
 
-**Build:** Finite-difference ∂(lap time)/∂(mass, CdA, CLA, μ, FD, shift time)
-on the loaded design, rendered as a tornado chart in Performance/Lap Sim and
-the report. ~12 extra simLap calls — instant.
+**v1 (vehicle-dynamics sweeps, 2026-06-24):** a "VD sweep" mode on the Lap Sim
+screen sweeps ONE chassis knob — total mass, CG height, ARB balance
+(`rsdFront`), or tire µ %dropoff — across a physical range on source A's engine,
+re-running the full `simLap` at each value (`lib/performance/vdSweep.ts`:
+`applyVdParam`/`runVdSweep`). New "lap time vs VD value" plot with a baseline
+marker, sweep-summary CSV (`value, lapTimeS, maxLatG, balanceMargin, fuelKg`),
+and the A/B headline/traces reused via a `runFor(src, vehicleOverride?)` seam
+refactor (B = the swept setup). The µ %dropoff framing is a pure restatement of
+`tireLoadSensitivity` — `(1 − 2^(−sens))·100`,
+`lib/performance/loadSensitivity.ts` — surfaced as a chip in the Performance
+VehicleEditor (which also gained a CG-height field). Directional invariants are
+pinned in `vdSweep.test.ts`. The %dropoff sweep is gated off when a `.tir`
+overrides µ(Fz); and `cgHeightM` is gated off when the resolved vehicle has a
+roll config (see the finding). Mass/RSD always stay valid; a disabled param can
+never be the active one. **Gotcha honored:** `applyVdParam` patches the RESOLVED
+vehicle — `vehicleForCar` force-overwrites `massKg` for known cars, so a mass
+sweep before identity resolution silently resets to the preset (same trap as the
+FD optimizer, note above). **Finding:** under the per-axle roll model, lateral
+transfer keys on `hRollArmM`, NOT raw `cgHeightM`, so on a roll-config car a CG
+sweep freezes lateral capacity and the lap-time trend **INVERTS** (higher CG
+reads as faster — it moves only longitudinal load transfer). That wrong-way plot
+is why `cgHeightM` is gated to lumped-model vehicles in v1, and why coupling
+`hRollArmM ↔ cgHeightM` is the priority QSS follow-up (stage 1 of the design
+doc). Design doc + the staged path to the full QSS model:
+`docs/superpowers/specs/2026-06-24-lapsim-vd-quasi-steady-state-roadmap.md`.
+
+**Remaining (the original ask, deferred):** finite-difference ∂(lap
+time)/∂(mass, CdA, CLA, μ, FD, shift time) as a one-shot TORNADO chart in
+Performance/Lap Sim and the report (~12 extra simLap calls — instant). The VD
+sweep is the interactive, single-axis tool; the tornado is the at-a-glance
+ranking. Plus the full quasi-steady-state VD model (per-station equilibrium
+solve, per-tire combined-slip MF) per the design doc's staged roadmap.
 
 ---
 
