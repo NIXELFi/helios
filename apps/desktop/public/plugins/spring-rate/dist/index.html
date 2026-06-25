@@ -67,13 +67,15 @@
           host.postMessage({ kind: "helios:rpc", id: id, method: method, params: params || {} }, "*");
         });
       }
-      var resolveReady;
+      var resolveReady, initialized = false;
       var ready = new Promise(function (r) { resolveReady = r; });
       window.addEventListener("message", function (ev) {
         if (ev.source !== host) return;
         var m = ev.data;
         if (!m || typeof m !== "object") return;
         if (m.kind === "helios:init") {
+          if (initialized) return;
+          initialized = true;
           resolveReady(m.context);
         } else if (m.kind === "helios:rpc-result") {
           var p = pending[m.id];
@@ -84,7 +86,12 @@
         }
       });
       function log() { call("host.log", { args: [].slice.call(arguments).map(String) }); }
-      host.postMessage({ kind: "helios:ready", protocol: 1 }, "*");
+      // Re-post readiness until the host completes the handshake — robust to the
+      // host attaching its message listener slightly after we load.
+      function announce() { if (!initialized) host.postMessage({ kind: "helios:ready", protocol: 1 }, "*"); }
+      announce();
+      var hsTimer = setInterval(function () { if (initialized) clearInterval(hsTimer); else announce(); }, 50);
+      setTimeout(function () { clearInterval(hsTimer); }, 4000);
 
       // ── The tool ─────────────────────────────────────────────────────────
       var FIELDS = ["mass", "spring", "mr", "tire"];

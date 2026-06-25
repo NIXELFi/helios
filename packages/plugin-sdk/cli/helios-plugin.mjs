@@ -25,8 +25,12 @@ const ALLOWED_PERMISSIONS = ["file.read", "file.write", "storage", "engine:matla
 // bundled SDK uses them legitimately to reach the broker, and we scan the
 // COMPILED bundle. We focus on APIs the SDK never uses, so their presence is a
 // genuine red flag: network, alternate storage, cookies, dynamic eval.
+// The lookbehind `(?<![.\w])` excludes member-access forms like `store.fetch(`
+// or `obj.eval(` so we only flag the GLOBAL builtins, not unrelated methods that
+// happen to share the name. (This scan is a heuristic author aid, not the
+// security control — the CSP/sandbox is. It can be defeated by aliasing.)
 const FORBIDDEN = [
-  { re: /\bfetch\s*\(/, msg: "network call `fetch(` — blocked by CSP. Use a brokered capability instead." },
+  { re: /(?<![.\w])fetch\s*\(/, msg: "network call `fetch(` — blocked by CSP. Use a brokered capability instead." },
   { re: /\bXMLHttpRequest\b/, msg: "`XMLHttpRequest` — network is blocked by CSP." },
   { re: /\bWebSocket\b/, msg: "`WebSocket` — network is blocked by CSP." },
   { re: /\bnavigator\.sendBeacon\b/, msg: "`sendBeacon` — network is blocked by CSP." },
@@ -34,7 +38,7 @@ const FORBIDDEN = [
   { re: /\blocalStorage\b/, msg: "`localStorage` — unavailable in the sandbox. Use the SDK `storage` API." },
   { re: /\bsessionStorage\b/, msg: "`sessionStorage` — unavailable in the sandbox. Use the SDK `storage` API." },
   { re: /\bindexedDB\b/, msg: "`indexedDB` — unavailable in the sandbox. Use the SDK `storage` API." },
-  { re: /\beval\s*\(/, msg: "`eval(` — dynamic code execution is not allowed." },
+  { re: /(?<![.\w])eval\s*\(/, msg: "`eval(` — dynamic code execution is not allowed." },
 ];
 
 // Map a used capability to the permission it requires. We match BOTH the SDK
@@ -65,9 +69,11 @@ function validateManifestJs(m) {
   if (typeof m.id !== "string" || !/^[a-z0-9]+(?:[-.][a-z0-9]+)*$/.test(m.id))
     errors.push("id must be lowercase dot/dash segments, e.g. 'aero.downforce-calculator'");
   if (typeof m.name !== "string" || !m.name.trim()) errors.push("name is required");
-  if (typeof m.version !== "string" || !/^\d+\.\d+\.\d+/.test(m.version))
+  if (typeof m.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(m.version))
     errors.push("version must be semver, e.g. '1.4.0'");
   if (typeof m.entry !== "string" || !m.entry.trim()) errors.push("entry is required");
+  else if (/\.\.|^\/|\\|^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(m.entry))
+    errors.push("entry must be a relative path within the bundle (no '..', leading '/', backslash, or URL scheme)");
   if (typeof m.sdk !== "string" || !m.sdk.trim()) errors.push("sdk range is required, e.g. '^1.0.0'");
   if (!Array.isArray(m.permissions)) errors.push("permissions must be an array (use [] for pure sandbox)");
   else

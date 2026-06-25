@@ -67,6 +67,14 @@ describe("validateManifest", () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join(" ")).toMatch(/entry/);
   });
+
+  it("rejects an entry that escapes the bundle (traversal / absolute / scheme)", () => {
+    for (const entry of ["../../secret.html", "/etc/passwd", "C:\\evil.html", "http://evil/x.html"]) {
+      const r = validateManifest({ ...base(), entry });
+      expect(r.ok, entry).toBe(false);
+      expect(r.errors.join(" ")).toMatch(/entry/);
+    }
+  });
 });
 
 describe("isSdkCompatible", () => {
@@ -78,6 +86,13 @@ describe("isSdkCompatible", () => {
   it("rejects a different major", () => {
     expect(isSdkCompatible("^2.0.0", "1.0.0")).toBe(false);
     expect(isSdkCompatible("^1.0.0", "2.0.0")).toBe(false);
+  });
+
+  it("rejects a host older than the requested minor/patch floor", () => {
+    expect(isSdkCompatible("^1.5.0", "1.0.0")).toBe(false);
+    expect(isSdkCompatible("^1.0.5", "1.0.0")).toBe(false);
+    expect(isSdkCompatible("^1.0.0", "1.5.0")).toBe(true); // host newer within major is fine
+    expect(isSdkCompatible("^1.2.0", "1.2.3")).toBe(true);
   });
 
   it("handles exact versions", () => {

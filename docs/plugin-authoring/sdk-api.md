@@ -93,7 +93,9 @@ log("loaded", file.name, file.bytes.length, "bytes");
 - **Requires `"file.write"`.**
 - Opens a **user-confirmed save dialog**. Pass the content (bytes or string) and a
   suggested filename.
-- Resolves `true` if saved, **`false` if the user cancels** — handle both.
+- Resolves `true` once the save is initiated. **Code defensively for `false`**: the
+  current build's browser-download path can't detect a user cancel (so it always
+  resolves `true`), but a future native save dialog will resolve `false` on cancel.
 
 ```ts
 const csv = "speed,downforce\n30,1940\n";
@@ -154,7 +156,7 @@ Any SDK call that crosses to the host can **reject** with an `Error` carrying a
 | `"UnknownMethod"` | You called a method the host does not recognize. | You invented an API or mistyped. Use only the methods in this doc. |
 | `"BadParams"` | Arguments were the wrong shape/type. | Check the signature above. |
 | `"HandlerError"` | The host-side handler threw while processing. | Inspect the message; the inputs may be invalid (e.g. unreadable file). |
-| `"Timeout"` | The host did not respond in time. | Retry once; surface a `notify(..., "error")` if it persists. |
+| `"Timeout"` | The host did not respond in time. *(Reserved — not emitted by the current build; per-call timeouts arrive with the marketplace.)* | Retry once; surface a `notify(..., "error")` if it persists. |
 
 ```ts
 try {

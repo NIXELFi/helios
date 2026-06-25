@@ -29,6 +29,7 @@ export class HeliosPluginClient {
   /** @param target the embedding host window (defaults to `window.parent`). */
   constructor(target?: Window) {
     this.#target = target ?? window.parent;
+    let initialized = false;
     this.#ready = new Promise<PluginContext>((resolve) => {
       window.addEventListener("message", (ev: MessageEvent) => {
         // Only trust messages from our host (the window that embedded us).
@@ -36,6 +37,8 @@ export class HeliosPluginClient {
         const msg = ev.data as HostToPluginMessage;
         if (!msg || typeof msg !== "object") return;
         if (msg.kind === "helios:init") {
+          if (initialized) return; // ignore duplicate inits from re-posted readies
+          initialized = true;
           this.#context = msg.context;
           resolve(msg.context);
         } else if (msg.kind === "helios:rpc-result") {
@@ -43,8 +46,20 @@ export class HeliosPluginClient {
         }
       });
     });
-    // Announce readiness so the host sends us our init/context.
-    this.#post({ kind: "helios:ready", protocol: PROTOCOL_VERSION });
+    // Announce readiness, re-posting until the host completes the handshake — a
+    // `ready` that races ahead of the host attaching its message listener would
+    // otherwise be lost forever and the plugin would hang. The host replies to
+    // every `ready` with `init` (idempotent), so re-posting is safe; we stop
+    // once initialized, or after a few seconds to avoid a runaway interval.
+    const announce = () => {
+      if (!initialized) this.#post({ kind: "helios:ready", protocol: PROTOCOL_VERSION });
+    };
+    announce();
+    const timer = setInterval(() => {
+      if (initialized) clearInterval(timer);
+      else announce();
+    }, 50);
+    setTimeout(() => clearInterval(timer), 4000);
   }
 
   get context(): PluginContext | null {

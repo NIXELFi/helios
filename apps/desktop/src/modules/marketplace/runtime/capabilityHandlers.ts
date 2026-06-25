@@ -56,11 +56,21 @@ export function makeHandlers(manifest: PluginManifest, services: HostServices): 
     },
     "storage.set": (params) => {
       const p = (params as { key?: string; value?: unknown }) ?? {};
+      const key = String(p.key ?? "");
       const serialized = JSON.stringify(p.value ?? null);
-      if (serialized.length > STORAGE_QUOTA_BYTES) {
-        throw new Error("storage value exceeds the 1 MB per-plugin quota");
+      // Enforce a CUMULATIVE per-plugin quota, not just per-value, so a plugin
+      // can't exhaust the host's shared localStorage by writing many small keys.
+      let total = serialized.length;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(ns) && k !== ns + key) {
+          total += (localStorage.getItem(k) ?? "").length;
+        }
       }
-      localStorage.setItem(ns + String(p.key ?? ""), serialized);
+      if (total > STORAGE_QUOTA_BYTES) {
+        throw new Error("plugin storage quota (1 MB) exceeded");
+      }
+      localStorage.setItem(ns + key, serialized);
       return undefined;
     },
     "storage.keys": () => {
@@ -93,31 +103,22 @@ async function pickFile(accept?: string): Promise<{ name: string; bytes: Uint8Ar
     if (accept) input.accept = accept;
     input.style.display = "none";
     let settled = false;
-    const cleanup = () => {
+    const finish = (value: { name: string; bytes: Uint8Array } | null) => {
+      if (settled) return;
+      settled = true;
       if (input.parentNode) input.parentNode.removeChild(input);
+      resolve(value);
     };
     input.addEventListener("change", async () => {
-      settled = true;
       const file = input.files?.[0];
-      cleanup();
-      if (!file) return resolve(null);
+      if (!file) return finish(null);
       const bytes = new Uint8Array(await file.arrayBuffer());
-      resolve({ name: file.name, bytes });
+      finish({ name: file.name, bytes });
     });
-    // Cancel path: the dialog firing focus back to the window without a change
-    // means the user dismissed it. Resolve null so the plugin's await settles.
-    window.addEventListener(
-      "focus",
-      () => {
-        setTimeout(() => {
-          if (!settled) {
-            cleanup();
-            resolve(null);
-          }
-        }, 400);
-      },
-      { once: true },
-    );
+    // Modern browsers (incl. the WebView2 the desktop app uses) fire `cancel` on
+    // the file input when the dialog is dismissed — a reliable signal that does
+    // NOT risk clobbering a genuine selection the way a focus/timer heuristic did.
+    input.addEventListener("cancel", () => finish(null));
     document.body.appendChild(input);
     input.click();
   });
@@ -132,6 +133,8 @@ function saveFile(bytes: Uint8Array | string, suggestedName: string): boolean {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Defer the revoke a tick — revoking synchronously after click can cancel the
+  // download of larger blobs in some engines before the fetch begins.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
   return true;
 }

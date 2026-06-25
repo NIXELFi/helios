@@ -33,4 +33,14 @@ describe("capability catalog", () => {
     expect(isKnownMethod("fs.readAll")).toBe(false);
     expect(isKnownMethod("engine.python.run")).toBe(false);
   });
+
+  it("never maps a method to more than one permission (broker checks only the first)", () => {
+    const seen = new Map<string, string>();
+    for (const key of ALL_PERMISSIONS) {
+      for (const m of CAPABILITIES[key].methods) {
+        expect(seen.has(m), `method '${m}' is under both '${seen.get(m)}' and '${key}'`).toBe(false);
+        seen.set(m, key);
+      }
+    }
+  });
 });

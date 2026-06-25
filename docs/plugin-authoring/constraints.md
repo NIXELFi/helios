@@ -24,10 +24,12 @@ The plugin loads in:
 ```
 default-src 'none';
 connect-src 'none';
-script-src 'unsafe-inline';
+script-src 'unsafe-inline' 'wasm-unsafe-eval';
 style-src  'unsafe-inline';
 img-src    data: blob:;
 font-src   data:;
+worker-src blob:;
+child-src  blob:;
 ```
 
 Consequences you **MUST** internalize:
@@ -103,6 +105,10 @@ If you write code that assumes a network, a host, or browser storage, it will fa
 - Render any HTML/CSS/JS UI. Use any framework, bundled into `dist/`.
 - Run arbitrary client-side computation (math, parsing, simulation, charts drawn on
   `<canvas>`/SVG).
+- **Web Workers and WebAssembly ARE supported** — for heavy sims, move work off the
+  main thread with a Worker created from a `blob:` URL, and/or run WASM. Both inherit
+  the sandbox + CSP, so they stay contained. (Workers from a remote URL won't load —
+  build the worker into a `blob:`.)
 - Use `data:` and `blob:` URLs for images you generate at runtime.
 - Use inline styles and inline scripts (CSP allows `'unsafe-inline'` for script/style).
 - `log()` and `notify()` — Tier 0, always available.
@@ -111,12 +117,16 @@ If you write code that assumes a network, a host, or browser storage, it will fa
 
 ## How the validator enforces this
 
-`helios-plugin check` scans your bundle and **flags forbidden APIs**: `fetch`,
-`XMLHttpRequest`, `WebSocket`, `sendBeacon`, `localStorage`, `sessionStorage`,
-`indexedDB`, `document.cookie`, `eval`, dynamic `Function`, direct
-`window.parent`/`window.top` access, and remote resource references. It also checks
+`helios-plugin check` scans your bundle and **flags forbidden APIs**: the global
+`fetch`, `XMLHttpRequest`, `WebSocket`, `sendBeacon`, `localStorage`,
+`sessionStorage`, `indexedDB`, `document.cookie`, and `eval`. It also reconciles
 declared-vs-used permissions. **It MUST pass (exit 0)** before you submit. See
 [checklist.md](./checklist.md).
+
+> The validator is a **heuristic author aid, not the security control** — the
+> sandbox + CSP are. It can be fooled (e.g. by aliasing a global), so a clean run
+> means "no obvious mistakes," not "proven safe." Don't try to out-clever it: if you
+> reach for a blocked API, the runtime blocks it regardless.
 
 > If you ever feel the need to make a network call, fetch a font, or reach the parent
 > window — **STOP.** Re-read this doc. The answer is always: bundle it, take it as

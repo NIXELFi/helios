@@ -67,6 +67,10 @@ export function validateManifest(input: unknown): ValidationResult {
   }
   if (typeof m.entry !== "string" || m.entry.trim() === "") {
     errors.push("entry is required (path to the bundle's HTML entry)");
+  } else if (/\.\.|^\/|\\|^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(m.entry)) {
+    // Path-traversal / absolute / scheme guard — the loader concatenates this
+    // onto the bundle base, so it must stay a relative path inside the bundle.
+    errors.push("entry must be a relative path within the bundle (no '..', leading '/', backslash, or URL scheme)");
   }
   if (typeof m.sdk !== "string" || m.sdk.trim() === "") {
     errors.push("sdk is required (compatible SDK contract range, e.g. '^1.0.0')");
@@ -105,10 +109,16 @@ export function isSdkCompatible(range: string, hostVersion: string = SDK_CONTRAC
   if (major === undefined || Number.isNaN(major)) return false;
 
   if (caret) {
-    // ^1.2.3 := same major (and >= minor when major is 0, but host is >=1 here).
     if (major !== hostMajor) return false;
-    if (hostMajor === 0) return (parts[1] ?? 0) === hostMinor;
-    return true;
+    const reqMinor = parts[1] ?? 0;
+    const reqPatch = parts[2] ?? 0;
+    const hostPatch = host[2] ?? 0;
+    // ^0.x.y pins the minor; otherwise the host must satisfy the requested floor
+    // (>= minor.patch) within the same major — a host OLDER than the requested
+    // minor must be refused, not accepted.
+    if (hostMajor === 0) return reqMinor === hostMinor && hostPatch >= reqPatch;
+    if (hostMinor !== reqMinor) return hostMinor > reqMinor;
+    return hostPatch >= reqPatch;
   }
   // Exact / prefix match: every provided segment must equal the host's.
   return parts.every((n, i) => n === host[i]);

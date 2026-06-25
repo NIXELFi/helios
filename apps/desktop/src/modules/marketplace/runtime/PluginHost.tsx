@@ -14,23 +14,35 @@ import type { LoadedPlugin } from "./loader";
 // default-src 'none' denies anything not re-allowed; connect-src 'none' kills
 // fetch/XHR/WebSocket (no exfiltration); scripts/styles are inline-only (the
 // bundle is self-contained); images limited to data:/blob:.
+//
+// `worker-src blob:` + `'wasm-unsafe-eval'` deliberately re-allow the in-sandbox
+// compute path the platform exists for (Web Workers off the main thread, and
+// WebAssembly): both inherit this document's opaque origin + CSP, so they don't
+// weaken network/DOM containment. NOTE: CSP does NOT prevent the frame from
+// navigating ITSELF (e.g. location.assign to an external URL) — that egress gap
+// is closed by the production `plugin://` navigation handler (deferred to
+// Sub-project B); see the spec's hardening backlog.
 const PLUGIN_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  "script-src 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'unsafe-inline'",
   "img-src data: blob:",
   "font-src data:",
   "connect-src 'none'",
+  "worker-src blob:",
+  "child-src blob:",
   "form-action 'none'",
   "base-uri 'none'",
 ].join("; ");
 
 function withCsp(html: string): string {
+  // Prepend the CSP as the very first node so NOTHING the plugin authored can
+  // precede the policy (a script the parser hoists ahead of a meta injected
+  // mid-<head> would otherwise run before the policy applied). We strip any
+  // leading doctype the bundle declared and supply our own.
   const meta = `<meta http-equiv="Content-Security-Policy" content="${PLUGIN_CSP}">`;
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}\n${meta}`);
-  }
-  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+  const body = html.replace(/^\s*<!doctype html>/i, "");
+  return `<!doctype html>${meta}${body}`;
 }
 
 export interface PluginHostProps {
@@ -67,7 +79,10 @@ export function PluginHost({ plugin, theme, locale, onLog, onNotify, onCall }: P
       // Authenticate the sender: only OUR frame's window may talk to this host.
       if (!frame || ev.source !== frame.contentWindow) return;
       const msg = ev.data as PluginToHostMessage;
-      if (!msg || typeof msg !== "object") return;
+      if (!msg || typeof msg !== "object") {
+        console.warn("[marketplace] dropped malformed message from plugin frame");
+        return;
+      }
 
       if (msg.kind === "helios:ready") {
         const init: InitMessage = {

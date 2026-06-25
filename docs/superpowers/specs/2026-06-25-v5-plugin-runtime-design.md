@@ -35,9 +35,12 @@ This spec is **Sub-project A only**.
 > **The wall is absolute, but the doors are generous.**
 
 Origin isolation + CSP make it *physically* impossible for a plugin to reach the host DOM, the
-Supabase client, the login token, the filesystem, or the network on its own. Functionality does not
-come from weakening that wall — it comes from a rich, well-designed **Host SDK** that brokers
-exactly what plugins legitimately need. "More capable plugins" must always mean "a better SDK,"
+Supabase client, the login token, or the filesystem on its own, and they block ambient network
+egress (`fetch`/XHR/WebSocket/remote resources). (One residual egress channel — the frame
+navigating *itself* to an external URL — is not closable by CSP alone and is closed by the
+production `plugin://` navigation handler; see §10.) Functionality does not come from weakening that
+wall — it comes from a rich, well-designed **Host SDK** that brokers exactly what plugins
+legitimately need. "More capable plugins" must always mean "a better SDK,"
 never "a leakier sandbox."
 
 ### Requirements captured from the design dialogue
@@ -172,7 +175,7 @@ top, not the primary control.
 |---|---|
 | Plugin reads/steals the Supabase client, JWT, or other auth state | Opaque-origin iframe (`sandbox="allow-scripts"`, **no** `allow-same-origin`). The plugin has no reference to the host realm — there is nothing to read. |
 | Plugin reaches the host DOM / other modules | Same as above — cross-origin DOM access is blocked by the browser. The plugin only sees its own document. |
-| Plugin exfiltrates data over the network | Strict CSP on the plugin document: `default-src 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:`. No `fetch`/XHR/WebSocket can leave. Outbound network is itself a future Tier-2 capability (`net.fetch` with a declared host allowlist), never ambient. |
+| Plugin exfiltrates data over the network | Strict CSP on the plugin document: `default-src 'none'; connect-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:`. No `fetch`/XHR/WebSocket/remote-resource load can leave. Outbound network is itself a future Tier-2 capability (`net.fetch` with a declared host allowlist), never ambient. **Residual gap:** CSP does not stop the frame navigating *itself* to an external URL (e.g. `location.assign`), so a plugin holding user-handed data could exfiltrate by self-navigation. Conspicuous (destroys its own UI) but real — closed by the `plugin://` navigation handler (§10), a Blocker before Sub-project B loads untrusted plugins. |
 | Plugin reads/writes the filesystem | No FS API in the sandbox. File I/O is only via the user-mediated `file.read`/`file.write` brokered calls. |
 | Plugin spawns processes / runs native code | Impossible from the sandbox. Native execution exists only through **curated** host bridges (e.g. `engine:matlab`), never a generic "run command." |
 | Plugin forges messages / impersonates another plugin | The host validates `event.source === iframe.contentWindow` for every message and tags each frame with its own broker instance bound to that plugin's manifest. |
@@ -285,3 +288,31 @@ real example plugin built against the SDK · Agent Authoring Kit starter (docs +
 **Out (later sub-projects):** MATLAB bridge (E) · Supabase marketplace backend (B) · review pipeline
 (D) · the production `plugin://` Tauri protocol · package signing · real `.hplugin` zip-from-disk
 picker (the MVP exercises the identical validate→mount→broker path via a bundled example).
+
+---
+
+## 10. Known gaps / hardening backlog
+
+Tracked from the post-MVP code review (2026-06-25). The MVP loads only trusted, bundled/local
+plugins, so none of these block *this* checkpoint — but the items marked **[B-blocker]** MUST be
+resolved before Sub-project B loads untrusted, third-party plugins.
+
+- **[B-blocker] Self-navigation egress (H1).** A sandboxed frame can navigate *itself* to an
+  external URL (`location.assign`), which CSP cannot prevent. A plugin holding user-handed data
+  could exfiltrate this way. Fix: the production `plugin://` Tauri asset protocol + a webview
+  navigation handler that denies any navigation to a non-`plugin://` URL. Until then the network
+  claim is "no `fetch`/XHR/WebSocket/remote-resource egress," not "no network whatsoever."
+- **RPC resource limits (partial).** Implemented: malformed-message drop with a logged warning;
+  client re-posts `ready` until handshake (no deadlock); cumulative per-plugin storage quota.
+  Deferred: a per-call `Timeout` (the code is reserved but not emitted — a blanket timeout would
+  break legitimately-long interactive calls like the file picker, so this needs per-method tuning),
+  an in-flight request cap, and an RPC payload-size cap.
+- **Plugin teardown on module switch (L4).** Like every Helios module, the Marketplace stays mounted
+  when you switch tabs, so a launched plugin keeps running (hidden) rather than being torn down on
+  navigate-away. Consistent with the app's keep-state convention; the spec's "drops the realm" wording
+  applies to the in-module back/close action. Revisit if background plugins prove costly.
+- **Live theme (N1).** `PluginHost` passes `theme: "dark"` (Helios's only theme today) rather than a
+  reactive theme value. Wire through if/when a light theme ships.
+- **Validator is a heuristic, not a control.** `helios-plugin check` scans for obvious mistakes and
+  can be defeated by aliasing; the sandbox/CSP is the real control. The review pipeline (D) should
+  treat a clean check as necessary-not-sufficient and add the monitored-sandbox dynamic pass.
