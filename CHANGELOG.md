@@ -27,6 +27,21 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Marketplace (v5 plugin platform) — foundation**: a new Marketplace module that
+  runs subteam-built add-ons as standalone tools inside Helios, each in a
+  locked-down sandbox (opaque-origin iframe + strict CSP) that cannot reach the
+  DOM, the database, the network, or the filesystem on its own. Add-ons declare
+  capabilities in a manifest (default-deny) and reach the host only through a
+  permission-checked broker (`@helios/plugin-sdk`): user-picked file open/save and
+  private per-plugin storage today; a curated, high-trust MATLAB engine bridge is
+  designed for and gated for later. Ships with an example add-on (Spring Rate &
+  Ride Frequency), an Agent Authoring Kit for AI-assisted plugin authors, and a
+  `helios-plugin check` compliance validator. This is Sub-project A of v5.0.0
+  (runtime + format + SDK); the marketplace backend, browse/install UI, and review
+  pipeline land in later sub-projects.
+
 ## [4.5.4] - 2026-06-24
 
 ### Added

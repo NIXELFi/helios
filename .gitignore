@@ -73,6 +73,12 @@ worktrees/agent-*/
 worktrees/agent-*/pending_amend.json
 worktrees/agent-*/pending_amend.rejected.json
 
+# Bundled Marketplace example plugins ship their built entry under dist/, so it
+# must be tracked despite the global `dist/` ignore above. (Real plugins are
+# delivered as .hplugin bundles by the marketplace, not committed here.)
+!apps/desktop/public/plugins/**/dist/
+!apps/desktop/public/plugins/**/dist/**
+
 # Physics agent scratch space (smoke outputs, ad-hoc sweep results)
 /tmp/
 

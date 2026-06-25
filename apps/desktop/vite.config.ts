@@ -19,6 +19,7 @@ export default defineConfig({
     alias: {
       "@helios/store": path.resolve(__dirname, "../../packages/store/src"),
       "@helios/lib": path.resolve(__dirname, "../../packages/lib/src"),
+      "@helios/plugin-sdk": path.resolve(__dirname, "../../packages/plugin-sdk/src"),
       "@helios/ui": path.resolve(__dirname, "../../packages/ui/src"),
       "@helios/widgets": path.resolve(__dirname, "../../packages/widgets/src"),
       "@helios/pm-ui": path.resolve(__dirname, "../../packages/pm-ui/src"),

@@ -7,6 +7,7 @@ import {
   IconChevronsRight,
   IconClipboardList,
   IconDeviceGamepad2,
+  IconPuzzle,
   IconShieldLock,
   IconUserCircle,
   IconWind,
@@ -19,7 +20,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "org";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "marketplace" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -29,6 +30,7 @@ const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   cfd: IconWind,
   pm: IconClipboardList,
   games: IconDeviceGamepad2,
+  marketplace: IconPuzzle,
   org: IconShieldLock,
 };
 
@@ -240,6 +242,16 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("games")}
           disabled={gamesDisabled}
           disabledTitle="Sign in to use Games"
+        />
+        {/* Marketplace (v5 plugin platform) — no auth gate: add-ons are
+            standalone sandboxed programs that don't touch Supabase. */}
+        <NavButton
+          label="Market"
+          Icon={MODULE_ICON.marketplace}
+          collapsed={collapsed}
+          badge="BETA"
+          active={active === "marketplace"}
+          onClick={() => onSelect("marketplace")}
         />
         {/* Org & Access is admin-only tooling — hide the entry entirely for
             everyone else rather than show a disabled control. */}

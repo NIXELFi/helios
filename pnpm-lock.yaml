@@ -41,6 +41,9 @@ importers:
       '@helios/lib':
         specifier: workspace:*
         version: link:../../packages/lib
+      '@helios/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@helios/pm-ui':
         specifier: workspace:*
         version: link:../../packages/pm-ui
@@ -226,6 +229,15 @@ importers:
         version: 2.1.9(@types/node@20.19.39)(jsdom@25.0.1)
 
   packages/lib:
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@25.6.0)(jsdom@25.0.1)
+
+  packages/plugin-sdk:
     devDependencies:
       typescript:
         specifier: ^5.4.0

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spring Rate &amp; Ride Frequency</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #15171a; color: #e6e8ea; padding: 24px; }
+      h1 { font-size: 18px; margin: 0 0 2px; color: #ffc627; letter-spacing: 0.02em; }
+      .sub { color: #8a9099; font-size: 12px; margin-bottom: 20px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 720px; }
+      label { display: block; font-size: 12px; color: #8a9099; margin-bottom: 4px; }
+      input { width: 100%; background: #1d2024; border: 1px solid #2c3036; color: #e6e8ea; border-radius: 4px; padding: 8px; font-size: 14px; }
+      input:focus { outline: none; border-color: #ffc627; }
+      .row { margin-bottom: 12px; }
+      .out { background: #1d2024; border: 1px solid #2c3036; border-radius: 8px; padding: 18px; align-self: start; }
+      .metric { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid #2c3036; }
+      .metric:last-child { border-bottom: none; }
+      .metric .v { color: #ffc627; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; }
+      .actions { margin-top: 18px; display: flex; gap: 8px; }
+      button { background: #ffc627; color: #15171a; border: none; border-radius: 4px; padding: 8px 14px; font-weight: 600; cursor: pointer; font-size: 13px; }
+      button:hover { opacity: 0.9; }
+      .note { margin-top: 16px; font-size: 11px; color: #5a5f66; max-width: 720px; line-height: 1.5; }
+      code { color: #8a9099; }
+    </style>
+  </head>
+  <body>
+    <h1>Spring Rate &amp; Ride Frequency</h1>
+    <div class="sub">Suspension subteam · runs sandboxed inside Helios</div>
+    <div class="grid">
+      <div>
+        <div class="row"><label>Sprung corner mass (kg)</label><input id="mass" type="number" value="80" /></div>
+        <div class="row"><label>Spring rate (N/mm)</label><input id="spring" type="number" value="35" /></div>
+        <div class="row"><label>Motion ratio (wheel : spring)</label><input id="mr" type="number" step="0.01" value="1.10" /></div>
+        <div class="row"><label>Tire rate (N/mm, 0 = rigid)</label><input id="tire" type="number" value="200" /></div>
+      </div>
+      <div class="out">
+        <div class="metric"><span>Wheel rate</span><span class="v" id="o_wheel">–</span></div>
+        <div class="metric"><span>Effective rate (w/ tire)</span><span class="v" id="o_eff">–</span></div>
+        <div class="metric"><span>Ride frequency</span><span class="v" id="o_freq">–</span></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="export">Export report (.txt)</button>
+    </div>
+    <div class="note">
+      This add-on declares only <code>storage</code> (to remember your inputs) and <code>file.write</code> (to export a
+      report). It has no network, filesystem, or database access — it physically can't reach anything outside this
+      sandbox.
+    </div>
+
+    <script>
+      // ── Minimal Helios plugin client ─────────────────────────────────────
+      // This is the hand-authored equivalent of `import ... from
+      // "@helios/plugin-sdk"` + a bundle step. It speaks the exact same
+      // postMessage protocol the SDK generates. (The MVP ships this by hand to
+      // avoid standing up a bundler; production authors use the SDK + template.)
+      var host = window.parent;
+      var seq = 0;
+      var pending = {};
+      function call(method, params) {
+        return new Promise(function (resolve, reject) {
+          var id = String(++seq);
+          pending[id] = { resolve: resolve, reject: reject };
+          host.postMessage({ kind: "helios:rpc", id: id, method: method, params: params || {} }, "*");
+        });
+      }
+      var resolveReady;
+      var ready = new Promise(function (r) { resolveReady = r; });
+      window.addEventListener("message", function (ev) {
+        if (ev.source !== host) return;
+        var m = ev.data;
+        if (!m || typeof m !== "object") return;
+        if (m.kind === "helios:init") {
+          resolveReady(m.context);
+        } else if (m.kind === "helios:rpc-result") {
+          var p = pending[m.id];
+          if (!p) return;
+          delete pending[m.id];
+          if (m.ok) p.resolve(m.result);
+          else { var e = new Error(m.error.message); e.code = m.error.code; p.reject(e); }
+        }
+      });
+      function log() { call("host.log", { args: [].slice.call(arguments).map(String) }); }
+      host.postMessage({ kind: "helios:ready", protocol: 1 }, "*");
+
+      // ── The tool ─────────────────────────────────────────────────────────
+      var FIELDS = ["mass", "spring", "mr", "tire"];
+      function num(id) { return parseFloat(document.getElementById(id).value) || 0; }
+      function compute() {
+        var mass = num("mass"), spring = num("spring"), mr = num("mr"), tire = num("tire");
+        var wheel = spring * mr * mr; // N/mm
+        var eff = tire > 0 ? (wheel * tire) / (wheel + tire) : wheel; // spring + tire in series
+        var k = eff * 1000; // N/m
+        var freq = mass > 0 ? (1 / (2 * Math.PI)) * Math.sqrt(k / mass) : 0; // Hz
+        document.getElementById("o_wheel").textContent = wheel.toFixed(2) + " N/mm";
+        document.getElementById("o_eff").textContent = eff.toFixed(2) + " N/mm";
+        document.getElementById("o_freq").textContent = freq.toFixed(2) + " Hz";
+        return { mass: mass, spring: spring, mr: mr, tire: tire, wheel: wheel, eff: eff, freq: freq };
+      }
+      function persist() {
+        var v = {};
+        FIELDS.forEach(function (id) { v[id] = document.getElementById(id).value; });
+        call("storage.set", { key: "inputs", value: v }); // needs "storage" permission
+      }
+      FIELDS.forEach(function (id) {
+        document.getElementById(id).addEventListener("input", function () { compute(); persist(); });
+      });
+      document.getElementById("export").addEventListener("click", function () {
+        var r = compute();
+        var txt =
+          "Spring Rate & Ride Frequency\n\n" +
+          "Sprung corner mass : " + r.mass + " kg\n" +
+          "Spring rate        : " + r.spring + " N/mm\n" +
+          "Motion ratio       : " + r.mr + "\n" +
+          "Tire rate          : " + r.tire + " N/mm\n\n" +
+          "Wheel rate         : " + r.wheel.toFixed(2) + " N/mm\n" +
+          "Effective rate     : " + r.eff.toFixed(2) + " N/mm\n" +
+          "Ride frequency     : " + r.freq.toFixed(2) + " Hz\n";
+        call("file.write", { bytes: txt, suggestedName: "spring-rate-report.txt" }) // needs "file.write"
+          .then(function () { log("report exported"); })
+          .catch(function (e) { log("export failed: " + e.message); });
+      });
+
+      // Restore the user's last inputs (if any), then compute.
+      ready.then(function (ctx) {
+        log("loaded " + ctx.pluginId + " v" + ctx.pluginVersion + " (" + ctx.theme + ")");
+        call("storage.get", { key: "inputs" })
+          .then(function (saved) {
+            if (saved) FIELDS.forEach(function (id) { if (saved[id] != null) document.getElementById(id).value = saved[id]; });
+            compute();
+          })
+          .catch(function () { compute(); });
+      });
+    </script>
+  </body>
+</html>

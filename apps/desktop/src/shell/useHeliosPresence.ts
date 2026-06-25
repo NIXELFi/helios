@@ -31,6 +31,7 @@ const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set<ModuleId>([
   "cfd",
   "pm",
   "games",
+  "marketplace",
   "org",
 ]);
 
