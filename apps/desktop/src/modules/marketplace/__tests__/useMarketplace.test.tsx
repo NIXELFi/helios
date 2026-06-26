@@ -10,7 +10,7 @@ import {
 } from "../data/useMarketplace";
 
 // Capture Tauri invoke calls without a real Tauri runtime.
-const invokeMock = vi.fn(async () => undefined);
+const invokeMock = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
