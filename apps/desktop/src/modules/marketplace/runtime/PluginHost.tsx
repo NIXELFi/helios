@@ -22,6 +22,10 @@ import type { LoadedPlugin } from "./loader";
 // navigating ITSELF (e.g. location.assign to an external URL) — that egress gap
 // is closed by the production `plugin://` navigation handler (deferred to
 // Sub-project B); see the spec's hardening backlog.
+//
+// KEEP BYTE-IDENTICAL to `PLUGIN_CSP` in the `plugin-host` Rust crate
+// (crates/plugin-host/src/lib.rs), which serves it as a response header on the
+// `plugin://` production path. A pin test there fails CI if the two drift.
 const PLUGIN_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline' 'wasm-unsafe-eval'",

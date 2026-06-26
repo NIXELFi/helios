@@ -9,6 +9,7 @@ members = [
   "crates/pdm-client",
   "crates/engine-sim",
   "crates/cfd-core",
+  "crates/plugin-host",
   "crates/helios-bench",
   "crates/helios-mcp",
   "apps/desktop/src-tauri",

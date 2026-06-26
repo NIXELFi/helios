@@ -5,6 +5,7 @@ mod addin_injector;
 mod bridge;
 mod cfd;
 mod commands;
+mod plugins;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
@@ -149,6 +150,13 @@ pub fn run() {
         .manage(pending)
         .manage(cfd::CfdState::default())
         .manage(bridge_state.clone())
+        // Active installed-plugin versions, read by the `plugin://` asset protocol
+        // (populated by the install command in a later phase).
+        .manage(plugins::ActiveVersions::default())
+        // `plugin://<id>/<path>` serves installed bundles from the local cache with
+        // the strict plugin CSP attached as a response header. Registering it is
+        // inert until a plugin is installed (the A dev example still uses srcDoc).
+        .register_uri_scheme_protocol("plugin", plugins::protocol::handle)
         .setup(move |app| {
             // Best-effort: a bridge failure (e.g. port bind) must never stop the
             // app from launching. The add-in degrades to "Helios not reachable".

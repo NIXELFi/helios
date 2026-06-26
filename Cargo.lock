@@ -2108,6 +2108,7 @@ dependencies = [
  "helios-core",
  "helios-csv",
  "pdm-sw-parser",
+ "plugin-host",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3549,6 +3550,10 @@ dependencies = [
  "serde",
  "time",
 ]
+
+[[package]]
+name = "plugin-host"
+version = "4.5.4"
 
 [[package]]
 name = "png"

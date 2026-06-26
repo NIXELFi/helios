@@ -33,6 +33,7 @@ helios-arrow = { path = "../../../crates/helios-arrow" }
 engine-sim = { path = "../../../crates/engine-sim" }
 cfd-core = { path = "../../../crates/cfd-core" }
 pdm-sw-parser = { path = "../../../crates/pdm-sw-parser" }
+plugin-host = { path = "../../../crates/plugin-host" }
 ulid = "1"
 
 # Windows-only: the SOLIDWORKS add-in injector writes per-user (HKCU) registry
