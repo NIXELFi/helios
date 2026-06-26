@@ -113,3 +113,7 @@ export * from "./protocol";
 export * from "./manifest";
 export * from "./capabilities";
 export { HeliosPluginClient } from "./client";
+// The canonical bundle-compliance scan, shared with the author CLI + the review
+// pipeline (Sub-project D). Plain-ESM module typed by the compliance.d.mts sidecar.
+export { scanBundle } from "./compliance.mjs";
+export type { ComplianceFinding, FindingKind } from "./compliance.mjs";

@@ -5,52 +5,14 @@
 //
 // Validates a plugin's manifest and scans its built bundle for compliance with
 // the sandbox rules: no forbidden host/network/DOM-escape APIs, and declared
-// permissions that match what the code actually uses. This is the SAME set of
-// checks the marketplace review pipeline (Sub-project D) runs, so a plugin that
-// passes here is most of the way through review.
-//
-// NOTE (MVP): the rules below are intentionally duplicated from
-// @helios/plugin-sdk's catalog/validateManifest in plain JS so the CLI has zero
-// build step. Once the SDK ships a compiled entry, this should import them
-// directly to keep a single source of truth.
+// permissions that match what the code actually uses. The bundle-scan rules are
+// the SAME `scanBundle` the marketplace review pipeline (Sub-project D) runs —
+// both import them from `../src/compliance.mjs`, so passing here is most of the
+// way through review and there is no rule drift between the two.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, extname } from "node:path";
-
-const ALLOWED_PERMISSIONS = ["file.read", "file.write", "storage", "engine:matlab"];
-
-// Forbidden API patterns. Each plugin runs in an opaque-origin sandbox with a
-// strict CSP, so these either CANNOT work or are an attempt to escape the box.
-// NOTE: we deliberately do NOT forbid `window.parent`/`postMessage` here — the
-// bundled SDK uses them legitimately to reach the broker, and we scan the
-// COMPILED bundle. We focus on APIs the SDK never uses, so their presence is a
-// genuine red flag: network, alternate storage, cookies, dynamic eval.
-// The lookbehind `(?<![.\w])` excludes member-access forms like `store.fetch(`
-// or `obj.eval(` so we only flag the GLOBAL builtins, not unrelated methods that
-// happen to share the name. (This scan is a heuristic author aid, not the
-// security control — the CSP/sandbox is. It can be defeated by aliasing.)
-const FORBIDDEN = [
-  { re: /(?<![.\w])fetch\s*\(/, msg: "network call `fetch(` — blocked by CSP. Use a brokered capability instead." },
-  { re: /\bXMLHttpRequest\b/, msg: "`XMLHttpRequest` — network is blocked by CSP." },
-  { re: /\bWebSocket\b/, msg: "`WebSocket` — network is blocked by CSP." },
-  { re: /\bnavigator\.sendBeacon\b/, msg: "`sendBeacon` — network is blocked by CSP." },
-  { re: /\bdocument\.cookie\b/, msg: "`document.cookie` — unavailable in the sandbox." },
-  { re: /\blocalStorage\b/, msg: "`localStorage` — unavailable in the sandbox. Use the SDK `storage` API." },
-  { re: /\bsessionStorage\b/, msg: "`sessionStorage` — unavailable in the sandbox. Use the SDK `storage` API." },
-  { re: /\bindexedDB\b/, msg: "`indexedDB` — unavailable in the sandbox. Use the SDK `storage` API." },
-  { re: /(?<![.\w])eval\s*\(/, msg: "`eval(` — dynamic code execution is not allowed." },
-];
-
-// Map a used capability to the permission it requires. We match BOTH the SDK
-// helper names (save(), storage.set()) and the raw wire-method strings
-// ("file.write", "storage.set") so the check works whether the plugin used the
-// SDK helpers or spoke the protocol directly.
-const USAGE_TO_PERMISSION = [
-  { re: /\bopenFile\s*\(|["']file\.read["']/, perm: "file.read" },
-  { re: /\bsave\s*\(|["']file\.write["']/, perm: "file.write" },
-  { re: /\bstorage\.(get|set|keys|delete)\s*\(|["']storage\.(get|set|keys|delete)["']/, perm: "storage" },
-  { re: /\bengine\.matlab\.run\s*\(|["']engine\.matlab\.run["']/, perm: "engine:matlab" },
-];
+import { join, extname, relative } from "node:path";
+import { scanBundle, ALLOWED_PERMISSIONS } from "../src/compliance.mjs";
 
 function fail(msg) {
   console.error(`\x1b[31m✗\x1b[0m ${msg}`);
@@ -95,9 +57,6 @@ function collectSourceFiles(dir) {
 }
 
 function check(dir) {
-  let errorCount = 0;
-  let warnCount = 0;
-
   const manifestPath = join(dir, "manifest.json");
   if (!existsSync(manifestPath)) {
     fail(`no manifest.json found in ${dir}`);
@@ -108,12 +67,15 @@ function check(dir) {
   try {
     // Strip a leading UTF-8 BOM — editors/PowerShell add one and JSON.parse chokes.
     let raw = readFileSync(manifestPath, "utf8");
-    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1); // strip UTF-8 BOM
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     manifest = JSON.parse(raw);
   } catch (e) {
     fail(`manifest.json is not valid JSON: ${e.message}`);
     return 1;
   }
+
+  let errorCount = 0;
+  let warnCount = 0;
 
   const manifestErrors = validateManifestJs(manifest);
   if (manifestErrors.length) {
@@ -123,36 +85,20 @@ function check(dir) {
     ok(`manifest valid — ${manifest.id}@${manifest.version} (permissions: ${JSON.stringify(manifest.permissions)})`);
   }
 
-  const declared = new Set(Array.isArray(manifest.permissions) ? manifest.permissions : []);
-  const used = new Set();
-
-  // Scan the built bundle (dist/ if present, else the dir itself).
+  // Scan the built bundle (dist/ if present, else the dir itself) via the SHARED
+  // rules. Build a path -> contents map (paths shown relative to the plugin dir).
   const scanRoot = existsSync(join(dir, "dist")) ? join(dir, "dist") : dir;
-  const files = collectSourceFiles(scanRoot);
-
-  for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    for (const rule of FORBIDDEN) {
-      if (rule.re.test(text)) {
-        fail(`${file}: ${rule.msg}`);
-        errorCount++;
-      }
-    }
-    for (const u of USAGE_TO_PERMISSION) {
-      if (u.re.test(text)) used.add(u.perm);
-    }
+  const files = {};
+  for (const abs of collectSourceFiles(scanRoot)) {
+    files[relative(dir, abs)] = readFileSync(abs, "utf8");
   }
 
-  // Declared-vs-used reconciliation.
-  for (const perm of used) {
-    if (!declared.has(perm)) {
-      fail(`code uses a '${perm}' capability but the manifest does not declare it`);
+  for (const f of scanBundle(files, manifest)) {
+    if (f.level === "error") {
+      fail(f.path ? `${f.path}: ${f.message}` : f.message);
       errorCount++;
-    }
-  }
-  for (const perm of declared) {
-    if (!used.has(perm)) {
-      warn(`manifest declares '${perm}' but no code uses it — drop it to minimise the trust surface`);
+    } else {
+      warn(f.message);
       warnCount++;
     }
   }
