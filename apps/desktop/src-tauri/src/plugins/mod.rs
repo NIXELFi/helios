@@ -9,6 +9,7 @@
 // version in `protocol::ActiveVersions`.
 
 pub mod cache;
+pub mod commands;
 pub mod protocol;
 
 pub use protocol::ActiveVersions;

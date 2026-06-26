@@ -5,8 +5,10 @@
 //! handler, the active-version registry) lives in `apps/desktop/src-tauri/src/plugins`
 //! and calls into here.
 
+pub mod bundle;
 pub mod path;
 pub mod uri;
+pub mod verify;
 
 /// The plugin-document Content-Security-Policy. Attached as a response header by
 /// the `plugin://` protocol (production) and injected into the srcDoc `<meta>` by

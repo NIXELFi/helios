@@ -164,6 +164,11 @@ pub fn run() {
                 eprintln!("helios-vault-bridge failed to start: {e}");
             }
 
+            // Rebuild the active-plugin-version map from the on-disk install cache
+            // (it doesn't survive a restart); without it an installed plugin would
+            // 404 from the plugin:// protocol until reinstalled.
+            plugins::cache::restore_active_versions(app.handle());
+
             // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
             // Best-effort; never block launch. Windows-only (SOLIDWORKS + registry).
             #[cfg(windows)]
@@ -267,6 +272,8 @@ pub fn run() {
             cfd::commands::cfd_get_parameter_schema,
             cfd::commands::cfd_data_usage_bytes,
             cfd::commands::cfd_clear_data,
+            plugins::commands::install_plugin_bundle,
+            plugins::commands::remove_plugin_bundle,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Helios")
