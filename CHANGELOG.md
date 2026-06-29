@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.5] - 2026-06-29
+
 ### Added
 
 - **PM — "Primary only" view toggle**: in any subteam-scoped view (dashboard,
