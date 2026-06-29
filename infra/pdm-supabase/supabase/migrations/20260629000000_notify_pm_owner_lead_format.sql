@@ -1,33 +1,38 @@
--- PM Slack notifications: restructured message format (owner + subteam lead).
+-- PM Slack notifications: restructured message + a new `lead` recipient variable.
 --
 -- Supersedes the PM enqueue layout from 20260603120000_notify_slack_dispatch.sql.
 -- Apply to dlmyixonuyckxkknolku via the Management API; this file keeps the repo
 -- in sync and does NOT change the live DB on its own. Secrets/cron/tables/triggers
--- from the base migration are unchanged.
+-- from the base migration are otherwise unchanged.
 --
--- New format ("Variant A", no markdown formatting since the Slack Workflow shows
--- text literally). Example for a multi-field update (•, ·, →, — are plain Unicode):
+-- HOW MENTIONS WORK (important): the Slack Workflow renders people from DATA
+-- VARIABLES (Slack-user emails), NOT from text — putting <@id> in text shows up
+-- literally. So this migration keeps actor/owner/lead as separate EMAIL fields in
+-- the dispatch payload and puts only the human-readable description in `text`.
+-- The dispatch body for the PM channel is:
+--     { text, actor: <email>, owner: <email>, lead: <email> }
+-- The Workflow message template arranges them, e.g.  {actor} {text}
+--                                                    Owner {owner} · Lead {lead}
 --
---   Alex updated "Frame rev B" — SDM27 / Chassis
---   • Status: In Review → In Progress
---   • Due: 2026-07-01 → 2026-07-08
---   Owner <@U_BOB> · Lead <@U_JANE> · 3 edits
+-- `text` (no markdown — Slack shows it literally; •, ·, →, — are plain Unicode):
+--     updated "Frame rev B" — SDM27 / Chassis
+--     • Status: In Review → In Progress
+--     • Due: 2026-07-01 → 2026-07-08
 --
--- Key points:
---   * Actor is shown by NAME only (no ping).
---   * Owner and the task's subteam LEAD(s) are @-mentioned, EXCEPT we never ping
---     the actor about their own edit (they're shown by name instead).
---   * Mentions use <@slack_id>; the id is read from
---     auth.users.raw_user_meta_data->>'slack_id'. When a member has no slack_id
---     mapped, we fall back to their plain display name (no ping) — so populate
---     slack_id per member for pings to fire.
---   * WORKFLOW NOTE (for whoever owns the Slack side): the dispatcher sends the
---     fully-assembled message in the `text` field. For <@…> to render as a real
---     mention, that text must be posted through a mention-rendering path (a Slack
---     incoming webhook renders <@id>; a Workflow Builder message step tends to
---     escape it). actor/owner emails are still sent for backward compatibility.
+-- Notes:
+--   * Actor is NOT pinged about their own edit: Slack does not notify a user of a
+--     self-mention, so when the actor is also the owner/lead it resolves to no
+--     self-ping automatically.
+--   * `lead` is the task's primary-subteam lead by email (earliest-joined when a
+--     subteam has several). Empty string when the subteam has no lead — the
+--     Workflow should treat an empty lead as "skip".
+--   * Friendly status labels (pm-ui statusMeta.ts parity) + old → new for the
+--     changed fields; label-only lines for subsystem/rename/description.
 
--- 1. Helpers ----------------------------------------------------------------
+-- 1. Outbox gains a lead recipient column -----------------------------------
+alter table notify.outbox add column if not exists lead_email text;
+
+-- 2. Helpers ----------------------------------------------------------------
 
 -- Friendly label for the 5-status enum (single source: pm-ui statusMeta.ts).
 create or replace function notify.status_label(p_status text)
@@ -43,7 +48,8 @@ as $$
   end;
 $$;
 
--- Plain display name (never a ping). Used for old→new owner change lines.
+-- Plain display name (used for the old→new owner CHANGE line in `text`; the
+-- owner/lead MENTIONS are separate email variables, not this).
 create or replace function notify.person_name(p_uid uuid)
  returns text language sql stable security definer set search_path to ''
 as $$
@@ -53,34 +59,23 @@ as $$
     case when p_uid is null then 'unassigned' else 'someone' end);
 $$;
 
--- Mention token for a person: <@slack_id> when mapped, else the plain name.
--- Never pings the actor (p_actor) about their own change — returns their name.
-create or replace function notify.person_token(p_uid uuid, p_actor uuid)
- returns text language plpgsql stable security definer set search_path to ''
-as $$
-declare v_name text; v_slack text;
-begin
-  if p_uid is null then return 'unassigned'; end if;
-  select coalesce(nullif(u.raw_user_meta_data->>'display_name', ''), u.email::text),
-         nullif(u.raw_user_meta_data->>'slack_id', '')
-    into v_name, v_slack
-    from auth.users u where u.id = p_uid;
-  v_name := coalesce(v_name, 'someone');
-  if p_uid = p_actor then return v_name; end if;          -- don't ping the editor
-  if v_slack is not null then return '<@' || v_slack || '>'; end if;  -- real ping
-  return v_name;                                          -- unmapped → plain name
-end $$;
-
--- Space-joined mention tokens for every LEAD of a subteam (null when none).
-create or replace function notify.lead_tokens(p_subteam uuid, p_actor uuid)
+-- Email of the subteam's lead (earliest-joined when several). Null when none.
+create or replace function notify.lead_email(p_subteam uuid)
  returns text language sql stable security definer set search_path to ''
 as $$
-  select nullif(string_agg(notify.person_token(m.user_id, p_actor), ' ' order by m.user_id), '')
+  select u.email::text
     from pm.subteam_memberships m
-   where p_subteam is not null and m.subteam_id = p_subteam and m.role = 'lead';
+    join auth.users u on u.id = m.user_id
+   where p_subteam is not null and m.subteam_id = p_subteam and m.role = 'lead'
+   order by m.joined_at, m.user_id
+   limit 1;
 $$;
 
--- 2. Task enqueue (new layout) ----------------------------------------------
+-- person_token / lead_tokens from the earlier <@id>-in-text draft are obsolete.
+drop function if exists notify.person_token(uuid, uuid);
+drop function if exists notify.lead_tokens(uuid, uuid);
+
+-- 3. Task enqueue (description-only text; owner/lead travel as variables) -----
 CREATE OR REPLACE FUNCTION notify.enqueue_from_task()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -88,20 +83,16 @@ CREATE OR REPLACE FUNCTION notify.enqueue_from_task()
  SET search_path TO ''
 AS $function$
 declare
-  v_actor_id uuid; v_actor_email text; v_actor_name text;
-  v_owner_id uuid; v_owner_email text;
+  v_actor_id uuid; v_actor_email text;
+  v_owner_id uuid; v_owner_email text; v_lead_email text;
   v_pid uuid; v_title text; v_target uuid; v_action text;
   v_subteam_id uuid; v_proj text; v_subteam text; v_scope text := '';
   v_lines text[] := array[]::text[];
-  v_footer text; v_summary text; v_ckey text;
+  v_summary text; v_ckey text;
   v_old_sub text; v_new_sub text;
 begin
   v_actor_id := auth.uid();
-  select u.email::text,
-         coalesce(nullif(u.raw_user_meta_data->>'display_name', ''), u.email::text)
-    into v_actor_email, v_actor_name
-    from auth.users u where u.id = v_actor_id;
-  v_actor_name := coalesce(v_actor_name, 'Someone');
+  select u.email::text into v_actor_email from auth.users u where u.id = v_actor_id;
 
   if tg_op = 'DELETE' then
     v_title:=OLD.title; v_pid:=OLD.project_id; v_target:=OLD.id;
@@ -151,43 +142,41 @@ begin
     if array_length(v_lines, 1) is null then return null; end if;
   end if;
 
-  -- Scope ( — project / subteam ) and footer (owner + lead mentions).
+  -- Scope ( — project / subteam ) appended to the headline.
   select p.name into v_proj from pm.projects p where p.id = v_pid;
   select s.name into v_subteam from pm.subteams s where s.id = v_subteam_id;
   if v_proj is not null and v_subteam is not null then v_scope := ' — '||v_proj||' / '||v_subteam;
   elsif v_proj is not null then v_scope := ' — '||v_proj;
   elsif v_subteam is not null then v_scope := ' — '||v_subteam; end if;
 
-  v_footer := 'Owner '||notify.person_token(v_owner_id, v_actor_id)
-              || coalesce(' · Lead '||notify.lead_tokens(v_subteam_id, v_actor_id), '');
-
+  -- `text` is description only — the actor/owner/lead are sent as variables.
   if v_action = 'updated' then
-    v_summary := v_actor_name||' updated "'||coalesce(v_title,'(untitled)')||'"'||v_scope
-                 || E'\n' || array_to_string(v_lines, E'\n')
-                 || E'\n' || v_footer;
+    v_summary := 'updated "'||coalesce(v_title,'(untitled)')||'"'||v_scope
+                 || E'\n' || array_to_string(v_lines, E'\n');
   else
-    v_summary := v_actor_name||' '||v_action||' "'||coalesce(v_title,'(untitled)')||'"'||v_scope
-                 || E'\n' || v_footer;
+    v_summary := v_action||' "'||coalesce(v_title,'(untitled)')||'"'||v_scope;
   end if;
 
   if v_owner_id is not null then
     select u.email::text into v_owner_email from auth.users u where u.id = v_owner_id;
   end if;
+  v_lead_email := notify.lead_email(v_subteam_id);
 
   v_ckey := 'pm:' || v_target::text;
   update notify.outbox
      set edit_count=edit_count+1, summary=v_summary, action=v_action, actor_id=v_actor_id,
-         actor_email=v_actor_email, owner_email=v_owner_email, send_after=now()+interval '20 seconds'
+         actor_email=v_actor_email, owner_email=v_owner_email, lead_email=v_lead_email,
+         send_after=now()+interval '20 seconds'
    where coalesce_key=v_ckey and status='pending';
   if not found then
-    insert into notify.outbox (source, project_id, actor_id, actor_email, owner_email, action, target_type, target_id, target_name, summary, coalesce_key, send_after)
-    values ('pm', v_pid, v_actor_id, v_actor_email, v_owner_email, v_action, 'task', v_target, v_title, v_summary, v_ckey, now()+interval '20 seconds');
+    insert into notify.outbox (source, project_id, actor_id, actor_email, owner_email, lead_email, action, target_type, target_id, target_name, summary, coalesce_key, send_after)
+    values ('pm', v_pid, v_actor_id, v_actor_email, v_owner_email, v_lead_email, v_action, 'task', v_target, v_title, v_summary, v_ckey, now()+interval '20 seconds');
   end if;
   return null;
 exception when others then return null;
 end $function$;
 
--- 3. Comment enqueue (new layout) -------------------------------------------
+-- 4. Comment enqueue (same contract) ----------------------------------------
 CREATE OR REPLACE FUNCTION notify.enqueue_from_comment()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -195,18 +184,14 @@ CREATE OR REPLACE FUNCTION notify.enqueue_from_comment()
  SET search_path TO ''
 AS $function$
 declare
-  v_actor_id uuid; v_actor_email text; v_actor_name text;
-  v_owner_id uuid; v_owner_email text;
+  v_actor_id uuid; v_actor_email text;
+  v_owner_id uuid; v_owner_email text; v_lead_email text;
   v_task text; v_pid uuid; v_subteam_id uuid;
   v_proj text; v_subteam text; v_scope text := '';
-  v_footer text; v_summary text; v_ckey text; v_snip text;
+  v_summary text; v_ckey text; v_snip text;
 begin
   v_actor_id := coalesce(NEW.author_id, auth.uid());
-  select u.email::text,
-         coalesce(nullif(u.raw_user_meta_data->>'display_name', ''), u.email::text)
-    into v_actor_email, v_actor_name
-    from auth.users u where u.id = v_actor_id;
-  v_actor_name := coalesce(v_actor_name, 'Someone');
+  select u.email::text into v_actor_email from auth.users u where u.id = v_actor_id;
 
   select t.title, t.project_id, t.owner_id, t.subteam_id
     into v_task, v_pid, v_owner_id, v_subteam_id
@@ -219,39 +204,36 @@ begin
   elsif v_proj is not null then v_scope := ' — '||v_proj;
   elsif v_subteam is not null then v_scope := ' — '||v_subteam; end if;
 
-  v_footer := 'Owner '||notify.person_token(v_owner_id, v_actor_id)
-              || coalesce(' · Lead '||notify.lead_tokens(v_subteam_id, v_actor_id), '');
-
   v_snip := left(regexp_replace(coalesce(NEW.body, ''), '\s+', ' ', 'g'), 140);
 
   if NEW.kind::text = 'drawing_review' then
-    v_summary := v_actor_name||' left a drawing review on "'||v_task||'"'||v_scope
-                 || E'\n' || v_footer;
+    v_summary := 'left a drawing review on "'||v_task||'"'||v_scope;
   else
-    v_summary := v_actor_name||' commented on "'||v_task||'"'||v_scope
-                 || case when v_snip <> '' then E'\n'||'"'||v_snip||'"' else '' end
-                 || E'\n' || v_footer;
+    v_summary := 'commented on "'||v_task||'"'||v_scope
+                 || case when v_snip <> '' then E'\n'||'"'||v_snip||'"' else '' end;
   end if;
 
   if v_owner_id is not null then
     select u.email::text into v_owner_email from auth.users u where u.id = v_owner_id;
   end if;
+  v_lead_email := notify.lead_email(v_subteam_id);
 
   v_ckey := 'pm-comment:'||NEW.task_id::text||':'||coalesce(v_actor_id::text, '?');
   update notify.outbox
      set edit_count=edit_count+1, summary=v_summary, action='commented', event_id=NEW.id,
-         actor_id=v_actor_id, actor_email=v_actor_email, owner_email=v_owner_email, send_after=now()+interval '20 seconds'
+         actor_id=v_actor_id, actor_email=v_actor_email, owner_email=v_owner_email, lead_email=v_lead_email,
+         send_after=now()+interval '20 seconds'
    where coalesce_key=v_ckey and status='pending';
   if not found then
-    insert into notify.outbox (source, event_id, project_id, actor_id, actor_email, owner_email, action, target_type, target_id, target_name, summary, coalesce_key, send_after)
-    values ('pm', NEW.id, v_pid, v_actor_id, v_actor_email, v_owner_email, 'commented', 'comment', NEW.task_id, v_task, v_summary, v_ckey, now()+interval '20 seconds');
+    insert into notify.outbox (source, event_id, project_id, actor_id, actor_email, owner_email, lead_email, action, target_type, target_id, target_name, summary, coalesce_key, send_after)
+    values ('pm', NEW.id, v_pid, v_actor_id, v_actor_email, v_owner_email, v_lead_email, 'commented', 'comment', NEW.task_id, v_task, v_summary, v_ckey, now()+interval '20 seconds');
   end if;
   return null;
 exception when others then return null;
 end $function$;
 
--- 4. Dispatcher: edit-count suffix now reads " · N edits" (was "  (xN edits)")
---    to match the new footer line. All other dispatch logic is unchanged from
+-- 5. Dispatcher: send the new `lead` email field; " · N edits" suffix --------
+--    All other dispatch logic (incl. the vault path) is unchanged from
 --    20260603120000.
 CREATE OR REPLACE FUNCTION notify.dispatch()
  RETURNS void
@@ -297,9 +279,13 @@ begin
     if r.source = 'vault' then
       v_body := jsonb_build_object('text', v_text);
     else
+      -- actor/owner/lead are Slack-user EMAILS; the Workflow resolves + mentions
+      -- them. owner falls back to slack_fallback_email; lead is '' when none so
+      -- the Workflow can skip it (the fallback person is not anyone's "lead").
       v_body := jsonb_build_object('text', v_text,
                                    'actor', coalesce(r.actor_email, v_fallback),
-                                   'owner', coalesce(r.owner_email, v_fallback));
+                                   'owner', coalesce(r.owner_email, v_fallback),
+                                   'lead',  coalesce(r.lead_email, ''));
     end if;
 
     begin

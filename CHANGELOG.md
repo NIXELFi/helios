@@ -46,12 +46,11 @@ follow [semver](https://semver.org/).
 ### Changed
 
 - **PM Slack notifications restructured for readability**: each notice now leads
-  with who did what, lists field changes one per line (friendly status labels,
-  `old → new`), and shows the task **owner and its subteam lead**, who are
-  @-mentioned so leads are notified of changes regardless of who owns the task.
-  (Requires the Slack workflow to post messages via a mention-rendering path, and
-  members' Slack IDs populated for pings to fire; otherwise names are shown
-  without a ping.)
+  with who did what and lists field changes one per line (friendly status labels,
+  `old → new`), and includes the task **owner and its subteam lead** as recipients
+  so leads are notified of changes regardless of who owns the task. (Owner and lead
+  are sent to the Slack workflow as user emails — via a new `lead` variable — so the
+  workflow can either ping them or show their name.)
 
 ## [4.5.4] - 2026-06-24
 
