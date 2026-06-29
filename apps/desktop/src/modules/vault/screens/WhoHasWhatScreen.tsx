@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { readFile } from "@tauri-apps/plugin-fs";
 import { useUser } from "@helios/auth";
 import { useLocks } from "../data/useLocks";
 import { useForceUnlock } from "../data/useForceUnlock";
+import { useCheckIn } from "../data/useCheckIn";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useActiveVault } from "../data/useActiveVault";
+import { useVaultFolder } from "../data/useVaultFolder";
 import { useFilesByIds, type LockFileRow } from "../data/useFilesByIds";
 import { useActiveCheckouts } from "../data/useActiveCheckouts";
 import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { usePeople } from "../../org/data/useOrgData";
-import { folderPath } from "../data/folder-paths";
+import { folderPath, localDestPath, vaultRelPathFor } from "../data/folder-paths";
+import { ledgerRecord } from "../data/sync-ledger";
+import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import type { Lock, VaultUser } from "../data/types";
 
 /** Canonical lock-holder label: prefer the human display name, then the email,
@@ -135,6 +140,31 @@ export function WhoHasWhatScreen() {
   // is a no-op in the Tauri webview, so the reason is collected via an in-app
   // dialog instead (C1-MISS). null = modal closed.
   const [reasonFor, setReasonFor] = useState<string | null>(null);
+
+  // --- Check-in (Cole's request) --------------------------------------------
+  // Let the current user check in their OWN checkouts straight from this screen
+  // — per row and in bulk — instead of hunting each file down in the Browse
+  // tree. Check-in needs the local working copy (to hash + upload its bytes),
+  // and the local vault folder is only resolvable for the ACTIVE vault, so these
+  // actions are offered for active-vault rows only. pdm_check_in's skip-unchanged
+  // path means a freshly-uploaded draft whose bytes still match version 1 is just
+  // published + released (no duplicate version), while a locally-edited file
+  // lands a new version — one code path covers both.
+  const checkIn = useCheckIn();
+  const activeVaultName = useMemo(
+    () => vaults.find((v) => v.id === activeVaultId)?.name ?? null,
+    [vaults, activeVaultId],
+  );
+  const { path: vaultRoot } = useVaultFolder(
+    activeVaultName ? { vaultName: activeVaultName } : null,
+  );
+  // We can only check in when we know BOTH the active vault's local root and its
+  // folder tree (to resolve each file's on-disk path).
+  const canCheckInActive = vaultRoot != null && folders != null && activeVaultId != null;
+  // file_id currently being checked in (per-row spinner); null = none.
+  const [checkingInId, setCheckingInId] = useState<string | null>(null);
+  const [checkingInAll, setCheckingInAll] = useState(false);
+  const [checkinStatus, setCheckinStatus] = useState<string | null>(null);
 
   const fileById = useMemo(() => {
     const m = new Map<string, LockFileRow>();
@@ -306,6 +336,88 @@ export function WhoHasWhatScreen() {
   const totalLocks = rpcMode ? (checkouts.data?.length ?? 0) : (locks?.length ?? 0);
   const visibleCount = visibleGroups.reduce((n, g) => n + g.rows.length, 0);
 
+  // The current user's own checkouts in the ACTIVE vault that we can resolve to a
+  // named file — the set the "Check in all mine" button acts on. Computed off the
+  // unfiltered source groups so the count is stable regardless of the "Just mine"
+  // chip.
+  const myCheckinableRows = useMemo<LockRow[]>(() => {
+    if (!canCheckInActive) return [];
+    const me = user?.id ?? "";
+    const grp = sourceGroups.find((g) => g.vaultId === activeVaultId);
+    if (!grp) return [];
+    return grp.rows.filter(
+      (r) => r.lock.user_id === me && r.file != null && !r.nameHidden && r.file.name !== "",
+    );
+  }, [canCheckInActive, sourceGroups, activeVaultId, user]);
+
+  /** Check in ONE of the current user's checkouts from its local working copy.
+   *  Returns the outcome so callers can total bulk results. */
+  async function checkInOne(row: LockRow): Promise<"ok" | "no-local" | "fail"> {
+    const file = row.file;
+    if (!file || !vaultRoot || folders == null) return "fail";
+    const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+    let bytes: ArrayBuffer;
+    try {
+      const local = await readFile(dest);
+      bytes = local.buffer.slice(
+        local.byteOffset,
+        local.byteOffset + local.byteLength,
+      ) as ArrayBuffer;
+    } catch {
+      // No local copy at the expected path — nothing we can hash/upload.
+      return "no-local";
+    }
+    const ver = await checkIn.run(file.id, bytes, "Checked in from Checkouts");
+    if (!ver) return "fail";
+    // Published + released now — re-protect the local copy read-only, matching
+    // single-file / bulk check-in elsewhere so auto-sync doesn't read the
+    // writable-but-unlocked copy as an unsaved edit and hold it back.
+    await setReadonly(dest, true);
+    flipSwReadonly(dest, true);
+    if (activeVaultId) {
+      void ledgerRecord(activeVaultId, vaultRelPathFor(file.folder_id, file.name, folders), ver.sha256);
+    }
+    return "ok";
+  }
+
+  async function checkInRow(row: LockRow) {
+    setCheckingInId(row.lock.file_id);
+    setCheckinStatus(null);
+    const r = await checkInOne(row);
+    setCheckingInId(null);
+    if (r === "ok") {
+      refetch();
+      checkouts.refetch();
+    } else if (r === "no-local") {
+      setCheckinStatus(`Couldn't find a local copy of "${row.file?.name ?? "file"}" to check in.`);
+    } else {
+      setCheckinStatus(checkIn.error?.message ?? "Check-in failed.");
+    }
+  }
+
+  async function checkInAllMine() {
+    const rows = myCheckinableRows;
+    if (rows.length === 0) return;
+    setCheckingInAll(true);
+    setCheckinStatus(null);
+    let ok = 0, noLocal = 0, fail = 0;
+    for (const row of rows) {
+      const r = await checkInOne(row);
+      if (r === "ok") ok++;
+      else if (r === "no-local") noLocal++;
+      else fail++;
+    }
+    const parts = [`Checked in ${ok}/${rows.length}`];
+    const detail: string[] = [];
+    if (fail) detail.push(`${fail} failed`);
+    if (noLocal) detail.push(`${noLocal} with no local copy`);
+    if (detail.length) parts.push(`(${detail.join(", ")})`);
+    setCheckinStatus(parts.join(" "));
+    setCheckingInAll(false);
+    refetch();
+    checkouts.refetch();
+  }
+
   return (
     <div className="h-full overflow-auto bg-helios-panel">
       <header className="flex items-center gap-3 border-b border-helios-line px-4 py-3 text-helios-dim">
@@ -315,6 +427,17 @@ export function WhoHasWhatScreen() {
             <span className="ml-2 font-mono-num text-xs">({mineOnly ? `${visibleCount} of ${totalLocks}` : totalLocks})</span>
           )}
         </span>
+        {myCheckinableRows.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { void checkInAllMine(); }}
+            disabled={checkingInAll || checkingInId !== null}
+            title={`Check in your ${myCheckinableRows.length} checked-out file${myCheckinableRows.length === 1 ? "" : "s"} in ${activeVaultName ?? "this vault"}`}
+            className="rounded-full border border-[#66BB6A]/50 bg-[#66BB6A]/15 px-2.5 py-0.5 text-xs text-[#9CCC65] transition-colors hover:bg-[#66BB6A]/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+          >
+            {checkingInAll ? "Checking in…" : `Check in all mine (${myCheckinableRows.length})`}
+          </button>
+        )}
         <button
           type="button"
           aria-pressed={mineOnly}
@@ -342,6 +465,19 @@ export function WhoHasWhatScreen() {
           Couldn't load file paths: {contextError.message}
         </div>
       )}
+      {/* Check-in result / error — dismissible so it doesn't linger. */}
+      {checkinStatus && (
+        <div className="flex items-center gap-2 border-b border-helios-line bg-helios-base/60 px-4 py-1.5 text-xs text-helios-dim" role="status" aria-live="polite">
+          <span className="truncate" title={checkinStatus}>{checkinStatus}</span>
+          <button
+            type="button"
+            onClick={() => setCheckinStatus(null)}
+            className="ml-auto shrink-0 text-helios-dim hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="p-2">
         {resolving ? (
           <div className="p-4 text-sm text-helios-dim">Loading…</div>
@@ -359,6 +495,11 @@ export function WhoHasWhatScreen() {
             // or the active vault's admin for the active vault's group. Other
             // vaults' groups show no action unless the user is a global admin.
             const canForceUnlock = isAdmin || (g.vaultId !== null && g.vaultId === activeVaultId && isActiveVaultAdmin);
+            // This group is the active vault and we have the local context needed
+            // to check in — so the current user's own rows get a "Check in" action.
+            const canCheckInGroup = canCheckInActive && g.vaultId === activeVaultId;
+            const showActions = canForceUnlock || canCheckInGroup;
+            const me = user?.id ?? "";
             return (
             <section key={g.vaultId ?? "__other__"} className="mb-4">
               <h3 className="flex items-baseline gap-2 px-3 py-1.5 text-xs uppercase tracking-wider text-asu-gold">
@@ -373,7 +514,7 @@ export function WhoHasWhatScreen() {
                     <th className="px-3 py-2 font-normal">File</th>
                     <th className="px-3 py-2 font-normal">Holder</th>
                     <th className="px-3 py-2 font-normal">Since</th>
-                    {canForceUnlock && <th className="px-3 py-2 font-normal">Actions</th>}
+                    {showActions && <th className="px-3 py-2 font-normal">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -416,16 +557,31 @@ export function WhoHasWhatScreen() {
                         <td className="px-3 py-2 text-helios-dim" title={lock.acquired_at}>
                           {relativeTime(lock.acquired_at)}
                         </td>
-                        {canForceUnlock && (
+                        {showActions && (
                           <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => requestForceUnlock(lock.id)}
-                              disabled={unlockingId === lock.id}
-                              className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
-                            >
-                              {unlockingId === lock.id ? "Unlocking…" : "Force unlock"}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {canCheckInGroup && lock.user_id === me && file && !nameHidden && file.name !== "" && (
+                                <button
+                                  type="button"
+                                  onClick={() => { void checkInRow({ lock, file, path, nameHidden, isDraft }); }}
+                                  disabled={checkingInId === lock.file_id || checkingInAll}
+                                  title="Check this file in — publishes it and releases your lock"
+                                  className="rounded bg-[#66BB6A] px-2 py-0.5 text-xs text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                                >
+                                  {checkingInId === lock.file_id ? "Checking in…" : "Check in"}
+                                </button>
+                              )}
+                              {canForceUnlock && (
+                                <button
+                                  type="button"
+                                  onClick={() => requestForceUnlock(lock.id)}
+                                  disabled={unlockingId === lock.id}
+                                  className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                                >
+                                  {unlockingId === lock.id ? "Unlocking…" : "Force unlock"}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>

@@ -17,6 +17,8 @@ import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
 import { SubsystemEditor } from "@pm/components/SubsystemEditor";
 import { scopeTasksToSubteam, selectIsAdmin, usePmStore, type CrossTeamRelation } from "@pm/lib/pmStore";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
+import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { useDashboardPhotos, type DashboardPhoto } from "@pm/lib/useDashboardPhotos";
 import {
@@ -109,6 +111,7 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
   const allTeams = currentTeam === null;
   const isSubteamScope = currentTeam !== null;
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
 
   // Per-scope customizable layout (tabs of widget instances). Persisted to
   // localStorage like the Gantt/Graph/Calendar settings; this component remounts
@@ -127,13 +130,13 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
   const scoped = useMemo(
     () =>
       currentTeam
-        ? scopeTasksToSubteam(tasks, deps, currentTeam.id)
+        ? scopeTasksToSubteam(tasks, deps, currentTeam.id, primaryOnly)
         : tasks.map((task) => ({
             task,
             relation: "owned" as CrossTeamRelation,
             bridgeTaskIds: [] as string[],
           })),
-    [tasks, deps, currentTeam],
+    [tasks, deps, currentTeam, primaryOnly],
   );
   const owned = useMemo(() => scoped.filter((r) => r.relation === "owned").map((r) => r.task), [scoped]);
   const prerequisites = useMemo(() => scoped.filter((r) => r.relation === "prerequisite_of_team"), [scoped]);
@@ -230,6 +233,9 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         description="Upcoming deadlines, completion at a glance, and what's coming up — distilled."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {isSubteamScope ? (
+              <PrimaryOnlyToggle value={primaryOnly} onChange={setPrimaryOnly} />
+            ) : null}
             {allTeams && isAdmin ? (
               <button
                 type="button"

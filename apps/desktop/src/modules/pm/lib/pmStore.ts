@@ -1897,15 +1897,25 @@ export function scopeTasksToSubteam(
   tasks: ReadonlyArray<TaskRow>,
   dependencies: ReadonlyArray<TaskDependency>,
   subteamId: string,
+  primaryOnly = false,
 ): ScopedTask[] {
   // A task is "owned" by a subteam if that subteam is ANY of its memberships,
   // not just the primary. A multi-subteam task therefore appears as owned in
   // EVERY member team's scoped view. Falls back to the primary subteam_id for
   // tasks that somehow carry no membership list.
+  //
+  // primaryOnly tightens this to the PRIMARY subteam only (the "primary subteam"
+  // view preference): a task is owned by exactly one team — the one in
+  // task.subteam_id — so a subteam stops seeing tasks where it's merely a
+  // secondary contributor. Those tasks aren't dropped from the app; they just
+  // fall out of THIS subteam's "owned" set (and may still surface as a
+  // dependency bridge below if they connect to the team's work).
   const isMember = (t: TaskRow): boolean =>
-    (t.subteams ?? []).length > 0
-      ? t.subteams.some((s) => s.id === subteamId)
-      : t.subteam_id === subteamId;
+    primaryOnly
+      ? t.subteam_id === subteamId
+      : (t.subteams ?? []).length > 0
+        ? t.subteams.some((s) => s.id === subteamId)
+        : t.subteam_id === subteamId;
   const ownedIds = new Set(tasks.filter(isMember).map((t) => t.id));
 
   const out = new Map<string, ScopedTask>();

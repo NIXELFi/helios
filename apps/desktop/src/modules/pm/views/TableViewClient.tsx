@@ -36,6 +36,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
@@ -126,6 +127,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [subsystemFilter, setSubsystemFilter] = useState<string | null>(null);
 
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
+
   // Compute visible tasks. For global view, every task. For subteam view,
   // owned tasks + external tasks linked by a dependency edge.
   const scopedRows = useMemo(() => {
@@ -136,8 +139,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         bridgeTaskIds: [] as string[],
       }));
     }
-    return scopeTasksToSubteam(tasks, deps, currentTeam.id);
-  }, [tasks, deps, currentTeam]);
+    return scopeTasksToSubteam(tasks, deps, currentTeam.id, primaryOnly);
+  }, [tasks, deps, currentTeam, primaryOnly]);
 
   const relationByTaskId = useMemo(() => {
     const m = new Map<string, CrossTeamRelation>();
@@ -385,6 +388,8 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         users={users}
         active={filtersActive}
         scopedToTeam={currentTeam !== null}
+        primaryOnly={primaryOnly}
+        onPrimaryOnlyChange={setPrimaryOnly}
         onPatch={patchFilters}
         onClear={() => updateUrl(EMPTY_FILTERS, sort)}
       />
