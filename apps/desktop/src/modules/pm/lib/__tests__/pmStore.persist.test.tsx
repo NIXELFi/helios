@@ -830,6 +830,17 @@ describe("scopeTasksToSubteam with multi-subteam tasks", () => {
     expect(owned(scopeTasksToSubteam([multi], [], "st2", true))).toBe(false);
   });
 
+  test("primaryOnly stays a strict subset on inconsistent membership data", () => {
+    // Malformed: subteam_id points at st1 but the membership list omits st1. The
+    // default rule (membership-list-first) hides it from st1; primaryOnly must NOT
+    // make it reappear — the primaryOnly set is always a subset of the default set.
+    const bad = makeTask("tb", { subteam_id: "st1", subteams: [SUBTEAM2] });
+    const owned = (scoped: ReturnType<typeof scopeTasksToSubteam>) =>
+      scoped.some((s) => s.task.id === "tb" && s.relation === "owned");
+    expect(owned(scopeTasksToSubteam([bad], [], "st1"))).toBe(false);
+    expect(owned(scopeTasksToSubteam([bad], [], "st1", true))).toBe(false);
+  });
+
   test("primaryOnly still surfaces a secondary task as a dependency bridge", () => {
     // st1 primarily owns t1; tm is primarily st3 but lists st1 as a secondary
     // contributor, and depends on t1. Under primaryOnly, tm is no longer "owned"

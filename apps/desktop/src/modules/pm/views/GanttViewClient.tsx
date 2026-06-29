@@ -362,6 +362,14 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         <ViewHeader
           title={currentTeam ? `${currentTeam.name} · Gantt` : "Gantt"}
           description="No dated tasks to chart in this scope."
+          // Keep the toggle reachable here too: with "Primary only" on, a subteam
+          // whose only dated tasks are secondary-membership ones lands on this
+          // empty state — without the toggle the user couldn't switch it back off.
+          actions={
+            currentTeam ? (
+              <PrimaryOnlyToggle value={primaryOnly} onChange={setPrimaryOnly} />
+            ) : undefined
+          }
         />
       </>
     );

@@ -37,6 +37,8 @@ import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { Select } from "@pm/components/ui/Select";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { ViewHeader } from "@pm/components/ViewHeader";
+import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import {
   GRAPH_LAYOUT_LABEL,
   GRAPH_LAYOUTS,
@@ -1170,6 +1172,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
   const removeDependency = usePmStore((s) => s.removeDependency);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
 
   const scopedRows = useMemo(() => {
     if (!currentTeam) {
@@ -1183,10 +1186,15 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
     // SUBTEAM_GRAPH_MAX_HOPS dependency hops. Tasks farther removed than that are
     // hidden so the graph stays focused on the subteam's immediate neighborhood.
     const teamId = currentTeam.id;
-    const isMember = (t: TaskRow) =>
+    // Mirrors scopeTasksToSubteam's ownership rule (incl. the "primary only"
+    // tightening as a strict subset) so the graph stays consistent with every
+    // other subteam-scoped view rather than always counting secondary memberships.
+    const isDefaultMember = (t: TaskRow) =>
       (t.subteams ?? []).length > 0
         ? t.subteams.some((s) => s.id === teamId)
         : t.subteam_id === teamId;
+    const isMember = (t: TaskRow) =>
+      primaryOnly ? isDefaultMember(t) && t.subteam_id === teamId : isDefaultMember(t);
     const ownedIds = new Set(tasks.filter(isMember).map((t) => t.id));
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const preds = new Map<string, string[]>();
@@ -1227,7 +1235,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
       if (t) out.push({ task: t, relation, bridgeTaskIds: [] });
     }
     return out;
-  }, [tasks, deps, currentTeam]);
+  }, [tasks, deps, currentTeam, primaryOnly]);
 
   const visibleTasks = useMemo(() => scopedRows.map((r) => r.task), [scopedRows]);
 
@@ -1608,6 +1616,9 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
         actions={
           // Wrap on narrow screens so the toolbar doesn't clip its right-edge buttons.
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+            {currentTeam ? (
+              <PrimaryOnlyToggle value={primaryOnly} onChange={setPrimaryOnly} />
+            ) : null}
             <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
               Layout
               <Select

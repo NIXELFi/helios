@@ -165,6 +165,11 @@ export function WhoHasWhatScreen() {
   const [checkingInId, setCheckingInId] = useState<string | null>(null);
   const [checkingInAll, setCheckingInAll] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<string | null>(null);
+  // Aborts the in-flight bulk check-in loop on unmount so it stops reading files
+  // and calling check-in RPCs (and never setState's) after the user navigates
+  // away — same guard convention as BulkActionBar's long-running loops.
+  const checkinAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => checkinAbortRef.current?.abort(), []);
 
   const fileById = useMemo(() => {
     const m = new Map<string, LockFileRow>();
@@ -346,15 +351,24 @@ export function WhoHasWhatScreen() {
     const grp = sourceGroups.find((g) => g.vaultId === activeVaultId);
     if (!grp) return [];
     return grp.rows.filter(
-      (r) => r.lock.user_id === me && r.file != null && !r.nameHidden && r.file.name !== "",
+      (r) =>
+        r.lock.user_id === me &&
+        r.file != null &&
+        !r.nameHidden &&
+        r.file.name !== "" &&
+        !r.file.deleted_at, // a soft-deleted (recycle-bin) file can't be checked in
     );
   }, [canCheckInActive, sourceGroups, activeVaultId, user]);
 
   /** Check in ONE of the current user's checkouts from its local working copy.
-   *  Returns the outcome so callers can total bulk results. */
-  async function checkInOne(row: LockRow): Promise<"ok" | "no-local" | "fail"> {
+   *  Re-reads the bytes from disk each call (so a locally-edited draft publishes
+   *  the EDITED content; an unchanged one hits the RPC's skip-unchanged path).
+   *  Returns the outcome + the real error so callers can surface/total it. */
+  async function checkInOne(
+    row: LockRow,
+  ): Promise<{ status: "ok" | "no-local" | "fail"; error?: Error | null }> {
     const file = row.file;
-    if (!file || !vaultRoot || folders == null) return "fail";
+    if (!file || !vaultRoot || folders == null) return { status: "fail" };
     const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
     let bytes: ArrayBuffer;
     try {
@@ -365,10 +379,12 @@ export function WhoHasWhatScreen() {
       ) as ArrayBuffer;
     } catch {
       // No local copy at the expected path — nothing we can hash/upload.
-      return "no-local";
+      return { status: "no-local" };
     }
     const ver = await checkIn.run(file.id, bytes, "Checked in from Checkouts");
-    if (!ver) return "fail";
+    // checkIn.error is stale within this closure (state lands next render), so read
+    // the synchronously-updated ref the hook exposes for the actual reason.
+    if (!ver) return { status: "fail", error: checkIn.errorRef.current };
     // Published + released now — re-protect the local copy read-only, matching
     // single-file / bulk check-in elsewhere so auto-sync doesn't read the
     // writable-but-unlocked copy as an unsaved edit and hold it back.
@@ -377,41 +393,53 @@ export function WhoHasWhatScreen() {
     if (activeVaultId) {
       void ledgerRecord(activeVaultId, vaultRelPathFor(file.folder_id, file.name, folders), ver.sha256);
     }
-    return "ok";
+    return { status: "ok" };
   }
 
   async function checkInRow(row: LockRow) {
+    // Single-flight: never run a per-row check-in while another (per-row or bulk)
+    // is in progress — they share one useCheckIn instance and the spinner state.
+    if (checkingInId !== null || checkingInAll) return;
     setCheckingInId(row.lock.file_id);
     setCheckinStatus(null);
     const r = await checkInOne(row);
     setCheckingInId(null);
-    if (r === "ok") {
+    if (r.status === "ok") {
       refetch();
       checkouts.refetch();
-    } else if (r === "no-local") {
+    } else if (r.status === "no-local") {
       setCheckinStatus(`Couldn't find a local copy of "${row.file?.name ?? "file"}" to check in.`);
     } else {
-      setCheckinStatus(checkIn.error?.message ?? "Check-in failed.");
+      setCheckinStatus(r.error?.message ?? "Check-in failed.");
     }
   }
 
   async function checkInAllMine() {
     const rows = myCheckinableRows;
-    if (rows.length === 0) return;
+    if (rows.length === 0 || checkingInId !== null || checkingInAll) return;
+    // Fresh abort scope; bail between iterations once the screen unmounts.
+    checkinAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    checkinAbortRef.current = ctrl;
+    const signal = ctrl.signal;
     setCheckingInAll(true);
     setCheckinStatus(null);
     let ok = 0, noLocal = 0, fail = 0;
+    let lastError: Error | null = null;
     for (const row of rows) {
+      if (signal.aborted) return;
       const r = await checkInOne(row);
-      if (r === "ok") ok++;
-      else if (r === "no-local") noLocal++;
-      else fail++;
+      if (signal.aborted) return;
+      if (r.status === "ok") ok++;
+      else if (r.status === "no-local") noLocal++;
+      else { fail++; lastError = r.error ?? lastError; }
     }
     const parts = [`Checked in ${ok}/${rows.length}`];
     const detail: string[] = [];
     if (fail) detail.push(`${fail} failed`);
     if (noLocal) detail.push(`${noLocal} with no local copy`);
     if (detail.length) parts.push(`(${detail.join(", ")})`);
+    if (fail && lastError) parts.push(`— ${lastError.message}`);
     setCheckinStatus(parts.join(" "));
     setCheckingInAll(false);
     refetch();
@@ -560,11 +588,13 @@ export function WhoHasWhatScreen() {
                         {showActions && (
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              {canCheckInGroup && lock.user_id === me && file && !nameHidden && file.name !== "" && (
+                              {canCheckInGroup && lock.user_id === me && file && !nameHidden && file.name !== "" && !file.deleted_at && (
                                 <button
                                   type="button"
                                   onClick={() => { void checkInRow({ lock, file, path, nameHidden, isDraft }); }}
-                                  disabled={checkingInId === lock.file_id || checkingInAll}
+                                  // Disable EVERY row's button while any check-in is in
+                                  // flight (single useCheckIn instance + shared spinner).
+                                  disabled={checkingInId !== null || checkingInAll}
                                   title="Check this file in — publishes it and releases your lock"
                                   className="rounded bg-[#66BB6A] px-2 py-0.5 text-xs text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
                                 >

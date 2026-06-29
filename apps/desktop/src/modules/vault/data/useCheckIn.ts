@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, Version } from "./types";
 import { gzipBytes } from "./compression";
@@ -41,6 +41,11 @@ export function useCheckIn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [result, setResult] = useState<Version | null>(null);
+  // Mirror of `error` that updates synchronously inside run(), so a caller that
+  // awaits run() and gets null can read the actual failure reason in the SAME
+  // tick — the `error` state only lands on the next render, which is stale inside
+  // the awaiting closure (e.g. a per-row check-in handler).
+  const errorRef = useRef<Error | null>(null);
 
   const run = useCallback(
     async (
@@ -50,6 +55,7 @@ export function useCheckIn() {
     ): Promise<Version | null> => {
       setLoading(true);
       setError(null);
+      errorRef.current = null;
       try {
         const sha = await sha256Hex(bytes);
         const path = `${sha.slice(0, 2)}/${sha}`;
@@ -103,6 +109,7 @@ export function useCheckIn() {
         return ver as Version;
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
+        errorRef.current = err;
         setError(err);
         return null;
       } finally {
@@ -112,5 +119,5 @@ export function useCheckIn() {
     [client],
   );
 
-  return { run, loading, error, result };
+  return { run, loading, error, result, errorRef };
 }

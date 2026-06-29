@@ -1903,19 +1903,20 @@ export function scopeTasksToSubteam(
   // not just the primary. A multi-subteam task therefore appears as owned in
   // EVERY member team's scoped view. Falls back to the primary subteam_id for
   // tasks that somehow carry no membership list.
-  //
-  // primaryOnly tightens this to the PRIMARY subteam only (the "primary subteam"
-  // view preference): a task is owned by exactly one team — the one in
-  // task.subteam_id — so a subteam stops seeing tasks where it's merely a
-  // secondary contributor. Those tasks aren't dropped from the app; they just
-  // fall out of THIS subteam's "owned" set (and may still surface as a
-  // dependency bridge below if they connect to the team's work).
+  const isDefaultMember = (t: TaskRow): boolean =>
+    (t.subteams ?? []).length > 0
+      ? t.subteams.some((s) => s.id === subteamId)
+      : t.subteam_id === subteamId;
+  // primaryOnly (the "primary subteam" view preference) tightens ownership to the
+  // PRIMARY subteam only — a subteam stops seeing tasks where it's merely a
+  // secondary contributor. It is a STRICT SUBSET of the default rule: we require
+  // isDefaultMember AND that the scope is the task's primary subteam. Anchoring on
+  // isDefaultMember (not subteam_id alone) means the primaryOnly set can never
+  // surface a task the default view hides — even when a task's membership list is
+  // inconsistent with its subteam_id. Dropped tasks aren't gone from the app; they
+  // may still appear as a dependency bridge below if they connect to the team.
   const isMember = (t: TaskRow): boolean =>
-    primaryOnly
-      ? t.subteam_id === subteamId
-      : (t.subteams ?? []).length > 0
-        ? t.subteams.some((s) => s.id === subteamId)
-        : t.subteam_id === subteamId;
+    primaryOnly ? isDefaultMember(t) && t.subteam_id === subteamId : isDefaultMember(t);
   const ownedIds = new Set(tasks.filter(isMember).map((t) => t.id));
 
   const out = new Map<string, ScopedTask>();
