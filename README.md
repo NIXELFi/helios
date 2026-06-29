@@ -2,13 +2,13 @@
 
 **Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, and 1D engine simulation — in one signed, auto-updating binary.
 
-> **Status:** `v4.3.2` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
+> **Status:** `v4.5.5` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
 
 Five modules ship today:
 
 - **Telemetry** — MoTeC-style CSV log analysis: multi-session overlay, math channels, GPS basemaps, custom widget workspaces (details below).
 - **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
-- **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles.
+- **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles, a "primary subteam" view filter (hide tasks your subteam only contributes to), and Slack notifications that surface the task owner and subteam lead on every change.
 - **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, calibrated against the team's real dynos) with parameter sweeps, FSAE-points optimization, and print-to-PDF engineering reports — plus a measurement-driven lap simulator: Pacejka `.tir` tire fits, CFD aero maps, and roll-stiffness data load from a team-data folder; grip is pinned by real skidpad/autocross/accel results; fuel burn comes from a solver-derived variable-throttle model (no fudge constants); and a playback "lap player" with a supersport dash, per-axle balance readout, residency histograms, and a filterable channel analyzer.
 - **Games** — arcade lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards.
 
@@ -16,7 +16,7 @@ Five modules ship today:
 
 A self-hosted SolidWorks PDM Standard alternative — check-out/check-in with real file locking, built on Supabase (Postgres + RLS + content-addressed storage) so a student team can run it for free:
 
-- **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker, flipped even while the file is open in SolidWorks).
+- **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker, flipped even while the file is open in SolidWorks). Check your own files in individually or all at once straight from the Checkouts screen, without hunting them down in the tree.
 - **Versioning** — immutable, content-addressed (sha256) version history with comments, revisions, and per-version SolidWorks data cards (custom properties parsed natively from the CAD file at check-in).
 - **Assembly references** — Contains / Where-Used panels parsed from `.sldasm`/`.sldprt` at check-in; unresolved references are surfaced.
 - **Multi-vault + per-vault roles** — owner/admin/editor/viewer, grantable globally or per vault, enforced by row-level security (cross-vault reads and writes are isolated at the database).
