@@ -28,7 +28,15 @@ export class PluginLoadError extends Error {}
  *  authority form (`plugin://<id>` vs the Windows `plugin.localhost` shape) is
  *  normalized by the protocol handler and finalized during that live verify. */
 export function installedBaseUrl(pluginId: string): string {
-  return `plugin://${pluginId}`;
+  // Tauri v2 surfaces a registered custom scheme differently per platform: Windows
+  // WebView2 rewrites `plugin://` to `http://plugin.localhost/<path>` (id in the
+  // PATH), while macOS/Linux serve `plugin://<id>/` (id as the AUTHORITY). The Rust
+  // handler (plugin_host::uri::parse_request) accepts BOTH shapes — we just have to
+  // emit whichever the current webview will actually route, or the raw `plugin://`
+  // is an unknown scheme on Windows and fetch fails with "Failed to fetch".
+  const isWindows =
+    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+  return isWindows ? `http://plugin.localhost/${pluginId}` : `plugin://${pluginId}`;
 }
 
 function trimSlash(s: string): string {

@@ -32,6 +32,9 @@ create or replace function marketplace.review_plugin_version(
 )
 language plpgsql volatile security definer
 set search_path = marketplace, pm, public as $$
+-- See install_plugin: the RETURNS TABLE OUT columns shadow same-named table columns.
+-- Resolve bare identifiers to columns (every variable is read via a qualified name).
+#variable_conflict use_column
 declare
   v_uid     uuid := auth.uid();
   v_subteam uuid;

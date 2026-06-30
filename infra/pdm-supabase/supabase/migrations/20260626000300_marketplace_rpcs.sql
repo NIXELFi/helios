@@ -66,6 +66,9 @@ create or replace function marketplace.publish_plugin_version(
 )
 language plpgsql volatile security definer
 set search_path = marketplace, pm, public as $$
+-- See install_plugin: the RETURNS TABLE OUT columns shadow same-named table columns.
+-- Resolve bare identifiers to columns (every variable is read via a qualified name).
+#variable_conflict use_column
 declare
   v_uid     uuid := auth.uid();
   v_id      text := p_manifest->>'id';
@@ -177,6 +180,11 @@ returns table (
 )
 language plpgsql volatile security definer
 set search_path = marketplace, public as $$
+-- The RETURNS TABLE OUT columns (plugin_id, version, …) are in-scope variables that
+-- collide with the same-named table columns below (notably plugin_id in the INSERT's
+-- ON CONFLICT target) → "column reference is ambiguous". Resolve bare names to
+-- columns; every variable we actually read is accessed via a qualified name.
+#variable_conflict use_column
 declare
   v_uid uuid := auth.uid();
   v_row marketplace.plugin_versions%rowtype;

@@ -65,11 +65,20 @@ pub fn handle(ctx: UriSchemeContext<'_, Wry>, request: Request<Vec<u8>>) -> Resp
             // Belt-and-suspenders: never let the webview MIME-sniff plugin bytes
             // into something executable we didn't label.
             .header("X-Content-Type-Options", "nosniff")
+            // The loader fetches the manifest + entry from the APP webview, which is a
+            // different origin than this scheme (tauri.localhost / localhost:1420 ->
+            // plugin.localhost), so the cross-origin read needs ACAO. These are the
+            // plugin's own local bundle files (no secrets); the real isolation is the
+            // sandboxed srcdoc iframe, so `*` is safe here.
+            .header("Access-Control-Allow-Origin", "*")
             .body(body)
             .expect("static response builder never fails"),
         Err(status) => Response::builder()
             .status(status)
             .header("Content-Security-Policy", PLUGIN_CSP)
+            // Same cross-origin read path as the 200 case — without ACAO the loader
+            // sees even a clean 404/403 as an opaque "Failed to fetch".
+            .header("Access-Control-Allow-Origin", "*")
             .body(Vec::new())
             .expect("static response builder never fails"),
     }
