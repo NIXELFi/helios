@@ -1,6 +1,6 @@
 {
   "name": "helios",
-  "version": "4.5.4",
+  "version": "4.5.5",
   "private": true,
   "packageManager": "pnpm@9.0.0",
   "scripts": {

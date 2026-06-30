@@ -5,6 +5,7 @@ import { STATUS_DOT, STATUS_LABEL, TASK_STATUSES, TASK_TYPES } from "@helios/pm-
 import { IconEye, IconEyeOff, IconX } from "@tabler/icons-react";
 import type { TaskFilters } from "@pm/lib/filters";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
+import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
 
 const STATUS_FILTER_OPTIONS: SelectOption<string>[] = [
   { value: "", label: "All" },
@@ -22,6 +23,8 @@ export function TaskFilterBar({
   active,
   scopedToTeam,
   hideTypes = false,
+  primaryOnly,
+  onPrimaryOnlyChange,
   onPatch,
   onClear,
 }: {
@@ -31,6 +34,10 @@ export function TaskFilterBar({
   active: boolean;
   scopedToTeam: boolean;
   hideTypes?: boolean;
+  /** Current "primary subteam only" pref. When provided alongside
+   *  onPrimaryOnlyChange and a subteam scope is active, the bar shows the toggle. */
+  primaryOnly?: boolean;
+  onPrimaryOnlyChange?: (value: boolean) => void;
   onPatch: (patch: Partial<TaskFilters>) => void;
   onClear: () => void;
 }) {
@@ -123,6 +130,14 @@ export function TaskFilterBar({
 
       {/* Scope filters: subteams + types + mode */}
       <div className="flex flex-col gap-2">
+        {/* Inside a single subteam the subteam chips are meaningless (you're
+            already scoped to one), so that row is replaced by the "primary only"
+            toggle, which curates THIS subteam's own task list. */}
+        {scopedToTeam && onPrimaryOnlyChange ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <PrimaryOnlyToggle value={primaryOnly ?? false} onChange={onPrimaryOnlyChange} />
+          </div>
+        ) : null}
         {!scopedToTeam ? (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[10px] font-medium uppercase tracking-widest text-helios-dim">

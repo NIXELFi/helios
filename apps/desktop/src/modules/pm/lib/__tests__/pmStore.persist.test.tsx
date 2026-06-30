@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { SupabaseClient } from "@helios/auth";
-import type { CalendarEvent, Subteam, TaskRow } from "@helios/pm-ui";
+import type { CalendarEvent, Subteam, TaskDependency, TaskRow } from "@helios/pm-ui";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { scopeTasksToSubteam, selectCanEditTask, usePmStore } from "../pmStore";
 
@@ -812,6 +812,49 @@ describe("scopeTasksToSubteam with multi-subteam tasks", () => {
     const solo = makeTask("ts", { subteam_id: "st1", subteams: [SUBTEAM] });
     expect(scopeTasksToSubteam([solo], [], "st1").some((s) => s.relation === "owned")).toBe(true);
     expect(scopeTasksToSubteam([solo], [], "st2").some((s) => s.relation === "owned")).toBe(false);
+  });
+
+  // "Primary only" view preference: a subteam should stop seeing tasks where it
+  // is merely a secondary contributor.
+  test("primaryOnly drops tasks where the subteam is only a secondary contributor", () => {
+    const multi = makeTask("tm", { subteam_id: "st1", subteams: [SUBTEAM, SUBTEAM2] });
+    const owned = (scoped: ReturnType<typeof scopeTasksToSubteam>) =>
+      scoped.some((s) => s.task.id === "tm" && s.relation === "owned");
+
+    // Default (every membership counts): owned in both teams.
+    expect(owned(scopeTasksToSubteam([multi], [], "st1"))).toBe(true);
+    expect(owned(scopeTasksToSubteam([multi], [], "st2"))).toBe(true);
+
+    // primaryOnly: owned only in the PRIMARY team (st1), not the secondary (st2).
+    expect(owned(scopeTasksToSubteam([multi], [], "st1", true))).toBe(true);
+    expect(owned(scopeTasksToSubteam([multi], [], "st2", true))).toBe(false);
+  });
+
+  test("primaryOnly stays a strict subset on inconsistent membership data", () => {
+    // Malformed: subteam_id points at st1 but the membership list omits st1. The
+    // default rule (membership-list-first) hides it from st1; primaryOnly must NOT
+    // make it reappear — the primaryOnly set is always a subset of the default set.
+    const bad = makeTask("tb", { subteam_id: "st1", subteams: [SUBTEAM2] });
+    const owned = (scoped: ReturnType<typeof scopeTasksToSubteam>) =>
+      scoped.some((s) => s.task.id === "tb" && s.relation === "owned");
+    expect(owned(scopeTasksToSubteam([bad], [], "st1"))).toBe(false);
+    expect(owned(scopeTasksToSubteam([bad], [], "st1", true))).toBe(false);
+  });
+
+  test("primaryOnly still surfaces a secondary task as a dependency bridge", () => {
+    // st1 primarily owns t1; tm is primarily st3 but lists st1 as a secondary
+    // contributor, and depends on t1. Under primaryOnly, tm is no longer "owned"
+    // by st1, but the t1 -> tm edge should still bridge it in as a dependent.
+    const t1 = makeTask("t1", { subteam_id: "st1", subteams: [SUBTEAM] });
+    const tm = makeTask("tm", {
+      subteam_id: "st3",
+      subteams: [{ ...SUBTEAM, id: "st3", slug: "st3" }, SUBTEAM],
+    });
+    const deps = [{ predecessor_id: "t1", successor_id: "tm" } as TaskDependency];
+
+    const scoped = scopeTasksToSubteam([t1, tm], deps, "st1", true);
+    const row = scoped.find((s) => s.task.id === "tm");
+    expect(row?.relation).toBe("dependent_on_team");
   });
 });
 

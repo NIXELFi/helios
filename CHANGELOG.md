@@ -42,6 +42,33 @@ follow [semver](https://semver.org/).
   (runtime + format + SDK); the marketplace backend, browse/install UI, and review
   pipeline land in later sub-projects.
 
+## [4.5.5] - 2026-06-29
+
+### Added
+
+- **PM — "Primary only" view toggle**: in any subteam-scoped view (dashboard,
+  table, board, calendar, gantt) a new "Primary only" toggle hides tasks where
+  the subteam is merely a secondary contributor, leaving just the tasks it
+  primarily owns. Off by default and remembered per user, so it never changes
+  what teammates see. (Tasks dropped from the owned list still surface as a
+  dependency bridge when they connect to the team's work.)
+- **Vault — check in from the Checkouts screen**: each of your own checkouts now
+  has a "Check in" action on the Checkouts ("Who has what") screen, plus a
+  "Check in all mine" button that checks in every file you have checked out in
+  the active vault at once — no more hunting each file down folder-by-folder in
+  the Browse tree. Freshly-uploaded drafts are published as-is; files you edited
+  locally land a new version. (Acts on the active vault, where your local working
+  copies live.)
+
+### Changed
+
+- **PM Slack notifications restructured for readability**: each notice now leads
+  with who did what and lists field changes one per line (friendly status labels,
+  `old → new`), and includes the task **owner and its subteam lead** as recipients
+  so leads are notified of changes regardless of who owns the task. (Owner and lead
+  are sent to the Slack workflow as user emails — via a new `lead` variable — so the
+  workflow can either ping them or show their name.)
+
 ## [4.5.4] - 2026-06-24
 
 ### Added

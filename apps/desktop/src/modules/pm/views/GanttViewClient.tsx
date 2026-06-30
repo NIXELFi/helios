@@ -34,6 +34,8 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
+import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { GanttLegend } from "@pm/components/GanttLegend";
 import { MilestoneDialog } from "@pm/components/MilestoneDialog";
@@ -200,6 +202,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   const isAdmin = usePmStore(selectIsAdmin);
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
 
   const scopedRows = useMemo(() => {
     if (!currentTeam) {
@@ -209,8 +212,8 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         bridgeTaskIds: [] as string[],
       }));
     }
-    return scopeTasksToSubteam(tasks, deps, currentTeam.id);
-  }, [tasks, deps, currentTeam]);
+    return scopeTasksToSubteam(tasks, deps, currentTeam.id, primaryOnly);
+  }, [tasks, deps, currentTeam, primaryOnly]);
 
   const relationByTaskId = useMemo(() => {
     const m = new Map<string, CrossTeamRelation>();
@@ -359,6 +362,14 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         <ViewHeader
           title={currentTeam ? `${currentTeam.name} · Gantt` : "Gantt"}
           description="No dated tasks to chart in this scope."
+          // Keep the toggle reachable here too: with "Primary only" on, a subteam
+          // whose only dated tasks are secondary-membership ones lands on this
+          // empty state — without the toggle the user couldn't switch it back off.
+          actions={
+            currentTeam ? (
+              <PrimaryOnlyToggle value={primaryOnly} onChange={setPrimaryOnly} />
+            ) : undefined
+          }
         />
       </>
     );
@@ -436,6 +447,9 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
           // Wrap on narrow screens — this toolbar packs 8 controls, and a single
           // non-wrapping row clipped the "New task" button on smaller windows.
           <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+            {currentTeam ? (
+              <PrimaryOnlyToggle value={primaryOnly} onChange={setPrimaryOnly} />
+            ) : null}
             <label className="inline-flex items-center gap-1.5 text-xs font-normal text-helios-dim">
               Sort
               <Select

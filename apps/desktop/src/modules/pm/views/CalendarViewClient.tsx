@@ -52,6 +52,7 @@ import { EventDialog } from "@pm/components/EventDialog";
 import { MilestoneDialog } from "@pm/components/MilestoneDialog";
 import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
 import {
@@ -198,6 +199,8 @@ export function CalendarViewClient({
 
   const currentTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
+
   // --- Scope to team (owned + cross-team) ------------------------------------
   const scopedRows = useMemo(() => {
     if (!currentTeam) {
@@ -207,8 +210,8 @@ export function CalendarViewClient({
         bridgeTaskIds: [] as string[],
       }));
     }
-    return scopeTasksToSubteam(tasks, deps, currentTeam.id);
-  }, [tasks, deps, currentTeam]);
+    return scopeTasksToSubteam(tasks, deps, currentTeam.id, primaryOnly);
+  }, [tasks, deps, currentTeam, primaryOnly]);
 
   const relationByTaskId = useMemo(() => {
     const m = new Map<string, CrossTeamRelation>();
@@ -634,6 +637,8 @@ export function CalendarViewClient({
         active={filtersActive}
         scopedToTeam={currentTeam !== null}
         hideTypes={manufacturingOnly}
+        primaryOnly={primaryOnly}
+        onPrimaryOnlyChange={setPrimaryOnly}
         onPatch={(patch) => setFilters((f) => ({ ...f, ...patch }))}
         onClear={() => setFilters(EMPTY_FILTERS)}
       />

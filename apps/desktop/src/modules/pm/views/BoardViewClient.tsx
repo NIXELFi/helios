@@ -29,6 +29,7 @@ import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import {
@@ -97,6 +98,8 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
 
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
+
   const scopedRows = useMemo(() => {
     if (!currentTeam) {
       return tasks.map((task) => ({
@@ -105,8 +108,8 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         bridgeTaskIds: [] as string[],
       }));
     }
-    return scopeTasksToSubteam(tasks, deps, currentTeam.id);
-  }, [tasks, deps, currentTeam]);
+    return scopeTasksToSubteam(tasks, deps, currentTeam.id, primaryOnly);
+  }, [tasks, deps, currentTeam, primaryOnly]);
 
   const relationByTaskId = useMemo(() => {
     const m = new Map<string, CrossTeamRelation>();
@@ -222,6 +225,8 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         users={users}
         active={filtersActive}
         scopedToTeam={currentTeam !== null}
+        primaryOnly={primaryOnly}
+        onPrimaryOnlyChange={setPrimaryOnly}
         onPatch={(patch) => updateUrl({ ...filters, ...patch })}
         onClear={() => updateUrl(EMPTY_FILTERS)}
       />
