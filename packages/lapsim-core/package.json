@@ -1,0 +1,16 @@
+{
+  "name": "@helios/lapsim-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "Pure-TS lap-time simulation physics (QSS solver + tire/aero/fuel/torque/vehicle/track models). No React, Tauri, or DB — shared by the CFD module and the standalone Lap Sim plugin.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}
