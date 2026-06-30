@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.5.6] - 2026-06-30
+
 ### Added
 
 - **Custom subteam icons**: a subteam's icon can now be set explicitly and persists
