@@ -25,7 +25,7 @@ import {
 } from "@tabler/icons-react";
 import { Link } from "@pm/lib/router";
 import { usePathname, useRouter } from "@pm/lib/router";
-import { AllTeamsIcon, SubteamIcon } from "@pm/components/SubteamIcon";
+import { AllTeamsIcon, SubteamIcon, type SubteamGlyph } from "@pm/components/SubteamIcon";
 import { ASU_GOLD } from "@pm/lib/subteamTheme";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -45,6 +45,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ProjectDialog } from "@pm/components/ProjectDialog";
 import { SubteamDialog } from "@pm/components/SubteamDialog";
+import { SubteamIconPicker } from "@pm/components/SubteamIconPicker";
 import { HiddenSubteamsMenu, type HiddenRow } from "@pm/components/HiddenSubteamsMenu";
 import { usePmStore, selectIsAdmin } from "@pm/lib/pmStore";
 import {
@@ -239,11 +240,15 @@ export function Sidebar() {
   const hiddenSubteams = usePmStore((s) => s.hiddenSubteams);
   const hideProjectSubteam = usePmStore((s) => s.hideProjectSubteam);
   const showProjectSubteam = usePmStore((s) => s.showProjectSubteam);
+  const setSubteamIcon = usePmStore((s) => s.setSubteamIcon);
   // The server-wide write affordance is gated on the NEW capability
   // pm.manage_project_subteams (org-scoped) — NOT the legacy team_memberships
   // `isAdmin`, which would lock out the Chief Engineer (mapped to 'lead').
-  const { can } = useMyCapabilities();
+  const { can, canAnywhere } = useMyCapabilities();
   const canManageSubteamDisplay = can("pm.manage_project_subteams");
+  // Icon editing is open to any lead/exec/owner regardless of their subteam, so
+  // it's an ANY-scope capability check (a subteam-scoped Lead grant counts).
+  const canSetIcon = canAnywhere("pm.set_subteam_icon");
 
   // Per-user overrides, reloaded whenever the active project changes.
   const [userVis, setUserVis] = useState<SubteamVisibility>(() => ({ hide: [], unhide: [] }));
@@ -325,6 +330,9 @@ export function Sidebar() {
 
   const [subteamDialogOpen, setSubteamDialogOpen] = useState(false);
   const [editingSubteam, setEditingSubteam] = useState<Subteam | null>(null);
+  // The subteam whose icon picker is open, plus the icon's on-screen rect so the
+  // popover can anchor to it.
+  const [iconPicker, setIconPicker] = useState<{ subteam: Subteam; rect: DOMRect } | null>(null);
 
   function openNewProject() {
     // Only admins can create a season (the create_project RPC is admin-gated);
@@ -627,13 +635,42 @@ export function Sidebar() {
                           : "text-helios-dim hover:bg-helios-base/60 hover:text-asu-gold")
                       }
                     >
-                      <SubteamIcon
-                        name={s.name}
-                        code={s.code}
-                        size={17}
-                        className="shrink-0"
-                        style={{ color: s.color ?? "#6B7280" }}
-                      />
+                      {canSetIcon ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            // Don't navigate the Link — open the icon picker instead.
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIconPicker({ subteam: s, rect: e.currentTarget.getBoundingClientRect() });
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setIconPicker({
+                                subteam: s,
+                                rect: e.currentTarget.getBoundingClientRect(),
+                              });
+                            }
+                          }}
+                          aria-label={`Change ${s.name} icon`}
+                          title="Change icon"
+                          className="shrink-0 cursor-pointer rounded transition-opacity hover:opacity-70"
+                          style={{ color: s.color ?? "#6B7280" }}
+                        >
+                          <SubteamIcon glyph={s.icon} name={s.name} code={s.code} size={17} />
+                        </span>
+                      ) : (
+                        <SubteamIcon
+                          glyph={s.icon}
+                          name={s.name}
+                          code={s.code}
+                          size={17}
+                          className="shrink-0"
+                          style={{ color: s.color ?? "#6B7280" }}
+                        />
+                      )}
                       <span className="truncate">{s.name}</span>
                     </Link>
                     <span className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">
@@ -768,6 +805,17 @@ export function Sidebar() {
             addSubteam(subteam);
           }
         }}
+      />
+
+      <SubteamIconPicker
+        open={iconPicker !== null}
+        anchorRect={iconPicker?.rect ?? null}
+        current={(iconPicker?.subteam.icon ?? null) as SubteamGlyph | null}
+        color={iconPicker?.subteam.color ?? "#6B7280"}
+        onPick={(glyph) => {
+          if (iconPicker) setSubteamIcon(iconPicker.subteam.id, glyph);
+        }}
+        onClose={() => setIconPicker(null)}
       />
     </aside>
   );

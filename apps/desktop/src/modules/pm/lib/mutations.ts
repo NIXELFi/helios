@@ -393,6 +393,22 @@ export async function removeSubteam(client: SupabaseClient, id: string): Promise
   );
 }
 
+// Set (or clear) a subteam's display icon. Unlike the name/code/color edits above
+// (admin-RLS direct table writes), the icon is editable by any lead/exec/owner
+// via this SECURITY DEFINER RPC, which re-checks the `pm.set_subteam_icon`
+// capability held in ANY scope. `icon = null` clears the override so the subteam
+// reverts to its auto-derived glyph.
+export async function setSubteamIcon(
+  client: SupabaseClient,
+  id: string,
+  icon: string | null,
+): Promise<void> {
+  check(
+    await pm(client).rpc("set_subteam_icon", { p_id: id, p_icon: icon }),
+    "change this subteam's icon",
+  );
+}
+
 // --- Per-project subteam DISPLAY hides (sidebar nav list only) ---------------
 // `pm.project_hidden_subteams` is RLS-locked for direct writes; the only write
 // path is these SECURITY DEFINER RPCs, which re-check the org-scoped capability

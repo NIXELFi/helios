@@ -69,11 +69,20 @@ export function useMyCapabilities() {
     [caps],
   );
 
+  // True if the user holds `cap` in ANY scope (org OR any subteam). The check for
+  // org-wide actions that subteam-scoped roles (e.g. Lead) may also perform
+  // regardless of which subteam they belong to — `can()` without a target subteam
+  // id only honors org-scoped grants and would miss a subteam-scoped Lead.
+  const canAnywhere = useCallback(
+    (cap: string) => caps.some((c) => c.capability_key === cap),
+    [caps],
+  );
+
   // Re-run my_capabilities so newly-granted/revoked/edited permissions take
   // effect immediately instead of staying stale until a full reload.
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 
-  return { caps, can, loading, error, refetch };
+  return { caps, can, canAnywhere, loading, error, refetch };
 }
 
 /** Every account + their roles (admin-gated server-side; raises for others). */
@@ -112,6 +121,7 @@ export interface Subteam {
   name: string;
   code: string;
   color: string | null;
+  icon?: string | null;
 }
 export interface Project {
   id: string;
@@ -159,7 +169,7 @@ export function useSubteams() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: rows } = await client.schema("pm").from("subteams").select("id,name,code,color").order("name");
+      const { data: rows } = await client.schema("pm").from("subteams").select("id,name,code,color,icon").order("name");
       if (mounted) setData((rows as Subteam[]) ?? []);
     })();
     return () => {

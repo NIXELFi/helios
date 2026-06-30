@@ -27,6 +27,16 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Custom subteam icons**: a subteam's icon can now be set explicitly and persists
+  for everyone, instead of only being auto-derived from its name/code. Leads,
+  Executives, and Owners click a subteam's icon in the PM sidebar to pick from the
+  built-in glyph bank (now expanded with tires, battery/accumulator, electrical,
+  cooling, fuel, turbo/intake, exhaust, and manufacturing marks), or reset it back
+  to automatic. The ability isn't tied to which subteam you belong to — any
+  lead/exec/owner can set any subteam's icon. Picks inherit the subteam color.
+
 ## [4.5.5] - 2026-06-29
 
 ### Added

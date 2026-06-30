@@ -134,6 +134,9 @@ export const subteam = z.object({
   code: z.string(),
   slug: z.string(), // URL-friendly identifier, e.g. "aero-design"
   color: z.string().nullable(),
+  // Stored display-icon override (a SubteamGlyph key). null/absent = the icon is
+  // auto-derived from name/code. Set via the pm.set_subteam_icon RPC.
+  icon: z.string().nullable().optional(),
 });
 export type Subteam = z.infer<typeof subteam>;
 

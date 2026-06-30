@@ -71,7 +71,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     rolesR,
   ] = await Promise.all([
     sb.from("projects").select("id,name,description,car_code").order("car_code"),
-    sb.from("subteams").select("id,name,code,slug,color").order("sort_order"),
+    sb.from("subteams").select("id,name,code,slug,color,icon").order("sort_order"),
     sb
       .from("subsystems")
       .select("id,subteam_id,parent_subsystem_id,name,code,color")
@@ -84,9 +84,9 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
           // Pin the PRIMARY subteam embed to the direct tasks.subteam_id FK.
           // task_subteams adds a SECOND tasks->subteams path, so an unqualified
           // `subteams` embed is ambiguous ("more than one relationship found").
-          "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color)," +
+          "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color,icon)," +
           "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
-          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color))," +
+          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color,icon))," +
           // Owner ids only (auth.users can't be embedded cross-schema); the User
           // objects are resolved client-side from the directory, like owner.
           "task_owners(owner_id,is_primary)",

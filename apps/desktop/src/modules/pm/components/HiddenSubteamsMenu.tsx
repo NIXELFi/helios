@@ -70,6 +70,7 @@ export function HiddenSubteamsMenu({
                 <SubteamIcon
                   name={row.subteam.name}
                   code={row.subteam.code}
+                  glyph={row.subteam.icon}
                   size={17}
                   className="shrink-0 opacity-60"
                   style={{ color: row.subteam.color ?? "#6B7280" }}

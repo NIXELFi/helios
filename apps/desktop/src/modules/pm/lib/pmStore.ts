@@ -405,6 +405,10 @@ interface PmState {
   // Non-destructive: sole-membership tasks are REASSIGNED to `fallbackId`
   // instead of being deleted. The caller (Sidebar) must pass a fallback subteam.
   deleteSubteam: (id: string, fallbackId: string) => void;
+  // Set (or clear with null) a subteam's display icon. Persisted server-wide via
+  // the capability-gated `pm.set_subteam_icon` RPC (any lead/exec/owner); null
+  // reverts to the auto-derived glyph.
+  setSubteamIcon: (id: string, icon: string | null) => void;
 
   // DISPLAY-ONLY server-wide subteam hide/show for the ACTIVE project's sidebar
   // nav list. Gated server-side by `pm.manage_project_subteams` (the RPC re-checks
@@ -935,6 +939,29 @@ export const usePmStore = create<PmState>((set, get) => {
         };
       });
       persist((c) => db.patchSubteam(c, id, patch), () => set(snap));
+    },
+
+    setSubteamIcon: (id, icon) => {
+      const current = get().subteams.find((x) => x.id === id);
+      if (!current) return;
+      const snap = { subteams: get().subteams, tasks: get().tasks, activity: get().activity };
+      set((s) => {
+        const next: Subteam = { ...current, icon };
+        return {
+          subteams: s.subteams.map((x) => (x.id === id ? next : x)),
+          // Tasks embed a copy of their subteam — re-embed the updated record.
+          tasks: s.tasks.map((t) => (t.subteam_id === id ? { ...t, subteam: next } : t)),
+          activity: logActivity(s, {
+            action: "updated",
+            target_type: "subteam",
+            target_id: id,
+            target_name: next.name,
+            subteam_ids: [id],
+            payload: { icon },
+          }),
+        };
+      });
+      persist((c) => db.setSubteamIcon(c, id, icon), () => set(snap));
     },
 
     deleteSubteam: (id, fallbackId) => {
