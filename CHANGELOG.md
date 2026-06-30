@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-06-30
+
 ### Added
 
 - **Marketplace (v5 plugin platform) — BETA, not ready for use**: a new Marketplace
