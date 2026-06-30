@@ -31,7 +31,9 @@ describe("InstalledView", () => {
   it("shows an Update affordance only when a newer version is approved", () => {
     renderInstalled([makePlugin({ installedVersion: "1.0.0", version: "1.1.0" })]);
     expect(screen.getByRole("button", { name: /update/i })).toBeTruthy();
-    expect(screen.getByText(/v1\.1\.0 available/i)).toBeTruthy();
+    // The available version is set in mono (its own span), so match the parts.
+    expect(screen.getByText("v1.1.0")).toBeTruthy();
+    expect(screen.getByText(/available/i)).toBeTruthy();
   });
 
   it("has no Update affordance when up to date", () => {

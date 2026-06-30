@@ -4,7 +4,7 @@
 // this view stays pure and trivially testable with stubbed data.
 
 import { useMemo, useState } from "react";
-import { IconSearch, IconStarFilled } from "@tabler/icons-react";
+import { IconSearch, IconStarFilled, IconCheck } from "@tabler/icons-react";
 import type { AvailablePlugin } from "../data/useMarketplace";
 import { PermissionList } from "../components/PermissionList";
 import { hasUpdate } from "../lib/version";
@@ -133,37 +133,46 @@ function BrowseCard({
   const updatable = hasUpdate(plugin);
 
   return (
-    <div className="flex flex-col rounded-md border border-helios-line bg-helios-panel p-4">
+    <div className="group flex flex-col rounded-md border border-helios-line bg-helios-panel p-4 transition-colors hover:border-asu-gold/30">
       <button
         type="button"
         onClick={onOpenDetail}
-        className="text-left focus-visible:outline-none"
+        className="rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
         aria-label={`Details for ${plugin.name}`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
             {plugin.isRecommended && (
-              <IconStarFilled size={12} className="shrink-0 text-asu-gold" aria-label="Recommended" />
+              <IconStarFilled
+                size={12}
+                className="shrink-0 text-asu-gold"
+                aria-label="Recommended"
+                title="Recommended by the subteam"
+              />
             )}
-            <span className="font-medium text-helios-text">{plugin.name}</span>
+            <span className="truncate font-medium text-helios-text transition-colors group-hover:text-asu-gold">
+              {plugin.name}
+            </span>
           </div>
-          <span className="shrink-0 text-[10px] text-helios-dim">v{plugin.version}</span>
+          <span className="shrink-0 font-mono text-[10px] text-helios-dim">v{plugin.version}</span>
         </div>
         {plugin.subteam && (
-          <div className="mt-0.5 text-[10px] uppercase tracking-wider text-helios-dim">
+          <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-helios-dim">
             {plugin.subteam}
           </div>
         )}
         {plugin.manifest.description && (
-          <p className="mt-2 line-clamp-2 text-xs text-helios-dim">{plugin.manifest.description}</p>
+          <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-helios-dim">
+            {plugin.manifest.description}
+          </p>
         )}
       </button>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <PermissionList permissions={plugin.permissions} mode="badge" />
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 flex items-center gap-2 border-t border-helios-line/50 pt-3.5">
         {!installed && (
           <button
             type="button"
@@ -175,13 +184,6 @@ function BrowseCard({
         )}
         {installed && (
           <>
-            <button
-              type="button"
-              onClick={onOpen}
-              className="rounded-sm border border-asu-gold/60 px-3 py-1.5 text-xs font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
-            >
-              Open
-            </button>
             {updatable && (
               <button
                 type="button"
@@ -191,7 +193,18 @@ function BrowseCard({
                 Update to v{plugin.version}
               </button>
             )}
-            {!updatable && <span className="text-[10px] text-helios-success">Installed</span>}
+            <button
+              type="button"
+              onClick={onOpen}
+              className="rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-text transition-colors hover:border-asu-gold/50 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >
+              Open
+            </button>
+            {!updatable && (
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-helios-success">
+                <IconCheck size={12} /> Installed
+              </span>
+            )}
           </>
         )}
       </div>

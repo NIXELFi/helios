@@ -47,7 +47,7 @@ export function PermissionList({
     }
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-sm bg-helios-line px-1.5 py-0.5 text-[10px] text-helios-dim"
+        className="inline-flex items-center gap-1 rounded-sm border border-helios-line bg-helios-line/40 px-1.5 py-0.5 text-[10px] text-helios-dim"
         title="Pure sandbox — UI + compute only, no access to anything outside the box."
       >
         <IconLock size={10} /> Sandboxed
@@ -100,12 +100,17 @@ export function PermissionList({
     <>
       {keys.map((p) => {
         const info = CAPABILITIES[p];
+        // Quiet, mono technical tags — they're capability identifiers, not actions.
+        // Tier-2 keeps a red treatment so the one that reaches outside the sandbox
+        // still stands out at a glance.
         const tone =
-          info.tier === 2 ? "bg-helios-danger/15 text-helios-danger" : "bg-asu-gold/15 text-asu-gold";
+          info.tier === 2
+            ? "border-helios-danger/40 bg-helios-danger/10 text-helios-danger"
+            : "border-helios-line bg-helios-line/40 text-helios-dim";
         return (
           <span
             key={p}
-            className={`rounded-sm px-1.5 py-0.5 text-[10px] ${tone}`}
+            className={`rounded-sm border px-1.5 py-0.5 font-mono text-[10px] leading-none ${tone}`}
             title={info.description}
           >
             {p}

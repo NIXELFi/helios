@@ -40,7 +40,7 @@ export function InstallConsentModal({
           <div>
             <h2 className="text-sm font-semibold text-helios-text">Install “{plugin.name}”</h2>
             <p className="mt-0.5 text-[11px] text-helios-dim">
-              Version {plugin.version}
+              Version <span className="font-mono">{plugin.version}</span>
               {plugin.subteam ? ` · ${plugin.subteam}` : ""}
             </p>
           </div>

@@ -49,28 +49,35 @@ export function InstalledView({
         return (
           <li
             key={p.id}
-            className="flex flex-wrap items-center gap-3 rounded-md border border-helios-line bg-helios-panel p-3"
+            className="group flex flex-wrap items-center gap-3 rounded-md border border-helios-line bg-helios-panel p-3 transition-colors hover:border-asu-gold/30"
           >
             <button
               type="button"
               onClick={() => onOpenDetail(p)}
-              className="min-w-0 flex-1 text-left focus-visible:outline-none"
+              className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
               aria-label={`Details for ${p.name}`}
             >
               <div className="flex items-center gap-1.5">
                 {p.isRecommended && (
                   <IconStarFilled size={11} className="shrink-0 text-asu-gold" aria-label="Recommended" />
                 )}
-                <span className="truncate font-medium text-helios-text">{p.name}</span>
+                <span className="truncate font-medium text-helios-text transition-colors group-hover:text-asu-gold">
+                  {p.name}
+                </span>
                 {p.subteam && (
-                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-helios-dim">
+                  <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-helios-dim">
                     · {p.subteam}
                   </span>
                 )}
               </div>
               <div className="mt-0.5 text-[11px] text-helios-dim">
-                Installed v{p.installedVersion}
-                {updatable && <span className="text-asu-gold"> · v{p.version} available</span>}
+                Installed <span className="font-mono">v{p.installedVersion}</span>
+                {updatable && (
+                  <span className="text-asu-gold">
+                    {" "}
+                    · <span className="font-mono">v{p.version}</span> available
+                  </span>
+                )}
               </div>
             </button>
 
@@ -89,7 +96,7 @@ export function InstalledView({
                 type="button"
                 onClick={() => onOpen(p)}
                 disabled={busy}
-                className="inline-flex items-center gap-1 rounded-sm border border-asu-gold/60 px-2.5 py-1.5 text-xs font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-sm border border-helios-line px-2.5 py-1.5 text-xs font-medium text-helios-text transition-colors hover:border-asu-gold/50 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
               >
                 <IconPlayerPlay size={13} /> Open
               </button>

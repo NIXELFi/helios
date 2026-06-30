@@ -60,7 +60,7 @@ export function PluginDetail({
             )}
           </div>
           <div className="shrink-0 text-right text-[11px] text-helios-dim">
-            <div>v{plugin.version}</div>
+            <div className="font-mono">v{plugin.version}</div>
             <div>Published {formatDate(plugin.publishedAt)}</div>
           </div>
         </div>
@@ -93,7 +93,7 @@ export function PluginDetail({
                 type="button"
                 onClick={() => onOpen(plugin)}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-sm border border-asu-gold/60 px-4 py-2 text-xs font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-sm border border-helios-line px-4 py-2 text-xs font-medium text-helios-text transition-colors hover:border-asu-gold/50 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
               >
                 <IconPlayerPlay size={14} /> Open
               </button>
