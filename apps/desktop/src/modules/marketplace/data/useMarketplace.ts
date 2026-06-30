@@ -12,10 +12,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSupabaseClient } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
+import { isMarketplaceDemo, demoList, demoSubscribe, demoInstall, demoUninstall } from "./demoStore";
 
 const SCHEMA = "marketplace";
 const BUNDLE_BUCKET = "plugins";
 const SIGNED_URL_TTL = 120; // seconds — only needs to outlive a single download
+
+// DEV-ONLY: when the demo flag is on, the hooks serve in-memory fixtures instead
+// of the (not-yet-deployed) marketplace backend. Evaluated once at load; OFF by
+// default so production behavior is unchanged. See demoStore.ts.
+const DEMO = isMarketplaceDemo();
 
 /** One discoverable plugin (newest approved version) + the caller's install state. */
 export interface AvailablePlugin {
@@ -94,6 +100,13 @@ export function useAvailablePlugins(): {
   const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
+    if (DEMO) {
+      const sync = () => setPlugins(demoList());
+      sync();
+      setLoading(false);
+      setError(null);
+      return demoSubscribe(sync);
+    }
     let active = true;
     setLoading(true);
     setError(null);
@@ -148,6 +161,10 @@ export function useInstall(): {
 
   const install = useCallback(
     async (plugin: Pick<AvailablePlugin, "id" | "version">) => {
+      if (DEMO) {
+        demoInstall(plugin.id, plugin.version);
+        return;
+      }
       setInstalling(true);
       setError(null);
       try {
@@ -211,6 +228,10 @@ export function useUninstall(): {
 
   const uninstall = useCallback(
     async (pluginId: string) => {
+      if (DEMO) {
+        demoUninstall(pluginId);
+        return;
+      }
       setRemoving(true);
       setError(null);
       try {

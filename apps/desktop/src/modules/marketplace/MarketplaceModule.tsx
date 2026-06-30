@@ -11,6 +11,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { IconArrowLeft, IconPuzzle, IconTerminal2 } from "@tabler/icons-react";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
+import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
 import { PluginHost } from "./runtime/PluginHost";
 import type { CallObservation } from "./runtime/broker";
@@ -31,6 +32,9 @@ interface ConsoleLine {
 }
 
 type Tab = "browse" | "installed";
+
+// DEV-ONLY preview flag (see data/demoStore.ts). OFF by default.
+const DEMO = isMarketplaceDemo();
 
 export function MarketplaceModule() {
   const { plugins, loading, error, refetch } = useAvailablePlugins();
@@ -80,10 +84,21 @@ export function MarketplaceModule() {
   );
 
   const handleOpen = useCallback(async (p: AvailablePlugin) => {
-    setBusyId(p.id);
     setLaunchError(null);
+    // DEV preview: only the bundled example has a real, openable bundle; the rest
+    // would need the verified-install runtime (gated on the 0.2 nav guard).
+    const baseUrl = DEMO ? demoLaunchUrl(p.id) : installedBaseUrl(p.id);
+    if (DEMO && !baseUrl) {
+      setLaunchError({
+        baseUrl: p.name,
+        message:
+          "Preview mode — launching runs the sandboxed add-on in the full runtime. Install + open “Spring Rate & Ride Frequency” to see a real sandbox.",
+      });
+      return;
+    }
+    setBusyId(p.id);
     try {
-      const loaded = await loadPlugin(installedBaseUrl(p.id));
+      const loaded = await loadPlugin(baseUrl as string);
       setLaunch(loaded);
     } catch (e) {
       setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) });
@@ -108,8 +123,7 @@ export function MarketplaceModule() {
             </span>
           </div>
           <p className="mt-1 text-xs text-helios-dim">
-            Subteam-built add-ons, sandboxed and run inside Helios. Browse, install the ones you
-            need, and open them fullscreen.
+            Subteam-built tools, sandboxed and run right inside Helios — install the ones you need.
           </p>
         </header>
 
