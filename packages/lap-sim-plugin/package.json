@@ -1,0 +1,27 @@
+{
+  "name": "@helios/lap-sim-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone sandboxed Lap Sim marketplace plugin — versioned independently of Helios.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@helios/lapsim-core": "workspace:*",
+    "@helios/plugin-sdk": "workspace:*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "uplot": "^1.6.30"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}

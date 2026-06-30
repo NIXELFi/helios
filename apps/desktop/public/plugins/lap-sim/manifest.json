@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "id": "vehicle-dynamics.lap-sim",
+  "name": "Lap Sim",
+  "version": "1.0.0",
+  "description": "FSAE quasi-steady-state lap-time simulator over the 2026 autocross & endurance tracks. Ships with a default engine sweep; import a dyno CSV or pull a sweep from CFD to drive your own.",
+  "subteam": "vehicle-dynamics",
+  "entry": "dist/index.html",
+  "sdk": "^1.0.0",
+  "permissions": ["file.write"]
+}
