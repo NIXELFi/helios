@@ -7,7 +7,6 @@ import {
   IconGauge,
   IconGitCompare,
   IconReportAnalytics,
-  IconSteeringWheel,
   IconTrash,
   type TablerIcon,
 } from "@tabler/icons-react";
@@ -26,7 +25,6 @@ export const DEFAULT_NAV_ENTRIES: NavEntry[] = [
   { id: "studies", label: "Studies", Icon: IconFlask },
   { id: "results", label: "Results", Icon: IconReportAnalytics },
   { id: "performance", label: "Performance", Icon: IconGauge },
-  { id: "lapsim", label: "Lap Sim", Icon: IconSteeringWheel },
   { id: "compare", label: "Compare", Icon: IconGitCompare },
 ];
 

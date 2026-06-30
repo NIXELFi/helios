@@ -451,7 +451,7 @@ export interface JobSummary {
 }
 
 // Active screen inside the module.
-export type NavId = "config" | "studies" | "results" | "performance" | "lapsim" | "compare";
+export type NavId = "config" | "studies" | "results" | "performance" | "compare";
 
 // ---- Capture artifacts (loaded on demand via cfd_load_capture) ----
 
