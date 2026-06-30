@@ -89,9 +89,15 @@ export function BrowseView({
 
       {loading && <p className="text-sm text-helios-dim">Loading add-ons…</p>}
 
+      {/* During the beta the plugin backend isn't deployed, so the catalog query
+          fails — show a calm "coming soon" rather than a raw backend error. */}
       {error && (
-        <div className="rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
-          Couldn’t load the marketplace: {error}
+        <div className="rounded-md border border-helios-line bg-helios-panel p-6 text-center">
+          <div className="text-sm text-helios-text">The plugin catalog is coming soon</div>
+          <p className="mx-auto mt-1 max-w-md text-xs text-helios-dim">
+            The Marketplace is an early beta. Subteam-built plugins will show up here once
+            publishing goes live — for now, explore the built-in apps above.
+          </p>
         </div>
       )}
 
