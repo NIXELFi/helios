@@ -20,16 +20,16 @@ const baseProps = {
 };
 
 describe("<ModulePicker>", () => {
-  it("renders Logs (active), Vault, and CFD entries without NEW badges", () => {
+  it("renders Logs (active) and Vault entries, no CFD entry, no NEW badges", () => {
     render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: /logs/i })).toBeInTheDocument();
     const vaultBtn = screen.getByRole("button", { name: /vault/i });
-    const cfdBtn = screen.getByRole("button", { name: /cfd/i });
     expect(vaultBtn).toBeInTheDocument();
-    expect(cfdBtn).toBeInTheDocument();
-    // The NEW badge was removed from Vault and CFD — they aren't new anymore.
+    // CFD moved into the Marketplace (as a Built-in app) — no longer a sidebar entry.
+    expect(screen.queryByRole("button", { name: /cfd/i })).not.toBeInTheDocument();
+    // The NEW badges were dropped from the rail (PM / Games / Admin).
     expect(vaultBtn).not.toHaveTextContent(/new/i);
-    expect(cfdBtn).not.toHaveTextContent(/new/i);
+    expect(screen.queryByText("NEW")).not.toBeInTheDocument();
   });
 
   it("highlights the active module via aria-current", () => {
