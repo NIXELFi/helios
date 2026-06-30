@@ -44,36 +44,6 @@ const SEEDS: Seed[] = [
     publishedAt: "2026-06-30T00:00:00Z",
   },
   {
-    id: "vd.tire-model-builder",
-    name: "Tire Model Builder",
-    subteam: "Vehicle Dynamics",
-    version: "1.0.0",
-    permissions: ["storage", "file.read", "file.write"],
-    recommended: false,
-    description: "Fit and publish Pacejka tire models for the Lap Sim and other tools to consume.",
-    publishedAt: "2026-06-20T00:00:00Z",
-  },
-  {
-    id: "aero.map-studio",
-    name: "Aero Map Studio",
-    subteam: "Aero",
-    version: "1.2.0",
-    permissions: ["storage", "file.write"],
-    recommended: true,
-    description: "Build and share aero maps (CL/CD vs ride height and yaw) as artifacts other plugins can read.",
-    publishedAt: "2026-06-18T00:00:00Z",
-  },
-  {
-    id: "pwt.engine-sweep",
-    name: "Engine Sweep Runner",
-    subteam: "Powertrain",
-    version: "2.1.0",
-    permissions: ["engine:matlab", "storage"],
-    recommended: false,
-    description: "Run engine torque/power sweeps through the curated MATLAB bridge and publish the result.",
-    publishedAt: "2026-06-26T00:00:00Z",
-  },
-  {
     id: "susp.spring-rate",
     name: "Spring Rate & Ride Frequency",
     subteam: "Suspension",
@@ -82,16 +52,6 @@ const SEEDS: Seed[] = [
     recommended: false,
     description: "Spring rate to ride-frequency calculator. The bundled example add-on — launches for real.",
     publishedAt: "2026-06-25T00:00:00Z",
-  },
-  {
-    id: "pwt.gear-ratio",
-    name: "Gear Ratio Calculator",
-    subteam: "Powertrain",
-    version: "1.3.0",
-    permissions: [],
-    recommended: false,
-    description: "Final-drive and gear-ratio sweep. Pure sandbox — no permissions at all.",
-    publishedAt: "2026-06-12T00:00:00Z",
   },
 ];
 
@@ -126,8 +86,6 @@ const PLUGINS = SEEDS.map(toPlugin);
 // has an update available (installed 0.9.0 < approved 1.0.0).
 const installed = new Map<string, string>([
   ["vehicle-dynamics.lap-sim", "1.0.0"],
-  ["vd.tire-model-builder", "0.9.0"],
-  ["aero.map-studio", "1.2.0"],
 ]);
 
 const listeners = new Set<() => void>();
