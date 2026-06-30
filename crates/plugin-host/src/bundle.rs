@@ -24,7 +24,7 @@ pub fn unpack_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
 
     let mut total: u64 = 0;
     for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let entry = zip.by_index(i).map_err(|e| e.to_string())?;
         if entry.is_dir() {
             continue; // directories are materialized via their files' parents
         }
@@ -35,16 +35,23 @@ pub fn unpack_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
         let out_path =
             path::resolve(dest, &name).ok_or_else(|| format!("unsafe zip entry path: {name}"))?;
 
-        total = total.saturating_add(entry.size());
-        if total > MAX_TOTAL_UNCOMPRESSED {
-            return Err("zip expands beyond the size ceiling".into());
-        }
-
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let mut buf = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        // Bound the DECOMPRESSED read by the remaining budget rather than trusting
+        // the zip header's declared `entry.size()` — a crafted entry can understate
+        // it and balloon memory past the ceiling. Read one byte past the budget so
+        // an over-budget entry is detected instead of silently truncated.
+        let remaining = MAX_TOTAL_UNCOMPRESSED.saturating_sub(total);
+        let mut buf = Vec::new();
+        entry
+            .take(remaining + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        if buf.len() as u64 > remaining {
+            return Err("zip expands beyond the size ceiling".into());
+        }
+        total += buf.len() as u64;
         fs::write(&out_path, &buf).map_err(|e| e.to_string())?;
     }
     Ok(())

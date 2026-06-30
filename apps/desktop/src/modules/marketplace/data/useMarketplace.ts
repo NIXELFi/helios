@@ -201,6 +201,10 @@ export function useInstall(): {
           signature: row.signature,
           sigAlg: row.sig_alg,
           publicKey: keyRow.public_key,
+          // H1: the approved/consented permission set (from install_plugin's
+          // manifest). The Rust side refuses to install a bundle whose own
+          // manifest.json declares any permission not in this set.
+          approvedPermissions: row.manifest.permissions ?? [],
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

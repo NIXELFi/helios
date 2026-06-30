@@ -27,6 +27,7 @@ pub async fn install_plugin_bundle(
     signature: String,
     sig_alg: String,
     public_key: String,
+    approved_permissions: Vec<String>,
 ) -> Result<(), String> {
     // Resolve (and validate) the cache target before any network work.
     let dest = cache::version_dir(&app, &plugin_id, &version)?;
@@ -89,6 +90,26 @@ pub async fn install_plugin_bundle(
     if manifest.get("id").and_then(|v| v.as_str()) != Some(plugin_id.as_str()) {
         let _ = std::fs::remove_dir_all(&plugin_root);
         return Err("manifest id does not match the installed plugin id".into());
+    }
+
+    // 5b. Permission binding (H1). The bundle's manifest.json is signed (via the
+    //     bundle sha256), but the permissions shown at consent + approved at review
+    //     come from the SEPARATELY-submitted DB manifest. Enforce that the signed
+    //     bundle cannot grant itself MORE than was consented/approved: every
+    //     permission it declares must be in the approved set, else the publisher's
+    //     bundle drifted from what was reviewed — refuse the install.
+    let bundle_perms = manifest
+        .get("permissions")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for p in &bundle_perms {
+        if !approved_permissions.iter().any(|a| a.as_str() == *p) {
+            let _ = std::fs::remove_dir_all(&plugin_root);
+            return Err(format!(
+                "bundle declares permission '{p}' that was not approved for this version"
+            ));
+        }
     }
 
     // 6. Register as the active version served at plugin://<id>/.

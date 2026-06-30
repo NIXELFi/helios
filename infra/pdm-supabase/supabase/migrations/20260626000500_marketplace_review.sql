@@ -56,6 +56,18 @@ begin
       coalesce(v_subteam::text, '<org>');
   end if;
 
+  -- Separation of duties (M3): a publisher cannot APPROVE their own submission --
+  -- approval is the gate that lets untrusted code reach members, so it needs an
+  -- independent second set of eyes. (Self-rejection / withdrawal stays allowed.)
+  if p_decision = 'approved'
+     and v_uid = (
+       select pv.published_by from marketplace.plugin_versions pv
+       where pv.plugin_id = p_plugin_id and pv.version = p_version
+     )
+  then
+    raise exception 'you cannot approve your own submission; it needs an independent reviewer';
+  end if;
+
   update marketplace.plugin_versions pv
     set review_status = p_decision,
         reviewed_by   = v_uid,

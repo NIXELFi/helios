@@ -149,6 +149,7 @@ describe("useInstall", () => {
       signature: "c2ln",
       sigAlg: "ed25519",
       publicKey: "cHVi",
+      approvedPermissions: [],
     });
   });
 
