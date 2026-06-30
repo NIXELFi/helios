@@ -44,22 +44,19 @@ alter table marketplace.signing_keys enable row level security;
 revoke all on marketplace.signing_keys from authenticated, anon;
 
 -- ---------------------------------------------------------------------------
--- 2. Generate the active keypair once (idempotent: skip if one already exists).
---    Each environment (local / prod) self-signs with its own key; the desktop
---    fetches the public key per-environment, so there is no hardcoded key const.
--- ---------------------------------------------------------------------------
-do $$
-declare
-  kp record;
-  fp text;
-begin
-  if not exists (select 1 from marketplace.signing_keys where active) then
-    select * into kp from pgsodium.crypto_sign_keypair();
-    fp := left(encode(digest(kp.public, 'sha256'), 'hex'), 16);
-    insert into marketplace.signing_keys (id, alg, public_key, secret_key, active)
-    values (fp, 'ed25519', kp.public, kp.secret, true);
-  end if;
-end $$;
+-- 2. Active keypair = SEEDED OUT-OF-BAND per environment.
+--    Supabase locks pgsodium's key-GENERATION functions (crypto_sign_keypair /
+--    crypto_sign_new_keypair are permission-denied), even though the SIGN op
+--    (pgsodium.crypto_sign_detached, used by sign_message below) works. So the
+--    active Ed25519 keypair is generated CLIENT-SIDE and inserted into
+--    signing_keys out-of-band — the secret is NEVER committed to this repo. See
+--    the deploy runbook. (v5.1 hardening: move the secret to external key custody
+--    / a CI signer; sign_message is the only thing that reads it.)
+--
+--    Seed command (run once per environment, secret kept out of source control):
+--      insert into marketplace.signing_keys (id, alg, public_key, secret_key, active)
+--      values (left('<sha256(pub) hex>',16), 'ed25519', '\x<pub32hex>'::bytea,
+--              '\x<secret64hex>'::bytea, true);
 
 -- ---------------------------------------------------------------------------
 -- 3. Canonical signing message (pure, signer-independent). The desktop MUST
@@ -98,7 +95,12 @@ begin
     raise exception 'marketplace: no active signing key';
   end if;
   return query select
-    encode(pgsodium.crypto_sign_detached(p_msg, k.secret_key), 'base64'),
+    -- Strip Postgres's 76-column base64 line-wrap: encode(...,'base64') inserts a
+    -- newline every 76 chars, but the desktop verifier (verify.rs) decodes with the
+    -- strict STANDARD base64 engine and only trims the ends — an embedded newline in
+    -- an 88-char signature would make EVERY signed bundle fail to install. Emit
+    -- single-line base64 so the detached signature round-trips.
+    replace(encode(pgsodium.crypto_sign_detached(p_msg, k.secret_key), 'base64'), E'\n', ''),
     'ed25519'::text,
     k.id;
 end $$;

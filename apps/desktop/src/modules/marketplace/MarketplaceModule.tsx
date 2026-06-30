@@ -20,6 +20,7 @@ import { InstalledView } from "./views/InstalledView";
 import { PluginDetail } from "./views/PluginDetail";
 import { InstallConsentModal } from "./components/InstallConsentModal";
 import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
+import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled";
 
 interface LoadError {
   baseUrl: string;
@@ -108,6 +109,22 @@ export function MarketplaceModule() {
     }
   }, []);
 
+  // Bundled plugins ship in the build (public/plugins/<id>/) and launch straight
+  // from their local base URL into the same sandbox as a marketplace install — no
+  // download, no verified-install step.
+  const openBundled = useCallback(async (bp: BundledPlugin) => {
+    setLaunchError(null);
+    setBusyId(bp.id);
+    try {
+      const loaded = await loadPlugin(bp.baseUrl);
+      setLaunch(loaded);
+    } catch (e) {
+      setLaunchError({ baseUrl: bp.name, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusyId(null);
+    }
+  }, []);
+
   if (builtIn) {
     return <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />;
   }
@@ -188,6 +205,23 @@ export function MarketplaceModule() {
                     </div>
                   </div>
                 )}
+                {BUNDLED_PLUGINS.length > 0 && (
+                  <div className="mb-6">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-helios-dim">
+                      Bundled
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {BUNDLED_PLUGINS.map((bp) => (
+                        <BundledCard
+                          key={bp.id}
+                          plugin={bp}
+                          busy={busyId === bp.id}
+                          onOpen={() => openBundled(bp)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <BrowseView
                   plugins={plugins}
                   loading={loading}
@@ -256,6 +290,52 @@ function BuiltInCard({ app, onOpen }: { app: FirstPartyApp; onOpen: () => void }
           Open
         </button>
         <span className="ml-auto text-[10px] text-helios-dim">First-party · full access</span>
+      </div>
+    </div>
+  );
+}
+
+// A bundled plugin's card — ships with Helios but still runs sandboxed, so it's
+// marked "Bundled" (not "Built-in") and opens straight into the same locked-down
+// PluginHost as a marketplace install, with no download step.
+function BundledCard({
+  plugin,
+  busy,
+  onOpen,
+}: {
+  plugin: BundledPlugin;
+  busy: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex flex-col rounded-md border border-helios-line bg-helios-panel p-4 transition-colors hover:border-asu-gold/30">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <IconPuzzle size={13} className="shrink-0 text-asu-gold" />
+          <span className="truncate font-medium text-helios-text">{plugin.name}</span>
+          <span className="shrink-0 text-[10px] text-helios-dim">v{plugin.version}</span>
+        </div>
+        <span
+          className="inline-flex shrink-0 items-center rounded-sm border border-helios-line px-1.5 py-0.5 text-[10px] text-helios-dim"
+          title="Ships with Helios — always available, runs in the same sandbox as a marketplace plugin."
+        >
+          Bundled
+        </span>
+      </div>
+      {plugin.subteam && (
+        <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-helios-dim">{plugin.subteam}</div>
+      )}
+      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-helios-dim">{plugin.description}</p>
+      <div className="mt-4 flex items-center gap-2 border-t border-helios-line/50 pt-3.5">
+        <button
+          type="button"
+          onClick={onOpen}
+          disabled={busy}
+          className="rounded-sm border border-asu-gold/60 px-3 py-1.5 text-xs font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+        >
+          {busy ? "Opening…" : "Open"}
+        </button>
+        <span className="ml-auto text-[10px] text-helios-dim">Sandboxed</span>
       </div>
     </div>
   );

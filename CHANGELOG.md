@@ -31,22 +31,25 @@ follow [semver](https://semver.org/).
 
 ### Added
 
-- **Marketplace (v5 plugin platform) — BETA, not ready for use**: a new Marketplace
-  module previewing where Helios is heading — first-party "Built-in" apps and
-  sandboxed, independently-versioned plugins, side by side. **This is an early beta:
-  it is here to show the UI and experiment, and is NOT ready for real use yet.**
-  Add-ons run in a locked-down sandbox (opaque-origin iframe + strict CSP) that
-  cannot reach the DOM, the database, the network, or the filesystem on their own;
-  they declare capabilities in a manifest (default-deny) and reach the host only
-  through a permission-checked broker (`@helios/plugin-sdk`) — user-picked file
-  open/save and private per-plugin storage, with a curated high-trust MATLAB engine
-  bridge designed for later. Installing shows an explicit consent screen with an
-  unmissable warning before anything high-trust. **CFD** now appears as a first-party
-  Built-in app, and the **Lap Sim** is the first sandboxed plugin — extracted from
-  CFD and versioned independently of Helios. Includes an Agent Authoring Kit for
-  AI-assisted plugin authors and a `helios-plugin check` compliance validator.
-  Publishing plugins and the plugin catalog aren't wired up yet (the "Upload plugin"
-  button is a disabled placeholder and Browse shows "coming soon").
+- **Marketplace (v5 plugin platform) — early beta**: a new Marketplace module — the
+  first cut of where Helios is heading: first-party "Built-in" apps, bundled
+  sandboxed plugins, and a live catalog of installable marketplace plugins, side by
+  side. **This is an early beta — try it out and expect rough edges.** Add-ons run in
+  a locked-down sandbox (opaque-origin iframe + strict CSP) that cannot reach the DOM,
+  the database, the network, or the filesystem on their own; they declare capabilities
+  in a manifest (default-deny) and reach the host only through a permission-checked
+  broker (`@helios/plugin-sdk`) — user-picked file open/save and private per-plugin
+  storage, with a curated high-trust MATLAB engine bridge designed for later.
+  Installing fetches the content-addressed bundle, verifies its sha256 **and** an
+  Ed25519 signature before unpacking, and shows an explicit consent screen (with an
+  unmissable warning before anything high-trust). **CFD** now appears as a first-party
+  Built-in app; the **Lap Sim** ships as a bundled sandboxed plugin (extracted from
+  CFD and versioned independently of Helios); and **COAST** — the chassis-optimization
+  + 3D torsional-FEA tool — is the first plugin published through the real
+  sign-and-review pipeline and installable straight from the catalog. Includes an
+  Agent Authoring Kit for AI-assisted plugin authors and a `helios-plugin check`
+  compliance validator. In-app publishing isn't built yet — the "Upload plugin" button
+  is a disabled placeholder, and new plugins are published server-side for now.
 
 ### Changed
 
