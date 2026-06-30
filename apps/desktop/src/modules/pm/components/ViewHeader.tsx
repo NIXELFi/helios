@@ -55,7 +55,7 @@ export function ViewHeader({
           {isAllTeams || !subteam ? (
             <AllTeamsIcon size={28} strokeWidth={1.4} />
           ) : (
-            <SubteamIcon name={subteam.name} code={subteam.code} size={24} />
+            <SubteamIcon name={subteam.name} code={subteam.code} glyph={subteam.icon} size={24} />
           )}
         </span>
         <div className="min-w-0">

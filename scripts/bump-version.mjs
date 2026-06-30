@@ -10,6 +10,7 @@
 // One command updates all four. CI sanity-checks the tag against these before
 // building (see check-versions.mjs).
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -83,6 +84,30 @@ function applyBump(text, target, version) {
   throw new Error(`unknown target kind ${target.kind}`);
 }
 
+// Sync Cargo.lock to the bumped versions. The workspace crates use
+// `version.workspace = true`, so bumping Cargo.toml's [workspace.package] version
+// leaves their entries in Cargo.lock stale — and CI's `cargo test --workspace
+// --locked` then REJECTS the out-of-date lock, failing every release build before
+// it starts (this bit v4.5.6). `cargo update --workspace` rewrites only the
+// workspace members' lock entries (never external deps). Kept OUT of the pure
+// bumpVersion() so unit tests don't shell out; this is a CLI-only side effect.
+export function syncCargoLock(root = REPO_ROOT) {
+  for (const args of [["update", "--workspace", "--offline"], ["update", "--workspace"]]) {
+    try {
+      execFileSync("cargo", args, { cwd: root, stdio: "inherit" });
+      return true;
+    } catch {
+      /* try the next variant (offline first, then allow index access) */
+    }
+  }
+  console.warn(
+    "\n⚠  bump-version: could not run `cargo update --workspace` (is cargo installed?).\n" +
+      "   Run it manually and commit Cargo.lock, or CI's `cargo test --workspace --locked`\n" +
+      "   will fail the release on a stale lockfile.",
+  );
+  return false;
+}
+
 // Robust "run as a script" check. The naive `file://${process.argv[1]}` never
 // matches on Windows (backslashes + a missing slash), so the CLI silently no-ops
 // there; pathToFileURL normalizes both sides.
@@ -99,4 +124,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       ? `promoted CHANGELOG.md [Unreleased] → [${version}]`
       : `CHANGELOG.md: no [Unreleased] section to promote (or [${version}] already exists)`,
   );
+  const lockSynced = syncCargoLock();
+  console.log(lockSynced ? "synced Cargo.lock to the workspace versions" : "Cargo.lock NOT synced (see warning above)");
 }

@@ -29,19 +29,39 @@ follow [semver](https://semver.org/).
 
 ### Added
 
-- **Marketplace (v5 plugin platform)**: a new Marketplace module where members
-  browse subteam-built add-ons, install the ones they need, and run them as
-  standalone tools inside Helios — each in a locked-down sandbox (opaque-origin
-  iframe + strict CSP) that cannot reach the DOM, the database, the network, or the
-  filesystem on its own. Add-ons declare capabilities in a manifest (default-deny)
-  and reach the host only through a permission-checked broker (`@helios/plugin-sdk`):
-  user-picked file open/save and private per-plugin storage today; a curated,
-  high-trust MATLAB engine bridge is designed for and gated for later. Installing an
-  add-on shows an explicit consent screen listing exactly what it will be allowed to
-  do, with an unmissable warning before anything high-trust; add-ons can be updated
-  and uninstalled per member. Ships with an example add-on (Spring Rate & Ride
-  Frequency), an Agent Authoring Kit for AI-assisted plugin authors, and a
-  `helios-plugin check` compliance validator.
+- **Marketplace (v5 plugin platform) — BETA, not ready for use**: a new Marketplace
+  module previewing where Helios is heading — first-party "Built-in" apps and
+  sandboxed, independently-versioned plugins, side by side. **This is an early beta:
+  it is here to show the UI and experiment, and is NOT ready for real use yet.**
+  Add-ons run in a locked-down sandbox (opaque-origin iframe + strict CSP) that
+  cannot reach the DOM, the database, the network, or the filesystem on their own;
+  they declare capabilities in a manifest (default-deny) and reach the host only
+  through a permission-checked broker (`@helios/plugin-sdk`) — user-picked file
+  open/save and private per-plugin storage, with a curated high-trust MATLAB engine
+  bridge designed for later. Installing shows an explicit consent screen with an
+  unmissable warning before anything high-trust. **CFD** now appears as a first-party
+  Built-in app, and the **Lap Sim** is the first sandboxed plugin — extracted from
+  CFD and versioned independently of Helios. Includes an Agent Authoring Kit for
+  AI-assisted plugin authors and a `helios-plugin check` compliance validator.
+  Publishing plugins and the plugin catalog aren't wired up yet (the "Upload plugin"
+  button is a disabled placeholder and Browse shows "coming soon").
+
+### Changed
+
+- **CFD has moved off the main sidebar into the Marketplace** (as a first-party
+  Built-in app) — open it from the Marketplace tab. It runs exactly as before.
+
+## [4.5.6] - 2026-06-30
+
+### Added
+
+- **Custom subteam icons**: a subteam's icon can now be set explicitly and persists
+  for everyone, instead of only being auto-derived from its name/code. Leads,
+  Executives, and Owners click a subteam's icon in the PM sidebar to pick from the
+  built-in glyph bank (now expanded with tires, battery/accumulator, electrical,
+  cooling, fuel, turbo/intake, exhaust, and manufacturing marks), or reset it back
+  to automatic. The ability isn't tied to which subteam you belong to — any
+  lead/exec/owner can set any subteam's icon. Picks inherit the subteam color.
 
 ## [4.5.5] - 2026-06-29
 
