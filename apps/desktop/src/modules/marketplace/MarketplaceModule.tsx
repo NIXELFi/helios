@@ -1,15 +1,23 @@
-// The Marketplace module — a launcher for installed plugins. Clicking a working
-// add-on opens it fullscreen, sandboxed, in the Helios content area. In the MVP
-// the catalog is the bundled example set (registry.ts); Sub-project C turns this
-// into the real browse/install experience over the marketplace backend.
+// The Marketplace module — the backend-driven browse / install / launch surface
+// for subteam-built add-ons (Sub-project C). It owns the data + mutation hooks
+// (Sub-project B) and hands pure data + callbacks to the Browse / Installed /
+// Detail views. EVERY install goes through InstallConsentModal first, so the
+// trust decision (especially for high-trust Tier-2 add-ons) is never skipped.
+//
+// Launching an installed add-on reuses Sub-project A's sandboxed PluginHost via
+// PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
+// iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2, IconAlertTriangle } from "@tabler/icons-react";
-import { CAPABILITIES, type PermissionKey } from "@helios/plugin-sdk";
-import { LOCAL_PLUGINS } from "./registry";
-import { loadPlugin, type LoadedPlugin } from "./runtime/loader";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { IconArrowLeft, IconPuzzle, IconTerminal2 } from "@tabler/icons-react";
+import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
+import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
 import { PluginHost } from "./runtime/PluginHost";
 import type { CallObservation } from "./runtime/broker";
+import { BrowseView } from "./views/BrowseView";
+import { InstalledView } from "./views/InstalledView";
+import { PluginDetail } from "./views/PluginDetail";
+import { InstallConsentModal } from "./components/InstallConsentModal";
 
 interface LoadError {
   baseUrl: string;
@@ -22,37 +30,70 @@ interface ConsoleLine {
   level?: "info" | "warn" | "error";
 }
 
-export function MarketplaceModule() {
-  const [loaded, setLoaded] = useState<LoadedPlugin[]>([]);
-  const [errors, setErrors] = useState<LoadError[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [active, setActive] = useState<LoadedPlugin | null>(null);
+type Tab = "browse" | "installed";
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const ok: LoadedPlugin[] = [];
-      const bad: LoadError[] = [];
-      for (const entry of LOCAL_PLUGINS) {
-        try {
-          ok.push(await loadPlugin(entry.baseUrl));
-        } catch (e) {
-          bad.push({ baseUrl: entry.baseUrl, message: e instanceof Error ? e.message : String(e) });
-        }
+export function MarketplaceModule() {
+  const { plugins, loading, error, refetch } = useAvailablePlugins();
+  const { install, installing, error: installError } = useInstall();
+  const { uninstall } = useUninstall();
+
+  const [tab, setTab] = useState<Tab>("browse");
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [consentFor, setConsentFor] = useState<AvailablePlugin | null>(null);
+  const [launch, setLaunch] = useState<LoadedPlugin | null>(null);
+  const [launchError, setLaunchError] = useState<LoadError | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const installed = useMemo(() => plugins.filter((p) => p.installedVersion !== null), [plugins]);
+  const detail = useMemo(
+    () => (detailId ? (plugins.find((p) => p.id === detailId) ?? null) : null),
+    [plugins, detailId],
+  );
+
+  const openDetail = useCallback((p: AvailablePlugin) => setDetailId(p.id), []);
+  const requestInstall = useCallback((p: AvailablePlugin) => setConsentFor(p), []);
+
+  const confirmInstall = useCallback(async () => {
+    if (!consentFor) return;
+    try {
+      await install({ id: consentFor.id, version: consentFor.version });
+      setConsentFor(null);
+      refetch();
+    } catch {
+      // Error is surfaced inside the modal via `installError`; keep it open.
+    }
+  }, [consentFor, install, refetch]);
+
+  const handleUninstall = useCallback(
+    async (p: AvailablePlugin) => {
+      setBusyId(p.id);
+      try {
+        await uninstall(p.id);
+        refetch();
+      } catch {
+        // Best-effort; the row re-enables and the catalog refetch reflects reality.
+      } finally {
+        setBusyId(null);
       }
-      if (!cancelled) {
-        setLoaded(ok);
-        setErrors(bad);
-        setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    },
+    [uninstall, refetch],
+  );
+
+  const handleOpen = useCallback(async (p: AvailablePlugin) => {
+    setBusyId(p.id);
+    setLaunchError(null);
+    try {
+      const loaded = await loadPlugin(installedBaseUrl(p.id));
+      setLaunch(loaded);
+    } catch (e) {
+      setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusyId(null);
+    }
   }, []);
 
-  if (active) {
-    return <PluginStage plugin={active} onBack={() => setActive(null)} />;
+  if (launch) {
+    return <PluginStage plugin={launch} onBack={() => setLaunch(null)} />;
   }
 
   return (
@@ -61,101 +102,105 @@ export function MarketplaceModule() {
         <header className="mb-6">
           <div className="flex items-center gap-2 text-asu-gold">
             <IconPuzzle size={22} strokeWidth={1.5} />
-            <h1 className="font-helios text-2xl tracking-wide">MARKETPLACE</h1>
+            <h1 className="font-display text-2xl tracking-wide">MARKETPLACE</h1>
             <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-base">
               BETA
             </span>
           </div>
           <p className="mt-1 text-xs text-helios-dim">
-            Subteam-built add-ons, sandboxed and run inside Helios. Click one to open it fullscreen.
+            Subteam-built add-ons, sandboxed and run inside Helios. Browse, install the ones you
+            need, and open them fullscreen.
           </p>
         </header>
 
-        {loading && <p className="text-sm text-helios-dim">Loading add-ons…</p>}
+        {detail ? (
+          <PluginDetail
+            plugin={detail}
+            busy={busyId === detail.id || installing}
+            onBack={() => setDetailId(null)}
+            onRequestInstall={requestInstall}
+            onUpdate={requestInstall}
+            onOpen={handleOpen}
+            onUninstall={handleUninstall}
+          />
+        ) : (
+          <>
+            <div className="mb-5 flex items-center gap-1 border-b border-helios-line">
+              <TabButton active={tab === "browse"} onClick={() => setTab("browse")}>
+                Browse
+              </TabButton>
+              <TabButton active={tab === "installed"} onClick={() => setTab("installed")}>
+                Installed{installed.length > 0 ? ` (${installed.length})` : ""}
+              </TabButton>
+            </div>
 
-        {!loading && loaded.length === 0 && errors.length === 0 && (
-          <p className="text-sm text-helios-dim">No add-ons installed yet.</p>
-        )}
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {loaded.map((p) => (
-            <PluginCard key={p.manifest.id} plugin={p} onLaunch={() => setActive(p)} />
-          ))}
-        </div>
-
-        {errors.length > 0 && (
-          <div className="mt-6 space-y-2">
-            {errors.map((e) => (
-              <div
-                key={e.baseUrl}
-                className="flex items-start gap-2 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-text"
-              >
-                <IconAlertTriangle size={16} className="mt-0.5 shrink-0 text-helios-danger" />
-                <div>
-                  <div className="font-semibold">Failed to load {e.baseUrl}</div>
-                  <pre className="mt-1 whitespace-pre-wrap text-helios-dim">{e.message}</pre>
-                </div>
+            {launchError && (
+              <div className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
+                Couldn’t launch {launchError.baseUrl}: {launchError.message}
               </div>
-            ))}
-          </div>
+            )}
+
+            {tab === "browse" ? (
+              <BrowseView
+                plugins={plugins}
+                loading={loading}
+                error={error}
+                onOpenDetail={openDetail}
+                onRequestInstall={requestInstall}
+                onOpen={handleOpen}
+              />
+            ) : (
+              <InstalledView
+                plugins={installed}
+                loading={loading}
+                error={error}
+                busyId={busyId}
+                onOpen={handleOpen}
+                onUpdate={requestInstall}
+                onUninstall={handleUninstall}
+                onOpenDetail={openDetail}
+              />
+            )}
+          </>
         )}
       </div>
-    </div>
-  );
-}
 
-function PluginCard({ plugin, onLaunch }: { plugin: LoadedPlugin; onLaunch: () => void }) {
-  const { manifest } = plugin;
-  return (
-    <div className="flex flex-col rounded-md border border-helios-line bg-helios-panel p-4">
-      <div className="flex items-center justify-between">
-        <div className="font-medium text-helios-text">{manifest.name}</div>
-        <span className="text-[10px] text-helios-dim">v{manifest.version}</span>
-      </div>
-      {manifest.subteam && (
-        <div className="mt-0.5 text-[10px] uppercase tracking-wider text-helios-dim">{manifest.subteam}</div>
+      {consentFor && (
+        <InstallConsentModal
+          plugin={consentFor}
+          installing={installing}
+          error={installError}
+          onConfirm={confirmInstall}
+          onCancel={() => setConsentFor(null)}
+        />
       )}
-      {manifest.description && <p className="mt-2 text-xs text-helios-dim">{manifest.description}</p>}
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        <PermissionBadges permissions={manifest.permissions} />
-      </div>
-      <button
-        type="button"
-        onClick={onLaunch}
-        className="mt-4 self-start rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
-      >
-        Launch
-      </button>
     </div>
   );
 }
 
-function PermissionBadges({ permissions }: { permissions: PermissionKey[] }) {
-  if (permissions.length === 0) {
-    return (
-      <span
-        className="rounded-sm bg-helios-line px-1.5 py-0.5 text-[10px] text-helios-dim"
-        title="Pure sandbox — UI + compute only, no access to anything outside the box."
-      >
-        Sandboxed
-      </span>
-    );
-  }
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
-    <>
-      {permissions.map((p) => {
-        const info = CAPABILITIES[p];
-        const tone =
-          info.tier === 2
-            ? "bg-helios-danger/15 text-helios-danger"
-            : "bg-asu-gold/15 text-asu-gold";
-        return (
-          <span key={p} className={`rounded-sm px-1.5 py-0.5 text-[10px] ${tone}`} title={info.description}>
-            {p}
-          </span>
-        );
-      })}
-    </>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        "-mb-px border-b-2 px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+        (active
+          ? "border-asu-gold text-asu-gold"
+          : "border-transparent text-helios-dim hover:text-helios-text")
+      }
+    >
+      {children}
+    </button>
   );
 }
 
@@ -172,7 +217,14 @@ function PluginStage({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => v
   const onCall = useCallback((obs: CallObservation) => {
     if (obs.outcome === "ok") return; // only surface rejections/errors in the console
     setLines((c) =>
-      [...c, { kind: "call" as const, text: `${obs.method} → ${obs.outcome}${obs.code ? ` (${obs.code})` : ""}`, level: "warn" as const }].slice(-200),
+      [
+        ...c,
+        {
+          kind: "call" as const,
+          text: `${obs.method} → ${obs.outcome}${obs.code ? ` (${obs.code})` : ""}`,
+          level: "warn" as const,
+        },
+      ].slice(-200),
     );
   }, []);
 

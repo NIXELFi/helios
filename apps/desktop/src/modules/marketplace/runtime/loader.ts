@@ -16,6 +16,21 @@ export interface LoadedPlugin {
 
 export class PluginLoadError extends Error {}
 
+/** Where an installed plugin's verified bundle is served from at launch time.
+ *  The Rust `plugin://` asset protocol (Sub-project B, Phase 0.1) serves the
+ *  unpacked, signature-verified install cache under this origin.
+ *
+ *  GATE: mounting an *untrusted* installed bundle is still gated on the iframe
+ *  nav-hardening work (Phase 0.2 — see
+ *  docs/superpowers/specs/2026-06-26-plugin-nav-hardening-decision.md). Until
+ *  that lands and is live-verified, only trusted/bundled examples should be
+ *  launched, and PluginHost must NOT be flipped to `src=plugin://`. The exact
+ *  authority form (`plugin://<id>` vs the Windows `plugin.localhost` shape) is
+ *  normalized by the protocol handler and finalized during that live verify. */
+export function installedBaseUrl(pluginId: string): string {
+  return `plugin://${pluginId}`;
+}
+
 function trimSlash(s: string): string {
   return s.replace(/\/$/, "");
 }
