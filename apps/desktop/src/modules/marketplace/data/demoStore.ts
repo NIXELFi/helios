@@ -33,15 +33,15 @@ interface Seed {
 
 const SEEDS: Seed[] = [
   {
-    id: "cfd.lap-sim",
-    name: "CFD Lap Sim",
+    id: "vehicle-dynamics.lap-sim",
+    name: "Lap Sim",
     subteam: "Vehicle Dynamics",
     version: "1.0.0",
-    permissions: ["storage", "file.read"],
+    permissions: ["file.write"],
     recommended: true,
     description:
-      "Lap-time simulator — channels, limit-state analysis, A/B compare, CSV export. Pulls its tire model, aero map, and engine sweep from the shared plugin vault.",
-    publishedAt: "2026-06-29T00:00:00Z",
+      "FSAE quasi-steady-state lap-time simulator over the 2026 autocross & endurance tracks. Ships with a default engine sweep; import a dyno CSV or pull a sweep from CFD. (The real plugin — launches for real in the sandbox.)",
+    publishedAt: "2026-06-30T00:00:00Z",
   },
   {
     id: "vd.tire-model-builder",
@@ -125,6 +125,7 @@ const PLUGINS = SEEDS.map(toPlugin);
 // Seed a couple as already-installed so the Installed tab is populated and one
 // has an update available (installed 0.9.0 < approved 1.0.0).
 const installed = new Map<string, string>([
+  ["vehicle-dynamics.lap-sim", "1.0.0"],
   ["vd.tire-model-builder", "0.9.0"],
   ["aero.map-studio", "1.2.0"],
 ]);
@@ -155,8 +156,14 @@ export function demoUninstall(id: string): void {
   notify();
 }
 
-/** A local URL the demo can actually launch, or null to show a friendly preview
- *  note. Only the bundled example ships a real, openable bundle. */
+/** Local URLs the demo can actually launch for real, by plugin id. The Lap Sim
+ *  and the bundled spring-rate example ship real, openable single-file bundles
+ *  under public/plugins/; everything else shows a friendly preview note. */
+const DEMO_LAUNCHABLE: Record<string, string> = {
+  "susp.spring-rate": "/plugins/spring-rate",
+  "vehicle-dynamics.lap-sim": "/plugins/lap-sim",
+};
+
 export function demoLaunchUrl(id: string): string | null {
-  return id === "susp.spring-rate" ? "/plugins/spring-rate" : null;
+  return DEMO_LAUNCHABLE[id] ?? null;
 }

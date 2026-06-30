@@ -8,8 +8,8 @@
 // PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2 } from "@tabler/icons-react";
+import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
+import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt } from "@tabler/icons-react";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
@@ -19,6 +19,7 @@ import { BrowseView } from "./views/BrowseView";
 import { InstalledView } from "./views/InstalledView";
 import { PluginDetail } from "./views/PluginDetail";
 import { InstallConsentModal } from "./components/InstallConsentModal";
+import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
 
 interface LoadError {
   baseUrl: string;
@@ -47,6 +48,7 @@ export function MarketplaceModule() {
   const [launch, setLaunch] = useState<LoadedPlugin | null>(null);
   const [launchError, setLaunchError] = useState<LoadError | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [builtIn, setBuiltIn] = useState<FirstPartyApp | null>(null);
 
   const installed = useMemo(() => plugins.filter((p) => p.installedVersion !== null), [plugins]);
   const detail = useMemo(
@@ -107,6 +109,9 @@ export function MarketplaceModule() {
     }
   }, []);
 
+  if (builtIn) {
+    return <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />;
+  }
   if (launch) {
     return <PluginStage plugin={launch} onBack={() => setLaunch(null)} />;
   }
@@ -155,14 +160,28 @@ export function MarketplaceModule() {
             )}
 
             {tab === "browse" ? (
-              <BrowseView
-                plugins={plugins}
-                loading={loading}
-                error={error}
-                onOpenDetail={openDetail}
-                onRequestInstall={requestInstall}
-                onOpen={handleOpen}
-              />
+              <>
+                {FIRST_PARTY_APPS.length > 0 && (
+                  <div className="mb-6">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-helios-dim">
+                      Built-in
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {FIRST_PARTY_APPS.map((app) => (
+                        <BuiltInCard key={app.id} app={app} onOpen={() => setBuiltIn(app)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <BrowseView
+                  plugins={plugins}
+                  loading={loading}
+                  error={error}
+                  onOpenDetail={openDetail}
+                  onRequestInstall={requestInstall}
+                  onOpen={handleOpen}
+                />
+              </>
             ) : (
               <InstalledView
                 plugins={installed}
@@ -188,6 +207,68 @@ export function MarketplaceModule() {
           onCancel={() => setConsentFor(null)}
         />
       )}
+    </div>
+  );
+}
+
+// A first-party built-in app's card — honestly marked "Built-in · full access"
+// (NOT "Sandboxed"), since it's trusted native Helios code.
+function BuiltInCard({ app, onOpen }: { app: FirstPartyApp; onOpen: () => void }) {
+  return (
+    <div className="flex flex-col rounded-md border border-helios-line bg-helios-panel p-4 transition-colors hover:border-asu-gold/30">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <IconBolt size={13} className="shrink-0 text-asu-gold" />
+          <span className="truncate font-medium text-helios-text">{app.name}</span>
+        </div>
+        <span
+          className="inline-flex shrink-0 items-center rounded-sm border border-asu-gold/40 bg-asu-gold/10 px-1.5 py-0.5 text-[10px] text-asu-gold"
+          title="First-party Helios module — runs natively with full access, not sandboxed."
+        >
+          Built-in
+        </span>
+      </div>
+      {app.subteam && (
+        <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-helios-dim">{app.subteam}</div>
+      )}
+      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-helios-dim">{app.description}</p>
+      <div className="mt-4 flex items-center gap-2 border-t border-helios-line/50 pt-3.5">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-sm border border-asu-gold/60 px-3 py-1.5 text-xs font-semibold text-asu-gold transition-colors hover:bg-asu-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        >
+          Open
+        </button>
+        <span className="ml-auto text-[10px] text-helios-dim">First-party · full access</span>
+      </div>
+    </div>
+  );
+}
+
+// Fullscreen mount of a first-party app — its native React component, NOT a
+// sandboxed iframe (it's trusted code with full access).
+function FirstPartyStage({ app, onBack }: { app: FirstPartyApp; onBack: () => void }) {
+  return (
+    <div className="flex h-full flex-col bg-helios-base">
+      <div className="flex items-center gap-2 border-b border-helios-line px-3 py-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-helios-dim transition-colors hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+        >
+          <IconArrowLeft size={14} /> Marketplace
+        </button>
+        <span className="text-sm text-helios-text">{app.name}</span>
+        <span className="inline-flex items-center gap-1 rounded-sm border border-asu-gold/40 bg-asu-gold/10 px-1.5 py-0.5 text-[10px] text-asu-gold">
+          <IconBolt size={10} /> Built-in
+        </span>
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <Suspense fallback={<div className="p-6 text-sm text-helios-dim">Loading {app.name}…</div>}>
+          <app.Component />
+        </Suspense>
+      </div>
     </div>
   );
 }
