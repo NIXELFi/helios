@@ -217,17 +217,9 @@ export function ModulePicker(props: Props) {
           disabledTitle="Sign in to use Vault"
         />
         <NavButton
-          label="CFD"
-          Icon={MODULE_ICON.cfd}
-          collapsed={collapsed}
-          active={active === "cfd"}
-          onClick={() => onSelect("cfd")}
-        />
-        <NavButton
           label="PM"
           Icon={MODULE_ICON.pm}
           collapsed={collapsed}
-          badge="NEW"
           active={active === "pm"}
           onClick={() => onSelect("pm")}
           disabled={pmDisabled}
@@ -237,7 +229,6 @@ export function ModulePicker(props: Props) {
           label="Games"
           Icon={MODULE_ICON.games}
           collapsed={collapsed}
-          badge="NEW"
           active={active === "games"}
           onClick={() => onSelect("games")}
           disabled={gamesDisabled}
@@ -260,7 +251,6 @@ export function ModulePicker(props: Props) {
             label="Admin"
             Icon={MODULE_ICON.org}
             collapsed={collapsed}
-            badge="NEW"
             active={active === "org"}
             onClick={() => onSelect("org")}
           />

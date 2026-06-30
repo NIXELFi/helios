@@ -9,7 +9,7 @@
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
 import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt } from "@tabler/icons-react";
+import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload } from "@tabler/icons-react";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
@@ -93,8 +93,7 @@ export function MarketplaceModule() {
     if (DEMO && !baseUrl) {
       setLaunchError({
         baseUrl: p.name,
-        message:
-          "Preview mode — launching runs the sandboxed add-on in the full runtime. Install + open “Spring Rate & Ride Frequency” to see a real sandbox.",
+        message: "Preview mode — launching runs the sandboxed add-on in the full runtime.",
       });
       return;
     }
@@ -119,17 +118,33 @@ export function MarketplaceModule() {
   return (
     <div className="h-full overflow-y-auto bg-helios-base">
       <div className="mx-auto max-w-4xl px-6 py-8">
-        <header className="mb-6">
-          <div className="flex items-center gap-2 text-asu-gold">
-            <IconPuzzle size={22} strokeWidth={1.5} />
-            <h1 className="font-display text-2xl tracking-wide">MARKETPLACE</h1>
-            <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-base">
-              BETA
-            </span>
+        <header className="mb-6 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-asu-gold">
+              <IconPuzzle size={22} strokeWidth={1.5} />
+              <h1 className="font-display text-2xl tracking-wide">MARKETPLACE</h1>
+              <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-base">
+                BETA
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-helios-dim">
+              Subteam-built tools, sandboxed and run right inside Helios — install the ones you need.
+            </p>
           </div>
-          <p className="mt-1 text-xs text-helios-dim">
-            Subteam-built tools, sandboxed and run right inside Helios — install the ones you need.
-          </p>
+          {/* Publish/upload UI is not built yet — show the affordance disabled so the
+              beta hints at where it's going without pretending it works. */}
+          <button
+            type="button"
+            disabled
+            title="Coming soon!"
+            aria-label="Upload plugin — coming soon"
+            className="inline-flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim opacity-60"
+          >
+            <IconUpload size={14} /> Upload plugin
+            <span className="ml-1 rounded-sm bg-helios-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim">
+              Soon
+            </span>
+          </button>
         </header>
 
         {detail ? (

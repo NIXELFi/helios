@@ -43,16 +43,6 @@ const SEEDS: Seed[] = [
       "FSAE quasi-steady-state lap-time simulator over the 2026 autocross & endurance tracks. Ships with a default engine sweep; import a dyno CSV or pull a sweep from CFD. (The real plugin — launches for real in the sandbox.)",
     publishedAt: "2026-06-30T00:00:00Z",
   },
-  {
-    id: "susp.spring-rate",
-    name: "Spring Rate & Ride Frequency",
-    subteam: "Suspension",
-    version: "1.0.0",
-    permissions: ["storage", "file.write"],
-    recommended: false,
-    description: "Spring rate to ride-frequency calculator. The bundled example add-on — launches for real.",
-    publishedAt: "2026-06-25T00:00:00Z",
-  },
 ];
 
 function toPlugin(s: Seed): AvailablePlugin {
@@ -115,10 +105,9 @@ export function demoUninstall(id: string): void {
 }
 
 /** Local URLs the demo can actually launch for real, by plugin id. The Lap Sim
- *  and the bundled spring-rate example ship real, openable single-file bundles
- *  under public/plugins/; everything else shows a friendly preview note. */
+ *  ships a real, openable single-file bundle under public/plugins/; everything
+ *  else shows a friendly preview note. */
 const DEMO_LAUNCHABLE: Record<string, string> = {
-  "susp.spring-rate": "/plugins/spring-rate",
   "vehicle-dynamics.lap-sim": "/plugins/lap-sim",
 };
 
