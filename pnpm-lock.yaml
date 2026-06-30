@@ -233,6 +233,15 @@ importers:
 
   packages/lap-sim-plugin:
     dependencies:
+      '@fontsource-variable/inter':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/orbitron':
+        specifier: ^5.2.8
+        version: 5.2.8
       '@helios/lapsim-core':
         specifier: workspace:*
         version: link:../lapsim-core
@@ -258,6 +267,15 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@5.4.21(@types/node@25.6.0))
+      autoprefixer:
+        specifier: ^10.4.0
+        version: 10.5.0(postcss@8.5.14)
+      postcss:
+        specifier: ^8.4.0
+        version: 8.5.14
+      tailwindcss:
+        specifier: ^3.4.0
+        version: 3.4.19(tsx@4.21.0)
       typescript:
         specifier: ^5.4.0
         version: 5.9.3

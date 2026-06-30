@@ -1,194 +1,64 @@
-:root {
-  --base: #0e0e10;
-  --panel: #16171b;
-  --line: #2a2c32;
-  --text: #d8dce2;
-  --dim: #9097a0;
-  --gold: #ffc627;
-  --ok: #66bb6a;
-}
-* { box-sizing: border-box; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+   Real Tailwind build (mirrors apps/desktop). The LapSimScreen and charts were
+   copied verbatim from the desktop CFD module, so the class names here resolve
+   against the SAME tailwind.config.ts (the helios- and asu- color tokens plus
+   the sans/mono/display font stacks) and the SAME @fontsource faces bundled in
+   main.tsx, producing pixel-identical output. The rules below port only the
+   slice of the desktop global CSS (apps/desktop/src/styles.css) that the Lap
+   Sim screen actually exercises: the body type/background, the focus-ring and
+   interactive transitions (@layer base), and the global scrollbars. The
+   desktop's named component/animation classes (font-helios, helios-elevate,
+   the btn family, wave-scrubber, helios-wiki-prose, the helios- keyframes) are
+   intentionally omitted; none are referenced by LapSimScreen or the charts.
+*/
+
 html, body, #root { height: 100%; margin: 0; }
+/* Kill horizontal rubber-band / overscroll on macOS WKWebView so two-finger
+   swipes on the trackpad don't translate the whole page sideways. */
+html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 body {
-  background: var(--base);
-  color: var(--text);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 14px;
+  background: #0E0E10;
+  color: #D8DCE2;
+  font-family: "Inter Variable", Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* The ported LapSimScreen owns a full-height flex column; the shell fills the
+@layer base {
+  /* One consistent, accessible focus ring. Controls that define their own focus
+     style use `outline-none` (always on), which overrides this — so this only
+     fills the gaps where a control previously had no focus affordance. */
+  :focus-visible {
+    outline: 2px solid #FFC627;
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  /* Discrete color/shadow transitions on interactive chrome. Only paint
+     properties (no layout), so nothing reflows; hover/press feel intentional. */
+  button, [role="button"], a, select, summary {
+    transition: background-color 150ms ease, border-color 150ms ease,
+      color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+  }
+}
+
+/* Global scrollbars — thin, a dim grey thumb that brightens to gold on hover,
+   on a transparent track. Replaces the OS default chrome. */
+* { scrollbar-width: thin; scrollbar-color: #2A2C32 transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #2A2C32;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: #FFC627; background-clip: content-box; }
+
+/* The ported LapSimScreen owns a full-height flex column; this shell fills the
    plugin iframe so it can stretch into the whole viewport and scroll inside. */
 .app-root { height: 100vh; width: 100%; overflow: hidden; }
 .app-root > * { height: 100%; }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   Tailwind utility shim.
-
-   LapSimScreen was authored against the Helios desktop app's Tailwind build.
-   The sandboxed plugin has no Tailwind pipeline (tailwindcss is only installed
-   in apps/desktop, and wiring it here would need a new dependency + install,
-   which is out of scope), so the utility class names are inert at build time.
-   This hand-rolled shim re-implements the high-frequency structural utilities
-   plus the module's color palette so the screen renders as a coherent dark
-   dashboard rather than an unstyled blob. It is intentionally NOT exhaustive
-   (responsive/opacity/hover variants are skipped — they degrade gracefully).
-   ───────────────────────────────────────────────────────────────────────── */
-
-/* display + flex/grid */
-.flex { display: flex; }
-.grid { display: grid; }
-.block { display: block; }
-.inline-block { display: inline-block; }
-.hidden { display: none; }
-.flex-col { flex-direction: column; }
-.flex-wrap { flex-wrap: wrap; }
-.flex-1 { flex: 1 1 0%; }
-.flex-shrink-0 { flex-shrink: 0; }
-.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-.items-center { align-items: center; }
-.items-end { align-items: flex-end; }
-.items-baseline { align-items: baseline; }
-.justify-between { justify-content: space-between; }
-.justify-end { justify-content: flex-end; }
-.justify-center { justify-content: center; }
-
-/* gaps */
-.gap-0\.5 { gap: 2px; }
-.gap-1 { gap: 4px; }
-.gap-1\.5 { gap: 6px; }
-.gap-2 { gap: 8px; }
-.gap-3 { gap: 12px; }
-.gap-4 { gap: 16px; }
-.gap-x-4 { column-gap: 16px; }
-.gap-y-1 { row-gap: 4px; }
-
-/* sizing */
-.h-full { height: 100%; }
-.w-full { width: 100%; }
-.min-h-0 { min-height: 0; }
-.min-w-0 { min-width: 0; }
-.w-3 { width: 12px; }
-.w-3\.5 { width: 14px; }
-.h-2 { height: 8px; }
-.h-2\.5 { height: 10px; }
-.h-3 { height: 12px; }
-
-/* overflow */
-.overflow-hidden { overflow: hidden; }
-.overflow-x-auto { overflow-x: auto; }
-.overflow-y-auto { overflow-y: auto; }
-
-/* position */
-.relative { position: relative; }
-.absolute { position: absolute; }
-.bottom-0 { bottom: 0; }
-.left-0 { left: 0; }
-.right-0 { right: 0; }
-.top-0 { top: 0; }
-
-/* margins */
-.m-4 { margin: 16px; }
-.mt-1 { margin-top: 4px; }
-.mt-3 { margin-top: 12px; }
-.mb-1 { margin-bottom: 4px; }
-.ml-auto { margin-left: auto; }
-
-/* padding */
-.p-2 { padding: 8px; }
-.p-3 { padding: 12px; }
-.p-8 { padding: 32px; }
-.px-1 { padding-left: 4px; padding-right: 4px; }
-.px-1\.5 { padding-left: 6px; padding-right: 6px; }
-.px-2 { padding-left: 8px; padding-right: 8px; }
-.px-2\.5 { padding-left: 10px; padding-right: 10px; }
-.px-3 { padding-left: 12px; padding-right: 12px; }
-.py-0\.5 { padding-top: 2px; padding-bottom: 2px; }
-.py-1 { padding-top: 4px; padding-bottom: 4px; }
-.py-1\.5 { padding-top: 6px; padding-bottom: 6px; }
-.py-2 { padding-top: 8px; padding-bottom: 8px; }
-.py-4 { padding-top: 16px; padding-bottom: 16px; }
-.py-px { padding-top: 1px; padding-bottom: 1px; }
-.pb-1\.5 { padding-bottom: 6px; }
-.pb-2 { padding-bottom: 8px; }
-.pt-2 { padding-top: 8px; }
-
-/* borders + radius */
-.border { border: 1px solid var(--line); }
-.border-b { border-bottom: 1px solid var(--line); }
-.border-t { border-top: 1px solid var(--line); }
-.border-dashed { border-style: dashed; }
-.rounded-sm { border-radius: 3px; }
-.rounded-md { border-radius: 6px; }
-.rounded-full { border-radius: 9999px; }
-
-/* type */
-.font-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
-.uppercase { text-transform: uppercase; }
-.tracking-wider { letter-spacing: 0.05em; }
-.tabular-nums { font-variant-numeric: tabular-nums; }
-.text-left { text-align: left; }
-.text-right { text-align: right; }
-.text-center { text-align: center; }
-.font-semibold { font-weight: 600; }
-.font-bold { font-weight: 700; }
-.leading-tight { line-height: 1.25; }
-
-.text-\[7px\] { font-size: 7px; }
-.text-\[8px\] { font-size: 8px; }
-.text-\[9px\] { font-size: 9px; }
-.text-\[10px\] { font-size: 10px; }
-.text-\[11px\] { font-size: 11px; }
-.text-\[12px\] { font-size: 12px; }
-.text-\[13px\] { font-size: 13px; }
-
-/* palette — text */
-.text-\[\#FFC627\] { color: #ffc627; }
-.text-\[\#9097A0\] { color: #9097a0; }
-.text-\[\#5A5F66\] { color: #5a5f66; }
-.text-\[\#D8DCE2\] { color: #d8dce2; }
-.text-\[\#4FC3F7\] { color: #4fc3f7; }
-.text-\[\#A5D6A7\] { color: #a5d6a7; }
-.text-\[\#FF8A65\] { color: #ff8a65; }
-.text-\[\#FF5252\] { color: #ff5252; }
-.text-\[\#0E0E10\] { color: #0e0e10; }
-
-/* palette — backgrounds */
-.bg-\[\#0E0E10\] { background-color: #0e0e10; }
-.bg-\[\#0B0B0D\] { background-color: #0b0b0d; }
-.bg-\[\#101114\] { background-color: #101114; }
-.bg-\[\#16171B\] { background-color: #16171b; }
-.bg-\[\#1B1D22\] { background-color: #1b1d22; }
-.bg-\[\#FFC627\] { background-color: #ffc627; }
-.bg-helios-base { background-color: #0e0e10; }
-.bg-helios-panel { background-color: #16171b; }
-.text-helios-text { color: #d8dce2; }
-
-/* palette — borders */
-.border-\[\#2A2C32\] { border-color: #2a2c32; }
-.border-\[\#16171B\] { border-color: #16171b; }
-
-/* form controls inherit the dark theme so selects/inputs aren't white blocks */
-select, input, button, textarea {
-  font: inherit;
-  color: inherit;
-  background-color: #0b0b0d;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-}
-button { cursor: pointer; background-color: transparent; }
-table { border-collapse: collapse; }
-code { font-family: "JetBrains Mono", ui-monospace, monospace; }
-
-/* ── retained walking-skeleton styles (harmless if unused) ────────────────── */
-.wrap { max-width: 880px; margin: 0 auto; padding: 24px; }
-.title { display: flex; align-items: center; gap: 10px; color: var(--gold); }
-.title h1 { font-size: 22px; letter-spacing: 0.08em; margin: 0; }
-.dim { color: var(--dim); font-size: 12px; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.seg button { background: transparent; color: var(--dim); border: none; padding: 6px 14px; cursor: pointer; font-size: 13px; }
-.seg button.on { background: var(--gold); color: var(--base); font-weight: 600; }
-.laptime { font-size: 44px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.laptime .u { font-size: 18px; color: var(--dim); font-weight: 400; }
-.btn { background: var(--gold); color: var(--base); border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 13px; cursor: pointer; }
-.btn:hover { opacity: 0.9; }
-.panel { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 16px; margin-top: 16px; }
