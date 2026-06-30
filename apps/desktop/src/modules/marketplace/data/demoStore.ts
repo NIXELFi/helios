@@ -43,6 +43,17 @@ const SEEDS: Seed[] = [
       "FSAE quasi-steady-state lap-time simulator over the 2026 autocross & endurance tracks. Ships with a default engine sweep; import a dyno CSV or pull a sweep from CFD. (The real plugin — launches for real in the sandbox.)",
     publishedAt: "2026-06-30T00:00:00Z",
   },
+  {
+    id: "chassis.coast",
+    name: "COAST",
+    subteam: "Chassis",
+    version: "0.1.0",
+    permissions: [],
+    recommended: true,
+    description:
+      "FSAE chassis design + torsional-FEA + evolutionary optimizer (Three.js). Pure sandbox.",
+    publishedAt: "2026-06-30T00:00:00Z",
+  },
 ];
 
 function toPlugin(s: Seed): AvailablePlugin {
@@ -76,6 +87,7 @@ const PLUGINS = SEEDS.map(toPlugin);
 // has an update available (installed 0.9.0 < approved 1.0.0).
 const installed = new Map<string, string>([
   ["vehicle-dynamics.lap-sim", "1.0.0"],
+  ["chassis.coast", "0.1.0"],
 ]);
 
 const listeners = new Set<() => void>();
@@ -109,6 +121,7 @@ export function demoUninstall(id: string): void {
  *  else shows a friendly preview note. */
 const DEMO_LAUNCHABLE: Record<string, string> = {
   "vehicle-dynamics.lap-sim": "/plugins/lap-sim",
+  "chassis.coast": "/plugins/coast",
 };
 
 export function demoLaunchUrl(id: string): string | null {

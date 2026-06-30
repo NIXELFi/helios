@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "id": "chassis.coast",
+  "name": "COAST",
+  "version": "0.1.0",
+  "description": "Chassis Optimization And Simulation Tool — FSAE tube-frame chassis design, 3D torsional-rigidity FEA, an evolutionary optimizer, FSAE rule checks, and batch sweeps. Pure-sandbox (no host access).",
+  "subteam": "chassis",
+  "entry": "dist/index.html",
+  "sdk": "^1.0.0",
+  "permissions": []
+}
