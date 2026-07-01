@@ -27,6 +27,19 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-07-01
+
+### Fixed
+
+- Marketplace: installed plugins now execute their code. They were mounted in an
+  iframe via `srcDoc`, and an `about:srcdoc` document inherits the host window's
+  CSP (`script-src 'self' 'wasm-unsafe-eval'`, no `'unsafe-inline'`), which
+  intersected with and blocked every plugin's self-contained inline bundle — the
+  plugin rendered its static HTML but ran no JavaScript (blank frame). Plugins now
+  load from their own `plugin://<id>` origin (`src=` instead of `srcDoc`), so the
+  frame applies the plugin-host's response-header CSP (which allows `'unsafe-inline'`)
+  instead of inheriting the host's. `frame-src` widened to allow `plugin:`.
+
 ## [5.0.0] - 2026-06-30
 
 ### Added

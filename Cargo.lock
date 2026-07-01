@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "cfd-core"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "engine-sim",
  "num_cpus",
@@ -1479,7 +1479,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine-sim"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2122,7 +2122,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-arrow"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "arrow-ipc",
@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "helios-bench"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "anyhow",
  "cfd-core",
@@ -2153,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "helios-core"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "arrow",
  "serde",
@@ -2163,7 +2163,7 @@ dependencies = [
 
 [[package]]
 name = "helios-csv"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "helios-desktop"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "axum",
  "cfb 0.10.0",
@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "helios-mcp"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "anyhow",
  "helios-bench",
@@ -3499,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "pdm-client"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "chrono",
  "pdm-core",
@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "pdm-core"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "chrono",
  "serde",
@@ -3525,7 +3525,7 @@ dependencies = [
 
 [[package]]
 name = "pdm-sw-parser"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "cfb 0.10.0",
  "flate2",
@@ -3642,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "plugin-host"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
