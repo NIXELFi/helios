@@ -8,8 +8,8 @@
 // PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload } from "@tabler/icons-react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload, IconRefresh } from "@tabler/icons-react";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
@@ -59,6 +59,15 @@ export function MarketplaceModule() {
 
   const openDetail = useCallback((p: AvailablePlugin) => setDetailId(p.id), []);
   const requestInstall = useCallback((p: AvailablePlugin) => setConsentFor(p), []);
+
+  // Elegant auto-refresh: re-check the catalog whenever the window regains focus
+  // (e.g. after a new version is published elsewhere), so new plugins/versions show
+  // up without a manual reload. The Refresh button covers same-focus updates.
+  useEffect(() => {
+    const onFocus = () => refetch();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refetch]);
 
   const confirmInstall = useCallback(async () => {
     if (!consentFor) return;
@@ -148,20 +157,33 @@ export function MarketplaceModule() {
               Subteam-built tools, sandboxed and run right inside Helios — install the ones you need.
             </p>
           </div>
-          {/* Publish/upload UI is not built yet — show the affordance disabled so the
-              beta hints at where it's going without pretending it works. */}
-          <button
-            type="button"
-            disabled
-            title="Coming soon!"
-            aria-label="Upload plugin — coming soon"
-            className="inline-flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim opacity-60"
-          >
-            <IconUpload size={14} /> Upload plugin
-            <span className="ml-1 rounded-sm bg-helios-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim">
-              Soon
-            </span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={refetch}
+              disabled={loading}
+              title="Check for new plugins and versions"
+              aria-label="Refresh plugin list"
+              className="inline-flex items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim transition-colors hover:border-asu-gold/40 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:cursor-wait disabled:opacity-60"
+            >
+              <IconRefresh size={14} className={loading ? "animate-spin" : undefined} />
+              Refresh
+            </button>
+            {/* Publish/upload UI is not built yet — show the affordance disabled so the
+                beta hints at where it's going without pretending it works. */}
+            <button
+              type="button"
+              disabled
+              title="Coming soon!"
+              aria-label="Upload plugin — coming soon"
+              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim opacity-60"
+            >
+              <IconUpload size={14} /> Upload plugin
+              <span className="ml-1 rounded-sm bg-helios-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim">
+                Soon
+              </span>
+            </button>
+          </div>
         </header>
 
         {detail ? (

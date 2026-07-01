@@ -66,6 +66,14 @@ describe("MarketplaceModule — install consent gate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("Refresh button re-checks the catalog via refetch", () => {
+    mocks.state.plugins = [makePlugin({ id: "a", name: "Alpha", installedVersion: null })];
+    render(<MarketplaceModule />);
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh plugin list/i }));
+    expect(mocks.refetch).toHaveBeenCalled();
+  });
+
   it("switches to the Installed tab and lists installed add-ons", () => {
     mocks.state.plugins = [
       makePlugin({ id: "a", name: "Alpha", installedVersion: null }),

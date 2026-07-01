@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.2] - 2026-07-01
+
+### Added
+
+- Marketplace: a **Refresh** button in the header to re-check for new plugins and
+  versions on demand, plus an automatic re-check when the Helios window regains
+  focus — so a freshly published plugin or version appears without reloading the app.
+
 ## [5.0.1] - 2026-07-01
 
 ### Fixed
