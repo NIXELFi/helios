@@ -20,13 +20,18 @@ export class PluginLoadError extends Error {}
  *  The Rust `plugin://` asset protocol (Sub-project B, Phase 0.1) serves the
  *  unpacked, signature-verified install cache under this origin.
  *
- *  GATE: mounting an *untrusted* installed bundle is still gated on the iframe
- *  nav-hardening work (Phase 0.2 — see
- *  docs/superpowers/specs/2026-06-26-plugin-nav-hardening-decision.md). Until
- *  that lands and is live-verified, only trusted/bundled examples should be
- *  launched, and PluginHost must NOT be flipped to `src=plugin://`. The exact
+ *  PluginHost mounts the plugin via `src={baseUrl}/{entry}` from THIS origin so the
+ *  frame gets the plugin-host's response-header CSP (which allows the self-contained
+ *  bundle's inline scripts) instead of inheriting the host window's strict CSP the
+ *  way a `srcDoc` frame would (that inheritance was the blank-screen bug). The exact
  *  authority form (`plugin://<id>` vs the Windows `plugin.localhost` shape) is
- *  normalized by the protocol handler and finalized during that live verify. */
+ *  normalized by the protocol handler.
+ *
+ *  RESIDUAL (nav-hardening, Phase 0.2 — see
+ *  docs/superpowers/specs/2026-06-26-plugin-nav-hardening-decision.md): the sandbox
+ *  does not stop the frame from navigating ITSELF to an external URL. Tracked for
+ *  the `plugin://` navigation handler; not a regression (the gap existed under the
+ *  prior srcDoc path too). */
 export function installedBaseUrl(pluginId: string): string {
   // Tauri v2 surfaces a registered custom scheme differently per platform: Windows
   // WebView2 rewrites `plugin://` to `http://plugin.localhost/<path>` (id in the
