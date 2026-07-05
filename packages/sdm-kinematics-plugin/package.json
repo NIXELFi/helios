@@ -1,9 +1,9 @@
 {
   "name": "@helios/sdm-kinematics-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "SDM Kinematics — standalone sandboxed suspension-kinematics marketplace plugin (OptimumKinematics-class), versioned independently of Helios.",
+  "description": "SDM Kinematics â€” standalone sandboxed suspension-kinematics marketplace plugin (OptimumKinematics-class), versioned independently of Helios.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

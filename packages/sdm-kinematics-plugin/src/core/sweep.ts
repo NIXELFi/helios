@@ -5,7 +5,7 @@
 import { mirrorAxle, trackWidth, wheelbase, type CarSetup, type CornerId, type Pose } from "./model";
 import { solveCorner, type CornerState } from "./solver";
 import { cornerChannels, axleChannels, ackermannPct, type CornerChannels, type AxleChannels } from "./channels";
-import { rad } from "./vec";
+import { deg, rad } from "./vec";
 
 export type SweepType = "heave" | "roll" | "pitch" | "steer";
 
@@ -23,6 +23,12 @@ export interface FullState {
   frontAxle: AxleChannels;
   rearAxle: AxleChannels;
   ackermann: number | null;
+  /** U-bar twist per axle, deg. Both arms measure ψ about the same +Y axis,
+   *  and mirror symmetry makes equal bump give EQUAL ψ signs — so the bar's
+   *  relative wind-up is ψ_L − ψ_R: zero in pure heave, 2ψ in pure roll.
+   *  NaN when the axle has no U-bar. */
+  ubarTwistFront: number;
+  ubarTwistRear: number;
   pose: Pose;
 }
 
@@ -101,6 +107,8 @@ export function solveCar(
   return {
     corners, cornerCh, frontAxle, rearAxle,
     ackermann: ackermannPct(cornerCh.FL.steer, cornerCh.FR.steer, trackWidth(car.front), wb),
+    ubarTwistFront: deg(corners.FL.ubarAngle - corners.FR.ubarAngle),
+    ubarTwistRear: deg(corners.RL.ubarAngle - corners.RR.ubarAngle),
     pose,
   };
 }
@@ -154,6 +162,10 @@ export function channelDefs(): ChannelDef[] {
     { key: "anti_squat", label: "Anti-squat R", unit: "%", get: (s) => s.rearAxle.antiPct },
     { key: "bump_steer_fl", label: "Bump steer FL", unit: "deg/in", get: (s) => s.frontAxle.bumpSteerLeft },
     { key: "camber_gain_fl", label: "Camber gain FL", unit: "deg/in", get: (s) => s.frontAxle.camberGainLeft },
+    { key: "arb_twist_f", label: "ARB twist F", unit: "deg", get: (s) => s.ubarTwistFront },
+    { key: "arb_twist_r", label: "ARB twist R", unit: "deg", get: (s) => s.ubarTwistRear },
+    { key: "arb_rate_f", label: "ARB motion ratio F", unit: "deg/in", get: (s) => s.frontAxle.arbRateLeft },
+    { key: "arb_rate_r", label: "ARB motion ratio R", unit: "deg/in", get: (s) => s.rearAxle.arbRateLeft },
     { key: "ackermann", label: "Ackermann", unit: "%", get: (s) => s.ackermann },
   );
   return defs;

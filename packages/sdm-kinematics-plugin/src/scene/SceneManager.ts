@@ -52,6 +52,16 @@ export class SceneManager {
     return new THREE.Vector3(p[0], p[2], p[1]);
   }
 
+  /** Re-aim the view at a new point of interest (keeps the camera offset).
+   *  Needed because OpK coordinates put the origin at the front axle, so the
+   *  car body sits at negative X rather than around the grid center. */
+  focusOn(target: THREE.Vector3): void {
+    const delta = target.clone().sub(this.controls.target);
+    this.camera.position.add(delta);
+    this.controls.target.copy(target);
+    this.controls.update();
+  }
+
   private animate = () => {
     requestAnimationFrame(this.animate);
     this.controls.update();

@@ -101,6 +101,10 @@ export interface AxleChannels {
   /** Camber gain, deg/in of bump. */
   camberGainLeft: number;
   camberGainRight: number;
+  /** U-bar motion ratio: lever-arm rotation per inch of single-wheel bump
+   *  (deg/in), left side. Twist rate of the axle per unilateral travel. */
+  arbRateLeft: number;
+  arbRateRight: number;
 }
 
 interface SideProbe {
@@ -110,6 +114,8 @@ interface SideProbe {
   omega: number; // front-view upright rotation, rad per in of bump
   dToe: number;
   dCamber: number;
+  /** d(U-bar arm angle)/d(bump), deg/in — NaN when the axle has no U-bar. */
+  dArb: number;
 }
 
 function probeSide(
@@ -131,8 +137,10 @@ function probeSide(
     return { cp, fv, camber, toe };
   };
   const cur = chanAt(st);
-  const up = chanAt(solveAt(dz + H));
-  const dn = chanAt(solveAt(dz - H));
+  const upState = solveAt(dz + H);
+  const dnState = solveAt(dz - H);
+  const up = chanAt(upState);
+  const dn = chanAt(dnState);
   return {
     cp: cur.cp,
     vy: (up.cp[1] - dn.cp[1]) / (2 * H),
@@ -140,6 +148,7 @@ function probeSide(
     omega: (up.fv - dn.fv) / (2 * H) * (side === 1 ? 1 : 1),
     dToe: (up.toe - dn.toe) / (2 * H),
     dCamber: (up.camber - dn.camber) / (2 * H),
+    dArb: deg(upState.ubarAngle - dnState.ubarAngle) / (2 * H),
   };
 }
 
@@ -159,6 +168,7 @@ export function axleChannels(
     return {
       rollCenter: [NaN, NaN], icLeft: null, icRight: null, antiPct: NaN,
       bumpSteerLeft: NaN, bumpSteerRight: NaN, camberGainLeft: NaN, camberGainRight: NaN,
+      arbRateLeft: NaN, arbRateRight: NaN,
     };
   }
   const L = probeSide(geoL, 1, params, dzL, rack, stL);
@@ -206,6 +216,8 @@ export function axleChannels(
     bumpSteerRight: R.dToe,
     camberGainLeft: L.dCamber,
     camberGainRight: R.dCamber,
+    arbRateLeft: L.dArb,
+    arbRateRight: R.dArb,
   };
 }
 

@@ -47,6 +47,14 @@ export interface CornerState {
   shockRocker: V3;
   rockerAngle: number;
   shockLength: number;
+  /** U-bar droplink pickup in its displaced position (rides ubarOn host). */
+  ubarNsma: V3;
+  /** U-bar lever-arm end after arm rotation about the chassis pivot. */
+  ubarArm: V3;
+  /** U-bar lever-arm rotation about its lateral pivot axis, rad.
+   *  Left and right corners use the SAME axis direction (+Y), so equal bump
+   *  gives opposite signs and axle twist = ψ_L + ψ_R. NaN if no U-bar. */
+  ubarAngle: number;
 }
 
 const MAX_ITER = 60;
@@ -98,14 +106,14 @@ function armAngle(
   return { origin, axis, angle: Math.atan2(sinA, Math.min(1, Math.max(-1, cosA))) };
 }
 
-/** Rocker angle from the pushrod length constraint (1-D Newton). */
-function solveRocker(g: AxleGeometry, pushLowerCur: V3, guess: number): number | null {
-  const origin = g.rockerAxis1;
-  const axis = unit(sub(g.rockerAxis2, g.rockerAxis1));
-  const L2 = dist(g.pushUpper, g.pushLower) ** 2;
+/** Angle of a body rotating about a fixed axis so a link of fixed length
+ *  reaches `anchor`: |rotate(pt, θ) − anchor| = L. 1-D Newton. */
+function solveLinkAngle(
+  pt: V3, origin: V3, axis: V3, anchor: V3, L2: number, guess: number,
+): number | null {
   const f = (th: number) => {
-    const p = rotateAboutAxis(g.pushUpper, origin, axis, th);
-    return dist(p, pushLowerCur) ** 2 - L2;
+    const p = rotateAboutAxis(pt, origin, axis, th);
+    return dist(p, anchor) ** 2 - L2;
   };
   let th = guess;
   for (let i = 0; i < 50; i++) {
@@ -119,6 +127,14 @@ function solveRocker(g: AxleGeometry, pushLowerCur: V3, guess: number): number |
     th -= step;
   }
   return Math.abs(f(th)) < 1e-6 ? th : null;
+}
+
+/** Rocker angle from the pushrod length constraint. */
+function solveRocker(g: AxleGeometry, pushLowerCur: V3, guess: number): number | null {
+  return solveLinkAngle(
+    g.pushUpper, g.rockerAxis1, unit(sub(g.rockerAxis2, g.rockerAxis1)),
+    pushLowerCur, dist(g.pushUpper, g.pushLower) ** 2, guess,
+  );
 }
 
 export function solveCorner(input: CornerSolveInput): CornerState {
@@ -179,6 +195,33 @@ export function solveCorner(input: CornerSolveInput): CornerState {
   const pushUpperCur = rotateAboutAxis(g.pushUpper, rockerOrigin, rockerAxis, th);
   const shockRockerCur = rotateAboutAxis(g.shockRocker, rockerOrigin, rockerAxis, th);
 
+  // U-bar: carry the droplink pickup with its host body, then rotate the
+  // lever arm about the lateral (+Y) pivot axis to keep the droplink length.
+  let ubarNsmaCur: V3 = g.ubarNsma;
+  let ubarArmCur: V3 = g.ubarArm;
+  let ubarAngle = NaN;
+  if (g.ubarNsma && g.ubarArm && g.ubarPivot) {
+    if (g.ubarOn === "rocker") {
+      ubarNsmaCur = rotateAboutAxis(g.ubarNsma, rockerOrigin, rockerAxis, th);
+    } else if (g.ubarOn === "uca") {
+      const { origin, axis, angle } = armAngle(g.ucaFront, g.ucaRear, g.ubj, p2);
+      ubarNsmaCur = rotateAboutAxis(g.ubarNsma, origin, axis, angle);
+    } else if (g.ubarOn === "lca") {
+      const { origin, axis, angle } = armAngle(g.lcaFront, g.lcaRear, g.lbj, p1);
+      ubarNsmaCur = rotateAboutAxis(g.ubarNsma, origin, axis, angle);
+    } else {
+      ubarNsmaCur = xform.apply(g.ubarNsma);
+    }
+    const psi = solveLinkAngle(
+      g.ubarArm, g.ubarPivot, [0, 1, 0],
+      ubarNsmaCur, dist(g.ubarArm, g.ubarNsma) ** 2, 0,
+    );
+    if (psi !== null) {
+      ubarAngle = psi;
+      ubarArmCur = rotateAboutAxis(g.ubarArm, g.ubarPivot, [0, 1, 0], psi);
+    }
+  }
+
   return {
     ok,
     p1, p2, p3,
@@ -191,6 +234,9 @@ export function solveCorner(input: CornerSolveInput): CornerState {
     shockRocker: shockRockerCur,
     rockerAngle: th,
     shockLength: dist(shockRockerCur, g.shockChassis),
+    ubarNsma: ubarNsmaCur,
+    ubarArm: ubarArmCur,
+    ubarAngle,
   };
 }
 

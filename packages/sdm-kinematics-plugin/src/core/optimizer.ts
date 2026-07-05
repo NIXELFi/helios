@@ -397,6 +397,7 @@ export function defaultPointOpts(): PointOpt[] {
     "lcaFront", "lcaRear", "lbj", "ucaFront", "ucaRear", "ubj",
     "tieInner", "tieOuter",
     "pushLower", "pushUpper", "rockerAxis1", "rockerAxis2", "shockRocker", "shockChassis",
+    "ubarNsma", "ubarArm", "ubarPivot",
   ];
   const out: PointOpt[] = [];
   for (const axle of ["front", "rear"] as AxleId[]) {

@@ -6,7 +6,7 @@ import { SuspensionView } from "./scene/SuspensionView";
 import { Panel } from "./ui/panel";
 import { drawPlot, type PlotSeries } from "./ui/plot";
 import {
-  defaultCar, STATIC_POSE, type AxleGeometry, type CarSetup, type Pose,
+  defaultCar, roundPoint, STATIC_POSE, type AxleGeometry, type CarSetup, type Pose,
 } from "./core/model";
 import { solveCar, runSweep, channelDefs, type SweepResult, type SweepType } from "./core/sweep";
 import { serializeProject, parseProject, sweepToCsv, download } from "./core/io";
@@ -45,8 +45,17 @@ const panel = new Panel(sidebarEl, {
     refresh();
   },
   onHardpointChange(axle: "front" | "rear", key: keyof AxleGeometry, v) {
-    (car[axle][key] as [number, number, number]) = v;
+    (car[axle][key] as [number, number, number]) = roundPoint(v);
+    panel.refreshCoordInputs();
     view.setCar(car);
+    refresh();
+  },
+  onAttachmentChange(axle: "front" | "rear", kind: "pushrod" | "ubar", host: string) {
+    if (kind === "pushrod") {
+      car[axle].pushrodOn = host as AxleGeometry["pushrodOn"];
+    } else {
+      car[axle].ubarOn = host as AxleGeometry["ubarOn"];
+    }
     refresh();
   },
   onParamChange(patch) {
@@ -155,8 +164,18 @@ const optPanel = new OptimizerPanel(optOverlay, {
   },
   onApply() {
     if (!optResult) return;
+    // Coordinates land on the 3-decimal grid — nobody machines to 4 places.
+    const rounded = { ...optResult.bestCar, front: { ...optResult.bestCar.front }, rear: { ...optResult.bestCar.rear } };
+    for (const axle of ["front", "rear"] as const) {
+      for (const p of optResult.config.points) {
+        if (p.enabled && p.axle === axle) {
+          (rounded[axle][p.key] as [number, number, number]) =
+            roundPoint(rounded[axle][p.key] as [number, number, number]);
+        }
+      }
+    }
     car = {
-      ...optResult.bestCar,
+      ...rounded,
       name: `${optResult.seedCar.name} (optimized)`,
     };
     panel.build(car);

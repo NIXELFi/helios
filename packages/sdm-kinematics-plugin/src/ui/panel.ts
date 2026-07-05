@@ -2,7 +2,8 @@
 // widgets and calls back into main.ts; it never touches the solver directly.
 
 import {
-  HARDPOINT_KEYS, type AxleGeometry, type CarSetup, type Pose,
+  HARDPOINT_KEYS, PUSHROD_HOSTS, UBAR_HOSTS, fmtCoord,
+  type AxleGeometry, type CarSetup, type Pose,
 } from "../core/model";
 import type { FullState } from "../core/sweep";
 import type { SweepType } from "../core/sweep";
@@ -11,6 +12,7 @@ import { MEMBER_COLORS } from "../scene/SuspensionView";
 export interface PanelCallbacks {
   onPoseChange(pose: Pose): void;
   onHardpointChange(axle: "front" | "rear", key: keyof AxleGeometry, v: [number, number, number]): void;
+  onAttachmentChange(axle: "front" | "rear", kind: "pushrod" | "ubar", host: string): void;
   onParamChange(patch: Partial<CarSetup["params"]>): void;
   onNameChange(name: string): void;
   onRunSweep(type: SweepType, range: number, steps: number): void;
@@ -50,6 +52,7 @@ export class Panel {
       this.projectCard(),
       this.poseCard(),
       this.hardpointCard(),
+      this.attachmentsCard(),
       this.vehicleCard(),
       this.liveCard(),
       this.sweepCard(),
@@ -253,7 +256,52 @@ export class Panel {
 
   refreshCoordInputs(): void {
     const p = this.car[this.axle][this.pointKey] as [number, number, number];
-    p.forEach((v, i) => (this.coordInputs[i].value = String(Number(v.toFixed(4)))));
+    p.forEach((v, i) => (this.coordInputs[i].value = fmtCoord(v)));
+  }
+
+  /** Attachments: which linkage carries the pushrod pickup and the U-bar
+   *  droplink pickup — the OpK "Attachment" section, made explicit. */
+  private attachmentsCard(): HTMLElement {
+    const c = this.card("Attachments (pickup hosts)");
+    const note = document.createElement("div");
+    note.className = "small";
+    note.style.marginBottom = "8px";
+    note.textContent =
+      "The host body decides how the solver carries the pickup through travel. " +
+      "Pushrod = NSMA_PPAttPnt · U-bar = NSMA_UBarAttPnt.";
+    c.appendChild(note);
+    for (const axle of ["front", "rear"] as const) {
+      const mk = (
+        label: string,
+        hosts: { value: string; label: string }[],
+        current: string,
+        kind: "pushrod" | "ubar",
+      ) => {
+        const f = document.createElement("div");
+        f.className = "field";
+        const lab = document.createElement("span");
+        lab.className = "small";
+        lab.textContent = label;
+        const sel = document.createElement("select");
+        for (const h of hosts) {
+          const o = document.createElement("option");
+          o.value = h.value;
+          o.textContent = h.label;
+          sel.appendChild(o);
+        }
+        sel.value = current;
+        sel.onchange = () => this.cb.onAttachmentChange(axle, kind, sel.value);
+        f.append(lab, sel);
+        return f;
+      };
+      const g = this.car[axle];
+      const ax = axle === "front" ? "Front" : "Rear";
+      c.append(
+        mk(`${ax} pushrod on`, PUSHROD_HOSTS, g.pushrodOn, "pushrod"),
+        mk(`${ax} U-bar pickup on`, UBAR_HOSTS, g.ubarOn, "ubar"),
+      );
+    }
+    return c;
   }
 
   setCar(car: CarSetup): void {
@@ -334,6 +382,8 @@ export class Panel {
         <tr><td>Anti %</td><td>${fmt(f.antiPct, 1)}</td><td>${fmt(r.antiPct, 1)}</td></tr>
         <tr><td>Bump steer L °/in</td><td>${fmt(f.bumpSteerLeft, 3)}</td><td>${fmt(r.bumpSteerLeft, 3)}</td></tr>
         <tr><td>Camber gain L °/in</td><td>${fmt(f.camberGainLeft, 3)}</td><td>${fmt(r.camberGainLeft, 3)}</td></tr>
+        <tr><td>ARB twist °</td><td>${fmt(s.ubarTwistFront, 3)}</td><td>${fmt(s.ubarTwistRear, 3)}</td></tr>
+        <tr><td>ARB ratio °/in</td><td>${fmt(f.arbRateLeft, 3)}</td><td>${fmt(r.arbRateLeft, 3)}</td></tr>
         <tr><td>Ackermann %</td><td colspan="2">${s.ackermann === null ? "— (steer to read)" : fmt(s.ackermann, 1)}</td></tr>
       </table>`;
   }
@@ -396,6 +446,7 @@ export class Panel {
       ["Pushrod", MEMBER_COLORS.push],
       ["Rocker", MEMBER_COLORS.rocker],
       ["Coilover", MEMBER_COLORS.shock],
+      ["U-bar / droplink", MEMBER_COLORS.ubar],
       ["Upright / kingpin", MEMBER_COLORS.upright],
     ];
     for (const [lab, col] of items) {
