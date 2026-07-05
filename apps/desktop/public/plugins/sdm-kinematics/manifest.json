@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "id": "vehicle-dynamics.sdm-kinematics",
+  "name": "SDM Kinematics",
+  "version": "0.1.0",
+  "description": "Sun Devil Motorsports suspension-kinematics tool (OptimumKinematics-class): double-wishbone hardpoint editor, live 3D suspension with roll-center/IC overlays, Newton-Raphson position solver, and heave/roll/pitch/steer sweeps with full channel output. Pure-sandbox (no host access).",
+  "subteam": "vehicle-dynamics",
+  "entry": "dist/index.html",
+  "sdk": "^1.0.0",
+  "permissions": []
+}

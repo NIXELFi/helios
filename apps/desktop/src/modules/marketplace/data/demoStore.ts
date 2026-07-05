@@ -54,6 +54,17 @@ const SEEDS: Seed[] = [
       "FSAE chassis design + torsional-FEA + evolutionary optimizer (Three.js). Pure sandbox.",
     publishedAt: "2026-06-30T00:00:00Z",
   },
+  {
+    id: "vehicle-dynamics.sdm-kinematics",
+    name: "SDM Kinematics",
+    subteam: "Vehicle Dynamics",
+    version: "0.1.0",
+    permissions: [],
+    recommended: true,
+    description:
+      "Suspension-kinematics tool (OptimumKinematics-class): hardpoint editor, live 3D double-wishbone model with RC/IC overlays, heave/roll/pitch/steer sweeps + channel export (Three.js). Pure sandbox.",
+    publishedAt: "2026-07-04T00:00:00Z",
+  },
 ];
 
 function toPlugin(s: Seed): AvailablePlugin {
@@ -88,6 +99,7 @@ const PLUGINS = SEEDS.map(toPlugin);
 const installed = new Map<string, string>([
   ["vehicle-dynamics.lap-sim", "1.0.0"],
   ["chassis.coast", "0.1.0"],
+  ["vehicle-dynamics.sdm-kinematics", "0.1.0"],
 ]);
 
 const listeners = new Set<() => void>();
@@ -122,6 +134,7 @@ export function demoUninstall(id: string): void {
 const DEMO_LAUNCHABLE: Record<string, string> = {
   "vehicle-dynamics.lap-sim": "/plugins/lap-sim",
   "chassis.coast": "/plugins/coast",
+  "vehicle-dynamics.sdm-kinematics": "/plugins/sdm-kinematics",
 };
 
 export function demoLaunchUrl(id: string): string | null {

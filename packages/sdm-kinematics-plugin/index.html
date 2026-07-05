@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SDM Kinematics — Suspension Kinematics Tool</title>
+    <style>
+      :root {
+        --bg: #0e1116;
+        --panel: #171b22;
+        --panel-2: #1f242d;
+        --line: #2a313c;
+        --text: #e6eaf0;
+        --muted: #93a0b4;
+        --accent: #4ea1ff;
+        --good: #3ddc84;
+        --warn: #ffb454;
+        --bad: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+      }
+      #app { display: flex; height: 100vh; width: 100vw; }
+      #viewport { position: relative; flex: 1 1 auto; min-width: 0; }
+      #viewport canvas { display: block; }
+      #overlay-title {
+        position: absolute; top: 14px; left: 16px; pointer-events: none;
+        font-weight: 700; letter-spacing: 0.5px; font-size: 15px;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+      }
+      #overlay-title small { display:block; font-weight: 400; color: var(--muted); font-size: 11px; letter-spacing: 0; }
+      #hint { position:absolute; bottom: 12px; left: 16px; color: var(--muted); font-size: 11px; pointer-events:none; }
+      #sidebar {
+        flex: 0 0 340px; background: var(--panel); border-left: 1px solid var(--line);
+        padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+      }
+      .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+      .card h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+      .metric { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; }
+      .metric .label { color: var(--muted); }
+      .metric .value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; }
+      .metric .unit { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 3px; }
+      .val-good { color: var(--good); } .val-warn { color: var(--warn); } .val-bad { color: var(--bad); }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+        border-radius: 8px; padding: 8px 12px; font-size: 12px; cursor: pointer; transition: 0.12s;
+      }
+      button:hover { border-color: var(--accent); color: #fff; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #07121f; font-weight: 600; }
+      button.primary:hover { filter: brightness(1.1); }
+      label.toggle { display:flex; align-items:center; gap:8px; color: var(--muted); cursor:pointer; user-select:none; }
+      input[type="range"] { width: 100%; }
+      .legend-item { display:flex; align-items:center; gap:8px; padding: 2px 0; color: var(--muted); }
+      .swatch { width: 14px; height: 4px; border-radius: 2px; flex: 0 0 auto; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+      .small { font-size: 11px; color: var(--muted); }
+      #file-input { display: none; }
+      .field { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+      .field select, .field input { background: var(--bg); color: var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 7px; font-size:12px; max-width:62%; }
+      .field input[type="number"] { width: 80px; }
+      .seg { display:flex; gap:4px; }
+      .seg-btn { flex:1; padding:6px 4px; font-size:12px; }
+      .seg-btn.active { background: var(--accent); border-color: var(--accent); color:#07121f; font-weight:600; }
+      .coord-row { display:flex; gap:6px; }
+      .coord-row label { flex:1; display:flex; flex-direction:column; gap:2px; font-size:10px; color:var(--muted); }
+      .coord-row input { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px; font-size:12px; }
+      .slider-field { margin-bottom: 8px; }
+      .slider-field .lab { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); }
+      .slider-field .lab b { color: var(--text); font-variant-numeric: tabular-nums; font-weight:600; }
+      table.chan { width:100%; border-collapse: collapse; font-size:11px; font-variant-numeric: tabular-nums; }
+      table.chan th { color: var(--muted); font-weight:500; text-align:right; padding:2px 4px; border-bottom:1px solid var(--line); }
+      table.chan th:first-child, table.chan td:first-child { text-align:left; color:var(--muted); }
+      table.chan td { text-align:right; padding:2px 4px; }
+      #sweep-overlay {
+        position:absolute; left:0; right:0; bottom:0; background: rgba(14,17,22,0.96);
+        border-top:1px solid var(--line); padding:10px 14px 14px;
+        box-shadow:0 -8px 24px rgba(0,0,0,0.4); display:none; max-height: 46vh; overflow-y:auto;
+      }
+      .sweep-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+      .plot-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
+      .plot-cell { background: var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:6px; }
+      .plot-cell canvas { width:100%; display:block; }
+      .chk-row { display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--muted); }
+      .chk-row label { display:flex; gap:4px; align-items:center; cursor:pointer; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport">
+        <div id="overlay-title">SDM&nbsp;Kinematics<small>Sun Devil Motorsports — Suspension Kinematics Tool</small></div>
+        <div id="hint">drag = orbit · scroll = zoom · right-drag = pan</div>
+        <div id="sweep-overlay"></div>
+      </div>
+      <aside id="sidebar"><!-- populated by ui/panel.ts --></aside>
+    </div>
+    <input type="file" id="file-input" accept=".json" />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
