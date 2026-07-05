@@ -19,6 +19,11 @@ export interface PanelCallbacks {
   onReset(): void;
   onOverlayToggle(on: boolean): void;
   onAnimateToggle(on: boolean): void;
+  /** Import OptimumK points (.xlsx or OpK-layout .json). */
+  onImportPointsClick(): void;
+  onExportSdmXlsx(): void;
+  onExportOpkJson(): void;
+  onOpenOptimizer(): void;
 }
 
 const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
@@ -48,6 +53,7 @@ export class Panel {
       this.vehicleCard(),
       this.liveCard(),
       this.sweepCard(),
+      this.optimizerCard(),
       this.legendCard(),
     );
     this.refreshCoordInputs();
@@ -85,11 +91,30 @@ export class Panel {
     const row = document.createElement("div");
     row.className = "row";
     row.append(
-      this.btn("Save JSON", () => this.cb.onSave()),
-      this.btn("Load JSON", () => this.cb.onLoadClick()),
+      this.btn("Save project", () => this.cb.onSave()),
+      this.btn("Load project", () => this.cb.onLoadClick()),
       this.btn("Reset", () => this.cb.onReset()),
     );
-    c.append(f, row);
+    const io = document.createElement("div");
+    io.className = "row";
+    io.style.marginTop = "8px";
+    io.append(
+      this.btn("Import points (OpK xlsx / json)", () => this.cb.onImportPointsClick()),
+      this.btn("Export SDM xlsx", () => this.cb.onExportSdmXlsx()),
+      this.btn("Export OpK JSON", () => this.cb.onExportOpkJson()),
+    );
+    c.append(f, row, io);
+    return c;
+  }
+
+  private optimizerCard(): HTMLElement {
+    const c = this.card("Optimizer");
+    const note = document.createElement("div");
+    note.className = "small";
+    note.style.marginBottom = "8px";
+    note.textContent = "Multi-parameter targets with weights; box or actuation-plane mutation bounds per point.";
+    const b = this.btn("Open optimizer", () => this.cb.onOpenOptimizer(), true);
+    c.append(note, b);
     return c;
   }
 

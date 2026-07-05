@@ -60,7 +60,7 @@
       .swatch { width: 14px; height: 4px; border-radius: 2px; flex: 0 0 auto; }
       .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
       .small { font-size: 11px; color: var(--muted); }
-      #file-input { display: none; }
+      #file-input, #points-input { display: none; }
       .field { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
       .field select, .field input { background: var(--bg); color: var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 7px; font-size:12px; max-width:62%; }
       .field input[type="number"] { width: 80px; }
@@ -82,6 +82,10 @@
         border-top:1px solid var(--line); padding:10px 14px 14px;
         box-shadow:0 -8px 24px rgba(0,0,0,0.4); display:none; max-height: 46vh; overflow-y:auto;
       }
+      #opt-overlay {
+        position:absolute; inset:0; background: rgba(14,17,22,0.97);
+        padding:12px 14px; display:none; overflow-y:auto;
+      }
       .sweep-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
       .plot-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
       .plot-cell { background: var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:6px; }
@@ -96,10 +100,12 @@
         <div id="overlay-title">SDM&nbsp;Kinematics<small>Sun Devil Motorsports — Suspension Kinematics Tool</small></div>
         <div id="hint">drag = orbit · scroll = zoom · right-drag = pan</div>
         <div id="sweep-overlay"></div>
+        <div id="opt-overlay"></div>
       </div>
       <aside id="sidebar"><!-- populated by ui/panel.ts --></aside>
     </div>
     <input type="file" id="file-input" accept=".json" />
+    <input type="file" id="points-input" accept=".xlsx,.json" />
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

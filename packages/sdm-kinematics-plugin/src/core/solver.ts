@@ -76,17 +76,19 @@ function residuals(g: AxleGeometry, tieInnerCur: V3, targetWcZ: number, u: numbe
   ];
 }
 
-/** Signed rotation of the LCA about its inboard hinge, recovered from the
- *  displaced LBJ. Used to carry LCA-mounted pushrod pickups along. */
-function lcaAngle(g: AxleGeometry, p1: V3): { origin: V3; axis: V3; angle: number } {
-  const origin = g.lcaFront;
-  const axis = unit(sub(g.lcaRear, g.lcaFront));
+/** Signed rotation of an A-arm about its inboard hinge, recovered from the
+ *  displaced ball joint. Used to carry arm-mounted pushrod pickups along. */
+function armAngle(
+  hingeA: V3, hingeB: V3, bjStatic: V3, bjCur: V3,
+): { origin: V3; axis: V3; angle: number } {
+  const origin = hingeA;
+  const axis = unit(sub(hingeB, hingeA));
   const proj = (p: V3): V3 => {
     const v = sub(p, origin);
     return sub(v, scale(axis, dot(v, axis)));
   };
-  const a = proj(g.lbj);
-  const b = proj(p1);
+  const a = proj(bjStatic);
+  const b = proj(bjCur);
   const cosA = dot(unit(a), unit(b));
   const sinA = dot(axis, [
     a[1] * b[2] - a[2] * b[1],
@@ -160,12 +162,15 @@ export function solveCorner(input: CornerSolveInput): CornerState {
   const wheelCenter = xform.apply(g.wheelCenter);
   const wheelAxisOuter = xform.apply(g.wheelAxisOuter);
 
-  // Pushrod outboard end rides the LCA (or the upright).
+  // Pushrod outboard end rides its host body: LCA, UCA, or the upright.
   let pushLowerCur: V3;
   if (g.pushrodOn === "upright") {
     pushLowerCur = xform.apply(g.pushLower);
+  } else if (g.pushrodOn === "uca") {
+    const { origin, axis, angle } = armAngle(g.ucaFront, g.ucaRear, g.ubj, p2);
+    pushLowerCur = rotateAboutAxis(g.pushLower, origin, axis, angle);
   } else {
-    const { origin, axis, angle } = lcaAngle(g, p1);
+    const { origin, axis, angle } = armAngle(g.lcaFront, g.lcaRear, g.lbj, p1);
     pushLowerCur = rotateAboutAxis(g.pushLower, origin, axis, angle);
   }
   const th = solveRocker(g, pushLowerCur, 0) ?? 0;

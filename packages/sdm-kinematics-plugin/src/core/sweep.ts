@@ -26,12 +26,15 @@ export interface FullState {
   pose: Pose;
 }
 
-/** Per-corner bump target (wheel Δz relative to chassis) for an attitude. */
+/** Per-corner bump target (wheel Δz relative to chassis) for an attitude.
+ *  Pitch rotates about mid-wheelbase so the math is origin-independent
+ *  (OptimumK files put the origin at the front axle, not mid-wheelbase). */
 export function cornerTargets(car: CarSetup, pose: Pose): Record<CornerId, number> {
   const tf = Math.tan(rad(pose.rollDeg));
   const tp = Math.tan(rad(pose.pitchDeg));
-  const dz = (x: number, y: number) => pose.heave - y * tf + x * tp;
   const f = car.front.wheelCenter, r = car.rear.wheelCenter;
+  const xMid = (f[0] + r[0]) / 2;
+  const dz = (x: number, y: number) => pose.heave - y * tf + (x - xMid) * tp;
   return {
     FL: dz(f[0], f[1]),
     FR: dz(f[0], -f[1]),
@@ -40,9 +43,20 @@ export function cornerTargets(car: CarSetup, pose: Pose): Record<CornerId, numbe
   };
 }
 
+/** Evaluation cost controls — the optimizer skips derivative-probe solves
+ *  for channels a study doesn't reference. */
+export interface EvalOpts {
+  cornerProbes?: boolean; // installation ratio / wheel rate
+  axleProbes?: boolean; // RC, ICs, anti%, bump steer, camber gain
+}
+
 /** Solve the whole car at one attitude. `warm` carries the previous step's
  *  solution for sweep continuity. */
-export function solveCar(car: CarSetup, pose: Pose, warm?: Record<CornerId, CornerState>): FullState {
+export function solveCar(
+  car: CarSetup, pose: Pose, warm?: Record<CornerId, CornerState>, opts?: EvalOpts,
+): FullState {
+  const cornerProbes = opts?.cornerProbes ?? true;
+  const axleProbes = opts?.axleProbes ?? true;
   const targets = cornerTargets(car, pose);
   const geoFL = car.front;
   const geoFR = mirrorAxle(car.front);
@@ -72,15 +86,16 @@ export function solveCar(car: CarSetup, pose: Pose, warm?: Record<CornerId, Corn
       g(id), corners[id], side as 1 | -1, p,
       isFront ? p.springRateFront : p.springRateRear,
       targets[id], isFront ? pose.rack : 0,
+      !cornerProbes,
     );
   });
 
   const wb = wheelbase(car);
   const frontAxle = axleChannels(
-    geoFL, geoFR, p, corners.FL, corners.FR, targets.FL, targets.FR, pose.rack, true, wb,
+    geoFL, geoFR, p, corners.FL, corners.FR, targets.FL, targets.FR, pose.rack, true, wb, !axleProbes,
   );
   const rearAxle = axleChannels(
-    geoRL, geoRR, p, corners.RL, corners.RR, targets.RL, targets.RR, 0, false, wb,
+    geoRL, geoRR, p, corners.RL, corners.RR, targets.RL, targets.RR, 0, false, wb, !axleProbes,
   );
 
   return {
@@ -151,7 +166,7 @@ const SWEEP_META: Record<SweepType, { label: string; unit: string }> = {
   steer: { label: "Rack travel", unit: "in" },
 };
 
-export function runSweep(car: CarSetup, spec: SweepSpec): SweepResult {
+export function runSweep(car: CarSetup, spec: SweepSpec, opts?: EvalOpts): SweepResult {
   const n = Math.max(3, Math.floor(spec.steps));
   const values: number[] = [];
   const states: FullState[] = [];
@@ -176,7 +191,7 @@ export function runSweep(car: CarSetup, spec: SweepSpec): SweepResult {
     else if (spec.type === "pitch") pose.pitchDeg = v;
     else pose.rack = v;
     const warm = v >= 0 ? warmPos : warmNeg;
-    const st = solveCar(car, pose, warm);
+    const st = solveCar(car, pose, warm, opts);
     if (v >= 0) warmPos = st.corners;
     if (v <= 0) warmNeg = st.corners;
     stateAt[i] = st;

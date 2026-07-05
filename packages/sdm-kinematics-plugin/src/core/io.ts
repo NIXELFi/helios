@@ -22,6 +22,7 @@ export function parseProject(text: string): CarSetup {
     front: { ...d.front, ...car.front },
     rear: { ...d.rear, ...car.rear },
     params: { ...d.params, ...car.params },
+    opk: car.opk ?? null,
   };
 }
 

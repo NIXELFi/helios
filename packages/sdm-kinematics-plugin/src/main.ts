@@ -10,17 +10,25 @@ import {
 } from "./core/model";
 import { solveCar, runSweep, channelDefs, type SweepResult, type SweepType } from "./core/sweep";
 import { serializeProject, parseProject, sweepToCsv, download } from "./core/io";
+import { importOpkExcel, importOpkJson, exportSdmExcel, exportOpkJson } from "./core/opk";
+import { runOptimizer, type OptResult, type RunHandle, type OptimizerConfig } from "./core/optimizer";
+import { generateReport } from "./core/report";
+import { OptimizerPanel } from "./ui/optimizerPanel";
 
 const viewport = document.getElementById("viewport")!;
 const sidebarEl = document.getElementById("sidebar")!;
 const fileInput = document.getElementById("file-input") as HTMLInputElement;
+const pointsInput = document.getElementById("points-input") as HTMLInputElement;
 const sweepOverlay = document.getElementById("sweep-overlay")!;
+const optOverlay = document.getElementById("opt-overlay")!;
 
 let car: CarSetup = defaultCar();
 let pose: Pose = { ...STATIC_POSE };
 let lastSweep: SweepResult | null = null;
 let animating = false;
 let animT = 0;
+let optHandle: RunHandle | null = null;
+let optResult: OptResult | null = null;
 
 const sm = new SceneManager(viewport);
 const view = new SuspensionView(sm, car);
@@ -72,6 +80,101 @@ const panel = new Panel(sidebarEl, {
   },
   onAnimateToggle(on) {
     animating = on;
+  },
+  onImportPointsClick() {
+    pointsInput.click();
+  },
+  onExportSdmXlsx() {
+    const buf = exportSdmExcel(car);
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${car.name.replace(/\s+/g, "-")}-SDM-points.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  onExportOpkJson() {
+    download(`${car.name.replace(/\s+/g, "-")}-opk-points.json`, exportOpkJson(car), "application/json");
+  },
+  onOpenOptimizer() {
+    optPanel.open();
+  },
+});
+
+function adoptCar(next: CarSetup, warnings: string[]): void {
+  car = next;
+  panel.build(car);
+  panel.setPose(pose);
+  view.setCar(car);
+  refresh();
+  if (warnings.length) alert(`Imported with warnings:\n\n- ${warnings.join("\n- ")}`);
+}
+
+pointsInput.onchange = async () => {
+  const f = pointsInput.files?.[0];
+  if (!f) return;
+  try {
+    if (/\.xlsx$/i.test(f.name)) {
+      const { car: next, warnings } = importOpkExcel(await f.arrayBuffer());
+      adoptCar(next, warnings);
+    } else {
+      const text = await f.text();
+      const obj = JSON.parse(text);
+      if (obj?.tool === "sdm-kinematics") {
+        adoptCar(parseProject(text), []);
+      } else {
+        const { car: next, warnings } = importOpkJson(text);
+        adoptCar(next, warnings);
+      }
+    }
+  } catch (e) {
+    alert(`Could not import points: ${(e as Error).message}`);
+  }
+  pointsInput.value = "";
+};
+
+// ---- Optimizer ----
+const optPanel = new OptimizerPanel(optOverlay, {
+  onRun(config: OptimizerConfig) {
+    try {
+      optResult = null;
+      optHandle = runOptimizer(car, config, (p) => optPanel.showProgress(p));
+      optPanel.setRunning(true);
+      optHandle.done.then((res) => {
+        optResult = res;
+        optHandle = null;
+        optPanel.showResult(res);
+      });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  },
+  onCancel() {
+    optHandle?.cancel();
+  },
+  onApply() {
+    if (!optResult) return;
+    car = {
+      ...optResult.bestCar,
+      name: `${optResult.seedCar.name} (optimized)`,
+    };
+    panel.build(car);
+    panel.setPose(pose);
+    view.setCar(car);
+    refresh();
+  },
+  onRevert() {
+    if (!optResult) return;
+    car = optResult.seedCar;
+    panel.build(car);
+    panel.setPose(pose);
+    view.setCar(car);
+    refresh();
+  },
+  onReport() {
+    if (!optResult) return;
+    void generateReport(optResult);
   },
 });
 
@@ -178,3 +281,49 @@ function tick(): void {
 panel.build(car);
 refresh();
 tick();
+
+// Dev-only debug hooks for automated verification — vite replaces
+// import.meta.env.DEV with false in production, so none of this (including
+// the fetch) survives into the published single-file bundle.
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__sdm = {
+    getCar: () => car,
+    solve: () => solveCar(car, pose),
+    importXlsxUrl: async (url: string) => {
+      const r = await fetch(url);
+      const { car: next, warnings } = importOpkExcel(await r.arrayBuffer());
+      adoptCar(next, warnings);
+      return warnings;
+    },
+    importJsonText: (t: string) => {
+      const { car: next, warnings } = importOpkJson(t);
+      adoptCar(next, warnings);
+      return warnings;
+    },
+    exportJson: () => exportOpkJson(car),
+    exportXlsxBytes: () => exportSdmExcel(car).byteLength,
+    reportB64: async () => {
+      if (!optResult) return null;
+      const buf = (await generateReport(optResult, { returnBytes: true })) as ArrayBuffer;
+      const b = new Uint8Array(buf);
+      let s = "";
+      for (let i = 0; i < b.length; i += 0x8000) {
+        s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+      }
+      return btoa(s);
+    },
+    runOpt: (config: OptimizerConfig) =>
+      runOptimizer(car, config, () => {}).done.then(async (res) => {
+        optResult = res;
+        const pdf = (await generateReport(res, { returnBytes: true })) as ArrayBuffer;
+        return {
+          seed: res.seedObjective,
+          best: res.bestObjective,
+          perParam: res.perParam,
+          bestFront: res.bestCar.front,
+          seedFront: res.seedCar.front,
+          pdfBytes: pdf.byteLength,
+        };
+      }),
+  };
+}

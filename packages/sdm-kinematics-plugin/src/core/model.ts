@@ -40,8 +40,9 @@ export interface AxleGeometry {
   /** A second point on the wheel spin axis, outboard of wheelCenter
    *  (upright-fixed). Encodes static camber/toe. */
   wheelAxisOuter: V3;
-  /** Where the pushrod picks up: "lca" or "upright". */
-  pushrodOn: "lca" | "upright";
+  /** Where the pushrod picks up: lower A-arm, upper A-arm, or the upright.
+   *  (SDM26 runs front actuation off the UPPER arm per the OpK file.) */
+  pushrodOn: "lca" | "uca" | "upright";
 }
 
 export interface VehicleParams {
@@ -62,6 +63,9 @@ export interface CarSetup {
   front: AxleGeometry;
   rear: AxleGeometry;
   params: VehicleParams;
+  /** Raw OptimumK-file extras preserved for lossless round-trip (U-bar
+   *  points, stiffnesses, steering ratio, raw right-side values, …). */
+  opk?: Record<string, unknown> | null;
 }
 
 /** Ride/attitude state driven by the UI. Lengths in inches, angles in degrees,

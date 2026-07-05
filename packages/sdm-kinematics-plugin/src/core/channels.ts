@@ -38,6 +38,9 @@ export function cornerChannels(
   springRate: number,
   dz: number,
   rack: number,
+  /** Skip the ±bump probe solves (installation ratio / wheel rate become
+   *  NaN). The optimizer uses this to evaluate cheap channels fast. */
+  skipProbes = false,
 ): CornerChannels {
   let a = unit(sub(st.wheelAxisOuter, st.wheelCenter));
   if (a[1] * side < 0) a = scale(a, -1); // point outboard
@@ -65,17 +68,21 @@ export function cornerChannels(
   const scrub = side * (contactPatch[1] - g[1]);
 
   // Installation ratio via central difference on the bump target.
-  const H = 0.05;
-  const up = solveCorner({ geo, dz: dz + H, rack, guess: [st.p1, st.p2, st.p3] });
-  const dn = solveCorner({ geo, dz: dz - H, rack, guess: [st.p1, st.p2, st.p3] });
-  const installRatio = (up.shockLength - dn.shockLength) / (2 * H);
-  const wheelRate = springRate * installRatio * installRatio;
+  let installRatio = NaN;
+  let wheelRate = NaN;
+  if (!skipProbes) {
+    const H = 0.05;
+    const up = solveCorner({ geo, dz: dz + H, rack, guess: [st.p1, st.p2, st.p3] });
+    const dn = solveCorner({ geo, dz: dz - H, rack, guess: [st.p1, st.p2, st.p3] });
+    installRatio = (up.shockLength - dn.shockLength) / (2 * H);
+    wheelRate = springRate * installRatio * installRatio;
+  }
 
   return {
     camber, toe, steer, caster, kpi, mechTrail, scrub,
     contactPatch, wheelAxis: a,
     shockLength: st.shockLength,
-    installRatio: Math.abs(installRatio),
+    installRatio: Number.isFinite(installRatio) ? Math.abs(installRatio) : NaN,
     wheelRate,
   };
 }
@@ -145,7 +152,15 @@ export function axleChannels(
   stL: CornerState, stR: CornerState,
   dzL: number, dzR: number, rack: number,
   isFront: boolean, wheelbase: number,
+  /** Skip the ±bump probe solves — every axle channel becomes NaN. */
+  skipProbes = false,
 ): AxleChannels {
+  if (skipProbes) {
+    return {
+      rollCenter: [NaN, NaN], icLeft: null, icRight: null, antiPct: NaN,
+      bumpSteerLeft: NaN, bumpSteerRight: NaN, camberGainLeft: NaN, camberGainRight: NaN,
+    };
+  }
   const L = probeSide(geoL, 1, params, dzL, rack, stL);
   const R = probeSide(geoR, -1, params, dzR, rack, stR);
 
