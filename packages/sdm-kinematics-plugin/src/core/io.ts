@@ -19,8 +19,8 @@ export function parseProject(text: string): CarSetup {
   const car = obj.car as CarSetup;
   return {
     name: typeof car.name === "string" ? car.name : d.name,
-    front: { ...d.front, ...car.front },
-    rear: { ...d.rear, ...car.rear },
+    front: { ...d.front, ...car.front, config: { ...d.front.config, ...car.front?.config } },
+    rear: { ...d.rear, ...car.rear, config: { ...d.rear.config, ...car.rear?.config } },
     params: { ...d.params, ...car.params },
     opk: car.opk ?? null,
   };

@@ -149,6 +149,13 @@ const panel = new Panel(sidebarEl, {
   onLoadForceCsvClick() {
     forceCsvInput.click();
   },
+  onConfigChange(axle, patch) {
+    car[axle].config = { ...car[axle].config, ...patch };
+    panel.build(car);
+    panel.setPose(pose);
+    view.setCar(car);
+    refresh();
+  },
   onRunForces(cfg) {
     try {
       let samples;
@@ -596,6 +603,18 @@ if (import.meta.env.DEV) {
     exportXlsxBytes: () => exportSdmExcel(car).byteLength,
     runForcesDebug: (samples: { ax: number; ay: number; t: number }[]) =>
       runForces(car, massProps, samples, "debug", solveCar(car, STATIC_POSE)),
+    setConfig: (axle: "front" | "rear", patch: Record<string, string>) => {
+      car[axle].config = { ...car[axle].config, ...patch } as typeof car.front.config;
+      panel.build(car);
+      panel.setPose(pose);
+      view.setCar(car);
+      refresh();
+    },
+    setPoint: (axle: "front" | "rear", key: string, v: [number, number, number]) => {
+      (car[axle] as unknown as Record<string, unknown>)[key] = v;
+      view.setCar(car);
+      refresh();
+    },
     reportB64: async () => {
       if (!optResult) return null;
       const buf = (await generateReport(optResult, { returnBytes: true })) as ArrayBuffer;

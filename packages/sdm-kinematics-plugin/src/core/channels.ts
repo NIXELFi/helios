@@ -8,7 +8,7 @@
 //   scrub    + = contact patch outboard of the steering-axis ground intercept
 //   steer    + = wheel steered left
 
-import { type V3, sub, add, scale, unit, dot, cross, deg } from "./vec";
+import { type V3, sub, add, scale, unit, dot, cross, deg, dist } from "./vec";
 import type { AxleGeometry, VehicleParams } from "./model";
 import { solveCorner, type CornerState } from "./solver";
 
@@ -54,7 +54,7 @@ function travelToShockLimit(
   let prevF = L0 - target;
   let best = Math.abs(dz);
   for (let i = 0; i < 12; i++) {
-    const s = solveCorner({ geo, dz: dz0 + dz, rack, guess: [st.p1, st.p2, st.p3] });
+    const s = solveCorner({ geo, dz: dz0 + dz, rack, guessPose: st.poseU, needSteerAxis: false });
     if (!s.ok) {
       // Mechanical lock before the shock limit — back off toward it.
       dz *= 0.7;
@@ -131,11 +131,20 @@ export function cornerChannels(
   let travelTotal = NaN;
   if (!skipProbes) {
     const H = 0.05;
-    const up = solveCorner({ geo, dz: dz + H, rack, guess: [st.p1, st.p2, st.p3] });
-    const dn = solveCorner({ geo, dz: dz - H, rack, guess: [st.p1, st.p2, st.p3] });
+    const up = solveCorner({ geo, dz: dz + H, rack, guessPose: st.poseU, needSteerAxis: false });
+    const dn = solveCorner({ geo, dz: dz - H, rack, guessPose: st.poseU, needSteerAxis: false });
     const rate = (up.shockLength - dn.shockLength) / (2 * H); // signed dShock/dWheel
-    installRatio = Math.abs(rate);
-    wheelRate = springRate * rate * rate;
+    if (geo.config.spring === "torsion") {
+      // Torsion bar on the rocker shaft: WR = kT[lb·in/rad] · (dθ/dz)².
+      // installRatio reports the rocker rate in deg/in for torsion setups.
+      const dThetaRad = (up.rockerAngle - dn.rockerAngle) / (2 * H);
+      const kT = isFront ? params.torsionRateFront : params.torsionRateRear;
+      installRatio = Math.abs(deg(dThetaRad));
+      wheelRate = kT * (180 / Math.PI) * dThetaRad * dThetaRad;
+    } else {
+      installRatio = Math.abs(rate);
+      wheelRate = springRate * rate * rate;
+    }
 
     const coilMin = isFront ? params.coilMinFront : params.coilMinRear;
     const coilMax = isFront ? params.coilMaxFront : params.coilMaxRear;
@@ -187,6 +196,64 @@ export interface AxleChannels {
   /** Side-view n-line slope dz/dx at the contact patch (L/R average) — the
    *  force calculator intersects front & rear lines for the pitch center. */
   svSlope: number;
+  /** Decoupled wheel rates, lb/in at the wheel — the axle's effective rate
+   *  in pure-heave and pure-roll wheel motion (config.decoupling !== "none";
+   *  NaN otherwise). third-element: corner coils + shared heave element in
+   *  heave, corner coils only in roll. heave-roll: heave element only in
+   *  heave, roll element only in roll (corner units are dampers). */
+  wheelRateHeave: number;
+  wheelRateRoll: number;
+}
+
+/** Element-length rates for the decoupling springs, probed with both wheels
+ *  moving together (heave) or opposite (roll). Elements run pickup-to-pickup
+ *  across the car, so their energy is shared by two wheels (the ½ factors). */
+function decoupledRates(
+  geoL: AxleGeometry, geoR: AxleGeometry, params: VehicleParams,
+  stL: CornerState, stR: CornerState, dzL: number, dzR: number, rack: number,
+  isFront: boolean, springRate: number,
+): { heave: number; roll: number } {
+  const cfg = geoL.config;
+  if (cfg.decoupling === "none") return { heave: NaN, roll: NaN };
+  const H = 0.05;
+  const solveAt = (dL: number, dR: number): [CornerState, CornerState] => [
+    solveCorner({ geo: geoL, dz: dzL + dL, rack, guessPose: stL.poseU, needSteerAxis: false }),
+    solveCorner({ geo: geoR, dz: dzR + dR, rack, guessPose: stR.poseU, needSteerAxis: false }),
+  ];
+  // Heave element: a straight cross-car spring — its stroke is the geometric
+  // length change (responds to the SYMMETRIC pickup motion). Roll element: a
+  // heave-roll mechanism (T-bar / crossed lever) extracts the ANTISYMMETRIC
+  // component instead, so its stroke is the DIFFERENCE of the two pickups'
+  // inboard displacements — zero in pure heave by construction.
+  const inboard = (side: "L" | "R", st: CornerState, staticP: V3): number =>
+    side === "L" ? -(st.rollRocker[1] - staticP[1]) : st.rollRocker[1] - staticP[1];
+  const elementRates = (mode: "heave" | "roll") => {
+    const sgn = mode === "heave" ? 1 : -1;
+    const [upL, upR] = solveAt(H, sgn * H);
+    const [dnL, dnR] = solveAt(-H, -sgn * H);
+    // Per inch of (single) wheel motion in this mode.
+    const dThird = (dist(upL.thirdRocker, upR.thirdRocker) - dist(dnL.thirdRocker, dnR.thirdRocker)) / (2 * H);
+    const rollStroke = (l: CornerState, r: CornerState) =>
+      inboard("L", l, geoL.rollRocker) - inboard("R", r, geoR.rollRocker);
+    const dRoll = (rollStroke(upL, upR) - rollStroke(dnL, dnR)) / (2 * H);
+    const dCorner = (upL.shockLength - dnL.shockLength) / (2 * H);
+    return { dThird, dRoll, dCorner };
+  };
+  const kThird = isFront ? params.thirdRateFront : params.thirdRateRear;
+  const kRoll = isFront ? params.rollRateFront : params.rollRateRear;
+  const h = elementRates("heave");
+  const r = elementRates("roll");
+  if (cfg.decoupling === "third-element") {
+    return {
+      heave: springRate * h.dCorner * h.dCorner + (kThird * h.dThird * h.dThird) / 2,
+      roll: springRate * r.dCorner * r.dCorner + (kThird * r.dThird * r.dThird) / 2,
+    };
+  }
+  // heave-roll: corner units are dampers; springs are the two elements.
+  return {
+    heave: (kThird * h.dThird * h.dThird) / 2 + (kRoll * h.dRoll * h.dRoll) / 2,
+    roll: (kThird * r.dThird * r.dThird) / 2 + (kRoll * r.dRoll * r.dRoll) / 2,
+  };
 }
 
 interface SideProbe {
@@ -207,7 +274,7 @@ function probeSide(
   dz: number, rack: number, st: CornerState,
 ): SideProbe {
   const H = 0.05;
-  const solveAt = (d: number) => solveCorner({ geo, dz: d, rack, guess: [st.p1, st.p2, st.p3] });
+  const solveAt = (d: number) => solveCorner({ geo, dz: d, rack, guessPose: st.poseU, needSteerAxis: false });
   const chanAt = (s: CornerState) => {
     let a = unit(sub(s.wheelAxisOuter, s.wheelCenter));
     if (a[1] * side < 0) a = scale(a, -1);
@@ -261,10 +328,13 @@ export function axleChannels(
       arbMotionRatioLeft: NaN, arbMotionRatioRight: NaN,
       arbInstallRatioLeft: NaN, arbInstallRatioRight: NaN,
       svSlope: NaN,
+      wheelRateHeave: NaN, wheelRateRoll: NaN,
     };
   }
   const L = probeSide(geoL, 1, params, dzL, rack, stL);
   const R = probeSide(geoR, -1, params, dzR, rack, stR);
+  const springRate = isFront ? params.springRateFront : params.springRateRear;
+  const dec = decoupledRates(geoL, geoR, params, stL, stR, dzL, dzR, rack, isFront, springRate);
 
   // n-line: point cp, direction perpendicular to front-view velocity (vy, 1).
   const d1: [number, number] = [-1, L.vy];
@@ -315,6 +385,8 @@ export function axleChannels(
     arbMotionRatioLeft: Math.abs(L.dLink) > 1e-4 ? 1 / Math.abs(L.dLink) : NaN,
     arbMotionRatioRight: Math.abs(R.dLink) > 1e-4 ? 1 / Math.abs(R.dLink) : NaN,
     svSlope,
+    wheelRateHeave: dec.heave,
+    wheelRateRoll: dec.roll,
   };
 }
 

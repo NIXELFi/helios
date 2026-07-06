@@ -192,13 +192,18 @@ function solveLinkForces(
   geo: AxleGeometry, st: CornerState, cp: V3, tireF: V3, driven: boolean,
 ): Record<LinkName, number> | null {
   const wc = st.wheelCenter;
+  // Sixth member: the pushrod for rod-actuated setups, or the coilover
+  // itself when the shock acts directly on the outboard pickup.
+  const sixth = geo.config.actuation === "direct-coilover"
+    ? { out: st.pushLower, dir: unit(sub(geo.shockChassis, st.pushLower)) }
+    : { out: st.pushLower, dir: unit(sub(st.pushUpper, st.pushLower)) };
   const members: { out: V3; dir: V3 }[] = [
     { out: st.p1, dir: unit(sub(geo.lcaFront, st.p1)) },
     { out: st.p1, dir: unit(sub(geo.lcaRear, st.p1)) },
     { out: st.p2, dir: unit(sub(geo.ucaFront, st.p2)) },
     { out: st.p2, dir: unit(sub(geo.ucaRear, st.p2)) },
     { out: st.p3, dir: unit(sub(st.tieInner, st.p3)) },
-    { out: st.pushLower, dir: unit(sub(st.pushUpper, st.pushLower)) },
+    sixth,
   ];
 
   const rp = sub(cp, wc);
@@ -242,6 +247,15 @@ export function runForces(
    *  slopes, and wheel rates for the pose model. */
   staticState: FullState,
 ): ForceResult {
+  for (const axle of ["front", "rear"] as const) {
+    const c = car[axle].config;
+    if (c.type !== "double-wishbone" || c.actuation === "rocker-arm") {
+      throw new Error(
+        "link-force calc supports double-wishbone axles with rod-actuated or direct coilovers in this version " +
+        `(${axle} is ${c.type}/${c.actuation})`,
+      );
+    }
+  }
   // Live geometry for the transfer model.
   const frch = staticState.frontAxle.rollCenter[1];
   const rrch = staticState.rearAxle.rollCenter[1];

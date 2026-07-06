@@ -199,6 +199,8 @@ function applyToAxle(
   const pp = hostFromAttachment(p.ppAttachedTo, "lca");
   g.pushrodOn = pp === "rocker" ? "lca" : pp;
   g.ubarOn = hostFromAttachment(p.ubarAttachedTo, "rocker");
+  // OptimumK points files are double-wishbone by construction.
+  g.config = { type: "double-wishbone", actuation: "pushrod-rocker", spring: "coil", decoupling: "none", arb: "ubar" };
   return g;
 }
 
@@ -340,6 +342,11 @@ function axleRows(car: CarSetup, axle: "front" | "rear"): Row[] {
 /** Export the SDM-specific Excel points file (OptimumK sheet layout + an
  *  "SDM Params" sheet carrying the solver-side vehicle parameters). */
 export function exportSdmExcel(car: CarSetup): ArrayBuffer {
+  for (const axle of ["front", "rear"] as const) {
+    if (car[axle].config.type !== "double-wishbone") {
+      throw new Error("OpK/SDM Excel export supports double-wishbone axles only");
+    }
+  }
   const wb = XLSX.utils.book_new();
   const opk = (car.opk ?? {}) as Record<string, any>;
   const setup = opk.vehicleSetup ?? {};

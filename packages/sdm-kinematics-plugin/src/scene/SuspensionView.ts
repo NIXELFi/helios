@@ -1,12 +1,16 @@
 // Builds and updates the 3D suspension: links as line segments (colour-coded
 // per member, COAST-style), hardpoints as small spheres, wheels as translucent
-// cylinders + rim ring, plus roll-center / instant-center overlays.
+// cylinders + rim ring, plus roll-center / instant-center overlays. The
+// member set is assembled per corner from that axle's SuspensionConfig, so
+// MacPherson struts, five-link axles, direct coilovers, decoupling elements
+// and U/Z-bars all draw what actually exists.
 
 import * as THREE from "three";
 import type { SceneManager } from "./SceneManager";
 import type { V3 } from "../core/vec";
 import { sub, unit, scale as vscale } from "../core/vec";
-import { mirrorAxle, type CarSetup, type CornerId, CORNERS } from "../core/model";
+import { mirrorAxle, type AxleGeometry, type CarSetup, type CornerId, CORNERS } from "../core/model";
+import type { CornerState } from "../core/solver";
 import type { FullState } from "../core/sweep";
 
 export const MEMBER_COLORS = {
@@ -16,7 +20,8 @@ export const MEMBER_COLORS = {
   push: 0xff6b6b, // red
   rocker: 0xc792ea, // violet
   shock: 0xffd866, // yellow
-  ubar: 0x2dd4bf, // teal — U-bar arm, droplink, and cross-bar
+  ubar: 0x2dd4bf, // teal — U/Z-bar arm, droplink, and cross-bar
+  element: 0xf28fad, // pink — third / roll decoupling elements
   upright: 0x93a0b4, // muted
   chassis: 0x2a313c,
 } as const;
@@ -25,20 +30,95 @@ const NODE_COLOR = 0x9aa5b0;
 const RC_COLOR = 0xff6b6b;
 const IC_COLOR = 0x4ea1ff;
 
+/** One drawable member: endpoints resolved from geometry + solved state. */
+interface SegDef {
+  color: keyof typeof MEMBER_COLORS;
+  get(geo: AxleGeometry, st: CornerState): [V3, V3];
+  /** Draw hardpoint spheres at the endpoints (default true). */
+  spheres?: boolean;
+}
+
+/** Assemble the member list for an axle's configuration. */
+function segmentDefs(cfg: AxleGeometry["config"]): SegDef[] {
+  const defs: SegDef[] = [];
+  if (cfg.type === "double-wishbone") {
+    defs.push(
+      { color: "lca", get: (g, st) => [g.lcaFront, st.p1] },
+      { color: "lca", get: (g, st) => [g.lcaRear, st.p1] },
+      { color: "uca", get: (g, st) => [g.ucaFront, st.p2] },
+      { color: "uca", get: (g, st) => [g.ucaRear, st.p2] },
+      { color: "tie", get: (_g, st) => [st.tieInner, st.p3] },
+      { color: "upright", get: (_g, st) => [st.p1, st.p2] },
+      { color: "upright", get: (_g, st) => [st.p1, st.p3] },
+      { color: "upright", get: (_g, st) => [st.p2, st.p3] },
+    );
+  } else if (cfg.type === "macpherson") {
+    defs.push(
+      { color: "lca", get: (g, st) => [g.lcaFront, st.p1] },
+      { color: "lca", get: (g, st) => [g.lcaRear, st.p1] },
+      { color: "shock", get: (g, st) => [st.xform.apply(g.strutLower), g.strutTop] },
+      { color: "tie", get: (_g, st) => [st.tieInner, st.p3] },
+      { color: "upright", get: (g, st) => [st.p1, st.xform.apply(g.strutLower)] },
+      { color: "upright", get: (_g, st) => [st.p1, st.p3] },
+    );
+  } else {
+    defs.push(
+      { color: "lca", get: (g, st) => [g.ml1In, st.xform.apply(g.ml1Out)] },
+      { color: "lca", get: (g, st) => [g.ml2In, st.xform.apply(g.ml2Out)] },
+      { color: "uca", get: (g, st) => [g.ml3In, st.xform.apply(g.ml3Out)] },
+      { color: "uca", get: (g, st) => [g.ml4In, st.xform.apply(g.ml4Out)] },
+      { color: "tie", get: (_g, st) => [st.tieInner, st.p3] },
+      { color: "upright", get: (g, st) => [st.xform.apply(g.ml1Out), st.xform.apply(g.ml3Out)] },
+      { color: "upright", get: (g, st) => [st.xform.apply(g.ml1Out), st.p3] },
+    );
+  }
+  // Wheel spin axis (no spheres — the wheel mesh shows it).
+  defs.push({ color: "upright", get: (_g, st) => [st.wheelCenter, st.wheelAxisOuter], spheres: false });
+
+  const rodActuated = cfg.type !== "macpherson" &&
+    (cfg.actuation === "pushrod-rocker" || cfg.actuation === "pullrod-rocker");
+  if (rodActuated) {
+    defs.push(
+      { color: "push", get: (_g, st) => [st.pushLower, st.pushUpper] },
+      { color: "rocker", get: (g, st) => [g.rockerAxis1, st.pushUpper] },
+      { color: "rocker", get: (g, st) => [g.rockerAxis2, st.pushUpper] },
+      { color: "rocker", get: (g, st) => [g.rockerAxis1, st.shockRocker] },
+      { color: "rocker", get: (g, st) => [g.rockerAxis2, st.shockRocker] },
+    );
+  }
+  if (cfg.type !== "macpherson") {
+    defs.push({ color: "shock", get: (g, st) => [st.shockRocker, g.shockChassis] });
+  }
+  if (cfg.arb !== "none") {
+    defs.push(
+      { color: "ubar", get: (g, st) => [g.ubarPivot, st.ubarArm] },
+      { color: "ubar", get: (_g, st) => [st.ubarArm, st.ubarNsma] },
+      { color: "ubar", get: (g) => [g.ubarPivot, [g.ubarPivot[0], 0, g.ubarPivot[2]]], spheres: false },
+    );
+  }
+  if (cfg.decoupling !== "none") {
+    defs.push({ color: "element", get: (_g, st) => [st.thirdRocker, [st.thirdRocker[0], 0, st.thirdRocker[2]]] });
+    if (cfg.decoupling === "heave-roll") {
+      defs.push({ color: "element", get: (_g, st) => [st.rollRocker, [st.rollRocker[0], 0, st.rollRocker[2]]] });
+    }
+  }
+  return defs;
+}
+
 interface CornerObjects {
+  defs: SegDef[];
   lines: THREE.LineSegments;
   positions: Float32Array;
   nodes: THREE.Mesh[];
-  nodePts: V3[];
   wheel: THREE.Mesh;
   rim: THREE.Mesh;
+  geo: AxleGeometry;
 }
 
 export class SuspensionView {
   private group = new THREE.Group();
   private overlay = new THREE.Group();
   private corners = new Map<CornerId, CornerObjects>();
-  private sphereGeo = new THREE.SphereGeometry(0.6, 14, 14);
   private smallSphereGeo = new THREE.SphereGeometry(0.45, 12, 12);
   private nodeMat = new THREE.MeshStandardMaterial({ color: NODE_COLOR, roughness: 0.55 });
   private rcMat = new THREE.MeshStandardMaterial({ color: RC_COLOR, roughness: 0.4 });
@@ -91,22 +171,6 @@ export class SuspensionView {
     this.icLines = null;
   }
 
-  /** Members drawn per corner, as index pairs into the point layout below. */
-  private static SEGMENTS: [number, number, keyof typeof MEMBER_COLORS][] = [
-    [0, 2, "lca"], [1, 2, "lca"],
-    [3, 5, "uca"], [4, 5, "uca"],
-    [6, 7, "tie"],
-    [8, 9, "push"],
-    [10, 12, "rocker"], [11, 12, "rocker"], [10, 13, "rocker"], [11, 13, "rocker"],
-    [13, 14, "shock"],
-    [2, 5, "upright"], [2, 7, "upright"], [5, 7, "upright"],
-    [15, 16, "upright"],
-    [17, 18, "ubar"], [18, 19, "ubar"], [17, 20, "ubar"],
-  ];
-
-  /** Point indices that get a hardpoint sphere. */
-  private static SPHERE_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19];
-
   private build(): void {
     this.clear();
     const tireR = this.car.params.tireRadius;
@@ -120,37 +184,41 @@ export class SuspensionView {
     const rimMat = new THREE.MeshStandardMaterial({ color: 0x93a0b4, roughness: 0.35, metalness: 0.6 });
 
     for (const id of CORNERS) {
-      const segCount = SuspensionView.SEGMENTS.length;
-      const positions = new Float32Array(segCount * 2 * 3);
-      const colors = new Float32Array(segCount * 2 * 3);
+      const geoL = id[0] === "F" ? this.car.front : this.car.rear;
+      const geo = id[1] === "L" ? geoL : mirrorAxle(geoL);
+      const defs = segmentDefs(geo.config);
+
+      const positions = new Float32Array(defs.length * 2 * 3);
+      const colors = new Float32Array(defs.length * 2 * 3);
       const c = new THREE.Color();
-      SuspensionView.SEGMENTS.forEach(([, , mkey], i) => {
-        c.setHex(MEMBER_COLORS[mkey]);
+      defs.forEach((d, i) => {
+        c.setHex(MEMBER_COLORS[d.color]);
         for (const k of [0, 1]) {
           colors[(i * 2 + k) * 3] = c.r;
           colors[(i * 2 + k) * 3 + 1] = c.g;
           colors[(i * 2 + k) * 3 + 2] = c.b;
         }
       });
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      bg.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      const lines = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ vertexColors: true }));
       this.group.add(lines);
 
       const nodes: THREE.Mesh[] = [];
-      for (const i of SuspensionView.SPHERE_INDICES) {
-        const m = new THREE.Mesh(i < 10 ? this.sphereGeo : this.smallSphereGeo, this.nodeMat);
-        m.userData.ptIndex = i;
-        nodes.push(m);
-        this.group.add(m);
+      for (const d of defs) {
+        if (d.spheres === false) continue;
+        for (let k = 0; k < 2; k++) {
+          const m = new THREE.Mesh(this.smallSphereGeo, this.nodeMat);
+          nodes.push(m);
+          this.group.add(m);
+        }
       }
 
       const wheel = new THREE.Mesh(wheelGeo, wheelMat);
       const rim = new THREE.Mesh(rimGeo, rimMat);
       this.group.add(wheel, rim);
-
-      this.corners.set(id, { lines, positions, nodes, nodePts: [], wheel, rim });
+      this.corners.set(id, { defs, lines, positions, nodes, wheel, rim, geo });
     }
 
     // Roll-center markers (front, rear).
@@ -169,41 +237,23 @@ export class SuspensionView {
     this.overlay.add(this.icLines);
   }
 
-  /** Point layout per corner (car coords):
-   *  0 lcaFront 1 lcaRear 2 LBJ 3 ucaFront 4 ucaRear 5 UBJ 6 tieInner
-   *  7 tieOuter 8 pushLower 9 pushUpper 10 rockerAxis1 11 rockerAxis2
-   *  12 pushUpper(rocker) 13 shockRocker 14 shockChassis 15 wc 16 axisOuter
-   *  17 ubarPivot 18 ubarArm(cur) 19 ubarNsma(cur) 20 ubarPivot@centerline */
   update(state: FullState): void {
     for (const id of CORNERS) {
       const objs = this.corners.get(id)!;
       const st = state.corners[id];
-      const geo = id.endsWith("L")
-        ? (id[0] === "F" ? this.car.front : this.car.rear)
-        : mirrorAxle(id[0] === "F" ? this.car.front : this.car.rear);
-
-      const pts: V3[] = [
-        geo.lcaFront, geo.lcaRear, st.p1,
-        geo.ucaFront, geo.ucaRear, st.p2,
-        st.tieInner, st.p3,
-        st.pushLower, st.pushUpper,
-        geo.rockerAxis1, geo.rockerAxis2, st.pushUpper, st.shockRocker, geo.shockChassis,
-        st.wheelCenter, st.wheelAxisOuter,
-        geo.ubarPivot, st.ubarArm, st.ubarNsma,
-        [geo.ubarPivot[0], 0, geo.ubarPivot[2]],
-      ];
-      objs.nodePts = pts;
-
-      SuspensionView.SEGMENTS.forEach(([a, b], i) => {
-        const pa = this.sm.toWorld(pts[a]);
-        const pb = this.sm.toWorld(pts[b]);
+      let nodeIdx = 0;
+      objs.defs.forEach((d, i) => {
+        const [a, b] = d.get(objs.geo, st);
+        const pa = this.sm.toWorld(a);
+        const pb = this.sm.toWorld(b);
         objs.positions.set([pa.x, pa.y, pa.z, pb.x, pb.y, pb.z], i * 6);
+        if (d.spheres !== false) {
+          objs.nodes[nodeIdx++].position.copy(pa);
+          objs.nodes[nodeIdx++].position.copy(pb);
+        }
       });
       (objs.lines.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
       objs.lines.geometry.computeBoundingSphere();
-
-      // Hardpoint spheres (skip wc/axisOuter — the wheel shows those).
-      for (const m of objs.nodes) m.position.copy(this.sm.toWorld(pts[m.userData.ptIndex as number]));
 
       // Wheel: cylinder axis (local Y) aligned to the wheel spin axis.
       const axis = unit(sub(st.wheelAxisOuter, st.wheelCenter));

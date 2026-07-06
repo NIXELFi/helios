@@ -79,7 +79,7 @@ export function solveCar(
       geo: g(id),
       dz: targets[id],
       rack,
-      guess: w ? [w.p1, w.p2, w.p3] : undefined,
+      guessPose: w?.poseU,
     });
   }
 
@@ -105,11 +105,18 @@ export function solveCar(
     geoRL, geoRR, p, corners.RL, corners.RR, targets.RL, targets.RR, 0, false, wb, !axleProbes,
   );
 
+  // U-bar twist = ψL − ψR (resists roll, free in heave). A Z-bar's links
+  // act in the same sense: twist = ψL + ψR (resists heave/warp, free roll).
+  const twist = (axle: "front" | "rear", psiL: number, psiR: number): number => {
+    const arb = car[axle].config.arb;
+    if (arb === "none") return NaN;
+    return deg(arb === "zbar" ? psiL + psiR : psiL - psiR);
+  };
   return {
     corners, cornerCh, frontAxle, rearAxle,
     ackermann: ackermannPct(cornerCh.FL.steer, cornerCh.FR.steer, trackWidth(car.front), wb),
-    ubarTwistFront: deg(corners.FL.ubarAngle - corners.FR.ubarAngle),
-    ubarTwistRear: deg(corners.RL.ubarAngle - corners.RR.ubarAngle),
+    ubarTwistFront: twist("front", corners.FL.ubarAngle, corners.FR.ubarAngle),
+    ubarTwistRear: twist("rear", corners.RL.ubarAngle, corners.RR.ubarAngle),
     pose,
   };
 }
@@ -174,6 +181,10 @@ export function channelDefs(): ChannelDef[] {
     { key: "arb_mr_r", label: "ARB motion ratio R", unit: "in/in", get: (s) => s.rearAxle.arbMotionRatioLeft },
     { key: "arb_ir_f", label: "ARB install ratio F", unit: "in/in", get: (s) => s.frontAxle.arbInstallRatioLeft },
     { key: "arb_ir_r", label: "ARB install ratio R", unit: "in/in", get: (s) => s.rearAxle.arbInstallRatioLeft },
+    { key: "wheel_rate_heave_f", label: "Wheel rate heave F", unit: "lb/in", get: (s) => s.frontAxle.wheelRateHeave },
+    { key: "wheel_rate_heave_r", label: "Wheel rate heave R", unit: "lb/in", get: (s) => s.rearAxle.wheelRateHeave },
+    { key: "wheel_rate_roll_f", label: "Wheel rate roll F", unit: "lb/in", get: (s) => s.frontAxle.wheelRateRoll },
+    { key: "wheel_rate_roll_r", label: "Wheel rate roll R", unit: "lb/in", get: (s) => s.rearAxle.wheelRateRoll },
     { key: "ackermann", label: "Ackermann", unit: "%", get: (s) => s.ackermann },
   );
   return defs;

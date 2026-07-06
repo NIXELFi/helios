@@ -2,8 +2,8 @@
 // widgets and calls back into main.ts; it never touches the solver directly.
 
 import {
-  HARDPOINT_KEYS, LINK_OD_KEYS, PUSHROD_HOSTS, UBAR_HOSTS, fmtCoord,
-  type AxleGeometry, type CarSetup, type LinkOD, type Pose,
+  HARDPOINT_KEYS, LINK_OD_KEYS, PUSHROD_HOSTS, UBAR_HOSTS, fmtCoord, relevantHardpoints,
+  type AxleGeometry, type CarSetup, type LinkOD, type Pose, type SuspensionConfig,
 } from "../core/model";
 import type { StudyConfig, StudyResult } from "../core/clearance";
 import { poseLabel } from "../core/clearance";
@@ -35,6 +35,7 @@ export interface PanelCallbacks {
   onMassPropsChange(patch: Partial<MassProps>): void;
   onLoadForceCsvClick(): void;
   onRunForces(cfg: ForceRunConfig): void;
+  onConfigChange(axle: "front" | "rear", patch: Partial<SuspensionConfig>): void;
 }
 
 export interface ForceRunConfig {
@@ -71,6 +72,7 @@ export class Panel {
     this.root.append(
       this.projectCard(),
       this.poseCard(),
+      this.configCard(),
       this.hardpointCard(),
       this.attachmentsCard(),
       this.vehicleCard(),
@@ -212,6 +214,53 @@ export class Panel {
     return c;
   }
 
+  // ---- Suspension configuration ----
+  private configCard(): HTMLElement {
+    const c = this.card("Suspension configuration");
+    const note = document.createElement("div");
+    note.className = "small";
+    note.style.marginBottom = "6px";
+    note.textContent = "Per-axle architecture — front and rear are independent. The hardpoint list and 3D view follow the selection.";
+    c.appendChild(note);
+    const opts: Record<keyof SuspensionConfig, [string, string][]> = {
+      type: [["double-wishbone", "Double wishbone"], ["macpherson", "MacPherson strut"], ["multilink5", "Multi-link (5)"]],
+      actuation: [["pushrod-rocker", "Pushrod + rocker"], ["pullrod-rocker", "Pullrod + rocker"], ["direct-coilover", "Direct coilover"], ["rocker-arm", "Rocker-arm (UCA)"]],
+      spring: [["coil", "Coil spring"], ["torsion", "Torsion bar"]],
+      decoupling: [["none", "Corner springs"], ["third-element", "3rd element + corners"], ["heave-roll", "Heave-roll decoupled"]],
+      arb: [["none", "No ARB"], ["ubar", "U-bar"], ["zbar", "Z-bar"]],
+    };
+    const labels: Record<keyof SuspensionConfig, string> = {
+      type: "Type", actuation: "Actuation", spring: "Spring", decoupling: "Decoupling", arb: "ARB",
+    };
+    for (const axle of ["front", "rear"] as const) {
+      const h = document.createElement("div");
+      h.className = "small";
+      h.style.cssText = "font-weight:600;color:var(--text);margin:8px 0 4px;text-transform:uppercase;letter-spacing:1px;font-size:10px";
+      h.textContent = axle === "front" ? "Front axle" : "Rear axle";
+      c.appendChild(h);
+      const cfg = this.car[axle].config;
+      for (const key of Object.keys(opts) as (keyof SuspensionConfig)[]) {
+        const f = document.createElement("div");
+        f.className = "field";
+        const lab = document.createElement("span");
+        lab.className = "small";
+        lab.textContent = labels[key];
+        const sel = document.createElement("select");
+        for (const [v, l] of opts[key]) {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = l;
+          sel.appendChild(o);
+        }
+        sel.value = cfg[key];
+        sel.onchange = () => this.cb.onConfigChange(axle, { [key]: sel.value } as Partial<SuspensionConfig>);
+        f.append(lab, sel);
+        c.appendChild(f);
+      }
+    }
+    return c;
+  }
+
   // ---- Hardpoints ----
   private hardpointCard(): HTMLElement {
     const c = this.card("Hardpoints (left side, mirrored)");
@@ -231,13 +280,7 @@ export class Panel {
     this.pointSelect.style.border = "1px solid var(--line)";
     this.pointSelect.style.borderRadius = "6px";
     this.pointSelect.style.padding = "5px 7px";
-    for (const { key, label } of HARDPOINT_KEYS) {
-      const o = document.createElement("option");
-      o.value = key;
-      o.textContent = label;
-      this.pointSelect.appendChild(o);
-    }
-    this.pointSelect.value = this.pointKey;
+    this.repopulatePointSelect();
     this.pointSelect.onchange = () => {
       this.pointKey = this.pointSelect.value as keyof AxleGeometry;
       this.refreshCoordInputs();
@@ -273,7 +316,23 @@ export class Panel {
     this.axle = a;
     this.segFront.classList.toggle("active", a === "front");
     this.segRear.classList.toggle("active", a === "rear");
+    this.repopulatePointSelect();
     this.refreshCoordInputs();
+  }
+
+  /** The editable point list follows the axle's suspension configuration. */
+  private repopulatePointSelect(): void {
+    const keys = relevantHardpoints(this.car[this.axle]);
+    this.pointSelect.innerHTML = "";
+    for (const { key, label } of HARDPOINT_KEYS) {
+      if (!keys.includes(key)) continue;
+      const o = document.createElement("option");
+      o.value = key;
+      o.textContent = label;
+      this.pointSelect.appendChild(o);
+    }
+    if (!keys.includes(this.pointKey)) this.pointKey = keys[0];
+    this.pointSelect.value = this.pointKey;
   }
 
   refreshCoordInputs(): void {
@@ -364,6 +423,12 @@ export class Panel {
       this.numField("Coilover max F (in)", p.coilMaxFront, (v) => this.cb.onParamChange({ coilMaxFront: v })),
       this.numField("Coilover min R (in)", p.coilMinRear, (v) => this.cb.onParamChange({ coilMinRear: v })),
       this.numField("Coilover max R (in)", p.coilMaxRear, (v) => this.cb.onParamChange({ coilMaxRear: v })),
+      this.numField("Torsion rate F (lb·in/deg)", p.torsionRateFront, (v) => this.cb.onParamChange({ torsionRateFront: v })),
+      this.numField("Torsion rate R (lb·in/deg)", p.torsionRateRear, (v) => this.cb.onParamChange({ torsionRateRear: v })),
+      this.numField("3rd element rate F (lb/in)", p.thirdRateFront, (v) => this.cb.onParamChange({ thirdRateFront: v })),
+      this.numField("3rd element rate R (lb/in)", p.thirdRateRear, (v) => this.cb.onParamChange({ thirdRateRear: v })),
+      this.numField("Roll element rate F (lb/in)", p.rollRateFront, (v) => this.cb.onParamChange({ rollRateFront: v })),
+      this.numField("Roll element rate R (lb/in)", p.rollRateRear, (v) => this.cb.onParamChange({ rollRateRear: v })),
     );
     return c;
   }
@@ -662,6 +727,8 @@ export class Panel {
         <tr><td>ARB twist ratio °/in</td><td>${fmt(f.arbTwistRatioLeft, 3)}</td><td>${fmt(r.arbTwistRatioLeft, 3)}</td></tr>
         <tr><td>ARB MR (whl/link)</td><td>${fmt(f.arbMotionRatioLeft, 3)}</td><td>${fmt(r.arbMotionRatioLeft, 3)}</td></tr>
         <tr><td>ARB IR (link/whl)</td><td>${fmt(f.arbInstallRatioLeft, 3)}</td><td>${fmt(r.arbInstallRatioLeft, 3)}</td></tr>
+        <tr><td>WR heave lb/in</td><td>${fmt(f.wheelRateHeave, 1)}</td><td>${fmt(r.wheelRateHeave, 1)}</td></tr>
+        <tr><td>WR roll lb/in</td><td>${fmt(f.wheelRateRoll, 1)}</td><td>${fmt(r.wheelRateRoll, 1)}</td></tr>
         <tr><td>Ackermann %</td><td colspan="2">${s.ackermann === null ? "— (steer to read)" : fmt(s.ackermann, 1)}</td></tr>
       </table>`;
   }
@@ -724,7 +791,8 @@ export class Panel {
       ["Pushrod", MEMBER_COLORS.push],
       ["Rocker", MEMBER_COLORS.rocker],
       ["Coilover", MEMBER_COLORS.shock],
-      ["U-bar / droplink", MEMBER_COLORS.ubar],
+      ["U/Z-bar / droplink", MEMBER_COLORS.ubar],
+      ["3rd / roll element", MEMBER_COLORS.element],
       ["Upright / kingpin", MEMBER_COLORS.upright],
     ];
     for (const [lab, col] of items) {

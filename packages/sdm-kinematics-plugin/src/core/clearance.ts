@@ -154,19 +154,61 @@ export function buildSegments(car: CarSetup, corner: CornerId, st: CornerState):
   const geoL = corner[0] === "F" ? car.front : car.rear;
   const geo = corner[1] === "L" ? geoL : mirrorAxle(geoL);
   const od = geo.linkOD;
+  const cfg = geo.config;
   const mk = (name: string, a: V3, b: V3, d: number): StudySegment =>
     ({ name, corner, a, b, r: d / 2 });
-  return [
-    mk("LCA fore", geo.lcaFront, st.p1, od.lca),
-    mk("LCA aft", geo.lcaRear, st.p1, od.lca),
-    mk("UCA fore", geo.ucaFront, st.p2, od.uca),
-    mk("UCA aft", geo.ucaRear, st.p2, od.uca),
-    mk("toe link", st.tieInner, st.p3, od.tie),
-    mk("pushrod", st.pushLower, st.pushUpper, od.push),
-    mk("droplink", st.ubarNsma, st.ubarArm, od.droplink),
-    mk("U-bar arm", geo.ubarPivot, st.ubarArm, od.droplink),
-    mk("coilover", st.shockRocker, geo.shockChassis, od.shock),
-  ];
+  const xf = st.xform;
+  const segs: StudySegment[] = [];
+
+  if (cfg.type === "double-wishbone") {
+    segs.push(
+      mk("LCA fore", geo.lcaFront, st.p1, od.lca),
+      mk("LCA aft", geo.lcaRear, st.p1, od.lca),
+      mk("UCA fore", geo.ucaFront, st.p2, od.uca),
+      mk("UCA aft", geo.ucaRear, st.p2, od.uca),
+      mk("toe link", st.tieInner, st.p3, od.tie),
+    );
+  } else if (cfg.type === "macpherson") {
+    segs.push(
+      mk("LCA fore", geo.lcaFront, st.p1, od.lca),
+      mk("LCA aft", geo.lcaRear, st.p1, od.lca),
+      mk("strut", xf.apply(geo.strutLower), geo.strutTop, od.shock),
+      mk("toe link", st.tieInner, st.p3, od.tie),
+    );
+  } else {
+    const links: [string, V3, V3, number][] = [
+      ["link 1", geo.ml1In, xf.apply(geo.ml1Out), od.lca],
+      ["link 2", geo.ml2In, xf.apply(geo.ml2Out), od.lca],
+      ["link 3", geo.ml3In, xf.apply(geo.ml3Out), od.uca],
+      ["link 4", geo.ml4In, xf.apply(geo.ml4Out), od.uca],
+      ["link 5 (toe)", st.tieInner, st.p3, od.tie],
+    ];
+    for (const [n, a, b, d] of links) segs.push(mk(n, a, b, d));
+  }
+
+  const rodActuated = cfg.type !== "macpherson" &&
+    (cfg.actuation === "pushrod-rocker" || cfg.actuation === "pullrod-rocker");
+  if (rodActuated) segs.push(mk("pushrod", st.pushLower, st.pushUpper, od.push));
+  if (cfg.type !== "macpherson") {
+    segs.push(mk("coilover", st.shockRocker, geo.shockChassis, od.shock));
+  }
+  if (cfg.arb !== "none") {
+    segs.push(
+      mk("droplink", st.ubarNsma, st.ubarArm, od.droplink),
+      mk("U-bar arm", geo.ubarPivot, st.ubarArm, od.droplink),
+    );
+  }
+  if (cfg.decoupling !== "none") {
+    // Elements run to the mirrored pickup — represent the near half so the
+    // clearance check sees the member without double-counting across sides.
+    const mid3: V3 = [st.thirdRocker[0], 0, st.thirdRocker[2]];
+    segs.push(mk("3rd element", st.thirdRocker, mid3, od.shock));
+    if (cfg.decoupling === "heave-roll") {
+      const midR: V3 = [st.rollRocker[0], 0, st.rollRocker[2]];
+      segs.push(mk("roll element", st.rollRocker, midR, od.shock));
+    }
+  }
+  return segs;
 }
 
 export function buildWheel(car: CarSetup, corner: CornerId, st: CornerState): WheelCyl {
