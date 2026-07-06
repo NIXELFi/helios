@@ -92,6 +92,7 @@ export function solveCar(
       g(id), corners[id], side as 1 | -1, p,
       isFront ? p.springRateFront : p.springRateRear,
       targets[id], isFront ? pose.rack : 0,
+      isFront,
       !cornerProbes,
     );
   });
@@ -152,6 +153,9 @@ export function channelDefs(): ChannelDef[] {
   for (const id of ids) defs.push(corner(id, (c) => c.installRatio, "Install ratio", "in/in"));
   for (const id of ids) defs.push(corner(id, (c) => c.wheelRate, "Wheel rate", "lb/in"));
   for (const id of ids) defs.push(corner(id, (c) => c.shockLength, "Shock length", "in"));
+  for (const id of ids) defs.push(corner(id, (c) => c.lateralScrub, "Lat scrub", "in"));
+  for (const id of ids) defs.push(corner(id, (c) => c.travelTotal, "Total travel", "in"));
+  for (const id of ids) defs.push(corner(id, (c) => c.travelBump, "Bump travel left", "in"));
   for (const id of ids) defs.push(corner(id, (c) => c.steer, "Steer angle", "deg"));
   defs.push(
     { key: "rc_height_f", label: "Roll center height F", unit: "in", get: (s) => s.frontAxle.rollCenter[1], defaultOn: true },
@@ -164,8 +168,12 @@ export function channelDefs(): ChannelDef[] {
     { key: "camber_gain_fl", label: "Camber gain FL", unit: "deg/in", get: (s) => s.frontAxle.camberGainLeft },
     { key: "arb_twist_f", label: "ARB twist F", unit: "deg", get: (s) => s.ubarTwistFront },
     { key: "arb_twist_r", label: "ARB twist R", unit: "deg", get: (s) => s.ubarTwistRear },
-    { key: "arb_rate_f", label: "ARB motion ratio F", unit: "deg/in", get: (s) => s.frontAxle.arbRateLeft },
-    { key: "arb_rate_r", label: "ARB motion ratio R", unit: "deg/in", get: (s) => s.rearAxle.arbRateLeft },
+    { key: "arb_twist_ratio_f", label: "ARB twist ratio F", unit: "deg/in", get: (s) => s.frontAxle.arbTwistRatioLeft },
+    { key: "arb_twist_ratio_r", label: "ARB twist ratio R", unit: "deg/in", get: (s) => s.rearAxle.arbTwistRatioLeft },
+    { key: "arb_mr_f", label: "ARB motion ratio F", unit: "in/in", get: (s) => s.frontAxle.arbMotionRatioLeft },
+    { key: "arb_mr_r", label: "ARB motion ratio R", unit: "in/in", get: (s) => s.rearAxle.arbMotionRatioLeft },
+    { key: "arb_ir_f", label: "ARB install ratio F", unit: "in/in", get: (s) => s.frontAxle.arbInstallRatioLeft },
+    { key: "arb_ir_r", label: "ARB install ratio R", unit: "in/in", get: (s) => s.rearAxle.arbInstallRatioLeft },
     { key: "ackermann", label: "Ackermann", unit: "%", get: (s) => s.ackermann },
   );
   return defs;

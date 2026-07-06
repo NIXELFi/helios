@@ -22,12 +22,56 @@ export interface CornerChannels {
   kpi: number;
   mechTrail: number;
   scrub: number;
+  /** Lateral tire scrub: contact-patch y-displacement from static, + = the
+   *  patch has walked outboard. */
+  lateralScrub: number;
   contactPatch: V3;
   wheelAxis: V3; // unit, outboard-pointing
   shockLength: number;
   /** Installation ratio dShock/dWheel (in/in) and resulting wheel rate. */
   installRatio: number;
   wheelRate: number;
+  /** Remaining wheel travel (in) until the coilover hits its min/max length:
+   *  bump direction, droop direction, and the corner's total travel span. */
+  travelBump: number;
+  travelDroop: number;
+  travelTotal: number;
+}
+
+/** Wheel travel (in) from the current position until the shock length hits
+ *  `target`, searching in direction `dir` (±1). Secant on the corner solver;
+ *  capped at 6" (returned when the limit is unreachable). */
+function travelToShockLimit(
+  geo: AxleGeometry, dz0: number, rack: number, dir: 1 | -1,
+  target: number, L0: number, rate: number, st: CornerState,
+): number {
+  const CAP = 6;
+  if (!Number.isFinite(rate) || Math.abs(rate) < 1e-4) return CAP;
+  let dz = (target - L0) / rate;
+  if (dz * dir <= 0) return 0; // already at/past this limit
+  dz = Math.min(Math.abs(dz), CAP) * dir;
+  let prevDz = 0;
+  let prevF = L0 - target;
+  let best = Math.abs(dz);
+  for (let i = 0; i < 12; i++) {
+    const s = solveCorner({ geo, dz: dz0 + dz, rack, guess: [st.p1, st.p2, st.p3] });
+    if (!s.ok) {
+      // Mechanical lock before the shock limit — back off toward it.
+      dz *= 0.7;
+      best = Math.abs(dz);
+      continue;
+    }
+    const f = s.shockLength - target;
+    best = Math.abs(dz);
+    if (Math.abs(f) < 1e-3) return best;
+    const denom = f - prevF;
+    let next = Math.abs(denom) > 1e-9 ? dz - (f * (dz - prevDz)) / denom : dz * 0.9;
+    prevDz = dz;
+    prevF = f;
+    if (next * dir <= 0) next = dz * 0.5;
+    dz = Math.min(Math.abs(next), CAP) * dir;
+  }
+  return Math.min(best, CAP);
 }
 
 export function cornerChannels(
@@ -38,8 +82,9 @@ export function cornerChannels(
   springRate: number,
   dz: number,
   rack: number,
-  /** Skip the ±bump probe solves (installation ratio / wheel rate become
-   *  NaN). The optimizer uses this to evaluate cheap channels fast. */
+  isFront: boolean,
+  /** Skip the ±bump probe solves (installation ratio / wheel rate / travel
+   *  become NaN). The optimizer uses this to evaluate cheap channels fast. */
   skipProbes = false,
 ): CornerChannels {
   let a = unit(sub(st.wheelAxisOuter, st.wheelCenter));
@@ -67,23 +112,49 @@ export function cornerChannels(
   const mechTrail = g[0] - contactPatch[0];
   const scrub = side * (contactPatch[1] - g[1]);
 
-  // Installation ratio via central difference on the bump target.
+  // Lateral tire scrub vs the static contact patch (closed form — the static
+  // patch comes straight from the stored geometry, no solve needed).
+  const aS = (() => {
+    let v = unit(sub(geo.wheelAxisOuter, geo.wheelCenter));
+    if (v[1] * side < 0) v = scale(v, -1);
+    return v;
+  })();
+  const wS: V3 = unit([-aS[0] * aS[2], -aS[1] * aS[2], 1 - aS[2] * aS[2]]);
+  const cpStatic = sub(geo.wheelCenter, scale(wS, params.tireRadius));
+  const lateralScrub = side * (contactPatch[1] - cpStatic[1]);
+
+  // Installation ratio + travel to the coilover stops, via probe solves.
   let installRatio = NaN;
   let wheelRate = NaN;
+  let travelBump = NaN;
+  let travelDroop = NaN;
+  let travelTotal = NaN;
   if (!skipProbes) {
     const H = 0.05;
     const up = solveCorner({ geo, dz: dz + H, rack, guess: [st.p1, st.p2, st.p3] });
     const dn = solveCorner({ geo, dz: dz - H, rack, guess: [st.p1, st.p2, st.p3] });
-    installRatio = (up.shockLength - dn.shockLength) / (2 * H);
-    wheelRate = springRate * installRatio * installRatio;
+    const rate = (up.shockLength - dn.shockLength) / (2 * H); // signed dShock/dWheel
+    installRatio = Math.abs(rate);
+    wheelRate = springRate * rate * rate;
+
+    const coilMin = isFront ? params.coilMinFront : params.coilMinRear;
+    const coilMax = isFront ? params.coilMaxFront : params.coilMaxRear;
+    const L0 = st.shockLength;
+    // Moving in bump, the shock walks toward whichever stop the rate says.
+    const bumpTarget = rate < 0 ? coilMin : coilMax;
+    const droopTarget = rate < 0 ? coilMax : coilMin;
+    travelBump = travelToShockLimit(geo, dz, rack, 1, bumpTarget, L0, rate, st);
+    travelDroop = travelToShockLimit(geo, dz, rack, -1, droopTarget, L0, rate, st);
+    travelTotal = travelBump + travelDroop;
   }
 
   return {
-    camber, toe, steer, caster, kpi, mechTrail, scrub,
+    camber, toe, steer, caster, kpi, mechTrail, scrub, lateralScrub,
     contactPatch, wheelAxis: a,
     shockLength: st.shockLength,
-    installRatio: Number.isFinite(installRatio) ? Math.abs(installRatio) : NaN,
+    installRatio,
     wheelRate,
+    travelBump, travelDroop, travelTotal,
   };
 }
 
@@ -101,10 +172,18 @@ export interface AxleChannels {
   /** Camber gain, deg/in of bump. */
   camberGainLeft: number;
   camberGainRight: number;
-  /** U-bar motion ratio: lever-arm rotation per inch of single-wheel bump
-   *  (deg/in), left side. Twist rate of the axle per unilateral travel. */
-  arbRateLeft: number;
-  arbRateRight: number;
+  /** ARB twist ratio: lever-arm rotation per inch of single-wheel bump,
+   *  deg/in. */
+  arbTwistRatioLeft: number;
+  arbTwistRatioRight: number;
+  /** ARB motion ratio: wheel travel per inch of droplink-pickup travel
+   *  (measured along the droplink), in/in. */
+  arbMotionRatioLeft: number;
+  arbMotionRatioRight: number;
+  /** ARB installation ratio: droplink-pickup travel per inch of wheel
+   *  travel — the inverse of the motion ratio. */
+  arbInstallRatioLeft: number;
+  arbInstallRatioRight: number;
 }
 
 interface SideProbe {
@@ -116,6 +195,8 @@ interface SideProbe {
   dCamber: number;
   /** d(U-bar arm angle)/d(bump), deg/in — NaN when the axle has no U-bar. */
   dArb: number;
+  /** d(droplink-pickup travel along the droplink)/d(bump), in/in. */
+  dLink: number;
 }
 
 function probeSide(
@@ -141,6 +222,10 @@ function probeSide(
   const dnState = solveAt(dz - H);
   const up = chanAt(upState);
   const dn = chanAt(dnState);
+  // Droplink drive: pickup displacement projected onto the droplink axis —
+  // the component that actually strokes the bar.
+  const linkDir = unit(sub(st.ubarArm, st.ubarNsma));
+  const dLink = dot(sub(upState.ubarNsma, dnState.ubarNsma), linkDir) / (2 * H);
   return {
     cp: cur.cp,
     vy: (up.cp[1] - dn.cp[1]) / (2 * H),
@@ -149,6 +234,7 @@ function probeSide(
     dToe: (up.toe - dn.toe) / (2 * H),
     dCamber: (up.camber - dn.camber) / (2 * H),
     dArb: deg(upState.ubarAngle - dnState.ubarAngle) / (2 * H),
+    dLink,
   };
 }
 
@@ -168,7 +254,9 @@ export function axleChannels(
     return {
       rollCenter: [NaN, NaN], icLeft: null, icRight: null, antiPct: NaN,
       bumpSteerLeft: NaN, bumpSteerRight: NaN, camberGainLeft: NaN, camberGainRight: NaN,
-      arbRateLeft: NaN, arbRateRight: NaN,
+      arbTwistRatioLeft: NaN, arbTwistRatioRight: NaN,
+      arbMotionRatioLeft: NaN, arbMotionRatioRight: NaN,
+      arbInstallRatioLeft: NaN, arbInstallRatioRight: NaN,
     };
   }
   const L = probeSide(geoL, 1, params, dzL, rack, stL);
@@ -216,8 +304,12 @@ export function axleChannels(
     bumpSteerRight: R.dToe,
     camberGainLeft: L.dCamber,
     camberGainRight: R.dCamber,
-    arbRateLeft: L.dArb,
-    arbRateRight: R.dArb,
+    arbTwistRatioLeft: L.dArb,
+    arbTwistRatioRight: R.dArb,
+    arbInstallRatioLeft: Math.abs(L.dLink),
+    arbInstallRatioRight: Math.abs(R.dLink),
+    arbMotionRatioLeft: Math.abs(L.dLink) > 1e-4 ? 1 / Math.abs(L.dLink) : NaN,
+    arbMotionRatioRight: Math.abs(R.dLink) > 1e-4 ? 1 / Math.abs(R.dLink) : NaN,
   };
 }
 

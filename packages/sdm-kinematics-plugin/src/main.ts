@@ -11,6 +11,7 @@ import {
 import { solveCar, runSweep, channelDefs, type SweepResult, type SweepType } from "./core/sweep";
 import { serializeProject, parseProject, sweepToCsv, download } from "./core/io";
 import { importOpkExcel, importOpkJson, exportSdmExcel, exportOpkJson } from "./core/opk";
+import { runClearanceStudy, poseLabel, type StudyHandle, type StudyResult } from "./core/clearance";
 import { runOptimizer, type OptResult, type RunHandle, type OptimizerConfig } from "./core/optimizer";
 import { generateReport } from "./core/report";
 import { OptimizerPanel } from "./ui/optimizerPanel";
@@ -29,6 +30,7 @@ let animating = false;
 let animT = 0;
 let optHandle: RunHandle | null = null;
 let optResult: OptResult | null = null;
+let studyHandle: StudyHandle | null = null;
 
 const sm = new SceneManager(viewport);
 const view = new SuspensionView(sm, car);
@@ -109,7 +111,88 @@ const panel = new Panel(sidebarEl, {
   onOpenOptimizer() {
     optPanel.open();
   },
+  onLinkOdChange(axle, key, v) {
+    car[axle].linkOD = { ...car[axle].linkOD, [key]: v };
+  },
+  onRunClearance(cfg) {
+    studyHandle?.cancel();
+    view.clearClearanceMarker();
+    studyHandle = runClearanceStudy(car, cfg, (done, total) => panel.showClearanceProgress(done, total));
+    studyHandle.done.then((res) => {
+      studyHandle = null;
+      panel.showClearanceSummary(res);
+      renderClearanceResults(res);
+      if (res.min) view.setClearanceMarker(res.min.pA, res.min.pB);
+    });
+  },
+  onGotoPose(p) {
+    pose = { ...p };
+    panel.setPose(pose);
+    refresh();
+  },
 });
+
+function renderClearanceResults(res: StudyResult): void {
+  sweepOverlay.style.display = "block";
+  sweepOverlay.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "sweep-head";
+  const title = document.createElement("div");
+  title.innerHTML =
+    `<b>Motion study</b> <span class="small">${res.posesChecked} poses · ` +
+    `${res.pairsTracked} pairs tracked (${res.pairsExcluded} adjacent excluded)` +
+    (res.solverFailures ? ` · <span class="val-warn">${res.solverFailures} unsolvable poses</span>` : "") +
+    `</span>`;
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.onclick = () => (sweepOverlay.style.display = "none");
+  head.append(title, closeBtn);
+  sweepOverlay.appendChild(head);
+
+  const fmtP = (v: number) => v.toFixed(3);
+  let html = `<table class="chan"><tr><th style="text-align:left">Pair</th><th>Corner</th><th>Min clr in</th><th style="text-align:left">Motion condition</th><th style="text-align:left">Location [x y z]</th><th></th></tr>`;
+  const rows: string[] = [];
+  res.worstPairs.forEach((h, i) => {
+    const cls = h.clearance < 0 ? "val-bad" : h.clearance < 0.1 ? "val-warn" : "";
+    rows.push(
+      `<tr><td style="text-align:left">${h.aName} ↔ ${h.bName}</td><td>${h.corner}</td>` +
+      `<td class="${cls}">${fmtP(h.clearance)}</td>` +
+      `<td style="text-align:left">${poseLabel(h.pose)}</td>` +
+      `<td style="text-align:left">${fmtP(h.location[0])}, ${fmtP(h.location[1])}, ${fmtP(h.location[2])}</td>` +
+      `<td><button data-hit="${i}" style="padding:2px 8px;font-size:11px">View</button></td></tr>`,
+    );
+  });
+  html += rows.join("") + "</table>";
+  const tblWrap = document.createElement("div");
+  tblWrap.innerHTML = html;
+  sweepOverlay.appendChild(tblWrap);
+  tblWrap.querySelectorAll("button[data-hit]").forEach((b) => {
+    (b as HTMLButtonElement).onclick = () => {
+      const h = res.worstPairs[Number((b as HTMLElement).dataset.hit)];
+      pose = { ...h.pose };
+      panel.setPose(pose);
+      refresh();
+      view.setClearanceMarker(h.pA, h.pB);
+    };
+  });
+
+  if (res.bottoming.length) {
+    const bt = document.createElement("div");
+    bt.className = "small";
+    bt.style.marginTop = "8px";
+    const first = res.bottoming.slice(0, 6)
+      .map((b) => `${b.corner} shock ${b.shockLength.toFixed(3)}" (${b.limit}) @ ${poseLabel(b.pose)}`)
+      .join(" · ");
+    bt.innerHTML = `<span class="val-warn">⚠ coilover stops hit at ${res.bottoming.length} pose(s):</span> ${first}${res.bottoming.length > 6 ? " …" : ""}`;
+    sweepOverlay.appendChild(bt);
+  } else {
+    const ok = document.createElement("div");
+    ok.className = "small val-good";
+    ok.style.marginTop = "8px";
+    ok.textContent = "✓ no coilover stop violations across the studied envelope";
+    sweepOverlay.appendChild(ok);
+  }
+}
 
 function adoptCar(next: CarSetup, warnings: string[]): void {
   car = next;

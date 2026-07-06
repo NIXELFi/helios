@@ -193,8 +193,8 @@ function decode(seedCar: CarSetup, genes: Gene[], genome: number[]): CarSetup {
 // ---------------------------------------------------------------------------
 
 function needsFor(keys: string[]): EvalOpts {
-  const axleKeys = /^(rc_|anti_|bump_steer|camber_gain)/;
-  const cornerKeys = /^(install_ratio|wheel_rate)/;
+  const axleKeys = /^(rc_|anti_|bump_steer|camber_gain|arb_twist_ratio|arb_mr|arb_ir)/;
+  const cornerKeys = /^(install_ratio|wheel_rate|total_travel|bump_travel)/;
   return {
     axleProbes: keys.some((k) => axleKeys.test(k)),
     cornerProbes: keys.some((k) => cornerKeys.test(k)),

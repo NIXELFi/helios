@@ -70,6 +70,32 @@ export interface AxleGeometry {
   ubarPivot: V3;
   /** Which body carries the U-bar droplink pickup. */
   ubarOn: "rocker" | "lca" | "uca" | "upright";
+  /** Link outside diameters (in) for the clearance study. Fore and aft legs
+   *  of each control arm share the arm's diameter. */
+  linkOD: LinkOD;
+}
+
+export interface LinkOD {
+  lca: number;
+  uca: number;
+  tie: number;
+  push: number;
+  droplink: number;
+  /** Coilover body OD — the shock is checked as a thick segment. */
+  shock: number;
+}
+
+export const LINK_OD_KEYS: { key: keyof LinkOD; label: string }[] = [
+  { key: "lca", label: "LCA legs" },
+  { key: "uca", label: "UCA legs" },
+  { key: "tie", label: "Toe link" },
+  { key: "push", label: "Pushrod" },
+  { key: "droplink", label: "U-bar droplink" },
+  { key: "shock", label: "Coilover body" },
+];
+
+export function defaultLinkOD(): LinkOD {
+  return { lca: 0.625, uca: 0.625, tie: 0.5, push: 0.625, droplink: 0.375, shock: 2.0 };
 }
 
 /** Hosts a droplink/pushrod pickup can ride on, for the attachments UI. */
@@ -96,6 +122,12 @@ export interface VehicleParams {
   cgHeight: number;
   /** Fraction of braking force on the front axle (0–1). */
   brakeBiasFront: number;
+  /** Coilover length limits, in — explicit hard stops. The solver uses them
+   *  to flag bottoming/topping and to compute total travel per corner. */
+  coilMinFront: number;
+  coilMaxFront: number;
+  coilMinRear: number;
+  coilMaxRear: number;
 }
 
 export interface CarSetup {
@@ -150,6 +182,7 @@ export function defaultCar(): CarSetup {
     ubarArm: [xf - 0.25, 10.6, 4.0],
     ubarPivot: [xf - 4.25, 10.6, 4.0],
     ubarOn: "rocker",
+    linkOD: defaultLinkOD(),
   };
   const xr = -60.5;
   const rear: AxleGeometry = {
@@ -174,6 +207,7 @@ export function defaultCar(): CarSetup {
     ubarArm: [xr + 0.25, 10.6, 4.0],
     ubarPivot: [xr + 4.25, 10.6, 4.0],
     ubarOn: "rocker",
+    linkOD: defaultLinkOD(),
   };
   return {
     name: "SDM-26 baseline",
@@ -186,6 +220,11 @@ export function defaultCar(): CarSetup {
       springRateRear: 300,
       cgHeight: 11.0,
       brakeBiasFront: 0.6,
+      // Static shock length on this geometry is ~6.32" both ends.
+      coilMinFront: 5.4,
+      coilMaxFront: 7.2,
+      coilMinRear: 5.4,
+      coilMaxRear: 7.2,
     },
   };
 }
@@ -242,6 +281,7 @@ export function mirrorAxle(a: AxleGeometry): AxleGeometry {
     ubarArm: m(a.ubarArm),
     ubarPivot: m(a.ubarPivot),
     ubarOn: a.ubarOn,
+    linkOD: { ...a.linkOD },
   };
 }
 

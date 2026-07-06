@@ -58,7 +58,7 @@ const SEEDS: Seed[] = [
     id: "vehicle-dynamics.sdm-kinematics",
     name: "SDM Kinematics",
     subteam: "Vehicle Dynamics",
-    version: "0.3.0",
+    version: "0.4.0",
     permissions: ["file.write"],
     recommended: true,
     description:
@@ -99,7 +99,7 @@ const PLUGINS = SEEDS.map(toPlugin);
 const installed = new Map<string, string>([
   ["vehicle-dynamics.lap-sim", "1.0.0"],
   ["chassis.coast", "0.1.0"],
-  ["vehicle-dynamics.sdm-kinematics", "0.3.0"],
+  ["vehicle-dynamics.sdm-kinematics", "0.4.0"],
 ]);
 
 const listeners = new Set<() => void>();

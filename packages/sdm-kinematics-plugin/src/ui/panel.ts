@@ -2,9 +2,11 @@
 // widgets and calls back into main.ts; it never touches the solver directly.
 
 import {
-  HARDPOINT_KEYS, PUSHROD_HOSTS, UBAR_HOSTS, fmtCoord,
-  type AxleGeometry, type CarSetup, type Pose,
+  HARDPOINT_KEYS, LINK_OD_KEYS, PUSHROD_HOSTS, UBAR_HOSTS, fmtCoord,
+  type AxleGeometry, type CarSetup, type LinkOD, type Pose,
 } from "../core/model";
+import type { StudyConfig, StudyResult } from "../core/clearance";
+import { poseLabel } from "../core/clearance";
 import type { FullState } from "../core/sweep";
 import type { SweepType } from "../core/sweep";
 import { MEMBER_COLORS } from "../scene/SuspensionView";
@@ -26,6 +28,9 @@ export interface PanelCallbacks {
   onExportSdmXlsx(): void;
   onExportOpkJson(): void;
   onOpenOptimizer(): void;
+  onLinkOdChange(axle: "front" | "rear", key: keyof LinkOD, v: number): void;
+  onRunClearance(cfg: StudyConfig): void;
+  onGotoPose(pose: Pose): void;
 }
 
 const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
@@ -56,6 +61,7 @@ export class Panel {
       this.vehicleCard(),
       this.liveCard(),
       this.sweepCard(),
+      this.clearanceCard(),
       this.optimizerCard(),
       this.legendCard(),
     );
@@ -338,8 +344,110 @@ export class Panel {
       this.numField("Spring rate R (lb/in)", p.springRateRear, (v) => this.cb.onParamChange({ springRateRear: v })),
       this.numField("CG height (in)", p.cgHeight, (v) => this.cb.onParamChange({ cgHeight: v })),
       this.numField("Brake bias front (0–1)", p.brakeBiasFront, (v) => this.cb.onParamChange({ brakeBiasFront: v })),
+      this.numField("Coilover min F (in)", p.coilMinFront, (v) => this.cb.onParamChange({ coilMinFront: v })),
+      this.numField("Coilover max F (in)", p.coilMaxFront, (v) => this.cb.onParamChange({ coilMaxFront: v })),
+      this.numField("Coilover min R (in)", p.coilMinRear, (v) => this.cb.onParamChange({ coilMinRear: v })),
+      this.numField("Coilover max R (in)", p.coilMaxRear, (v) => this.cb.onParamChange({ coilMaxRear: v })),
     );
     return c;
+  }
+
+  /** Link ODs + motion-study ranges + run. Results render in the overlay. */
+  private clearanceCard(): HTMLElement {
+    const c = this.card("Clearance / motion study");
+    const note = document.createElement("div");
+    note.className = "small";
+    note.style.marginBottom = "6px";
+    note.textContent =
+      "Links are capsules at their OD (A-arm fore/aft legs share the arm OD); the tire is a cylinder. " +
+      "The study visits every extreme combination of heave × roll × pitch × steer.";
+    c.appendChild(note);
+
+    // OD table: rows per link, F and R columns.
+    const tbl = document.createElement("table");
+    tbl.className = "chan";
+    let html = `<tr><th>Link OD in</th><th>Front</th><th>Rear</th></tr>`;
+    tbl.innerHTML = html;
+    for (const { key, label } of LINK_OD_KEYS) {
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td");
+      td0.textContent = label;
+      tr.appendChild(td0);
+      for (const axle of ["front", "rear"] as const) {
+        const td = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.step = "0.0625";
+        inp.value = String(this.car[axle].linkOD[key]);
+        inp.style.cssText = "width:56px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:2px 4px;font-size:11px;text-align:right";
+        inp.onchange = () => {
+          const v = Number(inp.value);
+          if (Number.isFinite(v) && v > 0) this.cb.onLinkOdChange(axle, key, v);
+        };
+        td.appendChild(inp);
+        tr.appendChild(td);
+      }
+      tbl.appendChild(tr);
+    }
+    c.appendChild(tbl);
+
+    const mkRange = (label: string, value: string): HTMLElement => {
+      const f = this.numFieldRaw(label, value);
+      f.style.marginTop = "6px";
+      return f;
+    };
+    const heaveF = mkRange("Heave ± in", "1.2");
+    const rollF = mkRange("Roll ± deg", "2.5");
+    const pitchF = mkRange("Pitch ± deg", "1.5");
+    const rackF = mkRange("Rack ± in", "1.3");
+    const stepsF = mkRange("Steps / axis", "3");
+    c.append(heaveF, rollF, pitchF, rackF, stepsF);
+
+    const val = (f: HTMLElement) => Math.abs(Number((f.querySelector("input") as HTMLInputElement).value) || 0);
+    const run = this.btn("Run motion study", () => {
+      this.cb.onRunClearance({
+        heaveRange: val(heaveF),
+        rollRange: val(rollF),
+        pitchRange: val(pitchF),
+        rackRange: val(rackF),
+        steps: Math.max(2, Math.round(val(stepsF))),
+      });
+    }, true);
+    run.style.marginTop = "8px";
+    c.appendChild(run);
+
+    const barWrap = document.createElement("div");
+    barWrap.style.cssText = "background:var(--bg);border:1px solid var(--line);border-radius:6px;height:8px;margin-top:8px;overflow:hidden";
+    this.clearBar = document.createElement("div");
+    this.clearBar.style.cssText = "height:100%;width:0%;background:var(--accent);transition:width 0.15s";
+    barWrap.appendChild(this.clearBar);
+    this.clearSummary = document.createElement("div");
+    this.clearSummary.className = "small";
+    this.clearSummary.style.marginTop = "6px";
+    c.append(barWrap, this.clearSummary);
+    return c;
+  }
+
+  private clearBar!: HTMLElement;
+  private clearSummary!: HTMLElement;
+
+  showClearanceProgress(done: number, total: number): void {
+    this.clearBar.style.width = `${Math.round((100 * done) / Math.max(1, total))}%`;
+    this.clearSummary.textContent = `checking pose ${done}/${total}…`;
+  }
+
+  showClearanceSummary(res: StudyResult): void {
+    if (!res.min) {
+      this.clearSummary.textContent = "No trackable pairs (everything adjacent?).";
+      return;
+    }
+    const m = res.min;
+    const cls = m.clearance < 0 ? "val-bad" : m.clearance < 0.1 ? "val-warn" : "val-good";
+    this.clearSummary.innerHTML =
+      `Min clearance <b class="${cls}">${m.clearance.toFixed(3)}"</b> — ` +
+      `${m.corner} ${m.aName} ↔ ${m.bName} @ ${poseLabel(m.pose)}` +
+      (res.bottoming.length ? ` · <span class="val-warn">${res.bottoming.length} pose(s) hit coilover stops</span>` : "") +
+      ` · full table in overlay`;
   }
 
   // ---- Live outputs ----
@@ -363,6 +471,17 @@ export class Panel {
       ["Scrub in", (id) => fmt(s.cornerCh[id].scrub)],
       ["IR —", (id) => fmt(s.cornerCh[id].installRatio, 3)],
       ["WR lb/in", (id) => fmt(s.cornerCh[id].wheelRate, 1)],
+      ["Lat scrub in", (id) => fmt(s.cornerCh[id].lateralScrub, 3)],
+      ["Shock in", (id) => {
+        const c = s.cornerCh[id];
+        const isF = id[0] === "F";
+        const lo = isF ? this.car.params.coilMinFront : this.car.params.coilMinRear;
+        const hi = isF ? this.car.params.coilMaxFront : this.car.params.coilMaxRear;
+        const bad = c.shockLength < lo || c.shockLength > hi;
+        return bad ? `<span class="val-bad">${fmt(c.shockLength)}</span>` : fmt(c.shockLength);
+      }],
+      ["Trvl b/d in", (id) => `${fmt(s.cornerCh[id].travelBump, 2)}/${fmt(s.cornerCh[id].travelDroop, 2)}`],
+      ["Total trvl in", (id) => fmt(s.cornerCh[id].travelTotal, 2)],
     ];
     let html = `<table class="chan"><tr><th></th>${ids.map((i) => `<th>${i}</th>`).join("")}</tr>`;
     for (const [lab, f] of rows) {
@@ -383,7 +502,9 @@ export class Panel {
         <tr><td>Bump steer L °/in</td><td>${fmt(f.bumpSteerLeft, 3)}</td><td>${fmt(r.bumpSteerLeft, 3)}</td></tr>
         <tr><td>Camber gain L °/in</td><td>${fmt(f.camberGainLeft, 3)}</td><td>${fmt(r.camberGainLeft, 3)}</td></tr>
         <tr><td>ARB twist °</td><td>${fmt(s.ubarTwistFront, 3)}</td><td>${fmt(s.ubarTwistRear, 3)}</td></tr>
-        <tr><td>ARB ratio °/in</td><td>${fmt(f.arbRateLeft, 3)}</td><td>${fmt(r.arbRateLeft, 3)}</td></tr>
+        <tr><td>ARB twist ratio °/in</td><td>${fmt(f.arbTwistRatioLeft, 3)}</td><td>${fmt(r.arbTwistRatioLeft, 3)}</td></tr>
+        <tr><td>ARB MR (whl/link)</td><td>${fmt(f.arbMotionRatioLeft, 3)}</td><td>${fmt(r.arbMotionRatioLeft, 3)}</td></tr>
+        <tr><td>ARB IR (link/whl)</td><td>${fmt(f.arbInstallRatioLeft, 3)}</td><td>${fmt(r.arbInstallRatioLeft, 3)}</td></tr>
         <tr><td>Ackermann %</td><td colspan="2">${s.ackermann === null ? "— (steer to read)" : fmt(s.ackermann, 1)}</td></tr>
       </table>`;
   }

@@ -44,15 +44,35 @@ export class SuspensionView {
   private rcMat = new THREE.MeshStandardMaterial({ color: RC_COLOR, roughness: 0.4 });
   private rcMarkers: THREE.Mesh[] = [];
   private icLines: THREE.LineSegments | null = null;
+  private clearanceGroup = new THREE.Group();
   showOverlays = true;
 
   constructor(private sm: SceneManager, car: CarSetup) {
     this.car = car;
     sm.scene.add(this.group);
     sm.scene.add(this.overlay);
+    sm.scene.add(this.clearanceGroup);
     this.setCar(car);
   }
   private car: CarSetup;
+
+  /** Highlight a minimum-clearance location: markers at the two closest
+   *  points plus the connecting gap line. */
+  setClearanceMarker(pA: V3, pB: V3): void {
+    this.clearClearanceMarker();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffb454, roughness: 0.3, emissive: 0x664400 });
+    for (const p of [pA, pB]) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 12), mat);
+      m.position.copy(this.sm.toWorld(p));
+      this.clearanceGroup.add(m);
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints([this.sm.toWorld(pA), this.sm.toWorld(pB)]);
+    this.clearanceGroup.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffb454 })));
+  }
+
+  clearClearanceMarker(): void {
+    this.clearanceGroup.clear();
+  }
 
   setCar(car: CarSetup): void {
     this.car = car;

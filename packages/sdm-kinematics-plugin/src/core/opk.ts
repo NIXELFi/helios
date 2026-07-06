@@ -9,7 +9,7 @@
 // lost on round-trip even when they differ slightly from the mirror.
 
 import * as XLSX from "xlsx";
-import { type V3, deg, rad, unit, sub } from "./vec";
+import { type V3, deg, rad, unit, sub, dist } from "./vec";
 import {
   defaultCar, mirrorPoint, roundCoord, roundPoint, type AxleGeometry, type CarSetup,
 } from "./model";
@@ -244,6 +244,18 @@ export function importOpkExcel(buf: ArrayBuffer): OpkImportResult {
   if (typeof setup["Brake Bias"] === "number") car.params.brakeBiasFront = (setup["Brake Bias"] as number) / 100;
   if (typeof pf.wheels.tireDiameter === "number") car.params.tireRadius = pf.wheels.tireDiameter / 2;
   if (typeof pf.wheels.tireWidth === "number") car.params.tireWidth = pf.wheels.tireWidth;
+
+  // OpK files carry no coilover stops — default to static length ±1" so
+  // bottoming checks are sane until the real stroke numbers are entered.
+  const lF = dist(car.front.shockRocker, car.front.shockChassis);
+  const lR = dist(car.rear.shockRocker, car.rear.shockChassis);
+  car.params.coilMinFront = roundCoord(lF - 1);
+  car.params.coilMaxFront = roundCoord(lF + 1);
+  car.params.coilMinRear = roundCoord(lR - 1);
+  car.params.coilMaxRear = roundCoord(lR + 1);
+  warnings.push(
+    `Coilover stops defaulted to static length ±1.0" (F ${lF.toFixed(3)}", R ${lR.toFixed(3)}") — set the real min/max in Vehicle.`,
+  );
 
   // Preserve everything the solver doesn't model for lossless round-trip.
   car.opk = {
