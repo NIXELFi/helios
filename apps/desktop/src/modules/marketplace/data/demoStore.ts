@@ -58,11 +58,11 @@ const SEEDS: Seed[] = [
     id: "vehicle-dynamics.sdm-kinematics",
     name: "SDM Kinematics",
     subteam: "Vehicle Dynamics",
-    version: "0.4.0",
+    version: "0.5.0",
     permissions: ["file.write"],
     recommended: true,
     description:
-      "Suspension-kinematics tool (OptimumKinematics-class): hardpoint editor, live 3D double-wishbone + U-bar/ARB model with RC/IC overlays, sweeps, OptimumK Excel import, evolutionary optimizer with actuation-plane constraints + PDF reports (Three.js).",
+      "Suspension-kinematics tool (OptimumKinematics-class): hardpoint editor, live 3D double-wishbone + U-bar/ARB model, sweeps, OptimumK Excel import, evolutionary optimizer, clearance motion studies, dynamic link-force calculator with animated force vectors + PDF reports (Three.js).",
     publishedAt: "2026-07-04T00:00:00Z",
   },
 ];
@@ -99,7 +99,7 @@ const PLUGINS = SEEDS.map(toPlugin);
 const installed = new Map<string, string>([
   ["vehicle-dynamics.lap-sim", "1.0.0"],
   ["chassis.coast", "0.1.0"],
-  ["vehicle-dynamics.sdm-kinematics", "0.4.0"],
+  ["vehicle-dynamics.sdm-kinematics", "0.5.0"],
 ]);
 
 const listeners = new Set<() => void>();

@@ -6,7 +6,7 @@ const CSS = {
   bg: "#1f242d",
   line: "#2a313c",
   text: "#93a0b4",
-  series: ["#4ea1ff", "#3ddc84", "#ffb454", "#ff6b6b"],
+  series: ["#4ea1ff", "#3ddc84", "#ffb454", "#ff6b6b", "#c792ea", "#ffd866"],
 };
 
 export interface PlotSeries {

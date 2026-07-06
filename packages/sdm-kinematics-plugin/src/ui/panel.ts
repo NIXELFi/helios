@@ -7,6 +7,7 @@ import {
 } from "../core/model";
 import type { StudyConfig, StudyResult } from "../core/clearance";
 import { poseLabel } from "../core/clearance";
+import type { MassProps } from "../core/forces";
 import type { FullState } from "../core/sweep";
 import type { SweepType } from "../core/sweep";
 import { MEMBER_COLORS } from "../scene/SuspensionView";
@@ -31,6 +32,20 @@ export interface PanelCallbacks {
   onLinkOdChange(axle: "front" | "rear", key: keyof LinkOD, v: number): void;
   onRunClearance(cfg: StudyConfig): void;
   onGotoPose(pose: Pose): void;
+  onMassPropsChange(patch: Partial<MassProps>): void;
+  onLoadForceCsvClick(): void;
+  onRunForces(cfg: ForceRunConfig): void;
+}
+
+export interface ForceRunConfig {
+  source: "gg" | "csv";
+  latG: number;
+  accelG: number;
+  brakeG: number;
+  points: number;
+  axCol: number;
+  ayCol: number;
+  tCol: number | null;
 }
 
 const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
@@ -61,6 +76,7 @@ export class Panel {
       this.vehicleCard(),
       this.liveCard(),
       this.sweepCard(),
+      this.forcesCard(),
       this.clearanceCard(),
       this.optimizerCard(),
       this.legendCard(),
@@ -350,6 +366,147 @@ export class Panel {
       this.numField("Coilover max R (in)", p.coilMaxRear, (v) => this.cb.onParamChange({ coilMaxRear: v })),
     );
     return c;
+  }
+
+  /** Dynamic force calculator: mass properties + input source + run. */
+  private forcesCard(): HTMLElement {
+    const c = this.card("Dynamic forces");
+    const note = document.createElement("div");
+    note.className = "small";
+    note.style.marginBottom = "6px";
+    note.textContent =
+      "SDM27 load-transfer model with live RC/pitch-center heights; 6-link axial solve per corner at the loaded pose. " +
+      "Input a G-G envelope phasor sweep or a CSV acceleration trace (G units).";
+    c.appendChild(note);
+
+    const mp = this.massProps;
+    const mpField = (label: string, key: keyof MassProps, step = 1) =>
+      this.numFieldCb(label, mp[key], step, (v) => this.cb.onMassPropsChange({ [key]: v }));
+    c.append(
+      mpField("Sprung weight (lb)", "sprungWeight"),
+      mpField("Front weight dist (0–1)", "frontWeightDist", 0.01),
+      mpField("Unsprung F (lb/axle)", "unsprungWeightFront"),
+      mpField("Unsprung R (lb/axle)", "unsprungWeightRear"),
+      mpField("Unsprung CG h (in)", "unsprungCgHeight", 0.1),
+      mpField("Roll stiff dist F (0–1)", "rsd", 0.01),
+    );
+
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    seg.style.margin = "8px 0";
+    const bGG = this.btn("G-G envelope", () => setSource("gg"));
+    const bCSV = this.btn("CSV trace", () => setSource("csv"));
+    bGG.classList.add("seg-btn", "active");
+    bCSV.classList.add("seg-btn");
+    seg.append(bGG, bCSV);
+    c.appendChild(seg);
+
+    const ggBox = document.createElement("div");
+    const latF = this.numFieldRaw("Lat G ±", "2.2");
+    const accF = this.numFieldRaw("Accel G", "1.1");
+    const brkF = this.numFieldRaw("Brake G", "1.7");
+    const ptsF = this.numFieldRaw("Points", "72");
+    ggBox.append(latF, accF, brkF, ptsF);
+    c.appendChild(ggBox);
+
+    const csvBox = document.createElement("div");
+    csvBox.style.display = "none";
+    const loadBtn = this.btn("Load CSV…", () => this.cb.onLoadForceCsvClick());
+    loadBtn.style.marginBottom = "6px";
+    csvBox.appendChild(loadBtn);
+    const colWrap = document.createElement("div");
+    csvBox.appendChild(colWrap);
+    c.appendChild(csvBox);
+
+    let source: "gg" | "csv" = "gg";
+    const setSource = (s: "gg" | "csv") => {
+      source = s;
+      bGG.classList.toggle("active", s === "gg");
+      bCSV.classList.toggle("active", s === "csv");
+      ggBox.style.display = s === "gg" ? "" : "none";
+      csvBox.style.display = s === "csv" ? "" : "none";
+    };
+
+    this.csvColSelects = null;
+    this.setForceCsvColumns = (headers: string[]) => {
+      colWrap.innerHTML = "";
+      const mkSel = (label: string, withNone: boolean, guess: RegExp): HTMLSelectElement => {
+        const f = document.createElement("div");
+        f.className = "field";
+        const lab = document.createElement("span");
+        lab.className = "small";
+        lab.textContent = label;
+        const sel = document.createElement("select");
+        if (withNone) {
+          const o = document.createElement("option");
+          o.value = "-1";
+          o.textContent = "(index)";
+          sel.appendChild(o);
+        }
+        headers.forEach((h, i) => {
+          const o = document.createElement("option");
+          o.value = String(i);
+          o.textContent = h;
+          sel.appendChild(o);
+        });
+        const hit = headers.findIndex((h) => guess.test(h));
+        if (hit >= 0) sel.value = String(hit);
+        f.append(lab, sel);
+        colWrap.appendChild(f);
+        return sel;
+      };
+      this.csvColSelects = {
+        ax: mkSel("Ax column (long G)", false, /long|ax\b|a_x|accel.*x/i),
+        ay: mkSel("Ay column (lat G)", false, /lat|ay\b|a_y|accel.*y/i),
+        t: mkSel("Time column", true, /time|^t$|sec/i),
+      };
+      setSource("csv");
+    };
+
+    const val = (f: HTMLElement) => Number((f.querySelector("input") as HTMLInputElement).value) || 0;
+    const run = this.btn("Run forces", () => {
+      this.cb.onRunForces({
+        source,
+        latG: Math.abs(val(latF)),
+        accelG: Math.abs(val(accF)),
+        brakeG: Math.abs(val(brkF)),
+        points: Math.max(8, Math.round(val(ptsF))),
+        axCol: this.csvColSelects ? Number(this.csvColSelects.ax.value) : 0,
+        ayCol: this.csvColSelects ? Number(this.csvColSelects.ay.value) : 1,
+        tCol: this.csvColSelects && Number(this.csvColSelects.t.value) >= 0
+          ? Number(this.csvColSelects.t.value) : null,
+      });
+    }, true);
+    run.style.marginTop = "6px";
+    c.appendChild(run);
+    return c;
+  }
+
+  private massProps!: MassProps;
+  private csvColSelects: { ax: HTMLSelectElement; ay: HTMLSelectElement; t: HTMLSelectElement } | null = null;
+  /** Populated by forcesCard; called by main after a CSV is parsed. */
+  setForceCsvColumns: (headers: string[]) => void = () => {};
+
+  setMassProps(mp: MassProps): void {
+    this.massProps = mp;
+  }
+
+  private numFieldCb(label: string, value: number, step: number, onChange: (v: number) => void): HTMLElement {
+    const f = document.createElement("div");
+    f.className = "field";
+    const lab = document.createElement("span");
+    lab.className = "small";
+    lab.textContent = label;
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.step = String(step);
+    inp.value = String(value);
+    inp.onchange = () => {
+      const v = Number(inp.value);
+      if (Number.isFinite(v)) onChange(v);
+    };
+    f.append(lab, inp);
+    return f;
   }
 
   /** Link ODs + motion-study ranges + run. Results render in the overlay. */

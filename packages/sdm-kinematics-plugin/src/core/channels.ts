@@ -184,6 +184,9 @@ export interface AxleChannels {
    *  travel — the inverse of the motion ratio. */
   arbInstallRatioLeft: number;
   arbInstallRatioRight: number;
+  /** Side-view n-line slope dz/dx at the contact patch (L/R average) — the
+   *  force calculator intersects front & rear lines for the pitch center. */
+  svSlope: number;
 }
 
 interface SideProbe {
@@ -257,6 +260,7 @@ export function axleChannels(
       arbTwistRatioLeft: NaN, arbTwistRatioRight: NaN,
       arbMotionRatioLeft: NaN, arbMotionRatioRight: NaN,
       arbInstallRatioLeft: NaN, arbInstallRatioRight: NaN,
+      svSlope: NaN,
     };
   }
   const L = probeSide(geoL, 1, params, dzL, rack, stL);
@@ -310,6 +314,7 @@ export function axleChannels(
     arbInstallRatioRight: Math.abs(R.dLink),
     arbMotionRatioLeft: Math.abs(L.dLink) > 1e-4 ? 1 / Math.abs(L.dLink) : NaN,
     arbMotionRatioRight: Math.abs(R.dLink) > 1e-4 ? 1 / Math.abs(R.dLink) : NaN,
+    svSlope,
   };
 }
 

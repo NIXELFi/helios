@@ -215,9 +215,11 @@ export class SuspensionView {
       objs.rim.rotateX(Math.PI / 2);
     }
 
-    // Overlays: RC markers + n-lines at each axle's X station.
-    this.overlay.visible = this.showOverlays;
-    if (this.showOverlays) {
+    // Overlays: RC markers + n-lines at each axle's X station. Hidden when
+    // the state was solved without axle probes (RC = NaN, e.g. animation).
+    const rcFinite = Number.isFinite(state.frontAxle.rollCenter[1]);
+    this.overlay.visible = this.showOverlays && rcFinite;
+    if (this.showOverlays && rcFinite) {
       const axles = [
         { ch: state.frontAxle, x: this.car.front.wheelCenter[0], cpl: state.cornerCh.FL.contactPatch, cpr: state.cornerCh.FR.contactPatch },
         { ch: state.rearAxle, x: this.car.rear.wheelCenter[0], cpl: state.cornerCh.RL.contactPatch, cpr: state.cornerCh.RR.contactPatch },
