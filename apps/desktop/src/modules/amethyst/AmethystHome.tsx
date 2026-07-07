@@ -16,7 +16,7 @@ import { useAttachments } from "./data/useAttachments";
 import { buildIndex } from "./data/searchIndex";
 import { EmptyState } from "./components/EmptyState";
 import { Sidebar } from "./components/Sidebar";
-import { SearchPanel } from "./components/SearchPanel";
+import { SearchPanel, EMPTY_SEARCH, type SearchState } from "./components/SearchPanel";
 import { NoteView } from "./components/NoteView";
 import { RightRail } from "./components/RightRail";
 import { Dashboard } from "./components/Dashboard";
@@ -34,6 +34,18 @@ export function AmethystHome() {
   const [leftMode, setLeftMode] = useState<LeftMode>("search");
   const [showGraph, setShowGraph] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
+  const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
+  const [activeHeading, setActiveHeading] = useState<string | null>(null);
+
+  // Clicking a chip / breadcrumb / tag in a note drives the search pane.
+  const applyFacet = useCallback((key: "car" | "subteam" | "type", value: string) => {
+    setSearch({ query: "", filters: { car: "", subteam: "", type: "", [key]: value }, phraseOnly: false });
+    setLeftMode("search");
+  }, []);
+  const applyTag = useCallback((tag: string) => {
+    setSearch({ query: tag, filters: { car: "", subteam: "", type: "" }, phraseOnly: false });
+    setLeftMode("search");
+  }, []);
 
   // Navigation history (back / forward), kept in one atomic state object.
   const [nav, setNav] = useState<{ stack: string[]; i: number }>({ stack: [], i: -1 });
@@ -158,7 +170,14 @@ export function AmethystHome() {
             ) : leftMode === "files" ? (
               <Sidebar vault={vault} activeId={activeId} onSelect={navigate} />
             ) : index ? (
-              <SearchPanel vault={vault} index={index} activeId={activeId} onSelect={navigate} />
+              <SearchPanel
+                vault={vault}
+                index={index}
+                activeId={activeId}
+                search={search}
+                onSearchChange={setSearch}
+                onSelect={navigate}
+              />
             ) : null}
           </div>
         </aside>
@@ -178,6 +197,9 @@ export function AmethystHome() {
               highlight={highlight}
               onNavigate={navigate}
               onClearHighlight={() => setHighlight(null)}
+              onFacet={applyFacet}
+              onTag={applyTag}
+              onActiveHeading={setActiveHeading}
             />
           ) : (
             <Dashboard vault={vault} onNavigate={navigate} />
@@ -186,7 +208,7 @@ export function AmethystHome() {
 
         {vault && activeNote && !showGraph && (
           <aside className="w-60 shrink-0 border-l border-helios-line bg-helios-panel/30">
-            <RightRail note={activeNote} vault={vault} onNavigate={navigate} />
+            <RightRail note={activeNote} vault={vault} activeSlug={activeHeading} onNavigate={navigate} />
           </aside>
         )}
       </div>

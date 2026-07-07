@@ -6,10 +6,12 @@ import { buildOutline } from "../data/parse";
 export function RightRail({
   note,
   vault,
+  activeSlug,
   onNavigate,
 }: {
   note: KbNote;
   vault: KbVault;
+  activeSlug?: string | null;
   onNavigate: (id: string) => void;
 }) {
   const outline = useMemo(() => buildOutline(note.body), [note.body]);
@@ -31,17 +33,25 @@ export function RightRail({
           <Empty>No headings</Empty>
         ) : (
           <div className="mt-1 space-y-0.5">
-            {outline.map((o, i) => (
-              <button
-                key={i}
-                onClick={() => scrollTo(o.slug)}
-                className="block w-full truncate rounded px-2 py-0.5 text-left text-xs text-helios-dim hover:bg-helios-panel hover:text-helios-text"
-                style={{ paddingLeft: 8 + (o.level - 1) * 10 }}
-                title={o.text}
-              >
-                {o.text}
-              </button>
-            ))}
+            {outline.map((o, i) => {
+              const active = o.slug === activeSlug;
+              return (
+                <button
+                  key={i}
+                  onClick={() => scrollTo(o.slug)}
+                  className={
+                    "block w-full truncate rounded border-l-2 px-2 py-0.5 text-left text-xs transition-colors " +
+                    (active
+                      ? "border-asu-gold bg-asu-gold/10 text-asu-gold"
+                      : "border-transparent text-helios-dim hover:bg-helios-panel hover:text-helios-text")
+                  }
+                  style={{ paddingLeft: 8 + (o.level - 1) * 10 }}
+                  title={o.text}
+                >
+                  {o.text}
+                </button>
+              );
+            })}
           </div>
         )}
       </section>

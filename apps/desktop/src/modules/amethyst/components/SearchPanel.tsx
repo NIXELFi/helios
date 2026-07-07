@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronDown, IconSearch, IconX } from "@tabler/icons-react";
 import type { KbNote, KbVault } from "../types";
 import { makeSnippet, searchIndex, type SearchIndex } from "../data/searchIndex";
@@ -11,12 +11,18 @@ const FACETS: { key: FacetKey; label: string }[] = [
   { key: "type", label: "Type" },
 ];
 
+export interface SearchState {
+  query: string;
+  filters: Record<FacetKey, string>;
+  phraseOnly: boolean;
+}
+export const EMPTY_SEARCH: SearchState = { query: "", filters: { car: "", subteam: "", type: "" }, phraseOnly: false };
+
 function facetValue(n: KbNote, key: FacetKey): string | null {
   const v = n.frontmatter[key];
   return typeof v === "string" ? v : null;
 }
 
-// Coarse category for grouping results (keeps meetings, reference, etc. apart).
 const CAT_ORDER = ["Design notes", "Reference", "Meetings", "Overview", "Other"];
 function categoryOf(n: KbNote): string {
   const t = typeof n.frontmatter.type === "string" ? n.frontmatter.type : "";
@@ -27,31 +33,36 @@ function categoryOf(n: KbNote): string {
   return "Other";
 }
 
-interface SubGroup {
-  name: string | null;
-  notes: KbNote[];
-}
 interface Group {
   cat: string;
   count: number;
-  subgroups: SubGroup[];
+  subgroups: { name: string | null; notes: KbNote[] }[];
 }
 
 export function SearchPanel({
   vault,
   index,
   activeId,
+  search,
+  onSearchChange,
   onSelect,
 }: {
   vault: KbVault;
   index: SearchIndex;
   activeId: string | null;
+  search: SearchState;
+  onSearchChange: (s: SearchState) => void;
   onSelect: (id: string, highlight?: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<Record<FacetKey, string>>({ car: "", subteam: "", type: "" });
-  const [phraseOnly, setPhraseOnly] = useState(false);
+  const { query, filters, phraseOnly } = search;
+  const setQuery = (v: string) => onSearchChange({ ...search, query: v });
+  const setFilter = (key: FacetKey, v: string) => onSearchChange({ ...search, filters: { ...search.filters, [key]: v } });
+  const clearFilters = () => onSearchChange({ ...search, filters: { car: "", subteam: "", type: "" } });
+  const togglePhrase = () => onSearchChange({ ...search, phraseOnly: !search.phraseOnly });
+
   const { preview, show, hide } = useNotePreview();
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [sel, setSel] = useState(0);
 
   const facetOptions = useMemo(() => {
     const opt: Record<FacetKey, string[]> = { car: [], subteam: [], type: [] };
@@ -98,6 +109,29 @@ export function SearchPanel({
     });
   }, [results]);
 
+  // Flat ordered list (across groups) for keyboard navigation.
+  const flat = useMemo(() => grouped.flatMap((g) => g.subgroups.flatMap((sg) => sg.notes)), [grouped]);
+  const flatIdx = useMemo(() => new Map(flat.map((n, i) => [n.id, i])), [flat]);
+
+  useEffect(() => setSel(0), [query, phraseOnly, filters.car, filters.subteam, filters.type]);
+  useEffect(() => {
+    listRef.current?.querySelector('[data-sel="1"]')?.scrollIntoView({ block: "nearest" });
+  }, [sel]);
+
+  function onInputKey(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSel((s) => Math.min(s + 1, flat.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSel((s) => Math.max(s - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const n = flat[sel];
+      if (n) onSelect(n.id, query.trim() || undefined);
+    }
+  }
+
   const anyFilter = FACETS.some((f) => filters[f.key]);
 
   return (
@@ -109,6 +143,7 @@ export function SearchPanel({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onInputKey}
             placeholder="Search everything…"
             className="w-full rounded-lg border border-helios-line bg-helios-base py-2 pl-8 pr-8 text-sm text-helios-text placeholder:text-helios-dim/80 focus:border-asu-gold/60 focus:outline-none focus:ring-1 focus:ring-asu-gold/30"
           />
@@ -119,21 +154,15 @@ export function SearchPanel({
           )}
         </div>
 
-        {/* strictness toggle */}
         <button
-          onClick={() => setPhraseOnly((p) => !p)}
+          onClick={togglePhrase}
           title="Only match notes that contain the exact phrase you typed"
           className={
             "flex items-center gap-2 rounded-md px-1.5 py-1 text-[11px] transition-colors " +
             (phraseOnly ? "text-asu-gold" : "text-helios-dim hover:text-helios-text")
           }
         >
-          <span
-            className={
-              "flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border transition-colors " +
-              (phraseOnly ? "border-asu-gold bg-asu-gold" : "border-helios-line")
-            }
-          >
+          <span className={"flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border transition-colors " + (phraseOnly ? "border-asu-gold bg-asu-gold" : "border-helios-line")}>
             {phraseOnly && (
               <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-helios-base" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
@@ -143,35 +172,32 @@ export function SearchPanel({
           Exact phrase
         </button>
 
-        {/* compact filter dropdowns */}
         <div className="grid grid-cols-3 gap-1.5">
           {FACETS.map(({ key, label }) =>
             facetOptions[key].length > 1 ? (
-              <FilterSelect
-                key={key}
-                label={label}
-                value={filters[key]}
-                options={facetOptions[key]}
-                onChange={(v) => setFilters((f) => ({ ...f, [key]: v }))}
-              />
+              <FilterSelect key={key} label={label} value={filters[key]} options={facetOptions[key]} onChange={(v) => setFilter(key, v)} />
             ) : (
               <div key={key} />
             ),
           )}
         </div>
         {anyFilter && (
-          <button
-            onClick={() => setFilters({ car: "", subteam: "", type: "" })}
-            className="text-[10px] text-helios-dim underline decoration-dotted hover:text-helios-text"
-          >
+          <button onClick={clearFilters} className="text-[10px] text-helios-dim underline decoration-dotted hover:text-helios-text">
             clear filters
           </button>
         )}
       </div>
 
-      <div className="kb-scroll min-h-0 flex-1 overflow-y-auto py-1">
+      <div ref={listRef} className="kb-scroll min-h-0 flex-1 overflow-y-auto py-1">
         {results.length === 0 ? (
-          <div className="px-3 py-8 text-center text-sm text-helios-dim">Nothing matches.</div>
+          <div className="px-3 py-8 text-center text-sm text-helios-dim">
+            Nothing matches.
+            {anyFilter && (
+              <button onClick={clearFilters} className="mt-2 block w-full text-asu-gold underline">
+                clear filters
+              </button>
+            )}
+          </div>
         ) : (
           grouped.map((g) => (
             <div key={g.cat} className="mb-1">
@@ -193,6 +219,7 @@ export function SearchPanel({
                         note={n}
                         query={query}
                         active={n.id === activeId}
+                        selected={flatIdx.get(n.id) === sel}
                         showDir={!sg.name}
                         onClick={() => onSelect(n.id, query.trim() || undefined)}
                         onHover={(el) => show(n, el)}
@@ -249,6 +276,7 @@ function ResultRow({
   note,
   query,
   active,
+  selected,
   showDir,
   onClick,
   onHover,
@@ -257,6 +285,7 @@ function ResultRow({
   note: KbNote;
   query: string;
   active: boolean;
+  selected: boolean;
   showDir: boolean;
   onClick: () => void;
   onHover: (el: HTMLElement) => void;
@@ -264,17 +293,16 @@ function ResultRow({
 }) {
   return (
     <button
+      data-sel={selected ? "1" : undefined}
       onClick={onClick}
       onMouseEnter={(e) => onHover(e.currentTarget)}
       onMouseLeave={onHoverOut}
       className={
         "kb-row mb-0.5 block w-full rounded-md px-2 py-1.5 text-left " +
-        (active ? "bg-asu-gold/15" : "hover:bg-helios-panel")
+        (active ? "bg-asu-gold/15 " : selected ? "bg-helios-panel ring-1 ring-asu-gold/40 " : "hover:bg-helios-panel")
       }
     >
-      <div className={"truncate text-[13px] leading-tight " + (active ? "text-asu-gold" : "text-helios-text")}>
-        {note.title}
-      </div>
+      <div className={"truncate text-[13px] leading-tight " + (active ? "text-asu-gold" : "text-helios-text")}>{note.title}</div>
       {showDir && note.dir && <div className="truncate text-[10px] text-helios-dim">{note.dir}</div>}
       {query.trim() && (
         <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-helios-dim">
