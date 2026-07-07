@@ -31,7 +31,7 @@ export function AmethystHome() {
   const attachments = useAttachments(vault);
   const index = useMemo(() => (vault ? buildIndex(vault.notes) : null), [vault]);
 
-  const [leftMode, setLeftMode] = useState<LeftMode>("files");
+  const [leftMode, setLeftMode] = useState<LeftMode>("search");
   const [showGraph, setShowGraph] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
 
