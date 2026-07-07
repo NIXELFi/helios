@@ -87,7 +87,10 @@ md.renderer.rules.text = (tokens, idx, options, env: RenderEnv, self) => {
   const terms = env.highlight;
   if (!token || !terms || terms.length === 0) return defaultText(tokens, idx, options, env, self);
   const content = token.content;
-  const re = new RegExp(`(${terms.map(escapeReg).join("|")})`, "ig");
+  // Phrase-first alternation with whitespace-tolerant terms, so a contiguous
+  // phrase ("rear wing structure") is matched as one unit and tagged kb-phrase.
+  const alt = terms.map((t) => escapeReg(t).replace(/ /g, "\\s+")).join("|");
+  const re = new RegExp(`(${alt})`, "ig");
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
@@ -97,7 +100,8 @@ md.renderer.rules.text = (tokens, idx, options, env: RenderEnv, self) => {
       continue;
     }
     if (m.index > last) out += md.utils.escapeHtml(content.slice(last, m.index));
-    out += `<mark class="kb-search-hit">${md.utils.escapeHtml(m[0])}</mark>`;
+    const cls = /\s/.test(m[0]) ? "kb-search-hit kb-phrase" : "kb-search-hit";
+    out += `<mark class="${cls}">${md.utils.escapeHtml(m[0])}</mark>`;
     last = m.index + m[0].length;
   }
   if (last < content.length) out += md.utils.escapeHtml(content.slice(last));

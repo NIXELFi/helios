@@ -7,6 +7,15 @@ import { tokenize } from "../data/searchIndex";
 
 const EMBED_RE = /!\[\[([^\]|#]+)(?:\|[^\]]+)?\]\]/g;
 
+// Highlight terms: for a multi-word query, the contiguous phrase goes first so
+// the renderer matches it as one unit (and the view scrolls to it), followed by
+// the individual words as a fallback for scattered matches.
+function hlTerms(q: string): string[] {
+  const words = tokenize(q);
+  const phrase = q.toLowerCase().replace(/\s+/g, " ").trim();
+  return phrase.includes(" ") ? [phrase, ...words] : words;
+}
+
 const CHIP_KEYS: { key: string; label?: string }[] = [
   { key: "car" },
   { key: "subteam" },
@@ -56,7 +65,7 @@ export function NoteView({
           return { id: n?.id ?? null, exists: !!n };
         },
         resolveEmbed: (name) => attachments.resolve(name),
-        highlight: highlight ? tokenize(highlight) : undefined,
+        highlight: highlight ? hlTerms(highlight) : undefined,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [note.id, note.body, vault.resolve, attachments.version, highlight],
@@ -70,7 +79,10 @@ export function NoteView({
     if (!root || !highlight) return;
     const key = `${note.id}|${highlight}`;
     if (scrolledKey.current === key) return;
-    const first = root.querySelector<HTMLElement>("mark.kb-search-hit");
+    // Prefer the contiguous phrase match; fall back to the first word hit.
+    const first =
+      root.querySelector<HTMLElement>("mark.kb-phrase") ??
+      root.querySelector<HTMLElement>("mark.kb-search-hit");
     if (first) {
       scrolledKey.current = key;
       first.classList.add("kb-search-first");

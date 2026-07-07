@@ -148,6 +148,12 @@
   padding: 0 1px;
   box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.35);
 }
+.kb-prose mark.kb-phrase {
+  background: rgba(255, 198, 39, 0.42);
+  color: #FFEFC0;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.5);
+}
 .kb-prose mark.kb-search-hit.kb-search-first {
   animation: kb-hit-pulse 1.6s ease-out 1;
 }
