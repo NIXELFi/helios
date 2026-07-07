@@ -8,6 +8,7 @@ import {
   IconPhoto,
 } from "@tabler/icons-react";
 import type { KbNote, KbVault } from "../types";
+import { BarChart, type BarDatum } from "./Charts";
 
 export function Dashboard({
   vault,
@@ -32,6 +33,30 @@ export function Dashboard({
       subteams: subteams.size,
     };
   }, [vault]);
+
+  const bySubteam = useMemo<BarDatum[]>(() => {
+    const m = new Map<string, { notes: number; figs: number }>();
+    for (const n of vault.notes) {
+      const st = typeof n.frontmatter.subteam === "string" ? n.frontmatter.subteam : "—";
+      const e = m.get(st) ?? { notes: 0, figs: 0 };
+      e.notes++;
+      e.figs += n.body.match(/!\[\[/g)?.length ?? 0;
+      m.set(st, e);
+    }
+    return [...m.entries()]
+      .sort((a, b) => b[1].notes + b[1].figs - (a[1].notes + a[1].figs))
+      .slice(0, 14)
+      .map(([label, v]) => ({ label, value: v.notes, secondary: v.figs }));
+  }, [vault.notes]);
+
+  const byType = useMemo<BarDatum[]>(() => {
+    const m = new Map<string, number>();
+    for (const n of vault.notes) {
+      const t = typeof n.frontmatter.type === "string" ? n.frontmatter.type : "note";
+      m.set(t, (m.get(t) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
+  }, [vault.notes]);
 
   const recent = useMemo(
     () =>
@@ -74,6 +99,21 @@ export function Dashboard({
           <Stat icon={<IconFolders size={16} />} value={stats.cars} label="cars" />
           <Stat icon={<IconListDetails size={16} />} value={stats.subteams} label="subteams" />
         </div>
+
+        <section className="mt-9 grid gap-8 md:grid-cols-2">
+          <div>
+            <SectionTitle>Composition by subteam</SectionTitle>
+            <div className="mt-3">
+              <BarChart data={bySubteam} primaryLabel="notes" secondaryLabel="figures" />
+            </div>
+          </div>
+          <div>
+            <SectionTitle>Notes by type</SectionTitle>
+            <div className="mt-3">
+              <BarChart data={byType} />
+            </div>
+          </div>
+        </section>
 
         {quick.length > 0 && (
           <section className="mt-9">

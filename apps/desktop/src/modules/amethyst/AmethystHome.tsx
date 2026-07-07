@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconAffiliate,
+  IconFiles,
   IconFolderCog,
+  IconLayoutDashboard,
   IconRefresh,
   IconSearch,
 } from "@tabler/icons-react";
@@ -10,20 +13,28 @@ import "./amethyst.css";
 import { useVaultRoot } from "./data/useVaultRoot";
 import { useKbVault } from "./data/useVault";
 import { useAttachments } from "./data/useAttachments";
+import { buildIndex } from "./data/searchIndex";
 import { EmptyState } from "./components/EmptyState";
 import { Sidebar } from "./components/Sidebar";
+import { SearchPanel } from "./components/SearchPanel";
 import { NoteView } from "./components/NoteView";
 import { RightRail } from "./components/RightRail";
 import { Dashboard } from "./components/Dashboard";
+import { GraphView } from "./components/GraphView";
 import { CommandPalette } from "./components/CommandPalette";
+
+type LeftMode = "files" | "search";
 
 export function AmethystHome() {
   const { root, pick, clear } = useVaultRoot();
   const { vault, loading, error, reload } = useKbVault(root);
   const attachments = useAttachments(vault);
+  const index = useMemo(() => (vault ? buildIndex(vault.notes) : null), [vault]);
 
-  // Navigation history (back / forward), like a browser. Kept in one atomic
-  // state object so stack + index never desync.
+  const [leftMode, setLeftMode] = useState<LeftMode>("files");
+  const [showGraph, setShowGraph] = useState(false);
+
+  // Navigation history (back / forward), kept in one atomic state object.
   const [nav, setNav] = useState<{ stack: string[]; i: number }>({ stack: [], i: -1 });
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -40,7 +51,13 @@ export function AmethystHome() {
       const stack = [...trimmed, id];
       return { stack, i: stack.length - 1 };
     });
+    setShowGraph(false);
     setPaletteOpen(false);
+  }, []);
+
+  const goHome = useCallback(() => {
+    setShowGraph(false);
+    setNav((p) => ({ ...p, i: -1 }));
   }, []);
 
   const back = useCallback(() => setNav((p) => ({ ...p, i: Math.max(-1, p.i - 1) })), []);
@@ -49,26 +66,28 @@ export function AmethystHome() {
     [],
   );
 
-  // Reset navigation when the vault root changes.
   const prevRoot = useRef<string | null>(null);
   useEffect(() => {
     if (prevRoot.current !== root) {
       prevRoot.current = root;
       setNav({ stack: [], i: -1 });
+      setShowGraph(false);
     }
   }, [root]);
 
-  // Global-ish shortcuts (module is always mounted, so gate on visibility via
-  // document.hasFocus + the palette being the only KB-owned key handler).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O")) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === "o" || e.key === "O")) {
         e.preventDefault();
         setPaletteOpen((o) => !o);
-      } else if ((e.ctrlKey || e.metaKey) && e.key === "[") {
+      } else if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setLeftMode("search");
+      } else if (mod && e.key === "[") {
         e.preventDefault();
         back();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === "]") {
+      } else if (mod && e.key === "]") {
         e.preventDefault();
         forward();
       }
@@ -95,8 +114,14 @@ export function AmethystHome() {
         <IconBtn onClick={forward} disabled={nav.i >= nav.stack.length - 1} label="Forward">
           <IconArrowRight size={16} />
         </IconBtn>
+        <IconBtn onClick={goHome} active={!showGraph && !activeNote} label="Home / dashboard">
+          <IconLayoutDashboard size={15} />
+        </IconBtn>
+        <IconBtn onClick={() => setShowGraph((g) => !g)} active={showGraph} label="Graph view">
+          <IconAffiliate size={15} />
+        </IconBtn>
         <div className="mx-1 min-w-0 flex-1 truncate text-xs text-helios-dim">
-          {activeNote ? activeNote.rel : "Knowledge Base"}
+          {showGraph ? "Graph" : activeNote ? activeNote.rel : "Dashboard"}
         </div>
         <IconBtn onClick={() => setPaletteOpen(true)} label="Quick switch (Ctrl+O)">
           <IconSearch size={15} />
@@ -119,12 +144,21 @@ export function AmethystHome() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 border-r border-helios-line bg-helios-panel/30">
-          {vault ? (
-            <Sidebar vault={vault} activeId={activeId} onSelect={navigate} />
-          ) : (
-            <div className="p-4 text-sm text-helios-dim">{loading ? "Scanning…" : ""}</div>
-          )}
+        <aside className="flex w-64 shrink-0 flex-col border-r border-helios-line bg-helios-panel/30">
+          {/* left-pane mode toggle */}
+          <div className="flex gap-0.5 border-b border-helios-line p-1.5">
+            <SegBtn active={leftMode === "files"} onClick={() => setLeftMode("files")} icon={<IconFiles size={14} />} label="Files" />
+            <SegBtn active={leftMode === "search"} onClick={() => setLeftMode("search")} icon={<IconSearch size={14} />} label="Search" />
+          </div>
+          <div className="min-h-0 flex-1">
+            {!vault ? (
+              <div className="p-4 text-sm text-helios-dim">{loading ? "Scanning…" : ""}</div>
+            ) : leftMode === "files" ? (
+              <Sidebar vault={vault} activeId={activeId} onSelect={navigate} />
+            ) : index ? (
+              <SearchPanel vault={vault} index={index} activeId={activeId} onSelect={navigate} />
+            ) : null}
+          </div>
         </aside>
 
         <main className="min-w-0 flex-1">
@@ -132,6 +166,8 @@ export function AmethystHome() {
             <div className="flex h-full items-center justify-center text-sm text-helios-dim">
               {loading ? "Scanning your knowledge base…" : "No notes found in this folder."}
             </div>
+          ) : showGraph ? (
+            <GraphView vault={vault} activeId={activeId} onSelect={navigate} />
           ) : activeNote ? (
             <NoteView note={activeNote} vault={vault} attachments={attachments} onNavigate={navigate} />
           ) : (
@@ -139,7 +175,7 @@ export function AmethystHome() {
           )}
         </main>
 
-        {vault && activeNote && (
+        {vault && activeNote && !showGraph && (
           <aside className="w-60 shrink-0 border-l border-helios-line bg-helios-panel/30">
             <RightRail note={activeNote} vault={vault} onNavigate={navigate} />
           </aside>
@@ -156,11 +192,13 @@ export function AmethystHome() {
 function IconBtn({
   onClick,
   disabled,
+  active,
   label,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   label: string;
   children: React.ReactNode;
 }) {
@@ -171,9 +209,38 @@ function IconBtn({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="rounded p-1.5 text-helios-dim transition-colors hover:bg-helios-panel hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      className={
+        "rounded p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
+        (active ? "bg-asu-gold/15 text-asu-gold" : "text-helios-dim hover:bg-helios-panel hover:text-helios-text")
+      }
     >
       {children}
+    </button>
+  );
+}
+
+function SegBtn({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        "flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-xs transition-colors " +
+        (active ? "bg-asu-gold/15 text-asu-gold" : "text-helios-dim hover:bg-helios-panel hover:text-helios-text")
+      }
+    >
+      {icon}
+      {label}
     </button>
   );
 }
