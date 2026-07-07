@@ -27,6 +27,27 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-07-07
+
+### Added
+
+- **Amethyst — an in-app knowledge base.** A new side tab that reads an
+  Obsidian-style vault folder of markdown notes and figures, giving the team a
+  fast, linked reader for the whole design record, meeting history, and
+  reference registers. Point it at a folder and it reads the files live (with a
+  filesystem watcher) — nothing is copied or synced, and no sign-in is needed.
+  - **Search everything:** full-text with phrase-aware ranking, an "Exact
+    phrase" toggle, Car/Subteam/Type filters, results grouped by category and
+    subteam, keyboard navigation (↑/↓/Enter), and jump-to-match with a match
+    navigator.
+  - **Reader:** clickable `[[wikilinks]]`, embedded figures with click-to-zoom,
+    callouts, tables, and clickable frontmatter chips / tags / breadcrumbs to
+    pivot; an outline that tracks your position, backlinks, hover previews, and
+    in-note find (Ctrl+F).
+  - **Graph view** of how notes link together, colored by subteam.
+  - **Dashboard** with vault stats and composition charts, a command-palette
+    quick-switcher (Ctrl+O), and browser-style back / forward navigation.
+
 ## [5.0.2] - 2026-07-01
 
 ### Added
