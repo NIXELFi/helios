@@ -21,6 +21,8 @@ export interface KbNote {
   frontmatter: Record<string, string | string[]>;
   /** Markdown body (frontmatter stripped). */
   body: string;
+  /** Short preview text (Summary callout or first paragraph). */
+  summary: string;
   /** Resolved outgoing wikilink note-ids (deduped, resolvable only). */
   links: string[];
   /** Tags from frontmatter `tags` + inline #tags. */

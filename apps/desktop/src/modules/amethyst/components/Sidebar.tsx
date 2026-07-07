@@ -7,6 +7,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { KbNote, KbVault } from "../types";
+import { NotePreviewCard, useNotePreview } from "./HoverPreview";
 
 interface TreeNode {
   name: string;
@@ -58,6 +59,7 @@ export function Sidebar({
   onSelect: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const { preview, show, hide } = useNotePreview();
   const tree = useMemo(() => buildTree(vault.notes), [vault.notes]);
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(tree.children.filter((c) => c.isDir).map((c) => c.path)),
@@ -131,14 +133,32 @@ export function Sidebar({
               {results.length} result{results.length === 1 ? "" : "s"}
             </div>
             {results.map((n) => (
-              <FileRow key={n.id} label={n.title} sub={n.dir} active={n.id === activeId} onClick={() => onSelect(n.id)} />
+              <FileRow
+                key={n.id}
+                label={n.title}
+                sub={n.dir}
+                active={n.id === activeId}
+                onClick={() => onSelect(n.id)}
+                onHover={(el) => show(n, el)}
+                onHoverOut={hide}
+              />
             ))}
             {results.length === 0 && <div className="px-3 py-4 text-sm text-helios-dim">No matches.</div>}
           </div>
         ) : (
-          <TreeLevel node={tree} depth={0} expanded={expanded} toggle={toggle} activeId={activeId} onSelect={onSelect} />
+          <TreeLevel
+            node={tree}
+            depth={0}
+            expanded={expanded}
+            toggle={toggle}
+            activeId={activeId}
+            onSelect={onSelect}
+            onHover={show}
+            onHoverOut={hide}
+          />
         )}
       </div>
+      <NotePreviewCard preview={preview} />
     </div>
   );
 }
@@ -150,6 +170,8 @@ function TreeLevel({
   toggle,
   activeId,
   onSelect,
+  onHover,
+  onHoverOut,
 }: {
   node: TreeNode;
   depth: number;
@@ -157,6 +179,8 @@ function TreeLevel({
   toggle: (p: string) => void;
   activeId: string | null;
   onSelect: (id: string) => void;
+  onHover: (note: KbNote, el: HTMLElement) => void;
+  onHoverOut: () => void;
 }) {
   return (
     <>
@@ -176,7 +200,7 @@ function TreeLevel({
               <span className="truncate">{child.name}</span>
             </button>
             {expanded.has(child.path) && (
-              <TreeLevel node={child} depth={depth + 1} expanded={expanded} toggle={toggle} activeId={activeId} onSelect={onSelect} />
+              <TreeLevel node={child} depth={depth + 1} expanded={expanded} toggle={toggle} activeId={activeId} onSelect={onSelect} onHover={onHover} onHoverOut={onHoverOut} />
             )}
           </div>
         ) : (
@@ -186,6 +210,8 @@ function TreeLevel({
             indent={depth}
             active={child.path === activeId}
             onClick={() => onSelect(child.path)}
+            onHover={child.note ? (el) => onHover(child.note!, el) : undefined}
+            onHoverOut={onHoverOut}
           />
         ),
       )}
@@ -199,16 +225,22 @@ function FileRow({
   indent = 0,
   active,
   onClick,
+  onHover,
+  onHoverOut,
 }: {
   label: string;
   sub?: string;
   indent?: number;
   active: boolean;
   onClick: () => void;
+  onHover?: (el: HTMLElement) => void;
+  onHoverOut?: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onHover ? (e) => onHover(e.currentTarget) : undefined}
+      onMouseLeave={onHoverOut}
       className={
         "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-sm " +
         (active ? "bg-asu-gold/15 text-asu-gold" : "text-helios-text/80 hover:bg-helios-panel")

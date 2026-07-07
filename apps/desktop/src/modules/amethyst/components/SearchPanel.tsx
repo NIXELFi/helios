@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { IconChevronDown, IconSearch, IconX } from "@tabler/icons-react";
 import type { KbNote, KbVault } from "../types";
 import { makeSnippet, searchIndex, type SearchIndex } from "../data/searchIndex";
+import { NotePreviewCard, useNotePreview } from "./HoverPreview";
 
 type FacetKey = "car" | "subteam" | "type";
 const FACETS: { key: FacetKey; label: string }[] = [
@@ -49,6 +50,7 @@ export function SearchPanel({
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Record<FacetKey, string>>({ car: "", subteam: "", type: "" });
+  const { preview, show, hide } = useNotePreview();
 
   const facetOptions = useMemo(() => {
     const opt: Record<FacetKey, string[]> = { car: [], subteam: [], type: [] };
@@ -168,6 +170,8 @@ export function SearchPanel({
                         active={n.id === activeId}
                         showDir={!sg.name}
                         onClick={() => onSelect(n.id, query.trim() || undefined)}
+                        onHover={(el) => show(n, el)}
+                        onHoverOut={hide}
                       />
                     ))}
                   </div>
@@ -177,6 +181,7 @@ export function SearchPanel({
           ))
         )}
       </div>
+      <NotePreviewCard preview={preview} />
     </div>
   );
 }
@@ -221,16 +226,22 @@ function ResultRow({
   active,
   showDir,
   onClick,
+  onHover,
+  onHoverOut,
 }: {
   note: KbNote;
   query: string;
   active: boolean;
   showDir: boolean;
   onClick: () => void;
+  onHover: (el: HTMLElement) => void;
+  onHoverOut: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      onMouseEnter={(e) => onHover(e.currentTarget)}
+      onMouseLeave={onHoverOut}
       className={
         "kb-row mb-0.5 block w-full rounded-md px-2 py-1.5 text-left " +
         (active ? "bg-asu-gold/15" : "hover:bg-helios-panel")

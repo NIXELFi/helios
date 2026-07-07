@@ -5,6 +5,7 @@ import {
   splitFrontmatter,
   extractWikiTargets,
   extractTags,
+  extractSummary,
   makeTitle,
   resolveTarget,
 } from "./parse";
@@ -75,6 +76,7 @@ async function buildVault(root: string): Promise<KbVault> {
       title: makeTitle(fm, body, basename),
       frontmatter: fm,
       body,
+      summary: extractSummary(body),
       links: [], // filled after resolve map exists
       tags: extractTags(fm, body),
       mtimeMs,

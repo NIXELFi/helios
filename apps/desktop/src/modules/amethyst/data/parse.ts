@@ -92,6 +92,20 @@ export function extractTags(fm: Record<string, string | string[]>, body: string)
   return [...set];
 }
 
+/** Short preview text: the `> **Summary** …` callout if present, else the
+ *  first real paragraph. Used for hover previews. */
+export function extractSummary(body: string): string {
+  const m = /^>\s*\*\*Summary\*\*\s*[—:-]?\s*(.+)$/m.exec(body);
+  if (m && m[1]) return m[1].replace(/\*\*/g, "").replace(/\s+/g, " ").trim().slice(0, 340);
+  for (const raw of body.split(/\r?\n/)) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (/^(#|>|\||!\[\[|-|\*|\d+\.)/.test(t)) continue;
+    return t.replace(/[*_`]/g, "").replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_a, p, al) => al ?? p).slice(0, 340);
+  }
+  return "";
+}
+
 export function makeTitle(
   fm: Record<string, string | string[]>,
   body: string,
