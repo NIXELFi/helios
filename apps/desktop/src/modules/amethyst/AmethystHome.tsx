@@ -33,6 +33,7 @@ export function AmethystHome() {
 
   const [leftMode, setLeftMode] = useState<LeftMode>("files");
   const [showGraph, setShowGraph] = useState(false);
+  const [highlight, setHighlight] = useState<string | null>(null);
 
   // Navigation history (back / forward), kept in one atomic state object.
   const [nav, setNav] = useState<{ stack: string[]; i: number }>({ stack: [], i: -1 });
@@ -44,13 +45,14 @@ export function AmethystHome() {
     [activeId, vault],
   );
 
-  const navigate = useCallback((id: string) => {
+  const navigate = useCallback((id: string, hl?: string) => {
     setNav((prev) => {
       const trimmed = prev.stack.slice(0, prev.i + 1);
       if (trimmed[trimmed.length - 1] === id) return prev;
       const stack = [...trimmed, id];
       return { stack, i: stack.length - 1 };
     });
+    setHighlight(hl ?? null);
     setShowGraph(false);
     setPaletteOpen(false);
   }, []);
@@ -169,7 +171,7 @@ export function AmethystHome() {
           ) : showGraph ? (
             <GraphView vault={vault} activeId={activeId} onSelect={navigate} />
           ) : activeNote ? (
-            <NoteView note={activeNote} vault={vault} attachments={attachments} onNavigate={navigate} />
+            <NoteView note={activeNote} vault={vault} attachments={attachments} highlight={highlight} onNavigate={navigate} />
           ) : (
             <Dashboard vault={vault} onNavigate={navigate} />
           )}

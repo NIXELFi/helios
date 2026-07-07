@@ -1,21 +1,21 @@
 export interface BarDatum {
   label: string;
   value: number;
-  secondary?: number; // optional stacked second series
+  secondary?: number; // optional second series (e.g. figures), shown alongside
   color?: string;
   onClick?: () => void;
 }
 
 /**
- * Horizontal bar chart, div-based (responsive, no SVG math, theme-aware).
- * Optional `secondary` stacks a second series (e.g. notes + figures).
+ * Horizontal bar chart, div-based (responsive, theme-aware). `secondary`
+ * renders a second series segment after the primary one.
  */
 export function BarChart({
   data,
   primaryLabel,
   secondaryLabel,
   accent = "#FFC627",
-  accent2 = "#8C1D40",
+  accent2 = "#4E86B0",
 }: {
   data: BarDatum[];
   primaryLabel?: string;
@@ -27,22 +27,22 @@ export function BarChart({
   return (
     <div>
       {(primaryLabel || secondaryLabel) && (
-        <div className="mb-2 flex items-center gap-3 text-[11px] text-helios-dim">
+        <div className="mb-3 flex items-center gap-4 text-[11px] text-helios-dim">
           {primaryLabel && (
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-sm" style={{ background: accent }} />
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: accent }} />
               {primaryLabel}
             </span>
           )}
           {secondaryLabel && (
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-sm" style={{ background: accent2 }} />
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: accent2 }} />
               {secondaryLabel}
             </span>
           )}
         </div>
       )}
-      <div className="space-y-1.5">
+      <div className="space-y-2.5">
         {data.map((d) => {
           const total = d.value + (d.secondary ?? 0);
           const Comp = d.onClick ? "button" : "div";
@@ -50,31 +50,22 @@ export function BarChart({
             <Comp
               key={d.label}
               onClick={d.onClick}
-              className={
-                "flex w-full items-center gap-2 text-left " +
-                (d.onClick ? "group cursor-pointer" : "")
-              }
+              className={"flex w-full items-center gap-3 text-left " + (d.onClick ? "group cursor-pointer" : "")}
             >
-              <span className="w-32 shrink-0 truncate text-xs text-helios-dim group-hover:text-helios-text">
+              <span className="w-28 shrink-0 truncate text-xs text-helios-dim transition-colors group-hover:text-helios-text">
                 {d.label}
               </span>
-              <span className="relative h-4 flex-1 overflow-hidden rounded bg-helios-line/40">
+              <span className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-helios-line/25">
                 <span
-                  className="absolute inset-y-0 left-0 rounded-l transition-all"
+                  className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
+                  style={{ width: `${((d.value + (d.secondary ?? 0)) / max) * 100}%`, background: accent2, opacity: d.secondary !== undefined ? 1 : 0 }}
+                />
+                <span
+                  className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
                   style={{ width: `${(d.value / max) * 100}%`, background: d.color ?? accent }}
                 />
-                {d.secondary !== undefined && (
-                  <span
-                    className="absolute inset-y-0"
-                    style={{
-                      left: `${(d.value / max) * 100}%`,
-                      width: `${(d.secondary / max) * 100}%`,
-                      background: accent2,
-                    }}
-                  />
-                )}
               </span>
-              <span className="w-8 shrink-0 text-right text-xs tabular-nums text-helios-text">{total}</span>
+              <span className="w-9 shrink-0 text-right text-xs font-medium tabular-nums text-helios-text">{total}</span>
             </Comp>
           );
         })}

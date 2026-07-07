@@ -1,11 +1,11 @@
-import { IconBook2, IconFolderOpen } from "@tabler/icons-react";
+import { IconDiamond, IconFolderOpen } from "@tabler/icons-react";
 
 export function EmptyState({ onPick }: { onPick: () => void }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-md text-center">
         <div className="mx-auto mb-5 inline-flex rounded-2xl bg-asu-gold/10 p-4 text-asu-gold">
-          <IconBook2 size={40} strokeWidth={1.4} />
+          <IconDiamond size={40} strokeWidth={1.4} />
         </div>
         <h1 className="font-display text-2xl text-helios-text">Amethyst</h1>
         <p className="mt-1 text-xs uppercase tracking-widest text-asu-gold/70">Knowledge Base</p>

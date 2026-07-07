@@ -20,7 +20,7 @@ export function SearchPanel({
   vault: KbVault;
   index: SearchIndex;
   activeId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, highlight?: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Record<FacetKey, string | null>>({
@@ -120,7 +120,7 @@ export function SearchPanel({
           results.map((n) => (
             <button
               key={n.id}
-              onClick={() => onSelect(n.id)}
+              onClick={() => onSelect(n.id, query.trim() || undefined)}
               className={
                 "mb-0.5 block w-full rounded px-2 py-1.5 text-left " +
                 (n.id === activeId ? "bg-asu-gold/15" : "hover:bg-helios-panel")

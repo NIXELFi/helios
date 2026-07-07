@@ -3,6 +3,7 @@ import type { KbNote, KbVault } from "../types";
 import type { Attachments } from "../data/useAttachments";
 import { renderMarkdown } from "../render/markdown";
 import { resolveTarget } from "../data/parse";
+import { tokenize } from "../data/searchIndex";
 
 const EMBED_RE = /!\[\[([^\]|#]+)(?:\|[^\]]+)?\]\]/g;
 
@@ -18,14 +19,18 @@ export function NoteView({
   note,
   vault,
   attachments,
+  highlight,
   onNavigate,
 }: {
   note: KbNote;
   vault: KbVault;
   attachments: Attachments;
+  highlight?: string | null;
   onNavigate: (id: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const scrolledKey = useRef<string>("");
 
   // Load blob URLs for this note's embeds.
   useEffect(() => {
@@ -56,6 +61,58 @@ export function NoteView({
     [note.id, note.body, vault.resolve, attachments.version],
   );
 
+  // Highlight search terms in the rendered note and jump to the first match
+  // when the note was opened from the search pane.
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    root.querySelectorAll("mark.kb-search-hit").forEach((mk) => {
+      mk.replaceWith(document.createTextNode(mk.textContent ?? ""));
+    });
+    root.normalize();
+    const terms = highlight ? tokenize(highlight) : [];
+    if (terms.length === 0) return;
+    const alt = terms.map(escapeReg).join("|");
+    const has = new RegExp(alt, "i");
+    const split = new RegExp(`(${alt})`, "ig");
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const targets: Text[] = [];
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const tn = node as Text;
+      if (!tn.nodeValue || !has.test(tn.nodeValue)) continue;
+      if (tn.parentElement?.closest("a.kb-link")) continue;
+      targets.push(tn);
+    }
+    let first: HTMLElement | null = null;
+    for (const tn of targets) {
+      const text = tn.nodeValue ?? "";
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      split.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = split.exec(text))) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const mk = document.createElement("mark");
+        mk.className = "kb-search-hit";
+        mk.textContent = m[0];
+        if (!first) {
+          first = mk;
+          mk.classList.add("kb-search-first");
+        }
+        frag.appendChild(mk);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      tn.replaceWith(frag);
+    }
+    const key = `${note.id}|${highlight ?? ""}`;
+    if (first && scrolledKey.current !== key) {
+      scrolledKey.current = key;
+      first.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [html, highlight, note.id]);
+
   function onClick(e: React.MouseEvent) {
     const a = (e.target as HTMLElement).closest("a[data-wiki]") as HTMLElement | null;
     if (!a) return;
@@ -75,7 +132,7 @@ export function NoteView({
 
   return (
     <div ref={scrollRef} className="kb-scroll h-full overflow-y-auto">
-      <article className="mx-auto max-w-[820px] px-8 py-8">
+      <article key={note.id} className="kb-view-in mx-auto max-w-[820px] px-8 py-8">
         {crumbs.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-1 text-xs text-helios-dim">
             {crumbs.map((c, i) => (
@@ -113,6 +170,7 @@ export function NoteView({
         )}
 
         <div
+          ref={contentRef}
           className="kb-prose"
           onClick={onClick}
           dangerouslySetInnerHTML={{ __html: html }}
@@ -120,4 +178,8 @@ export function NoteView({
       </article>
     </div>
   );
+}
+
+function escapeReg(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   IconArchive,
-  IconBook2,
   IconBug,
   IconChartLine,
   IconChevronsLeft,
   IconChevronsRight,
   IconClipboardList,
   IconDeviceGamepad2,
+  IconDiamond,
   IconPuzzle,
   IconShieldLock,
   IconUserCircle,
@@ -31,7 +31,7 @@ const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   cfd: IconWind,
   pm: IconClipboardList,
   games: IconDeviceGamepad2,
-  amethyst: IconBook2,
+  amethyst: IconDiamond,
   marketplace: IconPuzzle,
   org: IconShieldLock,
 };

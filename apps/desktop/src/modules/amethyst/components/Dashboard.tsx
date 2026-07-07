@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import {
-  IconBook2,
   IconClock,
+  IconDiamond,
   IconFileText,
   IconFolders,
   IconListDetails,
@@ -37,7 +37,10 @@ export function Dashboard({
   const bySubteam = useMemo<BarDatum[]>(() => {
     const m = new Map<string, { notes: number; figs: number }>();
     for (const n of vault.notes) {
-      const st = typeof n.frontmatter.subteam === "string" ? n.frontmatter.subteam : "—";
+      // Only notes that declare a subteam — meetings / reference / meta are
+      // intentionally excluded so this reflects the design record.
+      if (typeof n.frontmatter.subteam !== "string") continue;
+      const st = n.frontmatter.subteam;
       const e = m.get(st) ?? { notes: 0, figs: 0 };
       e.notes++;
       e.figs += n.body.match(/!\[\[/g)?.length ?? 0;
@@ -82,10 +85,10 @@ export function Dashboard({
 
   return (
     <div className="kb-scroll h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-8 py-10">
+      <div className="kb-view-in mx-auto max-w-3xl px-8 py-10">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-asu-gold/15 p-2.5 text-asu-gold">
-            <IconBook2 size={26} strokeWidth={1.6} />
+            <IconDiamond size={26} strokeWidth={1.6} />
           </div>
           <div>
             <h1 className="font-display text-2xl text-helios-text">Amethyst</h1>
@@ -100,16 +103,16 @@ export function Dashboard({
           <Stat icon={<IconListDetails size={16} />} value={stats.subteams} label="subteams" />
         </div>
 
-        <section className="mt-9 grid gap-8 md:grid-cols-2">
-          <div>
-            <SectionTitle>Composition by subteam</SectionTitle>
-            <div className="mt-3">
+        <section className="mt-9 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-helios-line bg-helios-panel/40 p-5">
+            <SectionTitle>Design record by subteam</SectionTitle>
+            <div className="mt-4">
               <BarChart data={bySubteam} primaryLabel="notes" secondaryLabel="figures" />
             </div>
           </div>
-          <div>
+          <div className="rounded-xl border border-helios-line bg-helios-panel/40 p-5">
             <SectionTitle>Notes by type</SectionTitle>
-            <div className="mt-3">
+            <div className="mt-4">
               <BarChart data={byType} />
             </div>
           </div>
