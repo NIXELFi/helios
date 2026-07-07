@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
 import type { KbNote, KbVault } from "../types";
 import type { Attachments } from "../data/useAttachments";
 import { renderMarkdown } from "../render/markdown";
@@ -30,16 +31,21 @@ export function NoteView({
   attachments,
   highlight,
   onNavigate,
+  onClearHighlight,
 }: {
   note: KbNote;
   vault: KbVault;
   attachments: Attachments;
   highlight?: string | null;
   onNavigate: (id: string) => void;
+  onClearHighlight?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const scrolledKey = useRef<string>("");
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchIdx, setMatchIdx] = useState(0);
+  const matchIdxRef = useRef(0);
+  const autoFollow = useRef(true);
 
   // Load blob URLs for this note's embeds.
   useEffect(() => {
@@ -52,9 +58,12 @@ export function NoteView({
     if (names.length) attachments.ensure(names);
   }, [note.id, note.body, attachments]);
 
-  // Reset scroll to top when switching notes.
+  // Reset scroll + match navigation when switching notes.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
+    setMatchIdx(0);
+    matchIdxRef.current = 0;
+    autoFollow.current = true;
   }, [note.id]);
 
   const html = useMemo(
@@ -71,24 +80,71 @@ export function NoteView({
     [note.id, note.body, vault.resolve, attachments.version, highlight],
   );
 
-  // Jump to + emphasize the first search hit when opened from the search pane.
-  // The <mark>s are baked into `html` by the renderer, so they survive re-renders
-  // (e.g. as embeds load); we only need to scroll to the first one, once.
-  useEffect(() => {
+  // ---- search-match navigation --------------------------------------------
+  // Prefer contiguous phrase marks; fall back to individual word hits.
+  const getMarks = useCallback((): HTMLElement[] => {
     const root = contentRef.current;
-    if (!root || !highlight) return;
-    const key = `${note.id}|${highlight}`;
-    if (scrolledKey.current === key) return;
-    // Prefer the contiguous phrase match; fall back to the first word hit.
-    const first =
-      root.querySelector<HTMLElement>("mark.kb-phrase") ??
-      root.querySelector<HTMLElement>("mark.kb-search-hit");
-    if (first) {
-      scrolledKey.current = key;
-      first.classList.add("kb-search-first");
-      first.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!root) return [];
+    const phrase = Array.from(root.querySelectorAll<HTMLElement>("mark.kb-phrase"));
+    return phrase.length ? phrase : Array.from(root.querySelectorAll<HTMLElement>("mark.kb-search-hit"));
+  }, []);
+
+  const jump = useCallback(
+    (delta: number) => {
+      autoFollow.current = false;
+      const marks = getMarks();
+      if (marks.length === 0) return;
+      const i = ((matchIdxRef.current + delta) % marks.length + marks.length) % marks.length;
+      marks.forEach((mk, j) => mk.classList.toggle("kb-search-current", j === i));
+      matchIdxRef.current = i;
+      setMatchIdx(i);
+      marks[i]?.scrollIntoView({ block: "center", behavior: "smooth" });
+    },
+    [getMarks],
+  );
+
+  // Recompute match count + emphasize the current match whenever the html
+  // changes (including as embeds load and reflow). While the user hasn't taken
+  // over, keep the current match centered so it doesn't drift off-screen — this
+  // is what makes the jump land on the phrase even after images push it down.
+  useEffect(() => {
+    if (!highlight) {
+      setMatchCount(0);
+      return;
     }
-  }, [html, highlight, note.id]);
+    const marks = getMarks();
+    setMatchCount(marks.length);
+    if (marks.length === 0) return;
+    const i = Math.min(matchIdxRef.current, marks.length - 1);
+    marks.forEach((mk, j) => mk.classList.toggle("kb-search-current", j === i));
+    // instant (not smooth) so the match holds steady as embeds reflow above it
+    if (autoFollow.current) marks[i]?.scrollIntoView({ block: "center" });
+  }, [html, highlight, getMarks]);
+
+  // Once the user scrolls the note themselves, stop auto-centering.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const off = () => {
+      autoFollow.current = false;
+    };
+    el.addEventListener("wheel", off, { passive: true });
+    return () => el.removeEventListener("wheel", off);
+  }, []);
+
+  // Enter / Shift+Enter cycle matches (when not typing in a field).
+  useEffect(() => {
+    if (!highlight || matchCount === 0) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Enter") return;
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      jump(e.shiftKey ? -1 : 1);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [highlight, matchCount, jump]);
 
   function onClick(e: React.MouseEvent) {
     const a = (e.target as HTMLElement).closest("a[data-wiki]") as HTMLElement | null;
@@ -108,8 +164,27 @@ export function NoteView({
   const tags = note.tags.slice(0, 12);
 
   return (
-    <div ref={scrollRef} className="kb-scroll h-full overflow-y-auto">
-      <article key={note.id} className="kb-view-in mx-auto max-w-[820px] px-8 py-8">
+    <div className="relative h-full">
+      {highlight && matchCount > 0 && (
+        <div className="helios-modal-in absolute right-4 top-3 z-20 flex items-center gap-0.5 rounded-lg border border-helios-line bg-helios-panel/95 py-0.5 pl-2 pr-1 text-xs shadow-lg backdrop-blur">
+          <span className="mr-1 tabular-nums text-helios-dim">
+            {matchIdx + 1} / {matchCount}
+          </span>
+          <button onClick={() => jump(-1)} title="Previous match (Shift+Enter)" className="rounded p-1 text-helios-dim hover:bg-helios-panel hover:text-asu-gold">
+            <IconChevronUp size={15} />
+          </button>
+          <button onClick={() => jump(1)} title="Next match (Enter)" className="rounded p-1 text-helios-dim hover:bg-helios-panel hover:text-asu-gold">
+            <IconChevronDown size={15} />
+          </button>
+          {onClearHighlight && (
+            <button onClick={onClearHighlight} title="Clear highlight" className="rounded p-1 text-helios-dim hover:bg-helios-panel hover:text-helios-danger">
+              <IconX size={15} />
+            </button>
+          )}
+        </div>
+      )}
+      <div ref={scrollRef} className="kb-scroll h-full overflow-y-auto">
+        <article key={note.id} className="kb-view-in mx-auto max-w-[820px] px-8 py-8">
         {crumbs.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-1 text-xs text-helios-dim">
             {crumbs.map((c, i) => (
@@ -152,7 +227,8 @@ export function NoteView({
           onClick={onClick}
           dangerouslySetInnerHTML={{ __html: html }}
         />
-      </article>
+        </article>
+      </div>
     </div>
   );
 }

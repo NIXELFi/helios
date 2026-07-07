@@ -154,6 +154,12 @@
   font-weight: 600;
   box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.5);
 }
+.kb-prose mark.kb-search-current {
+  background: rgba(255, 198, 39, 0.78) !important;
+  color: #1a1400 !important;
+  box-shadow: 0 0 0 2px rgba(255, 198, 39, 0.9);
+  scroll-margin: 40vh;
+}
 .kb-prose mark.kb-search-hit.kb-search-first {
   animation: kb-hit-pulse 1.6s ease-out 1;
 }

@@ -171,7 +171,14 @@ export function AmethystHome() {
           ) : showGraph ? (
             <GraphView vault={vault} activeId={activeId} onSelect={navigate} />
           ) : activeNote ? (
-            <NoteView note={activeNote} vault={vault} attachments={attachments} highlight={highlight} onNavigate={navigate} />
+            <NoteView
+              note={activeNote}
+              vault={vault}
+              attachments={attachments}
+              highlight={highlight}
+              onNavigate={navigate}
+              onClearHighlight={() => setHighlight(null)}
+            />
           ) : (
             <Dashboard vault={vault} onNavigate={navigate} />
           )}
