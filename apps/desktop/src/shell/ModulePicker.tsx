@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   IconArchive,
+  IconBook2,
   IconBug,
   IconChartLine,
   IconChevronsLeft,
@@ -20,7 +21,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "marketplace" | "org";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "amethyst" | "marketplace" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -30,6 +31,7 @@ const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   cfd: IconWind,
   pm: IconClipboardList,
   games: IconDeviceGamepad2,
+  amethyst: IconBook2,
   marketplace: IconPuzzle,
   org: IconShieldLock,
 };
@@ -233,6 +235,15 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("games")}
           disabled={gamesDisabled}
           disabledTitle="Sign in to use Games"
+        />
+        {/* Amethyst — a reader for an external Obsidian-style vault folder.
+            No auth gate: reads a user-picked local folder, never touches Supabase. */}
+        <NavButton
+          label="Amethyst"
+          Icon={MODULE_ICON.amethyst}
+          collapsed={collapsed}
+          active={active === "amethyst"}
+          onClick={() => onSelect("amethyst")}
         />
         {/* Marketplace (v5 plugin platform) — no auth gate: add-ons are
             standalone sandboxed programs that don't touch Supabase. */}

@@ -9,6 +9,7 @@ const MODULE_LABEL: Record<ModuleId, string> = {
   cfd: "CFD",
   pm: "PM",
   games: "Games",
+  amethyst: "Amethyst",
   marketplace: "Marketplace",
   org: "Admin",
 };

@@ -5,6 +5,7 @@ import { VaultModule } from "./modules/vault";
 import { CfdModule } from "./modules/cfd";
 import { PmModule } from "./modules/pm";
 import { GamesModule } from "./modules/games";
+import { AmethystModule } from "./modules/amethyst";
 import { MarketplaceModule } from "./modules/marketplace";
 import { OrgModule } from "./modules/org";
 import LogsApp from "./App";
@@ -305,6 +306,13 @@ function HeliosShell() {
           <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
               <GamesModule paused={active !== "games"} />
+            </ErrorBoundary>
+          </div>
+        )}
+        {visited.has("amethyst") && (
+          <div className={"absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
+            <ErrorBoundary label="Amethyst" compact>
+              <AmethystModule />
             </ErrorBoundary>
           </div>
         )}
