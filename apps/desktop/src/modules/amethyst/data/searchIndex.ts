@@ -66,9 +66,17 @@ export function searchIndex(
   byId: Map<string, KbNote>,
   query: string,
   limit = 100,
+  opts: { phraseOnly?: boolean } = {},
 ): SearchHit[] {
   const terms = tokenize(query);
   if (terms.length === 0) return [];
+
+  // Phrase awareness: the contiguous query string (whitespace-normalized) is
+  // matched against title/body so notes that actually contain "rear wing
+  // structure" rank far above ones that merely mention each word somewhere.
+  const phrase = query.toLowerCase().replace(/\s+/g, " ").trim();
+  const isPhrase = phrase.includes(" ");
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ");
 
   // Resolve each term's postings; support a trailing prefix on the last term so
   // "restrict" matches "restrictor" mid-type.
@@ -113,7 +121,18 @@ export function searchIndex(
     }
     if (!all) continue;
     const note = byId.get(id.toLowerCase());
-    if (note) hits.push({ note, score });
+    if (!note) continue;
+    if (isPhrase) {
+      const inTitle = norm(note.title).includes(phrase);
+      const inBody = norm(note.body).includes(phrase);
+      if (opts.phraseOnly && !inTitle && !inBody) continue;
+      if (inTitle) score += 80;
+      else if (inBody) score += 30;
+    } else if (opts.phraseOnly) {
+      // single-word "exact": require the whole word in title or body
+      if (!norm(note.title).includes(phrase) && !norm(note.body).includes(phrase)) continue;
+    }
+    hits.push({ note, score });
   }
   hits.sort((a, b) => b.score - a.score || a.note.title.localeCompare(b.note.title));
   return hits.slice(0, limit);

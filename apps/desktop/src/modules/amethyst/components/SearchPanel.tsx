@@ -50,6 +50,7 @@ export function SearchPanel({
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Record<FacetKey, string>>({ car: "", subteam: "", type: "" });
+  const [phraseOnly, setPhraseOnly] = useState(false);
   const { preview, show, hide } = useNotePreview();
 
   const facetOptions = useMemo(() => {
@@ -67,12 +68,12 @@ export function SearchPanel({
 
   const results = useMemo(() => {
     let base: KbNote[];
-    if (query.trim()) base = searchIndex(index, vault.resolve, query, 300).map((h) => h.note);
+    if (query.trim()) base = searchIndex(index, vault.resolve, query, 300, { phraseOnly }).map((h) => h.note);
     else base = vault.notes;
     const active = FACETS.map((f) => f.key).filter((k) => filters[k]);
     if (active.length) base = base.filter((n) => active.every((k) => facetValue(n, k) === filters[k]));
     return base.slice(0, 300);
-  }, [query, filters, index, vault]);
+  }, [query, filters, phraseOnly, index, vault]);
 
   const grouped = useMemo<Group[]>(() => {
     const cats = new Map<string, KbNote[]>();
@@ -117,6 +118,30 @@ export function SearchPanel({
             </button>
           )}
         </div>
+
+        {/* strictness toggle */}
+        <button
+          onClick={() => setPhraseOnly((p) => !p)}
+          title="Only match notes that contain the exact phrase you typed"
+          className={
+            "flex items-center gap-2 rounded-md px-1.5 py-1 text-[11px] transition-colors " +
+            (phraseOnly ? "text-asu-gold" : "text-helios-dim hover:text-helios-text")
+          }
+        >
+          <span
+            className={
+              "flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border transition-colors " +
+              (phraseOnly ? "border-asu-gold bg-asu-gold" : "border-helios-line")
+            }
+          >
+            {phraseOnly && (
+              <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-helios-base" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </span>
+          Exact phrase
+        </button>
 
         {/* compact filter dropdowns */}
         <div className="grid grid-cols-3 gap-1.5">
