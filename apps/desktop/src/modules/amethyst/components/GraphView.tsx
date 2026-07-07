@@ -103,7 +103,7 @@ export function GraphView({
     let alpha = 1;
     let reveal = 0;
     let focusT = 0;
-    const k = Math.max(58, 900 / Math.sqrt(Math.max(1, nodes.length)));
+    const k = Math.max(74, 1150 / Math.sqrt(Math.max(1, nodes.length)));
     const nodeRad = (nd: GNode) => 2.4 + Math.min(6.5, Math.sqrt(nd.deg) * 1.5);
 
     function sizeCanvas() {
@@ -167,7 +167,7 @@ export function GraphView({
     }
 
     function roundedLabel(text: string, x: number, y: number, s: number) {
-      ctx!.font = `600 ${11.5 / s}px Inter, system-ui, sans-serif`;
+      ctx!.font = `600 ${10 / s}px Inter, system-ui, sans-serif`;
       const w = ctx!.measureText(text).width;
       const padX = 5 / s;
       const h = 15 / s;
@@ -241,7 +241,9 @@ export function GraphView({
       const labelSet = new Set<number>();
       if (focus !== undefined) {
         labelSet.add(focus);
-        neighbors?.forEach((n) => labelSet.add(n));
+        // Only label neighbors for small clusters — hubs (MOCs, meetings) would
+        // otherwise draw dozens of overlapping labels.
+        if (neighbors && neighbors.size <= 8) neighbors.forEach((n) => labelSet.add(n));
       }
       if (activeIdx !== undefined) labelSet.add(activeIdx);
       for (const i of labelSet) {

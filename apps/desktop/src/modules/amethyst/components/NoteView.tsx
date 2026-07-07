@@ -56,59 +56,24 @@ export function NoteView({
           return { id: n?.id ?? null, exists: !!n };
         },
         resolveEmbed: (name) => attachments.resolve(name),
+        highlight: highlight ? tokenize(highlight) : undefined,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [note.id, note.body, vault.resolve, attachments.version],
+    [note.id, note.body, vault.resolve, attachments.version, highlight],
   );
 
-  // Highlight search terms in the rendered note and jump to the first match
-  // when the note was opened from the search pane.
+  // Jump to + emphasize the first search hit when opened from the search pane.
+  // The <mark>s are baked into `html` by the renderer, so they survive re-renders
+  // (e.g. as embeds load); we only need to scroll to the first one, once.
   useEffect(() => {
     const root = contentRef.current;
-    if (!root) return;
-    root.querySelectorAll("mark.kb-search-hit").forEach((mk) => {
-      mk.replaceWith(document.createTextNode(mk.textContent ?? ""));
-    });
-    root.normalize();
-    const terms = highlight ? tokenize(highlight) : [];
-    if (terms.length === 0) return;
-    const alt = terms.map(escapeReg).join("|");
-    const has = new RegExp(alt, "i");
-    const split = new RegExp(`(${alt})`, "ig");
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const targets: Text[] = [];
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      const tn = node as Text;
-      if (!tn.nodeValue || !has.test(tn.nodeValue)) continue;
-      if (tn.parentElement?.closest("a.kb-link")) continue;
-      targets.push(tn);
-    }
-    let first: HTMLElement | null = null;
-    for (const tn of targets) {
-      const text = tn.nodeValue ?? "";
-      const frag = document.createDocumentFragment();
-      let last = 0;
-      split.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = split.exec(text))) {
-        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const mk = document.createElement("mark");
-        mk.className = "kb-search-hit";
-        mk.textContent = m[0];
-        if (!first) {
-          first = mk;
-          mk.classList.add("kb-search-first");
-        }
-        frag.appendChild(mk);
-        last = m.index + m[0].length;
-      }
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      tn.replaceWith(frag);
-    }
-    const key = `${note.id}|${highlight ?? ""}`;
-    if (first && scrolledKey.current !== key) {
+    if (!root || !highlight) return;
+    const key = `${note.id}|${highlight}`;
+    if (scrolledKey.current === key) return;
+    const first = root.querySelector<HTMLElement>("mark.kb-search-hit");
+    if (first) {
       scrolledKey.current = key;
+      first.classList.add("kb-search-first");
       first.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   }, [html, highlight, note.id]);
@@ -178,8 +143,4 @@ export function NoteView({
       </article>
     </div>
   );
-}
-
-function escapeReg(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

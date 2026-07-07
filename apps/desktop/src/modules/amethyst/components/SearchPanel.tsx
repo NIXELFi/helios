@@ -11,6 +11,17 @@ function facetValue(n: KbNote, key: FacetKey): string | null {
   return typeof v === "string" ? v : null;
 }
 
+// Coarse category for grouping results (keeps meetings, reference, etc. apart).
+const CAT_ORDER = ["Design notes", "Reference", "Meetings", "Overview", "Other"];
+function categoryOf(n: KbNote): string {
+  const t = typeof n.frontmatter.type === "string" ? n.frontmatter.type : "";
+  if (t === "meeting" || n.dir.startsWith("Meetings")) return "Meetings";
+  if (t === "register" || t === "reference") return "Reference";
+  if (t === "moc" || t === "index" || t === "home") return "Overview";
+  if (typeof n.frontmatter.subteam === "string") return "Design notes";
+  return "Other";
+}
+
 export function SearchPanel({
   vault,
   index,
@@ -55,6 +66,15 @@ export function SearchPanel({
     }
     return base.slice(0, 200);
   }, [query, filters, index, vault]);
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, KbNote[]>();
+    for (const n of results) {
+      const c = categoryOf(n);
+      (m.get(c) ?? m.set(c, []).get(c)!).push(n);
+    }
+    return CAT_ORDER.filter((c) => m.has(c)).map((c) => ({ cat: c, notes: m.get(c)! }));
+  }, [results]);
 
   const anyFilter = FACETS.some((k) => filters[k]);
 
@@ -117,31 +137,39 @@ export function SearchPanel({
         {results.length === 0 ? (
           <div className="px-3 py-6 text-center text-sm text-helios-dim">Nothing matches.</div>
         ) : (
-          results.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => onSelect(n.id, query.trim() || undefined)}
-              className={
-                "mb-0.5 block w-full rounded px-2 py-1.5 text-left " +
-                (n.id === activeId ? "bg-asu-gold/15" : "hover:bg-helios-panel")
-              }
-            >
-              <div className={"truncate text-sm " + (n.id === activeId ? "text-asu-gold" : "text-helios-text")}>{n.title}</div>
-              <div className="truncate text-[10px] text-helios-dim">{n.dir || "/"}</div>
-              {query.trim() && (
-                <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-helios-dim">
-                  {makeSnippet(n.body, query).map((seg, i) =>
-                    seg.hit ? (
-                      <mark key={i} className="rounded-sm bg-asu-gold/25 px-0.5 text-asu-gold">
-                        {seg.text}
-                      </mark>
-                    ) : (
-                      <span key={i}>{seg.text}</span>
-                    ),
+          grouped.map(({ cat, notes }) => (
+            <div key={cat} className="mb-1.5">
+              <div className="sticky top-0 z-10 flex items-center gap-1.5 bg-helios-panel/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-asu-gold/70 backdrop-blur">
+                {cat}
+                <span className="text-helios-dim">{notes.length}</span>
+              </div>
+              {notes.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => onSelect(n.id, query.trim() || undefined)}
+                  className={
+                    "mb-0.5 block w-full rounded px-2 py-1.5 text-left " +
+                    (n.id === activeId ? "bg-asu-gold/15" : "hover:bg-helios-panel")
+                  }
+                >
+                  <div className={"truncate text-sm " + (n.id === activeId ? "text-asu-gold" : "text-helios-text")}>{n.title}</div>
+                  <div className="truncate text-[10px] text-helios-dim">{n.dir || "/"}</div>
+                  {query.trim() && (
+                    <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-helios-dim">
+                      {makeSnippet(n.body, query).map((seg, i) =>
+                        seg.hit ? (
+                          <mark key={i} className="rounded-sm bg-asu-gold/25 px-0.5 text-asu-gold">
+                            {seg.text}
+                          </mark>
+                        ) : (
+                          <span key={i}>{seg.text}</span>
+                        ),
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-            </button>
+                </button>
+              ))}
+            </div>
           ))
         )}
       </div>

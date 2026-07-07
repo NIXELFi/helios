@@ -8,6 +8,8 @@ export interface RenderEnv {
   resolveWiki?: (target: string) => { id: string | null; exists: boolean };
   resolveEmbed?: (name: string) => string | null;
   headingSlugs?: Map<string, number>;
+  /** Lowercased search terms to wrap in <mark> (jump-to-match from search). */
+  highlight?: string[];
 }
 
 const md = new MarkdownIt({
@@ -75,6 +77,36 @@ md.renderer.rules.image = (tokens, idx, options, env: RenderEnv, self) => {
   }
   return self.renderToken(tokens, idx, options);
 };
+
+// Search highlighting at the text-token level, so the <mark>s are part of the
+// rendered HTML and survive React re-renders (e.g. as embeds finish loading).
+const defaultText =
+  md.renderer.rules.text ?? ((tokens, idx) => md.utils.escapeHtml(tokens[idx]?.content ?? ""));
+md.renderer.rules.text = (tokens, idx, options, env: RenderEnv, self) => {
+  const token = tokens[idx];
+  const terms = env.highlight;
+  if (!token || !terms || terms.length === 0) return defaultText(tokens, idx, options, env, self);
+  const content = token.content;
+  const re = new RegExp(`(${terms.map(escapeReg).join("|")})`, "ig");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    if (m.index > last) out += md.utils.escapeHtml(content.slice(last, m.index));
+    out += `<mark class="kb-search-hit">${md.utils.escapeHtml(m[0])}</mark>`;
+    last = m.index + m[0].length;
+  }
+  if (last < content.length) out += md.utils.escapeHtml(content.slice(last));
+  return out;
+};
+
+function escapeReg(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // Obsidian callouts: `> [!type] Title` becomes a titled, colored blockquote.
 function transformCallouts(src: string): string {
