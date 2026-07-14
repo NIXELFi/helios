@@ -12,6 +12,7 @@ import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
+import { useMyDisplayRole } from "./auth/useMyDisplayRole";
 import { useHeliosPresence } from "./shell/useHeliosPresence";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
@@ -58,6 +59,9 @@ function HeliosShell() {
   const { user, client, loading: authLoading } = useHeliosAuth();
   const { disconnect } = useConnection();
   const myRole = useMyRole();
+  // Identity display only (org role label preferred, legacy fallback) —
+  // gates below keep using myRole / capabilities.
+  const myDisplayRole = useMyDisplayRole();
 
   // Feed the SOLIDWORKS add-in bridge from the shell — always mounted, every
   // module — so the localhost API stays current with the signed-in session +
@@ -249,7 +253,10 @@ function HeliosShell() {
     subteam: userSubteamLabel,
     module: active,
   });
-  const canSeePresence = myRole === "owner" || myRole === "admin";
+  // Presence roster + bug-report triage: legacy owner/admin OR anyone with
+  // role-granting capabilities (leads/execs). Server side mirrors this —
+  // support.reports policies accept pm.can_triage_reports() (20260714040000).
+  const canSeePresence = myRole === "owner" || myRole === "admin" || canManageOrg;
 
   return (
     <div className="flex h-screen w-screen">
@@ -261,7 +268,7 @@ function HeliosShell() {
         onUpdaterClick={handleUpdaterClick}
         userLabel={userLabel}
         userSubteam={userSubteamLabel}
-        userRole={myRole}
+        userRole={myDisplayRole}
         onOpenAuth={() => setAuthModalOpen(true)}
         onSignOut={() => void handleSignOut()}
         onDisconnect={() => void handleDisconnect()}

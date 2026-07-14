@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
-import { useMyRole } from "../data/useMyRole";
+import { useMyDisplayRole } from "../../../auth/useMyDisplayRole";
 import { useVaultFolder, sanitizeVaultName } from "../data/useVaultFolder";
 import { useDownloadMode } from "../data/useDownloadMode";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
@@ -10,7 +10,9 @@ import { DEVICE_NOUN } from "../../../lib/platform";
 
 export function SettingsScreen() {
   const user = useUser();
-  const role = useMyRole();
+  // Display label (org role preferred, legacy fallback) — capability-only
+  // members are Engineers/Leads, not "(no role assigned)".
+  const role = useMyDisplayRole();
   const client = useSupabaseClient();
   const { activeVault, activeVaultId, vaults } = useActiveVault();
   // Folder is now a single shared root; per-vault paths are derived as

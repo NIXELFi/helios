@@ -56,6 +56,13 @@ follow [semver](https://semver.org/).
   check in files" — instead of the raw database policy error.
 - **Read-only vault users are no longer offered "Add to vault"** (or
   background auto-add attempts) that could only fail.
+- **Your role shows up as your role.** The sidebar user pill and vault
+  Settings now display your Org & Access role (Engineer, Lead, Executive, …)
+  instead of "(no role assigned)" when your access comes from the org tool.
+- **Leads can triage bug reports.** The in-app reports viewer (and the
+  presence roster) now opens for anyone with role-granting capabilities, and
+  the backend permits them to read, re-status, and clean up reports and their
+  screenshots — not just legacy global admins.
 
 - **Vault now honors Org & Access roles.** Granting a role that carries the
   vault edit capability (Engineer, Lead, VP, …) now actually grants vault
