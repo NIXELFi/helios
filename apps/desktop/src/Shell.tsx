@@ -101,7 +101,7 @@ function HeliosShell() {
   // we swap the data-backed module pane for a "contact your team lead"
   // screen. `member === null` means unknown (loading / probe failed): don't
   // gate, RLS is the real enforcement.
-  const { member: orgMember, recheck: recheckOrgAccess } = useOrgAccess();
+  const { member: orgMember, canManageOrg, recheck: recheckOrgAccess } = useOrgAccess();
   const noOrgAccess = user !== null && orgMember === false;
 
   // Vault is gated on a live logged-in user — the module immediately hits
@@ -112,9 +112,11 @@ function HeliosShell() {
   // mount, so it needs a live signed-in session from the main app.
   const pmEnabled = user !== null;
   const gamesEnabled = user !== null;
-  // Org & Access is admin-only tooling (owner/admin) AND needs a live session —
-  // it hits RLS-protected pm.* tables. Non-admins never see the rail entry.
-  const orgEnabled = user !== null && (myRole === "owner" || myRole === "admin");
+  // Org & Access needs a live session and someone with role-granting power:
+  // a legacy owner/admin row OR a capability grant (org.grant_roles /
+  // pm.grant_subteam_roles — e.g. subteam leads). Everyone else never sees
+  // the rail entry.
+  const orgEnabled = user !== null && (myRole === "owner" || myRole === "admin" || canManageOrg);
   // During the boot getSession() window we don't yet KNOW whether a returning
   // user is signed in. Don't present the disabled "Sign in to use Vault" state
   // (it flashes for a signed-in user) and don't bounce off Vault until auth

@@ -39,9 +39,23 @@ follow [semver](https://semver.org/).
 
 ### Fixed
 
+- **Roles granted in Org & Access now work everywhere.** Members whose only
+  role comes from the org tool (Engineer, Lead, VP, …) can now open the Vault
+  (the module's access check consulted only the legacy role table and told
+  them they weren't authorized), create and edit PM tasks (task permissions
+  had the same gap), and — for leads and execs — open the Org & Access tool
+  itself and manage vaults.
+- **PM Slack notifications are flowing again.** A stuck retry wedged the
+  notification queue on June 30 and every dispatch since failed silently; the
+  dispatcher now supersedes stale retries instead of colliding with newer
+  ones. Subteam leads are also resolved from Org & Access roles now (the old
+  lookup only knew the legacy table), and notifications to subteams without a
+  lead no longer get rejected by Slack.
 - **Clear message when you can't check in.** Uploading without vault write
   permission now says exactly that — "ask your team lead for a role that can
   check in files" — instead of the raw database policy error.
+- **Read-only vault users are no longer offered "Add to vault"** (or
+  background auto-add attempts) that could only fail.
 
 - **Vault now honors Org & Access roles.** Granting a role that carries the
   vault edit capability (Engineer, Lead, VP, …) now actually grants vault

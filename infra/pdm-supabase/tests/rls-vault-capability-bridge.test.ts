@@ -99,9 +99,11 @@ describe("pm capability bridge into vault gates", () => {
       });
     expect(upErr).toBeNull();
 
-    // The client-facing capability probe agrees.
+    // The client-facing capability probes agree.
     const { data: canEdit } = await c.rpc("pdm_can_edit_in", { p_vault_id: vaultId });
     expect(canEdit).toBe(true);
+    const { data: hasAccess } = await c.rpc("pdm_has_vault_access");
+    expect(hasAccess).toBe(true); // the Vault module's access wall (20260714030000)
   });
 
   it("a seeded pm Engineer (vault.view only) can read but NOT lock or upload", async () => {
@@ -153,6 +155,9 @@ describe("pm capability bridge into vault gates", () => {
         upsert: false,
       });
     expect(upErr).not.toBeNull();
+
+    const { data: hasAccess } = await c.rpc("pdm_has_vault_access");
+    expect(hasAccess).toBe(false); // the module wall stays up for true nobodies
   });
 
   it("a pm Executive (vault.admin) with NO pdm role passes the admin gate", async () => {

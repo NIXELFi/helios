@@ -17,17 +17,27 @@ import { useSupabaseClientOrNull, useUser } from "@helios/auth";
  * user who just got granted a role gets in with an alt-tab instead of a
  * restart.
  */
-export function useOrgAccess(): { member: boolean | null; recheck: () => void } {
+export function useOrgAccess(): {
+  member: boolean | null;
+  /** Holds a role-granting capability (org.grant_roles / pm.grant_subteam_roles)
+   *  — gates the Org & Access rail entry alongside the legacy owner/admin
+   *  role, so capability-only leads can reach the tool their server-side
+   *  grants already authorize. */
+  canManageOrg: boolean;
+  recheck: () => void;
+} {
   const client = useSupabaseClientOrNull();
   const user = useUser();
   const userId = user?.id ?? null;
   const [member, setMember] = useState<boolean | null>(null);
+  const [canManageOrg, setCanManageOrg] = useState(false);
   const [tick, setTick] = useState(0);
 
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     setMember(null);
+    setCanManageOrg(false);
     if (!client || !userId) return;
     let on = true;
     (async () => {
@@ -41,6 +51,13 @@ export function useOrgAccess(): { member: boolean | null; recheck: () => void } 
           return;
         }
         setMember(data === true);
+        if (data !== true) return;
+        const { data: caps } = await client.schema("pm").rpc("my_capabilities");
+        if (!on) return;
+        const keys = new Set(
+          ((caps as Array<{ capability_key: string }>) ?? []).map((c) => c.capability_key),
+        );
+        setCanManageOrg(keys.has("org.grant_roles") || keys.has("pm.grant_subteam_roles"));
       } catch (e) {
         // Same degrade path for a thrown probe (offline, stub client in
         // tests): unknown ≠ locked out.
@@ -60,5 +77,5 @@ export function useOrgAccess(): { member: boolean | null; recheck: () => void } 
     return () => window.removeEventListener("focus", onFocus);
   }, [member, recheck]);
 
-  return { member, recheck };
+  return { member, canManageOrg, recheck };
 }

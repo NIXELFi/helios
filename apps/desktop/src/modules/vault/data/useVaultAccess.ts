@@ -6,24 +6,25 @@ export type VaultAccessStatus = "loading" | "member" | "no-role" | "error";
 export interface VaultAccess {
   status: VaultAccessStatus;
   /** Populated only when status === "error" — the raw message from the
-   *  user_roles lookup, so a self-hoster can tell a backend misconfig
+   *  access probe, so a self-hoster can tell a backend misconfig
    *  (missing pdm schema, RLS, etc.) apart from "just not invited yet". */
   error: string | null;
 }
 
 /** Decide whether the signed-in user may actually use the Vault.
  *
- *  A fresh sign-up authenticates fine but has NO row in `pdm.user_roles`.
- *  Per the storage RLS (migration 20260511000700, a deliberate security
- *  fix), a role-less user can list folder/file *names* but cannot download
- *  bytes or write anything — so the Vault would look empty + broken to them.
- *  This hook lets the module show an explicit "ask an admin for access"
- *  notice instead of that confusing half-state.
+ *  Access has two sources of truth (20260714000000 capability bridge): a
+ *  legacy `pdm.user_roles` row OR an Org & Access role carrying the
+ *  vault.view capability. The old implementation self-selected user_roles,
+ *  which walled out every capability-only member (the default onboarding
+ *  path since the org tool became the way roles are granted) — so this now
+ *  asks the `pdm_has_vault_access` definer probe, the same predicate the
+ *  RLS gates derive from.
  *
- *  - `loading` — query in flight (or no user yet).
- *  - `member`  — has a role row (admin / editor / viewer) → full Vault.
- *  - `no-role` — authenticated but not yet granted a role.
- *  - `error`   — the lookup itself failed (likely a backend misconfig).
+ *  - `loading` — probe in flight (or no user yet).
+ *  - `member`  — has vault access (legacy role or vault.view capability).
+ *  - `no-role` — authenticated but no grant yet.
+ *  - `error`   — the probe itself failed (likely a backend misconfig).
  */
 export function useVaultAccess(): VaultAccess {
   const client = useSupabaseClient();
@@ -38,20 +39,17 @@ export function useVaultAccess(): VaultAccess {
     let mounted = true;
     setAccess({ status: "loading", error: null });
     (async () => {
-      // NOT .maybeSingle(): per-vault roles (20260531000000) mean a user can
-      // legitimately hold SEVERAL rows (a global one plus per-vault ones) —
-      // maybeSingle errors on >1 row and showed members the backend-misconfig
-      // screen. Any row at all means "member".
-      const { data, error } = await (client.from("user_roles") as any)
-        .select("role")
-        .eq("user_id", user.id)
-        .limit(1);
-      if (!mounted) return;
-      if (error) {
-        setAccess({ status: "error", error: error.message ?? String(error) });
-        return;
+      try {
+        const { data, error } = await (client as any).rpc("pdm_has_vault_access");
+        if (!mounted) return;
+        if (error) {
+          setAccess({ status: "error", error: error.message ?? String(error) });
+          return;
+        }
+        setAccess({ status: data === true ? "member" : "no-role", error: null });
+      } catch (e) {
+        if (mounted) setAccess({ status: "error", error: e instanceof Error ? e.message : String(e) });
       }
-      setAccess({ status: (data?.length ?? 0) > 0 ? "member" : "no-role", error: null });
     })();
     return () => {
       mounted = false;
