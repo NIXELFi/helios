@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-07-14
+
 ### Security
 
 - **Default-deny for accounts with no role — team data is IP.** A brand-new
