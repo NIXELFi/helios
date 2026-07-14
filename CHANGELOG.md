@@ -27,7 +27,21 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Default-deny for accounts with no role — team data is IP.** A brand-new
+  signup no longer gets any access: the automatic baseline vault role is gone,
+  and the remaining world-readable tables (vault list, PM reference data,
+  dashboard photos, synced calendar, games leaderboards, marketplace listings
+  and bundles, telemetry storage) now require an org role. Instead of empty
+  screens, role-less accounts see a clear "contact your team lead" page with
+  a one-click re-check once they've been added.
+
 ### Fixed
+
+- **Clear message when you can't check in.** Uploading without vault write
+  permission now says exactly that — "ask your team lead for a role that can
+  check in files" — instead of the raw database policy error.
 
 - **Vault now honors Org & Access roles.** Granting a role that carries the
   vault edit capability (Engineer, Lead, VP, …) now actually grants vault
