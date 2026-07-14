@@ -27,6 +27,17 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Vault now honors Org & Access roles.** Granting a role that carries the
+  vault edit capability (Engineer, Lead, VP, …) now actually grants vault
+  check-in/upload rights, and vault view/admin capabilities likewise take
+  effect. Previously the vault only consulted its own legacy role table, so
+  members granted a role in the Org tool since 2026-06-22 stayed read-only and
+  hit "new row violates row-level security policy" when adding or checking in
+  files. Legacy vault roles keep working unchanged; capability edits made in
+  the role editor apply immediately. (Server-side fix — no app update needed.)
+
 ## [5.1.0] - 2026-07-07
 
 ### Added
