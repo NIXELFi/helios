@@ -27,9 +27,11 @@ export function useMyDisplayRole(): string | null {
     if (!client || !userId) return;
     let on = true;
     (async () => {
+      // Org & Access memberships first (FK-embedded label + rank). RLS:
+      // role_memberships is self-readable; pm.roles is org-member-readable.
+      // Its own try so a failed org probe (older backend, stub client in
+      // tests) still falls through to the legacy label below.
       try {
-        // Org & Access memberships first (FK-embedded label + rank). RLS:
-        // role_memberships is self-readable; pm.roles is org-member-readable.
         const { data: memberships } = await client
           .schema("pm")
           .from("role_memberships")
@@ -47,6 +49,10 @@ export function useMyDisplayRole(): string | null {
           setRole(top.label);
           return;
         }
+      } catch {
+        // fall through to the legacy label
+      }
+      try {
         // Legacy fallback: the GLOBAL pdm role row (vault_id null), same
         // resolution as useMyRole — per-vault rows are not a global identity.
         const { data: rows } = await (client.from("user_roles") as any)
