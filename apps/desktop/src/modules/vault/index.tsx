@@ -45,12 +45,12 @@ function VaultAccessGate() {
     return (
       <CenteredCard title="Your account isn't authorized yet">
         <p className="text-helios-dim">
-          You're signed in as <span className="text-helios-text">{user?.email}</span>, but an
-          admin hasn't granted you access to this vault yet.
+          You're signed in as <span className="text-helios-text">{user?.email}</span>, but your
+          role doesn't include vault access yet.
         </p>
         <p className="mt-3 text-helios-dim">
-          Ask a vault admin to grant your account a role (viewer / editor / admin). Until then
-          you can keep using Logs and CFD — they don't require an account.
+          Ask your team lead (or an admin) to grant you a role that includes the vault. Until
+          then you can keep using Logs and CFD — they don't require an account.
         </p>
       </CenteredCard>
     );

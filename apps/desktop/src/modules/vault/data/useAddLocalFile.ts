@@ -7,6 +7,7 @@ import { gzipBytes } from "./compression";
 import { notifyLockChange } from "./lock-events";
 import { ledgerRecord } from "./sync-ledger";
 import { sanitizePathSegment } from "./folder-paths";
+import { friendlyUploadError } from "./pg-errors";
 
 /**
  * Result of a single useAddLocalFile().run(...) call.
@@ -234,7 +235,7 @@ export function useAddLocalFile() {
             // a concurrent caller raced us). Only fail if a re-probe confirms
             // it's still definitively absent.
             if ((await objectExists(client, sha)) === false) {
-              throw new Error(`upload: ${upErr.message}`);
+              throw new Error(`upload: ${friendlyUploadError(upErr.message)}`);
             }
           }
         }

@@ -134,6 +134,16 @@ export function friendlyPgError(
   return { message: raw || "Unknown database error", kind: "unknown" };
 }
 
+/** Storage uploads fail through StorageApiError (HTTP, no SQL code), so the
+ *  RLS denial arrives as raw policy text. It has exactly one user-actionable
+ *  cause — the account holds no role with vault write permission — so name
+ *  the remedy instead of quoting Postgres. Everything else passes through. */
+export function friendlyUploadError(message: string): string {
+  return /row-level security/i.test(message)
+    ? "you don't have vault write permission — ask your team lead (or an admin) to grant you a role that can check in files."
+    : message;
+}
+
 function verbFor(context: PgErrorContext): string {
   switch (context) {
     case "lock": return "lock";

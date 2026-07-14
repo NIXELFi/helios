@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
 import type { FileId, Version } from "./types";
 import { gzipBytes } from "./compression";
-import { friendlyPgError } from "./pg-errors";
+import { friendlyPgError, friendlyUploadError } from "./pg-errors";
 import { notifyLockChange } from "./lock-events";
 import { setLockOverlay } from "./lock-overlay";
 
@@ -85,7 +85,7 @@ export function useCheckIn() {
               `[vault] storage upload returned an error (${upErr.message}); re-probing for sha=${sha}`,
             );
             if (!(await objectExists(client, sha))) {
-              throw new Error(`upload: ${upErr.message}`);
+              throw new Error(`upload: ${friendlyUploadError(upErr.message)}`);
             }
           }
         }

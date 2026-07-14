@@ -5,21 +5,16 @@ import { useVaultAccess } from "../../src/modules/vault/data/useVaultAccess";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReactNode } from "react";
 
-/** Mock the `from("user_roles").select("role").eq("user_id", id).limit(1)`
- *  chain. `rows` is what the terminal limit() resolves with. */
-function mockClient(rows: any[], error: any = null): SupabaseClient {
+/** Mock the `rpc("pdm_has_vault_access")` probe (20260714030000): access is
+ *  a single boolean — a legacy pdm.user_roles row OR an Org & Access role
+ *  carrying vault.view both count, and the server owns that logic. */
+function mockClient(hasAccess: boolean | null, error: any = null): SupabaseClient {
   return {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          limit: () => Promise.resolve({ data: rows, error }),
-        }),
-      }),
-    }),
+    rpc: vi.fn().mockResolvedValue({ data: hasAccess, error }),
   } as any;
 }
 
@@ -30,34 +25,35 @@ const wrap = (c: SupabaseClient) =>
 describe("useVaultAccess", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("a user with MULTIPLE role rows (global + per-vault) is a member, not an error", async () => {
-    // Regression: the lookup used .maybeSingle(), which errors on >1 row.
-    // Per-vault roles (20260531000000) make multiple rows legitimate, so a
-    // real member was shown the backend-misconfig 'error' screen.
-    const c = mockClient([{ role: "editor" }, { role: "admin" }]);
+  it("probe true → member (covers legacy rows AND capability-only members)", async () => {
+    const c = mockClient(true);
     const { result } = renderHook(() => useVaultAccess(), { wrapper: wrap(c) });
     await waitFor(() => expect(result.current.status).not.toBe("loading"));
     expect(result.current.status).toBe("member");
     expect(result.current.error).toBeNull();
+    expect((c.rpc as any).mock.calls[0][0]).toBe("pdm_has_vault_access");
   });
 
-  it("a single role row is a member", async () => {
-    const c = mockClient([{ role: "viewer" }]);
-    const { result } = renderHook(() => useVaultAccess(), { wrapper: wrap(c) });
-    await waitFor(() => expect(result.current.status).toBe("member"));
-  });
-
-  it("no rows → no-role (authenticated but not yet granted)", async () => {
-    const c = mockClient([]);
+  it("probe false → no-role (authenticated but not yet granted)", async () => {
+    const c = mockClient(false);
     const { result } = renderHook(() => useVaultAccess(), { wrapper: wrap(c) });
     await waitFor(() => expect(result.current.status).toBe("no-role"));
     expect(result.current.error).toBeNull();
   });
 
-  it("a query error surfaces as the error status with the message", async () => {
-    const c = mockClient([], { message: "relation pdm.user_roles does not exist" });
+  it("a probe error surfaces as the error status with the message", async () => {
+    const c = mockClient(null, { message: "function pdm_has_vault_access does not exist" });
     const { result } = renderHook(() => useVaultAccess(), { wrapper: wrap(c) });
     await waitFor(() => expect(result.current.status).toBe("error"));
-    expect(result.current.error).toMatch(/user_roles/);
+    expect(result.current.error).toMatch(/pdm_has_vault_access/);
+  });
+
+  it("a THROWN probe (stub client without rpc) is an error, not a crash", async () => {
+    const c = { auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    } } as any;
+    const { result } = renderHook(() => useVaultAccess(), { wrapper: wrap(c) });
+    await waitFor(() => expect(result.current.status).toBe("error"));
   });
 });

@@ -12,11 +12,14 @@ import LogsApp from "./App";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
+import { useMyDisplayRole } from "./auth/useMyDisplayRole";
 import { useHeliosPresence } from "./shell/useHeliosPresence";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
 import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
+import { useOrgAccess } from "./shell/useOrgAccess";
+import { NoAccessScreen } from "./shell/NoAccessScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
@@ -56,6 +59,9 @@ function HeliosShell() {
   const { user, client, loading: authLoading } = useHeliosAuth();
   const { disconnect } = useConnection();
   const myRole = useMyRole();
+  // Identity display only (org role label preferred, legacy fallback) —
+  // gates below keep using myRole / capabilities.
+  const myDisplayRole = useMyDisplayRole();
 
   // Feed the SOLIDWORKS add-in bridge from the shell — always mounted, every
   // module — so the localhost API stays current with the signed-in session +
@@ -93,6 +99,15 @@ function HeliosShell() {
   const [reportKind, setReportKind] = useState<ReportKind | null>(null);
   const [reportsOpen, setReportsOpen] = useState(false);
 
+  // Org-membership gate (default-deny, 20260714010000): a signed-in account
+  // with NO role — no Org & Access grant, no legacy vault role — is denied
+  // every read by RLS. Instead of mounting modules that would render empty,
+  // we swap the data-backed module pane for a "contact your team lead"
+  // screen. `member === null` means unknown (loading / probe failed): don't
+  // gate, RLS is the real enforcement.
+  const { member: orgMember, canManageOrg, recheck: recheckOrgAccess } = useOrgAccess();
+  const noOrgAccess = user !== null && orgMember === false;
+
   // Vault is gated on a live logged-in user — the module immediately hits
   // Supabase RLS-protected tables on mount, so rendering it without a session
   // would be a bunch of failed queries. CFD and Logs don't depend on auth.
@@ -101,9 +116,11 @@ function HeliosShell() {
   // mount, so it needs a live signed-in session from the main app.
   const pmEnabled = user !== null;
   const gamesEnabled = user !== null;
-  // Org & Access is admin-only tooling (owner/admin) AND needs a live session —
-  // it hits RLS-protected pm.* tables. Non-admins never see the rail entry.
-  const orgEnabled = user !== null && (myRole === "owner" || myRole === "admin");
+  // Org & Access needs a live session and someone with role-granting power:
+  // a legacy owner/admin row OR a capability grant (org.grant_roles /
+  // pm.grant_subteam_roles — e.g. subteam leads). Everyone else never sees
+  // the rail entry.
+  const orgEnabled = user !== null && (myRole === "owner" || myRole === "admin" || canManageOrg);
   // During the boot getSession() window we don't yet KNOW whether a returning
   // user is signed in. Don't present the disabled "Sign in to use Vault" state
   // (it flashes for a signed-in user) and don't bounce off Vault until auth
@@ -236,7 +253,10 @@ function HeliosShell() {
     subteam: userSubteamLabel,
     module: active,
   });
-  const canSeePresence = myRole === "owner" || myRole === "admin";
+  // Presence roster + bug-report triage: legacy owner/admin OR anyone with
+  // role-granting capabilities (leads/execs). Server side mirrors this —
+  // support.reports policies accept pm.can_triage_reports() (20260714040000).
+  const canSeePresence = myRole === "owner" || myRole === "admin" || canManageOrg;
 
   return (
     <div className="flex h-screen w-screen">
@@ -248,7 +268,7 @@ function HeliosShell() {
         onUpdaterClick={handleUpdaterClick}
         userLabel={userLabel}
         userSubteam={userSubteamLabel}
-        userRole={myRole}
+        userRole={myDisplayRole}
         onOpenAuth={() => setAuthModalOpen(true)}
         onSignOut={() => void handleSignOut()}
         onDisconnect={() => void handleDisconnect()}
@@ -281,7 +301,21 @@ function HeliosShell() {
             </ErrorBoundary>
           </div>
         )}
-        {visited.has("vault") && vaultEnabled && (
+        {/* No-role accounts: the data-backed modules would only render RLS
+            walls, so show the waiting-room screen for whichever of them is
+            active (and skip mounting them entirely — no doomed queries). */}
+        {noOrgAccess &&
+          (active === "vault" || active === "pm" || active === "games" ||
+            active === "marketplace" || active === "org") && (
+          <div className="absolute inset-0">
+            <NoAccessScreen
+              email={user?.email ?? null}
+              onRecheck={recheckOrgAccess}
+              onSignOut={() => void handleSignOut()}
+            />
+          </div>
+        )}
+        {visited.has("vault") && vaultEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
             <ErrorBoundary label="Vault" compact>
               <VaultModule />
@@ -295,14 +329,14 @@ function HeliosShell() {
             </ErrorBoundary>
           </div>
         )}
-        {visited.has("pm") && pmEnabled && (
+        {visited.has("pm") && pmEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
             <ErrorBoundary label="PM" compact>
               <PmModule />
             </ErrorBoundary>
           </div>
         )}
-        {visited.has("games") && gamesEnabled && (
+        {visited.has("games") && gamesEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
               <GamesModule paused={active !== "games"} />
@@ -316,14 +350,14 @@ function HeliosShell() {
             </ErrorBoundary>
           </div>
         )}
-        {visited.has("marketplace") && (
+        {visited.has("marketplace") && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
             <ErrorBoundary label="Marketplace" compact>
               <MarketplaceModule />
             </ErrorBoundary>
           </div>
         )}
-        {visited.has("org") && orgEnabled && (
+        {visited.has("org") && orgEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
             <ErrorBoundary label="Org & Access" compact>
               <OrgModule />
@@ -359,7 +393,7 @@ function HeliosShell() {
       )}
       {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
           vault's tested upload/download code. Mounted only when signed in. */}
-      {vaultEnabled && <BridgeOpHandler />}
+      {vaultEnabled && !noOrgAccess && <BridgeOpHandler />}
       <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
       <ChangePasswordModal
         open={changePwOpen}

@@ -228,7 +228,9 @@ export function BrowseScreen() {
   // after the first check-in.
   const autoAdd = useAutoAddDrafts({
     vaultId: vaultId ?? undefined,
-    enabled: autoSyncEnabled,
+    // Gated on canEdit: a read-only user's auto-adds would hammer
+    // pdm_add_and_lock with guaranteed RLS denials on every scan pass.
+    enabled: autoSyncEnabled && canEdit,
     unmatched,
     onAdded: () => {
       refetchAllFiles();
@@ -723,8 +725,9 @@ export function BrowseScreen() {
     <div ref={browseRootRef} className="flex h-full flex-col">
       {/* SW PDM parity: in auto mode, new local files vault themselves as
           private checked-out drafts — no "add to vault" click. Manual mode
-          keeps the explicit banner. */}
-      {autoSyncEnabled ? (
+          keeps the explicit banner. Both flows are write paths, so neither
+          is offered to read-only users (their adds are RLS-denied anyway). */}
+      {!canEdit ? null : autoSyncEnabled ? (
         <AutoAddBanner status={autoAdd} />
       ) : (
         <UnmatchedFilesBanner

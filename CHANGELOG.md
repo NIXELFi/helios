@@ -27,6 +27,52 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Default-deny for accounts with no role — team data is IP.** A brand-new
+  signup no longer gets any access: the automatic baseline vault role is gone,
+  and the remaining world-readable tables (vault list, PM reference data,
+  dashboard photos, synced calendar, games leaderboards, marketplace listings
+  and bundles, telemetry storage) now require an org role. Instead of empty
+  screens, role-less accounts see a clear "contact your team lead" page with
+  a one-click re-check once they've been added.
+
+### Fixed
+
+- **Roles granted in Org & Access now work everywhere.** Members whose only
+  role comes from the org tool (Engineer, Lead, VP, …) can now open the Vault
+  (the module's access check consulted only the legacy role table and told
+  them they weren't authorized), create and edit PM tasks (task permissions
+  had the same gap), and — for leads and execs — open the Org & Access tool
+  itself and manage vaults.
+- **PM Slack notifications are flowing again.** A stuck retry wedged the
+  notification queue on June 30 and every dispatch since failed silently; the
+  dispatcher now supersedes stale retries instead of colliding with newer
+  ones. Subteam leads are also resolved from Org & Access roles now (the old
+  lookup only knew the legacy table), and notifications to subteams without a
+  lead no longer get rejected by Slack.
+- **Clear message when you can't check in.** Uploading without vault write
+  permission now says exactly that — "ask your team lead for a role that can
+  check in files" — instead of the raw database policy error.
+- **Read-only vault users are no longer offered "Add to vault"** (or
+  background auto-add attempts) that could only fail.
+- **Your role shows up as your role.** The sidebar user pill and vault
+  Settings now display your Org & Access role (Engineer, Lead, Executive, …)
+  instead of "(no role assigned)" when your access comes from the org tool.
+- **Leads can triage bug reports.** The in-app reports viewer (and the
+  presence roster) now opens for anyone with role-granting capabilities, and
+  the backend permits them to read, re-status, and clean up reports and their
+  screenshots — not just legacy global admins.
+
+- **Vault now honors Org & Access roles.** Granting a role that carries the
+  vault edit capability (Engineer, Lead, VP, …) now actually grants vault
+  check-in/upload rights, and vault view/admin capabilities likewise take
+  effect. Previously the vault only consulted its own legacy role table, so
+  members granted a role in the Org tool since 2026-06-22 stayed read-only and
+  hit "new row violates row-level security policy" when adding or checking in
+  files. Legacy vault roles keep working unchanged; capability edits made in
+  the role editor apply immediately. (Server-side fix — no app update needed.)
+
 ## [5.1.0] - 2026-07-07
 
 ### Added

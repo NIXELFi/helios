@@ -29,9 +29,9 @@ describe("<VaultModule>", () => {
       refresh_token: "r",
       user: { id: "u", email: "u@x.com" },
     };
-    // The user_roles lookup now gates the whole module (useVaultAccess) in
-    // addition to BrowseScreen's useMyRole — both read the same mock chain.
-    // Return a role so access resolves to "member" and the vault renders.
+    // The module gate (useVaultAccess) now asks the pdm_has_vault_access
+    // probe — a single boolean covering legacy rows AND capability grants.
+    // BrowseScreen's useMyRole still reads user_roles via the mock chain.
     const c = {
       auth: {
         getSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
@@ -46,7 +46,8 @@ describe("<VaultModule>", () => {
         if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [{ role: "admin" }], error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
-      rpc: (_name: string) => Promise.resolve({ data: false, error: null }),
+      rpc: (name: string) =>
+        Promise.resolve({ data: name === "pdm_has_vault_access", error: null }),
     } as any;
     render(
       <SupabaseAuthProvider client={c}>
@@ -75,6 +76,7 @@ describe("<VaultModule>", () => {
         if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) };
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
+      rpc: () => Promise.resolve({ data: false, error: null }),
     } as any;
     render(
       <SupabaseAuthProvider client={c}>
@@ -101,10 +103,11 @@ describe("<VaultModule>", () => {
         getSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
         onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
       },
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === "user_roles") return { select: () => ({ eq: () => ({ limit: () => Promise.resolve({ data: null, error: { message: "relation pdm.user_roles does not exist" } }) }) }) };
+      from: vi.fn().mockImplementation((_table: string) => {
         return { select: () => Promise.resolve({ data: [], error: null }) };
       }),
+      rpc: () =>
+        Promise.resolve({ data: null, error: { message: "function pdm_has_vault_access does not exist" } }),
     } as any;
     render(
       <SupabaseAuthProvider client={c}>
@@ -114,6 +117,6 @@ describe("<VaultModule>", () => {
     await waitFor(() => {
       expect(screen.getByText(/couldn't verify vault access/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/relation pdm\.user_roles does not exist/i)).toBeInTheDocument();
+    expect(screen.getByText(/pdm_has_vault_access does not exist/i)).toBeInTheDocument();
   });
 });
