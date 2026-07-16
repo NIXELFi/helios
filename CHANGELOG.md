@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-07-16
+
 ### Security
 
 - **The SOLIDWORKS bridge "add to vault" now refuses paths that escape the vault folder.**
