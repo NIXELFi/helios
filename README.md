@@ -1,16 +1,19 @@
 # Helios
 
-**Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, and 1D engine simulation — in one signed, auto-updating binary.
+**Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, 1D engine simulation, and a sandboxed plugin marketplace — in one signed, auto-updating binary.
 
-> **Status:** `v4.5.5` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
+> **Status:** `v5.1.1` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, [`CHANGELOG.md`](CHANGELOG.md) for the release notes, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
 
-Five modules ship today:
+Seven modules ship today, plus admin-only Org & Access tooling:
 
 - **Telemetry** — MoTeC-style CSV log analysis: multi-session overlay, math channels, GPS basemaps, custom widget workspaces (details below).
 - **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
 - **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles, a "primary subteam" view filter (hide tasks your subteam only contributes to), and Slack notifications that surface the task owner and subteam lead on every change.
 - **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, calibrated against the team's real dynos) with parameter sweeps, FSAE-points optimization, and print-to-PDF engineering reports — plus a measurement-driven lap simulator: Pacejka `.tir` tire fits, CFD aero maps, and roll-stiffness data load from a team-data folder; grip is pinned by real skidpad/autocross/accel results; fuel burn comes from a solver-derived variable-throttle model (no fudge constants); and a playback "lap player" with a supersport dash, per-axle balance readout, residency histograms, and a filterable channel analyzer.
 - **Games** — arcade lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards.
+- **Amethyst** — a built-in reader for an Obsidian-style Markdown vault: graph view, backlinks, full-text search, and a command palette over a local folder you pick (no backend, no sign-in).
+- **Marketplace** *(beta)* — install sandboxed, signed, team-built plugins (add-ons) that run in an isolated frame; first-party plugins already published include a lap simulator, a chassis torsional-rigidity tool, and an RF antenna studio.
+- **Org & Access** *(admin-only)* — data-driven team structure and role management: subteams, roles, and the capabilities that gate every module. Visible only to owners/admins.
 
 ## The Vault (PDM)
 
@@ -19,13 +22,13 @@ A self-hosted SolidWorks PDM Standard alternative — check-out/check-in with re
 - **Check-out / check-in** with single-active-lock semantics enforced in the database; local working copies are read-only unless YOU hold the lock (the read-only bit is the vault-wide "clean copy" marker, flipped even while the file is open in SolidWorks). Check your own files in individually or all at once straight from the Checkouts screen, without hunting them down in the tree.
 - **Versioning** — immutable, content-addressed (sha256) version history with comments, revisions, and per-version SolidWorks data cards (custom properties parsed natively from the CAD file at check-in).
 - **Assembly references** — Contains / Where-Used panels parsed from `.sldasm`/`.sldprt` at check-in; unresolved references are surfaced.
-- **Multi-vault + per-vault roles** — owner/admin/editor/viewer, grantable globally or per vault, enforced by row-level security (cross-vault reads and writes are isolated at the database).
+- **Multi-vault + roles** — access is granted per vault (owner/admin/editor/viewer) or through team-wide Org & Access roles (Engineer/Lead/VP/Executive) whose capabilities bridge into the vault, all enforced by row-level security. Today any granted member can read every vault: team-wide access is intentional for a single team storing its own CAD. Per-subteam isolation is planned once a vault-to-subteam mapping exists — until then, a role grant is team-wide, not scoped to one subteam's vault.
 - **Auto-vaulting & sync** — new local files become private drafts automatically; a sync daemon mirrors vault state to disk with guards that never clobber or delete unsaved local work.
 - **Recycle bin** — soft-delete with restore for files and folders.
 - **SolidWorks integration** — a Task Pane add-in (check in/out from inside SolidWorks via a localhost bridge with bearer-token auth), Explorer shell overlays, and a one-click in-app installer for both.
 - **Insights** — vault analytics dashboard (activity, storage, lock hygiene, member stats).
 
-The Vault's RLS/RPC security suite (97 integration tests against a real local Supabase stack) runs on every PR — see [`infra/pdm-supabase/`](infra/pdm-supabase/).
+The Vault's RLS/RPC security suite (160+ integration tests across 31 files against a real local Supabase stack) runs on every PR — see [`infra/pdm-supabase/`](infra/pdm-supabase/).
 
 ## Telemetry highlights
 
@@ -74,21 +77,28 @@ pnpm build        # release build via tauri build
 
 ```text
 apps/desktop/        Tauri shell + React frontend (the app)
-  src/modules/         vault (PDM), pm (projects), cfd (engine sim), games
-  src-tauri/           Rust shell: bridge server, add-in injector, commands
+  src/modules/         vault (PDM), pm (projects), cfd (engine sim + lap sim),
+                       games, marketplace (plugins), amethyst (notes reader),
+                       org (admin)
+  src-tauri/           Rust shell: bridge server, add-in injector, plugin host, commands
 crates/              Rust crates
   helios-core/         channel store core types
   helios-csv/          CSV loader (incl. MoTeC preprocessor)
   helios-arrow/        Arrow IPC helpers
   engine-sim/ cfd-core/  1D finite-volume engine simulator
+  helios-bench/        deterministic physics-agent simulation CLI over engine-sim + cfd-core
+  helios-mcp/          MCP server (stdio JSON-RPC) exposing the physics-agent tools
   pdm-core/ pdm-client/  Vault domain types + Supabase client
   pdm-sw-parser/       native SolidWorks file parser (refs + custom properties)
+  plugin-host/         marketplace bundle verify (sha256 + Ed25519) + safe unpack
 packages/            TypeScript packages
   lib/                 cursor emitter, time helpers, math-expression engine
   store/               JS-side channel store + slice
   widgets/             18 widgets (strip chart, GPS, gauges, steering wheel)
   ui/ auth/ pm-ui/     primitives, Supabase auth, project-management UI
-infra/pdm-supabase/  Vault backend: 69 SQL migrations + RLS/RPC test suite
+  plugin-sdk/          plugin manifest, host/plugin protocol, capability contracts
+  lapsim-core/ lap-sim-plugin/  lap-simulator core + its packaged marketplace plugin
+infra/pdm-supabase/  Vault backend: 136 SQL migrations + RLS/RPC test suite
 solidworks-addin/    SolidWorks Task Pane add-in (C#)
 shell-ext/ sw-helper/  Explorer overlay shell extension + read-only helper
 docs/                architecture, channel registry, design specs, wiki

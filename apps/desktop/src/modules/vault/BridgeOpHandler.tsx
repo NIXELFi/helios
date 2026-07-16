@@ -42,10 +42,27 @@ export function shouldSkipBridgeOverwrite(
   return destExists && destWritable;
 }
 
+/** True iff `rel` is a plain relative path fully contained in the vault subtree:
+ *  no `..`/`.` segments, no leading slash, no Windows drive/UNC root, no empty
+ *  segments. The `startsWith` containment check in `resolveVaultForPath` is
+ *  purely lexical, so on its own a path like `<vroot>/../../secret` passes it
+ *  while the file actually opened (`absolutePath`, which useAddLocalFile reads
+ *  verbatim) escapes the vault — a bridge caller with the loopback token could
+ *  pull an arbitrary local file (e.g. an SSH key) into the vault. Requiring the
+ *  relative remainder to be traversal-free closes that. Exported for tests. */
+export function isSafeVaultRelativePath(rel: string): boolean {
+  if (rel === "") return false; // the vault root itself, not a file
+  if (rel.startsWith("/")) return false; // absolute
+  if (/^[a-zA-Z]:/.test(rel)) return false; // Windows drive-relative (C:foo)
+  return rel.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
 /** Resolve which vault a local path belongs to (it lives at
  *  `<root>/<sanitize(vaultName)>/<relativePath>`), so an untracked file can be
- *  added to the right vault. */
-function resolveVaultForPath(
+ *  added to the right vault. Returns null for anything that doesn't resolve to a
+ *  real file genuinely under a vault folder — including lexically-contained but
+ *  traversing paths (see isSafeVaultRelativePath). Exported for tests. */
+export function resolveVaultForPath(
   path: string,
   root: string | null,
   vaults: Vault[] | null,
@@ -57,7 +74,9 @@ function resolveVaultForPath(
   for (const v of vaults) {
     const vroot = `${rootFwd}/${sanitizeVaultName(v.name)}`;
     if (lower.startsWith(vroot.toLowerCase() + "/")) {
-      return { vaultId: v.id, relativePath: pathFwd.slice(vroot.length + 1) };
+      const relativePath = pathFwd.slice(vroot.length + 1);
+      if (!isSafeVaultRelativePath(relativePath)) return null;
+      return { vaultId: v.id, relativePath };
     }
   }
   return null;

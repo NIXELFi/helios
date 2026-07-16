@@ -27,6 +27,63 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **The SOLIDWORKS bridge "add to vault" now refuses paths that escape the vault folder.**
+  The bridge matched a local file to its vault with a purely textual
+  prefix check, so a crafted path with `..` segments that still began with a vault
+  folder (e.g. `…/SDM26/../../../.ssh/id_rsa`) passed the check while the file it
+  actually read lived outside the vault — a caller could pull an arbitrary local
+  file into the vault. Reaching the bridge at all requires the machine-local,
+  per-launch token (it is not remotely reachable), so this was never web- or
+  network-exploitable, but the add path now rejects any `..`/`.`, absolute, or
+  drive-relative remainder. Found by the red-team review below.
+
+### Security review response
+
+- **Red-team assessment (Sam, 2026-07-15) reviewed and triaged.** A member ran an
+  authorized red-team of the Vault authorization model against a throwaway copy of
+  the database. It was good work — the reproduction was clean and one real finding
+  came out of it (fixed above). Full verdicts and decisions follow so everyone has
+  the same picture.
+- **Cross-vault access (reported HIGH): intended for now, not a regression.**
+  Any member with a role can currently read every vault (`vault.view` is carried by
+  every role), and members whose role also carries `vault.edit` (Engineer and up in
+  our current role config) can write across vaults too — so the finding is real and
+  the reproduction is accurate. This is deliberate and documented in the code:
+  subteam roles are subteam-scoped while vaults are season-scoped, with no
+  vault-to-subteam mapping yet, so a vault capability grants team-wide access — the
+  same team-wide model we had under the old "global viewer row" rows. It was not
+  introduced by the July capability-bridge migration and is not a regression; the
+  same day's default-deny change actually tightened access (a brand-new signup now
+  gets nothing until a lead grants a role). Decision: for a single FSAE team sharing
+  its own CAD, team-wide access is acceptable today; true per-subteam isolation is
+  deferred until the vault-to-subteam mapping lands, which is the real fix if and
+  when we decide to wall subteams off.
+- **Bridge arbitrary-file "add" (reported MED): fixed this release.**
+  See Security above. Real, but gated behind the machine-local bridge token.
+- **Marketplace signature omits declared permissions (reported MED): already defended.**
+  Install already refuses any bundle whose
+  manifest requests a permission that was not consented and reviewed, and the
+  bundle's manifest is covered by the signed content hash — so a plugin can never run
+  with more than the user approved. Signing the separately-submitted database
+  manifest as well is out of scope by our stated threat model (it does not defend
+  against a full database compromise, which could read the signing key regardless).
+- **Native commands could amplify a future in-app XSS (reported MED): acknowledged, tracked.**
+  There is no known XSS today; this is defense-in-depth. Scoping the
+  sensitive Tauri commands is tracked for a dedicated hardening pass rather than a
+  patch release.
+- **Forgeable game scores + vulnerable deps (reported LOW): accepted / routine.**
+  Leaderboard scores on an internal team game do not warrant per-game
+  server-side validation right now (a blunt cap would reject legitimate scores). The
+  dependency advisories are low-impact for a desktop tool; patch-level fixes ride
+  this release's lockfile refresh, and anything needing a major version bump is
+  tracked separately.
+- **Confirmed solid (credit where due):** no secrets in the repo or its history; the
+  loopback bridge auth (per-launch token, Origin rejection, loopback-only bind), the
+  server-side role re-checks on sensitive actions, the default-deny pass, and the
+  asu.edu signup gating all held up under testing.
+
 ## [5.1.1] - 2026-07-14
 
 ### Security
