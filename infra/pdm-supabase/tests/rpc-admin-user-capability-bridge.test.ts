@@ -109,6 +109,33 @@ describe("pdm admin user RPCs — org capability bridge", () => {
     expect(delErr!.message).toMatch(/only the owner can delete an admin/i);
   });
 
+  it("deleting a plugin author detaches the marketplace FKs instead of failing", async () => {
+    // plugins.created_by / plugin_versions.published_by are NOT NULL FKs to
+    // auth.users (20260626000000) that the pre-bridge delete body never
+    // detached — deleting any plugin author raised an FK violation.
+    const exec = await createTestUser(uniqueEmail("exec"));
+    await grantPmRole(exec.id, "executive");
+    const author = await createTestUser(uniqueEmail("author"));
+    const mkt = serviceClient().schema("marketplace");
+    const pluginId = `test.audit-plugin-${Date.now()}`;
+    const { error: seedErr } = await mkt.from("plugins").insert({
+      id: pluginId, name: "Audit Plugin", created_by: author.id,
+    });
+    expect(seedErr).toBeNull();
+
+    try {
+      const c = await signInAs(exec.email!);
+      const { error: delErr } = await c.rpc("pdm_admin_delete_user", { p_target: author.id });
+      expect(delErr).toBeNull();
+      // Ownership reassigned to the deleting admin; the plugin row survives.
+      const { data: plugin } = await mkt.from("plugins").select("created_by").eq("id", pluginId).single();
+      expect(plugin!.created_by).toBe(exec.id);
+    } finally {
+      // Remove the seed so the afterEach auth reset never trips on its FK.
+      await mkt.from("plugins").delete().eq("id", pluginId);
+    }
+  });
+
   it("legacy paths are untouched: a legacy global admin still works, self-delete still refused", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
     await setRole(admin.id, "admin");

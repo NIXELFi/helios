@@ -82,6 +82,21 @@ describe("on lookup miss", () => {
     expect(r.createdFolderIds).toEqual(["revived"]);
   });
 
+  it("fills the caller's out-array before throwing on a mid-chain failure", async () => {
+    // run()'s failure cleanup receives created ids through this out-array, so
+    // a failure at segment 2 of A/B must still report the already-created A —
+    // otherwise A is stranded, the exact M5 defect this rework fixes.
+    const results = [
+      { data: { folder: { id: "made-1" }, created: true, resurrected: false }, error: null },
+      { data: null, error: { message: "boom" } },
+    ];
+    const rpc = vi.fn(async () => results.shift());
+    const client = { from: folderLookup(() => []), rpc };
+    const out: string[] = [];
+    await expect(ensureFolderHierarchy(client, "vault-1", ["A", "B"], out)).rejects.toThrow(/boom/);
+    expect(out).toEqual(["made-1"]);
+  });
+
   it("surfaces an RPC failure with the segment name", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: { message: "editor or admin role required" } }));
     const client = { from: folderLookup(() => []), rpc };

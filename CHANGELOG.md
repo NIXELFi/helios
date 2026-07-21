@@ -52,11 +52,13 @@ follow [semver](https://semver.org/).
   creates its folder path and a later step fails (unreadable file, upload
   error), the add now removes the folders it had just created instead of
   leaving empty husks behind in the vault tree.
-- **Subteams created in Org Structure now appear in the signup picker.** The
-  signup screen's subteam list was a separate table that only an unreachable
-  legacy admin screen could edit, so org-registry changes never reached it.
-  Creating, renaming, or deleting a subteam in Org & Access → Org Structure now
-  keeps the signup list in step (with a one-time backfill of missing names).
+- **Renaming or deleting a subteam no longer leaves its old name in the signup
+  picker.** The signup picker offers a merged list of the org registry and a
+  legacy seed table that only an unreachable admin screen could ever edit — so
+  a renamed or deleted subteam's old name stayed on offer to new signups
+  indefinitely. A database trigger now keeps the legacy half in step with
+  every registry change (made in Org Structure or the PM sidebar alike), and
+  the orphaned legacy picker-editing functions lost their execute rights.
 
 ### Removed
 

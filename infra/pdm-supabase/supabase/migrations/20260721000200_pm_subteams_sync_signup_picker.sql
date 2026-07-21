@@ -1,108 +1,90 @@
--- Keep the signup subteam picker in step with the org registry (audit M1).
+-- Keep the signup subteam picker's pdm.subteams half in step with the org
+-- registry (audit M1 follow-through), and retire the orphaned legacy picker
+-- RPCs.
 --
--- Two subteam tables exist: pm.subteams (the canonical org registry, edited in
--- the Org Structure panel) and pdm.subteams (the anon-readable list the signup
--- screen's picker reads, 20260529010000). The only UI that ever managed
--- pdm.subteams was the vault AdminScreen — orphaned since the Org module
--- shipped and now deleted — so the picker list could silently drift from the
--- real org: a subteam created in Org Structure never became choosable at
--- signup. (20260617006000 already declared these RPCs the successor of that
--- panel; the sync is the missing piece.)
+-- The signup picker reads public.list_signup_subteams(), a de-duplicated
+-- UNION of pdm.subteams (the 20260529010000 seed list) and pm.subteams (the
+-- canonical org registry) since 20260621000000 — so subteams CREATED in Org
+-- Structure already appear at signup. What drifts is the pdm half: RENAMING a
+-- registry subteam leaves its old name still offered by a matching pdm seed
+-- row, and DELETING one leaves the pdm row offering a subteam that no longer
+-- exists. The only UI that could ever fix pdm.subteams was the vault
+-- AdminScreen — orphaned since the Org module shipped, deleted in this
+-- change.
 --
--- Fix: the pm structure RPCs mirror their change into pdm.subteams BY NAME.
---   * create → insert the name if the picker doesn't have it
---   * rename → follow the rename; if the new name already exists in the
---     picker, drop the old row instead (merge)
---   * delete → remove the name from the picker
--- One-time backfill inserts registry names the picker is missing. Existing
--- picker-only rows (legacy names that predate the registry) are left alone —
--- signup subteams are stored as plain text in auth metadata, so nothing
--- references pdm.subteams rows by id. Bodies otherwise verbatim from
--- 20260617006000_pm_structure_editing.sql.
+-- Fix: an AFTER trigger ON pm.subteams mirrors changes into pdm.subteams BY
+-- NAME. A trigger rather than editing the pm RPCs (20260617006000) because
+-- the registry has TWO writers: those RPCs AND the PM module's subteam
+-- editor, which updates pm.subteams by direct DML (pm/lib/mutations.ts) —
+-- RPC-level sync would silently miss half the writes.
+--   * insert → offer the name in the pdm half too (harmless overlap with the
+--     union, keeps the halves consistent)
+--   * rename → follow; if the new name already exists in pdm, drop the stale
+--     old row instead (merge)
+--   * delete → remove the name from the pdm half
+-- The pm 'Unknown' repair sentinel (20260618000000) is skipped throughout —
+-- list_signup_subteams filters it, and mirroring it into pdm.subteams (which
+-- has no such filter) would leak it to any direct reader. Existing pdm-only
+-- rows (legacy seed names with no registry counterpart) are left alone:
+-- signup subteams are stored as plain text in auth metadata, nothing
+-- references pdm.subteams rows by id.
+-- SECURITY DEFINER: pm writers (org.manage_structure holders / pm admins via
+-- RLS) hold no DML grant on pdm.subteams, and shouldn't.
 
-create or replace function pm.create_subteam(p_name text, p_code text, p_color text, p_project_id uuid default null)
-returns uuid language plpgsql security definer set search_path = pm, public as $$
-declare v_id uuid; v_code text; v_slug text;
+create or replace function pm.trg_subteams_sync_signup_picker()
+returns trigger
+language plpgsql
+security definer
+set search_path = pm, pdm, public
+as $$
 begin
-  if auth.uid() is null then raise exception 'authentication required' using errcode = '42501'; end if;
-  if not pm.has_capability(auth.uid(), 'org.manage_structure', null) then
-    raise exception 'not authorized to edit org structure' using errcode = '42501';
+  if tg_op = 'INSERT' then
+    if new.name <> 'Unknown' then
+      insert into pdm.subteams (name, sort_order, created_by)
+        select new.name, coalesce(max(sort_order), 0) + 1, new.created_by from pdm.subteams
+        on conflict (name) do nothing;
+    end if;
+    return new;
+  elsif tg_op = 'UPDATE' then
+    if old.name is distinct from new.name and old.name <> 'Unknown' and new.name <> 'Unknown' then
+      begin
+        update pdm.subteams set name = new.name where name = old.name;
+      exception when unique_violation then
+        delete from pdm.subteams where name = old.name;
+      end;
+    end if;
+    return new;
+  else
+    if old.name <> 'Unknown' then
+      delete from pdm.subteams where name = old.name;
+    end if;
+    return old;
   end if;
-  if coalesce(btrim(p_name), '') = '' then raise exception 'subteam name is required' using errcode = '22023'; end if;
-  v_code := upper(coalesce(nullif(btrim(p_code), ''), left(regexp_replace(p_name, '[^a-zA-Z0-9]', '', 'g'), 4)));
-  v_slug := lower(regexp_replace(btrim(p_name), '[^a-zA-Z0-9]+', '-', 'g'));
-  -- keep slug unique (it keys per-scope dashboard configs)
-  if exists (select 1 from pm.subteams where slug = v_slug) then
-    v_slug := v_slug || '-' || substr(gen_random_uuid()::text, 1, 4);
-  end if;
-  insert into pm.subteams (name, code, slug, color, created_by)
-    values (btrim(p_name), v_code, v_slug, nullif(btrim(p_color), ''), auth.uid())
-    returning id into v_id;
-  if p_project_id is not null then
-    insert into pm.project_subteams (project_id, subteam_id) values (p_project_id, v_id) on conflict do nothing;
-  end if;
-  -- Signup-picker sync: make the new subteam choosable at signup.
-  insert into pdm.subteams (name, sort_order, created_by)
-    select btrim(p_name), coalesce(max(sort_order), 0) + 1, auth.uid() from pdm.subteams
-    on conflict (name) do nothing;
-  return v_id;
-end; $$;
+end;
+$$;
 
-create or replace function pm.update_subteam(p_id uuid, p_name text, p_color text)
-returns void language plpgsql security definer set search_path = pm, public as $$
-declare v_old_name text;
-begin
-  if auth.uid() is null then raise exception 'authentication required' using errcode = '42501'; end if;
-  if not pm.has_capability(auth.uid(), 'org.manage_structure', null) then
-    raise exception 'not authorized to edit org structure' using errcode = '42501';
-  end if;
-  if coalesce(btrim(p_name), '') = '' then raise exception 'subteam name is required' using errcode = '22023'; end if;
-  select name into v_old_name from pm.subteams where id = p_id;
-  -- slug is intentionally left stable (it keys saved dashboard layouts).
-  update pm.subteams set name = btrim(p_name), color = nullif(btrim(p_color), ''), updated_at = now() where id = p_id;
-  -- Signup-picker sync: follow the rename; when the new name is already in the
-  -- picker, the rows merge (drop the stale old one).
-  if v_old_name is not null and v_old_name <> btrim(p_name) then
-    begin
-      update pdm.subteams set name = btrim(p_name) where name = v_old_name;
-    exception when unique_violation then
-      delete from pdm.subteams where name = v_old_name;
-    end;
-  end if;
-end; $$;
+drop trigger if exists subteams_sync_signup_picker on pm.subteams;
+create trigger subteams_sync_signup_picker
+  after insert or update of name or delete on pm.subteams
+  for each row execute function pm.trg_subteams_sync_signup_picker();
 
--- Delete a subteam, but only when nothing depends on it (the caller reassigns first).
-create or replace function pm.delete_subteam(p_id uuid)
-returns void language plpgsql security definer set search_path = pm, public as $$
-declare v_name text;
-begin
-  if auth.uid() is null then raise exception 'authentication required' using errcode = '42501'; end if;
-  if not pm.has_capability(auth.uid(), 'org.manage_structure', null) then
-    raise exception 'not authorized to edit org structure' using errcode = '42501';
-  end if;
-  if exists (select 1 from pm.tasks where subteam_id = p_id) then
-    raise exception 'this subteam still has tasks — reassign them first' using errcode = '42501';
-  end if;
-  if exists (select 1 from pm.subsystems where subteam_id = p_id) then
-    raise exception 'this subteam still has subsystems — remove them first' using errcode = '42501';
-  end if;
-  if exists (select 1 from pm.role_memberships where subteam_id = p_id) then
-    raise exception 'this subteam still has members — reassign them first' using errcode = '42501';
-  end if;
-  select name into v_name from pm.subteams where id = p_id;
-  delete from pm.project_subteams where subteam_id = p_id;
-  delete from pm.subteams where id = p_id;
-  -- Signup-picker sync: a removed subteam shouldn't be offered to new signups.
-  -- (Accounts keep their choice — signup subteam is plain text in auth metadata.)
-  if v_name is not null then
-    delete from pdm.subteams where name = v_name;
-  end if;
-end; $$;
+-- One-time cleanup of drift that already happened: pdm rows whose name is a
+-- FORMER registry name have no way to be identified retroactively, but rows
+-- shadow-deleted registry names can't be told apart from intentional
+-- pdm-only seeds — so no destructive backfill. Going forward the trigger
+-- keeps the halves aligned.
 
--- One-time backfill: registry subteams the picker doesn't offer yet.
-insert into pdm.subteams (name, sort_order)
-  select s.name,
-         (select coalesce(max(sort_order), 0) from pdm.subteams)
-           + row_number() over (order by s.name)
-    from pm.subteams s
-   where not exists (select 1 from pdm.subteams p where p.name = s.name);
+-- ---------------------------------------------------------------------------
+-- Retire the legacy pdm picker RPCs (create_subteam/delete_subteam,
+-- 20260529010000). Their only UI was the deleted AdminScreen, no released
+-- client can reach them, and they still gate on the UNSCOPED pdm.is_admin()
+-- (the C-3 class 20260622000100 fixed elsewhere) — so a per-vault admin
+-- could perturb the signup picker directly. Functions stay (dropping would
+-- break nothing but this is additive-only); execution rights go.
+-- ---------------------------------------------------------------------------
+revoke all on function pdm.create_subteam(text)          from public, anon, authenticated;
+revoke all on function pdm.delete_subteam(uuid)          from public, anon, authenticated;
+revoke all on function pdm.pdm_create_subteam(text)      from public, anon, authenticated;
+revoke all on function pdm.pdm_delete_subteam(uuid)      from public, anon, authenticated;
+revoke all on function public.pdm_create_subteam(text)   from public, anon, authenticated;
+revoke all on function public.pdm_delete_subteam(uuid)   from public, anon, authenticated;

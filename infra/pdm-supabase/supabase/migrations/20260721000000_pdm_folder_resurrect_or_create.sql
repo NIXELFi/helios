@@ -32,12 +32,19 @@
 -- and deleting atomically server-side (a client-side check-then-delete could
 -- race a concurrent add into the same folder).
 --   * nothing references it at all (no files live or deleted, no child
---     folders live or deleted) → hard delete. This is the fresh-stranded-
---     folder case: the row provably holds nothing, so the "never hard-delete"
---     vault rule isn't at stake, and tombstoning it would just pollute the
---     recycle bin with phantom folders every time an import fails.
---   * only soft-deleted content references it (the resurrected-tombstone
---     case) → re-tombstone it with a fresh batch, restoring the pre-add state.
+--     folders live or deleted) AND it was created within the last hour →
+--     hard delete. This is the fresh-stranded-folder case: the row provably
+--     holds nothing, so the "never hard-delete" vault rule isn't at stake,
+--     and tombstoning it would pollute the recycle bin with phantom folders
+--     every time an import fails. The recency bound keeps this the ONLY
+--     client-reachable hard delete: an old empty folder someone deliberately
+--     created falls through to the restorable soft path instead.
+--   * otherwise (soft-deleted content references it — the resurrected-
+--     tombstone case — or it's old) → soft-delete with a fresh batch,
+--     returning it to the recycle bin. NB the re-tombstone stamps deleted_by
+--     = the cleanup caller, not the original deleter — accepted: the folder
+--     is empty, its former CONTENTS kept their own batch + deleted_by, and
+--     restoring any of them re-anchors the folder regardless.
 --   * any live file or live subfolder → refuse (returns false, no exception —
 --     the caller's add already failed; cleanup must never mask that error).
 
@@ -123,6 +130,7 @@ declare
   v_caller uuid := auth.uid();
   v_row pdm.folders;
   v_has_dead boolean;
+  v_hard boolean;
 begin
   if v_caller is null then raise exception 'authentication required'; end if;
 
@@ -147,23 +155,25 @@ begin
        exists (select 1 from pdm.files where folder_id = p_folder_id)
     or exists (select 1 from pdm.folders where parent_id = p_folder_id);
 
-  if v_has_dead then
-    -- Resurrected-tombstone case: recycle-bin content still points here, so
-    -- put the tombstone back rather than orphaning that content.
+  v_hard := not v_has_dead and v_row.created_at > now() - interval '1 hour';
+  if v_hard then
+    -- Provably-empty husk from a just-failed import: nothing (live or
+    -- deleted) has ever referenced it and it's minutes old, so a hard delete
+    -- loses nothing and keeps the recycle bin free of phantom folders.
+    delete from pdm.folders where id = p_folder_id;
+  else
+    -- Resurrected-tombstone case (bin content still points here — putting
+    -- the tombstone back keeps that content anchored), or an old empty
+    -- folder: soft-delete restorably, like pdm.delete_folder would.
     update pdm.folders
        set deleted_at = now(), deleted_by = v_caller, delete_batch = gen_random_uuid()
      where id = p_folder_id;
-  else
-    -- Provably-empty husk from a failed import: nothing (live or deleted) has
-    -- ever referenced it, so a hard delete loses nothing and keeps the
-    -- recycle bin free of phantom folders.
-    delete from pdm.folders where id = p_folder_id;
   end if;
 
   begin
     insert into pdm.audit_log (user_id, action, target_type, target_id, payload)
       values (v_caller, 'delete', 'folder', p_folder_id,
-        jsonb_build_object('cleanup', true, 'soft', v_has_dead, 'name', v_row.name));
+        jsonb_build_object('cleanup', true, 'soft', not v_hard, 'name', v_row.name));
   exception when others then null; end;
   return true;
 end; $function$;

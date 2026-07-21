@@ -87,6 +87,11 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * folder THIS call brought into existence, deepest last — so a caller whose
  * later add step fails can undo them (see the cleanup in `run`'s catch).
  *
+ * `createdOut` is filled AS folders are created, not on return — so when the
+ * walk itself fails mid-chain (segment 2 of A/B/C), the ancestors already
+ * created are still reported to the caller's failure cleanup rather than
+ * stranded.
+ *
  * IMPORTANT: This function queries folders fresh from the database for EACH
  * segment, on EVERY call. The previous implementation accepted a `folders`
  * snapshot from React state, which went stale across batched bulk-adds —
@@ -104,9 +109,10 @@ export async function ensureFolderHierarchy(
   client: any,
   vaultId: VaultId,
   relativeDirSegments: string[],
+  createdOut?: FolderId[],
 ): Promise<{ folderId: FolderId | null; createdFolderIds: FolderId[] }> {
   let parentId: FolderId | null = null;
-  const createdFolderIds: FolderId[] = [];
+  const createdFolderIds: FolderId[] = createdOut ?? [];
 
   for (const seg of relativeDirSegments) {
     // Look up: does a folder with (vault_id, parent_id, name) already exist?
@@ -185,7 +191,9 @@ export function useAddLocalFile() {
       setLoading(true);
       setError(null);
       // Folders materialized by THIS call, for the failure-path undo below.
-      let createdFolderIds: FolderId[] = [];
+      // Passed INTO ensureFolderHierarchy so a mid-chain failure still leaves
+      // the already-created ancestors here for cleanup.
+      const createdFolderIds: FolderId[] = [];
       try {
         // 1. Resolve folder hierarchy. e.g. "Chassis/Subframe/x.sldprt" → ["Chassis","Subframe"]
         //    A targetPrefix re-parents the whole import beneath it.
@@ -195,9 +203,7 @@ export function useAddLocalFile() {
         const segments = effectiveRelPath.split("/");
         const fileName = segments[segments.length - 1];
         const dirSegments = segments.slice(0, -1);
-        const hierarchy = await ensureFolderHierarchy(client, vaultId, dirSegments);
-        const folderId = hierarchy.folderId;
-        createdFolderIds = hierarchy.createdFolderIds;
+        const { folderId } = await ensureFolderHierarchy(client, vaultId, dirSegments, createdFolderIds);
 
         // 2. Resolve sha256 + size. The local-folder scan already computed and
         //    cached local.sha256 (and sizeBytes) — reuse it instead of

@@ -168,6 +168,30 @@ describe("pdm_cleanup_empty_folder — the ensureFolderHierarchy undo", () => {
     expect(still!.deleted_at).toBeNull();
   });
 
+  it("soft-deletes (not hard) an OLD empty folder — hard delete is only for fresh husks", async () => {
+    const admin = await createTestUser(uniqueEmail("admin"));
+    await setRole(admin.id, "admin");
+    const vaultId = await seedVault(admin.id);
+    const svc = serviceClient();
+    const a = await signInAs(admin.email!);
+
+    const { data: made } = await a.rpc("pdm_create_folder", {
+      p_vault_id: vaultId, p_parent_id: null, p_name: "Old Empty",
+    });
+    const folderId = (made as CreateFolderResult).folder.id;
+    // Age it past the 1-hour fresh-husk window.
+    await svc.from("folders")
+      .update({ created_at: new Date(Date.now() - 2 * 3600e3).toISOString() })
+      .eq("id", folderId);
+
+    const { data: cleaned } = await a.rpc("pdm_cleanup_empty_folder", { p_folder_id: folderId });
+    expect(cleaned).toBe(true);
+    // Restorably in the recycle bin, not gone.
+    const { data: row } = await svc.from("folders").select("deleted_at").eq("id", folderId).single();
+    expect(row).not.toBeNull();
+    expect(row!.deleted_at).not.toBeNull();
+  });
+
   it("re-tombstones a resurrected folder whose recycle-bin content still points at it", async () => {
     const admin = await createTestUser(uniqueEmail("admin"));
     await setRole(admin.id, "admin");

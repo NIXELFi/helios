@@ -21,7 +21,11 @@
 --     capability-only admin target used to look like a plain member to these
 --     guards and was editable by any legacy global admin.
 --
--- Bodies otherwise verbatim from 20260622000100_pdm_is_global_admin.sql.
+-- Bodies otherwise verbatim from 20260622000100_pdm_is_global_admin.sql, plus
+-- one repair: delete's FK-detach list predates the marketplace schema
+-- (20260626000000), whose plugins.created_by / plugin_versions.published_by
+-- are NOT NULL references to auth.users — deleting any plugin author failed
+-- outright on the FK. Detached below like the pdm.vaults convention.
 -- The pdm_-prefixed wrappers delegate and need no recreation.
 
 create or replace function pdm.admin_is_admin_tier(p_user uuid)
@@ -38,8 +42,10 @@ as $$
   or pm.has_capability(p_user, 'org.grant_roles', null)
   or pm.has_capability(p_user, 'org.manage_admins', null);
 $$;
-revoke all on function pdm.admin_is_admin_tier(uuid) from public, anon;
-grant execute on function pdm.admin_is_admin_tier(uuid) to authenticated;
+-- No client grant: only the definer admin RPCs below call it (they execute as
+-- the function owner). A PUBLIC/authenticated grant would let any member probe
+-- whether an arbitrary uid is admin-tier.
+revoke all on function pdm.admin_is_admin_tier(uuid) from public, anon, authenticated;
 
 create or replace function pdm.admin_update_user(p_target uuid, p_display_name text, p_subteam text)
 returns void
@@ -117,6 +123,22 @@ begin
   update support.reports    set reporter_id = v_caller where reporter_id = p_target;
   update pm.task_owners     set created_by = null      where created_by = p_target;
   update pm.task_links      set created_by = null      where created_by = p_target;
+
+  -- Marketplace FKs (20260626000000), missed by every body since then:
+  -- plugins.created_by and plugin_versions.published_by are NOT NULL, so
+  -- reassign to the deleting admin (the pdm.vaults convention); reviewed_by is
+  -- nullable; plugin_installs cascades on its own.
+  update marketplace.plugins         set created_by   = v_caller where created_by   = p_target;
+  update marketplace.plugin_versions set published_by = v_caller where published_by = p_target;
+  update marketplace.plugin_versions set reviewed_by  = null     where reviewed_by  = p_target;
+
+  -- storage.objects.owner is a deprecated informational column that has
+  -- carried an auth.users FK on some stack versions (the vault sets it on
+  -- every upload). Null it defensively, tolerating stacks where the column,
+  -- FK, or our permission on it differs.
+  begin
+    update storage.objects set owner = null where owner = p_target;
+  exception when others then null; end;
 
   delete from pdm.user_roles where user_id = p_target;
   delete from auth.users where id = p_target;
