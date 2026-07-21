@@ -871,7 +871,7 @@ function VehicleEditor({
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
         <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} min={0.1} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />
-        <NumField label="driveline η" value={vehicle.drivetrainEff} step={0.01} onChange={(n) => set({ drivetrainEff: n })} />
+        <NumField label="driveline η" value={vehicle.drivetrainEff} step={0.01} min={0.1} onChange={(n) => set({ drivetrainEff: n })} />
         <NumField label="track" unit="m" value={vehicle.trackWidthM} step={0.01} min={0.1} onChange={(n) => set({ trackWidthM: n })} />
         <NumField label="wheelbase" unit="m" value={vehicle.wheelbaseM} step={0.01} min={0.1} onChange={(n) => set({ wheelbaseM: n })} />
         <NumField label="shift" unit="rpm" value={vehicle.shiftRpm} step={100} onChange={(n) => set({ shiftRpm: n })} />
