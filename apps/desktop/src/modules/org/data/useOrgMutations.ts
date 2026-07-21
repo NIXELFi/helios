@@ -126,6 +126,18 @@ export function useOrgMutations() {
     [client],
   );
 
+  // Permanently delete an account. The SECURITY DEFINER pdm RPC enforces the
+  // guards (not self, not the owner, admin-tier targets are owner-only —
+  // legacy roles and org capabilities alike, 20260721000100), detaches every
+  // FK reference, and removes the auth row in one transaction.
+  const deletePerson = useCallback(
+    async (target: string): Promise<Result> => {
+      const { error } = await client.rpc("pdm_admin_delete_user", { p_target: target });
+      return error ? { ok: false, error: messageOf(error) } : { ok: true, error: null };
+    },
+    [client],
+  );
+
   return {
     grantRole,
     revokeRole,
@@ -137,5 +149,6 @@ export function useOrgMutations() {
     updateSubteam,
     deleteSubteam,
     updatePerson,
+    deletePerson,
   };
 }

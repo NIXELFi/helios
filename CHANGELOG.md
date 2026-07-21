@@ -27,6 +27,44 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Accounts can now be deleted from Org & Access → People & Roles.** A trash
+  button on each person row (with a confirmation) permanently deletes the
+  account: releases their checkouts, un-assigns their work, and preserves
+  authorship history as an unknown user. The action previously only existed on
+  an unreachable legacy vault screen. Org admins (anyone who can grant roles)
+  can delete regular members; admin-tier accounts — role carrying
+  `org.grant_roles` or `org.manage_admins`, or a legacy global admin — can only
+  be deleted by the owner. Profile edits (name / signup subteam) follow the
+  same rules.
+
+### Fixed
+
+- **A deleted folder's name can be used again.** Creating a folder with the
+  same name, in the same place, as one sitting in the recycle bin used to fail
+  with a raw "duplicate key" error — permanently, because the recycle-bin entry
+  still owned the name. Creating it now revives that folder, empty; its old
+  contents stay in the recycle bin and restore exactly as before. Applies to
+  the New-folder button, drag-drop imports, Add-from-local-folder, and the
+  SOLIDWORKS bridge alike.
+- **Failed local-file adds no longer strand empty folders.** When adding a file
+  creates its folder path and a later step fails (unreadable file, upload
+  error), the add now removes the folders it had just created instead of
+  leaving empty husks behind in the vault tree.
+- **Subteams created in Org Structure now appear in the signup picker.** The
+  signup screen's subteam list was a separate table that only an unreachable
+  legacy admin screen could edit, so org-registry changes never reached it.
+  Creating, renaming, or deleting a subteam in Org & Access → Org Structure now
+  keeps the signup list in step (with a one-time backfill of missing names).
+
+### Removed
+
+- **The orphaned vault "Users & roles" admin screen was deleted.** Nothing
+  linked to it since the Org & Access module took over role management; its two
+  remaining unique abilities (account deletion, signup-picker subteam edits)
+  moved into Org & Access, above.
+
 ## [5.1.2] - 2026-07-16
 
 ### Security
