@@ -27,6 +27,30 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Bug-report screenshots are now capped at 10 MB and must be images**
+  (PNG, JPEG, WebP, or GIF). The Report modal explains the rejection inline
+  instead of failing on upload, and the storage bucket enforces the same cap
+  server-side.
+
+### Fixed
+
+- **Two admins removing owners at the same moment can no longer leave the org with zero owners.**
+  Owner-revokes are now serialized, so the second removal always sees the first and the
+  "cannot remove the last owner" guard holds under concurrency.
+- **Performance-sim vehicle inputs now refuse zero and negative physical values.**
+  Typing 0 into mass, track, wheelbase, tire radius, CG height, driveline η, or air density
+  used to silently turn accel and lap-sim results into NaN; those fields now only accept
+  sane positive values.
+- **Slack notifications no longer silently drop an edit when two people touch the same task at the same moment.**
+  The notification queue now coalesces concurrent edits atomically instead of discarding the
+  loser's update.
+- **Adding an identical file to the vault now matches its checksum regardless of letter case.**
+  The add-and-lock duplicate check compared SHA-256 hashes case-sensitively (unlike check-in
+  and restore), so an uppercase-hex client would be wrongly told the file "already exists with
+  different content".
+
 ## [5.2.0] - 2026-07-21
 
 ### Added

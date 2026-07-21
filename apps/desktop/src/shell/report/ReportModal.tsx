@@ -9,6 +9,11 @@ const SEVERITIES: Record<ReportKind, string[]> = {
 };
 const DEFAULT_SEVERITY: Record<ReportKind, string> = { bug: "annoying", feature: "important" };
 
+// Screenshot caps — mirrored server-side on the report-attachments bucket
+// (20260721000500_report_bucket_limits.sql), so keep the two in sync.
+const MAX_SHOT_BYTES = 10 * 1024 * 1024; // 10 MB
+const SHOT_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
 function currentOs(): string {
   try {
     return (navigator.platform || navigator.userAgent || "unknown").slice(0, 80);
@@ -34,6 +39,7 @@ export function ReportModal({
   const [whatDoing, setWhatDoing] = useState("");
   const [details, setDetails] = useState("");
   const [shot, setShot] = useState<Blob | null>(null);
+  const [shotError, setShotError] = useState<string | null>(null);
   const [showDiag, setShowDiag] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -86,7 +92,16 @@ export function ReportModal({
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (f) setShot(f);
+    if (f) {
+      if (!SHOT_TYPES.includes(f.type)) {
+        setShotError("Screenshot must be an image (PNG, JPEG, WebP, or GIF).");
+      } else if (f.size > MAX_SHOT_BYTES) {
+        setShotError("Screenshot is too large — 10 MB max.");
+      } else {
+        setShotError(null);
+        setShot(f);
+      }
+    }
     // Reset so re-picking the same file still fires onChange.
     e.target.value = "";
   }
@@ -202,7 +217,7 @@ export function ReportModal({
               {shotUrl ? (
                 <>
                   <img src={shotUrl} alt="Screenshot preview" className="h-12 w-20 rounded-sm border border-helios-line object-cover" />
-                  <button type="button" onClick={() => setShot(null)} className="text-xs text-helios-dim hover:text-helios-danger">
+                  <button type="button" onClick={() => { setShot(null); setShotError(null); }} className="text-xs text-helios-dim hover:text-helios-danger">
                     Remove screenshot
                   </button>
                 </>
@@ -216,6 +231,11 @@ export function ReportModal({
                 </button>
               )}
             </div>
+            {shotError && (
+              <div className="rounded-sm border border-helios-danger bg-helios-danger/10 px-2 py-1 text-xs text-helios-danger">
+                {shotError}
+              </div>
+            )}
 
             <div className="rounded-sm border border-helios-line">
               <button
