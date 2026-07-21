@@ -56,6 +56,15 @@ function buildHappyClient(): SupabaseClient {
     },
     rpc: (name: string, _args: any) => {
       callLog.push(`rpc:${name}`);
+      // Folder creation goes through the resurrect-or-create RPC
+      // (20260721000000) — return its {folder, created, resurrected} shape.
+      if (name === "pdm_create_folder") {
+        const n = callLog.filter((s) => s === "rpc:pdm_create_folder").length;
+        return Promise.resolve({
+          data: { folder: { id: `dir-${n}` }, created: true, resurrected: false },
+          error: null,
+        });
+      }
       return Promise.resolve({ data: {}, error: null });
     },
     from: vi.fn().mockImplementation((table: string) => {
@@ -82,6 +91,7 @@ function buildHappyClient(): SupabaseClient {
       if (table === "folders") {
         return {
           // Chain: select → eq(vault_id) → is(deleted_at,null) → eq(name) → {is|eq}(parent_id)
+          // Lookup only — creation happens via the pdm_create_folder RPC.
           select: () => ({
             eq: () => ({
               is: () => ({
@@ -96,17 +106,6 @@ function buildHappyClient(): SupabaseClient {
                   },
                 }),
               }),
-            }),
-          }),
-          insert: (_row: any) => ({
-            select: () => ({
-              single: () => {
-                callLog.push("folders.insert");
-                return Promise.resolve({
-                  data: { id: `dir-${callLog.filter((s) => s === "folders.insert").length}` },
-                  error: null,
-                });
-              },
             }),
           }),
         };
@@ -326,9 +325,9 @@ describe("useAddLocalFile", () => {
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
     expect(result.current.hook.error?.message ?? null).toBeNull();
-    // 2 folder lookups (Engine, Internals) + 2 folder inserts + the file flow
+    // 2 folder lookups (Engine, Internals) + 2 create RPCs + the file flow
     expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
-    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(2);
+    expect(callLog.filter((s) => s === "rpc:pdm_create_folder")).toHaveLength(2);
   });
 
   it("nested file with existing parent: only creates the missing leaf", async () => {
@@ -370,14 +369,6 @@ describe("useAddLocalFile", () => {
               }),
             }),
           }),
-          insert: () => ({
-            select: () => ({
-              single: () => {
-                callLog.push("folders.insert");
-                return Promise.resolve({ data: { id: "internals-new" }, error: null });
-              },
-            }),
-          }),
         };
       }
       return { select: () => Promise.resolve({ data: [], error: null }) };
@@ -395,75 +386,31 @@ describe("useAddLocalFile", () => {
 
     expect(result.current.hook.error?.message ?? null).toBeNull();
     expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
-    // Only 1 insert because Engine already existed
-    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(1);
+    // Only 1 create RPC because Engine already existed
+    expect(callLog.filter((s) => s === "rpc:pdm_create_folder")).toHaveLength(1);
   });
 
-  it("retries by re-query when folder INSERT races against another caller", async () => {
-    // Regression guard for the 2026-05-25 audit: useAddLocalFile.ts's
-    // ensureFolderHierarchy has a critical retry-by-query path for "two
-    // bulk-adds collide on the same brand-new deep folder". The first
-    // lookup returns no row; the INSERT fails with a unique_violation;
-    // the post-failure re-query finds the row another caller just inserted
-    // and we reuse it. Without this branch, bulk-adds with deep paths
-    // would fail half-the-time on the second-and-later items.
+  it("a folder-create race is absorbed by the RPC: the hook reuses the winner's row", async () => {
+    // The 2026-05-25 regression guard ("two bulk-adds collide on the same
+    // brand-new deep folder") moved SERVER-side in 20260721000000:
+    // pdm.create_folder retries internally and returns the winning row with
+    // created:false. The hook must treat that as success, use the returned
+    // id, and NOT claim the folder for failure-path cleanup (it existed
+    // anyway — created:false, resurrected:false).
     const c = buildHappyClient();
-    let lookupRound = 0;
-    (c.from as any).mockImplementation((table: string) => {
-      if (table === "files") {
-        return {
-          insert: () => ({
-            select: () => ({
-              single: () => { callLog.push("files.insert"); return Promise.resolve({ data: FILE_ROW, error: null }); },
-            }),
-          }),
-        };
+    (c as any).rpc = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      if (name === "pdm_create_folder") {
+        return Promise.resolve({
+          data: { folder: { id: "race-winner" }, created: false, resurrected: false },
+          error: null,
+        });
       }
-      if (table === "locks") {
-        return { insert: () => { callLog.push("locks.insert"); return Promise.resolve({ data: { id: "l1" }, error: null }); } };
+      if (name === "pdm_add_and_lock") {
+        return Promise.resolve({ data: { lock_id: "l1", created: true }, error: null });
       }
-      if (table === "folders") {
-        return {
-          select: () => ({
-            eq: () => ({
-              is: () => ({
-                eq: () => ({
-                  is: () => {
-                    callLog.push("folders.lookup");
-                    // 1st call: initial lookup — folder doesn't exist yet → []
-                    // 2nd call: post-INSERT retry — another caller created it,
-                    //           so it now exists.
-                    lookupRound++;
-                    if (lookupRound === 1) return Promise.resolve({ data: [], error: null });
-                    return Promise.resolve({ data: [{ id: "race-created" }], error: null });
-                  },
-                  // Same as above for non-null parent — unused in this test
-                  // because we use a single-segment relative path.
-                  eq: () => Promise.resolve({ data: [], error: null }),
-                }),
-              }),
-            }),
-          }),
-          insert: () => ({
-            select: () => ({
-              single: () => {
-                callLog.push("folders.insert");
-                // Simulate a unique_violation as if another caller already
-                // inserted this folder between our lookup and our INSERT.
-                return Promise.resolve({
-                  data: null,
-                  error: {
-                    code: "23505",
-                    message: 'duplicate key value violates unique constraint "folders_vault_parent_name_key"',
-                  },
-                });
-              },
-            }),
-          }),
-        };
-      }
-      return { select: () => Promise.resolve({ data: [], error: null }) };
-    });
+      return Promise.resolve({ data: {}, error: null });
+    };
 
     const oneLevelDeep = { ...localFileRoot, relativePath: "Engine/cylinder.sldprt", basename: "cylinder.sldprt" };
     const { result } = renderHook(
@@ -476,46 +423,28 @@ describe("useAddLocalFile", () => {
     await act(async () => { returned = await result.current.hook.run("v1", oneLevelDeep); });
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
-    // The hook recovered: it did one INSERT (which failed) but then
-    // re-queried, found the racing row, and proceeded with the file flow.
-    expect(callLog.filter((s) => s === "folders.lookup")).toHaveLength(2);
-    expect(callLog.filter((s) => s === "folders.insert")).toHaveLength(1);
+    expect(callLog.filter((s) => s === "rpc:pdm_create_folder")).toHaveLength(1);
     expect(callLog).toContain("storage.upload");
     expect(callLog).toContain("rpc:pdm_add_and_lock");
     expect(returned.ok).toBe(true);
     expect(result.current.hook.error?.message ?? null).toBeNull();
   });
 
-  it("throws when folder INSERT fails AND the post-INSERT re-query also finds nothing", async () => {
-    // The audit's other half: only the retry-by-query path is forgiving;
-    // a true RLS denial (not a race) must still propagate, otherwise the
-    // user would think their file was added when it wasn't.
+  it("surfaces a create-folder denial from the RPC as a failed add", async () => {
+    // Only genuine races are forgiving (absorbed inside the RPC); a true
+    // authorization denial must still propagate, otherwise the user would
+    // think their file was added when it wasn't.
     const c = buildHappyClient();
-    (c.from as any).mockImplementation((table: string) => {
-      if (table === "folders") {
-        return {
-          select: () => ({
-            eq: () => ({
-              is: () => ({
-                eq: () => ({
-                  is: () => Promise.resolve({ data: [], error: null }),
-                  eq: () => Promise.resolve({ data: [], error: null }),
-                }),
-              }),
-            }),
-          }),
-          insert: () => ({
-            select: () => ({
-              single: () => Promise.resolve({
-                data: null,
-                error: { code: "42501", message: "permission denied for table folders" },
-              }),
-            }),
-          }),
-        };
+    (c as any).rpc = (name: string, _args: any) => {
+      callLog.push(`rpc:${name}`);
+      if (name === "pdm_create_folder") {
+        return Promise.resolve({
+          data: null,
+          error: { code: "42501", message: "editor or admin role required to create folders" },
+        });
       }
-      return { select: () => Promise.resolve({ data: [], error: null }) };
-    });
+      return Promise.resolve({ data: {}, error: null });
+    };
 
     const oneLevelDeep = { ...localFileRoot, relativePath: "Engine/cylinder.sldprt", basename: "cylinder.sldprt" };
     const { result } = renderHook(
@@ -529,7 +458,50 @@ describe("useAddLocalFile", () => {
     await waitFor(() => expect(result.current.hook.loading).toBe(false));
 
     expect(returned.ok).toBe(false);
-    expect(returned.error).toMatch(/permission denied/i);
+    expect(returned.error).toMatch(/create folder "Engine": editor or admin role required/i);
+    // Nothing was created, so the failure path had nothing to clean up.
+    expect(callLog.filter((s) => s === "rpc:pdm_cleanup_empty_folder")).toHaveLength(0);
+  });
+
+  it("M5: a failed add un-creates the folders it just materialized, deepest first", async () => {
+    const c = buildHappyClient();
+    const cleaned: string[] = [];
+    (c as any).rpc = (name: string, args: any) => {
+      callLog.push(`rpc:${name}`);
+      if (name === "pdm_create_folder") {
+        const n = callLog.filter((s) => s === "rpc:pdm_create_folder").length;
+        return Promise.resolve({
+          data: { folder: { id: `dir-${n}` }, created: true, resurrected: false },
+          error: null,
+        });
+      }
+      if (name === "pdm_add_and_lock") {
+        return Promise.resolve({ data: null, error: { message: "boom" } });
+      }
+      if (name === "pdm_cleanup_empty_folder") {
+        cleaned.push(args.p_folder_id);
+        return Promise.resolve({ data: true, error: null });
+      }
+      return Promise.resolve({ data: {}, error: null });
+    };
+
+    const nested = { ...localFileRoot, relativePath: "Engine/Internals/cylinder.sldprt", basename: "cylinder.sldprt" };
+    const { result } = renderHook(
+      () => ({ hook: useAddLocalFile(), authLoading: useAuthLoading() }),
+      { wrapper: wrap(c) },
+    );
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+
+    let returned: any;
+    await act(async () => { returned = await result.current.hook.run("v1", nested); });
+    await waitFor(() => expect(result.current.hook.loading).toBe(false));
+
+    // The add failure is what the user sees — cleanup must not mask it.
+    expect(returned.ok).toBe(false);
+    expect(returned.error).toMatch(/add_and_lock: boom/);
+    // Both just-created folders were undone, leaf first so each parent is
+    // empty by the time its own cleanup runs.
+    expect(cleaned).toEqual(["dir-2", "dir-1"]);
   });
 
   it("returns false and sets error when not authenticated", async () => {
