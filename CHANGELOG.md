@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-07-21
+
 ### Added
 
 - **Accounts can now be deleted from Org & Access → People & Roles.** A trash
