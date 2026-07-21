@@ -47,6 +47,10 @@ follow [semver](https://semver.org/).
 - **Slack notifications no longer silently drop an edit when two people touch
   the same task at the same moment.** The notification queue now coalesces
   concurrent edits atomically instead of discarding the loser's update.
+- **Adding an identical file to the vault now matches its checksum regardless
+  of letter case.** The add-and-lock duplicate check compared SHA-256 hashes
+  case-sensitively (unlike check-in and restore), so an uppercase-hex client
+  would be wrongly told the file "already exists with different content".
 
 ## [5.2.0] - 2026-07-21
 
