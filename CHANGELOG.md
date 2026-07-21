@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-07-21
+
 ### Changed
 
 - **Bug-report screenshots are now capped at 10 MB and must be images**
