@@ -44,6 +44,9 @@ follow [semver](https://semver.org/).
   values.** Typing 0 into mass, track, wheelbase, tire radius, CG height, or
   air density used to silently turn accel and lap-sim results into NaN; those
   fields now only accept sane positive values.
+- **Slack notifications no longer silently drop an edit when two people touch
+  the same task at the same moment.** The notification queue now coalesces
+  concurrent edits atomically instead of discarding the loser's update.
 
 ## [5.2.0] - 2026-07-21
 
