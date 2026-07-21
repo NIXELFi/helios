@@ -45,7 +45,8 @@ export function ConfirmDialog({
     // Always self-close after running the action so callers no longer have to
     // wire close into every onConfirm. try/finally guarantees the dialog
     // dismisses even if onConfirm throws. Callers that ALSO close in onConfirm
-    // (e.g. Vault's AdminScreen) stay correct because closing is idempotent.
+    // (e.g. the Org module's delete-account flow) stay correct because closing
+    // is idempotent.
     try {
       onConfirm();
     } finally {

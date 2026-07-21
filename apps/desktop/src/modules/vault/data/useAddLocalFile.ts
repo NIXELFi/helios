@@ -83,23 +83,36 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 /**
  * Walks the local file's relative path; for each path segment that doesn't
  * already exist as a folder under the vault, creates it. Returns the leaf
- * folder_id (or null if the file is in the vault root).
+ * folder_id (or null if the file is in the vault root) plus the ids of every
+ * folder THIS call brought into existence, deepest last — so a caller whose
+ * later add step fails can undo them (see the cleanup in `run`'s catch).
+ *
+ * `createdOut` is filled AS folders are created, not on return — so when the
+ * walk itself fails mid-chain (segment 2 of A/B/C), the ancestors already
+ * created are still reported to the caller's failure cleanup rather than
+ * stranded.
  *
  * IMPORTANT: This function queries folders fresh from the database for EACH
  * segment, on EVERY call. The previous implementation accepted a `folders`
  * snapshot from React state, which went stale across batched bulk-adds —
  * adding two files into the same brand-new deep folder failed on the second
  * one with a unique-constraint violation. Querying live keeps a single hook
- * instance correct across N sequential `run()` calls in a bulk add, and also
- * handles concurrent races (two clients adding the same path) via a
- * post-failure retry-by-query.
+ * instance correct across N sequential `run()` calls in a bulk add.
+ *
+ * Creation goes through the pdm_create_folder RPC (20260721000000), which
+ * resolves both failure modes the old direct INSERT had: a concurrent create
+ * race (returns the winner's row) and a recycle-bin tombstone squatting on
+ * the name (resurrects it empty — previously a permanent unique-violation,
+ * audit M2).
  */
-async function ensureFolderHierarchy(
+export async function ensureFolderHierarchy(
   client: any,
   vaultId: VaultId,
   relativeDirSegments: string[],
-): Promise<FolderId | null> {
+  createdOut?: FolderId[],
+): Promise<{ folderId: FolderId | null; createdFolderIds: FolderId[] }> {
   let parentId: FolderId | null = null;
+  const createdFolderIds: FolderId[] = createdOut ?? [];
 
   for (const seg of relativeDirSegments) {
     // Look up: does a folder with (vault_id, parent_id, name) already exist?
@@ -115,34 +128,25 @@ async function ensureFolderHierarchy(
     const { data: existing, error: lookupErr } = await q;
     if (lookupErr) throw new Error(`lookup folder "${seg}": ${lookupErr.message}`);
 
-    let found = existing?.[0];
-    if (!found) {
-      const { data: created, error } = await client
-        .from("folders")
-        .insert({ vault_id: vaultId, parent_id: parentId, name: seg })
-        .select()
-        .single();
-      if (error) {
-        // Race: another op (or another iteration in this same batch) may have
-        // created it between our lookup and our insert. Re-query and reuse.
-        let raceQ = client
-          .from("folders")
-          .select("*")
-          .eq("vault_id", vaultId)
-          .is("deleted_at", null)
-          .eq("name", seg);
-        raceQ = parentId === null ? raceQ.is("parent_id", null) : raceQ.eq("parent_id", parentId);
-        const { data: race } = await raceQ;
-        if (race?.[0]) found = race[0];
-        else throw new Error(`create folder "${seg}": ${error.message}`);
-      } else {
-        found = created;
-      }
+    const found = existing?.[0];
+    if (found) {
+      parentId = found.id;
+      continue;
     }
-    parentId = found.id;
+    const { data, error } = await client.rpc("pdm_create_folder", {
+      p_vault_id: vaultId,
+      p_parent_id: parentId,
+      p_name: seg,
+    });
+    if (error) throw new Error(`create folder "${seg}": ${error.message}`);
+    const res = data as { folder: { id: FolderId }; created: boolean; resurrected: boolean };
+    parentId = res.folder.id;
+    // A row we found live (created:false, resurrected:false = another op won a
+    // race) existed anyway — only rows this call materialized are ours to undo.
+    if (res.created || res.resurrected) createdFolderIds.push(parentId);
   }
 
-  return parentId;
+  return { folderId: parentId, createdFolderIds };
 }
 
 export function useAddLocalFile() {
@@ -186,6 +190,10 @@ export function useAddLocalFile() {
       }
       setLoading(true);
       setError(null);
+      // Folders materialized by THIS call, for the failure-path undo below.
+      // Passed INTO ensureFolderHierarchy so a mid-chain failure still leaves
+      // the already-created ancestors here for cleanup.
+      const createdFolderIds: FolderId[] = [];
       try {
         // 1. Resolve folder hierarchy. e.g. "Chassis/Subframe/x.sldprt" → ["Chassis","Subframe"]
         //    A targetPrefix re-parents the whole import beneath it.
@@ -195,7 +203,7 @@ export function useAddLocalFile() {
         const segments = effectiveRelPath.split("/");
         const fileName = segments[segments.length - 1];
         const dirSegments = segments.slice(0, -1);
-        const folderId = await ensureFolderHierarchy(client, vaultId, dirSegments);
+        const { folderId } = await ensureFolderHierarchy(client, vaultId, dirSegments, createdFolderIds);
 
         // 2. Resolve sha256 + size. The local-folder scan already computed and
         //    cached local.sha256 (and sizeBytes) — reuse it instead of
@@ -282,6 +290,20 @@ export function useAddLocalFile() {
         setLoading(false);
         return { ok: true, lockAcquired, alreadyExisted };
       } catch (e) {
+        // Undo folders this add materialized but never filled (audit M5: a
+        // failed read/upload/RPC used to strand the just-created chain).
+        // Deepest-first so each parent is empty by the time we reach it. The
+        // server refuses if anything live landed in one meanwhile (e.g. an
+        // earlier file of a bulk add succeeded into it) — and any refusal or
+        // error here is swallowed: the user's failure is the ADD error, and a
+        // best-effort cleanup must never replace or mask it.
+        for (const id of [...createdFolderIds].reverse()) {
+          try {
+            await client.rpc("pdm_cleanup_empty_folder", { p_folder_id: id });
+          } catch {
+            /* best-effort */
+          }
+        }
         const msg = e instanceof Error ? e.message : String(e);
         setError(new Error(msg));
         setLoading(false);

@@ -13,7 +13,8 @@ import {
   IconUsers,
   IconX,
 } from "@tabler/icons-react";
-import { useSupabaseClient } from "@helios/auth";
+import { useSupabaseClient, useUser } from "@helios/auth";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
   useCapabilities,
   useMyCapabilities,
@@ -163,13 +164,16 @@ interface Subteam {
 
 function PeopleRolesPanel() {
   const client = useSupabaseClient();
+  const me = useUser();
   const { data: people, loading, error, refetch } = usePeople();
   // Pull each role's capability set too, so we can apply the server's
   // grant-subset rule client-side (only offer roles the granter can actually
   // grant) instead of always failing the RPC.
   const { data: roles } = useRolesWithCaps();
   const { can, refetch: refetchMyCaps } = useMyCapabilities();
-  const { grantRole, revokeRole, updatePerson } = useOrgMutations();
+  const { grantRole, revokeRole, updatePerson, deletePerson } = useOrgMutations();
+  // Pending account deletion awaiting the confirm dialog; null = closed.
+  const [confirmDelete, setConfirmDelete] = useState<Person | null>(null);
 
   const [subteams, setSubteams] = useState<Subteam[]>([]);
   useEffect(() => {
@@ -234,6 +238,14 @@ function PeopleRolesPanel() {
     setBusyUser(target);
     setActionError(null);
     const r = await updatePerson(target, name, subteam);
+    if (!r.ok) setActionError(r.error);
+    else refetch();
+    setBusyUser(null);
+  }
+  async function doDelete(target: string) {
+    setBusyUser(target);
+    setActionError(null);
+    const r = await deletePerson(target);
     if (!r.ok) setActionError(r.error);
     else refetch();
     setBusyUser(null);
@@ -309,10 +321,12 @@ function PeopleRolesPanel() {
                   subteams={subteams}
                   subteamName={subteamName}
                   busy={busyUser === p.user_id}
+                  isMe={p.user_id === me?.id}
                   can={can}
                   onGrant={doGrant}
                   onRevoke={doRevoke}
                   onUpdate={doUpdate}
+                  onDelete={(person) => setConfirmDelete(person)}
                 />
               ))}
               {total === 0 && (
@@ -333,6 +347,33 @@ function PeopleRolesPanel() {
           </table>
         </div>
       )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete account"
+          body={
+            <>
+              Permanently delete{" "}
+              <span className="font-semibold">
+                {confirmDelete.display_name ?? confirmDelete.email ?? confirmDelete.user_id}
+              </span>
+              ? This removes their account and access for good, releases any files they have
+              checked out, and un-assigns work they created. Authorship history is preserved
+              (shown as an unknown user).
+              <span className="mt-2 block text-red-300">This cannot be undone.</span>
+            </>
+          }
+          confirmLabel="Delete account"
+          confirmTone="danger"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            const p = confirmDelete;
+            setConfirmDelete(null);
+            doDelete(p.user_id);
+          }}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
@@ -343,12 +384,14 @@ function PersonRow(props: {
   subteams: Subteam[];
   subteamName: Map<string, string>;
   busy: boolean;
+  isMe: boolean;
   can: (cap: string, subteamId?: string | null) => boolean;
   onGrant: (target: string, roleKey: string, subteamId: string | null) => void;
   onRevoke: (target: string, roleKey: string, subteamId: string | null) => void;
   onUpdate: (target: string, name: string | null, subteam: string | null) => void;
+  onDelete: (person: Person) => void;
 }) {
-  const { person, roles, subteams, subteamName, busy, can, onGrant, onRevoke, onUpdate } = props;
+  const { person, roles, subteams, subteamName, busy, isMe, can, onGrant, onRevoke, onUpdate, onDelete } = props;
   const [adding, setAdding] = useState(false);
   const [roleKey, setRoleKey] = useState("");
   const [subteamId, setSubteamId] = useState("");
@@ -356,6 +399,26 @@ function PersonRow(props: {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(person.display_name ?? "");
   const [editSubteam, setEditSubteam] = useState(person.signup_subteam ?? "");
+
+  // Client mirror of the server's admin-tier delete/edit guard (20260721000100):
+  // a target holding an org-scoped role that carries org.grant_roles or
+  // org.manage_admins is owner-managed. Legacy-only pdm admin rows aren't
+  // visible from here — the server still refuses those; this only shapes the
+  // tooltip so the refusal isn't a surprise.
+  const targetIsAdminTier = useMemo(
+    () =>
+      person.roles.some((pr) => {
+        if (pr.scope !== "org") return false;
+        const caps = roles.find((r) => r.key === pr.role)?.capabilities ?? [];
+        return caps.includes("org.grant_roles") || caps.includes("org.manage_admins");
+      }),
+    [person.roles, roles],
+  );
+  const deleteTitle = isMe
+    ? "You can't delete your own account."
+    : targetIsAdminTier
+      ? "Admin-tier account — only the owner can delete it."
+      : "Permanently delete this account…";
 
   // Subteam options for the editor: the real subteams, plus the current value if
   // it's a legacy/free-text one (e.g. "President") so editing never loses it.
@@ -476,6 +539,18 @@ function PersonRow(props: {
                   className="rounded p-1 text-helios-dim opacity-0 transition hover:text-asu-gold focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold group-hover/edit:opacity-100 disabled:opacity-40"
                 >
                   <IconPencil size={13} strokeWidth={1.5} />
+                </button>
+              )}
+              {canManagePeople && (
+                <button
+                  type="button"
+                  disabled={busy || isMe}
+                  aria-label={`Delete ${person.display_name ?? person.email ?? "user"}`}
+                  title={deleteTitle}
+                  onClick={() => onDelete(person)}
+                  className="rounded p-1 text-helios-dim opacity-0 transition hover:text-red-300 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold group-hover/edit:opacity-100 disabled:opacity-40"
+                >
+                  <IconTrash size={13} strokeWidth={1.5} />
                 </button>
               )}
             </div>
