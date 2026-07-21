@@ -74,6 +74,39 @@ describe("ReportModal", () => {
     expect(screen.getByRole("button", { name: "Upload screenshot" })).toBeInTheDocument();
   });
 
+  it("rejects a screenshot over 10 MB with an inline error and no preview", () => {
+    open("bug");
+    const input = screen.getByLabelText("Upload screenshot");
+    const big = new File(["x"], "big.png", { type: "image/png" });
+    Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
+    fireEvent.change(input, { target: { files: [big] } });
+    expect(screen.getByText(/too large — 10 MB max/)).toBeInTheDocument();
+    expect(screen.queryByAltText("Screenshot preview")).not.toBeInTheDocument();
+  });
+
+  it("rejects a non-image file with an inline error and no preview", () => {
+    open("bug");
+    const input = screen.getByLabelText("Upload screenshot");
+    const pdf = new File(["%PDF-1.4"], "notes.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [pdf] } });
+    expect(screen.getByText(/must be an image/)).toBeInTheDocument();
+    expect(screen.queryByAltText("Screenshot preview")).not.toBeInTheDocument();
+  });
+
+  it("a valid pick after a rejected one clears the error and shows the preview", () => {
+    open("bug");
+    const input = screen.getByLabelText("Upload screenshot");
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "notes.pdf", { type: "application/pdf" })] },
+    });
+    expect(screen.getByText(/must be an image/)).toBeInTheDocument();
+    fireEvent.change(input, {
+      target: { files: [new File(["img"], "shot.png", { type: "image/png" })] },
+    });
+    expect(screen.queryByText(/must be an image/)).not.toBeInTheDocument();
+    expect(screen.getByAltText("Screenshot preview")).toBeInTheDocument();
+  });
+
   it("autofocuses the Title input on initial mount", () => {
     open("bug");
     expect(screen.getByPlaceholderText("Short summary of the problem")).toHaveFocus();

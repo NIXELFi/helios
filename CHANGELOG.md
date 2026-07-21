@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Bug-report screenshots are now capped at 10 MB and must be images**
+  (PNG, JPEG, WebP, or GIF). The Report modal explains the rejection inline
+  instead of failing on upload, and the storage bucket enforces the same cap
+  server-side.
+
 ### Fixed
 
 - **Two admins removing owners at the same moment can no longer leave the org
