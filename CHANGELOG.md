@@ -33,6 +33,10 @@ follow [semver](https://semver.org/).
   with zero owners.** Owner-revokes are now serialized, so the second removal
   always sees the first and the "cannot remove the last owner" guard holds
   under concurrency.
+- **Performance-sim vehicle inputs now refuse zero and negative physical
+  values.** Typing 0 into mass, track, wheelbase, tire radius, CG height, or
+  air density used to silently turn accel and lap-sim results into NaN; those
+  fields now only accept sane positive values.
 
 ## [5.2.0] - 2026-07-21
 

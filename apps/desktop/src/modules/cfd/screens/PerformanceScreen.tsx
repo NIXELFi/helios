@@ -847,9 +847,9 @@ function VehicleEditor({
         </div>
       )}
       <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-6">
-        <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} onChange={(n) => set({ massKg: n })} />
+        <NumField label="mass" unit="kg" value={vehicle.massKg} step={1} min={1} onChange={(n) => set({ massKg: n })} />
         <NumField label="front wt" value={vehicle.weightDistFront} step={0.01} onChange={(n) => set({ weightDistFront: n })} />
-        <NumField label="CG height" unit="m" value={vehicle.cgHeightM} step={0.005} onChange={(n) => set({ cgHeightM: n })} />
+        <NumField label="CG height" unit="m" value={vehicle.cgHeightM} step={0.005} min={0.01} onChange={(n) => set({ cgHeightM: n })} />
         <NumField label="μ long" value={vehicle.muLong} step={0.05} onChange={(n) => set({ muLong: n })}
           disabled={!!tire} disabledHint="Overridden by the imported tire model — remove it to use this" />
         <NumField label="μ lat" value={vehicle.muLat} step={0.05} onChange={(n) => set({ muLat: n })}
@@ -869,11 +869,11 @@ function VehicleEditor({
           )}
         </div>
         <NumField label="CdA" unit="m²" value={vehicle.cdaM2} step={0.01} onChange={(n) => set({ cdaM2: n })} />
-        <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} onChange={(n) => set({ airDensityKgM3: n })} />
+        <NumField label="ρ air" unit="kg/m³" value={vehicle.airDensityKgM3} step={0.01} min={0.1} onChange={(n) => set({ airDensityKgM3: n })} />
         <NumField label="Crr" value={vehicle.crr} step={0.005} onChange={(n) => set({ crr: n })} />
         <NumField label="driveline η" value={vehicle.drivetrainEff} step={0.01} onChange={(n) => set({ drivetrainEff: n })} />
-        <NumField label="track" unit="m" value={vehicle.trackWidthM} step={0.01} onChange={(n) => set({ trackWidthM: n })} />
-        <NumField label="wheelbase" unit="m" value={vehicle.wheelbaseM} step={0.01} onChange={(n) => set({ wheelbaseM: n })} />
+        <NumField label="track" unit="m" value={vehicle.trackWidthM} step={0.01} min={0.1} onChange={(n) => set({ trackWidthM: n })} />
+        <NumField label="wheelbase" unit="m" value={vehicle.wheelbaseM} step={0.01} min={0.1} onChange={(n) => set({ wheelbaseM: n })} />
         <NumField label="shift" unit="rpm" value={vehicle.shiftRpm} step={100} onChange={(n) => set({ shiftRpm: n })} />
         <NumField label="rev limit" unit="rpm" value={vehicle.revLimitRpm} step={100} onChange={(n) => set({ revLimitRpm: n })} />
         <NumField label="shift time" unit="s" value={vehicle.shiftTimeS} step={0.01} onChange={(n) => set({ shiftTimeS: n })} />
@@ -882,7 +882,7 @@ function VehicleEditor({
         <div className="mb-2 flex flex-wrap items-end gap-3">
           <NumField label="final drive" value={vehicle.finalDrive} step={0.05} onChange={(n) => set({ finalDrive: n })} />
           <NumField label="primary" value={vehicle.primaryReduction} step={0.001} onChange={(n) => set({ primaryReduction: n })} />
-          <NumField label="tire r" unit="m" value={vehicle.tireRadiusM} step={0.005} onChange={(n) => set({ tireRadiusM: n })} />
+          <NumField label="tire r" unit="m" value={vehicle.tireRadiusM} step={0.005} min={0.01} onChange={(n) => set({ tireRadiusM: n })} />
           <span className="pb-1.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
             top {(topSpeedMps(vehicle) * 3.6).toFixed(0)} km/h
           </span>
@@ -911,6 +911,7 @@ function NumField({
   value,
   onChange,
   step = 1,
+  min,
   unit,
   disabled,
   disabledHint,
@@ -919,6 +920,9 @@ function NumField({
   value: number;
   onChange: (n: number) => void;
   step?: number;
+  /** Reject values below this (guards physical quantities used as divisors —
+   *  0/negative mass, track, etc. would turn sim results into NaN). */
+  min?: number;
   unit?: string;
   disabled?: boolean;
   disabledHint?: string;
@@ -935,11 +939,12 @@ function NumField({
       <input
         type="number"
         step={step}
+        min={min}
         value={value}
         disabled={disabled}
         onChange={(e) => {
           const n = parseFloat(e.target.value);
-          if (Number.isFinite(n)) onChange(n);
+          if (Number.isFinite(n) && (min === undefined || n >= min)) onChange(n);
         }}
         className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:cursor-not-allowed"
       />
