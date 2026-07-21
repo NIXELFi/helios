@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two admins removing owners at the same moment can no longer leave the org
+  with zero owners.** Owner-revokes are now serialized, so the second removal
+  always sees the first and the "cannot remove the last owner" guard holds
+  under concurrency.
+
 ## [5.2.0] - 2026-07-21
 
 ### Added
