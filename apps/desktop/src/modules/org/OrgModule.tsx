@@ -23,6 +23,7 @@ import {
   useProjectSubteams,
   useRolesWithCaps,
   useSubteams,
+  canRevokeRole,
   grantableCapsPayload,
   roleCapsHeldInScope,
   type Capability,
@@ -614,15 +615,17 @@ function PersonRow(props: {
                   {r.scope === "subteam" && r.subteam_id ? (
                     <span className="opacity-70">· {subteamName.get(r.subteam_id) ?? "?"}</span>
                   ) : null}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    aria-label={`Remove ${r.label}`}
-                    onClick={() => onRevoke(person.user_id, r.role, r.subteam_id)}
-                    className="ml-0.5 rounded-full p-0.5 text-current opacity-60 transition hover:bg-red-500/20 hover:text-red-300 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
-                  >
-                    <IconX size={11} strokeWidth={2} />
-                  </button>
+                  {canRevokeRole(r, can) && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Remove ${r.label}`}
+                      onClick={() => onRevoke(person.user_id, r.role, r.subteam_id)}
+                      className="ml-0.5 rounded-full p-0.5 text-current opacity-60 transition hover:bg-red-500/20 hover:text-red-300 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+                    >
+                      <IconX size={11} strokeWidth={2} />
+                    </button>
+                  )}
                 </span>
               );
             })
@@ -675,7 +678,12 @@ function PersonRow(props: {
               </button>
             </span>
           ) : (
-            (can("org.grant_roles") || can("pm.grant_subteam_roles")) && (
+            // Gate on "is there anything this user could actually grant here"
+            // rather than on raw capability keys: `can(cap)` with no subteam id
+            // only honors ORG-wide grants, so a subteam-scoped Lead (who holds
+            // pm.grant_subteam_roles for their subteam only) would never see
+            // the button even though pm.grant_role accepts them.
+            grantableRoles.length > 0 && (
               <button
                 type="button"
                 disabled={busy}

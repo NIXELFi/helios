@@ -27,6 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Org — leads can assign roles again.** The "+ role" button in People & Roles never appeared for subteam leads: the button's gate only recognized *org-wide* grant capabilities, while a lead holds `pm.grant_subteam_roles` scoped to their subteam (the server accepted lead grants all along — only the button was missing). The button now appears whenever there is at least one role the signed-in user can actually grant. Role chips likewise only show their remove (×) button when the revoke would be accepted — leads no longer see remove buttons on org-wide or other-subteam roles that always failed with a permissions error.
+
+### Security
+- **SOLIDWORKS bridge: `checkin` and `getLatest` are now confined to the vault folder**, like `add` already was. Before, a caller holding the per-launch loopback token could point `checkin` at any local file (arbitrary read → exfiltrate into the vault) or `getLatest` at any destination (arbitrary write). Both ops now refuse paths that don't resolve to a location inside a vault folder.
+
 ## [5.2.1] - 2026-07-21
 
 ### Changed

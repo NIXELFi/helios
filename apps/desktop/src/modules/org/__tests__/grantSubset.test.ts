@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { grantableCapsPayload, roleCapsHeldInScope, type CanFn } from "../data/useOrgData";
+import { canRevokeRole, grantableCapsPayload, roleCapsHeldInScope, type CanFn } from "../data/useOrgData";
 
 // Build a `can(cap, subteamId?)` matching useMyCapabilities' resolver from a
 // flat list of granted caps: subteam_id null ⇒ applies everywhere; otherwise
@@ -72,5 +72,56 @@ describe("grantableCapsPayload (role-editor save, bug 2)", () => {
     const can = makeCan([{ capability_key: "pm.edit", subteam_id: "st-aero" }]);
     // pm.edit is held only in st-aero, not org-wide → must not be sent.
     expect(grantableCapsPayload(new Set(["pm.edit"]), can)).toEqual([]);
+  });
+});
+
+describe("subteam-scoped Lead can grant (the missing plus button)", () => {
+  // A Lead holds pm.grant_subteam_roles ONLY for their subteam. The old plus-
+  // button gate called can("pm.grant_subteam_roles") with no subteam id, which
+  // matches org-wide grants only — so the button never rendered for Leads even
+  // though pm.grant_role accepts them. The gate now derives from the grantable
+  // role set, whose per-subteam resolution these cases pin down.
+  const lead = makeCan([
+    { capability_key: "pm.view", subteam_id: "st-aero" },
+    { capability_key: "pm.edit_tasks", subteam_id: "st-aero" },
+    { capability_key: "pm.grant_subteam_roles", subteam_id: "st-aero" },
+  ]);
+
+  it("a scope-blind can() misses the Lead's grant capability (the old gate)", () => {
+    expect(lead("pm.grant_subteam_roles")).toBe(false);
+    expect(lead("pm.grant_subteam_roles", "st-aero")).toBe(true);
+  });
+
+  it("a member-tier role is grantable into the Lead's subteam but nowhere else", () => {
+    const memberCaps = ["pm.view", "pm.edit_tasks"];
+    expect(roleCapsHeldInScope(memberCaps, lead, "st-aero")).toBe(true);
+    expect(roleCapsHeldInScope(memberCaps, lead, "st-chassis")).toBe(false);
+    expect(roleCapsHeldInScope(memberCaps, lead, null)).toBe(false);
+  });
+});
+
+describe("canRevokeRole (revoke-gate mirror)", () => {
+  const lead = makeCan([{ capability_key: "pm.grant_subteam_roles", subteam_id: "st-aero" }]);
+  const orgGranter = makeCan([{ capability_key: "org.grant_roles", subteam_id: null }]);
+  const owner = makeCan([
+    { capability_key: "org.grant_roles", subteam_id: null },
+    { capability_key: "org.manage_admins", subteam_id: null },
+  ]);
+
+  it("a Lead can revoke only within their own subteam", () => {
+    expect(canRevokeRole({ role: "member", subteam_id: "st-aero" }, lead)).toBe(true);
+    expect(canRevokeRole({ role: "member", subteam_id: "st-chassis" }, lead)).toBe(false);
+    expect(canRevokeRole({ role: "advisor", subteam_id: null }, lead)).toBe(false);
+  });
+
+  it("owner/executive chips need org.manage_admins, not just org.grant_roles", () => {
+    expect(canRevokeRole({ role: "executive", subteam_id: null }, orgGranter)).toBe(false);
+    expect(canRevokeRole({ role: "owner", subteam_id: null }, orgGranter)).toBe(false);
+    expect(canRevokeRole({ role: "executive", subteam_id: null }, owner)).toBe(true);
+  });
+
+  it("an org granter can revoke org and subteam grants alike", () => {
+    expect(canRevokeRole({ role: "advisor", subteam_id: null }, orgGranter)).toBe(true);
+    expect(canRevokeRole({ role: "member", subteam_id: "st-aero" }, orgGranter)).toBe(true);
   });
 });
