@@ -28,6 +28,9 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **PM — members onboarded through Org & Access can edit tasks in the UI.** The PM module read roles from the legacy membership table only, so anyone granted access via Org & Access (the standard path) saw every edit control disabled with "You don't have access…" even though the server accepted their edits. `my_team_roles` now reports the same effective role the server's edit rules use (migration `20260722000000`).
+- **Vault — capability-granted admins get their admin controls.** The "New vault" form (Vault switcher) and the Insights spotlight picker were gated on the legacy global admin probe, hiding them from admins granted via Org & Access capabilities (and, for spotlight, from per-vault admins) — the server accepted both all along. Both now probe the same rule the database enforces.
+- **Org & Access — role editors and structure editors can reach the tool.** The rail entry only admitted role-granters; an account holding just Manage-roles or Manage-org-structure couldn't open the module its capabilities serve. The People tab hides for accounts the server's people-directory would refuse, instead of erroring.
 - **Org — leads can assign roles again.** The "+ role" button in People & Roles never appeared for subteam leads: the button's gate only recognized *org-wide* grant capabilities, while a lead holds `pm.grant_subteam_roles` scoped to their subteam (the server accepted lead grants all along — only the button was missing). The button now appears whenever there is at least one role the signed-in user can actually grant. Role chips likewise only show their remove (×) button when the revoke would be accepted — leads no longer see remove buttons on org-wide or other-subteam roles that always failed with a permissions error.
 
 ### Security

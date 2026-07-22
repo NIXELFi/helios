@@ -42,6 +42,21 @@ const TABS: { id: Tab; label: string; Icon: typeof IconUsers }[] = [
 
 export function OrgModule() {
   const [tab, setTab] = useState<Tab>("people");
+  // The People tab is backed by pm.list_people, which admits granters (org or
+  // subteam scope) and role editors — anyone else gets a server error, so hide
+  // the tab for them (e.g. a structure-editor-only account, reachable now that
+  // the rail admits org.manage_structure). Only prune AFTER capabilities load;
+  // an empty in-flight set must not flash the People tab away from admins.
+  const { can, canAnywhere, loading: capsLoading } = useMyCapabilities();
+  const canSeePeople =
+    capsLoading ||
+    can("org.grant_roles") ||
+    can("org.manage_roles") ||
+    canAnywhere("pm.grant_subteam_roles");
+  const visibleTabs = TABS.filter((t) => t.id !== "people" || canSeePeople);
+  useEffect(() => {
+    if (tab === "people" && !capsLoading && !canSeePeople) setTab("structure");
+  }, [tab, capsLoading, canSeePeople]);
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 flex-col gap-3 border-b border-helios-line px-5 pt-4">
@@ -60,7 +75,7 @@ export function OrgModule() {
           </div>
         </div>
         <nav className="-mb-px flex gap-0.5" aria-label="Admin sections">
-          {TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = tab === t.id;
             return (
               <button

@@ -2024,9 +2024,12 @@ export const selectIsAdmin = (state: PmState): boolean => selectMyRole(state) ==
 //
 // Any EDITOR (engineer or above) of the project/subteam may edit ANY task in it,
 // not just tasks they personally own or created — see the can_edit_task RLS
-// migration (2026-06-23). The role here comes from `my_team_roles`, which uses
-// the same `user_role_in_project` resolution as RLS (including the global-PDM
-// fallback), so engineer→allow matches the broadened RLS for the common case.
+// migration (2026-06-23). The role here comes from `my_team_roles`, which since
+// 20260722000000 reports `pm.effective_role` per project — the same resolver
+// the RLS edit gates use (legacy memberships + pdm fallback + org capability
+// bridge) — so engineer→allow matches the RLS for the common case. (Before that
+// migration it read raw team_memberships only, so capability-only members got a
+// view-only UI while RLS accepted their writes.)
 // The client can still UNDER-permit: a user whose only editor access is a
 // subteam-scoped role (e.g. engineer in a subteam a task is shared into, but a
 // lower project role) reads as the lower project role here, because the client
