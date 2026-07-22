@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.2.2] - 2026-07-22
+
 ### Fixed
 - **PM — members onboarded through Org & Access can edit tasks in the UI.** The PM module read roles from the legacy membership table only, so anyone granted access via Org & Access (the standard path) saw every edit control disabled with "You don't have access…" even though the server accepted their edits. `my_team_roles` now reports the same effective role the server's edit rules use (migration `20260722000000`).
 - **Vault — capability-granted admins get their admin controls.** The "New vault" form (Vault switcher) and the Insights spotlight picker were gated on the legacy global admin probe, hiding them from admins granted via Org & Access capabilities (and, for spotlight, from per-vault admins) — the server accepted both all along. Both now probe the same rule the database enforces.
