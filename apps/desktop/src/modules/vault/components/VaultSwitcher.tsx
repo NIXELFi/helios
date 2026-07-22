@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { IconCheck, IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { useActiveVault } from "../data/useActiveVault";
 import { useCreateVault } from "../data/useCreateVault";
-import { useIsAdmin } from "../data/useIsAdmin";
+import { useCanCreateVault } from "../data/useVaultRole";
 
 /**
  * Vault picker at the top of the NavRail. Mirrors the PM sidebar's project
@@ -12,7 +12,10 @@ import { useIsAdmin } from "../data/useIsAdmin";
  */
 export function VaultSwitcher() {
   const { activeVault, setActiveVaultId, vaults, refetch } = useActiveVault();
-  const isAdmin = useIsAdmin();
+  // Gate the New-vault form on the same predicate as the vaults INSERT policy
+  // (bridged is_admin_in), not the legacy-only global pdm_is_admin — a
+  // capability-only admin can create vaults server-side and must see the form.
+  const isAdmin = useCanCreateVault();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");

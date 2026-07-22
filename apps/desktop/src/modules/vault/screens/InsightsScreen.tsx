@@ -4,7 +4,7 @@ import { useAllFiles } from "../data/useAllFiles";
 import { useFolders } from "../data/useFolders";
 import { useLocks } from "../data/useLocks";
 import { useVaultUsers } from "../data/useVaultUsers";
-import { useIsAdmin } from "../data/useIsAdmin";
+import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useSetSpotlight } from "../data/useSetSpotlight";
 import { folderPath } from "../data/folder-paths";
 import { computeVaultInsights } from "../lib/vaultStats";
@@ -30,7 +30,10 @@ export function InsightsScreen() {
   const { data: folders } = useFolders(vaultId ?? undefined);
   const { data: locks } = useLocks();
   const { data: users } = useVaultUsers(); // admin-gated; errors ignored (fallback below)
-  const isAdmin = useIsAdmin();
+  // Spotlight writes go through the vaults UPDATE policy (bridged, PER-VAULT
+  // is_admin_in) — gate the affordance on the same probe, not the legacy-only
+  // global pdm_is_admin, so per-vault and capability-only admins get it too.
+  const isAdmin = useIsVaultAdmin(vaultId ?? null);
   const setSpotlight = useSetSpotlight();
   const { data: extra, loading: extraLoading } = useVaultInsightsExtra(vaultId ?? undefined);
   const { data: massRows, loading: massLoading } = useVaultMass(vaultId ?? undefined, files);

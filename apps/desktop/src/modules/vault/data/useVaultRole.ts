@@ -42,3 +42,15 @@ export function useIsVaultAdmin(vaultId: VaultId | null): boolean {
 export function useCanEditVault(vaultId: VaultId | null): boolean {
   return useVaultPermission("pdm_can_edit_in", vaultId);
 }
+
+/** May the current user create a NEW vault? Mirrors the vaults_insert_admin
+ *  policy (20260714030000): `pdm.is_admin_in(id)` evaluated for a
+ *  not-yet-existing id, which only a GLOBAL legacy admin row or the
+ *  vault.admin capability can satisfy — so probing is_admin_in with a fresh
+ *  random uuid evaluates exactly that predicate. (The old gate was the
+ *  legacy-only global pdm_is_admin, which hid the New-vault form from
+ *  capability-only admins the policy accepts.) */
+export function useCanCreateVault(): boolean {
+  const [probeId] = useState(() => crypto.randomUUID());
+  return useVaultPermission("pdm_is_admin_in", probeId);
+}

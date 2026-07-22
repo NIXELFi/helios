@@ -112,6 +112,14 @@ export function BridgeOpHandler(): null {
         void invoke("bridge_respond", { reply: { id: p.id, result } }).catch(() => {});
       try {
         if (p.op === "checkin") {
+          // Containment: only read working copies inside the vault tree. Same
+          // class as the `add` fix below — without this, a bridge caller with
+          // the loopback token could exfiltrate any local file (SSH keys, …)
+          // into the vault as a "new version".
+          if (!resolveVaultForPath(p.path, rootRef.current, vaultsRef.current)) {
+            respond({ ok: false, error: "path isn't under your Helios vault folder" });
+            return;
+          }
           const bytes = await readFile(p.path);
           const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
           const ver = await checkInRef.current(p.fileId, buf, p.comment ?? null);
@@ -119,6 +127,14 @@ export function BridgeOpHandler(): null {
             ? { ok: true, versionNum: ver.version_num, versionId: ver.id }
             : { ok: false, error: "check-in failed" });
         } else if (p.op === "getLatest") {
+          // Containment: only write inside the vault tree. Without this the op
+          // is an arbitrary-file-WRITE primitive (drop an attacker-chosen blob
+          // at any path, e.g. a Startup folder) for anyone holding the
+          // loopback token.
+          if (!resolveVaultForPath(p.destPath, rootRef.current, vaultsRef.current)) {
+            respond({ ok: false, error: "destination isn't under your Helios vault folder" });
+            return;
+          }
           // Guard: refuse to clobber a writable destination — it may hold
           // unsaved edits. Mirrors useVaultDropImport.ts ~283-291 and the
           // model in useAutoSync.ts ~281-293. Unknown stat → treat as writable.

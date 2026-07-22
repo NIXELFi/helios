@@ -12,6 +12,11 @@ import type { Vault } from "../data/types";
  * pass containment while opening a file OUTSIDE the vault. A caller holding the
  * per-launch loopback token could use that to pull an arbitrary local file
  * (e.g. an SSH key) into the vault. resolveVaultForPath must refuse it.
+ *
+ * The same resolver now also gates the other two path-taking bridge ops:
+ * `checkin` (arbitrary-file READ without it) and `getLatest` (arbitrary-file
+ * WRITE without it — drop a blob at any caller-chosen path). All three ops
+ * refuse paths that don't resolve to a spot inside a vault folder.
  */
 describe("isSafeVaultRelativePath", () => {
   it("accepts an ordinary nested relative path", () => {

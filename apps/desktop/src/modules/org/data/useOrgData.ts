@@ -154,6 +154,20 @@ export function roleCapsHeldInScope(
   return capabilities.every((capKey) => can(capKey, scopeSubteamId));
 }
 
+/** Server-side revoke gate (`pm.revoke_role`), mirrored on the client so a role
+ *  chip only shows its remove button when the RPC would honor it: owner /
+ *  executive need `org.manage_admins`; other org-scoped grants need
+ *  `org.grant_roles`; a subteam grant needs `pm.grant_subteam_roles` in THAT
+ *  subteam (or org-wide `org.grant_roles`). */
+export function canRevokeRole(
+  pr: Pick<PersonRole, "role" | "subteam_id">,
+  can: CanFn,
+): boolean {
+  if (pr.role === "owner" || pr.role === "executive") return can("org.manage_admins");
+  if (pr.subteam_id === null) return can("org.grant_roles");
+  return can("org.grant_roles") || can("pm.grant_subteam_roles", pr.subteam_id);
+}
+
 /** The capability set safe to send to `pm.upsert_role`: only caps the caller can
  *  actually grant org-wide. Filtering here prevents a disabled-but-selected cap
  *  (one the admin lacks) from being included in the payload and tripping the

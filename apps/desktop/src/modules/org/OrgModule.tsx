@@ -23,6 +23,7 @@ import {
   useProjectSubteams,
   useRolesWithCaps,
   useSubteams,
+  canRevokeRole,
   grantableCapsPayload,
   roleCapsHeldInScope,
   type Capability,
@@ -41,6 +42,21 @@ const TABS: { id: Tab; label: string; Icon: typeof IconUsers }[] = [
 
 export function OrgModule() {
   const [tab, setTab] = useState<Tab>("people");
+  // The People tab is backed by pm.list_people, which admits granters (org or
+  // subteam scope) and role editors — anyone else gets a server error, so hide
+  // the tab for them (e.g. a structure-editor-only account, reachable now that
+  // the rail admits org.manage_structure). Only prune AFTER capabilities load;
+  // an empty in-flight set must not flash the People tab away from admins.
+  const { can, canAnywhere, loading: capsLoading } = useMyCapabilities();
+  const canSeePeople =
+    capsLoading ||
+    can("org.grant_roles") ||
+    can("org.manage_roles") ||
+    canAnywhere("pm.grant_subteam_roles");
+  const visibleTabs = TABS.filter((t) => t.id !== "people" || canSeePeople);
+  useEffect(() => {
+    if (tab === "people" && !capsLoading && !canSeePeople) setTab("structure");
+  }, [tab, capsLoading, canSeePeople]);
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 flex-col gap-3 border-b border-helios-line px-5 pt-4">
@@ -59,7 +75,7 @@ export function OrgModule() {
           </div>
         </div>
         <nav className="-mb-px flex gap-0.5" aria-label="Admin sections">
-          {TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = tab === t.id;
             return (
               <button
@@ -614,15 +630,17 @@ function PersonRow(props: {
                   {r.scope === "subteam" && r.subteam_id ? (
                     <span className="opacity-70">· {subteamName.get(r.subteam_id) ?? "?"}</span>
                   ) : null}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    aria-label={`Remove ${r.label}`}
-                    onClick={() => onRevoke(person.user_id, r.role, r.subteam_id)}
-                    className="ml-0.5 rounded-full p-0.5 text-current opacity-60 transition hover:bg-red-500/20 hover:text-red-300 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
-                  >
-                    <IconX size={11} strokeWidth={2} />
-                  </button>
+                  {canRevokeRole(r, can) && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Remove ${r.label}`}
+                      onClick={() => onRevoke(person.user_id, r.role, r.subteam_id)}
+                      className="ml-0.5 rounded-full p-0.5 text-current opacity-60 transition hover:bg-red-500/20 hover:text-red-300 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+                    >
+                      <IconX size={11} strokeWidth={2} />
+                    </button>
+                  )}
                 </span>
               );
             })
@@ -675,7 +693,12 @@ function PersonRow(props: {
               </button>
             </span>
           ) : (
-            (can("org.grant_roles") || can("pm.grant_subteam_roles")) && (
+            // Gate on "is there anything this user could actually grant here"
+            // rather than on raw capability keys: `can(cap)` with no subteam id
+            // only honors ORG-wide grants, so a subteam-scoped Lead (who holds
+            // pm.grant_subteam_roles for their subteam only) would never see
+            // the button even though pm.grant_role accepts them.
+            grantableRoles.length > 0 && (
               <button
                 type="button"
                 disabled={busy}

@@ -19,10 +19,11 @@ import { useSupabaseClientOrNull, useUser } from "@helios/auth";
  */
 export function useOrgAccess(): {
   member: boolean | null;
-  /** Holds a role-granting capability (org.grant_roles / pm.grant_subteam_roles)
-   *  — gates the Org & Access rail entry alongside the legacy owner/admin
-   *  role, so capability-only leads can reach the tool their server-side
-   *  grants already authorize. */
+  /** Holds any capability the Org & Access tool serves (granting roles,
+   *  editing role definitions, editing the org structure) — gates the rail
+   *  entry alongside the legacy owner/admin role, so capability-only leads,
+   *  role editors, and structure editors can all reach the tool their
+   *  server-side grants already authorize. */
   canManageOrg: boolean;
   recheck: () => void;
 } {
@@ -57,7 +58,12 @@ export function useOrgAccess(): {
         const keys = new Set(
           ((caps as Array<{ capability_key: string }>) ?? []).map((c) => c.capability_key),
         );
-        setCanManageOrg(keys.has("org.grant_roles") || keys.has("pm.grant_subteam_roles"));
+        setCanManageOrg(
+          keys.has("org.grant_roles") ||
+            keys.has("pm.grant_subteam_roles") ||
+            keys.has("org.manage_roles") ||
+            keys.has("org.manage_structure"),
+        );
       } catch (e) {
         // Same degrade path for a thrown probe (offline, stub client in
         // tests): unknown ≠ locked out.
