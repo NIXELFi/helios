@@ -17,9 +17,12 @@ import {
 
 async function seedProject(): Promise<string> {
   const svc = serviceClient().schema("pm");
+  // car_code is UNIQUE and projects survive between tests (resetAuthUsers only
+  // wipes auth) — make it unique per call.
+  const tag = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
   const { data, error } = await svc
     .from("projects")
-    .insert({ name: `proj-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, car_year: 2026, car_code: "T26" })
+    .insert({ name: `proj-${tag}`, car_year: 2026, car_code: `T${tag}` })
     .select()
     .single();
   if (error) throw error;
