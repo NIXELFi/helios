@@ -28,7 +28,7 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Windows now gets a custom Helios title bar.** The stock Windows frame is replaced by an in-app bar that matches the rest of the app — gold Helios mark, the module you're in, and minimize/maximize/close controls (close hides to tray, exactly like before). Drag, double-click to maximize, Win+arrow snapping, and edge snapping all still work. macOS is unchanged (native traffic lights).
+- **Windows now gets a custom Helios title bar.** The stock Windows frame is replaced by an in-app bar that matches the rest of the app — the Helios logo + wordmark, the module you're in, and minimize/maximize/close controls (close hides to tray, exactly like before). Drag, double-click to maximize, Win+arrow snapping, and edge snapping all still work. The sidebar no longer repeats the wordmark on Windows (the title bar owns the brand). macOS is unchanged (native traffic lights).
 
 ### Fixed
 - **No more white flash while Helios starts up.** The window now opens with the app's dark background instead of a blank white webview, and a small spinner appears (only if startup takes more than a moment) until the interface finishes loading.

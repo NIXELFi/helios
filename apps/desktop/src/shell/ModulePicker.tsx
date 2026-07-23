@@ -18,7 +18,7 @@ import { UpdatesPill } from "../components/UpdatesPill";
 import { PresencePanel } from "./PresencePanel";
 import type { PresenceUser } from "./useHeliosPresence";
 import type { UpdaterState } from "../lib/use-updater";
-import { IS_MAC } from "../lib/platform";
+import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
 export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "amethyst" | "marketplace" | "org";
@@ -173,10 +173,17 @@ export function ModulePicker(props: Props) {
         className={
           "flex items-center border-b border-helios-line pb-3 " +
           BRAND_HEADER_TOP_PADDING +
-          (collapsed ? " justify-center px-1" : " justify-between px-3")
+          (collapsed
+            ? " justify-center px-1"
+            : IS_WINDOWS
+              ? " justify-end px-3"
+              : " justify-between px-3")
         }
       >
-        {collapsed ? null : (
+        {/* On Windows the custom TitleBar already carries the logo + wordmark
+            (and the UpdatesPill at the rail's foot shows the version), so the
+            rail skips the brand header — only the collapse chevron remains. */}
+        {collapsed || IS_WINDOWS ? null : (
           <div className="min-w-0">
             <div className="font-helios text-xl leading-none text-asu-gold">HELIOS</div>
             <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">

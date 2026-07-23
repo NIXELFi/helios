@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import heliosIcon from "../assets/helios-icon.png";
 
 /** `getCurrentWindow()` throws outside a real Tauri webview (vitest/jsdom,
  *  `vite:dev` in a plain browser) — the bar still renders there, its window
@@ -73,9 +74,12 @@ export function TitleBar({ context }: { context: string | null }) {
       {/* Children of a drag region swallow the drag mousedown unless they
           carry the attribute themselves — every decorative element repeats it. */}
       <div data-tauri-drag-region className="flex items-center gap-[9px] pl-[13px]">
-        <div
+        <img
+          src={heliosIcon}
+          alt=""
+          draggable={false}
           data-tauri-drag-region
-          className="size-[15px] rounded-[3px] bg-gradient-to-br from-asu-gold to-[#D99E00] shadow-[0_0_10px_rgba(255,198,39,0.45)]"
+          className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgba(255,198,39,0.35)]"
         />
         <span
           data-tauri-drag-region
