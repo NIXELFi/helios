@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.2.3] - 2026-07-23
+
 ### Fixed
 - **Vault — no more phantom "file was deleted / added" detections.** The local-sync engine treated "absent from a snapshot" as truth, and several windows made snapshots stale or wrong. All are closed:
   - **Vault switch no longer mass-warns "deleted locally — restored from vault" or re-downloads the whole vault.** The previous vault's disk scan stayed published while the new vault's (slow, full re-hash) scan ran, so the new vault's files all looked locally deleted — and a writable local file with unsaved work could be overwritten. The scan now drops its snapshot the instant the root changes, and every consumer verifies the snapshot came from the active vault's folder.
