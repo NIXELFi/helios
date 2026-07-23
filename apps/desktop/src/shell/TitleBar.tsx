@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import heliosIcon from "../assets/helios-icon.png";
 
@@ -22,14 +22,29 @@ const TITLEBAR_HEIGHT_PX = 38;
  * macOS keeps its native traffic lights via `titleBarStyle: "Overlay"` and
  * does NOT render this component.
  *
- * The whole bar is a Tauri drag region (double-click = maximize/restore is
- * handled natively by the drag region); the window-control buttons opt out
- * simply by not carrying the attribute. Design per the approved 2026-06-16
- * mockup: gold logo chip + HELIOS wordmark + module crumb left, min/max/close
- * right, red close hover.
+ * Dragging: handled EXPLICITLY via startDragging() on mousedown, not via
+ * `data-tauri-drag-region` — the declarative attribute's injected handler
+ * proved unreliable on a frameless Windows window (drag simply didn't
+ * engage), and mixing both mechanisms would double-fire the double-click
+ * maximize. The window-control buttons opt out via `closest("button")`.
+ * Design per the approved 2026-06-16 mockup: logo + HELIOS wordmark +
+ * module crumb left, min/max/close right, red close hover.
  */
 export function TitleBar({ context }: { context: string | null }) {
   const [maximized, setMaximized] = useState(false);
+
+  function handleDragMouseDown(e: ReactMouseEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    // The min/max/close buttons are click targets, never drag handles.
+    if ((e.target as HTMLElement).closest("button")) return;
+    const win = tauriWindow();
+    if (!win) return;
+    // Second press of a double-click arrives as mousedown with detail 2 —
+    // native title bars toggle maximize on it; a single press starts the
+    // OS move loop (which also swallows the matching mouseup).
+    if (e.detail === 2) void win.toggleMaximize();
+    else void win.startDragging();
+  }
 
   // Publish the bar height app-wide while mounted (see TITLEBAR_HEIGHT_PX).
   useEffect(() => {
@@ -68,37 +83,28 @@ export function TitleBar({ context }: { context: string | null }) {
 
   return (
     <div
-      data-tauri-drag-region
+      onMouseDown={handleDragMouseDown}
       className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-[#15161B] to-[#0E0E10]"
     >
-      {/* Children of a drag region swallow the drag mousedown unless they
-          carry the attribute themselves — every decorative element repeats it. */}
-      <div data-tauri-drag-region className="flex items-center gap-[9px] pl-[13px]">
+      <div className="flex items-center gap-[9px] pl-[13px]">
         <img
           src={heliosIcon}
           alt=""
           draggable={false}
-          data-tauri-drag-region
           className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgba(255,198,39,0.35)]"
         />
-        <span
-          data-tauri-drag-region
-          className="font-helios text-[12.5px] text-asu-gold"
-        >
+        <span className="font-helios text-[12.5px] text-asu-gold">
           HELIOS
         </span>
         {context && (
-          <span
-            data-tauri-drag-region
-            className="ml-[5px] border-l border-helios-line pl-[11px] text-xs text-helios-dim"
-          >
-            <b data-tauri-drag-region className="font-semibold text-helios-text">
+          <span className="ml-[5px] border-l border-helios-line pl-[11px] text-xs text-helios-dim">
+            <b className="font-semibold text-helios-text">
               {context}
             </b>
           </span>
         )}
       </div>
-      <div data-tauri-drag-region className="flex-1 self-stretch" />
+      <div className="flex-1 self-stretch" />
       <div className="flex h-full">
         <button
           type="button"
