@@ -274,10 +274,10 @@ export function TaskDetailSheet() {
         type="button"
         aria-label="Close detail panel"
         onClick={() => selectTask(null)}
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]"
+        className="fixed inset-x-0 bottom-0 top-[var(--helios-titlebar-h)] z-40 bg-black/40 backdrop-blur-[1px]"
       />
       <aside
-        className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-[540px] flex-col border-l border-helios-line bg-helios-panel shadow-2xl"
+        className="fixed right-0 top-[var(--helios-titlebar-h)] z-50 flex h-[calc(100vh-var(--helios-titlebar-h))] w-full max-w-[540px] flex-col border-l border-helios-line bg-helios-panel shadow-2xl"
         role="dialog"
         aria-label={`Task: ${task.title}`}
       >

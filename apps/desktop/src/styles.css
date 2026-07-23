@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; margin: 0; }
+/* Height of the custom in-app title bar. 0 by default; the TitleBar component
+   (Windows only — frameless window) sets it to its real height while mounted.
+   Full-height `fixed` overlays subtract it so they slide under the bar, not
+   over the window controls. */
+:root { --helios-titlebar-h: 0px; }
 /* Kill horizontal rubber-band / overscroll on macOS WKWebView so two-finger
    swipes on the trackpad don't translate the whole page sideways. Vertical
    overscroll is still allowed where needed. */

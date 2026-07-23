@@ -36,6 +36,13 @@ if (typeof window !== "undefined") {
   (window as unknown as { __TAURI_INTERNALS__: Record<string, unknown> }).__TAURI_INTERNALS__ = {
     transformCallback: () => 0,
     invoke: () => Promise.resolve(null),
+    // getCurrentWindow()/getCurrentWebview() read the current labels off
+    // metadata at call time (the Shell's Windows TitleBar does this) and
+    // throw when it's absent.
+    metadata: {
+      currentWindow: { label: "main" },
+      currentWebview: { label: "main", windowLabel: "main" },
+    },
     ...existing,
   };
   // @tauri-apps/api/event registers/unregisters listeners through this separate

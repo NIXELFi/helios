@@ -6,6 +6,46 @@
     <title>Helios</title>
     <!-- Fonts are self-hosted via @fontsource (imported in src/main.tsx) so the
          app needs no runtime network access and renders identically offline. -->
+    <style>
+      /* Painted before the Vite bundle loads so startup never flashes white.
+         Keep in sync with the app background in src/styles.css (#0E0E10) and
+         the window backgroundColor in src-tauri/tauri.conf.json. */
+      html,
+      body {
+        margin: 0;
+        background: #0e0e10;
+      }
+      /* Boot spinner: shown only while #root is empty (i.e. before React
+         mounts), and only if loading takes longer than ~250ms — fast starts
+         never see it. Disappears the instant the app renders. */
+      #root:empty {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+      #root:empty::before {
+        content: "";
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 2px solid #2a2c32;
+        border-top-color: #ffc627;
+        animation:
+          helios-boot-spin 0.8s linear infinite,
+          helios-boot-fade 0.4s ease-out 0.25s backwards;
+      }
+      @keyframes helios-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes helios-boot-fade {
+        from {
+          opacity: 0;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
