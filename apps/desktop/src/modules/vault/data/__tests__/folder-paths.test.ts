@@ -18,7 +18,10 @@ import { describe, it, expect } from "vitest";
 import {
   folderPath,
   folderNamePath,
+  folderResolvable,
   isDescendantOf,
+  localDestPath,
+  localDestPathStrict,
   nearestLiveAncestor,
   resolveBreadcrumbPath,
   selectionAfterPartialDelete,
@@ -247,5 +250,47 @@ describe("selectionAfterPartialDelete", () => {
     const result = selectionAfterPartialDelete(selected, ["f1"]);
     expect(selected.has("f1")).toBe(true); // original untouched
     expect(result.has("f1")).toBe(false);
+  });
+});
+
+// ── folderResolvable / localDestPathStrict (phantom-change triage 2026-07-23) ─
+//
+// folderPath's ""-on-unknown-id fallback silently collapses paths to the vault
+// ROOT, which made stale folder snapshots read/write/chmod/delete an unrelated
+// same-named root file. The strict variant surfaces that case as null so
+// callers can skip the file for the pass instead.
+
+describe("folderResolvable", () => {
+  const folders = [folder("fa")];
+
+  it("null folder id (vault root) is always resolvable", () => {
+    expect(folderResolvable(null, folders)).toBe(true);
+    expect(folderResolvable(null, [])).toBe(true);
+  });
+
+  it("known id resolves; unknown id does not", () => {
+    expect(folderResolvable("fa", folders)).toBe(true);
+    expect(folderResolvable("nope", folders)).toBe(false);
+    expect(folderResolvable("fa", [])).toBe(false);
+  });
+});
+
+describe("localDestPathStrict", () => {
+  const folders = [folder("fa"), folder("fb", "fa")];
+
+  it("matches localDestPath for resolvable folders and the root", () => {
+    expect(localDestPathStrict("/root", null, "x.bin", folders)).toBe(
+      localDestPath("/root", null, "x.bin", folders),
+    );
+    expect(localDestPathStrict("/root", "fb", "x.bin", folders)).toBe(
+      localDestPath("/root", "fb", "x.bin", folders),
+    );
+    expect(localDestPathStrict("/root", "fb", "x.bin", folders)).toBe("/root/fa/fb/x.bin");
+  });
+
+  it("returns null instead of collapsing to the vault root on an unknown folder id", () => {
+    // The non-strict helper collapses — that's the hazard being guarded.
+    expect(localDestPath("/root", "unknown", "x.bin", folders)).toBe("/root/x.bin");
+    expect(localDestPathStrict("/root", "unknown", "x.bin", folders)).toBeNull();
   });
 });

@@ -7,7 +7,7 @@ import { useIsVaultAdmin } from "../data/useVaultRole";
 import { useCheckIn } from "../data/useCheckIn";
 import { useDownloadVersion } from "../data/useDownloadVersion";
 import { matchLocal, vaultRelativePath } from "../data/local-match";
-import { localDestPath } from "../data/folder-paths";
+import { localDestPathStrict } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
@@ -223,7 +223,11 @@ export function BulkActionBar({
       if (!file) { skipped++; continue; }
       const ver = versionsByFileId.get(id)?.[0];
       if (!ver) { skipped++; continue; }
-      const dest = localDestPath(vaultRoot!, file.folder_id, file.name, folders);
+      // Strict: an unresolvable folder id would collapse the destination to
+      // the vault root (stranding an orphan / clobbering a same-named root
+      // file). Skip the row; the folder refetch makes it work next attempt.
+      const dest = localDestPathStrict(vaultRoot!, file.folder_id, file.name, folders);
+      if (!dest) { skipped++; continue; }
       const r = await download.run(ver.sha256, dest, signal);
       if (signal.aborted) return;
       if (r) {
@@ -268,7 +272,10 @@ export function BulkActionBar({
       if (file && vaultRoot) {
         const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
         const ver = versionsByFileId.get(id)?.[0];
-        const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+        // Strict: never download/chmod through a collapsed root path. Roll the
+        // just-acquired lock back like the download-failure path below.
+        const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
+        if (!dest) { await releaseLock.run(id); fail++; continue; }
         const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
         if (ver && stale) {
           const got = await download.run(ver.sha256, dest, signal);
@@ -332,7 +339,11 @@ export function BulkActionBar({
       // edit on disk writable (held back), never a read-only-but-dirty copy that
       // the next sync pass would treat as clean and clobber.
       if (file && ver && vaultRoot) {
-        const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+        // Strict: a collapsed root path would "restore" over an unrelated root
+        // file. Lock is already released (counted ok); treat like a failed
+        // local restore — the next sync pass materializes it properly.
+        const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
+        if (!dest) { restoreFailed++; continue; }
         const restored = await download.run(ver.sha256, dest, signal);
         if (signal.aborted) return;
         if (!restored) { restoreFailed++; continue; }

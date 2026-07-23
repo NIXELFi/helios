@@ -13,7 +13,7 @@ import { useActiveCheckouts } from "../data/useActiveCheckouts";
 import { useCrossVaultFolders } from "../data/useCrossVaultFolders";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { usePeople } from "../../org/data/useOrgData";
-import { folderPath, localDestPath, vaultRelPathFor } from "../data/folder-paths";
+import { folderPath, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
 import { ledgerRecord } from "../data/sync-ledger";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import type { Lock, VaultUser } from "../data/types";
@@ -369,7 +369,12 @@ export function WhoHasWhatScreen() {
   ): Promise<{ status: "ok" | "no-local" | "fail"; error?: Error | null }> {
     const file = row.file;
     if (!file || !vaultRoot || folders == null) return { status: "fail" };
-    const dest = localDestPath(vaultRoot, file.folder_id, file.name, folders);
+    // STRICT path resolution: if the folder snapshot can't resolve this file's
+    // folder, the non-strict helper collapses the path to the VAULT ROOT — and
+    // this function then reads an unrelated same-named root file's bytes and
+    // publishes them as a new version. "no-local" is the honest degradation.
+    const dest = localDestPathStrict(vaultRoot, file.folder_id, file.name, folders);
+    if (!dest) return { status: "no-local" };
     let bytes: ArrayBuffer;
     try {
       const local = await readFile(dest);

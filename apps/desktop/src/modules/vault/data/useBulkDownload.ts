@@ -4,7 +4,7 @@ import { stat, readFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
-import { localDestPath, vaultRelPathFor } from "./folder-paths";
+import { localDestPathStrict, vaultRelPathFor } from "./folder-paths";
 import { ledgerRecord } from "./sync-ledger";
 import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
@@ -193,7 +193,16 @@ export function useBulkDownload(opts: {
         const file = downloadable[i]!;
         const version = versionsByFileId.get(file.id)?.[0];
         if (!version) continue;
-        const dest = localDestPath(root!, file.folder_id, file.name, folders);
+        // Strict: an unresolvable folder id collapses the destination to the
+        // vault root — stranding an orphan copy (or overwriting a same-named
+        // root file). Count it as an error so the summary isn't silently
+        // green; a retry after the folder refetch lands succeeds.
+        const dest = localDestPathStrict(root!, file.folder_id, file.name, folders);
+        if (!dest) {
+          setErrs((e) => e + 1);
+          setLastError(`couldn't resolve the folder path for ${file.name} — retry in a moment`);
+          continue;
+        }
 
         // Skip-if-already-synced. The local copy is only considered current
         // when its CONTENT matches the latest version — size equality alone
