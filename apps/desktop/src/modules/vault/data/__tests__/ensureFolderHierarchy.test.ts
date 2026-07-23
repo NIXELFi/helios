@@ -11,7 +11,10 @@ import { ensureFolderHierarchy } from "../useAddLocalFile";
 
 type FolderRow = { id: string; name: string; parent_id: string | null };
 
-/** Awaitable supabase-js query-builder stub: chainable eq/is, resolves rows. */
+/** Awaitable supabase-js query-builder stub: chainable eq/is/ilike, resolves
+ *  rows. The name lookup goes through .ilike (case-insensitive, wildcards
+ *  escaped — see the N4 fix in ensureFolderHierarchy); the stub unescapes the
+ *  pattern back to the raw segment before handing it to rowsFor. */
 function folderLookup(rowsFor: (name: string, parentId: string | null) => FolderRow[]) {
   return () => {
     const filters: Record<string, unknown> = {};
@@ -23,6 +26,10 @@ function folderLookup(rowsFor: (name: string, parentId: string | null) => Folder
       },
       is: (col: string, val: unknown) => {
         filters[col] = val;
+        return builder;
+      },
+      ilike: (col: string, val: string) => {
+        filters[col] = val.replace(/\\([\\%_])/g, "$1"); // undo LIKE-escaping
         return builder;
       },
       then: (resolve: (v: { data: FolderRow[]; error: null }) => void) =>
@@ -44,6 +51,40 @@ it("reuses live folders without calling the RPC", async () => {
   const r = await ensureFolderHierarchy(client, "vault-1", ["Chassis"]);
   expect(r.folderId).toBe("f1");
   expect(r.createdFolderIds).toEqual([]);
+  expect(rpc).not.toHaveBeenCalled();
+});
+
+it("reuses a case-variant folder instead of creating a filesystem twin (N4)", async () => {
+  // Windows collapses `Chassis` and `chassis` to ONE directory — a
+  // case-sensitive lookup created a sibling duplicate folder whose files then
+  // fought the original's over the same on-disk path.
+  const rpc = vi.fn();
+  const client = {
+    from: folderLookup((name) =>
+      name.toLowerCase() === "chassis" ? [{ id: "f1", name: "Chassis", parent_id: null }] : [],
+    ),
+    rpc,
+  };
+  const r = await ensureFolderHierarchy(client, "vault-1", ["chassis"]);
+  expect(r.folderId).toBe("f1");
+  expect(rpc).not.toHaveBeenCalled();
+});
+
+it("prefers the exact-case row when legacy case-variant duplicates coexist", async () => {
+  const rpc = vi.fn();
+  const client = {
+    from: folderLookup((name) =>
+      name.toLowerCase() === "chassis"
+        ? [
+            { id: "c-lower", name: "chassis", parent_id: null },
+            { id: "c-exact", name: "Chassis", parent_id: null },
+          ]
+        : [],
+    ),
+    rpc,
+  };
+  const r = await ensureFolderHierarchy(client, "vault-1", ["Chassis"]);
+  expect(r.folderId).toBe("c-exact");
   expect(rpc).not.toHaveBeenCalled();
 });
 

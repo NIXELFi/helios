@@ -172,8 +172,14 @@ export function useBridgeSync(): void {
       const [v, f, fo] = await Promise.all([
         fetchAllRows<Vault>(() => (client.from("vaults") as any)
           .select("id,name").order("id", { ascending: true })),
+        // Live files only: without the deleted_at filter the add-in's path map
+        // treated recycle-bin files as live, and a bridge getLatest could
+        // re-materialize a teammate's deleted file — auto-add then resurrected
+        // the soft-deleted row (the delete silently undone as a phantom re-add).
         fetchAllRows<VaultFile>(() => (client.from("files") as any)
-          .select("id,vault_id,folder_id,name,latest_version_id").order("id", { ascending: true })),
+          .select("id,vault_id,folder_id,name,latest_version_id")
+          .is("deleted_at", null)
+          .order("id", { ascending: true })),
         fetchAllRows<Folder>(() => (client.from("folders") as any)
           .select("id,vault_id,parent_id,name").order("id", { ascending: true })),
       ]);

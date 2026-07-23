@@ -118,17 +118,25 @@ export async function ensureFolderHierarchy(
     // Look up: does a folder with (vault_id, parent_id, name) already exist?
     // supabase-js distinguishes `IS NULL` (.is) from value match (.eq) for the
     // parent_id of root-level folders; using .eq with null silently misses.
+    // CASE-INSENSITIVE on the name (ilike with wildcards escaped): the DB's
+    // identity is case-sensitive but Windows/macOS collapse `Chassis` and
+    // `chassis` to ONE directory — a case-sensitive lookup here created a
+    // sibling duplicate folder whose files then fought the original's over
+    // the same on-disk path (alternating synced/modified re-download thrash).
     let q = client
       .from("folders")
       .select("*")
       .eq("vault_id", vaultId)
       .is("deleted_at", null)
-      .eq("name", seg);
+      .ilike("name", seg.replace(/([\\%_])/g, "\\$1"));
     q = parentId === null ? q.is("parent_id", null) : q.eq("parent_id", parentId);
     const { data: existing, error: lookupErr } = await q;
     if (lookupErr) throw new Error(`lookup folder "${seg}": ${lookupErr.message}`);
 
-    const found = existing?.[0];
+    // Prefer an exact-case match when several case-variants exist (legacy
+    // duplicates), otherwise take the case-insensitive hit.
+    const rows = (existing ?? []) as Array<{ id: FolderId; name: string }>;
+    const found = rows.find((r) => r.name === seg) ?? rows[0];
     if (found) {
       parentId = found.id;
       continue;

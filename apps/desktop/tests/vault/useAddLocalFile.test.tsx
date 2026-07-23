@@ -90,12 +90,13 @@ function buildHappyClient(): SupabaseClient {
       }
       if (table === "folders") {
         return {
-          // Chain: select → eq(vault_id) → is(deleted_at,null) → eq(name) → {is|eq}(parent_id)
-          // Lookup only — creation happens via the pdm_create_folder RPC.
+          // Chain: select → eq(vault_id) → is(deleted_at,null) → ilike(name) → {is|eq}(parent_id)
+          // Lookup only — creation happens via the pdm_create_folder RPC. The
+          // name filter is .ilike since the N4 case-insensitivity fix.
           select: () => ({
             eq: () => ({
               is: () => ({
-                eq: () => ({
+                ilike: () => ({
                   is: () => {
                     callLog.push("folders.lookup");
                     return Promise.resolve({ data: [], error: null });
@@ -353,7 +354,8 @@ describe("useAddLocalFile", () => {
           select: () => ({
             eq: () => ({
               is: () => ({
-                eq: () => ({
+                // Name filter is .ilike since the N4 case-insensitivity fix.
+                ilike: () => ({
                   is: () => {
                     callLog.push("folders.lookup");
                     // First lookup is for Engine (parent_id is null) → return existing

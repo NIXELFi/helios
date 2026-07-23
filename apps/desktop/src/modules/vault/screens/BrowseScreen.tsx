@@ -37,7 +37,7 @@ import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useVaultCursor } from "../data/useVaultCursor";
 import { useVaultUsers } from "../data/useVaultUsers";
-import { findUnmatchedLocal } from "../data/find-unmatched";
+import { findUnmatchedLocal, vaultSnapshotConsistent } from "../data/find-unmatched";
 import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
 import { FolderTree } from "../components/FolderTree";
 import { FileTable } from "../components/FileTable";
@@ -147,12 +147,25 @@ export function BrowseScreen() {
   // file table doesn't flicker between modified/synced as bytes land; the
   // explicit rescan from onComplete catches the final state.
   const [syncBusy, setSyncBusy] = useState(false);
-  const { files: localFiles, openInSw, refetch: rescan } = useLocalFolderScan(vaultFolderPath, {
+  const {
+    files: localFilesRaw,
+    scanRoot,
+    rootMissing,
+    openInSw,
+    refetch: rescan,
+  } = useLocalFolderScan(vaultFolderPath, {
     intervalMs: LOCAL_RESCAN_INTERVAL_MS,
     rescanOnFocus: true,
     watchFs: true,
     paused: syncBusy,
   });
+  // Only accept a scan snapshot that was produced from the ACTIVE vault's
+  // root. The hook nulls its snapshot on a root change, but that lands one
+  // commit later — and in that window vault A's disk listing pairs with vault
+  // B's rows, fabricating "locally deleted" / "add to vault" verdicts (and,
+  // worse, letting a sync pass re-download the whole vault over itself). Null
+  // is the safe "no data yet" state every consumer already handles.
+  const localFiles = scanRoot === vaultFolderPath ? localFilesRaw : null;
 
   // Use vault-wide files for the auto-sync pass (so it covers folders the user
   // hasn't opened yet) and for unmatched-local detection.
@@ -181,6 +194,10 @@ export function BrowseScreen() {
     deletedFolders,
     vaultRoot: vaultFolderPath,
     vaultId: vaultId ?? null,
+    // Enables the ledgered-clean-orphan pass: stranded old-path copies left
+    // behind by remote moves are removed instead of surfacing forever as
+    // phantom "not in vault" files.
+    liveFiles: allFiles,
     onReaped: rescan,
   });
   // Materialize the vault folder scaffolding locally in BOTH download modes —
@@ -215,12 +232,18 @@ export function BrowseScreen() {
   }, [vaultUsers]);
   // Memoized: findUnmatchedLocal allocates a fresh array each call, so without
   // this every render handed a new identity to <UnmatchedFilesBanner>.
+  // Consistency-gated (same discipline as useAutoSync / the reaper / the
+  // folder-tree materializer): rows from another vault, or file rows whose
+  // folder hasn't been fetched yet, make the comparison set wrong — local
+  // files then read as phantom "add" candidates, and auto-add below would act
+  // on them for real (cross-vault draft adds during a vault switch). An
+  // inconsistent pass yields [] and the refetch self-heals.
   const unmatched = useMemo(
     () =>
-      allFiles && localFiles && folders
+      allFiles && localFiles && folders && vaultSnapshotConsistent(vaultId, allFiles, folders)
         ? findUnmatchedLocal(allFiles, localFiles, folders)
         : [],
-    [allFiles, localFiles, folders],
+    [allFiles, localFiles, folders, vaultId],
   );
 
   // SW-PDM-style auto-vaulting of new local files (auto mode only): each
@@ -848,6 +871,7 @@ export function BrowseScreen() {
                   vaultRoot={vaultFolderPath}
                   folders={folders ?? []}
                   vaultId={vaultId ?? null}
+                  rootMissing={rootMissing}
                   onComplete={onAutoSyncComplete}
                   onBusyChange={onAutoSyncBusy}
                   onRescan={rescan}
@@ -1553,6 +1577,7 @@ function VaultSyncSection(props: {
   vaultRoot: string | null;
   folders: import("../data/types").Folder[];
   vaultId: string | null;
+  rootMissing: boolean;
   onComplete: () => void;
   onBusyChange: (busy: boolean) => void;
   onRescan: () => void;
@@ -1567,6 +1592,7 @@ function VaultSyncSection(props: {
     vaultRoot: props.vaultRoot,
     folders: props.folders,
     vaultId: props.vaultId,
+    rootMissing: props.rootMissing,
     onComplete: props.onComplete,
   });
   const onBusyChange = props.onBusyChange;
