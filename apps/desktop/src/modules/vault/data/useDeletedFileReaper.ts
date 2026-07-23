@@ -4,8 +4,8 @@ import type { Folder, VaultFile } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { vaultRelativePath, normalizePathForCompare } from "./local-match";
 import { setReadonly } from "./fs-readonly";
-import { ledgerRemove } from "./sync-ledger";
-import { folderPath } from "./folder-paths";
+import { ledgerRemove, loadLedger } from "./sync-ledger";
+import { folderPath, folderResolvable } from "./folder-paths";
 import { notifyReaperHeldBack } from "./local-delete-events";
 
 /**
@@ -44,6 +44,15 @@ export function useDeletedFileReaper(input: {
   deletedFiles: VaultFile[] | null | undefined;
   localFiles: LocalFile[] | null;
   folders: Folder[];
+  /** LIVE vault files (vault-wide). When provided together with vaultId, the
+   *  reaper also removes LEDGERED CLEAN ORPHANS: a read-only local file that
+   *  this machine materialized from the vault (ledger entry, matching sha) but
+   *  that no live or deleted vault row maps to anymore — the residue a remote
+   *  file MOVE leaves behind on every other machine (the mover renames their
+   *  own copy; everyone else re-downloads at the new path and keeps the old
+   *  one forever, where it reads as a phantom "add" candidate). Omit/null to
+   *  disable the orphan pass. */
+  liveFiles?: VaultFile[] | null | undefined;
   /** Soft-deleted folders whose local directories should be reaped. Uses a
    *  combined lookup set of live + deleted folders so a deleted child under a
    *  live parent can still resolve its path. */
@@ -59,7 +68,7 @@ export function useDeletedFileReaper(input: {
    *  local rescan so the removed files leave the scan promptly). */
   onReaped?: () => void;
 }): void {
-  const { enabled, deletedFiles, localFiles, folders, deletedFolders, vaultRoot, vaultId, onReaped } = input;
+  const { enabled, deletedFiles, localFiles, folders, deletedFolders, vaultRoot, vaultId, liveFiles, onReaped } = input;
 
   // Keep the callback in a ref so a fresh identity each render doesn't re-fire
   // the reap effect.
@@ -83,16 +92,33 @@ export function useDeletedFileReaper(input: {
       vaultId &&
       ((deletedFiles ?? []).some((f) => f.vault_id !== vaultId) ||
         (deletedFolders ?? []).some((f) => f.vault_id !== vaultId) ||
+        (liveFiles ?? []).some((f) => f.vault_id !== vaultId) ||
         folders.some((f) => f.vault_id !== vaultId))
     ) {
       return;
     }
     // Proceed even if deletedFiles is empty when there are deleted folders to
-    // reap — the file-reap loop is gated on its own early-exit below.
+    // reap or the orphan pass can run — each phase gates itself below.
     const hasDeletedFiles = deletedFiles && deletedFiles.length > 0;
     const hasDeletedFolders = deletedFolders && deletedFolders.length > 0 && vaultRoot;
-    if (!hasDeletedFiles && !hasDeletedFolders) return;
+    // liveFiles must be NON-EMPTY, not just loaded: RLS returns 200-with-zero-
+    // rows (not an error) when membership is revoked mid-session, and against
+    // an empty live list every ledgered synced copy would look orphaned — the
+    // pass would wipe the user's whole local tree. An actually-empty vault
+    // leaves residue for the file-reap/unmatched paths instead (safe failure).
+    const canReapOrphans =
+      !!vaultId && liveFiles != null && liveFiles.length > 0 && (localFiles?.length ?? 0) > 0;
+    if (!hasDeletedFiles && !hasDeletedFolders && !canReapOrphans) return;
     if (!localFiles) return;
+
+    // Combined live+deleted folder lookup, used to resolve DELETED files'
+    // paths. A cascade-deleted file references a folder that is itself gone
+    // from the LIVE list — resolving against live folders alone collapsed its
+    // path to the bare basename (folderPath returns "" for an unknown id),
+    // which (a) missed the file's real local copy, leaving whole deleted
+    // subtrees un-reaped forever, and (b) could match — and delete — an
+    // UNRELATED root-level file that merely shared the basename.
+    const combinedFolders: Folder[] = [...(folders ?? []), ...(deletedFolders ?? [])];
 
     // Index local files by their normalized relative path — the SAME key the
     // rest of the vault uses to match a DB file row to a file on disk, so a
@@ -111,7 +137,10 @@ export function useDeletedFileReaper(input: {
       if (hasDeletedFiles && localFiles.length > 0) {
         for (const f of deletedFiles!) {
           if (cancelled) return;
-          const rel = vaultRelativePath(f, folders);
+          // Unresolvable even in the combined set → no computable path; touch
+          // nothing this pass rather than fall back to a collapsed root path.
+          if (!folderResolvable(f.folder_id, combinedFolders)) continue;
+          const rel = vaultRelativePath(f, combinedFolders);
           const key = normalizePathForCompare(rel);
           const local = localByRel.get(key);
           if (!local) continue; // no local copy of this deleted file → nothing to do
@@ -162,15 +191,12 @@ export function useDeletedFileReaper(input: {
       // Path resolution uses a combined lookup (live + deleted) so a deleted
       // child under a still-live parent can resolve its full path correctly.
       if (hasDeletedFolders && vaultRoot) {
-        // Build the combined lookup set once: live folders + deleted folders.
-        const lookupSet: Folder[] = [...(folders ?? []), ...(deletedFolders ?? [])];
-
         // Sort deepest-first (most path segments first) so child dirs are
         // attempted before their parents, giving the parent the best chance
         // of being empty by the time we reach it.
         const sorted = [...deletedFolders!].sort((a, b) => {
-          const pa = folderPath(a.id, lookupSet);
-          const pb = folderPath(b.id, lookupSet);
+          const pa = folderPath(a.id, combinedFolders);
+          const pb = folderPath(b.id, combinedFolders);
           const depthA = pa ? pa.split("/").length : 0;
           const depthB = pb ? pb.split("/").length : 0;
           return depthB - depthA;
@@ -178,7 +204,7 @@ export function useDeletedFileReaper(input: {
 
         for (const folder of sorted) {
           if (cancelled) return;
-          const rel = folderPath(folder.id, lookupSet);
+          const rel = folderPath(folder.id, combinedFolders);
           if (!rel) continue; // root or unresolvable — skip
           const absPath = `${vaultRoot}/${rel}`;
           try {
@@ -189,6 +215,51 @@ export function useDeletedFileReaper(input: {
           } catch {
             // Non-empty dir, already gone, or permission failure — fine;
             // next pass will retry when/if the dir eventually empties.
+          }
+        }
+      }
+
+      // ── Ledgered-clean-orphan reap ─────────────────────────────────────────
+      // Remove read-only local files that THIS machine materialized from the
+      // vault (live, sha-matching ledger entry) but that no live or deleted
+      // vault row maps to anymore — the stranded old-path copy a remote MOVE
+      // leaves on every machine but the mover's. Strictly bounded:
+      //   - read-only only (writable = possible unsaved work; the module-wide
+      //     clean-copy marker — never touched);
+      //   - ledger sha must equal the local sha (we only ever delete bytes the
+      //     vault itself gave us; tombstoned entries are skipped);
+      //   - the WHOLE phase is skipped if any live file's folder is
+      //     unresolvable (an incomplete folder snapshot collapses live paths,
+      //     which would make genuinely-live files look orphaned).
+      if (canReapOrphans && !cancelled) {
+        const liveConsistent = liveFiles!.every((f) => folderResolvable(f.folder_id, folders));
+        if (liveConsistent) {
+          const liveRels = new Set(
+            liveFiles!.map((f) => normalizePathForCompare(vaultRelativePath(f, folders))),
+          );
+          const deletedRels = new Set(
+            (deletedFiles ?? [])
+              .filter((f) => folderResolvable(f.folder_id, combinedFolders))
+              .map((f) => normalizePathForCompare(vaultRelativePath(f, combinedFolders))),
+          );
+          const ledger = await loadLedger(vaultId!);
+          for (const local of localFiles) {
+            if (cancelled) return;
+            if (local.readonly !== true) continue;
+            const key = normalizePathForCompare(local.relativePath);
+            if (liveRels.has(key) || deletedRels.has(key)) continue;
+            const entry = ledger.entries[key];
+            if (!entry || entry.deletedAt) continue;
+            if (!local.sha256 || entry.sha256.toLowerCase() !== local.sha256.toLowerCase()) continue;
+            try {
+              await setReadonly(local.absolutePath, false);
+              if (cancelled) { void setReadonly(local.absolutePath, true); return; }
+              await remove(local.absolutePath);
+              removedAny = true;
+              void ledgerRemove(vaultId!, local.relativePath);
+            } catch (e) {
+              console.warn(`[vault] reaper: couldn't remove orphan ${local.absolutePath}:`, e);
+            }
           }
         }
       }
@@ -205,5 +276,5 @@ export function useDeletedFileReaper(input: {
     return () => {
       cancelled = true;
     };
-  }, [enabled, deletedFiles, localFiles, folders, deletedFolders, vaultRoot, vaultId]);
+  }, [enabled, deletedFiles, localFiles, folders, deletedFolders, vaultRoot, vaultId, liveFiles]);
 }

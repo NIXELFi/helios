@@ -29,6 +29,19 @@ vi.mock("../../src/modules/vault/data/useDownloadVersion", () => ({
   }),
 }));
 
+// Controllable on-disk existence for the scan-absence re-probes: exists(path)
+// resolves true iff the path was registered via seedOnDisk. Defaults to false —
+// matching the real jsdom Tauri stub (invoke → null → falsy) the pre-mock tests
+// relied on. mkdir is consumed by ensureLocalFolderTree at pass start.
+const onDiskPaths = vi.hoisted(() => new Set<string>());
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  exists: (path: string) => Promise.resolve(onDiskPaths.has(path)),
+  mkdir: () => Promise.resolve(),
+}));
+function seedOnDisk(...paths: string[]) {
+  for (const p of paths) onDiskPaths.add(p);
+}
+
 // Capture setReadonly calls from the reconciliation pass. vi.hoisted so the
 // array exists when the hoisted vi.mock factory runs.
 const readonlyCalls = vi.hoisted(() => [] as Array<{ path: string; readonly: boolean }>);
@@ -149,6 +162,7 @@ describe("useAutoSync", () => {
     rpcCalls.length = 0;
     rpcError = null;
     seededRels.clear();
+    onDiskPaths.clear();
     ledgerRecordCalls.length = 0;
     ledgerRemoveCalls.length = 0;
     ledgerTombstoneCalls.length = 0;
@@ -729,5 +743,144 @@ describe("useAutoSync", () => {
     expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
     expect(ledgerTombstoneCalls).toHaveLength(0);
     expect(ledgerRecordCalls).toHaveLength(0);
+  });
+
+  // ── Phantom-change guards (triage 2026-07-23) ───────────────────────────────
+
+  it("rootMissing suppresses ALL deletion inference (no propagation, no blocked warning) but still downloads", async () => {
+    // Restart with the vault root unplugged: scan publishes [] with
+    // rootMissing=true while the ledger (which survives restarts) still lists
+    // materialized files. Without the guard this soft-deleted every
+    // checked-out file vault-wide and mass-warned "deleted locally".
+    const files: VaultFile[] = [makeFile("f1", "locked.bin"), makeFile("f2", "free.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-locked")]],
+      ["f2", [makeVersion("f2", "sha-free")]],
+    ]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    seedLedger("locked.bin", "free.bin");
+    const blocked: string[] = [];
+    const unsub = onLocalDeleteBlocked((names) => blocked.push(...names));
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1",
+        rootMissing: true, onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    // The unlocked file still downloads (bootstrap must keep working)…
+    await waitFor(() => { expect(downloadResolvers.has("sha-free")).toBe(true); });
+    await act(async () => { resolveDownload("sha-free", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    // …but nothing was inferred as a local deletion.
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    expect(ledgerTombstoneCalls).toHaveLength(0);
+    expect(blocked).toEqual([]);
+    unsub();
+  });
+
+  it("circuit breaker: an empty scan with 2+ live ledger entries never propagates or warns (mass-wipe ≠ deletions)", async () => {
+    const files: VaultFile[] = [makeFile("f1", "a.bin"), makeFile("f2", "b.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-a2")]],
+      ["f2", [makeVersion("f2", "sha-b2")]],
+    ]);
+    const locks: Lock[] = [
+      { id: "l1", file_id: "f1", user_id: "u1", acquired_at: "x", released_at: null, force_released_by: null },
+    ];
+    seedLedger("a.bin", "b.bin");
+    const blocked: string[] = [];
+    const unsub = onLocalDeleteBlocked((names) => blocked.push(...names));
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    // The unlocked file re-downloads (restore still happens)…
+    await waitFor(() => { expect(downloadResolvers.has("sha-b2")).toBe(true); });
+    await act(async () => { resolveDownload("sha-b2", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    // …but the locked one is NOT soft-deleted and no "deleted locally" warning fires.
+    expect(rpcCalls.find((c) => c.name === "pdm_delete_file")).toBeUndefined();
+    expect(ledgerTombstoneCalls).toHaveLength(0);
+    expect(blocked).toEqual([]);
+    unsub();
+  });
+
+  it("re-probes disk before the blocked warning: a scan-missed file that IS on disk is neither warned nor overwritten", async () => {
+    // walk() drops files whose read throws (sharing violation — SolidWorks/AV
+    // holding the file on a cold sha cache). Such a file is absent from the
+    // scan but present on disk: the pass must leave it completely alone.
+    const files: VaultFile[] = [makeFile("f1", "present.bin"), makeFile("f2", "held.bin")];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-present")]],
+      ["f2", [makeVersion("f2", "sha-held")]],
+    ]);
+    // f1 scanned + synced; f2 missing from the scan but actually on disk.
+    const localFiles: LocalFile[] = [
+      { basename: "present.bin", relativePath: "present.bin", absolutePath: "/v/present.bin", sha256: "sha-present", sizeBytes: 1, readonly: true },
+    ];
+    seedLedger("held.bin");
+    seedOnDisk("/v/held.bin");
+    const blocked: string[] = [];
+    const unsub = onLocalDeleteBlocked((names) => blocked.push(...names));
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders: EMPTY_FOLDERS, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() => { expect(result.current.lastRunAt).not.toBeNull(); });
+    // No download queued for the on-disk-but-unreadable file, and no warning.
+    expect(downloadCalls.find((c) => c.sha === "sha-held")).toBeUndefined();
+    expect(blocked).toEqual([]);
+    expect(result.current.lastSkipped).toBeGreaterThanOrEqual(1);
+    unsub();
+  });
+
+  it("skips files whose folder_id is not in the folder snapshot (no collapsed-to-root download)", async () => {
+    // A realtime file event can land before the folder refetch that carries
+    // its parent. folderPath would collapse the dest to the vault root —
+    // downloading the file there and stranding an orphan. The file must be
+    // skipped for the pass instead.
+    const folders: Folder[] = [
+      { id: "known", vault_id: "v1", parent_id: null, name: "chassis", created_at: "x" },
+    ];
+    const files: VaultFile[] = [
+      makeFile("f1", "ok.bin", "known"),
+      makeFile("f2", "orphan.bin", "not-fetched-yet"),
+    ];
+    const versionsByFileId = new Map<string, Version[]>([
+      ["f1", [makeVersion("f1", "sha-ok")]],
+      ["f2", [makeVersion("f2", "sha-orphan")]],
+    ]);
+
+    const { result } = renderHook(() =>
+      useAutoSync({
+        enabled: true, files, localFiles: EMPTY_LOCAL, versionsByFileId, locks: EMPTY_LOCKS,
+        currentUserId: "u1", vaultRoot: "/v", folders, vaultId: "v1", onComplete: () => {},
+      }),
+      { wrapper },
+    );
+
+    // The resolvable file downloads to its real folder path…
+    await waitFor(() => { expect(downloadResolvers.has("sha-ok")).toBe(true); });
+    expect(downloadCalls.find((c) => c.sha === "sha-ok")!.dest).toBe("/v/chassis/ok.bin");
+    await act(async () => { resolveDownload("sha-ok", true); });
+    await waitFor(() => { expect(result.current.busy).toBe(false); });
+    // …the unresolvable one is not fetched at all (and certainly not to "/v/orphan.bin").
+    expect(downloadCalls.find((c) => c.sha === "sha-orphan")).toBeUndefined();
   });
 });

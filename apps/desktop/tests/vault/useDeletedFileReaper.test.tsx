@@ -16,6 +16,26 @@ vi.mock("../../src/modules/vault/data/fs-readonly", () => ({
   flipSwReadonly: vi.fn(),
 }));
 
+// Controllable ledger for the orphan pass: normalized rel → sha. loadLedger
+// serves it; removals are captured. Existing tests never pass vaultId, so the
+// ledger halves are inert for them.
+const ledgerEntries = vi.hoisted(() => new Map<string, string>());
+const ledgerRemoveCalls = vi.hoisted(() => [] as Array<{ vaultId: string; rel: string }>);
+vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
+  loadLedger: vi.fn(async () => {
+    const entries: Record<string, { sha256: string; recordedAt: string }> = {};
+    for (const [rel, sha] of ledgerEntries) entries[rel] = { sha256: sha, recordedAt: "t" };
+    return { entries };
+  }),
+  ledgerRemove: vi.fn((vaultId: string, rel: string) => {
+    ledgerRemoveCalls.push({ vaultId, rel });
+    return Promise.resolve();
+  }),
+}));
+function seedLedger(rel: string, sha: string) {
+  ledgerEntries.set(rel.normalize("NFC").toLowerCase(), sha);
+}
+
 function delFile(id: string, name: string, folder_id: string | null = null): VaultFile {
   return {
     id, vault_id: "v1", folder_id, name, latest_version_id: null,
@@ -35,6 +55,8 @@ describe("useDeletedFileReaper", () => {
   beforeEach(() => {
     removeMock.mockClear();
     setReadonlyMock.mockClear();
+    ledgerEntries.clear();
+    ledgerRemoveCalls.length = 0;
   });
 
   it("removes the local copy of a deleted file, clearing read-only FIRST", async () => {
@@ -277,5 +299,153 @@ describe("useDeletedFileReaper", () => {
     const calls = removeMock.mock.calls.map((c) => c[0] as string);
     expect(calls[0]).toBe("C:/vault/SDM25/Chassis/Frame");
     expect(calls[1]).toBe("C:/vault/SDM25/Chassis");
+  });
+
+  // ── Phantom-change triage 2026-07-23 (F4 + N2) ───────────────────────────
+
+  it("F4: reaps a cascade-deleted file inside a DELETED folder (combined lookup resolves the real path)", async () => {
+    // The folder is gone from the LIVE list — resolving against live folders
+    // alone collapsed the file's path to the bare basename, which (a) missed
+    // this real copy and (b) could match an unrelated root file.
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [delFile("f1", "part.sldprt", "fd-gone")],
+        localFiles: [
+          local("Gone/part.sldprt", "C:/vault/SDM25/Gone/part.sldprt"),
+          // Unrelated same-named root file — must NOT be touched.
+          local("part.sldprt", "C:/vault/SDM25/part.sldprt"),
+        ],
+        folders: [],
+        deletedFolders: [
+          { id: "fd-gone", vault_id: "v1", parent_id: null, name: "Gone", created_at: "x", deleted_at: "y" } as Folder,
+        ],
+        vaultRoot: "C:/vault/SDM25",
+      }),
+    );
+    await waitFor(() => expect(removeMock).toHaveBeenCalled());
+    const removed = removeMock.mock.calls.map((c) => c[0] as string);
+    expect(removed).toContain("C:/vault/SDM25/Gone/part.sldprt");
+    expect(removed).not.toContain("C:/vault/SDM25/part.sldprt");
+  });
+
+  it("F4: touches nothing when a deleted file's folder is unresolvable even in the combined set", async () => {
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [delFile("f1", "part.sldprt", "hard-vanished")],
+        // Same-named clean root file — the pre-fix collapse deleted it.
+        localFiles: [local("part.sldprt", "C:/vault/SDM25/part.sldprt")],
+        folders: [],
+        deletedFolders: [],
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("N2: removes a ledgered clean orphan (remote-move residue) and drops its ledger entry", async () => {
+    const folders: Folder[] = [
+      { id: "fo-new", vault_id: "v1", parent_id: null, name: "New", created_at: "x" },
+      { id: "fo-old", vault_id: "v1", parent_id: null, name: "Old", created_at: "x" },
+    ];
+    // The file moved Old → New; this machine still has the stale Old copy.
+    const live: VaultFile[] = [{
+      id: "f1", vault_id: "v1", folder_id: "fo-new", name: "part.sldprt",
+      latest_version_id: null, created_at: "x",
+    } as VaultFile];
+    seedLedger("Old/part.sldprt", "sha-1");
+    seedLedger("New/part.sldprt", "sha-1");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [
+          { ...local("Old/part.sldprt", "C:/vault/SDM25/Old/part.sldprt"), sha256: "sha-1" },
+          { ...local("New/part.sldprt", "C:/vault/SDM25/New/part.sldprt"), sha256: "sha-1" },
+        ],
+        folders,
+        liveFiles: live,
+        vaultRoot: "C:/vault/SDM25",
+        vaultId: "v1",
+      }),
+    );
+    await waitFor(() => expect(removeMock).toHaveBeenCalledTimes(1));
+    expect(removeMock).toHaveBeenCalledWith("C:/vault/SDM25/Old/part.sldprt");
+    expect(ledgerRemoveCalls).toContainEqual({ vaultId: "v1", rel: "Old/part.sldprt" });
+  });
+
+  it("N2: keeps writable, un-ledgered, and sha-mismatched local files (never deletes user data)", async () => {
+    seedLedger("writable.bin", "sha-1");
+    seedLedger("edited.bin", "sha-VAULT");
+    // One unrelated live row so the pass actually runs (see the empty-liveFiles
+    // guard test below) — none of the candidates map to it.
+    const live: VaultFile[] = [{
+      id: "f-live", vault_id: "v1", folder_id: null, name: "other.bin",
+      latest_version_id: null, created_at: "x",
+    } as VaultFile];
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [
+          { ...local("writable.bin", "C:/vault/SDM25/writable.bin"), sha256: "sha-1", readonly: false },
+          { ...local("unledgered.bin", "C:/vault/SDM25/unledgered.bin"), sha256: "sha-1" },
+          { ...local("edited.bin", "C:/vault/SDM25/edited.bin"), sha256: "sha-LOCAL" },
+        ],
+        folders: [],
+        liveFiles: live,
+        vaultRoot: "C:/vault/SDM25",
+        vaultId: "v1",
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("N2: an EMPTY live list never runs the orphan pass (RLS-revoked membership must not wipe the local tree)", async () => {
+    // Membership revocation returns 200-with-zero-rows, not an error — an
+    // empty liveFiles makes every ledgered synced copy look orphaned. The
+    // pass must refuse to act on an empty live list.
+    seedLedger("part.sldprt", "sha-1");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        // A perfect orphan candidate: readonly, ledgered, sha-matching.
+        localFiles: [{ ...local("part.sldprt", "C:/vault/SDM25/part.sldprt"), sha256: "sha-1" }],
+        folders: [],
+        liveFiles: [],
+        vaultRoot: "C:/vault/SDM25",
+        vaultId: "v1",
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("N2: skips the orphan pass when a live file's folder is unresolvable (incomplete snapshot)", async () => {
+    // If the pass ran against an incomplete folder list, this live file's own
+    // local copy would look orphaned and be deleted.
+    const live: VaultFile[] = [{
+      id: "f1", vault_id: "v1", folder_id: "not-fetched-yet", name: "part.sldprt",
+      latest_version_id: null, created_at: "x",
+    } as VaultFile];
+    seedLedger("Somewhere/part.sldprt", "sha-1");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        localFiles: [
+          { ...local("Somewhere/part.sldprt", "C:/vault/SDM25/Somewhere/part.sldprt"), sha256: "sha-1" },
+        ],
+        folders: [], // folder list hasn't caught up
+        liveFiles: live,
+        vaultRoot: "C:/vault/SDM25",
+        vaultId: "v1",
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
   });
 });

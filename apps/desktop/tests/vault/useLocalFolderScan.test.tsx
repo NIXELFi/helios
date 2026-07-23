@@ -195,4 +195,64 @@ describe("useLocalFolderScan", () => {
     // Commit was skipped: files stays null (no partial publish while paused).
     expect(result.current.files).toBeNull();
   });
+
+  // ── Phantom-change triage 2026-07-23 (F1/N1) ─────────────────────────────
+
+  it("publishes scanRoot with the snapshot and drops the old snapshot IMMEDIATELY on a root change", async () => {
+    // Root B's walk is gated so it stays in flight — the old root's files must
+    // be gone (null) BEFORE the new walk completes. Keeping them published let
+    // a sync pass diff vault A's disk against vault B's rows (mass phantom
+    // "locally deleted" + cross-vault "add" candidates).
+    let releaseB: () => void = () => {};
+    const gateB = new Promise<void>((r) => { releaseB = r; });
+    vi.mocked(fs.readDir).mockImplementation(async (p: any) => {
+      if (p === "/ra") return [
+        { name: "a.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+      ] as any;
+      if (p === "/rb") { await gateB; return [] as any; }
+      return [];
+    });
+    vi.mocked(fs.readFile).mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    const { result, rerender } = renderHook(
+      ({ root }: { root: string }) => useLocalFolderScan(root),
+      { initialProps: { root: "/ra" } },
+    );
+    await waitFor(() => expect(result.current.files).not.toBeNull());
+    expect(result.current.scanRoot).toBe("/ra");
+    expect(result.current.rootMissing).toBe(false);
+
+    rerender({ root: "/rb" });
+    await waitFor(() => expect(result.current.files).toBeNull());
+    expect(result.current.scanRoot).toBeNull();
+
+    await act(async () => { releaseB(); });
+    await waitFor(() => expect(result.current.files).not.toBeNull());
+    expect(result.current.files).toEqual([]);
+    expect(result.current.scanRoot).toBe("/rb");
+  });
+
+  it("flags rootMissing when the root can't be stat'ed, and clears it once the root is back", async () => {
+    // Never-synced bootstrap still publishes [] (so auto-sync can materialize
+    // the folder) but rootMissing tells deletion inference to stand down — a
+    // restart with the drive unplugged must not read as a mass local delete.
+    vi.mocked(fs.stat).mockRejectedValue(new Error("No such file or directory (os error 2)"));
+    vi.mocked(fs.readDir).mockRejectedValue(new Error("No such file or directory (os error 2)"));
+    const { result } = renderHook(() => useLocalFolderScan("/root/SDM27"));
+    await waitFor(() => expect(result.current.files).toEqual([]));
+    expect(result.current.rootMissing).toBe(true);
+
+    // The drive comes back: the next scan clears the flag.
+    vi.mocked(fs.stat).mockImplementation(async () => ({
+      isFile: false, isDirectory: true, isSymlink: false, size: 0,
+      mtime: new Date(1), atime: null, birthtime: null, readonly: false,
+      fileAttributes: null, dev: null, ino: null, mode: null, nlink: null,
+      uid: null, gid: null, rdev: null, blksize: null, blocks: null,
+    } as any));
+    vi.mocked(fs.readDir).mockResolvedValue([] as any);
+    await act(async () => { result.current.refetch(); });
+    await waitFor(() => expect(result.current.rootMissing).toBe(false));
+    expect(result.current.files).toEqual([]);
+    expect(result.current.scanRoot).toBe("/root/SDM27");
+  });
 });

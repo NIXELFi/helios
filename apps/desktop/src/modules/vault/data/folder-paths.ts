@@ -121,6 +121,31 @@ export function localDestPath(
 }
 
 /**
+ * True iff `folderId` can actually be resolved against `folders` (null = the
+ * vault root, always resolvable). When this is false, folderPath() falls back
+ * to "" and every path helper silently collapses the file to the VAULT ROOT —
+ * which made a stale/incomplete folder list read, write, chmod, or delete a
+ * root-level file that merely shares the basename. Callers that touch disk for
+ * a SPECIFIC file must check this (or use localDestPathStrict) and skip the
+ * file for the pass instead; the folder refetch self-heals the next pass.
+ */
+export function folderResolvable(folderId: FolderId | null, folders: Folder[]): boolean {
+  return folderId === null || folders.some((f) => f.id === folderId);
+}
+
+/** localDestPath, but returns null instead of collapsing to the vault root
+ *  when the folder id can't be resolved (see folderResolvable). */
+export function localDestPathStrict(
+  vaultRoot: string,
+  folderId: FolderId | null,
+  fileName: string,
+  folders: Folder[],
+): string | null {
+  if (!folderResolvable(folderId, folders)) return null;
+  return localDestPath(vaultRoot, folderId, fileName, folders);
+}
+
+/**
  * Compute the VAULT-RELATIVE path (no root prefix) for a file given its folder
  * id + name. This is exactly the suffix `localDestPath` appends to the root, and
  * it matches `vaultRelativePath(file, folders)` for the same file — both sanitize

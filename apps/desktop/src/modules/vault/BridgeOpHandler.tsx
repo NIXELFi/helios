@@ -7,6 +7,8 @@ import { useDownloadVersion } from "./data/useDownloadVersion";
 import { useAddLocalFile } from "./data/useAddLocalFile";
 import { useVaults } from "./data/useVaults";
 import { sanitizeVaultName, useVaultFolder } from "./data/useVaultFolder";
+import { ledgerRecord } from "./data/sync-ledger";
+import { sanitizePathSegment } from "./data/folder-paths";
 import type { LocalFile } from "./data/useLocalFolderScan";
 import type { Vault } from "./data/types";
 
@@ -131,7 +133,8 @@ export function BridgeOpHandler(): null {
           // is an arbitrary-file-WRITE primitive (drop an attacker-chosen blob
           // at any path, e.g. a Startup folder) for anyone holding the
           // loopback token.
-          if (!resolveVaultForPath(p.destPath, rootRef.current, vaultsRef.current)) {
+          const resolvedDest = resolveVaultForPath(p.destPath, rootRef.current, vaultsRef.current);
+          if (!resolvedDest) {
             respond({ ok: false, error: "destination isn't under your Helios vault folder" });
             return;
           }
@@ -150,6 +153,15 @@ export function BridgeOpHandler(): null {
             return;
           }
           const ok = await downloadRef.current(p.sha, p.destPath);
+          // Record the materialization in the sync ledger (T6), keyed the same
+          // way useAddLocalFile keys it (sanitized vault-relative segments).
+          // Without this a bridge-materialized file was un-ledgered: after a
+          // vault-side delete reaped it and the add-in wrote it back, auto-add
+          // saw an un-ledgered unmatched file and resurrected the deleted row.
+          if (ok) {
+            const rel = resolvedDest.relativePath.split("/").map(sanitizePathSegment).join("/");
+            void ledgerRecord(resolvedDest.vaultId, rel, p.sha);
+          }
           respond(ok ? { ok: true } : { ok: false, error: "download failed" });
         } else if (p.op === "add") {
           const resolved = resolveVaultForPath(p.path, rootRef.current, vaultsRef.current);

@@ -10,7 +10,7 @@ import { useDownloadVersion } from "../data/useDownloadVersion";
 import { useRecordRefs } from "../data/useRecordRefs";
 import { useRecordProperties } from "../data/useRecordProperties";
 import { useRestoreVersion } from "../data/useRestoreVersion";
-import { localDestPath, vaultRelPathFor } from "../data/folder-paths";
+import { folderResolvable, localDestPathStrict, vaultRelPathFor } from "../data/folder-paths";
 import { setReadonly, flipSwReadonly } from "../data/fs-readonly";
 import { ledgerRecord } from "../data/sync-ledger";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
@@ -37,9 +37,13 @@ interface LocalCtx {
 }
 
 /** The vault-relative path for this file (folder hierarchy + sanitized name),
- *  or null if we lack a file name. Matches the key the sync ledger uses. */
+ *  or null if we lack a file name OR the folder id can't be resolved against
+ *  the folder snapshot (a collapsed path would mis-key the sync ledger).
+ *  Matches the key the sync ledger uses. */
 function relForCtx(ctx: LocalCtx): string | null {
-  return ctx.fileName ? vaultRelPathFor(ctx.folderId ?? null, ctx.fileName, ctx.folders ?? []) : null;
+  if (!ctx.fileName) return null;
+  if (!folderResolvable(ctx.folderId ?? null, ctx.folders ?? [])) return null;
+  return vaultRelPathFor(ctx.folderId ?? null, ctx.fileName, ctx.folders ?? []);
 }
 
 /** Record a successful materialization in the sync ledger. Fire-and-forget;
@@ -49,10 +53,15 @@ function recordLedger(ctx: LocalCtx, sha: string | null | undefined): void {
   if (ctx.vaultId && rel && sha) void ledgerRecord(ctx.vaultId, rel, sha);
 }
 
-/** The local working-copy path for this file, or null if no vault folder. */
+/** The local working-copy path for this file, or null if no vault folder OR
+ *  the folder id can't be resolved against the folder snapshot. STRICT on
+ *  purpose: the collapsed-to-root fallback made a stale folder list read,
+ *  chmod, or overwrite an unrelated same-named root-level file (a check-in
+ *  could even publish that file's bytes as a new version). Callers already
+ *  degrade gracefully on null. */
 function localTarget(ctx: LocalCtx): string | null {
   return ctx.vaultRoot && ctx.fileName
-    ? localDestPath(ctx.vaultRoot, ctx.folderId ?? null, ctx.fileName, ctx.folders ?? [])
+    ? localDestPathStrict(ctx.vaultRoot, ctx.folderId ?? null, ctx.fileName, ctx.folders ?? [])
     : null;
 }
 
@@ -483,7 +492,14 @@ export function GetLatestButton({
     let dest: string;
     let intoVault = false;
     if (vaultRoot) {
-      dest = localDestPath(vaultRoot, folderId, fileName, folders);
+      const strict = localDestPathStrict(vaultRoot, folderId, fileName, folders);
+      if (!strict) {
+        // Folder snapshot doesn't resolve this file's folder yet — writing to
+        // the collapsed root path would strand (or overwrite) a root file.
+        toast("Folder list is still refreshing — try again in a moment.");
+        return;
+      }
+      dest = strict;
       intoVault = true;
     } else {
       // No vault folder configured + manual mode → ask the user where to put
@@ -575,7 +591,12 @@ export function GetVersionButton({
     let dest: string;
     let intoVault = false;
     if (vaultRoot) {
-      dest = localDestPath(vaultRoot, folderId, fileName, folders);
+      const strict = localDestPathStrict(vaultRoot, folderId, fileName, folders);
+      if (!strict) {
+        toast("Folder list is still refreshing — try again in a moment.");
+        return;
+      }
+      dest = strict;
       intoVault = true;
     } else {
       const picked = await saveFileDialog({ defaultPath: fileName });

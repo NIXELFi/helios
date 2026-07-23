@@ -101,11 +101,18 @@ export function useAutoSync(input: {
   /** Active vault id. Required for ledger recording + local-deletion detection;
    *  null disables both (the pass still downloads + reconciles as before). */
   vaultId: string | null;
+  /** True when the scan found the vault root itself missing/unreachable (see
+   *  useLocalFolderScan). Deletion inference is suppressed for the pass: a
+   *  scan of a root that isn't there proves nothing about what the user
+   *  deleted — without this, restarting with the drive unplugged classified
+   *  EVERY ledgered file "locally deleted" and soft-deleted the checked-out
+   *  ones vault-wide. Downloads still run (that's how bootstrap works). */
+  rootMissing?: boolean;
   onComplete?: () => void;
 }): AutoSyncStatus {
   const {
     enabled, files, localFiles, versionsByFileId, locks,
-    currentUserId, vaultRoot, folders, vaultId, onComplete,
+    currentUserId, vaultRoot, folders, vaultId, rootMissing, onComplete,
   } = input;
   const download = useDownloadVersion();
   // Used to propagate local deletions of checked-out files (pdm_delete_file).
@@ -217,6 +224,36 @@ export function useAutoSync(input: {
     // Local-deletion ledger, loaded ONCE per pass (best-effort; empty when no
     // vaultId or on any IO error). Drives the third partition bucket below.
     const ledger = vaultId ? await loadLedger(vaultId) : emptyLedger();
+    // Live (non-tombstone) ledger entries = files THIS machine has materialized
+    // and not intentionally deleted. Used by the two absence-sanity guards below.
+    const liveLedgerCount = Object.values(ledger.entries).filter((e) => !e.deletedAt).length;
+    // CIRCUIT BREAKER for deletion inference. Two triggers:
+    //  - rootMissing: the scan couldn't even see the root — its emptiness is
+    //    an observation failure, not a deletion (unplugged drive, renamed
+    //    parent, share down). This survives app restarts, unlike the scan
+    //    hook's in-memory "had files before" guard.
+    //  - a COMPLETELY empty scan while the ledger says we materialized 2+
+    //    files: a whole-vault local wipe is far more likely a mount/observation
+    //    problem than the user intentionally deleting everything one by one.
+    //    (A single-entry ledger stays eligible so the one-file-vault local
+    //    delete flow keeps working.)
+    // Suppression only skips the deletion buckets — downloads still run, so
+    // the worst case of a false trigger is a redundant re-materialization.
+    const suppressDeletions =
+      rootMissing === true || (localFiles.length === 0 && liveLedgerCount > 1);
+    if (suppressDeletions && liveLedgerCount > 0) {
+      console.warn(
+        `[vault] local scan is empty/unreachable but the sync ledger has ${liveLedgerCount} live entr(ies) — ` +
+          "skipping local-deletion detection this pass (not treating this as a mass local delete)",
+      );
+    }
+    // Folder ids resolvable in THIS pass's folder snapshot. A file whose
+    // folder_id is missing from it (realtime file event racing the folder
+    // refetch, recycle-bin restore mid-flight) has NO computable path —
+    // folderPath would silently collapse it to the vault root, downloading it
+    // there and stranding an orphan copy. Skip such files for the pass; the
+    // folder refetch re-triggers a pass that syncs them properly.
+    const knownFolderIds = new Set(folders.map((f) => f.id));
     // Checked-out files the user deleted locally → propagate as a soft-delete
     // AFTER the worker pool settles (sequential pdm_delete_file calls). `dest`
     // is the file's expected on-disk path, re-probed for existence right before
@@ -238,13 +275,21 @@ export function useAutoSync(input: {
     };
     const tasks: Task[] = [];
     for (const file of files) {
+      // No computable path this pass (folder row not fetched yet) → skip the
+      // file entirely: matching, deletion classification, download, chmod all
+      // need the path, and the collapsed-to-root fallback targets the WRONG
+      // file. The pass that follows the folder refetch picks it up.
+      if (file.folder_id !== null && !knownFolderIds.has(file.folder_id)) {
+        skipped++;
+        continue;
+      }
       // Don't clobber in-progress edits. If the user holds the lock, they may
       // have unsaved local changes that don't match the latest sha yet — EXCEPT
       // when the ledger shows we materialized it and it's now gone from disk,
       // which means the user deleted their checked-out copy: propagate it as a
       // soft-delete (spec 2c). Either way the file is skipped from downloading.
       if (myLocks.has(file.id)) {
-        if (vaultId) {
+        if (vaultId && !suppressDeletions) {
           const m0 = matchLocal(file, localFiles, versionsByFileId, folders);
           const rel = vaultRelativePath(file, folders);
           if (!m0.local && classifyMissing(ledger, rel, false) === "locally-deleted") {
@@ -263,16 +308,39 @@ export function useAutoSync(input: {
       if (!ver) { skipped++; continue; }
       const m = matchLocal(file, localFiles, versionsByFileId, folders);
       if (m.status === "synced") { skipped++; continue; }
-      // Third bucket (spec 2c), NOT-locked side: the vault has it, the ledger
-      // says we materialized it locally, but the scan can't find it ⇒ the user
-      // deleted a copy they weren't checked out for. We re-download it (the task
-      // push below restores it) AND warn once — the worker's ledgerRecord
-      // refreshes the stamp so the next pass sees a fresh materialization, not a
-      // repeat deletion (warn-once). m.status === "vault-only" ⇒ !m.local.
-      if (vaultId && m.status === "vault-only") {
-        const rel = vaultRelativePath(file, folders);
-        if (classifyMissing(ledger, rel, false) === "locally-deleted") {
-          deleteBlocked.push(file.name);
+      // ABSENT from the scan — but scan absence is NOT proof of absence from
+      // DISK: walk() drops any file whose content read throws, and a CAD file
+      // held by SolidWorks / AV / a backup agent commonly raises a sharing
+      // violation exactly when the sha cache is cold (app start). Re-probe the
+      // real path before drawing any conclusion (the locked/propagation path
+      // has done this since spec 2c; this extends it to the not-locked side):
+      // a file that IS on disk but unreadable this pass must be neither warned
+      // about as "deleted" NOR overwritten by a restore download. Probe cost
+      // is one exists() per genuinely-missing file; the fresh-bootstrap case
+      // (empty scan, empty ledger — thousands of legitimately missing files)
+      // skips it wholesale since there's nothing on disk to protect.
+      if (m.status === "vault-only") {
+        const freshBootstrap = localFiles.length === 0 && liveLedgerCount === 0;
+        if (!freshBootstrap) {
+          let onDisk = false;
+          try {
+            onDisk = await exists(localDestPath(vaultRoot, file.folder_id, file.name, folders));
+          } catch {
+            onDisk = true; // fail safe: can't probe → assume present, touch nothing
+          }
+          if (onDisk) { skipped++; continue; }
+        }
+        // Third bucket (spec 2c), NOT-locked side: the vault has it, the ledger
+        // says we materialized it locally, and it's confirmed gone from disk ⇒
+        // the user deleted a copy they weren't checked out for. We re-download
+        // it (the task push below restores it) AND warn once — the worker's
+        // ledgerRecord refreshes the stamp so the next pass sees a fresh
+        // materialization, not a repeat deletion (warn-once).
+        if (vaultId && !suppressDeletions) {
+          const rel = vaultRelativePath(file, folders);
+          if (classifyMissing(ledger, rel, false) === "locally-deleted") {
+            deleteBlocked.push(file.name);
+          }
         }
       }
       // Present locally but differs from the latest version. The read-only bit
@@ -388,6 +456,10 @@ export function useAutoSync(input: {
       if (isCurrent() && localFiles) {
         for (const file of files) {
           if (!isCurrent()) break;
+          // Same guard as the partition loop: an unresolvable folder collapses
+          // the match path to the vault root, and the chmod below would then
+          // toggle the read-only bit on an unrelated same-named root file.
+          if (file.folder_id !== null && !knownFolderIds.has(file.folder_id)) continue;
           const m = matchLocal(file, localFiles, versionsByFileId, folders);
           if (!m.local) continue; // not present locally → nothing to chmod
           // Use the LIVE lock set (not the start-of-pass snapshot): a checkout
@@ -499,7 +571,7 @@ export function useAutoSync(input: {
       if (activeAbortRef.current === myAbort) activeAbortRef.current = null;
       lastFinishedAt.current = Date.now();
     }
-  }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders, vaultId, client]);
+  }, [enabled, files, localFiles, versionsByFileId, locks, currentUserId, vaultRoot, folders, vaultId, rootMissing, client]);
 
   // Unmount cleanup: abort any in-flight pass so its writeFile doesn't fire
   // after the consumer is gone.
