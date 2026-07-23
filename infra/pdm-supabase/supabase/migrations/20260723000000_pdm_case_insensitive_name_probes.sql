@@ -161,14 +161,17 @@ begin
   -- The unique indexes admit at most ONE row (live or tombstone) per exact
   -- (vault, parent, name); the probe is case-insensitive (N4) so a
   -- case-variant reuses the existing row instead of creating a filesystem
-  -- twin. Prefer the exact-case row if legacy variants coexist. Two passes:
-  -- losing a concurrent race in any branch falls through to a fresh lookup.
+  -- twin. LIVE rows win over tombstones (else a legacy live "chassis" +
+  -- tombstone "Chassis" pair would resurrect the tombstone into a second
+  -- LIVE twin — recreating the exact churn this probe exists to stop), then
+  -- prefer the exact-case row among legacy variants. Two passes: losing a
+  -- concurrent race in any branch falls through to a fresh lookup.
   for attempt in 1..2 loop
     select * into v_row from pdm.folders
       where vault_id = p_vault_id
         and parent_id is not distinct from p_parent_id
         and lower(name) = lower(v_name)
-      order by (name = v_name) desc, id
+      order by (deleted_at is null) desc, (name = v_name) desc, id
       limit 1;
 
     if found then

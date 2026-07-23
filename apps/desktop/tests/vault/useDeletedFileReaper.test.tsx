@@ -378,6 +378,12 @@ describe("useDeletedFileReaper", () => {
   it("N2: keeps writable, un-ledgered, and sha-mismatched local files (never deletes user data)", async () => {
     seedLedger("writable.bin", "sha-1");
     seedLedger("edited.bin", "sha-VAULT");
+    // One unrelated live row so the pass actually runs (see the empty-liveFiles
+    // guard test below) — none of the candidates map to it.
+    const live: VaultFile[] = [{
+      id: "f-live", vault_id: "v1", folder_id: null, name: "other.bin",
+      latest_version_id: null, created_at: "x",
+    } as VaultFile];
     renderHook(() =>
       useDeletedFileReaper({
         enabled: true,
@@ -388,7 +394,28 @@ describe("useDeletedFileReaper", () => {
           { ...local("edited.bin", "C:/vault/SDM25/edited.bin"), sha256: "sha-LOCAL" },
         ],
         folders: [],
-        liveFiles: [], // none map to a live row
+        liveFiles: live,
+        vaultRoot: "C:/vault/SDM25",
+        vaultId: "v1",
+      }),
+    );
+    await settle();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("N2: an EMPTY live list never runs the orphan pass (RLS-revoked membership must not wipe the local tree)", async () => {
+    // Membership revocation returns 200-with-zero-rows, not an error — an
+    // empty liveFiles makes every ledgered synced copy look orphaned. The
+    // pass must refuse to act on an empty live list.
+    seedLedger("part.sldprt", "sha-1");
+    renderHook(() =>
+      useDeletedFileReaper({
+        enabled: true,
+        deletedFiles: [],
+        // A perfect orphan candidate: readonly, ledgered, sha-matching.
+        localFiles: [{ ...local("part.sldprt", "C:/vault/SDM25/part.sldprt"), sha256: "sha-1" }],
+        folders: [],
+        liveFiles: [],
         vaultRoot: "C:/vault/SDM25",
         vaultId: "v1",
       }),

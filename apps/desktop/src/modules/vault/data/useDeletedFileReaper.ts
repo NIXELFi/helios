@@ -101,7 +101,13 @@ export function useDeletedFileReaper(input: {
     // reap or the orphan pass can run — each phase gates itself below.
     const hasDeletedFiles = deletedFiles && deletedFiles.length > 0;
     const hasDeletedFolders = deletedFolders && deletedFolders.length > 0 && vaultRoot;
-    const canReapOrphans = !!vaultId && liveFiles != null && (localFiles?.length ?? 0) > 0;
+    // liveFiles must be NON-EMPTY, not just loaded: RLS returns 200-with-zero-
+    // rows (not an error) when membership is revoked mid-session, and against
+    // an empty live list every ledgered synced copy would look orphaned — the
+    // pass would wipe the user's whole local tree. An actually-empty vault
+    // leaves residue for the file-reap/unmatched paths instead (safe failure).
+    const canReapOrphans =
+      !!vaultId && liveFiles != null && liveFiles.length > 0 && (localFiles?.length ?? 0) > 0;
     if (!hasDeletedFiles && !hasDeletedFolders && !canReapOrphans) return;
     if (!localFiles) return;
 
