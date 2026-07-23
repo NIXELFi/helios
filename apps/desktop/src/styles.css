@@ -109,6 +109,16 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
   .btn-ghost { @apply text-helios-dim hover:bg-helios-base/60 hover:text-helios-text; }
 }
 
+/* Rail-header telemetry pulse (Windows custom-titlebar layout) — an 8-char
+   window over a scrolling block-glyph waveform. steps() advances exactly one
+   character per tick so it reads as an ASCII animation, not a smooth marquee.
+   The pattern is 12 chars and the inner span holds it twice; translating by
+   -12ch loops seamlessly. */
+.rail-pulse { overflow: hidden; width: 8ch; white-space: nowrap; }
+.rail-pulse > span { display: inline-block; animation: rail-pulse-scroll 2.04s steps(12) infinite; }
+@keyframes rail-pulse-scroll { to { transform: translateX(-12ch); } }
+@media (prefers-reduced-motion: reduce) { .rail-pulse > span { animation: none; } }
+
 /* Helios brand wordmark — used in the header logo and the loading splash. */
 .font-helios {
   font-family: "Orbitron", "Audiowide", system-ui, sans-serif;

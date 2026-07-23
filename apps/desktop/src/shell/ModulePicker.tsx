@@ -173,17 +173,25 @@ export function ModulePicker(props: Props) {
         className={
           "flex items-center border-b border-helios-line pb-3 " +
           BRAND_HEADER_TOP_PADDING +
-          (collapsed
-            ? " justify-center px-1"
-            : IS_WINDOWS
-              ? " justify-end px-3"
-              : " justify-between px-3")
+          (collapsed ? " justify-center px-1" : " justify-between px-3")
         }
       >
         {/* On Windows the custom TitleBar already carries the logo + wordmark
             (and the UpdatesPill at the rail's foot shows the version), so the
-            rail skips the brand header — only the collapse chevron remains. */}
-        {collapsed || IS_WINDOWS ? null : (
+            rail swaps the brand header for the mockup's "MODULES" section
+            label — the row reads as a heading instead of an empty box. */}
+        {collapsed ? null : IS_WINDOWS ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="font-helios text-[10px] uppercase leading-none text-helios-dim">
+              Modules
+            </div>
+            {/* Tiny scrolling waveform — pure-CSS ASCII pulse (see .rail-pulse
+                in styles.css) to keep a bit of ground-station life up here. */}
+            <span aria-hidden className="rail-pulse font-mono-num text-[9px] leading-none text-asu-gold/70 select-none">
+              <span>{"▁▁▂▃▅▇▅▃▂▁▁▁▁▁▂▃▅▇▅▃▂▁▁▁"}</span>
+            </span>
+          </div>
+        ) : (
           <div className="min-w-0">
             <div className="font-helios text-xl leading-none text-asu-gold">HELIOS</div>
             <div className="mt-1 truncate text-[10px] uppercase tracking-wider text-helios-dim">
