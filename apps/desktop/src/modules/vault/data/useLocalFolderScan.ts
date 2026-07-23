@@ -153,6 +153,18 @@ export function useLocalFolderScan(
 ) {
   const { intervalMs, rescanOnFocus, watchFs, paused } = options;
   const [files, setFiles] = useState<LocalFile[] | null>(null);
+  // The root that produced the CURRENT `files` snapshot (null while files is
+  // null). Consumers that pair the scan with per-vault data (auto-sync,
+  // unmatched detection, the reaper) must check `scanRoot === theirRoot`
+  // before acting: on a vault switch the previous root's snapshot is stale
+  // for one render, and acting on it diffs vault A's disk against vault B's
+  // rows — fabricating "locally deleted" and "add to vault" verdicts.
+  const [scanRoot, setScanRoot] = useState<string | null>(null);
+  // True when the last scan found the root itself missing/unstattable. An
+  // absence-based consumer must never infer local deletions from a scan of a
+  // root that isn't there (unplugged drive, renamed parent, network share
+  // down) — that's how a missing drive once soft-deleted checked-out files.
+  const [rootMissing, setRootMissing] = useState(false);
   // Relative paths (built the same way as LocalFile.relativePath) of files that
   // SolidWorks currently has open for editing, derived from `~$` lock sidecars
   // seen during the walk. Used as an informational "Open in SolidWorks" signal.
@@ -182,11 +194,23 @@ export function useLocalFolderScan(
   useEffect(() => {
     shaCacheRef.current.clear();
     hadFilesRef.current = false;
+    // Drop the previous root's snapshot IMMEDIATELY on a root change. Keeping
+    // it published while the new root's (slow — cold sha cache) walk runs let
+    // a sync pass diff the OLD vault's disk against the NEW vault's rows:
+    // every file looked locally-deleted (mass "restored from vault" warnings +
+    // a full re-download) and the old root's files became cross-vault "add"
+    // candidates. Null is the safe idle state every consumer already handles.
+    setFiles(null);
+    setScanRoot(null);
+    setRootMissing(false);
+    setOpenInSw(EMPTY_OPEN_IN_SW);
   }, [rootPath]);
 
   useEffect(() => {
     if (!rootPath) {
       setFiles(null);
+      setScanRoot(null);
+      setRootMissing(false);
       setOpenInSw(EMPTY_OPEN_IN_SW);
       setError(null);
       setLoading(false);
@@ -221,6 +245,10 @@ export function useLocalFolderScan(
         try { await stat(rootPath); } catch { rootExists = false; }
         if (!rootExists && hadFilesRef.current) {
           if (mounted) {
+            // Surface the flag too: the kept snapshot is trustworthy for
+            // presence-based consumers, but deletion inference must stop —
+            // the disk state behind it can no longer be observed.
+            setRootMissing(true);
             setError(new Error(
               `vault folder is unreachable (${rootPath}) — keeping the last known local state; reconnect the drive or fix the path`,
             ));
@@ -239,6 +267,14 @@ export function useLocalFolderScan(
         if (mounted && !pausedNow) {
           if (collected.length > 0) hadFilesRef.current = true;
           setFiles(collected);
+          setScanRoot(rootPath);
+          // `hadFilesRef` is false here (a missing root with prior files took
+          // the error path above), so this is the never-synced bootstrap case:
+          // publish [] so auto-sync can materialize the folder, but flag that
+          // the root itself wasn't there — deletion inference must not run
+          // against a scan of a root that doesn't exist (restart with the
+          // drive unplugged looks identical to bootstrap without this flag).
+          setRootMissing(!rootExists);
           // Reuse the stable empty set when there's nothing open, so consumers
           // don't churn on a fresh empty-Set identity each scan.
           setOpenInSw(openSw.size === 0 ? EMPTY_OPEN_IN_SW : openSw);
@@ -317,5 +353,5 @@ export function useLocalFolderScan(
     };
   }, [rootPath, watchFs, refetch]);
 
-  return { files, openInSw, loading, error, refetch };
+  return { files, scanRoot, rootMissing, openInSw, loading, error, refetch };
 }
