@@ -9,6 +9,8 @@ import { AmethystModule } from "./modules/amethyst";
 import { MarketplaceModule } from "./modules/marketplace";
 import { OrgModule } from "./modules/org";
 import LogsApp from "./App";
+import { TitleBar } from "./shell/TitleBar";
+import { IS_WINDOWS } from "./lib/platform";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
@@ -258,8 +260,25 @@ function HeliosShell() {
   // support.reports policies accept pm.can_triage_reports() (20260714040000).
   const canSeePresence = myRole === "owner" || myRole === "admin" || canManageOrg;
 
+  // Shown in the Windows title bar crumb — mirrors the rail's nav labels.
+  const MODULE_LABEL: Record<ModuleId, string> = {
+    logs: "Logs",
+    vault: "Vault",
+    cfd: "CFD",
+    pm: "PM",
+    games: "Games",
+    amethyst: "Amethyst",
+    marketplace: "Market",
+    org: "Admin",
+  };
+
   return (
-    <div className="flex h-screen w-screen">
+    <div className="flex h-screen w-screen flex-col">
+      {/* Windows runs frameless (decorations:false in tauri.windows.conf.json)
+          and gets the custom in-app title bar; macOS keeps its native overlay
+          traffic lights and skips it. */}
+      {IS_WINDOWS && <TitleBar context={MODULE_LABEL[active]} />}
+      <div className="flex min-h-0 w-full flex-1">
       <ModulePicker
         active={active}
         onSelect={activate}
@@ -365,6 +384,7 @@ function HeliosShell() {
           </div>
         )}
       </main>
+      </div>
       {updateModalOpen && (
         <UpdateModal
           state={updater.state}

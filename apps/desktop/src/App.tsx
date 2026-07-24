@@ -1208,7 +1208,9 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#0E0E10] text-[#D8DCE2]">
+    // h-full (not h-screen): the Shell's Windows title bar sits above this
+    // pane, so the viewport height is no longer ours to claim.
+    <div className="flex flex-col h-full bg-[#0E0E10] text-[#D8DCE2]">
       {/* Header doubles as the macOS drag region under titleBarStyle: Overlay.
           No extra left padding needed here: the 176px-wide ModulePicker rail
           sits to the left of this header in the Shell layout, so the inset

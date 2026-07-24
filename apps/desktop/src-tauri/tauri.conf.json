@@ -15,6 +15,7 @@
         "title": "Helios",
         "width": 1600,
         "height": 1000,
+        "backgroundColor": "#0E0E10",
         "resizable": true,
         "dragDropEnabled": false,
         "titleBarStyle": "Overlay",

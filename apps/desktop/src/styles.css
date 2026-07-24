@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; margin: 0; }
+/* Height of the custom in-app title bar. 0 by default; the TitleBar component
+   (Windows only — frameless window) sets it to its real height while mounted.
+   Full-height `fixed` overlays subtract it so they slide under the bar, not
+   over the window controls. */
+:root { --helios-titlebar-h: 0px; }
+/* Anchor every full-screen `fixed inset-0` overlay (modal backdrops, dialogs,
+   click-away layers) below the custom title bar so the drag region and
+   min/max/close buttons stay usable while a modal is open. Two-class
+   specificity beats the Tailwind utilities; with no title bar mounted the
+   variable is 0px and this is a no-op. Overlays needing a different anchor
+   set an explicit `top-*` without `inset-0` (see TaskDetailSheet). */
+.fixed.inset-0 { top: var(--helios-titlebar-h); }
 /* Kill horizontal rubber-band / overscroll on macOS WKWebView so two-finger
    swipes on the trackpad don't translate the whole page sideways. Vertical
    overscroll is still allowed where needed. */
@@ -103,6 +115,16 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
   .btn-danger { @apply bg-helios-danger text-white hover:bg-helios-danger/85; }
   .btn-ghost { @apply text-helios-dim hover:bg-helios-base/60 hover:text-helios-text; }
 }
+
+/* Rail-header telemetry pulse (Windows custom-titlebar layout) — an 8-char
+   window over a scrolling block-glyph waveform. steps() advances exactly one
+   character per tick so it reads as an ASCII animation, not a smooth marquee.
+   The pattern is 12 chars and the inner span holds it twice; translating by
+   -12ch loops seamlessly. */
+.rail-pulse { overflow: hidden; width: 8ch; white-space: nowrap; }
+.rail-pulse > span { display: inline-block; animation: rail-pulse-scroll 2.04s steps(12) infinite; }
+@keyframes rail-pulse-scroll { to { transform: translateX(-12ch); } }
+@media (prefers-reduced-motion: reduce) { .rail-pulse > span { animation: none; } }
 
 /* Helios brand wordmark — used in the header logo and the loading splash. */
 .font-helios {

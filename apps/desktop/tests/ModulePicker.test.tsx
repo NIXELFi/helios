@@ -47,12 +47,36 @@ describe("<ModulePicker>", () => {
     expect(onSelect).toHaveBeenCalledWith("vault");
   });
 
-  it("renders the HELIOS wordmark and app version in the sidebar header", () => {
-    render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} />);
+  // The brand header is platform-dependent (on Windows the custom TitleBar owns
+  // the logo + wordmark, so the rail skips it) — pin IS_WINDOWS per case instead
+  // of inheriting whatever OS the test host reports through the jsdom UA.
+  it("renders the HELIOS wordmark and app version in the sidebar header (non-Windows)", async () => {
+    vi.resetModules();
+    vi.doMock("../src/lib/platform", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../src/lib/platform")>()),
+      IS_WINDOWS: false,
+    }));
+    const { ModulePicker: PinnedPicker } = await import("../src/shell/ModulePicker");
+    render(<PinnedPicker {...baseProps} active="logs" onSelect={() => {}} />);
     expect(screen.getByText("HELIOS")).toBeInTheDocument();
     // Version appears in two spots — the sidebar header subtitle ("v3.7.0") and
     // the UpdatesPill ("✓ v3.7.0"). Exact-match the persistent subtitle label.
     expect(screen.getByText("v3.7.0")).toBeInTheDocument();
+    vi.doUnmock("../src/lib/platform");
+  });
+
+  it("skips the sidebar wordmark on Windows — the custom TitleBar carries the brand", async () => {
+    vi.resetModules();
+    vi.doMock("../src/lib/platform", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../src/lib/platform")>()),
+      IS_WINDOWS: true,
+    }));
+    const { ModulePicker: PinnedPicker } = await import("../src/shell/ModulePicker");
+    render(<PinnedPicker {...baseProps} active="logs" onSelect={() => {}} />);
+    expect(screen.queryByText("HELIOS")).not.toBeInTheDocument();
+    // The UpdatesPill at the rail's foot still shows the version.
+    expect(screen.getByText(/v3\.7\.0/)).toBeInTheDocument();
+    vi.doUnmock("../src/lib/platform");
   });
 
   it("invokes onUpdaterClick when the updates pill is clicked", () => {
@@ -166,10 +190,19 @@ describe("<ModulePicker>", () => {
     expect(screen.queryByText(/vdev/i)).not.toBeInTheDocument();
   });
 
-  it("the version subtitle truncates a real version (S9)", () => {
-    render(<ModulePicker {...baseProps} active="logs" onSelect={() => {}} appVersion="3.7.0" />);
+  it("the version subtitle truncates a real version (S9)", async () => {
+    // The header subtitle only exists off-Windows (see the brand-header tests
+    // above) — pin the platform so this passes on a Windows test host too.
+    vi.resetModules();
+    vi.doMock("../src/lib/platform", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../src/lib/platform")>()),
+      IS_WINDOWS: false,
+    }));
+    const { ModulePicker: PinnedPicker } = await import("../src/shell/ModulePicker");
+    render(<PinnedPicker {...baseProps} active="logs" onSelect={() => {}} appVersion="3.7.0" />);
     const line = screen.getByText("v3.7.0");
     expect(line.className).toMatch(/truncate/);
+    vi.doUnmock("../src/lib/platform");
   });
 
   // S9: arrow keys move focus between menu items (roving focus) and Escape
