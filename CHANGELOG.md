@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-07-24
+
 ### Added
 - **Windows now gets a custom Helios title bar.** The stock Windows frame is replaced by an in-app bar that matches the rest of the app — the Helios logo + wordmark, the module you're in, and minimize/maximize/close controls (close hides to tray, exactly like before). Drag, double-click to maximize, Win+arrow snapping, and edge snapping all still work. The sidebar no longer repeats the wordmark on Windows (the title bar owns the brand). macOS is unchanged (native traffic lights).
 
