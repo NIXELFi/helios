@@ -173,8 +173,20 @@ export interface AxleChannels {
   /** Front-view instant centers per side (y, z) — null when at infinity. */
   icLeft: [number, number] | null;
   icRight: [number, number] | null;
-  /** Anti-dive (front, braking) or anti-squat (rear, accel), %. */
-  antiPct: number;
+  /** BRAKING anti, %: anti-dive on the front axle, anti-lift on the rear.
+   *  Outboard brakes ⇒ the braking torque is reacted by the links, so the
+   *  side-view line runs from the CONTACT PATCH to the side-view IC. Scaled
+   *  by this axle's share of the braking force (bias front / 1−bias rear),
+   *  which is why the front number tracks brake bias and the rear one
+   *  moves the opposite way. */
+  antiBrakePct: number;
+  /** ACCELERATION anti, %: anti-squat on the (driven) rear axle. RWD with an
+   *  inboard diff ⇒ drive torque goes to the chassis through the halfshafts,
+   *  so the line runs from the WHEEL CENTER, not the contact patch — the same
+   *  assumption the link-force calculator makes. An undriven, unbraked front
+   *  axle carries no longitudinal tire force and therefore has no geometric
+   *  anti at all under power: it is exactly 0, not a small number. */
+  antiAccelPct: number;
   /** Bump steer at the current position, deg/in. */
   bumpSteerLeft: number;
   bumpSteerRight: number;
@@ -260,6 +272,10 @@ interface SideProbe {
   cp: V3;
   vy: number; // d(cp_y)/d(bump)
   vx: number; // d(cp_x)/d(bump)
+  /** d(wheelCenter_x)/d(bump) — the side-view line for loads whose TORQUE is
+   *  reacted by the chassis rather than the links (inboard diff/halfshafts,
+   *  inboard brakes). Those act at the wheel center, not the contact patch. */
+  wcVx: number;
   omega: number; // front-view upright rotation, rad per in of bump
   dToe: number;
   dCamber: number;
@@ -300,6 +316,7 @@ function probeSide(
     cp: cur.cp,
     vy: (up.cp[1] - dn.cp[1]) / (2 * H),
     vx: (up.cp[0] - dn.cp[0]) / (2 * H),
+    wcVx: (upState.wheelCenter[0] - dnState.wheelCenter[0]) / (2 * H),
     omega: (up.fv - dn.fv) / (2 * H) * (side === 1 ? 1 : 1),
     dToe: (up.toe - dn.toe) / (2 * H),
     dCamber: (up.camber - dn.camber) / (2 * H),
@@ -322,7 +339,8 @@ export function axleChannels(
 ): AxleChannels {
   if (skipProbes) {
     return {
-      rollCenter: [NaN, NaN], icLeft: null, icRight: null, antiPct: NaN,
+      rollCenter: [NaN, NaN], icLeft: null, icRight: null,
+      antiBrakePct: NaN, antiAccelPct: NaN,
       bumpSteerLeft: NaN, bumpSteerRight: NaN, camberGainLeft: NaN, camberGainRight: NaN,
       arbTwistRatioLeft: NaN, arbTwistRatioRight: NaN,
       arbMotionRatioLeft: NaN, arbMotionRatioRight: NaN,
@@ -362,18 +380,30 @@ export function axleChannels(
     : ([R.cp[1] - 1 / R.omega, R.cp[2] + R.vy / R.omega] as [number, number]);
   void ic;
 
-  // Side-view n-line slope from contact-patch longitudinal velocity.
+  // Side-view n-line slopes: the contact-patch line (loads whose torque the
+  // LINKS react — outboard brakes) and the wheel-center line (loads whose
+  // torque the CHASSIS reacts — inboard diff/halfshafts).
   const svSlope = -((L.vx + R.vx) / 2);
+  const svSlopeWc = -((L.wcVx + R.wcVx) / 2);
   const lOverH = wheelbase / Math.max(params.cgHeight, 1e-6);
-  const antiPct = isFront
-    ? 100 * svSlope * lOverH * params.brakeBiasFront
-    : 100 * -svSlope * lOverH;
+
+  // 100 % anti = the side-view line aimed at the CG height over the
+  // wheelbase, so tanθ normalized by h/L is the anti fraction. Each axle
+  // only develops anti in proportion to the longitudinal force it carries.
+  // Rear slope is negated: the same tilt that lifts the front under braking
+  // pushes the rear down, so both read positive for "resists the motion".
+  const brakeShare = isFront ? params.brakeBiasFront : 1 - params.brakeBiasFront;
+  const antiBrakePct = (isFront ? svSlope : -svSlope) * lOverH * brakeShare * 100;
+  // Under power only the driven axle makes anti, and via the wheel-center
+  // line because the diff is chassis-mounted.
+  const antiAccelPct = isFront ? 0 : -svSlopeWc * lOverH * 100;
 
   return {
     rollCenter: rc,
     icLeft: icL,
     icRight: icR,
-    antiPct,
+    antiBrakePct,
+    antiAccelPct,
     bumpSteerLeft: L.dToe,
     bumpSteerRight: R.dToe,
     camberGainLeft: L.dCamber,

@@ -194,7 +194,8 @@ function decode(seedCar: CarSetup, genes: Gene[], genome: number[]): CarSetup {
 
 function needsFor(keys: string[]): EvalOpts {
   const axleKeys = /^(rc_|anti_|bump_steer|camber_gain|arb_twist_ratio|arb_mr|arb_ir)/;
-  const cornerKeys = /^(install_ratio|wheel_rate|total_travel|bump_travel)/;
+  // anti_pitch weights the two axles by ride rate, so it needs wheel rates.
+  const cornerKeys = /^(install_ratio|wheel_rate|total_travel|bump_travel|anti_pitch)/;
   return {
     axleProbes: keys.some((k) => axleKeys.test(k)),
     cornerProbes: keys.some((k) => cornerKeys.test(k)),

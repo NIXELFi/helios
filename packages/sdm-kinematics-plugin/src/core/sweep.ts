@@ -29,6 +29,15 @@ export interface FullState {
    *  NaN when the axle has no U-bar. */
   ubarTwistFront: number;
   ubarTwistRear: number;
+  /** Whole-car pitch resistance, %: how much less the chassis pitches than
+   *  a zero-anti car under the same load transfer. Each axle's spring
+   *  deflection scales with (1 − anti)/K, so the car-level number is the
+   *  COMPLIANCE-weighted mean of the two axle antis — not their sum, and
+   *  not the driven axle's figure alone. Equal ride rates reduce it to the
+   *  simple average, which is why a 60 % anti-squat rear with a 0 % front
+   *  only buys ~30 % of the pitch back. */
+  antiPitchBraking: number;
+  antiPitchAccel: number;
   pose: Pose;
 }
 
@@ -112,9 +121,20 @@ export function solveCar(
     if (arb === "none") return NaN;
     return deg(arb === "zbar" ? psiL + psiR : psiL - psiR);
   };
+  // Compliance-weighted combination of the two axle antis. Falls back to an
+  // even split when wheel rates are unavailable (probe-free evaluation).
+  const rateF = (cornerCh.FL.wheelRate + cornerCh.FR.wheelRate) / 2;
+  const rateR = (cornerCh.RL.wheelRate + cornerCh.RR.wheelRate) / 2;
+  const usable = Number.isFinite(rateF) && Number.isFinite(rateR) && rateF > 0 && rateR > 0;
+  const cF = usable ? 1 / rateF : 1;
+  const cR = usable ? 1 / rateR : 1;
+  const blend = (aF: number, aR: number) => (aF * cF + aR * cR) / (cF + cR);
+
   return {
     corners, cornerCh, frontAxle, rearAxle,
     ackermann: ackermannPct(cornerCh.FL.steer, cornerCh.FR.steer, trackWidth(car.front), wb),
+    antiPitchBraking: blend(frontAxle.antiBrakePct, rearAxle.antiBrakePct),
+    antiPitchAccel: blend(frontAxle.antiAccelPct, rearAxle.antiAccelPct),
     ubarTwistFront: twist("front", corners.FL.ubarAngle, corners.FR.ubarAngle),
     ubarTwistRear: twist("rear", corners.RL.ubarAngle, corners.RR.ubarAngle),
     pose,
@@ -169,8 +189,12 @@ export function channelDefs(): ChannelDef[] {
     { key: "rc_height_r", label: "Roll center height R", unit: "in", get: (s) => s.rearAxle.rollCenter[1], defaultOn: true },
     { key: "rc_lat_f", label: "Roll center lateral F", unit: "in", get: (s) => s.frontAxle.rollCenter[0] },
     { key: "rc_lat_r", label: "Roll center lateral R", unit: "in", get: (s) => s.rearAxle.rollCenter[0] },
-    { key: "anti_dive", label: "Anti-dive F", unit: "%", get: (s) => s.frontAxle.antiPct },
-    { key: "anti_squat", label: "Anti-squat R", unit: "%", get: (s) => s.rearAxle.antiPct },
+    { key: "anti_dive_f", label: "Anti-dive F (brk)", unit: "%", get: (s) => s.frontAxle.antiBrakePct },
+    { key: "anti_lift_r", label: "Anti-lift R (brk)", unit: "%", get: (s) => s.rearAxle.antiBrakePct },
+    { key: "anti_squat_r", label: "Anti-squat R (acc)", unit: "%", get: (s) => s.rearAxle.antiAccelPct },
+    { key: "anti_lift_f", label: "Anti-lift F (acc)", unit: "%", get: (s) => s.frontAxle.antiAccelPct },
+    { key: "anti_pitch_brk", label: "Total anti-pitch (brk)", unit: "%", get: (s) => s.antiPitchBraking },
+    { key: "anti_pitch_acc", label: "Total anti-pitch (acc)", unit: "%", get: (s) => s.antiPitchAccel },
     { key: "bump_steer_fl", label: "Bump steer FL", unit: "deg/in", get: (s) => s.frontAxle.bumpSteerLeft },
     { key: "camber_gain_fl", label: "Camber gain FL", unit: "deg/in", get: (s) => s.frontAxle.camberGainLeft },
     { key: "arb_twist_f", label: "ARB twist F", unit: "deg", get: (s) => s.ubarTwistFront },

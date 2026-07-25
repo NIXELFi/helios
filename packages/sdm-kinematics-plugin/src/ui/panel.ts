@@ -401,10 +401,16 @@ export class Panel {
     inp.type = "number";
     inp.step = "0.1";
     inp.value = String(value);
-    inp.onchange = () => {
+    // Commit on every keystroke, not just blur — otherwise a retyped value
+    // sits in the box while the channels still show the old one, which reads
+    // as "changing this does nothing". An empty box is mid-edit, not a zero.
+    const commit = () => {
+      if (inp.value.trim() === "") return;
       const v = Number(inp.value);
       if (Number.isFinite(v)) onChange(v);
     };
+    inp.oninput = commit;
+    inp.onchange = commit;
     f.append(lab, inp);
     return f;
   }
@@ -566,10 +572,13 @@ export class Panel {
     inp.type = "number";
     inp.step = String(step);
     inp.value = String(value);
-    inp.onchange = () => {
+    const commit = () => {
+      if (inp.value.trim() === "") return; // mid-edit, not a zero
       const v = Number(inp.value);
       if (Number.isFinite(v)) onChange(v);
     };
+    inp.oninput = commit;
+    inp.onchange = commit;
     f.append(lab, inp);
     return f;
   }
@@ -720,7 +729,9 @@ export class Panel {
         <tr><th></th><th>Front</th><th>Rear</th></tr>
         <tr><td>RC height in</td><td>${fmt(f.rollCenter[1])}</td><td>${fmt(r.rollCenter[1])}</td></tr>
         <tr><td>RC lateral in</td><td>${fmt(f.rollCenter[0])}</td><td>${fmt(r.rollCenter[0])}</td></tr>
-        <tr><td>Anti %</td><td>${fmt(f.antiPct, 1)}</td><td>${fmt(r.antiPct, 1)}</td></tr>
+        <tr><td>Anti-dive F / lift R (brk)</td><td>${fmt(f.antiBrakePct, 1)}</td><td>${fmt(r.antiBrakePct, 1)}</td></tr>
+        <tr><td>Anti-lift F / squat R (acc)</td><td>${fmt(f.antiAccelPct, 1)}</td><td>${fmt(r.antiAccelPct, 1)}</td></tr>
+        <tr><td>Total anti-pitch brk / acc</td><td>${fmt(s.antiPitchBraking, 1)}</td><td>${fmt(s.antiPitchAccel, 1)}</td></tr>
         <tr><td>Bump steer L °/in</td><td>${fmt(f.bumpSteerLeft, 3)}</td><td>${fmt(r.bumpSteerLeft, 3)}</td></tr>
         <tr><td>Camber gain L °/in</td><td>${fmt(f.camberGainLeft, 3)}</td><td>${fmt(r.camberGainLeft, 3)}</td></tr>
         <tr><td>ARB twist °</td><td>${fmt(s.ubarTwistFront, 3)}</td><td>${fmt(s.ubarTwistRear, 3)}</td></tr>
