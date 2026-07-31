@@ -10,6 +10,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload, IconRefresh } from "@tabler/icons-react";
+import { useUser } from "@helios/auth";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
@@ -19,6 +20,8 @@ import { BrowseView } from "./views/BrowseView";
 import { InstalledView } from "./views/InstalledView";
 import { PluginDetail } from "./views/PluginDetail";
 import { InstallConsentModal } from "./components/InstallConsentModal";
+import { UninstallConfirmModal } from "./components/UninstallConfirmModal";
+import { hasHighTrust } from "./components/PermissionList";
 import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled";
 
@@ -41,11 +44,12 @@ const DEMO = isMarketplaceDemo();
 export function MarketplaceModule() {
   const { plugins, loading, error, refetch } = useAvailablePlugins();
   const { install, installing, error: installError } = useInstall();
-  const { uninstall } = useUninstall();
+  const { uninstall, removing, error: uninstallError } = useUninstall();
 
   const [tab, setTab] = useState<Tab>("browse");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [consentFor, setConsentFor] = useState<AvailablePlugin | null>(null);
+  const [uninstallFor, setUninstallFor] = useState<AvailablePlugin | null>(null);
   const [launch, setLaunch] = useState<LoadedPlugin | null>(null);
   const [launchError, setLaunchError] = useState<LoadError | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -80,20 +84,26 @@ export function MarketplaceModule() {
     }
   }, [consentFor, install, refetch]);
 
-  const handleUninstall = useCallback(
-    async (p: AvailablePlugin) => {
-      setBusyId(p.id);
-      try {
-        await uninstall(p.id);
-        refetch();
-      } catch {
-        // Best-effort; the row re-enables and the catalog refetch reflects reality.
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [uninstall, refetch],
-  );
+  // Uninstall is destructive and irreversible (server-side deregister + bundle
+  // delete + stored-data purge), so the trash icon only OPENS the confirmation —
+  // exactly like Install only opens the consent modal. There is no code path from
+  // a click to `useUninstall` that skips it.
+  const requestUninstall = useCallback((p: AvailablePlugin) => setUninstallFor(p), []);
+
+  const confirmUninstall = useCallback(async () => {
+    if (!uninstallFor) return;
+    const p = uninstallFor;
+    setBusyId(p.id);
+    try {
+      await uninstall(p.id);
+      setUninstallFor(null);
+      refetch();
+    } catch {
+      // Error is surfaced inside the modal via `uninstallError`; keep it open.
+    } finally {
+      setBusyId(null);
+    }
+  }, [uninstallFor, uninstall, refetch]);
 
   const handleOpen = useCallback(async (p: AvailablePlugin) => {
     setLaunchError(null);
@@ -121,11 +131,31 @@ export function MarketplaceModule() {
   // Bundled plugins ship in the build (public/plugins/<id>/) and launch straight
   // from their local base URL into the same sandbox as a marketplace install — no
   // download, no verified-install step.
+  //
+  // There is no consent modal here, and that is a deliberate choice rather than an
+  // oversight (audit P2): consent exists to gate a trust decision the USER is
+  // making about a THIRD party's code, and a bundled plugin is neither — it is code
+  // we shipped, reviewed at build time, that the member did not choose to bring in.
+  // A modal for it would be noise, and noise is what teaches people to click
+  // through the modal that does matter.
+  //
+  // What the missing modal DID leave unguarded is the broker: it grants whatever
+  // the local manifest declares, so a bundled manifest that declared a Tier-2
+  // permission would get it silently and unreviewed (today that only fails because
+  // the one Tier-2 handler throws — a coincidence, not a guard). So the tier bound
+  // is asserted here, at load, and fails LOUDLY: a bundled plugin is Tier-0/1 only,
+  // and anything higher must go through the marketplace's review + consent path.
   const openBundled = useCallback(async (bp: BundledPlugin) => {
     setLaunchError(null);
     setBusyId(bp.id);
     try {
       const loaded = await loadPlugin(bp.baseUrl);
+      if (hasHighTrust(loaded.manifest.permissions)) {
+        throw new Error(
+          "this bundled add-on declares a high-trust (Tier-2) permission, which bundled add-ons " +
+            "are not allowed to hold — it must be published to the marketplace and installed with consent",
+        );
+      }
       setLaunch(loaded);
     } catch (e) {
       setLaunchError({ baseUrl: bp.name, message: e instanceof Error ? e.message : String(e) });
@@ -194,7 +224,7 @@ export function MarketplaceModule() {
             onRequestInstall={requestInstall}
             onUpdate={requestInstall}
             onOpen={handleOpen}
-            onUninstall={handleUninstall}
+            onUninstall={requestUninstall}
           />
         ) : (
           <>
@@ -261,7 +291,7 @@ export function MarketplaceModule() {
                 busyId={busyId}
                 onOpen={handleOpen}
                 onUpdate={requestInstall}
-                onUninstall={handleUninstall}
+                onUninstall={requestUninstall}
                 onOpenDetail={openDetail}
               />
             )}
@@ -276,6 +306,16 @@ export function MarketplaceModule() {
           error={installError}
           onConfirm={confirmInstall}
           onCancel={() => setConsentFor(null)}
+        />
+      )}
+
+      {uninstallFor && (
+        <UninstallConfirmModal
+          plugin={uninstallFor}
+          removing={removing}
+          error={uninstallError}
+          onConfirm={confirmUninstall}
+          onCancel={() => setUninstallFor(null)}
         />
       )}
     </div>
@@ -417,6 +457,10 @@ function TabButton({
 }
 
 function PluginStage({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => void }) {
+  // Read the member here rather than in MarketplaceModule: the stage only exists
+  // while an add-on is actually running, which is the only time the plugin's
+  // per-user storage namespace is needed.
+  const user = useUser();
   const [lines, setLines] = useState<ConsoleLine[]>([]);
   const [consoleOpen, setConsoleOpen] = useState(false);
 
@@ -474,6 +518,7 @@ function PluginStage({ plugin, onBack }: { plugin: LoadedPlugin; onBack: () => v
           plugin={plugin}
           theme="dark"
           locale={locale}
+          userId={user?.id ?? null}
           onLog={onLog}
           onNotify={onNotify}
           onCall={onCall}

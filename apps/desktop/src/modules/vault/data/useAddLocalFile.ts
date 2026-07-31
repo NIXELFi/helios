@@ -128,7 +128,10 @@ export async function ensureFolderHierarchy(
       .select("*")
       .eq("vault_id", vaultId)
       .is("deleted_at", null)
-      .ilike("name", seg.replace(/([\\%_])/g, "\\$1"));
+      // `*` MUST be escaped too: PostgREST rewrites `*` in an ilike value to
+      // `%` before it reaches SQL, so an unescaped folder named `R*D` matched
+      // its sibling `RandD` and files were filed into the wrong folder.
+      .ilike("name", seg.replace(/([\\%_*])/g, "\\$1"));
     q = parentId === null ? q.is("parent_id", null) : q.eq("parent_id", parentId);
     const { data: existing, error: lookupErr } = await q;
     if (lookupErr) throw new Error(`lookup folder "${seg}": ${lookupErr.message}`);
@@ -136,7 +139,20 @@ export async function ensureFolderHierarchy(
     // Prefer an exact-case match when several case-variants exist (legacy
     // duplicates), otherwise take the case-insensitive hit.
     const rows = (existing ?? []) as Array<{ id: FolderId; name: string }>;
-    const found = rows.find((r) => r.name === seg) ?? rows[0];
+    // Prefer exact case; otherwise accept ONLY a true case-variant. The old
+    // `?? rows[0]` took whatever the server returned first, so any row the
+    // pattern matched for a reason other than case (wildcard leakage — see the
+    // escape above — or a future pattern bug) silently became "the" folder and
+    // the file was filed somewhere the user never asked for. Verifying the
+    // match here means a surprising row creates a correctly-named folder
+    // instead of misfiling into an unrelated one.
+    // A row with no usable `name` can't be verified as a case-variant, so it is
+    // not a candidate — same principle as above: never adopt a folder we can't
+    // confirm is the one asked for (and never throw on a malformed row).
+    const lowerSeg = seg.toLowerCase();
+    const named = rows.filter((r) => typeof r?.name === "string");
+    const found =
+      named.find((r) => r.name === seg) ?? named.find((r) => r.name.toLowerCase() === lowerSeg);
     if (found) {
       parentId = found.id;
       continue;

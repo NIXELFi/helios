@@ -62,4 +62,28 @@ describe("resolveVaultForPath — vault-root confinement", () => {
   it("refuses a path outside any vault folder", () => {
     expect(resolveVaultForPath("C:\\Users\\nick\\Documents\\x.sldprt", root, vaults)).toBeNull();
   });
+
+  // Audit 0731: the prefix match is case-insensitive (Windows paths are), so
+  // two vaults whose names differ only by case share ONE on-disk directory and
+  // both match. Returning the first meant an add-in op could check bytes in
+  // against the wrong vault's file. Ambiguous → refuse.
+  it("refuses when more than one vault matches the same on-disk folder", () => {
+    const ambiguous = [
+      { id: "vault-a", name: "SDM26" },
+      { id: "vault-b", name: "sdm26" },
+    ] as unknown as Vault[];
+    expect(
+      resolveVaultForPath("C:\\Users\\nick\\Helios\\SDM26\\Chassis\\x.sldprt", root, ambiguous),
+    ).toBeNull();
+  });
+
+  it("still resolves when vault names merely share a prefix", () => {
+    const siblings = [
+      { id: "vault-a", name: "SDM26" },
+      { id: "vault-b", name: "SDM26-archive" },
+    ] as unknown as Vault[];
+    expect(
+      resolveVaultForPath("C:\\Users\\nick\\Helios\\SDM26\\x.sldprt", root, siblings),
+    ).toEqual({ vaultId: "vault-a", relativePath: "x.sldprt" });
+  });
 });

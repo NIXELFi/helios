@@ -166,22 +166,40 @@ export function BulkActionBar({
       // surfaces the count below so the user knows why some rows skipped.
       if (lockKindFor(id) === "other") { lockedByOther++; continue; }
       // Acquire lock if we don't already hold it. Stop the row if we can't.
+      // `acquiredHere` records that THIS pass took the lock, so every exit path
+      // below can compensate. Without it, a readFile throw (the common case:
+      // the part is open in SOLIDWORKS with an exclusive handle) counted the
+      // row as failed but left the lock held — the user silently ended up with
+      // files checked out to them that only an admin force-unlock could clear.
+      // bulkCheckOut already compensates this way on its own failure paths.
+      let acquiredHere = false;
       if (lockKindFor(id) === "none") {
         const acquired = await acquireLock.run(id);
-        if (signal.aborted) return;
+        // Abort between acquire and use is ALSO a leak: the effect's abort
+        // scope fires on any selection change, so a user clicking away mid-run
+        // would strand the lock. Release before bailing.
+        if (signal.aborted) { await releaseLock.run(id); return; }
         if (!acquired) { fail++; continue; }
+        acquiredHere = true;
       }
       try {
         const fileBytes = await readFile(m.local.absolutePath);
-        if (signal.aborted) return;
+        if (signal.aborted) { if (acquiredHere) await releaseLock.run(id); return; }
         const ab = fileBytes.buffer.slice(
           fileBytes.byteOffset,
           fileBytes.byteOffset + fileBytes.byteLength,
         ) as ArrayBuffer;
         const r = await checkIn.run(id, ab, "bulk check-in");
-        if (signal.aborted) return;
+        // A SUCCESSFUL check-in releases the lock server-side, so only
+        // compensate when we still hold it (r === null / abort before the RPC
+        // landed is indistinguishable here — releasing a lock we no longer hold
+        // is a harmless no-op, whereas keeping one we do is the bug).
+        if (signal.aborted) { if (acquiredHere && !r) await releaseLock.run(id); return; }
         if (r) {
           ok++;
+          // pdm_check_in released the lock server-side — we no longer hold it,
+          // so a later throw in this block must NOT try to release it again.
+          acquiredHere = false;
           // P0: the file is now the latest version and no longer checked out, so
           // re-protect the local copy read-only — mirroring single-file CheckIn.
           // Without this the writable-but-unlocked copy reads as an unsaved edit
@@ -191,8 +209,17 @@ export function BulkActionBar({
           flipSwReadonly(m.local.absolutePath, true);
           // Record the just-checked-in content in the ledger (T6).
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), r.sha256);
-        } else fail++;
+        } else {
+          // check-in RPC/upload failed — the lock is still ours, and we only
+          // took it for this attempt. Give it back so the row is retryable
+          // (and doesn't read as "checked out" to teammates).
+          if (acquiredHere) await releaseLock.run(id);
+          fail++;
+        }
       } catch {
+        // readFile / setReadonly threw. Same rule: never leave a lock this pass
+        // acquired behind on a failed row.
+        if (acquiredHere) await releaseLock.run(id);
         if (signal.aborted) return;
         fail++;
       }
@@ -261,7 +288,10 @@ export function BulkActionBar({
       if (kind === "me") { alreadyMine++; continue; }
       if (kind === "other") { lockedByOther++; continue; }
       const r = await acquireLock.run(id);
-      if (signal.aborted) return;
+      // Aborting between acquire and use strands the lock exactly like a failed
+      // download does (see the rollbacks below), and the abort scope fires on
+      // any selection change — release before bailing.
+      if (signal.aborted) { await releaseLock.run(id); return; }
       if (!r) { fail++; continue; }
       // P0: make the local copy editable — get the latest first if ours is
       // missing/stale (so the user doesn't edit an outdated base and then check
@@ -279,11 +309,17 @@ export function BulkActionBar({
         const stale = !m.local || (!!ver && m.local.sha256?.toLowerCase() !== ver.sha256.toLowerCase());
         if (ver && stale) {
           const got = await download.run(ver.sha256, dest, signal);
-          if (signal.aborted) return;
+          // Abort mid-download leaves the local copy stale AND the lock held —
+          // roll the lock back, same as the download-failure branch.
+          if (signal.aborted) { await releaseLock.run(id); return; }
           if (!got) { await releaseLock.run(id); fail++; continue; }
           if (vaultId) void ledgerRecord(vaultId, vaultRelativePath(file, folders), ver.sha256);
         }
         await setReadonly(dest, false);
+        // The bytes are correct and the copy is now writable — the checkout is
+        // effectively complete, so an abort here KEEPS the lock (releasing it
+        // would leave a writable unlocked copy, the one state the sync model
+        // treats as unsaved-edits-forever). Just stop the loop.
         if (signal.aborted) return;
         flipSwReadonly(dest, false);
       }

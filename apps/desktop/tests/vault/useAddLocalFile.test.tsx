@@ -360,7 +360,13 @@ describe("useAddLocalFile", () => {
                     callLog.push("folders.lookup");
                     // First lookup is for Engine (parent_id is null) → return existing
                     lookupCount++;
-                    return Promise.resolve({ data: [{ id: "engine-existing" }], error: null });
+                    // `name` matters: the lookup runs `.select("*")`, and the hook
+                    // verifies the returned row really is a case-variant of the
+                    // segment before reusing it (rather than trusting rows[0]).
+                    return Promise.resolve({
+                      data: [{ id: "engine-existing", name: "Engine" }],
+                      error: null,
+                    });
                   },
                   eq: () => {
                     callLog.push("folders.lookup");

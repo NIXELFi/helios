@@ -65,6 +65,12 @@ function pillFor(state: UpdaterState): { label: string; title: string; className
         title: "Installing update; the app will relaunch",
         className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]",
       };
+    case "installed":
+      return {
+        label: `↻ restart for v${state.version}`,
+        title: `Helios v${state.version} is installed — quit and reopen Helios to finish updating.`,
+        className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold",
+      };
     case "offline":
       return {
         label: "– offline",

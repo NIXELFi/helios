@@ -614,7 +614,11 @@ export function simLap(
       // Pedal channels (demand ÷ capacity, same physics as the classifier).
       const fAvail = fEngine > 0 ? tractiveForceInGear(curve, vehicle, gear, vAvg) : 0;
       ch.throttle.push(fEngine > 0 && fAvail > 0 ? Math.min(1, fEngine / fAvail) : 0);
-      const brakeCap = fBrake > 0 ? vehicle.massKg * grip.aBrakeGrip(vAvg, R) : 0;
+      // `pace` here for the same reason as the throttle side above: the
+      // solver brakes at `effort * aBrakeGrip` (managed-effort pace), so
+      // normalising against the UNPACED capacity made a driver at 100% of
+      // managed braking read ~0.58 on an endurance lap.
+      const brakeCap = fBrake > 0 ? pace * vehicle.massKg * grip.aBrakeGrip(vAvg, R) : 0;
       ch.brake.push(brakeCap > 0 ? Math.min(1, fBrake / brakeCap) : 0);
     }
   }
@@ -775,6 +779,14 @@ function solveSpeeds(
   for (let i = 1; i < N; i++) {
     const gPrev = gearAtSpeed(shiftV, out[i - 1]!);
     const gCur = gearAtSpeed(shiftV, out[i]!);
+    if (gCur > gPrev) shiftCount += gCur - gPrev;
+  }
+  // On a CLOSED track the lap also wraps out[N-1] → out[0]; skipping that
+  // transition lost an upshift (and its shiftTimeS) whenever the shift fell
+  // across the start/finish line.
+  if (closed && N > 1) {
+    const gPrev = gearAtSpeed(shiftV, out[N - 1]!);
+    const gCur = gearAtSpeed(shiftV, out[0]!);
     if (gCur > gPrev) shiftCount += gCur - gPrev;
   }
 

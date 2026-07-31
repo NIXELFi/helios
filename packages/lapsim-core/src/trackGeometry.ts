@@ -252,9 +252,14 @@ export function trackFromVisual(
   const segments: TrackSegment[] = [];
   for (let i = 0; i < n - 1; i++) {
     const kMid = (smooth[i]! + smooth[i + 1]!) / 2;
-    const r = kMid > 1 / maxRadius ? Math.max(minRadius, 1 / kMid) : Infinity;
+    // Clamp AFTER the rescale: `minRadius` is a real-world floor (the rules
+    // hairpin), so flooring the pre-scale radius made the effective floor
+    // minRadius * s — too high for s > 1, and letting a traced pinch through
+    // for s < 1. Straights stay Infinity.
+    const rRaw = kMid > 1 / maxRadius ? 1 / kMid : Infinity;
+    const r = Number.isFinite(rRaw) ? Math.max(minRadius, rRaw * s) : rRaw;
     if (ds[i]! > 1e-6) {
-      segments.push({ length: ds[i]! * s, radius: Number.isFinite(r) ? r * s : r });
+      segments.push({ length: ds[i]! * s, radius: r });
     }
   }
   return { name: `${visual.name} (traced)`, segments, closed: visual.closed };

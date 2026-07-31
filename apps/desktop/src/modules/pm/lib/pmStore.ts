@@ -146,13 +146,35 @@ function emptyProjectData(org: BaselineOrg): ProjectData {
 // persist to localStorage. Per-project data (tasks, vendors, …) now persists to
 // the `pm` schema in Supabase via the mutation actions below.
 
-const ACTIVE_PROJECT_KEY = "helios:activeProject";
+// Namespaced by user id, mirroring `snapshotKey` in workspace-snapshot.ts, so a
+// different account never inherits another's selection. On a shared machine the
+// un-namespaced key meant user B silently landed in whatever season user A last
+// had open (and it was never cleared on sign-out either). No userId = no write /
+// no read, rather than falling back to a shared key.
+const ACTIVE_PROJECT_KEY_PREFIX = "helios:activeProject";
+// The pre-namespacing key. Read by nobody now; removed on first touch so it
+// doesn't linger in localStorage forever leaking one user's last season.
+const LEGACY_ACTIVE_PROJECT_KEY = "helios:activeProject";
 const PROJECTS_KEY = "helios:projects";
 
-function persistActiveProject(id: string): void {
-  if (typeof window === "undefined") return;
+function activeProjectKey(userId: string): string {
+  return `${ACTIVE_PROJECT_KEY_PREFIX}:${userId}`;
+}
+
+function dropLegacyActiveProject(): void {
   try {
-    window.localStorage.setItem(ACTIVE_PROJECT_KEY, id);
+    window.localStorage.removeItem(LEGACY_ACTIVE_PROJECT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function persistActiveProject(userId: string, id: string): void {
+  if (typeof window === "undefined") return;
+  if (!userId) return;
+  try {
+    window.localStorage.setItem(activeProjectKey(userId), id);
+    dropLegacyActiveProject();
   } catch {
     // ignore storage failures (private mode, quota)
   }
@@ -167,10 +189,13 @@ function persistProjects(projects: Project[]): void {
   }
 }
 
-export function readPersistedActiveProject(): string | null {
+export function readPersistedActiveProject(userId: string): string | null {
   if (typeof window === "undefined") return null;
+  if (!userId) return null;
   try {
-    return window.localStorage.getItem(ACTIVE_PROJECT_KEY);
+    const id = window.localStorage.getItem(activeProjectKey(userId));
+    dropLegacyActiveProject();
+    return id;
   } catch {
     return null;
   }
@@ -206,6 +231,13 @@ export function readPersistedProjects(): Project[] | null {
 export interface WriteError {
   message: string;
   at: number;
+  // Set when the write PARTIALLY committed (see db.PartialWriteError). Local
+  // state is known to disagree with the server, so the toast must not auto-
+  // dismiss and an authoritative reload is forced. `reload` tracks that reload
+  // so the user is told whether the screen is trustworthy again:
+  //   "pending" → in flight | "done" → screen matches server | "failed" → still stale
+  needsReload?: boolean;
+  reload?: "pending" | "done" | "failed";
 }
 
 // --- Undo/redo command model ------------------------------------------------
@@ -307,6 +339,10 @@ interface PmState {
   // Most recent failed write, for the toast. Null when all is well.
   lastWriteError: WriteError | null;
   clearWriteError: () => void;
+  // Manual retry for the forced post-partial-write reload (the toast's "Reload
+  // now"), for when the automatic one failed — e.g. the network dropped between
+  // the partial commit and the re-pull.
+  retryWriteErrorReload: () => void;
   // Number of optimistic writes currently persisting. A background refresh skips
   // while this is > 0 so it never clobbers an in-flight optimistic edit.
   inFlightWrites: number;
@@ -574,16 +610,57 @@ function withSubteamMove(patch: Partial<TaskRow>): Partial<TaskRow> {
 }
 
 export const usePmStore = create<PmState>((set, get) => {
+  // Re-pull the authoritative workspace after a PARTIAL write, then restore the
+  // error toast on top of the fresh data. `reloadWorkspace`'s hydrate clears
+  // `lastWriteError` (a normal hydrate should), so we snapshot the message first
+  // and re-set it afterwards — the user must still be told WHY the rows they
+  // just edited look the way they do, even though the screen is now correct.
+  async function resyncAfterPartialWrite(): Promise<void> {
+    const pending = get().lastWriteError;
+    if (!pending) return;
+    const finish = (reload: "done" | "failed") => {
+      // Only re-assert OUR error: a newer write may have failed meanwhile, and
+      // clobbering its toast would hide a fresher problem.
+      const current = get().lastWriteError;
+      if (current && current.at !== pending.at) return;
+      set({ lastWriteError: { ...pending, reload } });
+    };
+    const reload = get().reloadWorkspace;
+    if (!reload) {
+      finish("failed");
+      return;
+    }
+    try {
+      await reload();
+      finish("done");
+    } catch {
+      finish("failed");
+    }
+  }
+
   // Optimistic-write helper. The action has already applied its change to the
   // store; this fires the matching DB write in the background. If it fails, we
-  // restore the captured pre-image (`rollback`) and surface the error. When
-  // there's no client (tests / signed-out) the change simply stays in memory.
+  // restore the captured pre-image (`rollback`) and surface the error.
   function persist(
     run: (client: SupabaseClient) => Promise<void>,
     rollback: () => void,
   ): void {
     const client = get().client;
-    if (!client) return;
+    // No client = nothing can be saved. This is only reachable before hydrate
+    // wires one in (or in a test that never seeds one), but a SAVE path must
+    // never silently no-op: dropping the write here would leave the optimistic
+    // change sitting in memory looking saved, which is the same silent data loss
+    // the zero-rows-affected check exists to prevent. Undo the change and say so.
+    if (!client) {
+      rollback();
+      set({
+        lastWriteError: {
+          message: "Not connected — your change couldn't be saved.",
+          at: Date.now(),
+        },
+      });
+      return;
+    }
     // Capture the project the write targets. A rollback restores this project's
     // flat fields (the snapshot was taken from it), so if the user switched to a
     // different project before the write rejected, rolling back would overwrite
@@ -594,10 +671,32 @@ export const usePmStore = create<PmState>((set, get) => {
     set((s) => ({ inFlightWrites: s.inFlightWrites + 1, writeEpoch: s.writeEpoch + 1 }));
     void run(client)
       .catch((err: unknown) => {
-        if (get().activeProjectId !== proj) return;
-        rollback();
-        const message = err instanceof Error ? err.message : String(err);
-        set({ lastWriteError: { message, at: Date.now() } });
+        // Only the ROLLBACK is project-conditional (see above). The ERROR is not:
+        // the toast is global, and a user who navigated to another season while
+        // the write was in flight otherwise got NO signal at all that their edit
+        // was lost. Name the project the write targeted, since it's no longer the
+        // one on screen and "Change not saved" alone would be baffling.
+        const switched = get().activeProjectId !== proj;
+        if (!switched) rollback();
+        const raw = err instanceof Error ? err.message : String(err);
+        const name = switched
+          ? get().projects.find((p) => p.id === proj)?.name ?? null
+          : null;
+        const message = name ? `${name}: ${raw}` : raw;
+        // A partial commit is the one failure mode where rolling back is not
+        // enough: the rows that DID save are still on the server, so the screen
+        // is wrong until we re-pull. Force the reload rather than asking the
+        // user to trust a toast (they can also retry it from the toast if this
+        // fails). See db.PartialWriteError.
+        const needsReload = err instanceof db.PartialWriteError;
+        set({
+          lastWriteError: {
+            message,
+            at: Date.now(),
+            ...(needsReload ? { needsReload: true, reload: "pending" as const } : {}),
+          },
+        });
+        if (needsReload) void resyncAfterPartialWrite();
       })
       .finally(() => {
         set((s) => ({ inFlightWrites: Math.max(0, s.inFlightWrites - 1) }));
@@ -660,6 +759,12 @@ export const usePmStore = create<PmState>((set, get) => {
     registerReloadWorkspace: (fn) => set({ reloadWorkspace: fn }),
     lastWriteError: null,
     clearWriteError: () => set({ lastWriteError: null }),
+    retryWriteErrorReload: () => {
+      const err = get().lastWriteError;
+      if (!err?.needsReload || err.reload === "pending") return;
+      set({ lastWriteError: { ...err, reload: "pending" } });
+      void resyncAfterPartialWrite();
+    },
     inFlightWrites: 0,
     writeEpoch: 0,
     projectRoles: {},
@@ -748,7 +853,9 @@ export const usePmStore = create<PmState>((set, get) => {
         const target = s.projectData[id];
         if (!target) return {};
         const projectData = { ...s.projectData, [s.activeProjectId]: snapshotFlat(s) };
-        persistActiveProject(id);
+        // currentUserId comes from hydrate; empty pre-hydrate/in tests, in which
+        // case persistActiveProject skips rather than writing a shared key.
+        persistActiveProject(s.currentUserId, id);
         return {
           projectData,
           activeProjectId: id,

@@ -88,6 +88,18 @@ fn all_same(values: &[f64]) -> bool {
     values.iter().all(|v| (v - values[0]).abs() < 1e-12)
 }
 
+/// `all_same` for the optional `diameter_out` vectors: a pipe group is
+/// uniform only when every entry is present-and-equal or every entry is
+/// absent (both cases collapse to the scalar config field).
+fn all_same_opt(values: &[Option<f64>]) -> bool {
+    if values.is_empty() { return true; }
+    values.iter().all(|v| match (v, values[0]) {
+        (Some(a), Some(b)) => (a - b).abs() < 1e-12,
+        (None, None) => true,
+        _ => false,
+    })
+}
+
 pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadError> {
     let text = fs::read_to_string(path)?;
     let data: Value = serde_json::from_str(&text)?;
@@ -125,6 +137,29 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
         return Err(ConfigLoadError::Schema("exhaust_primaries must have at least one pipe".into()));
     }
 
+    // One runner and one primary PER CYLINDER: `SDM26Engine::new` builds
+    // `0..n_cylinders` of each and indexes the per-pipe vectors unguarded, so
+    // a short array panics inside the solver thread and a long one silently
+    // drops the extra pipes. Reject the mismatch here instead.
+    //
+    // Secondaries are deliberately NOT checked against `n_cylinders`: a 4-2-1
+    // header has exactly 2 by design, and that count is what selects
+    // `ExhaustTopology::FourTwoOne` above — any other count means 4-1, where
+    // no secondary is built and `secondary_spec` is never called.
+    let n_cyl = req_u(&data, "n_cylinders")?;
+    if runners.len() != n_cyl {
+        return Err(ConfigLoadError::Schema(format!(
+            "intake_pipes has {} entries but n_cylinders is {n_cyl}; one runner per cylinder is required",
+            runners.len()
+        )));
+    }
+    if primaries.len() != n_cyl {
+        return Err(ConfigLoadError::Schema(format!(
+            "exhaust_primaries has {} entries but n_cylinders is {n_cyl}; one primary per cylinder is required",
+            primaries.len()
+        )));
+    }
+
     let runner_lengths: Vec<f64> = pipe_field(runners, "length", "intake_pipes")?;
     let runner_diameters_in: Vec<f64> = pipe_field(runners, "diameter", "intake_pipes")?;
     let runner_diameters_out: Vec<Option<f64>> = runners.iter()
@@ -149,7 +184,7 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.stroke = req_f64(cyl, "stroke")?;
     cfg.con_rod = req_f64(cyl, "con_rod_length")?;
     cfg.cr = req_f64(cyl, "compression_ratio")?;
-    cfg.n_cylinders = req_u(&data, "n_cylinders")?;
+    cfg.n_cylinders = n_cyl;
     let firing_order = data.get("firing_order").and_then(|x| x.as_array())
         .ok_or_else(|| ConfigLoadError::Schema("missing array \"firing_order\"".into()))?;
     cfg.firing_order = firing_order.iter().enumerate()
@@ -228,16 +263,30 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.exhaust_topology = topology;
     cfg.drivetrain_efficiency = opt_f64(&data, "drivetrain_efficiency").unwrap_or(0.91);
 
+    // Per-pipe geometry: stored only when it actually varies, otherwise the
+    // scalar seeded from `[0]` above already describes every pipe. Port gap
+    // (0731): only lengths and inlet diameters were mirrored here, so a
+    // stepped `diameter_out`, per-pipe `wall_temperature`, or a 4-2-1 with
+    // unequal secondaries loaded without complaint and ran every pipe with
+    // pipe #1's geometry.
     if !all_same(&runner_lengths) { cfg.runner_lengths = Some(runner_lengths); }
     if !all_same(&runner_diameters_in) { cfg.runner_diameters_in = Some(runner_diameters_in); }
+    if !all_same_opt(&runner_diameters_out) { cfg.runner_diameters_out = Some(runner_diameters_out); }
+    if !all_same(&runner_wall_ts) { cfg.runner_wall_ts = Some(runner_wall_ts); }
     if !all_same(&primary_lengths) { cfg.primary_lengths = Some(primary_lengths); }
     if !all_same(&primary_diameters_in) { cfg.primary_diameters_in = Some(primary_diameters_in); }
+    if !all_same_opt(&primary_diameters_out) { cfg.primary_diameters_out = Some(primary_diameters_out); }
+    if !all_same(&primary_wall_ts) { cfg.primary_wall_ts = Some(primary_wall_ts); }
     if topology == ExhaustTopology::FourTwoOne {
         cfg.secondary_length = secondary_lengths[0];
         cfg.secondary_diameter_in = secondary_diameters_in[0];
         cfg.secondary_diameter_out = secondary_diameters_out[0];
         cfg.secondary_n_cells = req_u(&secondaries[0], "n_points")?;
         cfg.secondary_wall_t = secondary_wall_ts[0];
+        if !all_same(&secondary_lengths) { cfg.secondary_lengths = Some(secondary_lengths); }
+        if !all_same(&secondary_diameters_in) { cfg.secondary_diameters_in = Some(secondary_diameters_in); }
+        if !all_same_opt(&secondary_diameters_out) { cfg.secondary_diameters_out = Some(secondary_diameters_out); }
+        if !all_same(&secondary_wall_ts) { cfg.secondary_wall_ts = Some(secondary_wall_ts); }
     }
 
     // ---- Optional `physics` section -------------------------------------
@@ -457,6 +506,76 @@ mod tests {
         let res = load_v1_json(&p);
         let _ = fs::remove_file(&p);
         assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    #[test]
+    fn pipe_count_must_match_n_cylinders() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        // Two runners of DIFFERENT length on a 4-cylinder: `runner_spec(2)`
+        // used to index out of bounds inside the solver thread.
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        let arr = data["intake_pipes"].as_array().unwrap();
+        let mut two = vec![arr[0].clone(), arr[1].clone()];
+        two[1]["length"] = serde_json::json!(0.3);
+        data["intake_pipes"] = Value::Array(two);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+
+        // Same for primaries, and an OVER-long array is rejected too (it
+        // would silently drop the extra pipes).
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        let arr = data["exhaust_primaries"].as_array().unwrap().clone();
+        let mut five = arr.clone();
+        five.push(arr[0].clone());
+        data["exhaust_primaries"] = Value::Array(five);
+        let p = write_temp(&data);
+        let res = load_v1_json(&p);
+        let _ = fs::remove_file(&p);
+        assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    #[test]
+    fn four_two_one_secondaries_are_not_constrained_to_n_cylinders() {
+        // The shipped SDM26 is a 4-2-1: 4 cylinders, 2 secondaries. That is
+        // legal and must still load.
+        let cfg = load_v1_json(python_ref_sdm26()).unwrap();
+        assert_eq!(cfg.n_cylinders, 4);
+        assert_eq!(cfg.exhaust_topology, ExhaustTopology::FourTwoOne);
+    }
+
+    #[test]
+    fn non_uniform_secondary_and_wall_geometry_reaches_the_config() {
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["exhaust_secondaries"][1]["length"] = serde_json::json!(0.5);
+        data["exhaust_secondaries"][1]["diameter_out"] = serde_json::json!(0.042);
+        data["exhaust_primaries"][2]["wall_temperature"] = serde_json::json!(700.0);
+        data["intake_pipes"][3]["diameter_out"] = serde_json::json!(0.041);
+        let p = write_temp(&data);
+        let cfg = load_v1_json(&p).unwrap();
+        let _ = fs::remove_file(&p);
+        assert_eq!(cfg.secondary_lengths.as_ref().unwrap()[1], 0.5);
+        assert_eq!(cfg.secondary_diameters_out.as_ref().unwrap()[1], Some(0.042));
+        assert_eq!(cfg.primary_wall_ts.as_ref().unwrap()[2], 700.0);
+        assert_eq!(cfg.runner_diameters_out.as_ref().unwrap()[3], Some(0.041));
+    }
+
+    #[test]
+    fn uniform_pipe_geometry_stores_no_per_pipe_vectors() {
+        // The shipped configs are uniform in every field except primary
+        // inlet diameter, so mirroring the extra vectors must not change
+        // what the solver sees.
+        let cfg = load_v1_json(python_ref_sdm26()).unwrap();
+        assert!(cfg.runner_diameters_out.is_none());
+        assert!(cfg.runner_wall_ts.is_none());
+        assert!(cfg.primary_diameters_out.is_none());
+        assert!(cfg.primary_wall_ts.is_none());
+        assert!(cfg.secondary_lengths.is_none());
+        assert!(cfg.secondary_diameters_in.is_none());
+        assert!(cfg.secondary_diameters_out.is_none());
+        assert!(cfg.secondary_wall_ts.is_none());
     }
 
     #[test]

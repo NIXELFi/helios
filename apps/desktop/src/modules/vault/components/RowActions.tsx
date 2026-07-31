@@ -126,9 +126,15 @@ export function CheckOutButton({
           // STALE (or missing) local copy writable would invite editing an
           // outdated base and checking it in over a teammate's newer work —
           // roll the checkout back instead and surface why.
-          await release.run(fileId);
+          // release.run returns false when pdm_cancel_checkout itself failed —
+          // the file is then STILL locked to this user. Telling them it was
+          // rolled back in that case is a lie that leaves an invisible lock
+          // teammates can't work around, so branch and name the recovery.
+          const rolledBack = await release.run(fileId);
           setRollbackErr(
-            "couldn't download the latest version — check-out was rolled back. Try again.",
+            rolledBack
+              ? "couldn't download the latest version — check-out was rolled back. Try again."
+              : "couldn't download the latest version, and the check-out could NOT be rolled back — the file is still checked out to you. Use Undo check-out.",
           );
           return;
         }

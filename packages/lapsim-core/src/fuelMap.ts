@@ -31,7 +31,27 @@ export interface EngineFuelMap {
 /** Solver-config fuel constants used to RECOVER fuel flow from trapped air:
  *  the shipped SDM26/25 configs run AFR 13.1 on 44 MJ/kg gasoline. η_ind is
  *  computed against these and is fuel-agnostic afterwards (energy-based), so
- *  the lap's actual fuel (Sunoco/E85 LHV) plugs in at evaluation time. */
+ *  the lap's actual fuel (Sunoco/E85 LHV) plugs in at evaluation time.
+ *
+ *  NOT an E85 bug, though it reads like one. These two constants only ever
+ *  appear as the ratio AFR/LHV in the recovery step (fuel = air/AFR, then
+ *  η = P_ind / (fuel · LHV)), so an error in one cancels an error in the
+ *  other. Running the numbers for E85 (stoich 9.77, LHV 29.2 MJ/kg) at the
+ *  same equivalence ratio as the gasoline config:
+ *
+ *    η_computed / η_true = (13.1 / 44) / (8.70 / 29.2) = 0.99925
+ *
+ *  i.e. 0.075% low — well inside the model's own error bars. The reason is
+ *  physical: stoichiometric fuel ENERGY PER KG OF AIR is nearly
+ *  fuel-independent (~2.99 MJ/kg-air for both), and the two configs sit at
+ *  the same equivalence ratio (13.1/14.7 = 0.891 vs 8.70/9.77 = 0.890), so
+ *  the same trapped air implies the same released energy either way.
+ *
+ *  This BREAKS — and these constants would then have to become per-fuel
+ *  inputs — if a fuel is run at a materially different equivalence ratio
+ *  from the gasoline config's 0.891 (e.g. a lean-burn or heavily
+ *  power-enriched map), or on a fuel whose stoichiometric energy per kg of
+ *  air departs from ~3 MJ (methanol/nitromethane/hydrogen). */
 const SOLVER_AFR = 13.1;
 const SOLVER_LHV_J_KG = 44e6;
 

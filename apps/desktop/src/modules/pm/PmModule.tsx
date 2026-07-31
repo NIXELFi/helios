@@ -139,23 +139,49 @@ function UndoRedoHotkeys() {
 function WriteErrorToast() {
   const error = usePmStore((s) => s.lastWriteError);
   const clear = usePmStore((s) => s.clearWriteError);
+  const retryReload = usePmStore((s) => s.retryWriteErrorReload);
   useEffect(() => {
     if (!error) return;
+    // A partial write leaves the screen disagreeing with the server until the
+    // forced reload lands, so this toast must NOT time out — it's the only
+    // signal that what's on screen was rewritten under the user. Everything
+    // else self-clears as before.
+    if (error.needsReload) return;
     const t = setTimeout(clear, 6000);
     return () => clearTimeout(t);
   }, [error, clear]);
   if (!error) return null;
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-md border border-red-500/40 bg-red-950/95 px-4 py-3 text-sm text-red-100 shadow-lg">
-      <div className="font-medium">Change not saved</div>
+      <div className="font-medium">
+        {error.needsReload ? "Only part of that saved" : "Change not saved"}
+      </div>
       <div className="mt-0.5 break-words text-red-200/80">{error.message}</div>
-      <button
-        type="button"
-        onClick={clear}
-        className="mt-1.5 text-xs text-red-300 underline underline-offset-2 hover:text-red-200"
-      >
-        Dismiss
-      </button>
+      {error.needsReload && (
+        <div className="mt-1.5 text-xs text-red-200/70">
+          {error.reload === "pending" && "Reloading from the server…"}
+          {error.reload === "done" && "Reloaded — this is what actually saved."}
+          {error.reload === "failed" && "Reload failed — what you see may be out of date."}
+        </div>
+      )}
+      <div className="mt-1.5 flex gap-3">
+        {error.needsReload && error.reload !== "pending" && (
+          <button
+            type="button"
+            onClick={retryReload}
+            className="text-xs font-medium text-red-200 underline underline-offset-2 hover:text-red-100"
+          >
+            {error.reload === "failed" ? "Reload now" : "Reload again"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={clear}
+          className="text-xs text-red-300 underline underline-offset-2 hover:text-red-200"
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   );
 }
@@ -187,24 +213,34 @@ function defaultProjectId(projects: ReadonlyArray<{ id: string; name: string }>)
 export function PmModule() {
   const client = useSupabaseClientOrNull();
   const user = useUser();
+  // Key the effects below on the user's ID, NOT the user object — the same
+  // hazard useMyRole (AuthShell) already guards. onAuthStateChange hands the
+  // provider a fresh `user` object on every benign event (incl. the ~hourly
+  // TOKEN_REFRESHED), and depending on `user` would re-run both effects: the
+  // first would re-`hydrateFrom(loadSnapshot(...))` mid-session, replacing the
+  // whole store from a possibly-stale localStorage snapshot (visibly reverting
+  // recent edits and desynchronising any in-flight rollback pre-image), and the
+  // second would tear down and re-subscribe the realtime channel + both
+  // intervals. Neither effect body needs anything from `user` but its id.
+  const userId = user?.id ?? null;
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!client || !user) return;
+    if (!client || !userId) return;
     const c = client;
-    const u = user;
+    const uid = userId;
     let active = true;
 
     const hydrateFrom = (ws: Workspace) => {
-      const persisted = readPersistedActiveProject();
+      const persisted = readPersistedActiveProject(uid);
       const activeProjectId =
         persisted && ws.projectData[persisted] ? persisted : defaultProjectId(ws.projects);
       usePmStore.getState().hydrate({
         projects: ws.projects,
         projectData: ws.projectData,
         activeProjectId,
-        currentUserId: u.id,
+        currentUserId: uid,
         baselineOrg: ws.baselineOrg,
         roles: ws.roles,
         client: c,
@@ -221,12 +257,12 @@ export function PmModule() {
     usePmStore.getState().registerReloadWorkspace(async () => {
       const ws = await loadWorkspace(c);
       hydrateFrom(ws);
-      saveSnapshot(ws, u.id, new Date().toISOString());
+      saveSnapshot(ws, uid, new Date().toISOString());
     });
 
     // 1. Stale-while-revalidate: paint instantly from the cached snapshot so PM
     //    cold-launch shows the last workspace sub-frame instead of a spinner.
-    const cached = loadSnapshot(u.id);
+    const cached = loadSnapshot(uid);
     if (cached) {
       hydrateFrom(cached);
       setPhase("ready");
@@ -238,7 +274,7 @@ export function PmModule() {
         const ws = await loadWorkspace(c);
         if (!active) return;
         hydrateFrom(ws);
-        saveSnapshot(ws, u.id, new Date().toISOString());
+        saveSnapshot(ws, uid, new Date().toISOString());
         setPhase("ready");
       } catch (e) {
         if (!active) return;
@@ -256,7 +292,7 @@ export function PmModule() {
       // stale client/user after sign-out or a client swap.
       usePmStore.getState().registerReloadWorkspace(null);
     };
-  }, [client, user]);
+  }, [client, userId]);
 
   // Keep the workspace fresh without a full app reload, re-hydrating from the
   // `pm` schema so server-side changes (the activity-feed trigger, edits from
@@ -273,9 +309,9 @@ export function PmModule() {
   //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
   //     the window stays focused but idle.
   useEffect(() => {
-    if (!client || !user) return;
+    if (!client || !userId) return;
     const c = client;
-    const u = user;
+    const uid = userId;
     let running = false;
     // Set when a refresh aborts because a write started/finished mid-fetch. We
     // can't just drop that refresh — the change that triggered it (a probe/
@@ -305,7 +341,7 @@ export function PmModule() {
           projects: ws.projects,
           projectData: ws.projectData,
           activeProjectId: keep,
-          currentUserId: u.id,
+          currentUserId: uid,
           baselineOrg: ws.baselineOrg,
           roles: ws.roles,
           client: c,
@@ -314,7 +350,7 @@ export function PmModule() {
         });
         // Keep the cold-launch cache fresh. serializeSnapshot caps size, so a
         // huge workspace just isn't persisted rather than janking the write.
-        saveSnapshot(ws, u.id, new Date().toISOString());
+        saveSnapshot(ws, uid, new Date().toISOString());
         retryPending = false; // this refresh succeeded — nothing left to re-arm
       } catch {
         // transient refresh failure — the next focus/interval retries
@@ -394,7 +430,7 @@ export function PmModule() {
       unsubscribeRealtime();
       unsubscribeStore();
     };
-  }, [client, user]);
+  }, [client, userId]);
 
   if (phase === "loading") return <Centered>Loading your projects…</Centered>;
   if (phase === "error")

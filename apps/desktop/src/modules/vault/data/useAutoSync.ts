@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Folder, VaultFile, Version, Lock } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
 import { matchLocal, vaultRelativePath } from "./local-match";
-import { localDestPath } from "./folder-paths";
+import { localDestPath, resolvableFolderIds } from "./folder-paths";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
 import { ensureLocalFolderTree } from "./ensureLocalFolderTree";
@@ -253,7 +253,12 @@ export function useAutoSync(input: {
     // folderPath would silently collapse it to the vault root, downloading it
     // there and stranding an orphan copy. Skip such files for the pass; the
     // folder refetch re-triggers a pass that syncs them properly.
-    const knownFolderIds = new Set(folders.map((f) => f.id));
+    //
+    // Resolvable means the WHOLE ancestor chain is present, not just the leaf
+    // row: a missing MID-chain folder used to leave the leaf id in this set
+    // while folderPath returned a TRUNCATED path, so the file was synced to —
+    // and chmod'd at — a real but wrong location.
+    const knownFolderIds = resolvableFolderIds(folders);
     // Checked-out files the user deleted locally → propagate as a soft-delete
     // AFTER the worker pool settles (sequential pdm_delete_file calls). `dest`
     // is the file's expected on-disk path, re-probed for existence right before

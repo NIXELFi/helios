@@ -229,16 +229,30 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
             // version (spec 2026-05-30 §4: release -> re-download latest ->
             // read-only) — not just release the lock. Forward a getLatest
             // download for the file's latest version before re-protecting.
-            // Best-effort: if it can't run now, the read-only bit set below plus
-            // auto-sync's "read-only but differs -> refresh" path still discards
-            // the edits on the next pass, which is the intent of undo.
-            if let Some(vid) = file.latest_version_id.clone() {
-                if let Ok(v) = supabase::get_version_by_id(&state.http, &session, &vid).await {
-                    if let Some(sha) = v.get("sha256").and_then(|s| s.as_str()) {
-                        let payload = json!({ "op": "getLatest", "sha": sha, "destPath": body.path.clone() });
-                        let _ = forward(&state, payload).await;
-                    }
-                }
+            //
+            // The read-only bit is NOT cosmetic here: this codebase treats it as
+            // the "clean synced copy" marker (see `get_latest`'s dirty-copy
+            // guard). Setting it on a file whose restore never landed is a lie —
+            // the user's modified bytes are still on disk, but now look clean, so
+            // a later /get-latest overwrites them with no warning. So we only
+            // re-protect when the restore actually succeeded; otherwise the file
+            // stays WRITABLE (still looks dirty, still protected by the guard)
+            // and we answer non-ok so the add-in can tell the user.
+            let restored = restore_latest(&state, &session, &file, &body.path).await;
+            if let Err(reason) = restored {
+                eprintln!("bridge: cancel-checkout restore failed, leaving local copy writable: {reason}");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "ok": false,
+                        "fileId": file.file_id,
+                        "error": format!(
+                            "the check-out was cancelled, but the vaulted copy could not be restored ({reason}). Your local edits are still on disk and the file was left writable — run Get Latest when you're ready to discard them."
+                        ),
+                        "code": "restore_failed",
+                    })),
+                )
+                    .into_response();
             }
             // Re-protect the local copy: with the lock gone it must be read-only
             // again so nobody edits without checking out (mirrors check-in).
@@ -252,6 +266,38 @@ async fn cancel_checkout(State(state): State<Arc<BridgeState>>, Json(body): Json
             Json(json!({ "ok": true, "fileId": file.file_id })).into_response()
         }
         Err(e) => supa_error(e),
+    }
+}
+
+/// Re-download the file's latest vaulted version over the local working copy,
+/// as the "discard my edits" half of an undo-checkout. Returns `Err(reason)` if
+/// the restore did NOT land, so the caller can leave the file writable rather
+/// than stamping the clean-copy (read-only) marker on unrestored bytes.
+async fn restore_latest(
+    state: &Arc<BridgeState>,
+    session: &super::Session,
+    file: &super::SnapshotFile,
+    path: &str,
+) -> Result<(), String> {
+    let Some(vid) = file.latest_version_id.clone() else {
+        return Err("the file has no vaulted version to restore".into());
+    };
+    let v = supabase::get_version_by_id(&state.http, session, &vid)
+        .await
+        .map_err(|e| e.message)?;
+    let Some(sha) = v.get("sha256").and_then(|s| s.as_str()) else {
+        return Err("could not resolve the latest version's checksum".into());
+    };
+    let payload = json!({ "op": "getLatest", "sha": sha, "destPath": path });
+    let reply = forward(state, payload).await.map_err(|(_, msg)| msg)?;
+    if op_ok(&reply) {
+        Ok(())
+    } else {
+        Err(reply
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("the download did not complete")
+            .to_string())
     }
 }
 
@@ -391,13 +437,38 @@ async fn get_latest(State(state): State<Arc<BridgeState>>, Json(body): Json<Path
     // edits with no recoverable copy, so refuse with a structured error the
     // add-in can show. A missing file or a clean read-only copy is safe to
     // (re)materialize.
-    if let Ok(meta) = std::fs::metadata(&body.path) {
-        if !meta.permissions().readonly() {
+    //
+    // This MUST be a `match`, not `if let Ok(..)`. A stat can fail for reasons
+    // that have nothing to do with the file being absent: a sharing violation
+    // (the doc is open in SOLIDWORKS on a UNC vault share), an ACL denial, a
+    // path over MAX_PATH. With `if let Ok`, every one of those skipped the
+    // guard entirely and we happily clobbered a writable checked-out working
+    // copy — destroying unsaved edits with no recoverable copy. Standing repo
+    // rule: never act on an unverifiable absence. Only a definitive NotFound
+    // means "safe to materialize"; anything else is unknown and we refuse.
+    match std::fs::metadata(&body.path) {
+        Ok(meta) if !meta.permissions().readonly() => {
             return (
                 StatusCode::CONFLICT,
                 Json(json!({
                     "error": "local file is writable (checked out or has unsaved changes) — check it in or undo the checkout before getting latest",
                     "code": "dirty_local_copy",
+                })),
+            )
+                .into_response();
+        }
+        // Clean, read-only, synced copy — safe to overwrite.
+        Ok(_) => {}
+        // Definitively absent — nothing to destroy, materialize it.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": format!(
+                        "cannot determine the state of the local file (it may be open in SOLIDWORKS or unreadable), so it will not be overwritten: {e}"
+                    ),
+                    "code": "local_state_unknown",
                 })),
             )
                 .into_response();

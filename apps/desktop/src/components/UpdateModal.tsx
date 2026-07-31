@@ -46,10 +46,15 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
   // user reached here via an install click, keep the modal up and surface the
   // error + a retry rather than vanishing.
   const installFailed = installAttempted && state.kind === "offline";
+  // The update installed but Helios couldn't restart itself — the user has to
+  // relaunch by hand. Keep the modal up to say so; it's the only place that
+  // instruction can land.
+  const needsRestart = state.kind === "installed";
   const isOpen =
     state.kind === "available" ||
     state.kind === "downloading" ||
     state.kind === "installing" ||
+    needsRestart ||
     installFailed;
   const downloading = state.kind === "downloading";
   const installing  = state.kind === "installing";
@@ -116,6 +121,54 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
   // download/install and an accidental backdrop click shouldn't dismiss it.
   function handleBackdropClick() {
     if (!inFlight) onClose();
+  }
+
+  // Installed, but the automatic restart didn't happen. This is a success
+  // state, not a failure — no error styling, just the one instruction.
+  if (state.kind === "installed") {
+    return (
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Update installed"
+        className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 outline-none"
+        onClick={handleBackdropClick}
+      >
+        <div
+          className="bg-[#0E0E10] border border-[#2A2C32] w-[560px] max-h-[80vh] flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
+            <span className="text-xs uppercase tracking-wider text-[#FFC627]">Update installed</span>
+            <button
+              type="button"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+              className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >×</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <div role="status" className="text-sm text-[#D8DCE2]">
+              Helios v{state.version} is installed — please restart Helios manually to finish updating.
+            </div>
+            <div className="mt-3 text-xs text-[#9097A0]">
+              Quit Helios from the tray icon (right-click → Quit Helios), then open it again.
+              You can keep using this version until you do.
+            </div>
+          </div>
+          <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-[#2A2C32]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >Got it</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Install failed → the updater is `offline` and we have no `update` details

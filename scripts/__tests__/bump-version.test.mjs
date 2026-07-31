@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bumpVersion } from "../bump-version.mjs";
+import { bumpVersion, promoteChangelog } from "../bump-version.mjs";
 
 function makeRepo(initial) {
   const dir = mkdtempSync(join(tmpdir(), "helios-bump-"));
@@ -50,4 +50,51 @@ test("accepts -rc suffixes", () => {
   bumpVersion("2.3.0-rc.1", dir);
   const root = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   assert.equal(root.version, "2.3.0-rc.1");
+});
+
+const CHANGELOG_HEAD = "# Changelog\n\n";
+
+test("promotes a populated [Unreleased]", () => {
+  const dir = makeRepo({ root: "0.0.1", desktop: "0.0.1", tauri: "0.0.1", cargo: "0.0.1" });
+  writeFileSync(
+    join(dir, "CHANGELOG.md"),
+    CHANGELOG_HEAD + "## [Unreleased]\n\n### Fixed\n- A real fix.\n\n## [2.2.0] - 2026-01-01\n\n### Added\n- Old.\n",
+  );
+  assert.equal(promoteChangelog("2.3.0", dir, "2026-07-31"), true);
+  const after = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+  assert.match(after, /## \[Unreleased\]\n\n## \[2\.3\.0\] - 2026-07-31\n\n### Fixed\n- A real fix\./);
+});
+
+// The release body + the Slack post are generated from the promoted section, so
+// promoting nothing would ship a release with no notes. Refuse, loudly.
+test("refuses to promote an empty [Unreleased]", () => {
+  const dir = makeRepo({ root: "0.0.1", desktop: "0.0.1", tauri: "0.0.1", cargo: "0.0.1" });
+  writeFileSync(join(dir, "CHANGELOG.md"), CHANGELOG_HEAD + "## [Unreleased]\n\n## [2.2.0] - 2026-01-01\n\n### Added\n- Old.\n");
+  assert.throws(() => promoteChangelog("2.3.0", dir), /\[Unreleased\] section is empty/);
+});
+
+// A heading-only [Unreleased] (group headers, no bullets) is just as empty as
+// far as the release notes are concerned.
+test("refuses an [Unreleased] with headings but no entries", () => {
+  const dir = makeRepo({ root: "0.0.1", desktop: "0.0.1", tauri: "0.0.1", cargo: "0.0.1" });
+  writeFileSync(join(dir, "CHANGELOG.md"), CHANGELOG_HEAD + "## [Unreleased]\n\n### Fixed\n\n## [2.2.0] - 2026-01-01\n");
+  assert.throws(() => promoteChangelog("2.3.0", dir), /\[Unreleased\] section is empty/);
+});
+
+// The refusal must land BEFORE any file is written, or the repo is left with
+// bumped version fields and an un-promoted changelog.
+test("an empty [Unreleased] aborts the bump without touching any file", () => {
+  const dir = makeRepo({ root: "0.0.1", desktop: "0.0.1", tauri: "0.0.1", cargo: "0.0.1" });
+  writeFileSync(join(dir, "CHANGELOG.md"), CHANGELOG_HEAD + "## [Unreleased]\n\n## [2.2.0] - 2026-01-01\n");
+  assert.throws(() => bumpVersion("2.3.0", dir), /\[Unreleased\] section is empty/);
+  assert.equal(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version, "0.0.1");
+});
+
+// Idempotence is unchanged: re-running the bump on an already-promoted
+// changelog is a no-op, even though [Unreleased] is now (legitimately) empty.
+test("already-promoted version is a no-op, not a refusal", () => {
+  const dir = makeRepo({ root: "0.0.1", desktop: "0.0.1", tauri: "0.0.1", cargo: "0.0.1" });
+  writeFileSync(join(dir, "CHANGELOG.md"), CHANGELOG_HEAD + "## [Unreleased]\n\n## [2.3.0] - 2026-07-31\n\n### Fixed\n- Already here.\n");
+  assert.equal(promoteChangelog("2.3.0", dir), false);
+  assert.equal(bumpVersion("2.3.0", dir), false);
 });

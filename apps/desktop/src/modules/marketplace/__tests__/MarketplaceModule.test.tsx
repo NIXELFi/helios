@@ -74,6 +74,38 @@ describe("MarketplaceModule — install consent gate", () => {
     expect(mocks.refetch).toHaveBeenCalled();
   });
 
+  it("does not uninstall until the confirmation is accepted", async () => {
+    // The destructive twin of the install gate: the trash icon must never reach
+    // `useUninstall` on its own.
+    mocks.state.plugins = [makePlugin({ id: "b", name: "Bravo", installedVersion: "1.0.0", version: "1.0.0" })];
+    render(<MarketplaceModule />);
+    fireEvent.click(screen.getByRole("button", { name: /installed/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /uninstall bravo/i }));
+    expect(mocks.uninstall).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toMatch(/Bravo/);
+    expect(dialog.textContent).toMatch(/can’t be undone/i);
+    expect(dialog.textContent).toMatch(/erased/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /^uninstall$/i }));
+    await waitFor(() => expect(mocks.uninstall).toHaveBeenCalledWith("b"));
+    await waitFor(() => expect(mocks.refetch).toHaveBeenCalled());
+  });
+
+  it("does not uninstall when the confirmation is dismissed", () => {
+    mocks.state.plugins = [makePlugin({ id: "b", name: "Bravo", installedVersion: "1.0.0", version: "1.0.0" })];
+    render(<MarketplaceModule />);
+    fireEvent.click(screen.getByRole("button", { name: /installed/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /uninstall bravo/i }));
+    fireEvent.click(screen.getByRole("button", { name: /keep it/i }));
+
+    expect(mocks.uninstall).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("switches to the Installed tab and lists installed add-ons", () => {
     mocks.state.plugins = [
       makePlugin({ id: "a", name: "Alpha", installedVersion: null }),

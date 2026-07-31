@@ -20,7 +20,7 @@ fn extracts_path_strings_from_ref_stream() {
     payload.extend_from_slice(b"..\\hardware\\m6-bolt-25.sldprt\x00");
 
     let cfb = build_cfb_with_refs_stream(&payload);
-    let refs = parse_refs(&cfb);
+    let refs = parse_refs(&cfb).unwrap();
     let paths: Vec<&str> = refs.iter().map(|r| r.path.as_str()).collect();
     assert!(paths.iter().any(|p| p.ends_with("frame-rail.sldprt")));
     assert!(paths.iter().any(|p| p.ends_with("m6-bolt-25.sldprt")));
@@ -30,7 +30,7 @@ fn extracts_path_strings_from_ref_stream() {
 fn ignores_non_sw_extensions() {
     let payload = b"helper.txt\x00random.png\x00valid.sldasm\x00";
     let cfb = build_cfb_with_refs_stream(payload);
-    let refs = parse_refs(&cfb);
+    let refs = parse_refs(&cfb).unwrap();
     let paths: Vec<&str> = refs.iter().map(|r| r.path.as_str()).collect();
     assert_eq!(paths.len(), 1);
     assert!(paths[0].ends_with("valid.sldasm"));
@@ -39,6 +39,6 @@ fn ignores_non_sw_extensions() {
 #[test]
 fn empty_ref_stream_returns_empty_vec() {
     let cfb = build_cfb_with_refs_stream(&[]);
-    let refs = parse_refs(&cfb);
+    let refs = parse_refs(&cfb).unwrap();
     assert!(refs.is_empty());
 }

@@ -75,6 +75,29 @@ describe("validateManifest", () => {
       expect(r.errors.join(" ")).toMatch(/entry/);
     }
   });
+
+  it("rejects a PERCENT-ENCODED traversal in entry", () => {
+    // The literal-".." test alone missed these: `entry` is concatenated into a URL
+    // and the WHATWG parser decodes %2e/%2f back into real path segments, so an
+    // encoded escape would have mounted another installed plugin's bundle.
+    for (const entry of [
+      "%2e%2e/%2e%2e/other.plugin/dist/index.html",
+      "%2E%2E/x.html",
+      "dist%2f..%2findex.html",
+      "dist%5c..%5cindex.html",
+    ]) {
+      const r = validateManifest({ ...base(), entry });
+      expect(r.ok, entry).toBe(false);
+      expect(r.errors.join(" ")).toMatch(/entry/);
+    }
+  });
+
+  it("still accepts a plain relative entry", () => {
+    for (const entry of ["dist/index.html", "index.html", "ui/app.v2.html"]) {
+      const r = validateManifest({ ...base(), entry });
+      expect(r.ok, entry).toBe(true);
+    }
+  });
 });
 
 describe("isSdkCompatible", () => {

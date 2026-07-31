@@ -81,20 +81,44 @@ fn write_state(v: &serde_json::Value) {
     }
 }
 
+/// Is the already-staged `dest` byte-for-byte the DLL we're about to stage?
+///
+/// This used to compare byte LENGTH only, which is exactly the case it needed to
+/// catch: a rebuilt HeliosVault.dll whose FileVersion resource didn't change
+/// (so the version-folder path is the same) and whose size happens to land on
+/// the same number of bytes is a routine outcome of editing a few instructions.
+/// Length-equality then said "up to date", the copy was skipped, and SOLIDWORKS
+/// kept loading the OLD add-in forever while state.json claimed current — an
+/// undebuggable "my fix isn't in the build". A sha256 of the two files is the
+/// only comparison that actually answers the question. The DLL is a few hundred
+/// KB and this runs once at startup, so the read+hash is free in practice.
+///
+/// Zero-length `dest` (or `src`) is never "up to date": an empty staged DLL is a
+/// prior crashed copy that SW can't load.
+fn up_to_date(src_bytes: &[u8], dest: &Path) -> bool {
+    if src_bytes.is_empty() {
+        return false;
+    }
+    let Ok(dest_bytes) = std::fs::read(dest) else {
+        return false; // missing or unreadable → re-stage
+    };
+    if dest_bytes.len() != src_bytes.len() {
+        return false; // cheap reject before hashing
+    }
+    plugin_host::verify::sha256_hex(&dest_bytes) == plugin_host::verify::sha256_hex(src_bytes)
+}
+
 /// Stage `src` to `dest` crash-safely, re-copying only when needed.
 ///
-/// Skips the copy when `dest` already matches `src` byte-length (the common
-/// steady-state case). Otherwise — `dest` missing, zero-length (a prior crashed
-/// copy), or a different size (a truncated or same-version-different-bytes DLL) —
+/// Skips the copy only when `dest` is byte-for-byte identical to `src`
+/// (sha256 — see `up_to_date`). Otherwise — `dest` missing, zero-length (a
+/// prior crashed copy), truncated, or a same-version-different-bytes rebuild —
 /// copies to a temp file in the SAME directory and atomically renames it over
 /// `dest`, so a crash mid-copy can never leave a half-written DLL that SW would
 /// fail to load. Verifies the final file is non-empty.
 pub(crate) fn stage_file(src: &Path, dest: &Path) -> std::io::Result<()> {
-    let src_len = std::fs::metadata(src)?.len();
-    let up_to_date = std::fs::metadata(dest)
-        .map(|m| m.len() == src_len && src_len != 0)
-        .unwrap_or(false);
-    if up_to_date {
+    let src_bytes = std::fs::read(src)?;
+    if up_to_date(&src_bytes, dest) {
         return Ok(());
     }
 
@@ -126,9 +150,9 @@ pub(crate) fn stage_file(src: &Path, dest: &Path) -> std::io::Result<()> {
 
 /// Copy `bundled_dll` to <root>\<version>\HeliosVault.dll and record it in
 /// state.json (merging — preserves other flags like `hklmAttempted`). Refreshes
-/// the copy when the staged file is missing, empty, or differs in size from the
-/// bundled DLL (a truncated/stale/same-version-different-bytes copy). Returns the
-/// staged path.
+/// the copy whenever the staged file isn't byte-identical to the bundled DLL —
+/// missing, empty, truncated, or a same-version-different-bytes rebuild.
+/// Returns the staged path.
 pub fn stage(bundled_dll: &Path, version: &str) -> std::io::Result<PathBuf> {
     let dir = addin_root().join(version);
     std::fs::create_dir_all(&dir)?;
@@ -181,6 +205,36 @@ mod tests {
             r"C:\Users\O''Brien\app.dll"
         );
         assert_eq!(ps_single_quote_escape("no quotes"), "no quotes");
+    }
+
+    /// The bug this replaced a length check for: a rebuilt DLL with the same
+    /// FileVersion (same version folder) and the same size must still re-stage,
+    /// or SOLIDWORKS keeps loading the stale add-in.
+    #[test]
+    fn restages_a_same_size_but_different_dll() {
+        let tmp = std::env::temp_dir().join(format!("helios_stage_hash_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let src = tmp.join("src.dll");
+        let dest = tmp.join("dest.dll");
+
+        std::fs::write(&src, b"AAAAAAAA").unwrap();
+        stage_file(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"AAAAAAAA");
+
+        // Same byte length, different content — must be re-copied.
+        std::fs::write(&src, b"BBBBBBBB").unwrap();
+        assert!(!up_to_date(b"BBBBBBBB", &dest), "same-size-different-bytes is NOT up to date");
+        stage_file(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"BBBBBBBB");
+
+        // Identical bytes are up to date (the steady-state skip still works).
+        assert!(up_to_date(b"BBBBBBBB", &dest));
+        // A zero-length staged copy (crashed prior copy) is never up to date.
+        std::fs::write(&dest, b"").unwrap();
+        assert!(!up_to_date(b"BBBBBBBB", &dest));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
