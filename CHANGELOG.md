@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.3.1] - 2026-07-31
+
 ### Fixed
 - **Vault no longer deletes your local working copies when the folder list arrives incomplete.** If a folder in the middle of a file's path hadn't loaded yet, Helios computed a shortened path (`Frame/part.sldprt` instead of `Chassis/Frame/part.sldprt`). That path matched nothing, so clean read-only working copies looked like leftovers from a moved file and were removed. Vault now treats a folder chain it can't fully verify as "unknown" and skips those files for the pass instead of acting on a guess — the same rule that already protects files whose own folder is missing.
 - **Bulk "Check In Changes" no longer leaves files checked out to you when the check-in fails.** If a part was open in SOLIDWORKS (or the upload failed), the file was reported as failed but stayed locked to you, and only an admin could clear it. The lock is now handed back on every failure, including when you change your selection mid-run. The same applies to bulk Check Out if you navigate away while it's downloading.
@@ -47,7 +49,8 @@ follow [semver](https://semver.org/).
 - **An assembly Helios can't read no longer wipes its "where used" links.** An unreadable assembly file was treated as one with no references at all, erasing the relationships that Get Latest with references depends on. It's now reported as a read failure and the existing links are left intact.
 - **Uninstalling an add-on now asks first.** The trash icon sat right next to Open and removed the add-on and its saved data immediately, with no undo.
 - **A failed add-on update no longer leaves you with no add-on at all.** The old version was deleted before the new one was unpacked, so an update that failed verification removed the working copy while still showing as installed. The previous version now stays in place unless the new one is fully verified.
-- **Add-on data is no longer visible to the next person who signs in** on a shared computer, and is now erased when you uninstall.
+- **Add-on data is no longer visible to the next person who signs in** on a shared computer, and is now erased when you uninstall. Your own saved add-on settings carry over to the new per-person storage.
+- **Dragging files onto a folder that hasn't finished loading no longer dumps them at the top of the vault.** Helios now says to refresh and try again instead of importing them to the wrong place.
 - **Launch-on-login no longer turns itself back on (macOS/Linux).** The marker recording your launch-on-login choice was written to a temporary folder the OS periodically clears, so a few days later Helios treated you as a first-run user and silently re-enabled launch-on-login. It's now stored in Helios's own app data folder. Existing Windows preferences are read from the old location too, so nothing changes for you there.
 
 - **The Lap Sim brake trace now reads as a true percentage of available braking.** On endurance laps the channel was measured against full-attack grip rather than the managed pace the lap is actually driven at, so a driver at the limit showed roughly 55-60% brake. Lap times are unaffected — only the displayed trace changed.
