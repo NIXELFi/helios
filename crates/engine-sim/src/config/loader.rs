@@ -563,6 +563,35 @@ mod tests {
     }
 
     #[test]
+    fn a_tapered_pipe_does_not_leak_its_taper_onto_the_straight_ones() {
+        // The scalar `runner_diameter_out` is seeded from pipe 0, so when the
+        // per-pipe vector exists a `None` entry must mean "straight" (d_out =
+        // d_in) rather than falling back to pipe 0's taper. Putting the taper at
+        // index 0 is what exposes it — an override at any other index leaves the
+        // scalar `None` and the bug stays hidden.
+        let text = fs::read_to_string(python_ref_sdm26()).unwrap();
+        let mut data: Value = serde_json::from_str(&text).unwrap();
+        data["intake_pipes"][0]["diameter_out"] = serde_json::json!(0.041);
+        let p = write_temp(&data);
+        let cfg = load_v1_json(&p).unwrap();
+        let _ = fs::remove_file(&p);
+
+        let outs = cfg.runner_diameters_out.as_ref().unwrap();
+        assert_eq!(outs[0], Some(0.041));
+        assert!(outs[1].is_none(), "pipes 1..3 declare no taper");
+
+        // What the SOLVER resolves, not just what the config stores.
+        let (_, d_in_0, d_out_0, _, _) = cfg.runner_spec(0);
+        let (_, d_in_1, d_out_1, _, _) = cfg.runner_spec(1);
+        assert_eq!(d_out_0, 0.041, "the tapered pipe keeps its taper");
+        assert_eq!(
+            d_out_1, d_in_1,
+            "a straight runner must stay straight, not inherit pipe 0's taper",
+        );
+        assert_ne!(d_out_0, d_in_0, "guard: pipe 0 really is tapered in this fixture");
+    }
+
+    #[test]
     fn uniform_pipe_geometry_stores_no_per_pipe_vectors() {
         // The shipped configs are uniform in every field except primary
         // inlet diameter, so mirroring the extra vectors must not change

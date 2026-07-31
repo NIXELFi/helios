@@ -29,6 +29,46 @@ function handlersFor(pluginId: string, userId: string | null) {
 
 beforeEach(() => localStorage.clear());
 
+// Three plugins are live in prod under the pre-namespacing key layout, so the
+// migration is what stops namespacing reading as "the add-on forgot everything".
+describe("legacy (pre-namespacing) plugin storage", () => {
+  const legacyKey = (pluginId: string, k: string) => `helios:plugin-storage:${pluginId}:${k}`;
+
+  it("is adopted into the first member who opens the add-on", async () => {
+    localStorage.setItem(legacyKey("aero.tool", "rake"), "3");
+
+    const h = handlersFor("aero.tool", "user-a");
+    expect(await h["storage.get"]!({ key: "rake" })).toBe(3);
+    // ...and the old key is gone, so it can't be adopted twice or linger.
+    expect(localStorage.getItem(legacyKey("aero.tool", "rake"))).toBeNull();
+  });
+
+  it("never overwrites a value the member already has", async () => {
+    const h = handlersFor("aero.tool", "user-a");
+    await h["storage.set"]!({ key: "rake", value: 9 });
+    localStorage.setItem(legacyKey("aero.tool", "rake"), "3");
+
+    const again = handlersFor("aero.tool", "user-a");
+    expect(await again["storage.get"]!({ key: "rake" })).toBe(9);
+  });
+
+  it("is erased by uninstall, so 'stored data is erased' is not a lie", () => {
+    localStorage.setItem(legacyKey("aero.tool", "rake"), "3");
+
+    purgePluginStorage("user-a", "aero.tool");
+    expect(localStorage.getItem(legacyKey("aero.tool", "rake"))).toBeNull();
+  });
+
+  it("is not confused with another plugin's namespaced keys", async () => {
+    const other = handlersFor("aero.other", "user-a");
+    await other["storage.set"]!({ key: "keep", value: 1 });
+    localStorage.setItem(legacyKey("aero.tool", "rake"), "3");
+
+    handlersFor("aero.tool", "user-a");
+    expect(await other["storage.get"]!({ key: "keep" })).toBe(1);
+  });
+});
+
 describe("plugin storage namespacing", () => {
   it("keys by user id as well as plugin id", async () => {
     const h = handlersFor("aero.tool", "user-a");

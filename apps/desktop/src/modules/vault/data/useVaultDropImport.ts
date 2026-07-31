@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { mkdir, writeFile, exists, stat } from "@tauri-apps/plugin-fs";
 import { useAddLocalFile, sha256Hex } from "./useAddLocalFile";
-import { folderNamePath, folderPath, sanitizePathSegment } from "./folder-paths";
+import {
+  folderNamePath,
+  folderPath,
+  folderResolvable,
+  sanitizePathSegment,
+} from "./folder-paths";
 import { resolveDropFolder } from "./drop-target";
 import type { Folder, FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
@@ -259,6 +264,22 @@ export function useVaultDropImport({
     // importing=true for itself by the time our abort check resumes, and
     // clearing it there would blank the new import's banner.
     try {
+      // The path helpers return "" for BOTH "this is the vault root" and "this
+      // folder's ancestor chain can't be resolved from the current snapshot", so
+      // an unresolvable target would silently import every dropped file to the
+      // vault ROOT — on disk AND in the DB. Verify the chain before trusting the
+      // prefix; a stale folder snapshot self-heals on the next refetch, so the
+      // right move is to refuse this drop, not to guess a destination.
+      if (!folderResolvable(targetFolderId, foldersSnap)) {
+        setResults(
+          items.map((item) => ({
+            name: item.relativePath,
+            ok: false,
+            error: "Couldn't work out where this folder lives yet — refresh the vault and try again.",
+          })),
+        );
+        return;
+      }
       // Raw DB folder names for ensureFolderHierarchy matching; sanitized
       // segments for anything touching disk (path-traversal containment).
       const prefix = folderNamePath(targetFolderId, foldersSnap);

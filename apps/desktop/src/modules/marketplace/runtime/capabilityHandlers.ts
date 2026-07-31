@@ -5,7 +5,11 @@
 
 import type { PluginManifest } from "@helios/plugin-sdk";
 import type { CapabilityHandler } from "./broker";
-import { pluginStorageKeys, pluginStorageNamespace } from "./pluginStorage";
+import {
+  migrateLegacyPluginStorage,
+  pluginStorageKeys,
+  pluginStorageNamespace,
+} from "./pluginStorage";
 
 export interface HostServices {
   /** Append a line to the plugin's host-side log console. */
@@ -27,6 +31,11 @@ export function makeHandlers(manifest: PluginManifest, services: HostServices): 
   // fall back to a shared bucket (the exact cross-member leak we're closing), the
   // storage capability simply fails closed.
   const ns = services.userId ? pluginStorageNamespace(services.userId, manifest.id) : null;
+  if (services.userId) {
+    // Adopt anything this plugin stored before keys were per-user, so namespacing
+    // doesn't read as "the add-on forgot all my settings" after an update.
+    migrateLegacyPluginStorage(services.userId, manifest.id);
+  }
   const requireNs = (): string => {
     if (!ns) throw new Error("plugin storage is unavailable while signed out");
     return ns;

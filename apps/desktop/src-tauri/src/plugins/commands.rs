@@ -177,18 +177,19 @@ fn unpack_and_verify(
 #[tauri::command]
 pub fn remove_plugin_bundle(app: AppHandle, plugin_id: String) -> Result<(), String> {
     let plugin_root = cache::plugin_root(&app, &plugin_id)?;
-    if plugin_root.exists() {
-        std::fs::remove_dir_all(&plugin_root).map_err(|e| e.to_string())?;
-    }
-    // Also drop anything this plugin left in staging. Critically, a stale
-    // `<id>~old` backup would otherwise be RESTORED by `cache::recover_staging` on
-    // the next launch (it reads "plugin root missing" as an interrupted swap) and
-    // resurrect the add-on the user just uninstalled.
+    // Order matters: the backup/staging dirs go FIRST. `cache::recover_staging`
+    // reads "backup present + plugin root missing" as an interrupted swap and
+    // restores the backup, so deleting the root first leaves a window where a
+    // crash resurrects the add-on the user just uninstalled. Clearing the backup
+    // first means the worst case is a leftover root the user can uninstall again.
     if let Ok(staging) = cache::staging_dir(&app, &plugin_id) {
         let _ = std::fs::remove_dir_all(staging);
     }
     if let Ok(backup) = cache::backup_dir(&app, &plugin_id) {
         let _ = std::fs::remove_dir_all(backup);
+    }
+    if plugin_root.exists() {
+        std::fs::remove_dir_all(&plugin_root).map_err(|e| e.to_string())?;
     }
     app.state::<ActiveVersions>().remove(&plugin_id);
     Ok(())
