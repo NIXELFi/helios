@@ -114,6 +114,15 @@ pub struct OptimisticOverride {
     pub lock: Option<Option<LockInfo>>,
     /// Optimistic latest-version pointer set on check-in, pending UI confirmation.
     pub latest_version_id: Option<String>,
+    /// Wall-clock millis (`now_ms`) when this override was applied. Overrides
+    /// EXPIRE: they exist only to cover the sub-second window between a bridge
+    /// op and the UI's next snapshot push. Without a TTL a `/checkin` override
+    /// (`lock: Some(None)`) that a coworker's immediate check-out contradicts is
+    /// never confirmed, so every later push gets the stale value re-applied and
+    /// `/status`, `/status-batch`, `/files` and the Explorer overlay all report
+    /// the file available until the app restarts (mirror case: an admin
+    /// force-unlock stays invisible after `mark_locked_by_me`).
+    pub applied_ms: u64,
 }
 
 /// Mutable bridge state, guarded for access from the HTTP server thread.
@@ -132,6 +141,15 @@ pub struct Inner {
 /// frontend stops the expensive vault-structure refresh — the snapshot is only
 /// consumed by the add-in, so nothing observes the staleness while it's gone.
 const ADDIN_IDLE_MS: u64 = 90_000;
+
+/// How long an unconfirmed optimistic override keeps overriding pushed snapshots.
+/// The UI pushes a fresh snapshot within a second or two of any bridge op, so a
+/// few seconds is generous cover for the race; past that, an override that still
+/// disagrees is far more likely to be STALE (a coworker grabbed the lock, an
+/// admin force-unlocked) than early, and continuing to re-apply it hides the
+/// real state indefinitely. Ceiling, not a schedule — a confirmed override is
+/// dropped immediately, well before this.
+const OPTIMISTIC_TTL_MS: u64 = 5_000;
 
 /// Wall-clock millis since the Unix epoch (matches JS `Date.now()`).
 fn now_ms() -> u64 {
@@ -216,7 +234,9 @@ impl BridgeState {
         let mut inner = self.write();
         // Record the override FIRST so a concurrent snapshot push that lands
         // between the two writes still re-applies it on merge.
-        inner.optimistic.entry(file_id.to_string()).or_default().lock = Some(Some(lock.clone()));
+        let ov = inner.optimistic.entry(file_id.to_string()).or_default();
+        ov.lock = Some(Some(lock.clone()));
+        ov.applied_ms = now_ms(); // (re)start the TTL — see OPTIMISTIC_TTL_MS
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
             f.lock = Some(lock);
         }
@@ -225,7 +245,9 @@ impl BridgeState {
     /// Optimistically clear a file's lock (check-in releases it).
     pub(crate) fn clear_lock(&self, file_id: &str) {
         let mut inner = self.write();
-        inner.optimistic.entry(file_id.to_string()).or_default().lock = Some(None);
+        let ov = inner.optimistic.entry(file_id.to_string()).or_default();
+        ov.lock = Some(None);
+        ov.applied_ms = now_ms();
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
             f.lock = None;
         }
@@ -235,11 +257,9 @@ impl BridgeState {
     /// so `/status` reports the fresh version before the frontend's next push.
     pub(crate) fn set_latest_version_id(&self, file_id: &str, version_id: &str) {
         let mut inner = self.write();
-        inner
-            .optimistic
-            .entry(file_id.to_string())
-            .or_default()
-            .latest_version_id = Some(version_id.to_string());
+        let ov = inner.optimistic.entry(file_id.to_string()).or_default();
+        ov.latest_version_id = Some(version_id.to_string());
+        ov.applied_ms = now_ms();
         if let Some(f) = inner.snapshot.files.iter_mut().find(|f| f.file_id == file_id) {
             f.latest_version_id = Some(version_id.to_string());
         }
@@ -254,7 +274,7 @@ impl BridgeState {
     pub(crate) fn apply_snapshot(&self, snapshot: Snapshot) {
         let mut inner = self.write();
         let Inner { snapshot: cur, optimistic, .. } = &mut *inner;
-        *cur = merge_snapshot(snapshot, optimistic);
+        *cur = merge_snapshot(snapshot, optimistic, now_ms());
     }
 
     /// Write the path→state cache the Windows Explorer shell extensions read for
@@ -447,8 +467,16 @@ fn write_discovery_file(port: u16, token: &str) -> Result<(), String> {
 /// trailing slash. SOLIDWORKS reports `C:\dir\part.SLDPRT`; the snapshot stores
 /// `localDestPath`-style forward-slash paths — normalizing both the same way
 /// lets `/status?path=` reverse-resolve regardless of separator/case.
+///
+/// ASCII-only case folding is deliberate. Windows (and .NET, which the add-in
+/// and shell extensions are written in) compares paths with ORDINAL
+/// case-insensitivity; Rust's Unicode `to_lowercase` folds more aggressively —
+/// U+212A KELVIN SIGN becomes `k`, U+0130 becomes `i̇` — so two paths NTFS
+/// considers distinct would collide here. `file_by_path` returns the FIRST
+/// match, so a collision silently resolves `/checkout` and `/checkin` to the
+/// wrong file_id. `to_ascii_lowercase` matches what the OS and the C# side do.
 pub(crate) fn norm_path(p: &str) -> String {
-    p.replace('\\', "/").trim_end_matches('/').to_lowercase()
+    p.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
 }
 
 /// Merge a freshly-pushed snapshot with the still-pending optimistic overrides,
@@ -457,20 +485,41 @@ pub(crate) fn norm_path(p: &str) -> String {
 /// unit-tested without constructing a `BridgeState` (which links the bridge's
 /// reqwest/HTTP stack into the test binary — see `build_shell_state`). Returns
 /// the merged snapshot to store.
+/// An override is dropped on EITHER condition:
+///   1. **Confirmed** — the incoming snapshot already carries the value we
+///      optimistically applied. That's the UI agreeing with us, so the override
+///      is redundant; keeping it would make a genuine LATER remote change (a
+///      coworker's check-out) get overridden back.
+///   2. **Expired** — `OPTIMISTIC_TTL_MS` has passed since it was applied. An
+///      override the UI never confirms is not "still racing", it's wrong: the
+///      classic case is `/checkin` recording `lock: Some(None)` and a coworker
+///      checking the file out a moment later, after which every push disagrees
+///      forever and the whole app reports the file available until restart.
+/// Confirmation is tracked per FIELD (lock and version expire independently),
+/// so a confirmed lock can't be resurrected by a still-pending version pointer.
 fn merge_snapshot(
     mut snapshot: Snapshot,
     optimistic: &mut HashMap<String, OptimisticOverride>,
+    now: u64,
 ) -> Snapshot {
     optimistic.retain(|file_id, ov| {
         let Some(f) = snapshot.files.iter_mut().find(|f| &f.file_id == file_id) else {
             // File no longer in the snapshot — nothing to protect; drop it.
             return false;
         };
+        // saturating_sub so a backwards clock step can't make an old override
+        // look freshly applied and pin it in place.
+        if now.saturating_sub(ov.applied_ms) >= OPTIMISTIC_TTL_MS {
+            // Expired: let the pushed snapshot through untouched. Whatever the
+            // server says is now more trustworthy than our stale guess.
+            return false;
+        }
         let mut still_pending = false;
 
         if let Some(want_lock) = &ov.lock {
             if lock_matches(&f.lock, want_lock) {
                 // UI has caught up to our optimistic lock state — confirmed.
+                ov.lock = None;
             } else {
                 f.lock = want_lock.clone();
                 still_pending = true;
@@ -480,6 +529,7 @@ fn merge_snapshot(
         if let Some(want_ver) = &ov.latest_version_id {
             if f.latest_version_id.as_deref() == Some(want_ver.as_str()) {
                 // Confirmed by the UI; stop overriding.
+                ov.latest_version_id = None;
             } else {
                 f.latest_version_id = Some(want_ver.clone());
                 still_pending = true;
@@ -690,13 +740,16 @@ mod tests {
             OptimisticOverride {
                 lock: Some(Some(LockInfo { user_id: "me".into(), by_me: true })),
                 latest_version_id: None,
+                applied_ms: 1_000_000,
             },
         );
 
         // Stale UI push (still unlocked) — must be overridden back to locked-by-me.
+        // All pushes here land inside the TTL window.
         let merged = merge_snapshot(
             Snapshot { vault_root: None, files: vec![sf("f1", "C:/v/a.SLDPRT", None)] },
             &mut optimistic,
+            1_000_100,
         );
         assert_eq!(merged.files[0].lock.as_ref().map(|l| l.by_me), Some(true));
         assert_eq!(optimistic.len(), 1, "override stays until UI confirms");
@@ -708,6 +761,7 @@ mod tests {
                 files: vec![sf("f1", "C:/v/a.SLDPRT", Some(LockInfo { user_id: "me".into(), by_me: true }))],
             },
             &mut optimistic,
+            1_000_200,
         );
         assert_eq!(merged.files[0].lock.as_ref().map(|l| l.by_me), Some(true));
         assert!(optimistic.is_empty(), "confirmed override is dropped");
@@ -719,11 +773,100 @@ mod tests {
                 files: vec![sf("f1", "C:/v/a.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false }))],
             },
             &mut optimistic,
+            1_000_300,
         );
         assert_eq!(
             merged.files[0].lock.as_ref().map(|l| l.user_id.clone()),
             Some("him".into())
         );
+    }
+
+    /// The forever-stale case: `/checkin` clears the lock optimistically, then a
+    /// coworker checks the file out before the UI pushes. Every push now
+    /// disagrees with the override, so without a TTL the bridge would keep
+    /// re-clearing the lock and report the file available until app restart.
+    #[test]
+    fn never_confirmed_optimistic_override_expires() {
+        let mut optimistic: HashMap<String, OptimisticOverride> = HashMap::new();
+        optimistic.insert(
+            "f1".into(),
+            OptimisticOverride { lock: Some(None), latest_version_id: None, applied_ms: 1_000_000 },
+        );
+        let coworker = || Some(LockInfo { user_id: "him".into(), by_me: false });
+
+        // Inside the TTL the override still wins (that's the race it exists for).
+        let merged = merge_snapshot(
+            Snapshot { vault_root: None, files: vec![sf("f1", "C:/v/a.SLDPRT", coworker())] },
+            &mut optimistic,
+            1_000_000 + OPTIMISTIC_TTL_MS - 1,
+        );
+        assert!(merged.files[0].lock.is_none());
+        assert_eq!(optimistic.len(), 1);
+
+        // Past the TTL it expires and the coworker's real lock shows through.
+        let merged = merge_snapshot(
+            Snapshot { vault_root: None, files: vec![sf("f1", "C:/v/a.SLDPRT", coworker())] },
+            &mut optimistic,
+            1_000_000 + OPTIMISTIC_TTL_MS,
+        );
+        assert_eq!(
+            merged.files[0].lock.as_ref().map(|l| l.user_id.clone()),
+            Some("him".into()),
+            "expired override must stop hiding the real lock"
+        );
+        assert!(optimistic.is_empty(), "expired override is dropped");
+    }
+
+    /// Fields expire independently: a lock the UI has confirmed must not be
+    /// resurrected on a later push just because the version pointer is still
+    /// pending (an admin force-unlock would stay invisible).
+    #[test]
+    fn confirmed_lock_is_dropped_even_while_version_still_pending() {
+        let mut optimistic: HashMap<String, OptimisticOverride> = HashMap::new();
+        optimistic.insert(
+            "f1".into(),
+            OptimisticOverride {
+                lock: Some(None),
+                latest_version_id: Some("v2".into()),
+                applied_ms: 1_000_000,
+            },
+        );
+
+        // Push 1: lock agrees (both unlocked) → confirmed; version lags → pending.
+        merge_snapshot(
+            Snapshot { vault_root: None, files: vec![sf("f1", "C:/v/a.SLDPRT", None)] },
+            &mut optimistic,
+            1_000_100,
+        );
+        assert!(optimistic["f1"].lock.is_none(), "confirmed lock override cleared");
+        assert_eq!(optimistic["f1"].latest_version_id.as_deref(), Some("v2"));
+
+        // Push 2 (still inside the TTL): someone else now holds the lock — it
+        // must flow through, not be re-cleared by the confirmed override.
+        let merged = merge_snapshot(
+            Snapshot {
+                vault_root: None,
+                files: vec![sf("f1", "C:/v/a.SLDPRT", Some(LockInfo { user_id: "him".into(), by_me: false }))],
+            },
+            &mut optimistic,
+            1_000_200,
+        );
+        assert_eq!(
+            merged.files[0].lock.as_ref().map(|l| l.user_id.clone()),
+            Some("him".into())
+        );
+    }
+
+    /// Ordinal (ASCII) case folding: U+212A KELVIN SIGN must NOT fold to `k`, or
+    /// two paths NTFS treats as distinct collide and `file_by_path` can resolve
+    /// a check-out to the wrong file.
+    #[test]
+    fn norm_path_folds_ascii_only() {
+        assert_eq!(norm_path(r"C:\Vault\SDM26\Part.SLDPRT"), "c:/vault/sdm26/part.sldprt");
+        assert_eq!(norm_path("C:/Vault/x/"), "c:/vault/x");
+        let kelvin = "C:/Vault/\u{212A}elvin.sldprt";
+        let latin_k = "C:/Vault/kelvin.sldprt";
+        assert_ne!(norm_path(kelvin), norm_path(latin_k));
     }
 
     #[test]

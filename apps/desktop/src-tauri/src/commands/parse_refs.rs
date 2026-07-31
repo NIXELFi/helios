@@ -2,9 +2,17 @@
 //!
 //! Wraps the `pdm-sw-parser` crate so the Vault client can extract assembly →
 //! part / drawing → model references at check-in time, then persist them via
-//! the `pdm_record_refs` RPC. Best-effort: unreadable / non-CFB files yield an
-//! empty list rather than an error, so a parse miss never blocks a check-in. A
-//! read failure (path gone) IS surfaced so the caller can log it.
+//! the `pdm_record_refs` RPC.
+//!
+//! A read failure (path gone) and a PARSE failure (not a readable CFB) are both
+//! surfaced as errors. They must be: `pdm_record_refs` REPLACES the version's
+//! whole ref set with the hints it's handed, so answering `Ok(vec![])` for a
+//! file we couldn't open would wipe a real parent→child graph and silently
+//! break where-used / get-latest-with-refs. The caller (`useRecordRefs`) treats
+//! refs as best-effort auxiliary metadata and swallows+logs the error, so the
+//! check-in still succeeds — it just leaves the existing refs alone, which is
+//! the only safe thing to do on an unverifiable parse (see the repo rule:
+//! never act on an unverifiable absence).
 
 use std::fs;
 
@@ -28,10 +36,12 @@ fn read_sw_properties(path: &str) -> Result<Vec<pdm_sw_parser::SwProperty>, Stri
 /// server-side in `pdm.record_refs`).
 fn read_sw_refs(path: &str) -> Result<Vec<String>, String> {
     let bytes = fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
-    Ok(pdm_sw_parser::parse_refs(&bytes)
-        .into_iter()
-        .map(|r| r.path)
-        .collect())
+    let refs = pdm_sw_parser::parse_refs(&bytes)
+        // `parse_refs_failed` is the machine-readable marker (it matches the
+        // pdm-core `AuditAction::ParseRefsFailed` wire value) so the failure is
+        // greppable in logs and distinguishable from "no references".
+        .map_err(|e| format!("parse_refs_failed {path}: {e}"))?;
+    Ok(refs.into_iter().map(|r| r.path).collect())
 }
 
 #[tauri::command]
@@ -79,6 +89,20 @@ mod tests {
         assert!(refs.iter().any(|p| p.ends_with("frame-rail.sldprt")));
         assert!(refs.iter().any(|p| p.ends_with("m6-bolt.sldprt")));
         let _ = fs::remove_file(&path);
+    }
+
+    /// A readable-but-unparseable file must ERROR, not report zero references:
+    /// `pdm_record_refs` replaces the whole ref set, so an empty list here
+    /// would wipe the assembly's real where-used graph.
+    #[test]
+    fn errors_rather_than_reporting_zero_refs_on_a_non_cfb_file() {
+        let mut p = std::env::temp_dir();
+        p.push(format!("helios_refs_notcfb_{}.sldasm", std::process::id()));
+        fs::write(&p, b"\x00\x01\x02 definitely not a compound file").unwrap();
+
+        let err = read_sw_refs(&p.to_string_lossy()).unwrap_err();
+        assert!(err.contains("parse_refs_failed"), "got: {err}");
+        let _ = fs::remove_file(&p);
     }
 
     #[test]

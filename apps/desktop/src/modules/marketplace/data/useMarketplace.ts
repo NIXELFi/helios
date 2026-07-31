@@ -10,9 +10,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useSupabaseClient } from "@helios/auth";
+import { useSupabaseClient, useUser } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
 import { isMarketplaceDemo, demoList, demoSubscribe, demoInstall, demoUninstall } from "./demoStore";
+import { purgePluginStorage } from "../runtime/pluginStorage";
 
 const SCHEMA = "marketplace";
 const BUNDLE_BUCKET = "plugins";
@@ -220,13 +221,19 @@ export function useInstall(): {
   return { install, installing, error };
 }
 
-/** Remove the caller's install + delete the local bundle cache. */
+/** Remove the caller's install, delete the local bundle cache, and erase what the
+ *  add-on stored for this member. All three are what the uninstall confirmation
+ *  promises; leaving the storage behind previously meant a reinstall silently
+ *  resurrected old config, and the keys kept eating the plugin's 1 MB quota
+ *  forever. */
 export function useUninstall(): {
   uninstall: (pluginId: string) => Promise<void>;
   removing: boolean;
   error: string | null;
 } {
   const client = useSupabaseClient();
+  const user = useUser();
+  const userId = user?.id ?? null;
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -247,6 +254,10 @@ export function useUninstall(): {
         } catch {
           /* not running under Tauri */
         }
+        // Erase this member's data vault for the plugin. Done last, after the
+        // server-side removal succeeded, so a failed uninstall doesn't throw away
+        // the settings of an add-on that is still installed.
+        if (userId) purgePluginStorage(userId, pluginId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
@@ -255,7 +266,7 @@ export function useUninstall(): {
         setRemoving(false);
       }
     },
-    [client],
+    [client, userId],
   );
 
   return { uninstall, removing, error };

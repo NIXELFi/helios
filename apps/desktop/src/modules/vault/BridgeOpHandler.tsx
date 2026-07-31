@@ -73,15 +73,24 @@ export function resolveVaultForPath(
   const rootFwd = root.replace(/\\/g, "/").replace(/\/+$/, "");
   const pathFwd = path.replace(/\\/g, "/");
   const lower = pathFwd.toLowerCase();
+  // Collect ALL matches rather than returning the first. The prefix test is
+  // case-insensitive (Windows paths are), so vaults whose names differ only by
+  // case — `SDM26` and `sdm26` — share ONE on-disk directory and both match.
+  // Returning the first put the add-in's check-in / getLatest on whichever
+  // vault happened to sort first in the list: the same bytes could land as a
+  // new version of a file in the wrong vault. Ambiguous is not resolvable, so
+  // we refuse and let the caller surface it (the user renames one vault).
+  const matches: Array<{ vaultId: string; relativePath: string }> = [];
   for (const v of vaults) {
     const vroot = `${rootFwd}/${sanitizeVaultName(v.name)}`;
     if (lower.startsWith(vroot.toLowerCase() + "/")) {
       const relativePath = pathFwd.slice(vroot.length + 1);
       if (!isSafeVaultRelativePath(relativePath)) return null;
-      return { vaultId: v.id, relativePath };
+      matches.push({ vaultId: v.id, relativePath });
     }
   }
-  return null;
+  if (matches.length !== 1) return null;
+  return matches[0]!;
 }
 
 export function BridgeOpHandler(): null {
@@ -119,7 +128,12 @@ export function BridgeOpHandler(): null {
           // the loopback token could exfiltrate any local file (SSH keys, …)
           // into the vault as a "new version".
           if (!resolveVaultForPath(p.path, rootRef.current, vaultsRef.current)) {
-            respond({ ok: false, error: "path isn't under your Helios vault folder" });
+            // Also fires when the path is ambiguous (two vault names collapse
+            // to the same on-disk folder) — we refuse rather than guess.
+            respond({
+              ok: false,
+              error: "path isn't under your Helios vault folder, or matches more than one vault",
+            });
             return;
           }
           const bytes = await readFile(p.path);
@@ -135,7 +149,11 @@ export function BridgeOpHandler(): null {
           // loopback token.
           const resolvedDest = resolveVaultForPath(p.destPath, rootRef.current, vaultsRef.current);
           if (!resolvedDest) {
-            respond({ ok: false, error: "destination isn't under your Helios vault folder" });
+            respond({
+              ok: false,
+              error:
+                "destination isn't under your Helios vault folder, or matches more than one vault",
+            });
             return;
           }
           // Guard: refuse to clobber a writable destination — it may hold
@@ -166,7 +184,10 @@ export function BridgeOpHandler(): null {
         } else if (p.op === "add") {
           const resolved = resolveVaultForPath(p.path, rootRef.current, vaultsRef.current);
           if (!resolved) {
-            respond({ ok: false, error: "file isn't under your Helios vault folder" });
+            respond({
+              ok: false,
+              error: "file isn't under your Helios vault folder, or matches more than one vault",
+            });
             return;
           }
           const local: LocalFile = {

@@ -53,20 +53,56 @@ function check(res: { error: { message: string } | null }, what: string): void {
   if (res.error) throw new Error(humanize(res.error.message, what));
 }
 
-// An UPDATE/DELETE/upsert that MUST touch an existing row. PostgREST silently
-// returns zero rows (HTTP 200, error: null) when an RLS USING clause hides the
-// row from the write — so a denied edit looks like it saved and then "reverts"
-// on the next reload (the bug behind report 1548ec9e). We chain `.select()` on
-// every such write and treat an empty result as a permission/not-found failure
-// so the store rolls back and the user is told why, instead of silently losing
-// their change.
+// An UPDATE/DELETE/upsert that MUST touch an EXACT number of rows. PostgREST
+// silently returns fewer rows (HTTP 200, error: null) when an RLS USING clause
+// hides some of them from the write — so a denied edit looks like it saved and
+// then "reverts" on the next reload (the bug behind report 1548ec9e). We chain
+// `.select()` on every such write and compare the affected count against what
+// the caller intended.
+//
+// `expected` defaults to 1 because almost every write here is scoped by a
+// primary key (`.eq("id", …)`) and can therefore only ever touch one row. The
+// bulk path passes `ids.length`: a `.in()` update spanning subteams where RLS
+// permits only SOME rows comes back SHORT, not empty, and a `length === 0`
+// check would wave it straight through — the UI would show every row updated
+// and silently revert the denied ones on the next refresh. That is the exact
+// class of bug the zero-row check was added for, so it has to catch the partial
+// case too.
+//
+// The PARTIAL message deliberately reads differently from the total-denial one:
+// the permitted rows DID commit server-side (PostgREST ran one statement, and
+// the rows it was allowed to touch are saved), while the store rolls the whole
+// optimistic change back on screen. The user has to know that the two no longer
+// agree and that a reload is what shows the truth.
+// A write that PARTIALLY committed: some rows saved server-side, the rest were
+// hidden by RLS. Distinct from every other write failure because local state is
+// now KNOWN to disagree with the server — a rollback alone leaves the user
+// looking at a lie. `persist` detects this type and forces an authoritative
+// workspace reload so the screen matches reality.
+export class PartialWriteError extends Error {
+  readonly needsReload = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "PartialWriteError";
+  }
+}
+
 function checkAffected(
   res: { data: unknown[] | null; error: { message: string } | null },
   what: string,
+  expected = 1,
 ): void {
   if (res.error) throw new Error(humanize(res.error.message, what));
-  if (!res.data || res.data.length === 0) {
+  const affected = res.data?.length ?? 0;
+  if (affected === 0) {
     throw new Error(`You don't have permission to ${what} (or it no longer exists).`);
+  }
+  if (affected !== expected) {
+    throw new PartialWriteError(
+      `Only ${affected} of ${expected} rows changed — you don't have permission to ` +
+        `${what} for the rest. The allowed rows DID save, so we're reloading to show ` +
+        `you what actually stuck.`,
+    );
   }
 }
 
@@ -127,16 +163,23 @@ export async function removeTask(client: SupabaseClient, id: string): Promise<vo
 // Bulk edit: apply the SAME column patch to many tasks in ONE atomic statement
 // (`UPDATE … WHERE id = ANY($ids)`). PostgREST runs it as a single transaction.
 // `.select()` returns the rows actually updated — if RLS hides any of them the
-// returned set is short (or empty), so a partially/fully denied bulk edit is
-// caught here and rolled back instead of silently dropping changes.
+// returned set is SHORT (not just empty), which is why we hand checkAffected the
+// intended count instead of letting it settle for "at least one row came back".
+// A bulk edit spanning subteams where the user may only write some of them is
+// the normal way to hit this.
 export async function batchPatchTasks(
   client: SupabaseClient,
   ids: string[],
   patch: Partial<TaskRow>,
 ): Promise<void> {
+  // Dedupe before counting: `WHERE id = ANY($ids)` returns one row per DISTINCT
+  // id, so a caller that passed the same id twice would otherwise look like a
+  // partial denial and trigger a spurious rollback + reload.
+  const unique = [...new Set(ids)];
   checkAffected(
-    await pm(client).from("tasks").update(taskColumns(patch)).in("id", ids).select("id"),
+    await pm(client).from("tasks").update(taskColumns(patch)).in("id", unique).select("id"),
     "edit these tasks",
+    unique.length,
   );
 }
 

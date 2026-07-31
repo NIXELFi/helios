@@ -222,7 +222,7 @@ function HeliosShell() {
     const k = updater.state.kind;
     if (k === "up_to_date" || k === "offline") {
       updater.recheck();
-    } else if (k === "available" || k === "downloading" || k === "installing") {
+    } else if (k === "available" || k === "downloading" || k === "installing" || k === "installed") {
       setUpdateModalOpen(true);
     }
   }

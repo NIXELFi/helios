@@ -482,27 +482,43 @@ impl SDM26Config {
 }
 
 impl SDM26Config {
-    fn runner_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
+    /// `pub(crate)` only so the config-loader tests can assert the per-pipe
+    /// geometry a config actually resolves to, not just what it stores.
+    pub(crate) fn runner_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.runner_lengths.as_ref().map(|v| v[i]).unwrap_or(self.runner_length);
         let d_in = self.runner_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.runner_diameter_in);
-        let d_out_override = self.runner_diameters_out.as_ref().and_then(|v| v[i]);
-        let d_out = d_out_override.unwrap_or_else(|| self.runner_diameter_out.unwrap_or(d_in));
+        // When the per-pipe vector exists the pipes are NOT uniform, so the scalar
+        // (seeded from pipe 0) describes pipe 0 only — falling back to it would
+        // give a straight pipe pipe 0's taper. A `None` entry means "no taper on
+        // this pipe", i.e. d_out = d_in.
+        let d_out = match self.runner_diameters_out.as_ref() {
+            Some(v) => v[i].unwrap_or(d_in),
+            None => self.runner_diameter_out.unwrap_or(d_in),
+        };
         let wt = self.runner_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.runner_wall_t);
         (l, d_in, d_out, self.runner_n_cells, wt)
     }
     fn primary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.primary_lengths.as_ref().map(|v| v[i]).unwrap_or(self.primary_length);
         let d_in = self.primary_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.primary_diameter_in);
-        let d_out_override = self.primary_diameters_out.as_ref().and_then(|v| v[i]);
-        let d_out = d_out_override.unwrap_or_else(|| self.primary_diameter_out.unwrap_or(d_in));
+        // See runner_spec: a present vector means non-uniform pipes, so the
+        // pipe-0 scalar must not stand in for a `None` entry.
+        let d_out = match self.primary_diameters_out.as_ref() {
+            Some(v) => v[i].unwrap_or(d_in),
+            None => self.primary_diameter_out.unwrap_or(d_in),
+        };
         let wt = self.primary_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.primary_wall_t);
         (l, d_in, d_out, self.primary_n_cells, wt)
     }
     fn secondary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.secondary_lengths.as_ref().map(|v| v[i]).unwrap_or(self.secondary_length);
         let d_in = self.secondary_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.secondary_diameter_in);
-        let d_out_override = self.secondary_diameters_out.as_ref().and_then(|v| v[i]);
-        let d_out = d_out_override.unwrap_or_else(|| self.secondary_diameter_out.unwrap_or(d_in));
+        // See runner_spec: a present vector means non-uniform pipes, so the
+        // pipe-0 scalar must not stand in for a `None` entry.
+        let d_out = match self.secondary_diameters_out.as_ref() {
+            Some(v) => v[i].unwrap_or(d_in),
+            None => self.secondary_diameter_out.unwrap_or(d_in),
+        };
         let wt = self.secondary_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.secondary_wall_t);
         (l, d_in, d_out, self.secondary_n_cells, wt)
     }

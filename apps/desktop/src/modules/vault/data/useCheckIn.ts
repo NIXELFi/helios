@@ -17,14 +17,44 @@ const BUCKET = "vault-objects";
  *  SELECT policy is vault-scoped (20260610110000), so list() can't see
  *  content that already exists under another vault, which would make this
  *  flow fail on the cross-vault duplicate-content path. */
-async function objectExists(client: ReturnType<typeof useSupabaseClient>, sha: string): Promise<boolean> {
+/** Tri-state on purpose: "unknown" (the probe itself failed — transient 5xx,
+ *  offline, proxy hiccup) is NOT the same as "absent". Collapsing them meant a
+ *  transient probe failure on content ALREADY in the bucket sent us down the
+ *  upload path, where Supabase's duplicate response is an error, and the
+ *  re-probe failed the same way — so a check-in that should have been a no-op
+ *  threw and left the user's lock held. On "unknown" we still attempt the
+ *  upload (it's the only way to make progress) but treat a duplicate-shaped
+ *  rejection as success rather than a hard failure. */
+type ObjectProbe = "present" | "absent" | "unknown";
+
+async function objectExists(
+  client: ReturnType<typeof useSupabaseClient>,
+  sha: string,
+): Promise<ObjectProbe> {
   try {
     const { data, error } = await client.rpc("pdm_object_exists", { p_sha: sha });
-    if (error) return false;
-    return data === true;
+    if (error) return "unknown";
+    return data === true ? "present" : "absent";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+/** True iff a storage upload error is the "this content is already here" shape.
+ *  Deliberately loose (message/status sniffing) — the exact shape varies across
+ *  Supabase versions and proxies, which is why the probe exists at all. Since
+ *  storage paths are content-addressed (path === sha256), an object already at
+ *  this path is byte-identical to what we were uploading, so treating a
+ *  duplicate as success can never publish the wrong bytes. */
+function isDuplicateUploadError(err: { message?: string; statusCode?: string | number }): boolean {
+  const msg = (err.message ?? "").toLowerCase();
+  const status = String(err.statusCode ?? "");
+  return (
+    status === "409" ||
+    msg.includes("duplicate") ||
+    msg.includes("already exists") ||
+    msg.includes("resource already exists")
+  );
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -60,7 +90,9 @@ export function useCheckIn() {
         const sha = await sha256Hex(bytes);
         const path = `${sha.slice(0, 2)}/${sha}`;
 
-        if (!(await objectExists(client, sha))) {
+        // "unknown" falls through to the upload attempt — the duplicate handling
+        // below makes that safe even when the content was in fact already there.
+        if ((await objectExists(client, sha)) !== "present") {
           // Gzip before upload — keeps payloads under Supabase's 50 MiB free-
           // plan cap for typical MoTeC / Link logs. Stored bytes are gzipped;
           // the version's sha256 (and storage path) still identify the
@@ -84,7 +116,17 @@ export function useCheckIn() {
             console.warn(
               `[vault] storage upload returned an error (${upErr.message}); re-probing for sha=${sha}`,
             );
-            if (!(await objectExists(client, sha))) {
+            const reprobe = await objectExists(client, sha);
+            // Only "absent" is a real failure. A duplicate-shaped rejection
+            // means the content-addressed object is already there — identical
+            // bytes by construction — so the check-in can proceed even when the
+            // re-probe ALSO came back "unknown" (the same outage that broke the
+            // first probe usually breaks the second). Throwing there is what
+            // turned a no-op into a hard failure with the lock retained.
+            const duplicate = isDuplicateUploadError(
+              upErr as { message?: string; statusCode?: string | number },
+            );
+            if (reprobe === "absent" || (reprobe === "unknown" && !duplicate)) {
               throw new Error(`upload: ${friendlyUploadError(upErr.message)}`);
             }
           }

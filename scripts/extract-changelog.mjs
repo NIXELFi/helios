@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { sectionBody } from "./changelog-section.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -27,23 +28,5 @@ try {
   process.exit(0);
 }
 
-const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const headRe = new RegExp(`^##\\s*\\[${esc}\\]`);
-const lines = text.split("\n");
-
-let start = -1;
-for (let i = 0; i < lines.length; i++) {
-  if (headRe.test(lines[i])) { start = i; break; }
-}
-if (start === -1) {
-  console.log(fallback);
-  process.exit(0);
-}
-
-let end = lines.length;
-for (let i = start + 1; i < lines.length; i++) {
-  if (/^##\s+/.test(lines[i])) { end = i; break; }
-}
-
-const body = lines.slice(start + 1, end).join("\n").trim();
+const body = sectionBody(text, version);
 console.log(body || fallback);

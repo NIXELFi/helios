@@ -16,10 +16,28 @@ import type { Folder, FolderId, FileId } from "./types";
  *   - neutralize `.` / `..` (which would stay-put / walk-up) to `_` / `__`
  *   - fall back to `_` for an empty result
  *
+ * It ALSO defangs the names Windows simply refuses to create — the sibling
+ * `sanitizeVaultName` (useVaultFolder.ts) already did this and the mismatch was
+ * a real sync bug: a folder named `Rev1.` or `R&D: v2` produced a path that
+ * `mkdir`/`writeFile` either rejected or silently rewrote (Windows strips
+ * trailing dots/spaces), so what `readDir` reported back never equalled the key
+ * we computed and those files stayed permanently "vault-only", re-downloaded
+ * every pass. So additionally:
+ *   - replace the Windows-illegal characters `: * ? " < > |` with `_`
+ *   - strip trailing dots/spaces (Windows drops them when creating the entry)
+ *   - suffix `_` onto reserved DOS device names (CON, PRN, AUX, NUL, COM1-9,
+ *     LPT1-9), which can't be used as a file/dir name at all
+ *
  * Ordinary names (spaces, dots in extensions, dashes, Unicode) pass through
  * byte-identical, so this doesn't change how legitimate files are matched or
  * stored — only how malicious/malformed ones are contained.
  */
+const RESERVED_DEVICE_NAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+]);
+
 export function sanitizePathSegment(name: string): string {
   let s = name;
   // 1. Strip C0 (U+0000-U+001F) and C1 (U+007F-U+009F) control characters.
@@ -30,44 +48,98 @@ export function sanitizePathSegment(name: string): string {
   // 3. Collapse any path separators inside the segment — a name must never
   //    introduce additional path components.
   s = s.replace(/[/\\]+/g, "_");
-  // 4. Neutralize traversal/no-op segments so they can't walk the tree.
+  // 4. Replace the remaining Windows-illegal characters. Same class as
+  //    sanitizeVaultName; without this the computed key can never match what
+  //    the filesystem actually stores (see the doc comment above).
+  s = s.replace(/[:*?"<>|]/g, "_");
+  // 5. Neutralize traversal/no-op segments so they can't walk the tree. Done
+  //    BEFORE the trailing-dot strip so `.`/`..` don't collapse to "".
   if (s === ".") s = "_";
   else if (s === "..") s = "__";
-  // 5. Never emit an empty segment (would collapse "a//b" -> "a/b" and shift
+  // 6. Strip trailing dots and spaces — Windows silently drops them when it
+  //    creates the entry, so keeping them guarantees a key/readDir mismatch.
+  s = s.replace(/[. ]+$/, "");
+  // 7. Reserved DOS device names are unusable even with an extension
+  //    (`CON.txt` is still the console). Suffix the BASE so the extension —
+  //    which SolidWorks and the type filters key off — survives intact.
+  const dot = s.indexOf(".");
+  const base = dot === -1 ? s : s.slice(0, dot);
+  if (RESERVED_DEVICE_NAMES.has(base.toUpperCase())) {
+    s = dot === -1 ? `${base}_` : `${base}_${s.slice(dot)}`;
+  }
+  // 8. Never emit an empty segment (would collapse "a//b" -> "a/b" and shift
   //    later components up a level).
   if (s === "") s = "_";
   return s;
 }
 
 /**
+ * Walk `folderId`'s `parent_id` chain to a root, returning the ordered folder
+ * rows (highest ancestor first) — or NULL when the chain can't be walked to a
+ * genuine root:
+ *   - `folderId` itself isn't in `folders`
+ *   - a MID-CHAIN ancestor is missing (the classic stale/partial folder fetch)
+ *   - the chain cycles, or exceeds the depth guard
+ *
+ * The null return is the whole point. The previous inline walk exited the loop
+ * on a missing ancestor and returned whatever it had collected, i.e. a PARTIAL
+ * path — `chassis/frame/subframe` silently became `frame/subframe`. That key
+ * matches nothing on disk, and every consumer that compares computed keys to a
+ * local scan (auto-sync, the reaper's `liveRels`) then classified real files as
+ * unknown. In the reaper that meant a user's legitimate read-only working copies
+ * matched neither the live nor the deleted set and were DELETED as orphans.
+ *
+ * Callers that touch disk for a specific file must treat null as "skip this
+ * file for the pass" — the folder refetch self-heals the next pass. This is the
+ * module's "never act on unverifiable absence" rule.
+ *
+ * The depth/cycle guard matches the sibling walkers in this file: a corrupt row
+ * must never stack-overflow, since these run on the hot sync-match path and one
+ * bad row would otherwise make the whole Vault UI unopenable.
+ */
+function folderChain(folderId: FolderId, folders: Folder[]): Folder[] | null {
+  const byId = new Map(folders.map((x) => [x.id, x]));
+  const chain: Folder[] = [];
+  let cur = byId.get(folderId);
+  if (!cur) return null;
+  const visited = new Set<FolderId>();
+  let guard = 0;
+  while (guard++ < 64) {
+    if (visited.has(cur.id)) return null; // cycle — no well-defined path
+    visited.add(cur.id);
+    chain.unshift(cur);
+    if (!cur.parent_id) return chain; // reached a root-level folder: complete
+    const parent = byId.get(cur.parent_id);
+    if (!parent) return null; // broken link — the path is NOT knowable
+    cur = parent;
+  }
+  return null; // depth guard tripped — treat as unresolvable, not as partial
+}
+
+/**
  * Compute the slash-joined folder path for a given folder_id by walking up the
  * `parent_id` chain. Returns "" for root (folderId === null) and "" if the
- * folder isn't found. Each folder name is sanitized (see sanitizePathSegment)
- * so a malicious name can't inject extra components or `..` traversal.
+ * chain can't be fully resolved (unknown id, missing ancestor, cycle). Each
+ * folder name is sanitized (see sanitizePathSegment) so a malicious name can't
+ * inject extra components or `..` traversal.
+ *
+ * ⚠️ Best-effort by design: "" is indistinguishable from "the vault root", so
+ * this is safe ONLY for display (breadcrumb-ish labels, search hit subtitles,
+ * grouping keys) and for callers that have already checked `folderResolvable`.
+ * Anything that touches disk for a SPECIFIC file must use `localDestPathStrict`
+ * / `folderResolvable` and skip the file instead. It no longer returns a
+ * partial path — a broken chain now collapses to "" (root), which the strict
+ * helpers reject, rather than to a plausible-looking wrong path that they
+ * would happily hand to `remove()`.
  *
  * Example:
  *   folderPath("frame-id", folders) → "chassis/frame"
  */
 export function folderPath(folderId: FolderId | null, folders: Folder[]): string {
   if (!folderId) return "";
-  const byId = new Map(folders.map((x) => [x.id, x]));
-  // Iterative walk up the parent_id chain with a cycle/depth guard. A corrupt
-  // chain (self-parent or a loop) must never stack-overflow — folderPath is on
-  // the hot sync-match path, so a single bad row would otherwise make the whole
-  // Vault UI unopenable. Mirrors the guard the sibling walkers in this file use.
-  const segments: string[] = [];
-  let cur = byId.get(folderId);
-  if (!cur) return "";
-  const visited = new Set<FolderId>();
-  let guard = 0;
-  while (cur && guard++ < 64) {
-    if (visited.has(cur.id)) break; // cycle — stop walking
-    visited.add(cur.id);
-    segments.unshift(sanitizePathSegment(cur.name));
-    if (!cur.parent_id) break;
-    cur = byId.get(cur.parent_id);
-  }
-  return segments.join("/");
+  const chain = folderChain(folderId, folders);
+  if (!chain) return "";
+  return chain.map((f) => sanitizePathSegment(f.name)).join("/");
 }
 
 /**
@@ -90,22 +162,14 @@ export function folderPath(folderId: FolderId | null, folders: Folder[]): string
  */
 export function folderNamePath(folderId: FolderId | null, folders: Folder[]): string {
   if (!folderId) return "";
-  const byId = new Map(folders.map((x) => [x.id, x]));
-  // Iterative walk with the same cycle/depth guard as folderPath — a corrupt
-  // parent_id chain must never stack-overflow (uses RAW names, see warning above).
-  const segments: string[] = [];
-  let cur = byId.get(folderId);
-  if (!cur) return "";
-  const visited = new Set<FolderId>();
-  let guard = 0;
-  while (cur && guard++ < 64) {
-    if (visited.has(cur.id)) break; // cycle — stop walking
-    visited.add(cur.id);
-    segments.unshift(cur.name);
-    if (!cur.parent_id) break;
-    cur = byId.get(cur.parent_id);
-  }
-  return segments.join("/");
+  // Shares folderChain's all-or-nothing walk: a partial prefix here would make
+  // ensureFolderHierarchy re-create the tail of the tree under the WRONG parent
+  // (e.g. a root-level "Front Frame" beside the real "Chassis/Front Frame"),
+  // which is exactly the duplicate-folder split that fights over one on-disk
+  // path. "" (= the vault root) is the honest answer for an unknowable chain.
+  const chain = folderChain(folderId, folders);
+  if (!chain) return "";
+  return chain.map((f) => f.name).join("/");
 }
 
 /** Compute the local destination path for a vault file. */
@@ -121,16 +185,56 @@ export function localDestPath(
 }
 
 /**
- * True iff `folderId` can actually be resolved against `folders` (null = the
- * vault root, always resolvable). When this is false, folderPath() falls back
- * to "" and every path helper silently collapses the file to the VAULT ROOT —
- * which made a stale/incomplete folder list read, write, chmod, or delete a
- * root-level file that merely shares the basename. Callers that touch disk for
- * a SPECIFIC file must check this (or use localDestPathStrict) and skip the
- * file for the pass instead; the folder refetch self-heals the next pass.
+ * True iff `folderId`'s ENTIRE ancestor chain can be resolved against `folders`
+ * (null = the vault root, always resolvable). When this is false, folderPath()
+ * falls back to "" and every path helper silently collapses the file to the
+ * VAULT ROOT — which made a stale/incomplete folder list read, write, chmod, or
+ * delete a root-level file that merely shares the basename. Callers that touch
+ * disk for a SPECIFIC file must check this (or use localDestPathStrict) and
+ * skip the file for the pass instead; the folder refetch self-heals the pass
+ * after.
+ *
+ * This validates the WHOLE chain, not just the leaf. Leaf-only was the P0: a
+ * missing MID-chain ancestor left the leaf id present, so this returned true
+ * while folderPath returned a truncated path — the strict helpers waved a
+ * plausible-but-wrong path through to callers that then acted on disk with it.
  */
 export function folderResolvable(folderId: FolderId | null, folders: Folder[]): boolean {
-  return folderId === null || folders.some((f) => f.id === folderId);
+  return folderId === null || folderChain(folderId, folders) !== null;
+}
+
+/**
+ * The set of folder ids whose FULL ancestor chain resolves in `folders` — the
+ * bulk form of `folderResolvable` for hot loops (auto-sync partitions every
+ * live file twice per pass; calling folderResolvable per file would rebuild the
+ * id map each time). Computed in one pass with memoized chain results.
+ */
+export function resolvableFolderIds(folders: Folder[]): Set<FolderId> {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const ok = new Set<FolderId>();
+  const bad = new Set<FolderId>();
+  for (const start of folders) {
+    // Walk up remembering the path we took, then stamp every id on it with the
+    // verdict the root-most step produced — so a deep tree costs O(n), not
+    // O(n·depth), and a broken/cyclic branch is only walked once.
+    const seen: FolderId[] = [];
+    const visited = new Set<FolderId>();
+    let cur: Folder | undefined = start;
+    let verdict: boolean | null = null;
+    let guard = 0;
+    while (cur && guard++ < 64) {
+      if (ok.has(cur.id)) { verdict = true; break; }
+      if (bad.has(cur.id) || visited.has(cur.id)) { verdict = false; break; }
+      visited.add(cur.id);
+      seen.push(cur.id);
+      if (!cur.parent_id) { verdict = true; break; } // reached a real root
+      const parent: Folder | undefined = byId.get(cur.parent_id);
+      if (!parent) { verdict = false; break; } // broken link
+      cur = parent;
+    }
+    for (const id of seen) (verdict === true ? ok : bad).add(id);
+  }
+  return ok;
 }
 
 /** localDestPath, but returns null instead of collapsing to the vault root

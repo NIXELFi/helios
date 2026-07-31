@@ -25,18 +25,41 @@ fn show_main(app: &tauri::AppHandle) {
 /// Its presence means the user has an explicit launch-on-login preference (either
 /// the default we set on first launch, or a later Settings toggle), so `.setup`
 /// must NOT re-enable autostart and clobber a user who turned it off.
-fn autostart_marker() -> std::path::PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("Helios")
-        .join("autostart.applied")
+///
+/// Resolved through Tauri's path API so it lands in the app's own local-data
+/// directory on every platform. It used to read %LOCALAPPDATA% directly and fall
+/// back to `temp_dir()` — but that env var is Windows-only, so macOS/Linux wrote
+/// the marker into a temp dir that the OS purges (macOS after ~3 days, Linux on
+/// reboot). Once it vanished, `.setup` saw "no preference" and silently
+/// re-enabled launch-on-login for a user who had turned it off.
+fn autostart_marker(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|dir| dir.join("autostart.applied"))
+}
+
+/// Pre-fix marker location (%LOCALAPPDATA%\Helios\autostart.applied). Still
+/// honoured on read so existing Windows users who disabled launch-on-login
+/// don't get it re-enabled once by the move to the new path.
+fn legacy_autostart_marker() -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|local| {
+        std::path::PathBuf::from(local)
+            .join("Helios")
+            .join("autostart.applied")
+    })
+}
+
+/// True when the user already has an explicit launch-on-login preference.
+fn autostart_preference_recorded(app: &tauri::AppHandle) -> bool {
+    autostart_marker(app).is_some_and(|p| p.exists())
+        || legacy_autostart_marker().is_some_and(|p| p.exists())
 }
 
 /// Record that the user now has an explicit autostart preference, so the
 /// first-run default in `.setup` won't override it on the next launch.
-fn mark_autostart_preference_set() {
-    let path = autostart_marker();
+fn mark_autostart_preference_set(app: &tauri::AppHandle) {
+    let Some(path) = autostart_marker(app) else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -51,7 +74,7 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())?;
     // The user made an explicit choice — stop the first-run default from
     // re-enabling autostart on the next launch.
-    mark_autostart_preference_set();
+    mark_autostart_preference_set(&app);
     Ok(())
 }
 
@@ -107,14 +130,11 @@ pub fn run() {
     let bridge_state = Arc::new(bridge::BridgeState::new());
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
+        // MUST be the first plugin registered (Tauri's own requirement). A second
+        // launch runs every plugin registered before this one to completion before
+        // the callback below bails the process — including autostart's enable
+        // side-effect. Registered last, a stray double-launch could re-apply
+        // launch-on-login behind the user's back.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let helios_paths: Vec<String> = extract_helios_paths(argv.into_iter().skip(1));
             if !helios_paths.is_empty() {
@@ -147,6 +167,14 @@ pub fn run() {
                 show_main(app);
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .manage(pending)
         .manage(cfd::CfdState::default())
         .manage(bridge_state.clone())
@@ -212,9 +240,9 @@ pub fn run() {
             // silently undo a user who turned launch-on-login off in Settings.
             {
                 use tauri_plugin_autostart::ManagerExt;
-                if !autostart_marker().exists() {
+                if !autostart_preference_recorded(app.handle()) {
                     let _ = app.autolaunch().enable();
-                    mark_autostart_preference_set();
+                    mark_autostart_preference_set(app.handle());
                 }
             }
             if std::env::args().any(|a| a == "--hidden") {

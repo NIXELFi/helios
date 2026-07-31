@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 
@@ -12,6 +11,9 @@ export type UpdaterState =
   | { kind: "available";   update: UpdaterAvailable }
   | { kind: "downloading"; update: UpdaterAvailable; downloaded: number; total: number | null }
   | { kind: "installing";  update: UpdaterAvailable }
+  /** New bundle is on disk but we couldn't restart the app for the user; they
+   *  must relaunch Helios by hand. NOT an error — the update did land. */
+  | { kind: "installed";   version: string }
   | { kind: "offline";     error: string };
 
 export interface UpdaterAvailable {
@@ -104,10 +106,12 @@ export function useUpdater(): UpdaterApi {
       try {
         await invoke("helios_relaunch");
       } catch {
-        // Fallback to Tauri's standard relaunch — better than nothing if
-        // our custom command somehow isn't available (older app updating
-        // to a build with the new command, etc.).
-        await relaunch();
+        // The restart failed (e.g. an older build that predates the command).
+        // There is no fallback: tauri-plugin-process isn't bundled, so calling
+        // its relaunch() would just throw "plugin process not found" and land
+        // the user on a false "offline" error. The new bundle IS installed, so
+        // say exactly that and ask for a manual restart.
+        setState({ kind: "installed", version: state.update.version });
       }
     } catch (e) {
       setState({ kind: "offline", error: String(e) });

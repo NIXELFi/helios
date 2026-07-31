@@ -7,7 +7,10 @@ import {
   AUTOCROSS_2026,
   type CycleStats,
   type SweepPoint,
+  trackFromVisual,
   type TorqueCurve,
+  type VisualTrack,
+  type XY,
 } from "../src";
 
 // A small synthetic CBR600RR-ish brake-torque curve (Nm vs rpm).
@@ -60,5 +63,40 @@ describe("lapsim-core smoke", () => {
     // sorted ascending by rpm
     expect(curve.map((p) => p.rpm)).toEqual([4000, 7000, 9500]);
     expect(curve[0]!.torqueNm).toBe(38);
+  });
+
+  it("trackFromVisual applies the minRadius floor AFTER scaleToLength", () => {
+    // A 3 m-radius circle: every segment is below the 4.5 m rules floor.
+    const R = 3;
+    const N = 400;
+    const centerline: XY[] = [];
+    for (let i = 0; i < N; i++) {
+      const a = (2 * Math.PI * i) / N;
+      centerline.push([R * Math.cos(a), R * Math.sin(a)]);
+    }
+    const visual: VisualTrack = {
+      name: "circle", closed: true, trackWidthM: 3,
+      centerline, leftEdge: [], rightEdge: [],
+    };
+    const raw = 2 * Math.PI * R;
+    // s = 1.1: the clamp used to run pre-scale, giving a 4.5 * 1.1 = 4.95 floor.
+    const t = trackFromVisual(visual, { smoothM: 1, scaleToLength: raw * 1.1 });
+    const radii = t.segments.map((sg) => sg.radius).filter(Number.isFinite);
+    expect(radii.length).toBeGreaterThan(0);
+    for (const r of radii) expect(r).toBeCloseTo(4.5, 6);
+  });
+
+  it("brake channel is normalised against the PACED capacity", () => {
+    // On an endurance-paced lap the brake trace must still reach ~1.0 where
+    // the solver is at the managed braking limit; against the unpaced
+    // capacity it topped out near `pace`.
+    const result = simLap(CURVE, SDM26_VEHICLE, AUTOCROSS_2026, {
+      ...autocrossLapOpts(),
+      pace: 0.5826,
+      channels: true,
+    });
+    const maxBrake = Math.max(...result.channels!.brake);
+    expect(maxBrake).toBeGreaterThan(0.9);
+    expect(maxBrake).toBeLessThanOrEqual(1);
   });
 });

@@ -67,6 +67,18 @@ export function validateManifest(input: unknown): ValidationResult {
   }
   if (typeof m.entry !== "string" || m.entry.trim() === "") {
     errors.push("entry is required (path to the bundle's HTML entry)");
+  } else if (/%(?:2e|2f|5c)/i.test(m.entry)) {
+    // PERCENT-ENCODED traversal. `entry` is concatenated into a URL (runtime/
+    // PluginHost.tsx, loader.ts) and the WHATWG URL parser decodes `%2e%2e/` back
+    // into a real `..` segment, so a literal-`..` test alone is not enough:
+    // "%2e%2e/%2e%2e/other.plugin/dist/index.html" would sail past it and mount a
+    // DIFFERENT installed plugin's bundle inside this plugin's frame — running that
+    // bundle under the wrong permission set and storage namespace. A bundle-relative
+    // path never legitimately needs an encoded dot or slash, so refuse them outright
+    // rather than try to normalize.
+    errors.push(
+      "entry must not contain percent-encoded path characters (%2e, %2f, %5c) — use a plain relative path",
+    );
   } else if (/\.\.|^\/|\\|^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(m.entry)) {
     // Path-traversal / absolute / scheme guard — the loader concatenates this
     // onto the bundle base, so it must stay a relative path inside the bundle.

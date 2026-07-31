@@ -5,21 +5,41 @@
 
 import type { PluginManifest } from "@helios/plugin-sdk";
 import type { CapabilityHandler } from "./broker";
+import {
+  migrateLegacyPluginStorage,
+  pluginStorageKeys,
+  pluginStorageNamespace,
+} from "./pluginStorage";
 
 export interface HostServices {
   /** Append a line to the plugin's host-side log console. */
   log: (line: string) => void;
   /** Surface a transient toast in the Helios chrome. */
   notify: (message: string, level: "info" | "warn" | "error") => void;
+  /** The signed-in member's id — the storage namespace's outer scope. `null`
+   *  only while signed out, which disables storage entirely (see below). */
+  userId: string | null;
 }
 
-const STORAGE_PREFIX = "helios:plugin-storage:";
 const STORAGE_QUOTA_BYTES = 1_000_000; // 1 MB per plugin (MVP soft cap)
 
 /** Build the capability handlers bound to one plugin. Storage is namespaced by
- *  plugin id so one plugin can never read another's keys. */
+ *  USER id AND plugin id, so one plugin can never read another's keys and one
+ *  member can never read another's — see pluginStorage.ts. */
 export function makeHandlers(manifest: PluginManifest, services: HostServices): Record<string, CapabilityHandler> {
-  const ns = `${STORAGE_PREFIX}${manifest.id}:`;
+  // No signed-in member means there is no namespace to write into. Rather than
+  // fall back to a shared bucket (the exact cross-member leak we're closing), the
+  // storage capability simply fails closed.
+  const ns = services.userId ? pluginStorageNamespace(services.userId, manifest.id) : null;
+  if (services.userId) {
+    // Adopt anything this plugin stored before keys were per-user, so namespacing
+    // doesn't read as "the add-on forgot all my settings" after an update.
+    migrateLegacyPluginStorage(services.userId, manifest.id);
+  }
+  const requireNs = (): string => {
+    if (!ns) throw new Error("plugin storage is unavailable while signed out");
+    return ns;
+  };
 
   return {
     // ── Tier 0 ──
@@ -50,40 +70,36 @@ export function makeHandlers(manifest: PluginManifest, services: HostServices): 
 
     // ── Tier 1: storage — namespaced + quota'd ──
     "storage.get": (params) => {
+      const prefix = requireNs();
       const key = (params as { key?: string })?.key ?? "";
-      const raw = localStorage.getItem(ns + key);
+      const raw = localStorage.getItem(prefix + key);
       return raw === null ? null : JSON.parse(raw);
     },
     "storage.set": (params) => {
+      const prefix = requireNs();
       const p = (params as { key?: string; value?: unknown }) ?? {};
       const key = String(p.key ?? "");
       const serialized = JSON.stringify(p.value ?? null);
       // Enforce a CUMULATIVE per-plugin quota, not just per-value, so a plugin
       // can't exhaust the host's shared localStorage by writing many small keys.
       let total = serialized.length;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(ns) && k !== ns + key) {
-          total += (localStorage.getItem(k) ?? "").length;
-        }
+      for (const k of pluginStorageKeys(prefix)) {
+        if (k !== prefix + key) total += (localStorage.getItem(k) ?? "").length;
       }
       if (total > STORAGE_QUOTA_BYTES) {
         throw new Error("plugin storage quota (1 MB) exceeded");
       }
-      localStorage.setItem(ns + key, serialized);
+      localStorage.setItem(prefix + key, serialized);
       return undefined;
     },
     "storage.keys": () => {
-      const keys: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(ns)) keys.push(k.slice(ns.length));
-      }
-      return keys;
+      const prefix = requireNs();
+      return pluginStorageKeys(prefix).map((k) => k.slice(prefix.length));
     },
     "storage.delete": (params) => {
+      const prefix = requireNs();
       const key = (params as { key?: string })?.key ?? "";
-      localStorage.removeItem(ns + key);
+      localStorage.removeItem(prefix + key);
       return undefined;
     },
 

@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
+import { hasEntries, headingRegex, sectionBody } from "./changelog-section.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -28,6 +29,9 @@ export function bumpVersion(version, root = REPO_ROOT) {
   if (!/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(version)) {
     throw new Error(`bad version "${version}" — expected semver like 2.3.0 or 2.3.0-rc.1`);
   }
+  // Check the changelog BEFORE touching any file, so a refusal leaves the repo
+  // unmodified rather than half-bumped.
+  assertChangelogPromotable(version, root);
   for (const t of TARGETS) {
     const fullPath = resolve(root, t.path);
     const before = readFileSync(fullPath, "utf8");
@@ -43,6 +47,11 @@ export function bumpVersion(version, root = REPO_ROOT) {
 // in check-versions.mjs. Idempotent: a no-op if a section for this version
 // already exists, if there's no CHANGELOG.md, or if there's no [Unreleased]
 // heading. Returns true when it rewrote the file.
+//
+// THROWS when [Unreleased] exists but is empty: promoting it would mint a
+// version section with no notes, which then sails past the release gate and
+// ships a GitHub release + Slack post saying nothing. Better to stop the bump
+// here, where the developer can still write the entries.
 export function promoteChangelog(version, root = REPO_ROOT, today = new Date().toISOString().slice(0, 10)) {
   const path = resolve(root, "CHANGELOG.md");
   let text;
@@ -51,12 +60,35 @@ export function promoteChangelog(version, root = REPO_ROOT, today = new Date().t
   } catch {
     return false;
   }
-  const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`^##\\s*\\[${esc}\\]`, "m").test(text)) return false; // already promoted
+  if (headingRegex(version, "m").test(text)) return false; // already promoted
+  assertChangelogPromotable(version, root, text);
   const after = text.replace(/^(##\s*\[Unreleased\][^\n]*)\n/m, `$1\n\n## [${version}] - ${today}\n`);
   if (after === text) return false; // no [Unreleased] heading to promote
   writeFileSync(path, after);
   return true;
+}
+
+// Throw unless CHANGELOG.md's [Unreleased] section is safe to promote. Silent
+// (returns) when there's no CHANGELOG.md, no [Unreleased] heading, or a section
+// for `version` already exists — those are the documented no-op cases.
+export function assertChangelogPromotable(version, root = REPO_ROOT, preloaded = null) {
+  let text = preloaded;
+  if (text === null) {
+    try {
+      text = readFileSync(resolve(root, "CHANGELOG.md"), "utf8");
+    } catch {
+      return;
+    }
+  }
+  if (headingRegex(version, "m").test(text)) return; // already promoted
+  const unreleased = sectionBody(text, "Unreleased");
+  if (unreleased === null || hasEntries(unreleased)) return;
+  throw new Error(
+    `CHANGELOG.md's [Unreleased] section is empty — refusing to promote it to [${version}].\n` +
+      `The release body and the Slack post are generated from this section, so an empty\n` +
+      `promotion ships a release with no notes. Add your entries under [Unreleased]\n` +
+      `(### Added / Changed / Fixed / …, one "- " bullet per user-facing change), then re-run.`,
+  );
 }
 
 function applyBump(text, target, version) {
@@ -117,7 +149,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error("usage: node scripts/bump-version.mjs <version>");
     process.exit(2);
   }
-  const promoted = bumpVersion(version);
+  let promoted;
+  try {
+    promoted = bumpVersion(version);
+  } catch (e) {
+    // Expected failure mode (bad semver / empty [Unreleased]) — print the
+    // message, not a stack trace.
+    console.error(`\n${e.message}`);
+    process.exit(1);
+  }
   console.log(`bumped to ${version}`);
   console.log(
     promoted

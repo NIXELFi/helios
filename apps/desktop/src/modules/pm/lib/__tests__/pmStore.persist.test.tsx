@@ -3,7 +3,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { SupabaseClient } from "@helios/auth";
 import type { CalendarEvent, Subteam, TaskDependency, TaskRow } from "@helios/pm-ui";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
-import { scopeTasksToSubteam, selectCanEditTask, usePmStore } from "../pmStore";
+import {
+  readPersistedActiveProject,
+  scopeTasksToSubteam,
+  selectCanEditTask,
+  usePmStore,
+} from "../pmStore";
 
 // Chainable recorder mock — same slice of supabase-js the write layer uses.
 // `error` controls whether every write resolves ok or fails. Each recorded write
@@ -23,12 +28,15 @@ interface Rpc {
   args: unknown;
 }
 // `rows` is what `.select()` resolves to on success. The write layer chains
-// `.select()` on every UPDATE/DELETE and treats an empty result as a silent RLS
-// denial, so success must return a non-empty set. Pass `[]` to simulate a write
-// the DB accepted (no error) but RLS silently dropped (zero rows affected).
+// `.select()` on every UPDATE/DELETE and compares the affected count against
+// what the caller intended, so a SHORT result is a PARTIAL RLS denial, not a
+// success. The default ("auto") mirrors a fully-permitted write: one row per id
+// for an `.in()` batch, one row otherwise. Pass an explicit array to simulate a
+// write the DB accepted (no error) but RLS dropped — `[]` for all rows, a short
+// array for some.
 function recorderClient(
   error: { message: string } | null = null,
-  rows: unknown[] = [{ id: "ok" }],
+  rows: unknown[] | "auto" = "auto",
 ) {
   const writes: Write[] = [];
   const rpcs: Rpc[] = [];
@@ -49,7 +57,12 @@ function recorderClient(
         },
         then<R>(onF: (v: { data: unknown[] | null; error: typeof error }) => R) {
           writes.push(rec);
-          return Promise.resolve({ data: error ? null : rows, error }).then(onF);
+          const auto =
+            rec.ins.length > 0
+              ? (rec.ins[0]![1] as unknown[]).map((id) => ({ id }))
+              : [{ id: "ok" }];
+          const data = rows === "auto" ? auto : rows;
+          return Promise.resolve({ data: error ? null : data, error }).then(onF);
         },
       };
       return chain;
@@ -216,12 +229,15 @@ describe("optimistic persistence with rollback", () => {
     expect(usePmStore.getState().lastWriteError?.message).toMatch(/denied/i);
   });
 
-  test("with no client (not signed in) mutations stay in-memory and never throw", async () => {
+  test("with no client the change is rolled back and a 'not connected' error surfaces", async () => {
+    // A save path must never silently no-op. persist() used to `return` on a
+    // null client, leaving the optimistic row in memory looking saved with no
+    // error — the same silent data loss the zero-rows check exists to prevent.
     seed(null as unknown as SupabaseClient);
     usePmStore.getState().addTask(makeTask("t1"));
     await flush();
-    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeTruthy();
-    expect(usePmStore.getState().lastWriteError).toBeNull();
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeFalsy(); // rolled back
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/not connected/i);
   });
 
   test("deleteEvent removes optimistically and rolls back on a failed write", async () => {
@@ -309,11 +325,99 @@ describe("bulkUpdateTasks", () => {
     expect(t.subsystem).toBeNull();
   });
 
-  test("with no client the bulk change stays in-memory and never throws", async () => {
+  test("with no client the bulk change is rolled back with a 'not connected' error", async () => {
     seed(null as unknown as SupabaseClient, [makeTask("t1"), makeTask("t2")]);
     usePmStore.getState().bulkUpdateTasks(["t1", "t2"], { priority: "critical" });
     await flush();
-    expect(usePmStore.getState().tasks.every((t) => t.priority === "critical")).toBe(true);
+    expect(usePmStore.getState().tasks.every((t) => t.priority === "medium")).toBe(true);
+    expect(usePmStore.getState().lastWriteError?.message).toMatch(/not connected/i);
+  });
+
+  // P0-3: a bulk edit spanning subteams where RLS permits only SOME rows comes
+  // back from PostgREST as HTTP 200 with a SHORT id list. The old zero-rows
+  // check waved that straight through, so the UI showed every row updated and
+  // silently reverted the denied ones on the next refresh() — the same class as
+  // the bug report 1548ec9e. It must roll the whole batch back and say so.
+  test("a PARTIALLY denied bulk edit (short id list) rolls back and names it as partial", async () => {
+    // Two ids sent, only one row comes back → partial denial.
+    const { client } = recorderClient(null, [{ id: "t1" }]);
+    seed(client, [makeTask("t1"), makeTask("t2")]);
+
+    usePmStore.getState().bulkUpdateTasks(["t1", "t2"], { status: "done" });
+    expect(usePmStore.getState().tasks.every((t) => t.status === "done")).toBe(true); // optimistic
+
+    await flush();
+    // The WHOLE batch rolls back on screen — the store can't apply half of an
+    // atomic .in() write.
+    expect(usePmStore.getState().tasks.every((t) => t.status === "not_started")).toBe(true);
+    const msg = usePmStore.getState().lastWriteError?.message ?? "";
+    expect(msg).toMatch(/1 of 2/);
+    expect(msg).toMatch(/reload/i); // tells the user the server and screen disagree
+  });
+
+  // Rolling back is NOT enough for a partial commit: the rows that were allowed
+  // are still changed on the server, so the screen is wrong until we re-pull.
+  // The reload is forced rather than merely suggested in the toast.
+  test("a partial denial FORCES an authoritative workspace reload", async () => {
+    const { client } = recorderClient(null, [{ id: "t1" }]);
+    seed(client, [makeTask("t1"), makeTask("t2")]);
+    let reloads = 0;
+    usePmStore.getState().registerReloadWorkspace(async () => {
+      reloads++;
+    });
+
+    usePmStore.getState().bulkUpdateTasks(["t1", "t2"], { status: "done" });
+    await flush();
+
+    expect(reloads).toBe(1);
+    const err = usePmStore.getState().lastWriteError;
+    expect(err?.needsReload).toBe(true);
+    // The toast survives the reload's hydrate and reports the screen is trustworthy.
+    expect(err?.reload).toBe("done");
+  });
+
+  test("a failed forced reload is reported, and 'Reload now' retries it", async () => {
+    const { client } = recorderClient(null, [{ id: "t1" }]);
+    seed(client, [makeTask("t1"), makeTask("t2")]);
+    let fail = true;
+    usePmStore.getState().registerReloadWorkspace(async () => {
+      if (fail) throw new Error("network down");
+    });
+
+    usePmStore.getState().bulkUpdateTasks(["t1", "t2"], { status: "done" });
+    await flush();
+    // The user is told the screen may be stale rather than being left to assume
+    // the reload worked.
+    expect(usePmStore.getState().lastWriteError?.reload).toBe("failed");
+
+    fail = false;
+    usePmStore.getState().retryWriteErrorReload();
+    await flush();
+    expect(usePmStore.getState().lastWriteError?.reload).toBe("done");
+  });
+
+  test("a non-partial write failure still auto-clears and forces no reload", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [makeTask("t1")]);
+    let reloads = 0;
+    usePmStore.getState().registerReloadWorkspace(async () => {
+      reloads++;
+    });
+
+    usePmStore.getState().updateTask("t1", { status: "done" });
+    await flush();
+
+    expect(reloads).toBe(0);
+    expect(usePmStore.getState().lastWriteError?.needsReload).toBeUndefined();
+  });
+
+  test("a fully permitted bulk edit sticks (the count check doesn't false-positive)", async () => {
+    const { client } = recorderClient(null); // auto: one row per id
+    seed(client, [makeTask("t1"), makeTask("t2"), makeTask("t3")]);
+
+    usePmStore.getState().bulkUpdateTasks(["t1", "t2", "t3"], { status: "done" });
+    await flush();
+    expect(usePmStore.getState().tasks.every((t) => t.status === "done")).toBe(true);
     expect(usePmStore.getState().lastWriteError).toBeNull();
   });
 
@@ -1056,5 +1160,79 @@ describe("background re-hydrate preserves a pending write error (toast not suppr
       roles: { p1: "admin" },
     } as never);
     expect(usePmStore.getState().lastWriteError).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-9 — a write that fails AFTER the user switched projects
+// ---------------------------------------------------------------------------
+describe("a failed write that outlives a project switch", () => {
+  const EMPTY_PROJECT = {
+    tasks: [], subteams: [], subsystems: [], users: [], dependencies: [],
+    milestones: [], pages: [], blocks: [], activity: [], vendors: [],
+    comments: [], links: [], buildRecords: [], events: [], hiddenSubteams: [],
+  };
+
+  test("still surfaces an error (naming the project) even though the rollback is skipped", async () => {
+    const { client } = recorderClient({ message: "denied" });
+    seed(client, [makeTask("t1")]);
+    usePmStore.setState({
+      activeProjectId: "p1",
+      projects: [
+        { id: "p1", name: "SDM26", description: null },
+        { id: "p2", name: "SDM27", description: null },
+      ],
+      projectData: { p1: { ...EMPTY_PROJECT }, p2: { ...EMPTY_PROJECT } },
+    });
+
+    usePmStore.getState().updateTask("t1", { title: "edited" });
+    // Navigate away before the write rejects.
+    usePmStore.getState().setActiveProject("p2");
+
+    await flush();
+    // The rollback is deliberately skipped across a switch (it would overwrite
+    // the NOW-active project's flat fields), but the user must still be told —
+    // the toast is project-independent, so it names the project that failed.
+    const msg = usePmStore.getState().lastWriteError?.message ?? "";
+    expect(msg).toMatch(/denied/i);
+    expect(msg).toMatch(/SDM26/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2 — the persisted active-project selection is namespaced per user
+// ---------------------------------------------------------------------------
+describe("persisted active project is per-user", () => {
+  test("user B does not inherit user A's selection, and the legacy key is dropped", () => {
+    localStorage.clear();
+    // A stale pre-namespacing value written by an older build.
+    localStorage.setItem("helios:activeProject", "p-legacy");
+
+    const { client } = recorderClient(null);
+    seed(client, []);
+    usePmStore.setState({
+      currentUserId: "user-a",
+      activeProjectId: "p1",
+      projectData: {
+        p1: {
+          tasks: [], subteams: [], subsystems: [], users: [], dependencies: [],
+          milestones: [], pages: [], blocks: [], activity: [], vendors: [],
+          comments: [], links: [], buildRecords: [], events: [], hiddenSubteams: [],
+        },
+        p2: {
+          tasks: [], subteams: [], subsystems: [], users: [], dependencies: [],
+          milestones: [], pages: [], blocks: [], activity: [], vendors: [],
+          comments: [], links: [], buildRecords: [], events: [], hiddenSubteams: [],
+        },
+      },
+    });
+
+    usePmStore.getState().setActiveProject("p2");
+
+    // Written under A's namespace only, and the shared legacy key is cleaned up
+    // so it can't keep leaking one account's season to the next.
+    expect(readPersistedActiveProject("user-a")).toBe("p2");
+    expect(readPersistedActiveProject("user-b")).toBeNull();
+    expect(localStorage.getItem("helios:activeProject")).toBeNull();
   });
 });

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { mkdir, writeFile, exists, stat } from "@tauri-apps/plugin-fs";
 import { useAddLocalFile, sha256Hex } from "./useAddLocalFile";
-import { folderNamePath, folderPath, sanitizePathSegment } from "./folder-paths";
+import {
+  folderNamePath,
+  folderPath,
+  folderResolvable,
+  sanitizePathSegment,
+} from "./folder-paths";
 import { resolveDropFolder } from "./drop-target";
 import type { Folder, FolderId, VaultId } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
@@ -251,73 +256,101 @@ export function useVaultDropImport({
     setImporting(true);
     setResults([]);
 
-    // Raw DB folder names for ensureFolderHierarchy matching; sanitized
-    // segments for anything touching disk (path-traversal containment).
-    const prefix = folderNamePath(targetFolderId, foldersSnap);
-    const sanitizedPrefix = folderPath(targetFolderId, foldersSnap);
-
-    const collected: DropImportResult[] = [];
-    for (const item of items) {
-      if (signal.aborted) return;
-      const name = item.relativePath;
-      try {
-        const bytes = new Uint8Array(await item.file.arrayBuffer());
-        const sha = await sha256Hex(bytes);
-
-        // Copy the bytes into the local vault folder at the vault-relative
-        // path FIRST, so the file lands on disk even if the vault add fails
-        // (the unmatched/auto-add flow can then pick it up). Segment-wise
-        // sanitization matches how the sync ledger + auto-sync key paths.
-        let absolutePath = "";
-        const root = rootSnap;
-        if (root) {
-          const relSan = item.relativePath.split("/").map(sanitizePathSegment).join("/");
-          const localRel = sanitizedPrefix ? `${sanitizedPrefix}/${relSan}` : relSan;
-          absolutePath = `${root}/${localRel}`;
-          // Never clobber a writable existing working copy: a writable file on
-          // disk is (or may be) a checked-out copy holding unsaved edits, so
-          // overwriting it would silently destroy that work. A read-only copy
-          // is a clean synced file and is safe to overwrite. `readonly` may be
-          // absent on some platforms (stat blocked / type gap) — treat unknown
-          // as writable (skip) to err on the side of preserving local work.
-          if (await exists(absolutePath)) {
-            const writable = await stat(absolutePath)
-              .then((info) => (info as { readonly?: boolean }).readonly !== true)
-              .catch(() => true);
-            if (writable) {
-              collected.push({ name, ok: false, error: "Would overwrite a checked-out copy — skipped" });
-              setResults([...collected]);
-              continue;
-            }
-          }
-          const dir = absolutePath.slice(0, absolutePath.lastIndexOf("/"));
-          await mkdir(dir, { recursive: true }).catch(() => { /* may exist */ });
-          await writeFile(absolutePath, bytes);
-        }
-        if (signal.aborted) return;
-
-        const lf: LocalFile = {
-          basename: basename(item.relativePath),
-          relativePath: item.relativePath,
-          absolutePath,
-          sha256: sha,
-          sizeBytes: bytes.length,
-          bytes,
-        };
-        const r = await addRunRef.current(vid, lf, prefix || undefined);
-        if (signal.aborted) return;
-        collected.push(r.ok ? { name, ok: true } : { name, ok: false, error: r.error });
-      } catch (e) {
-        if (signal.aborted) return;
-        collected.push({ name, ok: false, error: e instanceof Error ? e.message : String(e) });
+    // try/finally: the loop below has six early `return`s (abort checks), and
+    // every one of them used to skip the single setImporting(false) at the end,
+    // pinning the "Importing dropped files…" banner until the whole screen
+    // unmounted. Clearing in `finally` covers every exit — but only when THIS
+    // run is still the current one: a superseding drop has already set
+    // importing=true for itself by the time our abort check resumes, and
+    // clearing it there would blank the new import's banner.
+    try {
+      // The path helpers return "" for BOTH "this is the vault root" and "this
+      // folder's ancestor chain can't be resolved from the current snapshot", so
+      // an unresolvable target would silently import every dropped file to the
+      // vault ROOT — on disk AND in the DB. Verify the chain before trusting the
+      // prefix; a stale folder snapshot self-heals on the next refetch, so the
+      // right move is to refuse this drop, not to guess a destination.
+      if (!folderResolvable(targetFolderId, foldersSnap)) {
+        setResults(
+          items.map((item) => ({
+            name: item.relativePath,
+            ok: false,
+            error: "Couldn't work out where this folder lives yet — refresh the vault and try again.",
+          })),
+        );
+        return;
       }
-      // Publish incrementally so the strip fills in as files land.
-      setResults([...collected]);
-    }
+      // Raw DB folder names for ensureFolderHierarchy matching; sanitized
+      // segments for anything touching disk (path-traversal containment).
+      const prefix = folderNamePath(targetFolderId, foldersSnap);
+      const sanitizedPrefix = folderPath(targetFolderId, foldersSnap);
 
-    if (signal.aborted) return;
-    setImporting(false);
-    onCompleteRef.current?.();
+      const collected: DropImportResult[] = [];
+      for (const item of items) {
+        if (signal.aborted) return;
+        const name = item.relativePath;
+        try {
+          const bytes = new Uint8Array(await item.file.arrayBuffer());
+          const sha = await sha256Hex(bytes);
+
+          // Copy the bytes into the local vault folder at the vault-relative
+          // path FIRST, so the file lands on disk even if the vault add fails
+          // (the unmatched/auto-add flow can then pick it up). Segment-wise
+          // sanitization matches how the sync ledger + auto-sync key paths.
+          let absolutePath = "";
+          const root = rootSnap;
+          if (root) {
+            const relSan = item.relativePath.split("/").map(sanitizePathSegment).join("/");
+            const localRel = sanitizedPrefix ? `${sanitizedPrefix}/${relSan}` : relSan;
+            absolutePath = `${root}/${localRel}`;
+            // Never clobber a writable existing working copy: a writable file on
+            // disk is (or may be) a checked-out copy holding unsaved edits, so
+            // overwriting it would silently destroy that work. A read-only copy
+            // is a clean synced file and is safe to overwrite. `readonly` may be
+            // absent on some platforms (stat blocked / type gap) — treat unknown
+            // as writable (skip) to err on the side of preserving local work.
+            if (await exists(absolutePath)) {
+              const writable = await stat(absolutePath)
+                .then((info) => (info as { readonly?: boolean }).readonly !== true)
+                .catch(() => true);
+              if (writable) {
+                collected.push({ name, ok: false, error: "Would overwrite a checked-out copy — skipped" });
+                setResults([...collected]);
+                continue;
+              }
+            }
+            const dir = absolutePath.slice(0, absolutePath.lastIndexOf("/"));
+            await mkdir(dir, { recursive: true }).catch(() => { /* may exist */ });
+            await writeFile(absolutePath, bytes);
+          }
+          if (signal.aborted) return;
+
+          const lf: LocalFile = {
+            basename: basename(item.relativePath),
+            relativePath: item.relativePath,
+            absolutePath,
+            sha256: sha,
+            sizeBytes: bytes.length,
+            bytes,
+          };
+          const r = await addRunRef.current(vid, lf, prefix || undefined);
+          if (signal.aborted) return;
+          collected.push(r.ok ? { name, ok: true } : { name, ok: false, error: r.error });
+        } catch (e) {
+          if (signal.aborted) return;
+          collected.push({ name, ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        // Publish incrementally so the strip fills in as files land.
+        setResults([...collected]);
+      }
+
+      if (signal.aborted) return;
+      onCompleteRef.current?.();
+    } finally {
+      // Only the run that still owns the abort scope may clear the flag — see
+      // the note above the try.
+      if (abortRef.current === ctrl) setImporting(false);
+    }
   }
 
   return { hoverFolderId, dragActive, importing, results, clearResults };

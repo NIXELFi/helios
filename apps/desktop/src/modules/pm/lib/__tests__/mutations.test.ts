@@ -65,13 +65,16 @@ interface RecordedRpc {
 // A chainable recorder that mimics the slice of supabase-js the write layer
 // uses: client.schema(s).from(t).insert/update/upsert/delete(...).eq(...) and
 // client.schema(s).rpc(name, args).
-// `rows` is what `.select()` resolves to on success — the write layer now chains
-// `.select()` on every UPDATE/DELETE and treats an empty result as a silent RLS
-// denial. Default to one row (the happy path); pass `[]` to simulate RLS hiding
-// the row from the write (HTTP 200, no error, zero rows affected).
+// `rows` is what `.select()` resolves to on success — the write layer chains
+// `.select()` on every UPDATE/DELETE and compares the affected count against
+// what the caller intended, so a SHORT result (not just an empty one) is a
+// partial RLS denial. The default ("auto") therefore mirrors a fully-permitted
+// write: one row per id for an `.in()` batch, one row otherwise. Pass an
+// explicit array to simulate RLS hiding rows — `[]` for a total denial, a short
+// array for a partial one.
 function makeClient(
   error: { message: string } | null = null,
-  rows: unknown[] = [{ id: "ok" }],
+  rows: unknown[] | "auto" = "auto",
 ) {
   const calls: Recorded[] = [];
   const rpcs: RecordedRpc[] = [];
@@ -92,7 +95,12 @@ function makeClient(
         },
         then<R>(onF: (v: { data: unknown[] | null; error: typeof error }) => R) {
           calls.push(rec);
-          return Promise.resolve({ data: error ? null : rows, error }).then(onF);
+          const auto =
+            rec.ins.length > 0
+              ? (rec.ins[0]![1] as unknown[]).map((id) => ({ id }))
+              : [{ id: "ok" }];
+          const data = rows === "auto" ? auto : rows;
+          return Promise.resolve({ data: error ? null : data, error }).then(onF);
         },
       };
       return chain;
@@ -206,6 +214,31 @@ describe("task mutations", () => {
     const { client } = makeClient({ message: "permission denied for table tasks" });
     await expect(batchPatchTasks(client, ["t1"], { status: "done" })).rejects.toThrow(
       /don't have permission to edit these tasks/,
+    );
+  });
+
+  test("batchPatchTasks throws when RLS permits only SOME of the ids (short result)", async () => {
+    // The P0-3 defect: PostgREST returns HTTP 200 with a SHORT id list when RLS
+    // hides some rows from an `.in()` update. `data.length === 0` never fires,
+    // so the UI showed every row updated and silently reverted the denied ones
+    // on the next refresh. The count must be compared against ids.length.
+    const { client } = makeClient(null, [{ id: "t1" }]); // 3 sent, 1 allowed
+    await expect(batchPatchTasks(client, ["t1", "t2", "t3"], { status: "done" })).rejects.toThrow(
+      /1 of 3/,
+    );
+  });
+
+  test("batchPatchTasks resolves when every id was permitted", async () => {
+    const { client } = makeClient(); // auto: one row per id
+    await expect(
+      batchPatchTasks(client, ["t1", "t2", "t3"], { status: "done" }),
+    ).resolves.toBeUndefined();
+  });
+
+  test("batchPatchTasks still reports a TOTAL denial as a plain permission failure", async () => {
+    const { client } = makeClient(null, []);
+    await expect(batchPatchTasks(client, ["t1", "t2"], { status: "done" })).rejects.toThrow(
+      /don't have permission to edit these tasks \(or it no longer exists\)/,
     );
   });
 

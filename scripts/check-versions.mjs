@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { hasEntries, sectionBody } from "./changelog-section.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -65,24 +66,33 @@ for (const [path, version] of Object.entries(got)) {
 // Changelog gate — the GitHub release body + the Slack notification are sourced
 // from CHANGELOG.md (see scripts/extract-changelog.mjs and the publish job in
 // .github/workflows/release.yml), so a tagged release MUST carry a section for
-// its version. This is what makes "add your changelog" non-optional: forget it
-// and the release fails right here.
+// its version — and that section must actually CONTAIN notes. A heading alone
+// isn't enough: extract-changelog.mjs falls back to a generic one-liner on an
+// empty body, which would ship a release + Slack post with zero notes. We read
+// the body through the same parser the extractor uses (changelog-section.mjs)
+// so the gate can never disagree with what actually gets published. This is
+// what makes "add your changelog" non-optional: forget it and the release fails
+// right here.
+let changelogNote = `section for ${expected}`;
 let changelogOk = false;
 try {
   const changelog = readFileSync(resolve(REPO_ROOT, "CHANGELOG.md"), "utf8");
-  const esc = expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  changelogOk = new RegExp(`^##\\s*\\[${esc}\\]`, "m").test(changelog);
+  const body = sectionBody(changelog, expected);
+  if (body === null) changelogNote = `no "## [${expected}]" section`;
+  else if (!hasEntries(body)) changelogNote = `"## [${expected}]" section has no entries`;
+  else changelogOk = true;
 } catch {
   /* missing file counts as not-ok */
+  changelogNote = "CHANGELOG.md is missing";
 }
-console.log(`${changelogOk ? "✓" : "✗"} CHANGELOG.md: section for ${expected}`);
+console.log(`${changelogOk ? "✓" : "✗"} CHANGELOG.md: ${changelogNote}`);
 if (!changelogOk) ok = false;
 
 if (!ok) {
   console.error(
     `\nRelease preflight failed for tag ${tag}:\n` +
       `  - all version fields must equal ${expected}\n` +
-      `  - CHANGELOG.md must have a "## [${expected}]" section\n` +
+      `  - CHANGELOG.md must have a "## [${expected}]" section with at least one "- " entry\n` +
       `Fix both by adding your notes under [Unreleased], then run \`node scripts/bump-version.mjs ${expected}\` and re-tag.`,
   );
   process.exit(1);
