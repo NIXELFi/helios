@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.3.2] - 2026-08-04
+
 ### Fixed
 - **The Vault stops re-downloading the entire file list every 15 seconds.** Helios keeps an eye on your vault with a cheap "has anything changed?" check, and only reloads the full catalog when the answer is yes. One part of that check was asking the server a question it couldn't answer, so it failed every single time — and a failed check is treated as "something changed", which meant every open Vault window quietly re-pulled the whole catalog (thousands of files) four times a minute, forever. The check now works, so an idle vault costs almost nothing. Expect the Vault to feel faster and your network usage to drop sharply.
 
