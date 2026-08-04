@@ -231,6 +231,31 @@ jobs:
           node scripts/assemble-updater-json.mjs
           gh release upload "$RELEASE_TAG" latest.json --clobber
 
+      # Gate the release on what it ACTUALLY holds. Every updater bundle named by
+      # latest.json is re-read from the release and cryptographically verified
+      # against the pubkey the shipped app trusts, BEFORE `publish` un-drafts it.
+      #
+      # v5.3.1 shipped with its Windows and macOS-x64 bundles destroyed: CI built
+      # and uploaded them correctly, then an out-of-band upload overwrote them with
+      # copies that had been round-tripped through a UTF-8 text pipeline (BOM
+      # prepended, every non-ASCII byte replaced by U+FFFD). Signature verification
+      # failed on every Windows and Intel-Mac client, so nobody on those platforms
+      # could auto-update or even reinstall by hand — and the pipeline was blind to
+      # it, because all it checked was that the build jobs exited 0.
+      #
+      # Assets are pulled with `gh release download` rather than the manifest URLs:
+      # the release is still a draft here, and a draft's assets are not yet served
+      # from the stable releases/download/<tag>/ paths.
+      - name: Verify release assets against latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          ASSET_DIR: release-assets
+        run: |
+          mkdir -p release-assets
+          gh release download "$RELEASE_TAG" --dir release-assets
+          node scripts/verify-release-assets.mjs
+
   publish:
     name: Publish release
     needs: [build, updater]
