@@ -69,8 +69,19 @@ export async function fetchVaultCursor(
   const [liveFiles, versions, liveFolders, activeLocks] = await Promise.all([
     countOf(client.from("files").select("id", head).eq("vault_id", vaultId).is("deleted_at", null)),
     // versions has no vault_id — scope by an inner join on the parent file.
+    // The FK must be named explicitly: pdm.files and pdm.versions reference each
+    // other BOTH ways (versions.file_id -> files.id, and files.latest_version_id
+    // -> versions.id via files_latest_version_fk), so a bare `files!inner` is
+    // ambiguous and PostgREST rejects the request with 300 / PGRST201 before it
+    // ever reaches RLS. `locks` below needs no hint because it has exactly one FK
+    // to files. See the regression test: this failing made countOf throw, which
+    // rejected the whole Promise.all, which made useVaultCursor treat EVERY poll
+    // as an error and run a full catalog reconcile on a 15s timer.
     countOf(
-      client.from("versions").select("id, files!inner(vault_id)", head).eq("files.vault_id", vaultId),
+      client
+        .from("versions")
+        .select("id, files!versions_file_id_fkey!inner(vault_id)", head)
+        .eq("files.vault_id", vaultId),
     ),
     countOf(client.from("folders").select("id", head).eq("vault_id", vaultId).is("deleted_at", null)),
     // locks have no vault_id — scope to THIS vault via an inner join on the

@@ -27,7 +27,15 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The Vault stops re-downloading the entire file list every 15 seconds.** Helios keeps an eye on your vault with a cheap "has anything changed?" check, and only reloads the full catalog when the answer is yes. One part of that check was asking the server a question it couldn't answer, so it failed every single time — and a failed check is treated as "something changed", which meant every open Vault window quietly re-pulled the whole catalog (thousands of files) four times a minute, forever. The check now works, so an idle vault costs almost nothing. Expect the Vault to feel faster and your network usage to drop sharply.
+
+### Security
+- **Releases are now verified before they reach you.** Every installer and update package is re-downloaded and cryptographically checked against Helios's signing key before a release is published. A damaged or tampered download now blocks the release instead of reaching your computer — see the v5.3.1 note below.
+
 ## [5.3.1] - 2026-07-31
+
+_Re-released 2026-08-04._ The originally published Windows and Intel-Mac downloads were corrupted after the build and could not be installed or updated to; Apple Silicon and Linux were unaffected. All downloads were rebuilt, signature-verified, and republished under the same version. If Helios told you an update failed, it will now install normally.
 
 ### Fixed
 - **Vault no longer deletes your local working copies when the folder list arrives incomplete.** If a folder in the middle of a file's path hadn't loaded yet, Helios computed a shortened path (`Frame/part.sldprt` instead of `Chassis/Frame/part.sldprt`). That path matched nothing, so clean read-only working copies looked like leftovers from a moved file and were removed. Vault now treats a folder chain it can't fully verify as "unknown" and skips those files for the pass instead of acting on a guess — the same rule that already protects files whose own folder is missing.

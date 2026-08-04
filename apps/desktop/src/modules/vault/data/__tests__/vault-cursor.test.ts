@@ -106,10 +106,11 @@ describe("fetchVaultCursor", () => {
     expect(files.filters).toContainEqual(["eq", "vault_id", "v1"]);
     expect(files.filters).toContainEqual(["is", "deleted_at", null]);
 
-    // versions has no vault_id column — must scope via an inner join on files.
+    // versions has no vault_id column — must scope via an inner join on files,
+    // naming the FK explicitly (see the dedicated regression test below).
     const versions = states.find((s) => s.table === "versions")!;
     expect(versions.opts).toMatchObject({ count: "exact", head: true });
-    expect(versions.select).toContain("files!inner");
+    expect(versions.select).toContain("files!versions_file_id_fkey!inner");
     expect(versions.filters).toContainEqual(["eq", "files.vault_id", "v1"]);
 
     const folders = states.find((s) => s.table === "folders")!;
@@ -128,5 +129,33 @@ describe("fetchVaultCursor", () => {
   it("throws if any sub-count errors so the caller can fall back to a full reconcile", async () => {
     const { client } = makeCountClient({ files: 1, versions: 1, folders: 1, locks: 1 }, "versions");
     await expect(fetchVaultCursor(client, "v1")).rejects.toThrow();
+  });
+
+  // Regression (shipped v4.1.1 -> v5.3.1): the versions probe embedded a bare
+  // `files!inner`. pdm.files and pdm.versions reference each other BOTH ways
+  // (versions.file_id -> files.id, files.latest_version_id -> versions.id), so
+  // PostgREST could not choose a relationship and answered 300 / PGRST201 —
+  // BEFORE RLS, which is why this one count failed while the other three passed.
+  // countOf throws on error, Promise.all rejected, and useVaultCursor's catch ran
+  // a full catalog reconcile on EVERY 15s tick, for every open Browse tab. The
+  // whole point of the cursor probe (avoid megabyte re-pulls on an idle vault)
+  // was inverted into a permanent full-pull loop.
+  //
+  // A mock can't reproduce PostgREST's relationship resolution, so this asserts
+  // the one thing that actually prevents it: the embed names the FK. `locks` is
+  // deliberately checked to be WITHOUT a hint — it has a single FK to files, and
+  // adding a bogus constraint name there would break it the same way.
+  it("names the FK on the versions embed (ambiguous otherwise) but not on locks", async () => {
+    const { client, states } = makeCountClient({ files: 1, versions: 1, folders: 1, locks: 1 });
+    await fetchVaultCursor(client, "v1");
+
+    const versions = states.find((s) => s.table === "versions")!;
+    expect(versions.select).toContain("files!versions_file_id_fkey!inner");
+    // The bare form is the bug — it must not come back.
+    expect(versions.select).not.toMatch(/files!inner/);
+
+    const locks = states.find((s) => s.table === "locks")!;
+    expect(locks.select).toContain("files!inner");
+    expect(locks.select).not.toMatch(/files!\w+!inner/);
   });
 });
