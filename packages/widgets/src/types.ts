@@ -51,6 +51,15 @@ export interface WidgetRenderProps<Config> {
    *  hooking the emitter; widgets that need live updates should subscribe
    *  to the emitter directly. */
   lapSelection?: LapSelection;
+  /** Host-provided config writer. Widgets may push a config update for
+   *  lightweight in-widget affordances — the strip chart's x-mode pill, for
+   *  instance — instead of making the user open the config panel. The host
+   *  persists it exactly like a config-panel edit (Tile → App.updateTile →
+   *  workspace commit), so treat every call as a durable change, not a
+   *  transient view tweak: put ephemeral state in viewState instead.
+   *  Absent when the host doesn't support config writes (read-only embeds,
+   *  previews), so widgets must degrade to a non-interactive display. */
+  onConfigChange?: (next: Config) => void;
   /** Coordinator for "click the GPS track to pick a coordinate" flows.
    *  When armed (Lap Config dialog → "Pick from map"), the GPS Track widget
    *  shows a hint banner and treats the next click as a coordinate emit. */

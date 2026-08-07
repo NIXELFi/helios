@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { magnitudeSpectrum, pow2Floor } from "@helios/lib";
+import type { ZoomRange } from "@helios/lib";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import type { WidgetRenderProps, OverlaySession } from "../types";
@@ -35,16 +36,45 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
   // render but their data is only different when the id set changes.
   const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
 
+  // Mirror the zoom window into React state. The spectra memo below has to
+  // RECOMPUTE when the zoom changes, and `viewState` is a long-lived emitter
+  // whose identity never changes — keying the memo on the emitter alone (as
+  // this did) pinned the FFT to whatever window was current on first render,
+  // so `useZoomRange` silently did nothing after the first drag-zoom. The
+  // state holds the range itself so it can be a real memo dependency.
+  const [zoomWindow, setZoomWindow] = useState<ZoomRange | null>(
+    () => viewState?.get().zoomRange ?? null,
+  );
+
+  // Single subscription drives both paths: mirror the zoom (→ recompute) and
+  // redraw (→ repaint for changes that don't touch the spectra, e.g. a datum
+  // drop). setZoomWindow keeps the previous object when the range is
+  // value-equal so an unrelated view-state emit doesn't churn the memo.
+  useEffect(() => {
+    if (!viewState) return;
+    const apply = (state: { zoomRange: ZoomRange | null }) => {
+      setZoomWindow((prev) => (sameZoom(prev, state.zoomRange) ? prev : state.zoomRange));
+      drawRef.current();
+    };
+    apply(viewState.get());
+    return viewState.subscribe(apply);
+  }, [viewState]);
+
+  // The window the spectra are actually computed over. Collapsing to null up
+  // front (rather than branching inside the memo) keeps the dependency stable
+  // at null while `useZoomRange` is off, so zoom emits the user has opted out
+  // of don't re-run every session's FFT.
+  const effectiveZoom = config.useZoomRange ? zoomWindow : null;
+
   const spectra = useMemo(() => {
-    const zoom = config.useZoomRange ? viewState?.get().zoomRange ?? null : null;
     const out: { session: OverlaySession; freq: Float64Array; mag: Float64Array; n: number; fs: number }[] = [];
     for (const s of visible) {
       const arr = s.slice.data.get(config.channelId);
       if (!arr || arr.length < 4) continue;
       let iStart = 0, iEnd = arr.length;
-      if (zoom) {
-        iStart = lowerBoundUs(s.slice.time, zoom.startUs);
-        iEnd = lowerBoundUs(s.slice.time, zoom.endUs);
+      if (effectiveZoom) {
+        iStart = lowerBoundUs(s.slice.time, effectiveZoom.startUs);
+        iEnd = lowerBoundUs(s.slice.time, effectiveZoom.endUs);
       }
       const n = pow2Floor(iEnd - iStart);
       if (n < 4) continue;
@@ -60,14 +90,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey, config, viewState]);
-
-  // Subscribe to zoom changes so the windowed FFT recomputes when the user
-  // drag-zooms a strip chart.
-  useEffect(() => {
-    if (!viewState) return;
-    return viewState.subscribe(() => drawRef.current());
-  }, [viewState]);
+  }, [visibleIdsKey, config, effectiveZoom]);
 
   drawRef.current = () => {
     const c = canvasRef.current; if (!c) return;
@@ -176,6 +199,15 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
   useEffect(() => { drawRef.current(); }, [spectra, config]);
 
   return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+}
+
+/** Value-equality for zoom ranges, so a view-state emit that only changed the
+ *  datums doesn't hand the spectra memo a new object and force a full
+ *  recompute of every visible session's FFT. */
+function sameZoom(a: ZoomRange | null, b: ZoomRange | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.startUs === b.startUs && a.endUs === b.endUs;
 }
 
 function lowerBoundUs(time: BigInt64Array, targetUs: number): number {

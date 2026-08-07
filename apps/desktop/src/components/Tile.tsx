@@ -255,6 +255,15 @@ export function Tile({
           lapSelectionEmitter={lapSelectionEmitter}
           lapSelection={lapSelection}
           gpsPickerEmitter={gpsPickerEmitter}
+          // In-widget config writes (e.g. the strip chart's x-mode pill) go
+          // through the SAME path as a drag/resize: onChange → App.updateTile
+          // → workspace commit, so the change persists. The cast mirrors
+          // ConfigPanel — the registry erases the config type parameter
+          // (Widget<unknown>), and the widget is the authority on its own
+          // config shape.
+          onConfigChange={(nextConfig) =>
+            onChange?.({ ...spec, config: nextConfig as TileSpec["config"] })
+          }
         />
         {editMode && (
           <>
