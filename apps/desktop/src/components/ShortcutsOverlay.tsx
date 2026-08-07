@@ -31,6 +31,8 @@ const GROUPS: Group[] = [
     title: "Cursor & laps",
     items: [
       { keys: ["Space"], label: "Play / pause cursor" },
+      { keys: ["←", "→"], label: "Nudge cursor (hold to scrub)" },
+      { keys: ["shift", "←", "→"], label: "Nudge cursor — coarse step" },
       { keys: ["["],     label: "Previous lap boundary (primary)" },
       { keys: ["]"],     label: "Next lap boundary (primary)" },
       { keys: ["M"],     label: "Make lap at cursor the Main lap" },
@@ -44,6 +46,7 @@ const GROUPS: Group[] = [
       { keys: ["shift", "click"], label: "Add a datum marker" },
       { keys: [ALT_KEY, "click"], label: "Remove the datum under the pointer" },
       { keys: ["shift", "drag"],  label: "Zoom to drawn range" },
+      { keys: ["U"],             label: "Zoom out one level (undo)" },
       { keys: ["dbl-click"],     label: "Reset zoom" },
     ],
   },

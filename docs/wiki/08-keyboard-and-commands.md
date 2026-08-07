@@ -21,7 +21,7 @@ Navigation: **↑↓** select, **Enter** run, **Esc** close. Each result row sho
 | --- | --- |
 | **Workspace** (gold) | `Switch to Overview` · `Switch to Lap Analysis` (with `⌘1`, `⌘2`, … hints) |
 | **Session** (cyan) | `Set primary: <session name>` (one entry per loaded CSV) |
-| **System** (dim) | `Open Channels` · `Open Math channels` · `Add tile…` · `Enter/Exit edit mode` (`⌘E`) · `Keyboard shortcuts` (`?`) · `Reset zoom` · `Clear datums` · `Drop datum at current cursor` · `Zoom to current lap` |
+| **System** (dim) | `Open Channels` · `Open Math channels` · `Add tile…` · `Enter/Exit edit mode` (`⌘E`) · `Keyboard shortcuts` (`?`) · `Reset zoom` · `Zoom out one level` (`U`) · `Clear datums` · `Drop datum at current cursor` · `Zoom to current lap` |
 | **Lap** (orange) | `Set best lap as Main` · `Set 2nd-best lap as Ref` · `Swap Main and Ref` · `Clear Ref lap (hide Δt)` · `Set lap 5 as Main` (one per lap, capped at 30) |
 
 The action list is rebuilt from current app state on every render, so it always reflects what's actually loaded.
@@ -46,6 +46,8 @@ All single-key bindings ignore form inputs (`INPUT`, `TEXTAREA`, `SELECT`) so ty
 | Key | Action |
 | --- | --- |
 | **Space** | Play / pause cursor animation |
+| **←** / **→** | Nudge cursor back / forward by 1/500 of the visible window. Auto-repeats, so you can hold to scrub. |
+| **Shift+←** / **Shift+→** | Same, coarse — 1/50 of the visible window |
 | **`[`** | Jump cursor to start of previous lap (primary session) |
 | **`]`** | Jump cursor to start of next lap (primary session) |
 | **M** | Set lap containing cursor as Main |
@@ -58,7 +60,8 @@ All single-key bindings ignore form inputs (`INPUT`, `TEXTAREA`, `SELECT`) so ty
 | Click | Scrub cursor to that time / point |
 | Shift+Click | Drop a datum marker |
 | Shift+Drag | Zoom to drawn range |
-| Double-click | Reset zoom |
+| Double-click | Reset zoom (jumps straight back to the full extent) |
+| **U** | Zoom out one level — steps back through zoom history one range at a time. Works from anywhere, not just over a chart. Zoom changes from any source (drag-zoom, `Zoom to current lap`, double-click reset) are all undoable this way. |
 
 ### Sessions panel — lap rows
 

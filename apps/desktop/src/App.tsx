@@ -327,7 +327,14 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
       const inField =
         tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
         target?.isContentEditable === true;
-      if (e.repeat) return;
+      // ←/→ cursor nudge is the ONE binding that wants auto-repeat: holding an
+      // arrow to scrub the cursor is the whole point (i2 muscle memory). Every
+      // other shortcut here is a single-shot toggle/jump that must not spam on
+      // key-hold, so repeats are still dropped for them. Arrow repeats fall
+      // through the branches below untouched (none of them match an arrow key)
+      // and land in the nudge branch further down.
+      const isArrowNudge = e.key === "ArrowLeft" || e.key === "ArrowRight";
+      if (e.repeat && !isArrowNudge) return;
 
       // ⌘K — toggle command palette (works from anywhere).
       if (mod && e.key.toLowerCase() === "k") {
@@ -424,6 +431,42 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         }
         return;
       }
+      // ← / → — nudge the cursor along the time axis. i2 muscle memory: arrows
+      // scrub. The step is a fraction of the VISIBLE window (the active zoom
+      // range, else the primary's full extent) rather than a fixed number of
+      // µs, so one keypress moves the same visual distance no matter how far
+      // you're zoomed in: 1/500 of the window normally, 1/50 with shift.
+      // ⌘/Ctrl is excluded — ⌘← is "start of line" text navigation on macOS
+      // and must not be hijacked.
+      if (isArrowNudge && !inField && !mod) {
+        const p = sessions?.find((s) => s.id === primaryId);
+        if (!p) return;
+        const win = viewState.get().zoomRange ?? p.store.extentUs();
+        // Round the bounds INWARD first so the rounded result below can never
+        // land outside the visible window on a fractional-µs extent.
+        const lo = Math.ceil(win.startUs);
+        const hi = Math.floor(win.endUs);
+        if (hi <= lo) return;
+        e.preventDefault();  // arrows would otherwise scroll the pane
+        const step = (win.endUs - win.startUs) / (e.shiftKey ? 50 : 500);
+        const dir = e.key === "ArrowRight" ? 1 : -1;
+        const cur = emitter.get();
+        const next = Math.max(lo, Math.min(hi, Math.round(cur + dir * step)));
+        // Skip the emit once we're pinned at an edge, so holding the key
+        // against the end of the window doesn't spam every chart subscriber.
+        if (next !== cur) emitter.emit(next);
+        return;
+      }
+      // U — zoom out one level. i2's zoom-undo convention. Every setZoom /
+      // resetZoom pushes the range it replaced onto ViewStateEmitter's stack,
+      // so this walks back through zoom history instead of the old all-or-
+      // nothing jump straight to the full extent. No-op (returns false) when
+      // there's nothing left to undo.
+      if ((e.key === "u" || e.key === "U") && !inField && !mod) {
+        e.preventDefault();
+        viewState.popZoom();
+        return;
+      }
       // [ / ] — step cursor to previous/next lap boundary on the primary.
       // The step logic (epsilon handling so it isn't sticky on a boundary,
       // clamping `[` to the session start) lives in stepToLapBoundary so it's
@@ -450,7 +493,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     // values and fail to suppress shortcuts when a modal is up.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    workspaces, sessions, primaryId, emitter,
+    workspaces, sessions, primaryId, emitter, viewState,
     paletteOpen, channelsOpen, addTileOpen, mathChannelsOpen,
     lapConfigSessionId, confirmState, shortcutsOpen, helpState.open,
   ]);
@@ -585,6 +628,15 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
       { id: "sys:help-laps",            label: "Help: Laps & analysis",    kind: "system", keywords: ["docs", "lap"],         run: () => openHelp("07-laps-and-analysis") },
       { id: "sys:help-keyboard",        label: "Help: Keyboard & commands",kind: "system", keywords: ["docs", "hotkey"],      run: () => openHelp("08-keyboard-and-commands") },
       { id: "sys:reset-zoom", label: "Reset zoom", kind: "system", run: () => viewState.resetZoom() },
+      {
+        id: "sys:zoom-out",
+        label: "Zoom out one level",
+        sublabel: "Step back through zoom history",
+        kind: "system",
+        hint: "U",
+        keywords: ["undo", "zoom", "back", "previous"],
+        run: () => viewState.popZoom(),
+      },
       { id: "sys:clear-datums", label: "Clear datums", kind: "system", run: () => viewState.clearDatums() },
       {
         id: "sys:drop-datum",
@@ -1222,30 +1274,35 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         data-tauri-drag-region
         className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs"
       >
+        {/* Primary-session label is the first thing to go when space is tight:
+            it's hidden in edit mode so the tab bar and the (wider) edit
+            toolbar both fit. The tab bar itself now stays mounted in BOTH
+            modes — hiding it meant ⌘1-9 was the only way to change workspace
+            while editing, which is exactly when you're most likely to want to
+            hop between them. It's `flex-1 min-w-0` with its own internal
+            scroller, so it absorbs all the shrink at narrow widths and the
+            fixed-width toolbar to its right never gets squeezed. */}
         {!editMode && (
           <>
             <span className="text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
             <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
-            <WorkspaceTabBar
-              workspaces={workspaces}
-              activeId={workspaceId}
-              onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
-              onCreate={handleCreateWorkspace}
-              onRename={handleRenameWorkspace}
-              onRecolor={handleRecolorWorkspace}
-              onDuplicate={handleDuplicateWorkspace}
-              onDelete={handleRequestDeleteWorkspace}
-              onReorder={handleReorderWorkspaces}
-              onExport={handleExportWorkspace}
-              onExportAll={handleExportAllWorkspaces}
-              onImport={handleImportWorkspaces}
-            />
           </>
         )}
-        <div className={
-          "flex items-center gap-2 self-stretch flex-shrink-0 " +
-          (editMode ? "mx-auto" : "ml-3 pl-3 border-l border-[#2A2C32]")
-        }>
+        <WorkspaceTabBar
+          workspaces={workspaces}
+          activeId={workspaceId}
+          onSelect={(id) => { setWorkspaceId(id); setSelectedTileId(null); }}
+          onCreate={handleCreateWorkspace}
+          onRename={handleRenameWorkspace}
+          onRecolor={handleRecolorWorkspace}
+          onDuplicate={handleDuplicateWorkspace}
+          onDelete={handleRequestDeleteWorkspace}
+          onReorder={handleReorderWorkspaces}
+          onExport={handleExportWorkspace}
+          onExportAll={handleExportAllWorkspaces}
+          onImport={handleImportWorkspaces}
+        />
+        <div className="flex items-center gap-2 self-stretch flex-shrink-0 ml-3 pl-3 border-l border-[#2A2C32]">
           <ViewStatePills viewState={viewState} />
           <button
             onClick={() => setPaletteOpen(true)}
