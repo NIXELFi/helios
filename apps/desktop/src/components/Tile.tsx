@@ -255,6 +255,7 @@ export function Tile({
           lapSelectionEmitter={lapSelectionEmitter}
           lapSelection={lapSelection}
           gpsPickerEmitter={gpsPickerEmitter}
+          availableChannels={primary.store.list()}
           // In-widget config writes (e.g. the strip chart's x-mode pill) go
           // through the SAME path as a drag/resize: onChange → App.updateTile
           // → workspace commit, so the change persists. The cast mirrors

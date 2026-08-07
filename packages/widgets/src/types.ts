@@ -64,6 +64,11 @@ export interface WidgetRenderProps<Config> {
    *  When armed (Lap Config dialog → "Pick from map"), the GPS Track widget
    *  shows a hint banner and treats the next click as a coordinate emit. */
   gpsPickerEmitter?: GpsPickerEmitter;
+  /** The PRIMARY session's channel metadata, host-supplied. Lets widgets
+   *  format values with the channel's display_name / units / decimals instead
+   *  of hardcoding. Optional so existing hosts and tests keep working —
+   *  consumers must fall back (raw id, no unit, 2 decimals) when absent. */
+  availableChannels?: ReadonlyArray<ChannelMeta>;
 }
 
 export interface WidgetConfigEditorProps<Config> {

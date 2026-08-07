@@ -4,7 +4,7 @@ import {
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
   channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
-  lapDeltaWidget, sectorTableWidget,
+  lapDeltaWidget, sectorTableWidget, valuesTableWidget,
   type Widget,
 } from "@helios/widgets";
 import type { TileSpec, WidgetType } from "../workspaces/types";
@@ -40,6 +40,7 @@ export const PALETTE: PaletteEntry[] = [
   { type: "fft",             label: "FFT / Spectrum",  description: "Frequency-domain magnitude",      defaultCells: { w: 10, h: 6 }, widget: fftWidget },
   { type: "lap_delta",       label: "Lap Δt",          description: "Main − Ref time delta by distance", defaultCells: { w: 12, h: 5 }, widget: lapDeltaWidget },
   { type: "sector_table",    label: "Sector Splits",   description: "Per-lap sector times w/ optimal",   defaultCells: { w: 10, h: 6 }, widget: sectorTableWidget },
+  { type: "values_table",    label: "Values",          description: "Live channel values at the cursor", defaultCells: { w: 7,  h: 6 }, widget: valuesTableWidget },
 ];
 
 interface Props {

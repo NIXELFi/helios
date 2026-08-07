@@ -3,7 +3,7 @@ import type {
   EngineBarConfig, GpsTrackConfig, LapPanelConfig, AlarmPanelConfig,
   TireGridConfig, HistogramConfig, XyPlotConfig, SteeringWheelConfig,
   ChannelReportConfig, TimeReportConfig, ZoneStatsConfig, FftConfig,
-  LapDeltaConfig, SectorTableConfig,
+  LapDeltaConfig, SectorTableConfig, ValuesTableConfig,
 } from "@helios/widgets";
 
 export type WidgetType =
@@ -11,7 +11,7 @@ export type WidgetType =
   | "engine_bar" | "gps_track" | "lap_panel" | "alarm_panel"
   | "tire_grid" | "histogram" | "xy_plot" | "steering_wheel"
   | "channel_report" | "time_report" | "zone_stats" | "fft"
-  | "lap_delta" | "sector_table";
+  | "lap_delta" | "sector_table" | "values_table";
 
 export interface TileSpec {
   id: string;
@@ -21,7 +21,7 @@ export interface TileSpec {
     | EngineBarConfig | GpsTrackConfig | LapPanelConfig | AlarmPanelConfig
     | TireGridConfig | HistogramConfig | XyPlotConfig | SteeringWheelConfig
     | ChannelReportConfig | TimeReportConfig | ZoneStatsConfig | FftConfig
-    | LapDeltaConfig | SectorTableConfig;
+    | LapDeltaConfig | SectorTableConfig | ValuesTableConfig;
   x: number; y: number; w: number; h: number;
 }
 
