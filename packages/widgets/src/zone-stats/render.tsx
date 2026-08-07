@@ -1,42 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
+import { aggregateZone, emptyZoneAgg } from "./compute";
 
 export interface ZoneStatsConfig {
   channelIds: string[];
-}
-
-interface ZoneAgg {
-  n: number;
-  min: number; max: number;
-  start: number; end: number;
-  sum: number; sumSq: number;
-  durationS: number;
-}
-
-function aggregateZone(
-  values: Float64Array, time: BigInt64Array,
-  startUs: number, endUs: number,
-): ZoneAgg {
-  const out: ZoneAgg = {
-    n: 0, min: Infinity, max: -Infinity, start: NaN, end: NaN,
-    sum: 0, sumSq: 0, durationS: Math.max(0, (endUs - startUs) / 1_000_000),
-  };
-  const n = Math.min(values.length, time.length);
-  for (let i = 0; i < n; i++) {
-    const t = Number(time[i]!);
-    if (t < startUs) continue;
-    if (t > endUs) break;
-    const v = values[i]!;
-    if (!Number.isFinite(v)) continue;
-    if (out.n === 0) out.start = v;
-    out.end = v;
-    if (v < out.min) out.min = v;
-    if (v > out.max) out.max = v;
-    out.sum += v;
-    out.sumSq += v * v;
-    out.n++;
-  }
-  return out;
 }
 
 function fmt(v: number, dp = 2): string {
@@ -118,8 +85,7 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
     const arr = slice.data.get(id);
     const agg = arr
       ? aggregateZone(arr, slice.time, zone.startUs, zone.endUs)
-      : { ...{ n: 0, min: NaN, max: NaN, start: NaN, end: NaN, sum: 0, sumSq: 0,
-              durationS: (zone.endUs - zone.startUs) / 1_000_000 } };
+      : emptyZoneAgg(zone.startUs, zone.endUs);
     const mean = agg.n > 0 ? agg.sum / agg.n : NaN;
     const stddev = agg.n < 2
       ? 0

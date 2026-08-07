@@ -118,6 +118,13 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(config.channelId.toUpperCase(), 6, 6);
 
+    // These label screen sides, not the channel's sign convention, so they are
+    // deliberately NOT flipped by `invert`. Everything the user sees downstream
+    // of `displayAngle` — the wheel rotation, the readout's sign, the over-limit
+    // test — is already in inverted space, which is the whole point of the
+    // option: it makes the picture match what the driver did. Screen-left stays
+    // the driver's left, so swapping these would leave "+" rotating the wheel
+    // toward a side labelled "L".
     ctx.textAlign = "center";
     ctx.fillText("L", cx - r - 18, cy + 4);
     ctx.fillText("R", cx + r + 18, cy + 4);

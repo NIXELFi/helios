@@ -65,7 +65,12 @@ function fmtSec(s: number): string {
 }
 
 function fmtDelta(ds: number): string {
-  if (!Number.isFinite(ds) || ds === 0) return "—";
+  // "—" means "no delta to show" (untrusted lap, no best/mean yet). A delta of
+  // exactly zero is real data — it's what the best lap's own Δ-best is — so it
+  // renders as a number. Folding it into "—" made the best row look like it was
+  // missing data. (-0 compares equal to 0 and takes this branch too.)
+  if (!Number.isFinite(ds)) return "—";
+  if (ds === 0) return (0).toFixed(3);
   const sign = ds > 0 ? "+" : "−";
   return `${sign}${Math.abs(ds).toFixed(3)}`;
 }
@@ -74,15 +79,30 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
   const { config, overlays } = props;
   const visible = overlays && overlays.length > 0 ? overlays : [];
 
+  // Stable key: only session ids + config drive the report content. The
+  // `visible` array identity changes every parent render, so listing it as a
+  // dep defeated the memo entirely and re-ran every summary on every render.
+  // Same trade-off channel-report accepts: a session's laps are re-derived into
+  // a new session object (hence a new id-bearing entry) when detection changes,
+  // so ids are a sufficient proxy for the lap content behind them.
+  const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
+
   const blocks = useMemo(() => {
-    const out: { session: OverlaySession; all: Lap[]; rows: Lap[]; summary: SummaryStats; rollingFullIdx: Set<number> }[] = [];
+    const out: { session: OverlaySession; rows: { lap: Lap; fullIdx: number }[];
+                 summary: SummaryStats; rollingFullIdx: Set<number> }[] = [];
     for (const session of visible) {
       if (!config.perSession && !session.isPrimary) continue;
       const all = session.laps?.laps ?? [];
-      const rows = all.filter((l) => !config.hideUntrusted || l.trusted);
-      const summary = computeSummary(all, config.rollingWindow);
+      // Carry each row's index within `all` from the one pass that already
+      // walks the array — the render used to recover it with all.indexOf(lap)
+      // per row, which is O(n²) over the lap table.
+      const rows: { lap: Lap; fullIdx: number }[] = [];
       const trustedFullIdx: number[] = [];
-      all.forEach((l, idx) => { if (l.trusted) trustedFullIdx.push(idx); });
+      all.forEach((l, idx) => {
+        if (l.trusted) trustedFullIdx.push(idx);
+        if (!config.hideUntrusted || l.trusted) rows.push({ lap: l, fullIdx: idx });
+      });
+      const summary = computeSummary(all, config.rollingWindow);
       const rollingFullIdx = new Set<number>();
       if (config.rollingWindow > 0 && summary.rollingStartIndex >= 0) {
         const start = summary.rollingStartIndex;
@@ -91,10 +111,11 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
           if (fi !== undefined) rollingFullIdx.add(fi);
         }
       }
-      out.push({ session, all, rows, summary, rollingFullIdx });
+      out.push({ session, rows, summary, rollingFullIdx });
     }
     return out;
-  }, [visible, config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIdsKey, config]);
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (
@@ -106,7 +127,7 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
 
   return (
     <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
-      {blocks.map(({ session, all, rows, summary, rollingFullIdx }) => {
+      {blocks.map(({ session, rows, summary, rollingFullIdx }) => {
         return (
           <div key={session.id} className="mb-2">
             {visible.length > 1 && (
@@ -126,9 +147,8 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((lap) => {
+                {rows.map(({ lap, fullIdx }) => {
                   const isBest = lap.trusted && Number.isFinite(summary.best) && lap.durationS === summary.best;
-                  const fullIdx = all.indexOf(lap);
                   const inRolling = rollingFullIdx.has(fullIdx);
                   const dt = Number.isFinite(summary.best) && lap.trusted ? lap.durationS - summary.best : NaN;
                   const dAvg = Number.isFinite(summary.mean) && lap.trusted ? lap.durationS - summary.mean : NaN;
