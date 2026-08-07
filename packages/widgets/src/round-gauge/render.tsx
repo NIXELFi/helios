@@ -12,6 +12,10 @@ export interface RoundGaugeConfig {
   max: number;
   warn?: number;
   alarm?: number;
+  /** Low-side bounds, for channels that alarm on the way down (oil pressure,
+   *  fuel pressure, battery voltage). Independent of the high-side pair. */
+  warnLow?: number;
+  alarmLow?: number;
   /** sweep angle in radians — default 270° */
   sweep?: number;
 }
@@ -71,6 +75,24 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
       ctx.arc(cx, cy, r, start + alarmT * sweep, end);
       ctx.stroke();
     }
+    // Low-side bands mirror the high side: each band runs from its end of the
+    // scale inward to its bound, and the alarm band is drawn last so it
+    // overdraws the warn band where they meet.
+    if (config.warnLow !== undefined) {
+      const warnLowT = (config.warnLow - config.min) / span;
+      const fromT = config.alarmLow !== undefined ? (config.alarmLow - config.min) / span : 0;
+      ctx.strokeStyle = "#FFB800";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, start + fromT * sweep, start + warnLowT * sweep);
+      ctx.stroke();
+    }
+    if (config.alarmLow !== undefined) {
+      const alarmLowT = (config.alarmLow - config.min) / span;
+      ctx.strokeStyle = "#EF5350";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, start, start + alarmLowT * sweep);
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = "#5A5F66";
     ctx.lineWidth = 1;
@@ -84,10 +106,11 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
     }
 
     const v = valueRef.current;
+    const color = thresholdColor(v, config.warn, config.alarm, config.warnLow, config.alarmLow);
     if (v !== null) {
       const t = Math.max(0, Math.min(1, (v - config.min) / span));
       const a = start + t * sweep;
-      ctx.strokeStyle = thresholdColor(v, config.warn, config.alarm);
+      ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -99,7 +122,7 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
       ctx.fill();
     }
 
-    ctx.fillStyle = thresholdColor(v, config.warn, config.alarm);
+    ctx.fillStyle = color;
     ctx.font = `${Math.max(14, r * 0.35)}px "JetBrains Mono", ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

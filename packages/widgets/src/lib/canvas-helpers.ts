@@ -45,10 +45,26 @@ export function canvasLogicalSize(canvas: HTMLCanvasElement): { w: number; h: nu
   return resolveCanvasSize(canvas);
 }
 
-/** Pick the right text color for a value given warn/alarm thresholds. */
-export function thresholdColor(v: number | null, warn?: number, alarm?: number): string {
+/** Pick the right text color for a value given warn/alarm thresholds.
+ *
+ *  Thresholds come in high and low pairs because plenty of motorsport channels
+ *  alarm on the way *down* — oil pressure, fuel pressure, battery voltage — and
+ *  some (e.g. a target-window channel) alarm on both sides at once. The two
+ *  sides are independent tests; severity, not side, decides the color, so any
+ *  alarm outranks any warn. All four bounds are optional: pass only the sides
+ *  that apply. Comparisons are inclusive, so a value sitting exactly on a
+ *  threshold is already in that band. */
+export function thresholdColor(
+  v: number | null,
+  warn?: number,
+  alarm?: number,
+  warnLow?: number,
+  alarmLow?: number,
+): string {
   if (v === null) return "#7B8088";
   if (alarm !== undefined && v >= alarm) return "#EF5350";
+  if (alarmLow !== undefined && v <= alarmLow) return "#EF5350";
   if (warn !== undefined && v >= warn) return "#FFB800";
+  if (warnLow !== undefined && v <= warnLow) return "#FFB800";
   return "#D8DCE2";
 }
