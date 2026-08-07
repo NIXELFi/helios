@@ -27,7 +27,26 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
-## [5.3.2] - 2026-08-04
+### Added
+- **A Values panel — the readout table i2 users live in.** New "Values" widget: pick your channels and see each one's value under the cursor for every visible session, side by side, with a Δ-vs-primary column when you're overlaying runs and min/max/avg over whatever you've zoomed to. Channel names, units, and decimal places come from the channel registry, so `engine.rpm` reads "RPM" with no decimals instead of "10234.00".
+- **Arrow keys scrub the cursor.** ←/→ nudge the cursor by a fraction of what's on screen (hold Shift for coarse steps, hold the key to keep scrubbing) — the further you zoom in, the finer the step. ⌘/Ctrl+arrows still do text navigation.
+- **`U` zooms back out one level.** Every zoom you make is remembered (up to 32 deep), so drilling into a corner and pressing `U` walks you back the way you came instead of dumping you at the full session. Also in the command palette as "Zoom out one level".
+- **Datum markers can finally be removed one at a time.** Alt-click (Option-click on Mac) near a datum line deletes just that marker; "Clear datums" still clears them all. The shortcuts overlay documents both.
+- **Gauges can now alarm low.** Bar gauge, round gauge, and numeric readout accept "warn below" / "alarm below" thresholds alongside the existing high-side pair — so oil pressure, fuel pressure, and battery voltage can go amber and red on the way down, with matching low-side tick marks and arc bands. The numeric readout's thresholds are also editable from the config panel for the first time.
+- **The strip chart's "x = time" pill is now a real button.** Click it to flip between time and distance axes without opening the config panel — the toggle the pill's tooltip always promised.
+
+### Changed
+- **The workspace tab bar stays visible while editing.** Entering edit mode used to hide the tabs entirely, leaving ⌘1-9 as the only way to switch workspaces mid-edit.
+
+### Fixed
+- **Lap Δt and Sector Splits actually work now.** Both widgets need a speed channel to build their distance axis, but the app never included one in the data it handed them — so they permanently showed "sessions need a speed channel" no matter what you loaded. They were also missing from the Add Tile menu. Both are fixed; the speed channel your Lap Config picks now takes priority over the built-in guesses, for the distance-mode strip chart too.
+- **The FFT and XY plot honor the zoom window again.** Both advertise "analyze the zoomed range", and both silently kept showing the range from when the tile first drew. Drag-zooming a strip chart now genuinely recomputes the spectrum and refilters the scatter.
+- **Overlaid sessions draw as continuous lines.** Two runs whose sample clocks didn't line up exactly rendered as fields of disconnected fragments in time mode — the core comparison workflow looked broken. (Trade-off worth knowing: a genuine logger dropout is now bridged by a straight line rather than a gap.)
+- **Peak-hold markers stop resetting themselves.** The peak tick on the bar gauge and engine bar was wiped by any unrelated click in the app (selecting a lap, toggling a panel). It now resets only when you switch session, channel, or data range — which is what "peak hold" was supposed to mean.
+- **A stalled engine reads "0", not "—".** The engine bar treated zero rpm as missing data; zero is real data. Genuinely missing samples still show the dash (and no longer render as the literal text "NaN" before the first sample arrives).
+- **`highpass()` math no longer jolts after a data gap.** A single NaN sample reset the filter's internal state to zero, injecting a full-amplitude step into the output at every dropout. The filter now holds its state across gaps and resumes cleanly — damper-velocity math built on `highpass()` is trustworthy around dropouts again.
+- **Time Report: the best lap's "Δ best" column shows 0.000 instead of a dash**, and the report no longer recomputes itself on every unrelated UI update.
+- **Zone Stats no longer rescans the whole session on every cursor tick** in live datum→cursor mode — the window is found by binary search now, so long sessions stay smooth while scrubbing.
 
 ### Fixed
 - **The Vault stops re-downloading the entire file list every 15 seconds.** Helios keeps an eye on your vault with a cheap "has anything changed?" check, and only reloads the full catalog when the answer is yes. One part of that check was asking the server a question it couldn't answer, so it failed every single time — and a failed check is treated as "something changed", which meant every open Vault window quietly re-pulled the whole catalog (thousands of files) four times a minute, forever. The check now works, so an idle vault costs almost nothing. Expect the Vault to feel faster and your network usage to drop sharply.
