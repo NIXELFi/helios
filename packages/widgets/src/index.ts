@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./registry";
 export { ChannelPicker } from "./lib/channel-picker";
+export { SPEED_CHANNEL_CANDIDATES, findSpeed } from "./lib/speed";
 export * from "./numeric-readout";
 export * from "./strip-chart";
 export * from "./round-gauge";

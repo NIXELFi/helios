@@ -8,6 +8,10 @@ export const stripChartWidget: Widget<StripChartConfig> = {
   ConfigEditor: StripChartConfigEditor,
   Render: StripChartRender,
   requiredChannels: (c) => c.channels.map((x) => x.id).filter(Boolean),
+  // Distance mode integrates speed into per-lap distance. That speed trace
+  // is a session-level dependency, not a plotted channel, so the host must
+  // include it in each slice even when the user didn't plot it.
+  requiresSpeed: (c) => c.xMode === "distance",
 };
 
 export type { StripChartConfig, StripChartChannel } from "./render";

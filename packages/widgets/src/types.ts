@@ -13,6 +13,13 @@ export interface OverlaySession {
    *  partition data per-lap (channel report, time report, distance-axis
    *  strip chart, FFT-by-lap) read from here. */
   laps?: LapSet | null;
+  /** The session's lap-config speed channel, supplied by the host when it
+   *  resolved one (the user's Lap Config pick, or the first well-known
+   *  candidate the session carries). Distance-integrating widgets prefer
+   *  this over the built-in candidate order — see findSpeed. */
+  speedChannelId?: string;
+  /** Units of `speedChannelId` as reported by the host's channel store. */
+  speedChannelUnit?: string;
 }
 
 export interface WidgetRenderProps<Config> {
@@ -64,4 +71,10 @@ export interface Widget<Config> {
   ConfigEditor: FC<WidgetConfigEditorProps<Config>>;
   Render: FC<WidgetRenderProps<Config>>;
   requiredChannels: (config: Config) => string[];
+  /** When true (for the given config), the host must include each session's
+   *  speed channel(s) in the slices it builds. Speed here is a session-level
+   *  dependency — used for distance integration, not plotted — so it can't
+   *  be expressed through requiredChannels, which lists the channels the
+   *  user picked in the widget config. */
+  requiresSpeed?: (config: Config) => boolean;
 }

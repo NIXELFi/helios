@@ -4,6 +4,7 @@ import {
   engineBarWidget, gpsTrackWidget, lapPanelWidget, alarmPanelWidget,
   tireGridWidget, histogramWidget, xyPlotWidget, steeringWheelWidget,
   channelReportWidget, timeReportWidget, zoneStatsWidget, fftWidget,
+  lapDeltaWidget, sectorTableWidget,
   type Widget,
 } from "@helios/widgets";
 import type { TileSpec, WidgetType } from "../workspaces/types";
@@ -17,7 +18,10 @@ interface PaletteEntry {
   widget: Widget<any>;
 }
 
-const PALETTE: PaletteEntry[] = [
+// Exported so tests can assert the palette covers every registered widget
+// type — lap_delta and sector_table once shipped registered-but-unaddable
+// because this list drifted from the registry.
+export const PALETTE: PaletteEntry[] = [
   { type: "strip_chart",     label: "Strip Chart",     description: "Time-series line chart",         defaultCells: { w: 12, h: 5 }, widget: stripChartWidget },
   { type: "round_gauge",     label: "Round Gauge",     description: "Arc-style needle gauge",         defaultCells: { w: 4,  h: 5 }, widget: roundGaugeWidget },
   { type: "bar_gauge",       label: "Bar Gauge",       description: "Vertical or horizontal bar",     defaultCells: { w: 3,  h: 5 }, widget: barGaugeWidget },
@@ -34,6 +38,8 @@ const PALETTE: PaletteEntry[] = [
   { type: "time_report",     label: "Time Report",     description: "Lap times w/ rolling minimum",    defaultCells: { w: 8,  h: 6 }, widget: timeReportWidget },
   { type: "zone_stats",      label: "Zone Stats",      description: "Stats between two datums",        defaultCells: { w: 10, h: 5 }, widget: zoneStatsWidget },
   { type: "fft",             label: "FFT / Spectrum",  description: "Frequency-domain magnitude",      defaultCells: { w: 10, h: 6 }, widget: fftWidget },
+  { type: "lap_delta",       label: "Lap Δt",          description: "Main − Ref time delta by distance", defaultCells: { w: 12, h: 5 }, widget: lapDeltaWidget },
+  { type: "sector_table",    label: "Sector Splits",   description: "Per-lap sector times w/ optimal",   defaultCells: { w: 10, h: 6 }, widget: sectorTableWidget },
 ];
 
 interface Props {

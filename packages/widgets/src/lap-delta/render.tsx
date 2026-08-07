@@ -4,6 +4,7 @@ import "uplot/dist/uPlot.min.css";
 import type { LapSelection } from "@helios/lib";
 import { perSampleLapDistance } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { findSpeed } from "../lib/speed";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { computeLapDelta, formatDelta, type DeltaResult } from "./compute";
 
@@ -16,20 +17,6 @@ export interface LapDeltaConfig {
 const POSITIVE_COLOR = "#EF5350"; // Main slower → red
 const NEGATIVE_COLOR = "#66BB6A"; // Main faster → green
 const ZERO_COLOR = "#5A5F66";
-
-function findSpeed(session: OverlaySession): { values: Float64Array; unit: string } | null {
-  const candidates: Array<[string, string]> = [
-    ["gps.speed", "m/s"],
-    ["vehicle.speed", "km/h"],
-    ["wheel.speed_avg", "km/h"],
-    ["engine.wheel_speed_avg", "km/h"],
-  ];
-  for (const [id, unit] of candidates) {
-    const v = session.slice.data.get(id);
-    if (v) return { values: v, unit };
-  }
-  return null;
-}
 
 function formatDistance(v: number): string {
   if (!Number.isFinite(v)) return "";

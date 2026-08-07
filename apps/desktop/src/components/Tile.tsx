@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { widgetRegistry, type OverlaySession } from "@helios/widgets";
+import { widgetRegistry, SPEED_CHANNEL_CANDIDATES, type OverlaySession } from "@helios/widgets";
 import type { CursorEmitter, ViewStateEmitter, LapSelectionEmitter, LapSelection, GpsPickerEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
 import type { LoadedSession } from "../lib/session";
@@ -43,12 +43,37 @@ export function Tile({
 }: Props) {
   const widget = widgetRegistry.get(spec.widgetType);
   const channels = widget.requiredChannels(spec.config);
+  const needsSpeed = widget.requiresSpeed?.(spec.config) ?? false;
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState>({ kind: "none" });
+
+  // The session's lap-config speed channel when the store carries it, else
+  // the first well-known candidate present. Exposed on OverlaySession so
+  // distance-integrating widgets honor the user's explicit Lap Config pick.
+  function speedChannelFor(session: LoadedSession): string | undefined {
+    const configured = session.lapConfig.speedChannelId;
+    if (configured !== undefined && session.store.get(configured) !== undefined) return configured;
+    return SPEED_CHANNEL_CANDIDATES.find((c) => session.store.get(c.id) !== undefined)?.id;
+  }
 
   function sliceFor(session: LoadedSession) {
     const range = session.store.extentUs();
     const known = channels.filter((id) => session.store.get(id) !== undefined);
+    if (needsSpeed) {
+      // Session-level speed dependency: widgets that integrate distance
+      // (lap delta, sector table, distance-mode strip chart) need a speed
+      // trace in every slice even though it's not a plotted channel — a
+      // slice built from requiredChannels alone can never satisfy their
+      // findSpeed probe.
+      const configured = session.lapConfig.speedChannelId;
+      const speedIds = [
+        ...(configured !== undefined && session.store.get(configured) !== undefined ? [configured] : []),
+        ...SPEED_CHANNEL_CANDIDATES.map((c) => c.id).filter((id) => session.store.get(id) !== undefined),
+      ];
+      for (const id of speedIds) {
+        if (!known.includes(id)) known.push(id);
+      }
+    }
     return {
       slice: session.store.slice(known, { startUs: range.startUs, endUs: range.endUs }),
       range,
@@ -57,25 +82,32 @@ export function Tile({
 
   const primarySlice = sliceFor(primary);
 
-  // Only filter out sessions whose slice came up empty when the widget
-  // ASKED FOR channels — lap-aware widgets (lap_panel, time_report) declare
-  // requiredChannels(): [] because they read laps from session metadata, and
-  // we shouldn't drop sessions with valid laps just because we requested no
-  // columns. Without this guard those widgets render "no laps detected" even
-  // when channel_report (same data, different requiredChannels) shows laps.
+  // Only filter out sessions that carry NONE of the channels the widget
+  // ASKED FOR. Two subtleties: lap-aware widgets (lap_panel, time_report,
+  // lap_delta, sector_table) declare requiredChannels(): [] because they
+  // read laps from session metadata, and we shouldn't drop sessions with
+  // valid laps just because we requested no columns. And the guard must key
+  // on the widget's DECLARED channels, not the slice contents — sliceFor may
+  // augment the slice with session-level speed channels, which shouldn't
+  // keep a session alive when every plotted channel is missing.
   const overlays: OverlaySession[] = visibleSessions
     .map((s) => ({ session: s, ...sliceFor(s) }))
-    .filter((entry) => channels.length === 0 || entry.slice.data.size > 0)
+    .filter((entry) => channels.length === 0 || channels.some((id) => entry.slice.data.has(id)))
     .sort((a, b) => (a.session.id === primary.id ? -1 : b.session.id === primary.id ? 1 : 0))
-    .map((entry) => ({
-      id: entry.session.id,
-      label: entry.session.label,
-      color: entry.session.color,
-      slice: entry.slice,
-      range: entry.range,
-      isPrimary: entry.session.id === primary.id,
-      laps: entry.session.laps,
-    }));
+    .map((entry) => {
+      const speedChannelId = speedChannelFor(entry.session);
+      return {
+        id: entry.session.id,
+        label: entry.session.label,
+        color: entry.session.color,
+        slice: entry.slice,
+        range: entry.range,
+        isPrimary: entry.session.id === primary.id,
+        laps: entry.session.laps,
+        speedChannelId,
+        speedChannelUnit: speedChannelId !== undefined ? entry.session.store.get(speedChannelId)?.units : undefined,
+      };
+    });
 
   const RenderC = widget.Render;
 

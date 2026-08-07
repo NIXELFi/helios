@@ -8,9 +8,11 @@ export const lapDeltaWidget: Widget<LapDeltaConfig> = {
   ConfigEditor: LapDeltaConfigEditor,
   Render: LapDeltaRender,
   // Channel requirements are session-level (a speed channel for distance
-  // integration), not widget-level — the widget validates and reports
-  // missing-data at render time rather than via the required-channels gate.
+  // integration), not widget-level — requiresSpeed tells the host to include
+  // each session's speed channel(s) in the slice; the widget still validates
+  // and reports missing-data at render time.
   requiredChannels: () => [],
+  requiresSpeed: () => true,
 };
 
 export type { LapDeltaConfig } from "./render";

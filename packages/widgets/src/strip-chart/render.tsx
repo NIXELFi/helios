@@ -4,6 +4,7 @@ import "uplot/dist/uPlot.min.css";
 import type { LapRef, LapSelection } from "@helios/lib";
 import { perSampleLapDistance, speedToMs } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { findSpeed } from "../lib/speed";
 import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -278,22 +279,12 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
 
   // For distance mode, look up speed channels per session via lap config or
-  // gps.speed fallback. Captured here so buildDistanceData stays pure.
+  // well-known fallbacks. Captured here so buildDistanceData stays pure.
   const speedByOverlay = useMemo(() => {
     const m = new Map<string, { values: Float64Array; unit: string } | null>();
     if (xMode !== "distance") return m;
     for (const o of visible) {
-      const candidates = ["gps.speed", "vehicle.speed"];
-      let resolved: { values: Float64Array; unit: string } | null = null;
-      for (const id of candidates) {
-        const v = o.slice.data.get(id);
-        if (!v) continue;
-        // Take the unit hint from "the system" — gps.speed is m/s in MoTeC and
-        // most ECU exports. speedToMs is tolerant of unknown units.
-        resolved = { values: v, unit: id === "gps.speed" ? "m/s" : "km/h" };
-        break;
-      }
-      m.set(o.id, resolved);
+      m.set(o.id, findSpeed(o));
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
