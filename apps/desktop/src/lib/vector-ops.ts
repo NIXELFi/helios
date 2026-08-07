@@ -158,7 +158,13 @@ export function lowpass(values: Float64Array, fcHz: number, sampleRateHz: number
 
 /** First-order high-pass IIR. Removes drift below `fcHz` (e.g. damper-velocity
  *  baseline). `y[n] = α (y[n-1] + x[n] - x[n-1])` where `α = exp(-2π fc/fs)`.
- *  Output[0] = 0 by convention. */
+ *  The first finite sample outputs 0 by convention.
+ *
+ *  NaN runs emit NaN (so widgets render the gap) but do NOT disturb the filter:
+ *  the state pair (y[n-1], x[n-1]) is held across the gap and the next finite
+ *  sample resumes from it. Same spirit as lowpass holding its running value and
+ *  integral holding its accumulator — resetting the state to 0 across a gap
+ *  would inject a full-amplitude step into the output at every dropout. */
 export function highpass(values: Float64Array, fcHz: number, sampleRateHz: number): Float64Array {
   const n = values.length;
   const out = new Float64Array(n);
@@ -166,16 +172,22 @@ export function highpass(values: Float64Array, fcHz: number, sampleRateHz: numbe
   if (!Number.isFinite(fcHz) || fcHz <= 0) { out.set(values); return out; }
   if (!Number.isFinite(sampleRateHz) || sampleRateHz <= 0) { out.set(values); return out; }
   const alpha = Math.exp(-2 * Math.PI * fcHz / sampleRateHz);
-  out[0] = 0;
-  for (let i = 1; i < n; i++) {
-    const prevX = values[i - 1]!;
+  // Filter state is tracked separately from `out` precisely so a NaN sample can
+  // be written to `out` without also becoming the state the next sample reads.
+  // NaN state = "not started yet" (nothing finite seen so far).
+  let prevY = NaN;
+  let prevX = NaN;
+  for (let i = 0; i < n; i++) {
     const x = values[i]!;
-    const prevY = out[i - 1]!;
-    if (!Number.isFinite(x) || !Number.isFinite(prevX) || !Number.isFinite(prevY)) {
-      out[i] = 0;
-      continue;
-    }
-    out[i] = alpha * (prevY + x - prevX);
+    if (!Number.isFinite(x)) { out[i] = NaN; continue; }
+    // First finite sample of the series seeds the filter at 0. Note this is
+    // only reachable before any finite input — after a NaN run the held state
+    // is still finite, so filtering continues instead of restarting.
+    out[i] = Number.isFinite(prevY) && Number.isFinite(prevX)
+      ? alpha * (prevY + x - prevX)
+      : 0;
+    prevY = out[i]!;
+    prevX = x;
   }
   return out;
 }

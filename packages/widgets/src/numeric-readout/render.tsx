@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { thresholdColor } from "../lib/canvas-helpers";
 
 export interface NumericReadoutConfig {
   channelId: string;
@@ -8,6 +9,10 @@ export interface NumericReadoutConfig {
   decimals: number;
   warn?: number;
   alarm?: number;
+  /** Low-side bounds, for channels that alarm on the way down (oil pressure,
+   *  fuel pressure, battery voltage). Independent of the high-side pair. */
+  warnLow?: number;
+  alarmLow?: number;
 }
 
 export function NumericReadoutRender(props: WidgetRenderProps<NumericReadoutConfig>) {
@@ -25,10 +30,9 @@ export function NumericReadoutRender(props: WidgetRenderProps<NumericReadoutConf
   }, [slice, config.channelId, cursorEmitter]);
 
   const display = value === null ? "—" : value.toFixed(config.decimals);
-  const color =
-    value !== null && config.alarm !== undefined && value >= config.alarm ? "#EF5350" :
-    value !== null && config.warn  !== undefined && value >= config.warn  ? "#FFB800" :
-    "#D8DCE2";
+  // Shared with the canvas gauges so every readout in a workspace agrees on
+  // what amber and red mean — and so low-side bounds work here too.
+  const color = thresholdColor(value, config.warn, config.alarm, config.warnLow, config.alarmLow);
 
   return (
     <div className="flex flex-col items-center justify-center h-full bg-[#16171B] p-4">

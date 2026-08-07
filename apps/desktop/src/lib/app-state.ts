@@ -11,12 +11,11 @@
 
 const STORAGE_KEY = "helios.app-state.v1";
 
-/** Per-session view-state snapshot — cursor position and zoom range. Saved
- *  when the user is the primary session is `sessionId`; restored when that
- *  session is promoted back to primary on a later session. Datums are
- *  intentionally not persisted yet (they're unlabeled vertical lines today
- *  — reviving them across restarts would be more confusing than helpful
- *  without the planned label/author metadata). */
+/** Per-session view-state snapshot — cursor position, zoom range and datums.
+ *  Saved while the session is primary; restored when that session is promoted
+ *  back to primary later. Datums round-trip too: App.tsx writes them on the
+ *  debounced save and re-adds them on restore, dropping any that fall outside
+ *  the session's extent. */
 export interface ViewStateSnapshot {
   zoomRange: { startUs: number; endUs: number } | null;
   cursorUs: number;

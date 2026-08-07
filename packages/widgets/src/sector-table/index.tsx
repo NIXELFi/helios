@@ -8,9 +8,11 @@ export const sectorTableWidget: Widget<SectorTableConfig> = {
   ConfigEditor: SectorTableConfigEditor,
   Render: SectorTableRender,
   // Channel requirements are session-level (speed for distance integration),
-  // not widget-level — the renderer validates and reports missing-data at
-  // render time rather than gating via the required-channels list.
+  // not widget-level — requiresSpeed tells the host to include each session's
+  // speed channel(s) in the slice; the renderer still validates and reports
+  // missing-data at render time.
   requiredChannels: () => [],
+  requiresSpeed: () => true,
 };
 
 export type { SectorTableConfig } from "./render";

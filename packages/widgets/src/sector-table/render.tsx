@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { perSampleLapDistance } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { findSpeed } from "../lib/speed";
 import { buildSectorTable, formatLapTime, type LapInput } from "./compute";
 
 export interface SectorTableConfig {
@@ -16,20 +17,6 @@ export interface SectorTableConfig {
 
 const PURPLE = "#BA68C8";
 const BEST_LAP = "#FFC627";
-
-function findSpeed(session: OverlaySession): { values: Float64Array; unit: string } | null {
-  const candidates: Array<[string, string]> = [
-    ["gps.speed", "m/s"],
-    ["vehicle.speed", "km/h"],
-    ["wheel.speed_avg", "km/h"],
-    ["engine.wheel_speed_avg", "km/h"],
-  ];
-  for (const [id, unit] of candidates) {
-    const v = session.slice.data.get(id);
-    if (v) return { values: v, unit };
-  }
-  return null;
-}
 
 export function SectorTableRender(props: WidgetRenderProps<SectorTableConfig>) {
   const { config, slice, timeRange, overlays } = props;

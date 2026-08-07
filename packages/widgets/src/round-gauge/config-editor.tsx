@@ -2,9 +2,12 @@ import type { WidgetConfigEditorProps } from "../types";
 import type { RoundGaugeConfig } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
 
+// Labels are spelled out for the low-side bounds because "Warn low" alone
+// reads as "a low warning" rather than "warn when the value drops below this".
 const numericFields: Array<[keyof RoundGaugeConfig, string]> = [
   ["min", "Min"], ["max", "Max"],
-  ["warn", "Warn"], ["alarm", "Alarm"],
+  ["warn", "Warn above"], ["alarm", "Alarm above"],
+  ["warnLow", "Warn below"], ["alarmLow", "Alarm below"],
   ["decimals", "Decimals"],
 ];
 

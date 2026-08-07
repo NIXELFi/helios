@@ -86,3 +86,101 @@ describe("ViewStateEmitter", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 });
+
+describe("ViewStateEmitter zoom stack", () => {
+  it("setZoom pushes the previous range onto the stack", () => {
+    const e = new ViewStateEmitter();
+    expect(e.zoomStackDepth()).toBe(0);
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    expect(e.zoomStackDepth()).toBe(1);   // pushed the initial null
+    e.setZoom({ startUs: 100, endUs: 500 });
+    expect(e.zoomStackDepth()).toBe(2);
+  });
+
+  it("popZoom restores the previous range and reports success", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    e.setZoom({ startUs: 100, endUs: 500 });
+    expect(e.popZoom()).toBe(true);
+    expect(e.get().zoomRange).toEqual({ startUs: 0, endUs: 1000 });
+    expect(e.popZoom()).toBe(true);
+    expect(e.get().zoomRange).toBeNull();  // back to the full view
+  });
+
+  it("popZoom on an empty stack returns false and changes nothing", () => {
+    const e = new ViewStateEmitter();
+    const cb = vi.fn();
+    e.subscribe(cb);
+    expect(e.popZoom()).toBe(false);
+    expect(e.get().zoomRange).toBeNull();
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("popZoom does not itself push, so undo walks back instead of ping-ponging", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    e.setZoom({ startUs: 100, endUs: 500 });
+    e.popZoom();
+    expect(e.zoomStackDepth()).toBe(1);
+    e.popZoom();
+    expect(e.zoomStackDepth()).toBe(0);
+    expect(e.popZoom()).toBe(false);
+  });
+
+  it("resetZoom is undoable — popZoom restores the range it cleared", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 200, endUs: 800 });
+    e.resetZoom();
+    expect(e.get().zoomRange).toBeNull();
+    expect(e.popZoom()).toBe(true);
+    expect(e.get().zoomRange).toEqual({ startUs: 200, endUs: 800 });
+  });
+
+  it("redundant setZoom (same value, different object) does not grow the stack", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    expect(e.zoomStackDepth()).toBe(1);
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    expect(e.zoomStackDepth()).toBe(1);
+    expect(e.get().zoomRange).toEqual({ startUs: 0, endUs: 1000 });
+  });
+
+  it("redundant setZoom does not notify subscribers", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    const cb = vi.fn();
+    e.subscribe(cb);
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("degenerate ranges collapse to null and don't stack up when already null", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 200, endUs: 200 });   // zero width -> null == current
+    e.setZoom({ startUs: 500, endUs: 100 });   // negative width -> null
+    expect(e.zoomStackDepth()).toBe(0);
+    expect(e.get().zoomRange).toBeNull();
+  });
+
+  it("stack is capped, evicting the oldest entry", () => {
+    const e = new ViewStateEmitter();
+    for (let i = 1; i <= 100; i++) e.setZoom({ startUs: 0, endUs: i });
+    expect(e.zoomStackDepth()).toBe(32);
+    // Walk the whole history back; the oldest entries (incl. the initial null)
+    // were evicted, so we bottom out on a real range, not the full view.
+    let popped = 0;
+    while (e.popZoom()) popped++;
+    expect(popped).toBe(32);
+    expect(e.get().zoomRange).toEqual({ startUs: 0, endUs: 68 });
+  });
+
+  it("zoom history survives datum mutations", () => {
+    const e = new ViewStateEmitter();
+    e.setZoom({ startUs: 0, endUs: 1000 });
+    e.addDatum(42);
+    e.setZoom({ startUs: 10, endUs: 20 });
+    e.popZoom();
+    expect(e.get()).toEqual({ datums: [42], zoomRange: { startUs: 0, endUs: 1000 } });
+  });
+});

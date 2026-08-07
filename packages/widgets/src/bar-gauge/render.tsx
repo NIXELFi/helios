@@ -12,11 +12,15 @@ export interface BarGaugeConfig {
   max: number;
   warn?: number;
   alarm?: number;
+  /** Low-side bounds, for channels that alarm on the way down (oil pressure,
+   *  fuel pressure, battery voltage). Independent of the high-side pair. */
+  warnLow?: number;
+  alarmLow?: number;
   orientation: "vertical" | "horizontal";
 }
 
 export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
-  const { config, slice, cursorEmitter } = props;
+  const { config, slice, cursorEmitter, overlays } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const valueRef = useRef<number | null>(sampleAt(slice, config.channelId, cursorEmitter.get()));
   const peakRef = useRef<number | null>(valueRef.current);
@@ -27,23 +31,47 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     const off = cursorEmitter.subscribe((t) => {
       const v = sampleAt(slice, config.channelId, t);
       valueRef.current = v;
-      if (v !== null && (peakRef.current === null || v > peakRef.current)) peakRef.current = v;
+      if (v !== null && Number.isFinite(v) && (peakRef.current === null || v > peakRef.current)) peakRef.current = v;
       drawRef.current();
     });
     return off;
   }, [slice, config, cursorEmitter]);
 
-  // Reset peak-hold whenever the viewing window or channel changes — that's
-  // the natural "different context, start a new peak" signal. Without this,
-  // peak only ever moves up across the entire app lifetime: scrubbing back
-  // to a slower section, switching primary session, or applying a zoom all
-  // leave the peak marker stuck at a value the user can't currently see.
+  // Reset peak-hold whenever the viewing window, channel, or primary session
+  // changes — that's the natural "different context, start a new peak"
+  // signal. Without this, peak only ever moves up across the entire app
+  // lifetime: scrubbing back to a slower section, switching primary session,
+  // or applying a zoom all leave the peak marker stuck at a value the user
+  // can't currently see.
+  //
+  // The key is built from values only. `slice` and `config` are rebuilt by
+  // the Tile host on every React render, so their object identity churns
+  // constantly and must never be a reset trigger: keying on it wiped the peak
+  // on any unrelated UI churn (a lap click, a panel toggle), which defeated
+  // peak-hold entirely. The scale (min/max) is deliberately absent — it moves
+  // where the marker is drawn, not whether the observed peak is still true.
+  const peakKey = [
+    overlays?.[0]?.id ?? "",  // overlays[0] is the primary session (see types.ts)
+    config.channelId,
+    slice.range.startUs,
+    slice.range.endUs,
+  ].join("\u0000");
+  const peakKeyRef = useRef<string | null>(null);
+
+  // No dep array: the redraw must still happen on every render (config edits
+  // change the scale, units and decimals), but the peak reset is gated behind
+  // the key comparison above.
   useEffect(() => {
     const v = sampleAt(slice, config.channelId, cursorEmitter.get());
     valueRef.current = v;
-    peakRef.current = v;
+    if (peakKeyRef.current !== peakKey) {
+      peakKeyRef.current = peakKey;
+      // NaN would stick permanently: it never compares greater than itself, so
+      // a NaN seed can never be replaced by a later real sample.
+      peakRef.current = v !== null && Number.isFinite(v) ? v : null;
+    }
     drawRef.current();
-  }, [slice.range.startUs, slice.range.endUs, config.channelId, cursorEmitter, slice, config]);
+  });
 
   const onResize = useCallback(() => { drawRef.current(); }, []);
   useResizeObserver(canvasRef, onResize);
@@ -61,25 +89,30 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     const v = valueRef.current;
     const span = config.max - config.min;
     const t = v === null ? 0 : Math.max(0, Math.min(1, (v - config.min) / span));
+    const color = thresholdColor(v, config.warn, config.alarm, config.warnLow, config.alarmLow);
 
     ctx.fillStyle = "#0E0E10";
     ctx.fillRect(trackX, trackY, trackW, trackH);
     ctx.strokeStyle = "#2A2C32";
     ctx.strokeRect(trackX, trackY, trackW, trackH);
 
-    ctx.fillStyle = thresholdColor(v, config.warn, config.alarm);
+    ctx.fillStyle = color;
     if (horiz) ctx.fillRect(trackX, trackY, trackW * t, trackH);
     else       ctx.fillRect(trackX, trackY + trackH * (1 - t), trackW, trackH * t);
 
-    ctx.strokeStyle = "#FFB800";
-    if (config.warn !== undefined) {
-      const wt = (config.warn - config.min) / span;
-      drawTick(ctx, horiz, trackX, trackY, trackW, trackH, wt);
-    }
-    ctx.strokeStyle = "#EF5350";
-    if (config.alarm !== undefined) {
-      const at = (config.alarm - config.min) / span;
-      drawTick(ctx, horiz, trackX, trackY, trackW, trackH, at);
+    // Threshold ticks. Both sides of the scale use the same visual language —
+    // amber for warn, red for alarm — so a low-side bound reads identically to
+    // a high-side one. Alarms are drawn last so they win where the two
+    // coincide.
+    for (const [bound, tickColor] of [
+      [config.warn, "#FFB800"],
+      [config.warnLow, "#FFB800"],
+      [config.alarm, "#EF5350"],
+      [config.alarmLow, "#EF5350"],
+    ] as const) {
+      if (bound === undefined) continue;
+      ctx.strokeStyle = tickColor;
+      drawTick(ctx, horiz, trackX, trackY, trackW, trackH, (bound - config.min) / span);
     }
 
     if (peakRef.current !== null) {
@@ -96,7 +129,7 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     ctx.textAlign = "right";
     ctx.fillText(config.units, w - 4, 4);
 
-    ctx.fillStyle = thresholdColor(v, config.warn, config.alarm);
+    ctx.fillStyle = color;
     ctx.font = '14px "JetBrains Mono", ui-monospace, monospace';
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";

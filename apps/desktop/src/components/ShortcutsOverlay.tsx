@@ -1,5 +1,9 @@
 import { useEffect, useRef } from "react";
-import { MOD_KEY, shortcut } from "../lib/platform";
+import { IS_MAC, MOD_KEY, shortcut } from "../lib/platform";
+
+/** Label for the alt/option modifier. Display-only — the chart handler reads
+ *  `e.altKey`, which is what Option sets on macOS. */
+const ALT_KEY = IS_MAC ? "option" : "alt";
 
 interface Shortcut {
   keys: string[];
@@ -27,6 +31,8 @@ const GROUPS: Group[] = [
     title: "Cursor & laps",
     items: [
       { keys: ["Space"], label: "Play / pause cursor" },
+      { keys: ["←", "→"], label: "Nudge cursor (hold to scrub)" },
+      { keys: ["shift", "←", "→"], label: "Nudge cursor — coarse step" },
       { keys: ["["],     label: "Previous lap boundary (primary)" },
       { keys: ["]"],     label: "Next lap boundary (primary)" },
       { keys: ["M"],     label: "Make lap at cursor the Main lap" },
@@ -37,8 +43,10 @@ const GROUPS: Group[] = [
     title: "Strip chart",
     items: [
       { keys: ["click"],         label: "Scrub cursor (time or distance mode)" },
-      { keys: ["shift", "click"], label: "Drop a datum marker" },
+      { keys: ["shift", "click"], label: "Add a datum marker" },
+      { keys: [ALT_KEY, "click"], label: "Remove the datum under the pointer" },
       { keys: ["shift", "drag"],  label: "Zoom to drawn range" },
+      { keys: ["U"],             label: "Zoom out one level (undo)" },
       { keys: ["dbl-click"],     label: "Reset zoom" },
     ],
   },

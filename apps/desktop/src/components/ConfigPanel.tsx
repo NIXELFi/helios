@@ -23,6 +23,7 @@ const WIDGET_LABELS: Record<WidgetType, string> = {
   fft:             "FFT / Spectrum",
   lap_delta:       "Lap Δt",
   sector_table:    "Sector Splits",
+  values_table:    "Values",
 };
 
 const WIDGET_TYPES = BUILTIN_WIDGET_TYPES as readonly WidgetType[];

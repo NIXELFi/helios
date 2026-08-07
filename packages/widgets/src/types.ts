@@ -13,6 +13,13 @@ export interface OverlaySession {
    *  partition data per-lap (channel report, time report, distance-axis
    *  strip chart, FFT-by-lap) read from here. */
   laps?: LapSet | null;
+  /** The session's lap-config speed channel, supplied by the host when it
+   *  resolved one (the user's Lap Config pick, or the first well-known
+   *  candidate the session carries). Distance-integrating widgets prefer
+   *  this over the built-in candidate order — see findSpeed. */
+  speedChannelId?: string;
+  /** Units of `speedChannelId` as reported by the host's channel store. */
+  speedChannelUnit?: string;
 }
 
 export interface WidgetRenderProps<Config> {
@@ -44,10 +51,24 @@ export interface WidgetRenderProps<Config> {
    *  hooking the emitter; widgets that need live updates should subscribe
    *  to the emitter directly. */
   lapSelection?: LapSelection;
+  /** Host-provided config writer. Widgets may push a config update for
+   *  lightweight in-widget affordances — the strip chart's x-mode pill, for
+   *  instance — instead of making the user open the config panel. The host
+   *  persists it exactly like a config-panel edit (Tile → App.updateTile →
+   *  workspace commit), so treat every call as a durable change, not a
+   *  transient view tweak: put ephemeral state in viewState instead.
+   *  Absent when the host doesn't support config writes (read-only embeds,
+   *  previews), so widgets must degrade to a non-interactive display. */
+  onConfigChange?: (next: Config) => void;
   /** Coordinator for "click the GPS track to pick a coordinate" flows.
    *  When armed (Lap Config dialog → "Pick from map"), the GPS Track widget
    *  shows a hint banner and treats the next click as a coordinate emit. */
   gpsPickerEmitter?: GpsPickerEmitter;
+  /** The PRIMARY session's channel metadata, host-supplied. Lets widgets
+   *  format values with the channel's display_name / units / decimals instead
+   *  of hardcoding. Optional so existing hosts and tests keep working —
+   *  consumers must fall back (raw id, no unit, 2 decimals) when absent. */
+  availableChannels?: ReadonlyArray<ChannelMeta>;
 }
 
 export interface WidgetConfigEditorProps<Config> {
@@ -64,4 +85,10 @@ export interface Widget<Config> {
   ConfigEditor: FC<WidgetConfigEditorProps<Config>>;
   Render: FC<WidgetRenderProps<Config>>;
   requiredChannels: (config: Config) => string[];
+  /** When true (for the given config), the host must include each session's
+   *  speed channel(s) in the slices it builds. Speed here is a session-level
+   *  dependency — used for distance integration, not plotted — so it can't
+   *  be expressed through requiredChannels, which lists the channels the
+   *  user picked in the widget config. */
+  requiresSpeed?: (config: Config) => boolean;
 }

@@ -99,10 +99,26 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     };
     markerDrawRef.current = drawMarkers;
     drawMarkers();
-    const offCursor = cursorEmitter.subscribe(drawMarkers);
-    const offView = viewState?.subscribe(drawMarkers);
-    return () => { offCursor(); offView?.(); };
+    // View-state is NOT subscribed here — the effect below owns that
+    // subscription because a view-state change (zoom) has to re-run the data
+    // pipeline before the markers are redrawn. Subscribing in both places
+    // would fire drawMarkers twice per emit.
+    return cursorEmitter.subscribe(drawMarkers);
   }, [cursorEmitter, viewState]);
+
+  // Zoom changes must re-run the MAIN draw, not just the marker layer:
+  // buildSessionGroups consumes viewState.zoomRange, so the scatter itself is
+  // filtered by the zoom window. Only the marker layer used to subscribe, so
+  // drag-zooming a strip chart left the points unfiltered until some unrelated
+  // re-render happened to trip the [slice, config, ids] effect. Redraw order
+  // matters: draw() refreshes layoutRef, which drawMarkers reads.
+  useEffect(() => {
+    if (!viewState) return;
+    return viewState.subscribe(() => {
+      drawRef.current();
+      markerDrawRef.current();
+    });
+  }, [viewState]);
 
   function draw() {
     const c = canvasRef.current; if (!c) return;

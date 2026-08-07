@@ -4,6 +4,8 @@ import "uplot/dist/uPlot.min.css";
 import type { LapRef, LapSelection } from "@helios/lib";
 import { perSampleLapDistance, speedToMs } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { findSpeed } from "../lib/speed";
+import { datumNearPx } from "./hit-test";
 import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -251,7 +253,7 @@ function drawDatums(u: uPlot, datums: number[]): void {
 }
 
 export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter, onConfigChange } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   // Track how many uPlot instances we've constructed in this widget lifetime.
@@ -278,22 +280,12 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   const visibleIdsKey = JSON.stringify(visible.map((v) => v.id));
 
   // For distance mode, look up speed channels per session via lap config or
-  // gps.speed fallback. Captured here so buildDistanceData stays pure.
+  // well-known fallbacks. Captured here so buildDistanceData stays pure.
   const speedByOverlay = useMemo(() => {
     const m = new Map<string, { values: Float64Array; unit: string } | null>();
     if (xMode !== "distance") return m;
     for (const o of visible) {
-      const candidates = ["gps.speed", "vehicle.speed"];
-      let resolved: { values: Float64Array; unit: string } | null = null;
-      for (const id of candidates) {
-        const v = o.slice.data.get(id);
-        if (!v) continue;
-        // Take the unit hint from "the system" — gps.speed is m/s in MoTeC and
-        // most ECU exports. speedToMs is tolerant of unknown units.
-        resolved = { values: v, unit: id === "gps.speed" ? "m/s" : "km/h" };
-        break;
-      }
-      m.set(o.id, resolved);
+      m.set(o.id, findSpeed(o));
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -419,6 +411,21 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
           dash: dash.length ? dash : undefined,
           scale: channelScale[meta.channelIndex] ?? "s0",
           points: { show: false },
+          // Both builders union every source's X values and NaN-pad each
+          // series at the X's it doesn't own (time mode: other sessions'
+          // timestamps; distance mode: other laps' distances). uPlot draws no
+          // segment across a null, so two sessions whose sample clocks aren't
+          // identical render as a field of disconnected fragments — with
+          // points hidden, that reads as an empty chart. spanGaps bridges
+          // them.
+          //
+          // Deliberate trade-off: a genuine dropout (logger stopped, channel
+          // dead for 10 s) is bridged by the same straight line and no longer
+          // reads as missing data. That's the lesser evil until slices carry
+          // per-sample validity masks, which would let us distinguish
+          // "no sample here because another session sampled off-grid" from
+          // "no sample here because the data is missing". Revisit then.
+          spanGaps: true,
         };
       }),
     ];
@@ -448,15 +455,23 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       if (z0) u.setScale("x", { min: z0.startUs / 1_000_000, max: z0.endUs / 1_000_000 });
 
       // Pointer modes (time mode only):
-      //   plain drag      → scrub cursor
-      //   shift + click   → drop a datum
-      //   shift + drag    → zoom range
-      //   double-click    → reset zoom
+      //   plain drag         → scrub cursor
+      //   shift + click      → drop a datum
+      //   shift + drag       → zoom range
+      //   alt/option + click → remove the datum under the pointer
+      //   double-click       → reset zoom
+      // Alt is checked before shift, so alt+shift+click removes rather than
+      // adds — removal is the more specific gesture and adding is one plain
+      // shift+click away.
       // Distance mode is read-only — interaction would have to translate
       // back through the lap-distance mapping which depends on which lap
       // a sample belongs to; not handled in this iteration.
       const ZOOM_DRAG_PX = 4;
-      type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number };
+      // Grab radius for alt+click datum removal. Datum lines are 1px, which
+      // is not a realistic pointer target, so accept a near miss — small
+      // enough that two datums a few px apart stay individually selectable.
+      const DATUM_HIT_PX = 6;
+      type Mode = { kind: "none" } | { kind: "scrub" } | { kind: "shift"; startX: number } | { kind: "alt" };
       let mode: Mode = { kind: "none" };
       let zoomBox: HTMLDivElement | null = null;
 
@@ -491,7 +506,11 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       const onDown = (e: PointerEvent) => {
         if (e.button !== 0) return;
         over.setPointerCapture(e.pointerId);
-        if (e.shiftKey && viewStateRef.current) {
+        if (e.altKey && viewStateRef.current) {
+          // Resolved on pointerup, like the shift+click add path, so a
+          // press-and-think doesn't delete anything until the user commits.
+          mode = { kind: "alt" };
+        } else if (e.shiftKey && viewStateRef.current) {
           mode = { kind: "shift", startX: localX(e.clientX) };
         } else {
           mode = { kind: "scrub" };
@@ -514,7 +533,19 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
       const onUp = (e: PointerEvent) => {
         if (over.hasPointerCapture(e.pointerId)) over.releasePointerCapture(e.pointerId);
         const vs = viewStateRef.current;
-        if (mode.kind === "shift" && vs) {
+        if (mode.kind === "alt" && vs) {
+          // Project each datum through the SAME mapping drawDatums uses to
+          // place the lines, so the hit test matches what the user sees.
+          const hit = datumNearPx(
+            vs.get().datums,
+            (tUs) => u.valToPos(tUs / 1_000_000, "x", false),
+            localX(e.clientX),
+            DATUM_HIT_PX,
+          );
+          // Miss = no-op. Alt+click on empty chart shouldn't scrub, zoom, or
+          // delete the nearest datum from across the chart.
+          if (hit !== null) vs.removeDatum(hit);
+        } else if (mode.kind === "shift" && vs) {
           const x0 = mode.startX;
           const x1 = localX(e.clientX);
           clearZoomBox();
@@ -824,12 +855,34 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
           ))}
         </div>
       )}
-      {/* X-mode pill: shows current mode and lets the user toggle without
-          opening the config panel. Mirrors i2's F9 toggle. */}
+      {/* X-mode pill: shows the current mode and, when the host supports
+          config writes, toggles it without opening the config panel. Mirrors
+          i2's F9 toggle. Flipping xMode changes `config` identity, which
+          rebuilds the uPlot instance via Effect 1 — correct here, since the
+          two modes need different axes and scales. Hosts that don't pass
+          onConfigChange (read-only embeds) get the plain read-out. */}
       <div className="absolute bottom-1 left-1 z-10 text-[9px]">
-        <span className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num">
-          x = {xMode === "distance" ? "distance" : "time"}
-        </span>
+        {onConfigChange ? (
+          <button
+            type="button"
+            data-testid="strip-chart-xmode"
+            title={`X axis is ${xMode}. Click to switch to ${xMode === "distance" ? "time" : "distance"}.`}
+            onClick={() => onConfigChange({
+              ...config,
+              xMode: config.xMode === "distance" ? "time" : "distance",
+            })}
+            className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num border border-[#2A2C32] hover:border-[#FFC627] hover:text-[#FFC627] cursor-pointer transition-colors"
+          >
+            x = {xMode === "distance" ? "distance" : "time"}
+          </button>
+        ) : (
+          <span
+            data-testid="strip-chart-xmode"
+            className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num"
+          >
+            x = {xMode === "distance" ? "distance" : "time"}
+          </span>
+        )}
       </div>
     </div>
   );

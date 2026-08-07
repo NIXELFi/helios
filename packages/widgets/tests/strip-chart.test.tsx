@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { stripChartWidget } from "../src/strip-chart";
 import { CursorEmitter } from "@helios/lib";
 import type { ChannelSlice } from "@helios/store";
@@ -123,6 +123,62 @@ describe("StripChart", () => {
     // Emit cursor at last sample → value 1999.
     act(() => { cursorEmitter.emit(999 * 10_000); });
     expect(readout!.textContent).toBe("1999");
+  });
+
+  it("x-mode pill is a plain span when the host passes no onConfigChange", () => {
+    // Read-only hosts (embeds, previews) can't persist config, so the pill
+    // must degrade to a display-only read-out rather than a dead button.
+    const { container } = render(<stripChartWidget.Render
+      config={{ channels: [{ id: "engine.rpm", color: "#FFB800" }], yMin: 0, yMax: 15000 }}
+      slice={fakeSlice()}
+      cursorEmitter={new CursorEmitter()}
+      timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
+    />);
+    const pill = container.querySelector('[data-testid="strip-chart-xmode"]')!;
+    expect(pill).not.toBeNull();
+    expect(pill.tagName).toBe("SPAN");
+    expect(pill.textContent).toBe("x = time");
+  });
+
+  it("x-mode pill toggles time↔distance through onConfigChange", () => {
+    // The pill used to be a non-interactive span despite a comment claiming
+    // it toggled the axis mode.
+    const onConfigChange = vi.fn();
+    const config = {
+      channels: [{ id: "engine.rpm", color: "#FFB800" }],
+      yMin: 0, yMax: 15000,
+    };
+    const { container, rerender } = render(<stripChartWidget.Render
+      config={config}
+      slice={fakeSlice()}
+      cursorEmitter={new CursorEmitter()}
+      timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
+      onConfigChange={onConfigChange}
+    />);
+    const pill = container.querySelector('[data-testid="strip-chart-xmode"]')!;
+    expect(pill.tagName).toBe("BUTTON");
+    expect(pill.textContent).toBe("x = time");
+
+    fireEvent.click(pill);
+    // Unset xMode defaults to time, so the first flip goes to distance and
+    // the rest of the config rides along untouched.
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    expect(onConfigChange.mock.calls[0]![0]).toEqual({ ...config, xMode: "distance" });
+
+    // Host persists it and re-renders; the pill now flips back to time.
+    const distanceConfig = { ...config, xMode: "distance" as const };
+    rerender(<stripChartWidget.Render
+      config={distanceConfig}
+      slice={fakeSlice()}
+      cursorEmitter={new CursorEmitter()}
+      timeRange={{ startUs: 0, endUs: 1_000 * 10_000 }}
+      onConfigChange={onConfigChange}
+    />);
+    const pill2 = container.querySelector('[data-testid="strip-chart-xmode"]')!;
+    expect(pill2.textContent).toBe("x = distance");
+    fireEvent.click(pill2);
+    expect(onConfigChange).toHaveBeenCalledTimes(2);
+    expect(onConfigChange.mock.calls[1]![0]).toEqual({ ...config, xMode: "time" });
   });
 
   it("renders em-dash for empty channel id (placeholder row before user configures)", () => {
