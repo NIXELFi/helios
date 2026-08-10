@@ -34,9 +34,12 @@ follow [semver](https://semver.org/).
 - **Datum markers can finally be removed one at a time.** Alt-click (Option-click on Mac) near a datum line deletes just that marker; "Clear datums" still clears them all. The shortcuts overlay documents both.
 - **Gauges can now alarm low.** Bar gauge, round gauge, and numeric readout accept "warn below" / "alarm below" thresholds alongside the existing high-side pair — so oil pressure, fuel pressure, and battery voltage can go amber and red on the way down, with matching low-side tick marks and arc bands. The numeric readout's thresholds are also editable from the config panel for the first time.
 - **The strip chart's "x = time" pill is now a real button.** Click it to flip between time and distance axes without opening the config panel — the toggle the pill's tooltip always promised.
+- **Sessions can be renamed and recolored.** Double-click a session's name in the sidebar to give it a label that means something ("Kaden stint 2" instead of a log filename) — the rename shows up everywhere the session is named, and the tooltip still tells you which file it came from. Click the color chip next to the name to pin the trace color, or set it back to auto. Both survive restarts, and re-adding the same file later brings them back.
+- **Hidden sessions stay hidden.** The visibility checkbox is now remembered per session, so the runs you unchecked yesterday don't all flood back onto every widget at the next launch. Explicitly re-opening a file always brings it back visible.
 
 ### Changed
 - **The workspace tab bar stays visible while editing.** Entering edit mode used to hide the tabs entirely, leaving ⌘1-9 as the only way to switch workspaces mid-edit.
+- **Big files load faster, without freezing the app.** Session data now crosses from the loader to the UI as raw binary instead of being expanded into JSON text (which inflated it roughly 4×) and is unpacked in bulk rather than value by value — and the parse itself runs off the window's thread, so Helios stays responsive while a large CSV loads instead of locking up.
 
 ### Fixed
 - **Lap Δt and Sector Splits actually work now.** Both widgets need a speed channel to build their distance axis, but the app never included one in the data it handed them — so they permanently showed "sessions need a speed channel" no matter what you loaded. They were also missing from the Add Tile menu. Both are fixed; the speed channel your Lap Config picks now takes priority over the built-in guesses, for the distance-mode strip chart too.
@@ -47,6 +50,9 @@ follow [semver](https://semver.org/).
 - **`highpass()` math no longer jolts after a data gap.** A single NaN sample reset the filter's internal state to zero, injecting a full-amplitude step into the output at every dropout. The filter now holds its state across gaps and resumes cleanly — damper-velocity math built on `highpass()` is trustworthy around dropouts again.
 - **Time Report: the best lap's "Δ best" column shows 0.000 instead of a dash**, and the report no longer recomputes itself on every unrelated UI update.
 - **Zone Stats no longer rescans the whole session on every cursor tick** in live datum→cursor mode — the window is found by binary search now, so long sessions stay smooth while scrubbing.
+- **A missing sample no longer reads as zero.** When the loader marked a sample as absent, the value handed to widgets quietly became 0 — indistinguishable from a real reading of zero. Absent samples now come through as gaps, the same way math-channel gaps already behave.
+
+## [5.3.2] - 2026-08-04
 
 ### Fixed
 - **The Vault stops re-downloading the entire file list every 15 seconds.** Helios keeps an eye on your vault with a cheap "has anything changed?" check, and only reloads the full catalog when the answer is yes. One part of that check was asking the server a question it couldn't answer, so it failed every single time — and a failed check is treated as "something changed", which meant every open Vault window quietly re-pulled the whole catalog (thousands of files) four times a minute, forever. The check now works, so an idle vault costs almost nothing. Expect the Vault to feel faster and your network usage to drop sharply.
