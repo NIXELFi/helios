@@ -4,6 +4,7 @@ import { TireGridRender, type TireGridConfig } from "./render";
 
 export const tireGridWidget: Widget<TireGridConfig> = {
   type: "tire_grid",
+  label: "Tire Grid",
   defaultConfig: {
     tempChannels: { lf: "", rf: "", lr: "", rr: "" },
     pressureChannels: { lf: "", rf: "", lr: "", rr: "" },

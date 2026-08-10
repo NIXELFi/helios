@@ -4,6 +4,7 @@ import { TimeReportRender, type TimeReportConfig } from "./render";
 
 export const timeReportWidget: Widget<TimeReportConfig> = {
   type: "time_report",
+  label: "Time Report",
   defaultConfig: {
     perSession: false,
     hideUntrusted: true,

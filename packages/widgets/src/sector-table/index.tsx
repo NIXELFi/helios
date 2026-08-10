@@ -4,6 +4,8 @@ import { SectorTableRender, type SectorTableConfig } from "./render";
 
 export const sectorTableWidget: Widget<SectorTableConfig> = {
   type: "sector_table",
+  label: "Sector Splits",
+  summarize: (c) => (c.sectorCount > 0 ? `${c.sectorCount} sectors` : null),
   defaultConfig: { sectorCount: 3, maxRows: 8, hideUntrusted: true },
   ConfigEditor: SectorTableConfigEditor,
   Render: SectorTableRender,

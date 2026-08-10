@@ -2,38 +2,13 @@
  * formatting, and primary-session window stats. Split out of render.tsx so the
  * formatting and stats rules are unit-testable without mounting the widget.
  */
-import type { ChannelMeta, ChannelSlice } from "@helios/store";
+import type { ChannelSlice } from "@helios/store";
 import { aggregateZone } from "../zone-stats/compute";
 
-export interface DisplayMeta {
-  label: string;
-  units: string;
-  decimals: number;
-}
-
-/** Resolve a channel's display metadata from the host-supplied channel list.
- *  Falls back to the raw id / no unit / 2 decimals when the channel is
- *  unknown (workspace saved against a different CSV) or the host predates
- *  `availableChannels`. Decimals are sanitized to a non-negative integer so a
- *  malformed meta can never make toFixed throw. */
-export function displayMeta(id: string, available?: ReadonlyArray<ChannelMeta>): DisplayMeta {
-  const m = available?.find((c) => c.id === id);
-  const decimals =
-    m && Number.isInteger(m.decimals) && m.decimals >= 0 && m.decimals <= 20
-      ? m.decimals
-      : 2;
-  return {
-    label: m?.display_name || id,
-    units: m?.units ?? "",
-    decimals,
-  };
-}
-
-/** "—" for missing/non-finite samples, fixed-point otherwise. */
-export function formatValue(v: number | null, decimals: number): string {
-  if (v === null || !Number.isFinite(v)) return "—";
-  return v.toFixed(decimals);
-}
+// displayMeta/formatValue grew out of this widget and are now shared by every
+// widget that names a channel; re-exported so this module's surface (and its
+// tests) stay stable.
+export { displayMeta, formatValue, type DisplayMeta } from "../lib/display-meta";
 
 export type DeltaTint = "pos" | "neg" | "zero";
 

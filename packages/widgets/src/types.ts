@@ -81,9 +81,19 @@ export interface WidgetConfigEditorProps<Config> {
 
 export interface Widget<Config> {
   type: string;
+  /** Human name shown wherever the widget is presented — tile headers, the
+   *  Add Tile palette, the config panel's type picker. The single source;
+   *  hosts must not keep parallel type→label maps. */
+  label: string;
   defaultConfig: Config;
   ConfigEditor: FC<WidgetConfigEditorProps<Config>>;
   Render: FC<WidgetRenderProps<Config>>;
+  /** One-line summary of the given config for the tile header's subtitle —
+   *  typically the configured channel names ("RPM, Throttle"). Null/absent
+   *  when there's nothing more specific than the label to say. `channels`
+   *  is the primary session's metadata for id→display-name resolution;
+   *  implementations must tolerate its absence. */
+  summarize?: (config: Config, channels?: ReadonlyArray<ChannelMeta>) => string | null;
   requiredChannels: (config: Config) => string[];
   /** When true (for the given config), the host must include each session's
    *  speed channel(s) in the slices it builds. Speed here is a session-level

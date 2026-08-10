@@ -1,9 +1,13 @@
 import type { Widget } from "../types";
+import { channelLabel } from "../lib/display-meta";
 import { GpsTrackConfigEditor } from "./config-editor";
 import { GpsTrackRender, type GpsTrackConfig } from "./render";
 
 export const gpsTrackWidget: Widget<GpsTrackConfig> = {
   type: "gps_track",
+  label: "GPS Track",
+  // Only the color-by channel is worth a subtitle; lat/lon are implied.
+  summarize: (c, ch) => (c.colorByChannelId ? channelLabel(c.colorByChannelId, ch) : null),
   defaultConfig: { latChannelId: "gps.lat", lonChannelId: "gps.lon" },
   ConfigEditor: GpsTrackConfigEditor,
   Render: GpsTrackRender,

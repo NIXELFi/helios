@@ -217,33 +217,51 @@ export function Tile({
       ? "ring-1 ring-[#2A2C32] hover:ring-[#FFC627]"
       : "";
 
+  // Human header: the user's custom title, else the widget's registry label,
+  // with a config-derived subtitle (typically the channel names) so a wall of
+  // strip charts reads "Strip Chart · RPM, Throttle" instead of internal ids.
+  const availableChannels = primary.store.list();
+  const title = spec.title ?? widget.label;
+  const subtitle = widget.summarize?.(spec.config, availableChannels) ?? null;
+  const titleContent = (
+    <>
+      <span className="text-[#9097A0] truncate flex-shrink-0 max-w-[60%]">{title}</span>
+      {subtitle && (
+        <span className="ml-2 text-[#5A5F66] normal-case truncate min-w-0">{subtitle}</span>
+      )}
+      {editMode && (
+        <span className="ml-2 text-[#5A5F66] normal-case flex-shrink-0">
+          · {Math.round(liveW * GRID_COLS)}×{Math.round(liveH * GRID_ROWS)}
+        </span>
+      )}
+    </>
+  );
+
   return (
     <div
       ref={containerRef}
-      className={"absolute " + editRing}
+      className={"absolute group " + editRing}
       style={{
         left: `${liveX * 100}%`, top: `${liveY * 100}%`,
         width: `${liveW * 100}%`, height: `${liveH * 100}%`,
       }}
     >
-      <div
-        className={
-          "bg-[#0E0E10] text-[#9097A0] text-[10px] uppercase tracking-wider px-2 py-1 border-b border-[#2A2C32] " +
-          (editMode ? "cursor-grab active:cursor-grabbing select-none" : "")
-        }
-        onPointerDown={onMoveDown}
-        onPointerMove={onMoveMove}
-        onPointerUp={onMoveUp}
-        onPointerCancel={onMoveUp}
-      >
-        {spec.id}
-        {editMode && (
-          <span className="ml-2 text-[#5A5F66] normal-case">
-            · {Math.round(liveW * GRID_COLS)}×{Math.round(liveH * GRID_ROWS)}
-          </span>
-        )}
-      </div>
-      <div className="absolute inset-0 top-[20px] border border-[#2A2C32] border-t-0">
+      {/* Structural title bar only in edit mode, where it doubles as the drag
+          handle. During normal analysis the full tile is data; the same header
+          fades in as a hover overlay (below) so the title is never more than a
+          mouse-rest away. */}
+      {editMode && (
+        <div
+          className="h-[20px] flex items-center bg-[#0E0E10] text-[10px] uppercase tracking-wider px-2 border-b border-[#2A2C32] cursor-grab active:cursor-grabbing select-none"
+          onPointerDown={onMoveDown}
+          onPointerMove={onMoveMove}
+          onPointerUp={onMoveUp}
+          onPointerCancel={onMoveUp}
+        >
+          {titleContent}
+        </div>
+      )}
+      <div className={"absolute inset-0 border border-[#2A2C32] " + (editMode ? "top-[20px] border-t-0" : "")}>
         <RenderC
           config={spec.config}
           slice={primarySlice.slice}
@@ -255,7 +273,7 @@ export function Tile({
           lapSelectionEmitter={lapSelectionEmitter}
           lapSelection={lapSelection}
           gpsPickerEmitter={gpsPickerEmitter}
-          availableChannels={primary.store.list()}
+          availableChannels={availableChannels}
           // In-widget config writes (e.g. the strip chart's x-mode pill) go
           // through the SAME path as a drag/resize: onChange → App.updateTile
           // → workspace commit, so the change persists. The cast mirrors
@@ -293,6 +311,14 @@ export function Tile({
               }}
             />
           </>
+        )}
+        {!editMode && (
+          /* Hover-reveal header: identifies the tile without spending 20px of
+             chrome on every widget all the time. pointer-events-none so it
+             never intercepts scrubbing near the top edge of a chart. */
+          <div className="absolute top-0 left-0 right-0 z-20 h-[20px] flex items-center px-2 text-[10px] uppercase tracking-wider bg-[#0E0E10]/90 border-b border-[#2A2C32] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            {titleContent}
+          </div>
         )}
       </div>
     </div>

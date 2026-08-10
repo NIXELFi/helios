@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { Widget } from "../types";
+import { channelLabel } from "../lib/display-meta";
 import { XyPlotConfigEditor } from "./config-editor";
 import { XyPlotRender } from "./render";
 import type { XyPlotConfig } from "./types";
@@ -18,6 +19,12 @@ function MigratingEditor(props: React.ComponentProps<typeof XyPlotConfigEditor>)
 
 export const xyPlotWidget: Widget<XyPlotConfig> = {
   type: "xy_plot",
+  label: "XY Plot",
+  summarize: (c, ch) => {
+    const m = migrateConfig(c as never);
+    if (!m.xChannelId || !m.yChannelId) return null;
+    return `${channelLabel(m.xChannelId, ch)} vs ${channelLabel(m.yChannelId, ch)}`;
+  },
   defaultConfig: {
     version: 2,
     mode: "simple",

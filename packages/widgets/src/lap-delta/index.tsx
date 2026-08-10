@@ -4,6 +4,7 @@ import { LapDeltaRender, type LapDeltaConfig } from "./render";
 
 export const lapDeltaWidget: Widget<LapDeltaConfig> = {
   type: "lap_delta",
+  label: "Lap Δt",
   defaultConfig: {},
   ConfigEditor: LapDeltaConfigEditor,
   Render: LapDeltaRender,
