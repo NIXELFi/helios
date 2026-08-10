@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.3.3] - 2026-08-10
+
 ### Added
 - **A Values panel — the readout table i2 users live in.** New "Values" widget: pick your channels and see each one's value under the cursor for every visible session, side by side, with a Δ-vs-primary column when you're overlaying runs and min/max/avg over whatever you've zoomed to. Channel names, units, and decimal places come from the channel registry, so `engine.rpm` reads "RPM" with no decimals instead of "10234.00".
 - **Arrow keys scrub the cursor.** ←/→ nudge the cursor by a fraction of what's on screen (hold Shift for coarse steps, hold the key to keep scrubbing) — the further you zoom in, the finer the step. ⌘/Ctrl+arrows still do text navigation.
