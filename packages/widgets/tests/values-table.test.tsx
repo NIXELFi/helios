@@ -54,7 +54,7 @@ describe("valuesTableWidget", () => {
       cursorEmitter={new CursorEmitter()}
       timeRange={{ startUs: 0, endUs: 0 }}
     />);
-    expect(screen.getByText(/no channels configured/)).toBeDefined();
+    expect(screen.getByText(/no channels configured/i)).toBeDefined();
   });
 
   it("renders cursor value and min/max/avg stats for the primary session", () => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 import { aggregateZone, emptyZoneAgg } from "./compute";
 
 export interface ZoneStatsConfig {
@@ -75,9 +76,10 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
 
   if (!zone) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
-        Place a datum (shift+click on a strip chart). The zone is the segment between two datums, or between a datum and the cursor.
-      </div>
+      <WidgetEmpty
+        title="No zone to analyze"
+        hint="Shift+click a strip chart to place a datum — the zone spans two datums, or a datum and the cursor"
+      />
     );
   }
 
