@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { channelLabel } from "../lib/display-meta";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import type { XyPlotConfig, PlotLayout, OverlayContext, SessionGroup } from "./types";
 import { buildSessionGroups } from "./data-pipeline";
@@ -19,7 +20,7 @@ import "./overlays/friction-circle";
 export type { XyPlotConfig } from "./types";
 
 export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays: visibleOverlays, viewState } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays: visibleOverlays, viewState, availableChannels } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const markerCanvasRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef<{ groups: SessionGroup[]; layout: PlotLayout } | null>(null);
@@ -246,7 +247,10 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     // Axis labels
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillText(`${config.xChannelId} × ${config.yChannelId}`, 4, 4);
+    ctx.fillText(
+      `${channelLabel(config.xChannelId, availableChannels)} × ${channelLabel(config.yChannelId, availableChannels)}`,
+      4, 4,
+    );
     ctx.textAlign = "left"; ctx.textBaseline = "bottom";
     ctx.fillText(xmin!.toFixed(1), padL, h - 4);
     ctx.textAlign = "right";

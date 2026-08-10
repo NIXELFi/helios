@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { magnitudeSpectrum, pow2Floor } from "@helios/lib";
 import type { ZoomRange } from "@helios/lib";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { channelLabel } from "../lib/display-meta";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 
@@ -21,7 +22,8 @@ export interface FftConfig {
 }
 
 export function FftRender(props: WidgetRenderProps<FftConfig>) {
-  const { config, slice, viewState, overlays, timeRange } = props;
+  const { config, slice, viewState, overlays, timeRange, availableChannels } = props;
+  const channelName = channelLabel(config.channelId, availableChannels);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawRef = useRef<() => void>(() => {});
   const visible: OverlaySession[] = overlays && overlays.length > 0
@@ -111,7 +113,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     if (spectra.length === 0) {
       ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(`no data for ${config.channelId}`, w / 2, h / 2);
+      ctx.fillText(`no data for ${channelName}`, w / 2, h / 2);
       return;
     }
     const padL = 36, padR = 8, padT = 16, padB = 22;
@@ -184,7 +186,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     // Axis labels
     ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textBaseline = "top"; ctx.textAlign = "left";
-    ctx.fillText(`${config.channelId} · fs ≈ ${spectra[0]!.fs.toFixed(0)} Hz · n=${spectra[0]!.n}`, 4, 4);
+    ctx.fillText(`${channelName} · fs ≈ ${spectra[0]!.fs.toFixed(0)} Hz · n=${spectra[0]!.n}`, 4, 4);
     ctx.textBaseline = "bottom"; ctx.textAlign = "left";
     ctx.fillText("0 Hz", padL, h - 2);
     ctx.textAlign = "right";

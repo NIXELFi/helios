@@ -5,6 +5,7 @@ import type { LapSelection } from "@helios/lib";
 import { perSampleLapDistance } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { findSpeed } from "../lib/speed";
+import { AXIS_FONT } from "../lib/fonts";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { computeLapDelta, formatDelta, type DeltaResult } from "./compute";
 
@@ -119,12 +120,14 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
       {
         stroke: "#5A5F66",
         grid: { stroke: "#23252B" },
+        font: AXIS_FONT,
         values: (_u, splits) => splits.map(formatDistance),
         size: 30,
       },
       {
         stroke: "#5A5F66",
         grid: { stroke: "#23252B" },
+        font: AXIS_FONT,
         scale: "y",
         size: 45,
         values: (_u, splits) => splits.map((v) => (Number.isFinite(v) ? `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}` : "")),
