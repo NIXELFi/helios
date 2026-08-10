@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@helios/auth";
 // RLS + a BEFORE INSERT trigger own identity, so the client only ever sends
 // (game_id, score). Same unwrap convention as modules/pm/lib/data.ts.
 
-export type GameId = "snake" | "breakout" | "flappy" | "2048";
+export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack";
 
 export interface LeaderboardEntry {
   userId: string;

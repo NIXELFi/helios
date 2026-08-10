@@ -3,7 +3,7 @@ import { GAMES } from "../registry";
 
 // game_id values allowed by the games.scores check constraint — registry ids
 // MUST stay in lockstep with the migration.
-const DB_GAME_IDS = ["snake", "breakout", "flappy", "2048"];
+const DB_GAME_IDS = ["snake", "breakout", "flappy", "2048", "blackjack"];
 
 describe("game registry", () => {
   it("has unique ids that match the DB check constraint", () => {

@@ -3,7 +3,7 @@ import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
 import { submitScore, type GameId } from "./api";
-import { GAMES, type GameDef } from "./registry";
+import { GAMES, type GameCategory, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
 import { LobbyStandings } from "./components/LobbyStandings";
 import { GameStandings } from "./components/GameStandings";
@@ -16,6 +16,13 @@ export interface GamesModuleProps {
 }
 
 const LAST_GAME_KEY = "helios:games:lastGame";
+const LAST_SECTION_KEY = "helios:games:lastSection";
+
+/** Lobby copy per section — same room, different corner of it. */
+const SECTIONS: { id: GameCategory; label: string; tagline: string }[] = [
+  { id: "arcade", label: "ARCADE", tagline: "Sun Devil Motorsports · after hours" },
+  { id: "casino", label: "CASINO", tagline: "Sun Devil Motorsports · house chips only" },
+];
 
 export function GamesModule({ paused }: GamesModuleProps) {
   const { client } = useHeliosAuth();
@@ -35,6 +42,23 @@ export function GamesModule({ paused }: GamesModuleProps) {
       return GAMES[0]!.id;
     }
   });
+  const [section, setSection] = useState<GameCategory>(() => {
+    try {
+      const saved = localStorage.getItem(LAST_SECTION_KEY);
+      return saved === "casino" ? "casino" : "arcade";
+    } catch {
+      return "arcade";
+    }
+  });
+
+  function selectSection(s: GameCategory) {
+    setSection(s);
+    try {
+      localStorage.setItem(LAST_SECTION_KEY, s);
+    } catch {
+      // ignore (private mode / quota)
+    }
+  }
 
   // Warm every standings board on mount (and re-warm after each submit) so
   // the first click on any tab or game chip renders instantly from cache
@@ -59,6 +83,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
     setOver(null);
     setRun((n) => n + 1);
     setBoardGame(game.id);
+    selectSection(game.category); // back-nav lands in the section you played from
     try {
       localStorage.setItem(LAST_GAME_KEY, game.id);
     } catch {
@@ -140,11 +165,31 @@ export function GamesModule({ paused }: GamesModuleProps) {
           <div className="max-h-full w-full max-w-2xl overflow-y-auto px-1">
             <div className="mb-6">
               <div className="games-hazard mb-3 h-1 w-12 rounded-sm" />
-              <h1 className="games-display-heavy text-2xl tracking-[0.22em] text-asu-gold">ARCADE</h1>
-              <p className="mt-1 text-xs text-helios-dim">Sun Devil Motorsports · after hours</p>
+              {/* The heading IS the section switcher: active section in gold,
+               * the other room a dim click away. */}
+              <div className="flex items-baseline gap-5">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => selectSection(s.id)}
+                    className={
+                      "games-display-heavy text-2xl tracking-[0.22em] transition-colors " +
+                      (section === s.id
+                        ? "text-asu-gold"
+                        : "text-helios-line hover:text-helios-dim")
+                    }
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-helios-dim">
+                {SECTIONS.find((s) => s.id === section)!.tagline}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              {GAMES.map((g, i) => (
+              {GAMES.filter((g) => g.category === section).map((g, i) => (
                 <GameCard key={g.id} game={g} index={i} onPlay={() => play(g)} />
               ))}
             </div>
