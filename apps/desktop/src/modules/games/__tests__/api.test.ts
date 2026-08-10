@@ -95,6 +95,9 @@ describe("fetchAllTime", () => {
 });
 
 describe("fetchSubteams (Grand Prix placement scoring)", () => {
+  // Each lobby room runs its own Grand Prix — callers pass the room's games.
+  const ARCADE = ["snake", "breakout", "flappy", "2048"] as const;
+
   it("awards placement points per game and sums them, not raw subtotals", async () => {
     const { client } = stubClient({
       data: [
@@ -104,7 +107,7 @@ describe("fetchSubteams (Grand Prix placement scoring)", () => {
       ],
       error: null,
     });
-    const rows = await fetchSubteams(client);
+    const rows = await fetchSubteams(client, ARCADE);
     // snake: Aero 1st (10), Chassis 2nd (8). 2048: Aero 1st (10, only entrant).
     expect(rows).toEqual([
       { subteam: "Aero", total: 20, perGame: { snake: 10, "2048": 10 } },
@@ -124,7 +127,7 @@ describe("fetchSubteams (Grand Prix placement scoring)", () => {
       ],
       error: null,
     });
-    const rows = await fetchSubteams(client);
+    const rows = await fetchSubteams(client, ARCADE);
     // Each wins one game (10) and is runner-up in the other (8) -> 18 apiece.
     expect(rows.map((r) => [r.subteam, r.total])).toEqual([
       ["Aero", 18],
@@ -141,12 +144,29 @@ describe("fetchSubteams (Grand Prix placement scoring)", () => {
       ],
       error: null,
     });
-    const rows = await fetchSubteams(client);
+    const rows = await fetchSubteams(client, ARCADE);
     // Aero & Chassis tie for 1st (10 each); DAQ is 3rd (6), 2nd place is skipped.
     expect(rows).toEqual([
       { subteam: "Aero", total: 10, perGame: { snake: 10 } },
       { subteam: "Chassis", total: 10, perGame: { snake: 10 } },
       { subteam: "DAQ", total: 6, perGame: { snake: 6 } },
+    ]);
+  });
+
+  it("keeps each room's board to its own games — casino never scores the arcade", async () => {
+    const data = [
+      { subteam: "Aero", game_id: "snake", subtotal: 25 },
+      { subteam: "Chassis", game_id: "blackjack", subtotal: 1180 },
+      { subteam: "Aero", game_id: "blackjack", subtotal: 990 },
+    ];
+    const arcade = await fetchSubteams(stubClient({ data, error: null }).client, ARCADE);
+    // Chassis only played blackjack — no arcade points, no arcade row at all.
+    expect(arcade).toEqual([{ subteam: "Aero", total: 10, perGame: { snake: 10 } }]);
+
+    const casino = await fetchSubteams(stubClient({ data, error: null }).client, ["blackjack"]);
+    expect(casino).toEqual([
+      { subteam: "Chassis", total: 10, perGame: { blackjack: 10 } },
+      { subteam: "Aero", total: 8, perGame: { blackjack: 8 } },
     ]);
   });
 });

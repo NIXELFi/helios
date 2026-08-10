@@ -3,7 +3,7 @@ import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
 import { submitScore, type GameId } from "./api";
-import { GAMES, type GameCategory, type GameDef } from "./registry";
+import { GAMES, categoryOf, gamesInCategory, type GameCategory, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
 import { LobbyStandings } from "./components/LobbyStandings";
 import { GameStandings } from "./components/GameStandings";
@@ -194,9 +194,16 @@ export function GamesModule({ paused }: GamesModuleProps) {
               ))}
             </div>
             <div className="mt-4 pb-2">
+              {/* Each room has its own standings board: if the remembered
+               * board game belongs to the other room, fall back to this
+               * room's first game rather than showing a cross-room board. */}
               <LobbyStandings
                 client={client}
-                game={boardGame}
+                game={
+                  categoryOf(boardGame) === section
+                    ? boardGame
+                    : gamesInCategory(section)[0]!.id
+                }
                 onGameChange={selectBoard}
                 refreshToken={refreshToken}
               />

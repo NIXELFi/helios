@@ -4,7 +4,7 @@ import {
   fetchAllTime, fetchSubteams, fetchWeekly,
   type GameId, type LeaderboardEntry, type SubteamRanking,
 } from "../api";
-import { GAMES } from "../registry";
+import { GAMES, categoryOf, gamesInCategory } from "../registry";
 
 /* Shared standings toolkit — one data store + the visual atoms used by both
  * standings layouts (LobbyStandings on the picker screen, GameStandings
@@ -46,8 +46,9 @@ function subscribe(l: () => void) {
 const getVersion = () => cacheVersion;
 
 function keyFor(tab: Tab, gameId: GameId): string {
-  // The subteams board spans all games, so it gets one cache slot.
-  return tab === "subteams" ? "subteams" : `${tab}:${gameId}`;
+  // The subteams board spans the games of one lobby room (arcade or casino) —
+  // one cache slot per room, resolved from the game being viewed.
+  return tab === "subteams" ? `subteams:${categoryOf(gameId)}` : `${tab}:${gameId}`;
 }
 
 /** Fetch a board into the cache unless it's already fresh for `token`.
@@ -77,7 +78,10 @@ async function ensureBoard(
   if (existing) return existing;
   const load: Promise<BoardData> =
     tab === "subteams"
-      ? fetchSubteams(client).then((r) => ({ entries: null, subteams: r }))
+      ? fetchSubteams(
+          client,
+          gamesInCategory(categoryOf(gameId)).map((g) => g.id),
+        ).then((r) => ({ entries: null, subteams: r }))
       : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) => ({
           entries: r,
           subteams: null,
@@ -105,7 +109,11 @@ export function prefetchBoards(client: SupabaseClient, token: number): void {
       void ensureBoard(client, tab, g.id, token).catch(() => {});
     }
   }
-  void ensureBoard(client, "subteams", GAMES[0]!.id, token).catch(() => {});
+  // One subteams board per room — warm each through its first game.
+  for (const category of ["arcade", "casino"] as const) {
+    const first = gamesInCategory(category)[0];
+    if (first) void ensureBoard(client, "subteams", first.id, token).catch(() => {});
+  }
 }
 
 /** Standings data source over the shared cache: switching tabs/games shows
@@ -219,7 +227,7 @@ export function GameChips({
       className={"flex flex-wrap gap-1 transition-opacity " + (muted ? "pointer-events-none opacity-35" : "")}
       aria-hidden={muted || undefined}
     >
-      {GAMES.map((g) => {
+      {gamesInCategory(categoryOf(value)).map((g) => {
         const Icon = g.icon;
         const active = value === g.id && !muted;
         return (

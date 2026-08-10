@@ -112,9 +112,16 @@ export const fetchWeekly = (client: SupabaseClient, gameId: GameId) =>
 // a game the subteams are RANKED by their subtotal and earn placement POINTS,
 // which ARE comparable across games. A subteam's total is the sum of its
 // placement points over every game it placed in, so each game counts equally.
+//
+// Each lobby room runs its own Grand Prix: callers pass the room's game list
+// (registry gamesInCategory) and rows outside it are dropped, so the casino
+// never scores points on the arcade board or vice versa.
 const PLACEMENT_POINTS = [10, 8, 6, 5, 4, 3, 2, 1] as const;
 
-export async function fetchSubteams(client: SupabaseClient): Promise<SubteamRanking[]> {
+export async function fetchSubteams(
+  client: SupabaseClient,
+  gameIds: readonly GameId[],
+): Promise<SubteamRanking[]> {
   const rows = unwrap<{ subteam: string; game_id: GameId; subtotal: number }[]>(
     await client
       .schema("games")
@@ -123,9 +130,10 @@ export async function fetchSubteams(client: SupabaseClient): Promise<SubteamRank
       .limit(200),
     "subteam ranking",
   );
-  // Group each game's subteam subtotals so we can rank within the game.
+  // Group each in-room game's subteam subtotals so we can rank within the game.
   const games = new Map<GameId, { subteam: string; subtotal: number }[]>();
   for (const r of rows) {
+    if (!gameIds.includes(r.game_id)) continue;
     const list = games.get(r.game_id) ?? [];
     list.push({ subteam: r.subteam, subtotal: Number(r.subtotal) });
     games.set(r.game_id, list);

@@ -23,6 +23,14 @@ export interface GameDef {
   component: ComponentType<GameProps>;
 }
 
+export function gamesInCategory(category: GameCategory): GameDef[] {
+  return GAMES.filter((g) => g.category === category);
+}
+
+export function categoryOf(id: GameId): GameCategory {
+  return GAMES.find((g) => g.id === id)?.category ?? "arcade";
+}
+
 export const GAMES: GameDef[] = [
   { id: "snake", title: "Snake", blurb: "Eat. Grow. Don't bite yourself.", icon: IconArrowsMove, category: "arcade", component: SnakeGame },
   { id: "breakout", title: "Breakout", blurb: "Clear the wall, level up, speed up.", icon: IconBallTennis, category: "arcade", component: BreakoutGame },
