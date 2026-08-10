@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatLapTime } from "@helios/lib";
 import type { LapRef, LapSelection, LapSelectionEmitter } from "@helios/lib";
 import type { LoadedSession } from "../lib/session";
+import { SESSION_PALETTE } from "../lib/session";
 import { MOD_KEY } from "../lib/platform";
 
 interface Props {
@@ -19,6 +20,13 @@ interface Props {
    *  applying. Bundled samples reappear on next launch; user-loaded files
    *  stay on disk. */
   onRemoveSession: (id: string) => void;
+  /** Give a session a custom display label (double-click the row label).
+   *  `null` clears the override, falling back to the filename-derived one.
+   *  App.tsx owns the persist + re-apply. */
+  onRenameSession: (id: string, label: string | null) => void;
+  /** Pin a session's trace color (click the swatch). `null` clears the
+   *  override, returning it to its positional palette color. */
+  onRecolorSession: (id: string, color: string | null) => void;
   /** Lap-selection bus shared with lap-panel widget. Sidebar lap list reads
    *  + writes through the same emitter so Main/Ref highlighting stays
    *  in sync wherever it's surfaced. */
@@ -28,11 +36,47 @@ interface Props {
 
 export function SessionPanel({
   sessions, primaryId, onToggleVisibility, onSetPrimary, onConfigureLaps,
-  onAddSession, onRemoveSession, lapSelectionEmitter, lapSelection,
+  onAddSession, onRemoveSession, onRenameSession, onRecolorSession,
+  lapSelectionEmitter, lapSelection,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Inline rename state — same shape as WorkspaceTabBar's tab rename.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const primary = sessions.find((s) => s.id === primaryId) ?? null;
+
+  function startRename(s: LoadedSession) {
+    // If a rename is already in flight on another row, commit it against the
+    // row it was started for BEFORE retargeting: the outgoing input's onBlur
+    // fires as focus moves to the new one and would otherwise commit its text
+    // under the new id.
+    if (renamingId !== null && renamingId !== s.id) commitRename();
+    setRenamingId(s.id);
+    setRenameValue(s.label);
+  }
+
+  /** Commit the rename for a SPECIFIC id (captured at the call site so a
+   *  concurrent target switch can't redirect it). Committing empty text — or
+   *  text equal to the filename-derived label — CLEARS the override rather
+   *  than storing a redundant one; that's the discoverable way back to "auto".
+   *  No-ops when the text is unchanged so we don't churn localStorage. */
+  function commitRename(id: string | null = renamingId) {
+    if (id === null || renamingId !== id) return;
+    const target = sessions.find((s) => s.id === id);
+    if (target) {
+      const base = target.defaultLabel ?? target.label;
+      const trimmed = renameValue.trim();
+      const next = trimmed.length === 0 || trimmed === base ? null : trimmed;
+      const current = target.label === base ? null : target.label;
+      if (next !== current) onRenameSession(id, next);
+    }
+    setRenamingId((cur) => (cur === id ? null : cur));
+  }
+
+  function cancelRename(id: string | null = renamingId) {
+    setRenamingId((cur) => (cur === id ? null : cur));
+  }
 
   if (collapsed) {
     return (
@@ -70,6 +114,12 @@ export function SessionPanel({
         {sessions.map((s) => {
           const isPrimary = s.id === primaryId;
           const isExpanded = s.id === expandedId;
+          const isRenaming = s.id === renamingId;
+          // The loader-derived label, kept by applySessionMeta. When it differs
+          // from the live label the user has renamed this session, and the
+          // tooltip should still name the file it came from.
+          const baseLabel = s.defaultLabel ?? s.label;
+          const isRenamed = s.label !== baseLabel;
           const lapCount = s.laps?.laps.filter((l) => l.trusted).length ?? 0;
           const bestLap = s.laps && s.laps.bestLapIndex >= 0 ? s.laps.laps[s.laps.bestLapIndex] : null;
           return (
@@ -80,7 +130,9 @@ export function SessionPanel({
                   (isPrimary ? "bg-[#16171B]" : "hover:bg-[#16171B]")
                 }
                 onClick={() => { if (s.visible) onSetPrimary(s.id); }}
-                title={s.visible ? "Click to make primary" : "Enable visibility first"}
+                title={s.visible
+                  ? "Click to make primary · double-click the name to rename"
+                  : "Enable visibility first"}
               >
                 <input
                   type="checkbox"
@@ -89,13 +141,40 @@ export function SessionPanel({
                   onClick={(e) => e.stopPropagation()}
                   className="cursor-pointer accent-[#FFC627]"
                 />
-                <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} aria-hidden />
-                <span
-                  title={s.label}
-                  className={"flex-1 truncate " + (s.visible ? "text-[#D8DCE2]" : "text-[#5A5F66]")}
-                >
-                  {s.label}
-                </span>
+                <SessionSwatch session={s} onPick={(hex) => onRecolorSession(s.id, hex)} />
+                {isRenaming ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    aria-label={`Rename ${baseLabel}`}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    // Select-all on focus: renaming usually means replacing,
+                    // not appending.
+                    onFocus={(e) => e.currentTarget.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault(); e.stopPropagation(); commitRename(s.id);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault(); e.stopPropagation(); cancelRename(s.id);
+                      }
+                    }}
+                    onBlur={() => commitRename(s.id)}
+                    // The row sets primary on click and expands on
+                    // double-click-ish interactions; neither should fire while
+                    // the user is editing text inside it.
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 bg-[#0B0B0D] border border-[#FFC627] text-[#D8DCE2] rounded-sm px-1 outline-none text-xs"
+                  />
+                ) : (
+                  <span
+                    title={isRenamed ? `${s.label} — renamed from "${baseLabel}"` : s.label}
+                    onDoubleClick={(e) => { e.stopPropagation(); startRename(s); }}
+                    className={"flex-1 truncate " + (s.visible ? "text-[#D8DCE2]" : "text-[#5A5F66]")}
+                  >
+                    {s.label}
+                  </span>
+                )}
                 {isPrimary && (
                   <span className="text-[9px] uppercase tracking-wider text-[#FFC627] flex-shrink-0">primary</span>
                 )}
@@ -144,6 +223,89 @@ export function SessionPanel({
         Drag CSVs anywhere to add. + to browse.
       </div>
     </aside>
+  );
+}
+
+/** The session's color chip, plus the recolor popover it opens: the eight
+ *  SESSION_PALETTE entries and an "auto" button that clears the override so
+ *  the session goes back to its positional color.
+ *
+ *  Open state is deliberately LOCAL rather than lifted to a single
+ *  `openSwatchId` in the panel. Two rows can't actually end up open at once —
+ *  mousing down on row B's swatch trips row A's click-outside listener first —
+ *  and keeping it local means the effect's deps don't churn on every parent
+ *  render. Click-outside + Esc follow App.tsx's ExportMenuButton idiom.
+ *
+ *  Everything here stopPropagation's: this sits inside the row, whose click
+ *  handler sets the primary session. */
+function SessionSwatch({ session, onPick }: {
+  session: LoadedSession;
+  onPick: (hex: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  function pick(hex: string | null) {
+    onPick(hex);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        aria-label={`Change color for ${session.label}`}
+        aria-expanded={open}
+        title="Change trace color"
+        onClick={() => setOpen((o) => !o)}
+        className="w-4 h-4 flex items-center justify-center rounded-sm cursor-pointer hover:bg-[#2A2C32]"
+      >
+        <span className="w-2.5 h-2.5 rounded-sm block" style={{ background: session.color }} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-30 bg-[#0E0E10] border border-[#2A2C32] p-1.5 w-[132px]">
+          <div className="grid grid-cols-4 gap-1">
+            {SESSION_PALETTE.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                aria-label={`Set color ${hex}`}
+                title={hex}
+                onClick={() => pick(hex)}
+                className={
+                  "w-6 h-5 rounded-sm cursor-pointer border " +
+                  (session.color.toLowerCase() === hex.toLowerCase()
+                    ? "border-[#D8DCE2]"
+                    : "border-transparent hover:border-[#FFC627]")
+                }
+                style={{ background: hex }}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => pick(null)}
+            className="mt-1.5 w-full px-1 py-0.5 text-[10px] text-[#9097A0] border border-[#2A2C32] rounded-sm cursor-pointer hover:border-[#FFC627] hover:text-[#FFC627]"
+            title="Clear the pinned color — back to the automatic color for this slot"
+          >auto</button>
+        </div>
+      )}
+    </div>
   );
 }
 

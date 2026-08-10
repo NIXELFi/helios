@@ -11,7 +11,8 @@ import {
   computeMathChannelsUpdate,
 } from "../src/App";
 import type { LoadedSession } from "../src/lib/session";
-import { colorForIndex } from "../src/lib/session";
+import { applySessionMeta, colorForIndex } from "../src/lib/session";
+import type { SessionMeta } from "../src/lib/app-state";
 import type { MathChannel } from "../src/lib/math-channels";
 
 /** Minimal ChannelStore stub recording the override/math calls the handlers
@@ -77,6 +78,44 @@ describe("mergeSessionsWithColors — COLOR-DESYNC", () => {
     expect(next[2]!.color).toBe(colorForIndex(2));
     const colors = next.map((s) => s.color);
     expect(new Set(colors).size).toBe(colors.length);
+  });
+});
+
+describe("mergeSessionsWithColors + applySessionMeta — the commit path App uses", () => {
+  const lookup = (map: Record<string, SessionMeta>) =>
+    (id: string): SessionMeta | null => map[id] ?? null;
+
+  it("lets a pinned color win over the positional one the merge just assigned", () => {
+    const prev = [session("a"), session("b")];
+    const incoming = [session("c")];
+    const next = applySessionMeta(
+      mergeSessionsWithColors(prev, incoming),
+      lookup({ a: { color: "#EF5350" } }),
+    );
+    expect(next[0]!.color).toBe("#EF5350");
+    // Positional assignment still flows for everyone without an override.
+    expect(next[1]!.color).toBe(colorForIndex(1));
+    expect(next[2]!.color).toBe(colorForIndex(2));
+  });
+
+  it("keeps a session hidden across a merge, so it can't be picked as primary", () => {
+    const next = applySessionMeta(
+      mergeSessionsWithColors([session("a"), session("b")], [session("c")]),
+      lookup({ a: { visible: false } }),
+    );
+    expect(next.map((s) => s.visible)).toEqual([false, true, true]);
+    // App picks the first VISIBLE session as primary on both boot and add.
+    expect(next.find((s) => s.visible)!.id).toBe("b");
+  });
+
+  it("applies a custom label without disturbing the merge's dedup/order", () => {
+    const next = applySessionMeta(
+      mergeSessionsWithColors([session("a"), session("b")], [session("b")]),
+      lookup({ b: { label: "Kaden" } }),
+    );
+    expect(next.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(next[1]!.label).toBe("Kaden");
+    expect(next[1]!.defaultLabel).toBe("b");
   });
 });
 
