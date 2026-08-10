@@ -1,9 +1,12 @@
 import type { Widget } from "../types";
+import { channelListLabel } from "../lib/display-meta";
 import { ValuesTableConfigEditor } from "./config-editor";
 import { ValuesTableRender, type ValuesTableConfig } from "./render";
 
 export const valuesTableWidget: Widget<ValuesTableConfig> = {
   type: "values_table",
+  label: "Values",
+  summarize: (c, ch) => channelListLabel(c.channelIds, ch),
   defaultConfig: {
     channelIds: [],
     showStats: true,

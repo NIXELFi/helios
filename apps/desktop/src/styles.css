@@ -102,6 +102,32 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
 }
 ::-webkit-scrollbar-thumb:hover { background: #FFC627; background-clip: content-box; }
 
+/* Config-panel form language. Widget config editors render mostly-bare native
+   inputs/selects; these scoped rules (on the ConfigPanel's .helios-config
+   root) give every editor one consistent control style without per-editor
+   classes. Slightly higher specificity than single-class Tailwind utilities,
+   so the stragglers normalize to the same look the styled ones already had:
+   dark well, hairline border, gold focus. */
+.helios-config input[type="text"],
+.helios-config input[type="number"],
+.helios-config select {
+  background: #0E0E10;
+  border: 1px solid #2A2C32;
+  border-radius: 2px;
+  padding: 1px 4px;
+  outline: none;
+  /* color + font-size come from Tailwind preflight's `inherit`, so the
+     type-select's gold text and each editor's text sizing survive. */
+}
+.helios-config input[type="text"]:hover,
+.helios-config input[type="number"]:hover,
+.helios-config select:hover { border-color: #3A3D45; }
+.helios-config input[type="text"]:focus,
+.helios-config input[type="number"]:focus,
+.helios-config select:focus { border-color: #FFC627; }
+.helios-config select { cursor: pointer; }
+.helios-config input[type="checkbox"] { accent-color: #FFC627; cursor: pointer; }
+
 /* Shared button language. Use `btn btn-primary` (gold), `btn btn-secondary`
    (outlined), `btn btn-danger` (red), or `btn btn-ghost` (borderless). One place
    to tune the app's buttons; consistent focus ring + transitions baked in. */

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { formatLapTime } from "@helios/lib";
 import type { Lap } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 
 export interface TimeReportConfig {
   /** Show one block per visible session vs only the primary. */
@@ -119,9 +120,10 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#9097A0]">
-        no laps detected — configure detection in the Sessions panel
-      </div>
+      <WidgetEmpty
+        title="No laps detected"
+        hint="Configure lap detection in the Sessions panel"
+      />
     );
   }
 

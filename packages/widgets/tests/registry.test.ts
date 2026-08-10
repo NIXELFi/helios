@@ -4,6 +4,7 @@ import type { Widget } from "../src/types";
 
 const dummy = (type: string): Widget<{}> => ({
   type,
+  label: type,
   defaultConfig: {},
   ConfigEditor: () => null,
   Render: () => null,

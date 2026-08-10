@@ -5,6 +5,8 @@ import type { LapRef, LapSelection } from "@helios/lib";
 import { perSampleLapDistance, speedToMs } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { findSpeed } from "../lib/speed";
+import { displayMeta, formatValue } from "../lib/display-meta";
+import { AXIS_FONT, MONO_9PX } from "../lib/fonts";
 import { datumNearPx } from "./hit-test";
 import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
@@ -60,10 +62,10 @@ function formatDistance(v: number): string {
   return `${v.toFixed(0)} m`;
 }
 
-/** Format a channel value for the cursor readout. Auto-decimals: large magnitudes
- *  show as integers (RPM, ms, mm), mid-range shows 1 decimal, small values 2 decimals.
- *  This is intentionally heuristic — when ChannelMeta-driven decimals land at the
- *  widget-render boundary we'll pull from there instead. */
+/** Fallback cursor-readout format for channels the registry doesn't know
+ *  (foreign workspace, host without metadata). Auto-decimals: large magnitudes
+ *  show as integers (RPM, ms, mm), mid-range 1 decimal, small values 2.
+ *  Registry-known channels use their ChannelMeta decimals instead. */
 function formatReadout(v: number | null): string {
   if (v === null || !Number.isFinite(v)) return "—";
   const abs = Math.abs(v);
@@ -240,7 +242,7 @@ function drawDatums(u: uPlot, datums: number[]): void {
       label.style.padding = "0 3px";
       label.style.background = "#FF6B4A";
       label.style.color = "#0E0E10";
-      label.style.font = "9px ui-monospace, monospace";
+      label.style.font = MONO_9PX;
       label.style.borderRadius = "2px";
       label.style.whiteSpace = "nowrap";
       el.appendChild(label);
@@ -253,7 +255,7 @@ function drawDatums(u: uPlot, datums: number[]): void {
 }
 
 export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
-  const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter, onConfigChange } = props;
+  const { config, slice, cursorEmitter, timeRange, overlays, viewState, lapSelection, lapSelectionEmitter, onConfigChange, availableChannels } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   // Track how many uPlot instances we've constructed in this widget lifetime.
@@ -342,6 +344,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     const axes: Axis[] = [{
       stroke: "#5A5F66",
       grid: { stroke: "#23252B" },
+      font: AXIS_FONT,
       values: (_u, splits) => splits.map(xMode === "distance" ? formatDistance : formatElapsed),
       size: 30,
     }];
@@ -374,6 +377,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             side,
             stroke: ch.color,
             grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
+            font: AXIS_FONT,
             size: 60,
           });
         }
@@ -834,20 +838,30 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
               )}
               {config.channels.map((c, i) => {
                 const v = c.id ? (readoutsRef.current.get(`${session.id}|${c.id}`) ?? null) : null;
+                // Registry-known channels get their display name, decimals and
+                // units; unknown ids (foreign workspace, absent host metadata)
+                // keep the raw id + the auto-decimals heuristic.
+                const known = c.id !== "" && (availableChannels?.some((a) => a.id === c.id) ?? false);
+                const meta = known ? displayMeta(c.id, availableChannels) : null;
                 return (
                   <div
                     key={i}
                     className="flex items-center gap-1 text-[9px] text-[#D8DCE2] bg-[#0E0E10cc] px-1 py-px rounded-sm"
                   >
                     <span className="inline-block w-1.5 h-1.5" style={{ background: c.color }} />
-                    <span className="font-mono-num leading-none">{c.id || "—"}</span>
+                    <span className="font-mono-num leading-none" title={c.id || undefined}>
+                      {meta?.label ?? (c.id || "—")}
+                    </span>
                     <span
                       className="font-mono-num leading-none text-[#FFC627] tabular-nums text-right"
                       style={{ minWidth: "2.4em" }}
                       data-testid={`strip-chart-readout-value-${session.id}-${c.id}`}
                     >
-                      {formatReadout(v)}
+                      {meta ? formatValue(v, meta.decimals) : formatReadout(v)}
                     </span>
+                    {meta?.units ? (
+                      <span className="font-mono-num leading-none text-[#5A5F66]">{meta.units}</span>
+                    ) : null}
                   </div>
                 );
               })}

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ZoomRange } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 import { sampleAt } from "../lib/sample-at";
 import {
   channelStats, deltaTint, displayMeta, formatDelta, formatValue,
@@ -87,9 +88,10 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
 
   if (config.channelIds.length === 0) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#9097A0] text-center px-4">
-        no channels configured — add channels via the config panel
-      </div>
+      <WidgetEmpty
+        title="No channels configured"
+        hint="Add channels in the config panel"
+      />
     );
   }
 

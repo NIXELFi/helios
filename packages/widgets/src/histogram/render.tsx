@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
+import { channelLabel } from "../lib/display-meta";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
 export interface HistogramConfig {
@@ -16,7 +17,7 @@ export interface HistogramConfig {
 }
 
 export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
-  const { config, slice, cursorEmitter: _c, timeRange, overlays, viewState } = props;
+  const { config, slice, cursorEmitter: _c, timeRange, overlays, viewState, availableChannels } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawRef = useRef<() => void>(() => {});
   drawRef.current = draw;  // updated every render so async callbacks see the latest closure
@@ -247,7 +248,7 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     const totalN = datasets.reduce((s, d) => s + (d.iEnd - d.iStart), 0);
     ctx.fillText(
-      `${config.channelId} · ${datasets.length} session${datasets.length === 1 ? "" : "s"} · n=${totalN}`,
+      `${channelLabel(config.channelId, availableChannels)} · ${datasets.length} session${datasets.length === 1 ? "" : "s"} · n=${totalN}`,
       4, 4,
     );
     ctx.textAlign = "left"; ctx.textBaseline = "bottom";

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatLapTime } from "@helios/lib";
 import type { Lap, LapRef } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 
 export interface LapEntry { number: number; time_ms: number; }
 export interface LapPanelConfig {
@@ -47,9 +48,10 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
 
   if (!hasAnyDetected) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
-        no laps detected — open a session and configure lap detection from the Sessions panel
-      </div>
+      <WidgetEmpty
+        title="No laps detected"
+        hint="Open a session and configure lap detection in the Sessions panel"
+      />
     );
   }
 
@@ -144,11 +146,7 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
  *  `config.laps` empty and rely on the session's LapSet. */
 function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
   if (laps.length === 0) {
-    return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4">
-        no laps configured
-      </div>
-    );
+    return <WidgetEmpty title="No laps configured" />;
   }
   const best = laps.reduce((a, b) => (b.time_ms < a.time_ms ? b : a)).time_ms;
   return (

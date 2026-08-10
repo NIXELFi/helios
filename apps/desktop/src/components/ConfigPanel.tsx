@@ -4,28 +4,6 @@ import type { ChannelMeta } from "@helios/store";
 import type { TileSpec, WidgetType } from "../workspaces/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-const WIDGET_LABELS: Record<WidgetType, string> = {
-  strip_chart:     "Strip Chart",
-  numeric_readout: "Numeric Readout",
-  round_gauge:     "Round Gauge",
-  bar_gauge:       "Bar Gauge",
-  engine_bar:      "Engine Bar",
-  gps_track:       "GPS Track",
-  lap_panel:       "Lap Panel",
-  alarm_panel:     "Alarm Panel",
-  tire_grid:       "Tire Grid",
-  histogram:       "Histogram",
-  xy_plot:         "XY Plot",
-  steering_wheel:  "Steering Wheel",
-  channel_report:  "Channel Report",
-  time_report:     "Time Report",
-  zone_stats:      "Zone Stats",
-  fft:             "FFT / Spectrum",
-  lap_delta:       "Lap Δt",
-  sector_table:    "Sector Splits",
-  values_table:    "Values",
-};
-
 const WIDGET_TYPES = BUILTIN_WIDGET_TYPES as readonly WidgetType[];
 
 interface Props {
@@ -55,7 +33,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
   }
 
   return (
-    <aside className="w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
+    <aside className="helios-config w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
       <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
         <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Configure</span>
         <div className="flex items-center gap-1">
@@ -97,15 +75,28 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             if (nextType === tile.widgetType) return;
             setPendingType(nextType);
           }}
-          className="flex-1 bg-[#16171B] text-[#FFC627] border border-[#2A2C32] rounded-sm px-1 py-0.5 text-xs focus:outline-none focus:border-[#FFC627] cursor-pointer"
+          className="flex-1 text-[#FFC627] text-xs py-0.5"
         >
           {WIDGET_TYPES.map((t) => (
-            <option key={t} value={t}>{WIDGET_LABELS[t]}</option>
+            <option key={t} value={t}>{widgetRegistry.get(t).label}</option>
           ))}
         </select>
       </div>
-      <div className="px-2 py-1 border-b border-[#2A2C32] text-[10px] uppercase tracking-wider text-[#9097A0]">
-        id · <span className="text-[#D8DCE2] normal-case">{tile.id}</span>
+      <div className="px-2 py-1.5 border-b border-[#2A2C32] flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-shrink-0">title</span>
+        <input
+          type="text"
+          value={tile.title ?? ""}
+          placeholder={widget.label}
+          // Raw while typing (trimming per keystroke would eat mid-word
+          // spaces); normalized on blur. Empty clears back to the label.
+          onChange={(e) => onChange({ ...tile, title: e.target.value || undefined })}
+          onBlur={() => {
+            const t = (tile.title ?? "").trim();
+            onChange({ ...tile, title: t || undefined });
+          }}
+          className="flex-1 min-w-0 text-xs py-0.5"
+        />
       </div>
       <div className="flex-1 overflow-y-auto">
         <Editor
@@ -122,8 +113,8 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           title="Change widget type?"
           body={
             <>
-              Convert <span className="font-semibold">{tile.id}</span> from{" "}
-              {WIDGET_LABELS[tile.widgetType]} to {WIDGET_LABELS[pendingType]}? Position and size
+              Convert <span className="font-semibold">{tile.title ?? widget.label}</span> from{" "}
+              {widget.label} to {widgetRegistry.get(pendingType).label}? Position and size
               are kept; the widget's config resets to its default channels and ranges.
             </>
           }

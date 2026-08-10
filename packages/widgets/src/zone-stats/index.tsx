@@ -1,9 +1,12 @@
 import type { Widget } from "../types";
+import { channelListLabel } from "../lib/display-meta";
 import { ZoneStatsConfigEditor } from "./config-editor";
 import { ZoneStatsRender, type ZoneStatsConfig } from "./render";
 
 export const zoneStatsWidget: Widget<ZoneStatsConfig> = {
   type: "zone_stats",
+  label: "Zone Stats",
+  summarize: (c, ch) => channelListLabel(c.channelIds, ch),
   defaultConfig: { channelIds: ["engine.rpm", "engine.tps"] },
   ConfigEditor: ZoneStatsConfigEditor,
   Render: ZoneStatsRender,

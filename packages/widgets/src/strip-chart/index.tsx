@@ -1,9 +1,12 @@
 import type { Widget } from "../types";
+import { channelListLabel } from "../lib/display-meta";
 import { StripChartConfigEditor } from "./config-editor";
 import { StripChartRender, type StripChartConfig } from "./render";
 
 export const stripChartWidget: Widget<StripChartConfig> = {
   type: "strip_chart",
+  label: "Strip Chart",
+  summarize: (c, ch) => channelListLabel(c.channels.map((x) => x.id), ch),
   defaultConfig: { channels: [], yMin: 0, yMax: 100 },
   ConfigEditor: StripChartConfigEditor,
   Render: StripChartRender,

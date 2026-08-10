@@ -4,7 +4,9 @@ import "uplot/dist/uPlot.min.css";
 import type { LapSelection } from "@helios/lib";
 import { perSampleLapDistance } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 import { findSpeed } from "../lib/speed";
+import { AXIS_FONT } from "../lib/fonts";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { computeLapDelta, formatDelta, type DeltaResult } from "./compute";
 
@@ -119,12 +121,14 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
       {
         stroke: "#5A5F66",
         grid: { stroke: "#23252B" },
+        font: AXIS_FONT,
         values: (_u, splits) => splits.map(formatDistance),
         size: 30,
       },
       {
         stroke: "#5A5F66",
         grid: { stroke: "#23252B" },
+        font: AXIS_FONT,
         scale: "y",
         size: 45,
         values: (_u, splits) => splits.map((v) => (Number.isFinite(v) ? `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}` : "")),
@@ -289,8 +293,8 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
         </span>
       </div>
       {message && (
-        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4 pointer-events-none">
-          {message}
+        <div className="absolute inset-0 pointer-events-none">
+          <WidgetEmpty transparent title={message} />
         </div>
       )}
     </div>

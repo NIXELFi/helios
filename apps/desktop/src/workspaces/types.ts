@@ -15,6 +15,10 @@ export type WidgetType =
 
 export interface TileSpec {
   id: string;
+  /** User-set display title shown in the tile header. Absent = the widget's
+   *  registry label. Optional + additive so persisted v5 blobs (which never
+   *  carried it) load unchanged. */
+  title?: string;
   widgetType: WidgetType;
   config:
     | StripChartConfig | NumericReadoutConfig | RoundGaugeConfig | BarGaugeConfig

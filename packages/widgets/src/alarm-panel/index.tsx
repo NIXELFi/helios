@@ -4,6 +4,7 @@ import { AlarmPanelRender, type AlarmPanelConfig } from "./render";
 
 export const alarmPanelWidget: Widget<AlarmPanelConfig> = {
   type: "alarm_panel",
+  label: "Alarm Panel",
   defaultConfig: { alarms: [] },
   ConfigEditor: AlarmPanelConfigEditor,
   Render: AlarmPanelRender,

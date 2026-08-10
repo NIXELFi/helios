@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { perSampleLapDistance } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 import { findSpeed } from "../lib/speed";
 import { buildSectorTable, formatLapTime, type LapInput } from "./compute";
 
@@ -54,9 +55,10 @@ export function SectorTableRender(props: WidgetRenderProps<SectorTableConfig>) {
 
   if (!table) {
     return (
-      <div className="w-full h-full bg-helios-panel flex items-center justify-center text-[11px] text-helios-dim text-center px-4">
-        Sector splits need lap detection + a speed channel on the primary session.
-      </div>
+      <WidgetEmpty
+        title="No sector data"
+        hint="Sector splits need lap detection and a speed channel on the primary session"
+      />
     );
   }
 

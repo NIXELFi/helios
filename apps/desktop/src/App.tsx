@@ -8,7 +8,7 @@ import type { LapDetectionConfig, LapSelection } from "@helios/lib";
 import { loadAllSessions, type LoadProgress } from "./lib/load-sample";
 import { shortcut } from "./lib/platform";
 import type { LoadedSession } from "./lib/session";
-import { SESSION_PALETTE, colorForIndex } from "./lib/session";
+import { SESSION_PALETTE, applySessionMeta, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
 import { saveChannelOverrides } from "./lib/channel-overrides";
 import { classifyPaths, loadUserSession } from "./lib/load-user-session";
@@ -21,6 +21,7 @@ import {
   loadRecentSessions, addRecentSession, removeRecentSession,
   loadViewStateFor, saveViewStateFor,
   loadLapSelection, saveLapSelection,
+  saveSessionMeta, removeSessionMeta,
 } from "./lib/app-state";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
 import { stepToLapBoundary } from "./lib/lap-step";
@@ -224,7 +225,13 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             removeRecentSession(path);
           }
         }
-        const loaded = [...bundled, ...userLoaded];
+        // Apply the user's saved per-session overrides (custom label, pinned
+        // color, last visibility) BEFORE anything downstream reads the list.
+        // Order matters: `firstVisible` below picks the primary, and a session
+        // the user hid must not be chosen — so the meta pass has to run first.
+        // Without this, every recent came back visible on each boot and
+        // flooded every multi-session widget.
+        const loaded = applySessionMeta([...bundled, ...userLoaded]);
         setLoadProgress({
           label: "Computing math channels",
           loaded: bundled.length + recents.length,
@@ -234,6 +241,12 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         // bad bundled math formula or a malformed saved lap selection must NOT
         // strand the user on a blank loading screen. We commit whatever
         // sessions loaded no matter what, then attempt the niceties.
+        // The `?? loaded[0]` fallback is load-bearing now that saved meta can
+        // hide sessions: if the user hid EVERY session, there is no visible
+        // candidate, and leaving primaryId null would strand boot on the
+        // LoadingScreen forever (the render guard below waits on it). Falling
+        // back to a hidden session matches what toggleVisibility already
+        // leaves behind when the last visible session is switched off.
         const firstVisible = loaded.find((s) => s.visible) ?? loaded[0];
         // ZERO-SESSION boot strand: if NOTHING loaded (loadAllSessions resolved
         // empty AND no recent user sessions survived), don't leave the
@@ -793,20 +806,52 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     ? sessions.find((s) => s.id === lapConfigSessionId) ?? null
     : null;
 
+  /** Toggle one session's visibility and PERSIST the choice, so hidden
+   *  sessions stay hidden across restarts instead of every recent flooding
+   *  back on the next boot.
+   *  IMPURE-UPDATERS: this used to compute the next list, call setPrimaryId
+   *  and prune the lap selection all INSIDE a `setSessions(prev => …)`
+   *  updater, which StrictMode can double-invoke. Everything now runs off the
+   *  latest committed state via sessionsRef, leaving a pure
+   *  `setSessions(() => next)` — the same shape as handleRemoveSession. */
   function toggleVisibility(id: string) {
-    setSessions((prev) => {
-      if (!prev) return prev;
-      const next = prev.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s));
-      const stillVisible = next.find((s) => s.id === primaryId)?.visible;
-      if (!stillVisible) {
-        const fallback = next.find((s) => s.visible);
-        if (fallback) setPrimaryId(fallback.id);
-      }
-      // Drop any lap selection pointing at sessions that just went invisible.
-      const visibleIds = new Set(next.filter((s) => s.visible).map((s) => s.id));
-      lapSelectionEmitter.prune(visibleIds);
-      return next;
-    });
+    const current = sessionsRef.current;
+    if (!current) return;
+    const next = current.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s));
+    const target = next.find((s) => s.id === id);
+    if (!target) return;
+    saveSessionMeta(id, { visible: target.visible });
+    setSessions(() => next);
+    const stillVisible = next.find((s) => s.id === primaryIdRef.current)?.visible;
+    if (!stillVisible) {
+      const fallback = next.find((s) => s.visible);
+      if (fallback) setPrimaryId(fallback.id);
+    }
+    // Drop any lap selection pointing at sessions that just went invisible.
+    const visibleIds = new Set(next.filter((s) => s.visible).map((s) => s.id));
+    lapSelectionEmitter.prune(visibleIds);
+  }
+
+  /** Set (or clear, with `label === null`) a custom label for one session.
+   *  Persist first, then re-run the pure meta pass over the LATEST committed
+   *  list so the new label — or the restored filename-derived one — lands in
+   *  state. applySessionMeta reads `defaultLabel`, which is why clearing can
+   *  recover the original without the caller having to know it. */
+  function handleRenameSession(id: string, label: string | null) {
+    const current = sessionsRef.current;
+    if (!current) return;
+    saveSessionMeta(id, { label: label ?? undefined });
+    setSessions(() => applySessionMeta(current));
+  }
+
+  /** Pin (or clear, with `color === null`) one session's trace color. Clearing
+   *  returns it to the positional palette color, which applySessionMeta
+   *  re-derives from array position — no stored "auto" value to go stale. */
+  function handleRecolorSession(id: string, color: string | null) {
+    const current = sessionsRef.current;
+    if (!current) return;
+    saveSessionMeta(id, { color: color ?? undefined });
+    setSessions(() => applySessionMeta(current));
   }
 
   /** Apply a workspaces update via functional setState, then persist. Using
@@ -1098,9 +1143,17 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
       }
     }
     if (newSessions.length > 0) {
+      // Opening a file IS the intent to see it, so an explicit add clears any
+      // stale `visible: false` the user left on that id weeks ago — and
+      // persists the flip, so what's on screen matches what's stored. Saved
+      // label/color overrides are deliberately NOT touched: re-adding
+      // "Kaden's run" should still come back renamed and red.
+      for (const s of newSessions) saveSessionMeta(s.id, { visible: true });
       // Compute the merged+recolored list from the LATEST committed state via
       // the ref, OUTSIDE the updater, so the setSessions updater stays pure.
-      const merged = mergeSessionsWithColors(sessionsRef.current ?? [], newSessions);
+      // applySessionMeta runs AFTER the merge so a pinned color wins over the
+      // positional one the merge just assigned.
+      const merged = applySessionMeta(mergeSessionsWithColors(sessionsRef.current ?? [], newSessions));
       setSessions(() => merged);
       // Recover from the zero-session boot state: adopt a primary if the
       // current one is gone/never set, and clear the "No sessions could be
@@ -1159,8 +1212,13 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         const validIds = new Set(remaining.map((s) => s.id));
         lapSelectionEmitter.prune(validIds);
         // If this was a user-opened file, take it off the silent re-load list
-        // so removal feels durable across restarts.
+        // so removal feels durable across restarts. Drop the session's saved
+        // label/color/visibility with it — otherwise a removed session's
+        // overrides would linger in the blob forever, and (worse) a much later
+        // re-add would silently resurrect a hidden flag the user has long
+        // forgotten about.
         if (target.sourcePath) removeRecentSession(target.sourcePath);
+        removeSessionMeta(sessionId);
         setConfirmState(null);
       },
     });
@@ -1383,6 +1441,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           onConfigureLaps={(id) => setLapConfigSessionId(id)}
           onAddSession={handleAddSessionDialog}
           onRemoveSession={handleRemoveSession}
+          onRenameSession={handleRenameSession}
+          onRecolorSession={handleRecolorSession}
           lapSelectionEmitter={lapSelectionEmitter}
           lapSelection={lapSelection}
         />

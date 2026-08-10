@@ -25,6 +25,19 @@ export interface ViewStateSnapshot {
   datums?: number[];
 }
 
+/** User-controlled per-session identity: a custom label, a pinned trace color
+ *  and the last visibility choice. Every field is optional and an ABSENT field
+ *  means "no override" — which is not the same as a stored default, so
+ *  clearing an override is a delete, never a write of the auto value.
+ *  Keyed by the stable session id (path-hash for user files, sample id for
+ *  bundled ones), so "Kaden is always red" survives a restart and even a
+ *  remove-then-re-add of the same file. */
+export interface SessionMeta {
+  label?: string;
+  color?: string;
+  visible?: boolean;
+}
+
 /** Saved Main/Ref/Overlays selection — the global lap-comparison state. The
  *  emitter at runtime is a class; this is its serializable shape. */
 export interface SavedLapRef {
@@ -52,10 +65,16 @@ interface AppStateV1 {
    *  explicit pick — boot logic falls back to auto-picking the primary's
    *  best/2nd-best laps in that case. */
   lapSelection: SavedLapSelection | null;
+  /** Per-(session id) user overrides — label / color / visibility. Bounded by
+   *  the same insertion-order LRU as viewStateBySession so a user who cycles
+   *  through hundreds of files doesn't grow the blob without limit. Blobs
+   *  written before this field existed simply omit it; readers default to {}. */
+  sessionMeta: Record<string, SessionMeta>;
 }
 
 const RECENT_LIMIT = 32;
 const VIEW_STATE_LIMIT = 64;
+const SESSION_META_LIMIT = 64;
 
 function defaultState(): AppStateV1 {
   return {
@@ -64,6 +83,7 @@ function defaultState(): AppStateV1 {
     recentSessions: [],
     viewStateBySession: {},
     lapSelection: null,
+    sessionMeta: {},
   };
 }
 
@@ -84,6 +104,7 @@ function loadState(): AppStateV1 {
         ? parsed.viewStateBySession
         : {},
       lapSelection: isLapSelection(parsed.lapSelection) ? parsed.lapSelection : null,
+      sessionMeta: isSessionMetaMap(parsed.sessionMeta) ? parsed.sessionMeta : {},
     };
   } catch {
     return defaultState();
@@ -124,6 +145,22 @@ function isViewStateMap(x: unknown): x is Record<string, ViewStateSnapshot> {
     if (snap.datums !== undefined && (!Array.isArray(snap.datums) || snap.datums.some((d) => typeof d !== "number"))) {
       return false;
     }
+  }
+  return true;
+}
+
+/** Shape guard for the sessionMeta map. A single malformed entry rejects the
+ *  whole map (same all-or-nothing stance as isViewStateMap) — these are
+ *  cosmetic preferences, so falling back to "no overrides" is strictly safer
+ *  than half-applying a corrupt blob. */
+function isSessionMetaMap(x: unknown): x is Record<string, SessionMeta> {
+  if (!x || typeof x !== "object") return false;
+  for (const v of Object.values(x as Record<string, unknown>)) {
+    if (!v || typeof v !== "object") return false;
+    const m = v as Partial<SessionMeta>;
+    if (m.label !== undefined && typeof m.label !== "string") return false;
+    if (m.color !== undefined && typeof m.color !== "string") return false;
+    if (m.visible !== undefined && typeof m.visible !== "boolean") return false;
   }
   return true;
 }
@@ -191,6 +228,46 @@ export function saveViewStateFor(sessionId: string, snap: ViewStateSnapshot): vo
     const drop = keys.slice(0, keys.length - VIEW_STATE_LIMIT);
     for (const k of drop) delete s.viewStateBySession[k];
   }
+  saveState(s);
+}
+
+export function loadSessionMeta(sessionId: string): SessionMeta | null {
+  return loadState().sessionMeta[sessionId] ?? null;
+}
+
+/** Merge `patch` into the saved overrides for one session. A field explicitly
+ *  set to `undefined` CLEARS that override (the UI's "auto" / cleared-rename
+ *  path) — spreading would otherwise leave the key present-but-undefined, so
+ *  cleared fields are stripped before the write. An entry left with no fields
+ *  at all is dropped entirely rather than persisted as `{}`, which keeps the
+ *  blob from accumulating empty records for sessions the user has since reset.
+ *  Capped LRU at SESSION_META_LIMIT via the same delete + re-insert trick as
+ *  saveViewStateFor: the freshly-touched id moves to the end of the object's
+ *  insertion order and the oldest entries fall off the front on overflow. */
+export function saveSessionMeta(sessionId: string, patch: SessionMeta): void {
+  const s = loadState();
+  const merged: SessionMeta = { ...(s.sessionMeta[sessionId] ?? {}), ...patch };
+  for (const k of Object.keys(merged) as (keyof SessionMeta)[]) {
+    if (merged[k] === undefined) delete merged[k];
+  }
+  delete s.sessionMeta[sessionId];
+  if (Object.keys(merged).length > 0) {
+    s.sessionMeta[sessionId] = merged;
+    const keys = Object.keys(s.sessionMeta);
+    if (keys.length > SESSION_META_LIMIT) {
+      const drop = keys.slice(0, keys.length - SESSION_META_LIMIT);
+      for (const k of drop) delete s.sessionMeta[k];
+    }
+  }
+  saveState(s);
+}
+
+/** Forget every override for one session. Mirrors removeRecentSession — both
+ *  are called when the user removes a session so removal feels durable. */
+export function removeSessionMeta(sessionId: string): void {
+  const s = loadState();
+  if (!(sessionId in s.sessionMeta)) return;
+  delete s.sessionMeta[sessionId];
   saveState(s);
 }
 

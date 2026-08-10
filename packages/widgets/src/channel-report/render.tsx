@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { formatLapTime } from "@helios/lib";
 import type { Lap } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
+import { WidgetEmpty } from "../lib/widget-empty";
 
 export type ChannelReportStat =
   | "avg" | "min" | "max" | "abs_max" | "start" | "end" | "change" | "stddev";
@@ -120,9 +121,10 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
 
   if (blocks.length === 0 || blocks.every((b) => b.rows.length === 0)) {
     return (
-      <div className="w-full h-full bg-[#16171B] flex items-center justify-center text-xs text-[#9097A0]">
-        no laps detected — configure detection in the Sessions panel
-      </div>
+      <WidgetEmpty
+        title="No laps detected"
+        hint="Configure lap detection in the Sessions panel"
+      />
     );
   }
 
