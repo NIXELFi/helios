@@ -33,7 +33,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
   }
 
   return (
-    <aside className="w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
+    <aside className="helios-config w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
       <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
         <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Configure</span>
         <div className="flex items-center gap-1">
@@ -75,7 +75,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             if (nextType === tile.widgetType) return;
             setPendingType(nextType);
           }}
-          className="flex-1 bg-[#16171B] text-[#FFC627] border border-[#2A2C32] rounded-sm px-1 py-0.5 text-xs focus:outline-none focus:border-[#FFC627] cursor-pointer"
+          className="flex-1 text-[#FFC627] text-xs py-0.5"
         >
           {WIDGET_TYPES.map((t) => (
             <option key={t} value={t}>{widgetRegistry.get(t).label}</option>
@@ -95,7 +95,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             const t = (tile.title ?? "").trim();
             onChange({ ...tile, title: t || undefined });
           }}
-          className="flex-1 min-w-0 bg-[#16171B] text-[#D8DCE2] border border-[#2A2C32] rounded-sm px-1 py-0.5 text-xs focus:outline-none focus:border-[#FFC627]"
+          className="flex-1 min-w-0 text-xs py-0.5"
         />
       </div>
       <div className="flex-1 overflow-y-auto">
