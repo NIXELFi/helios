@@ -27,7 +27,10 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
-## [5.3.3] - 2026-08-10
+### Added
+- **The Games tab has a casino now.** The lobby heading splits into ARCADE / CASINO — click to switch rooms (Helios remembers which one you were in). First table in the back room: **Blackjack**. House chips only: sit down with 200, bet with 5/25/100 chips (or shove all-in), hit/stand/double against a dealer who stands on all 17s, blackjack pays 3:2. Bust the bankroll and the session is over; cash out to bank your result. Your leaderboard score is an **Elo rating**, not chips — every hand is a rated game against a fixed-1000 house (win 1, push ½, loss 0), so climbing above 1000 means beating the house edge, and the further you climb the harder every point gets. The table shows your live rating, per-hand swing, and W-L-P record; keyboard players get H/S/D and Enter. The casino keeps **its own standings** — its boards and subteam points live entirely in the casino room, so the arcade Grand Prix is exactly what it was before.
+
+
 
 ### Added
 - **A Values panel — the readout table i2 users live in.** New "Values" widget: pick your channels and see each one's value under the cursor for every visible session, side by side, with a Δ-vs-primary column when you're overlaying runs and min/max/avg over whatever you've zoomed to. Channel names, units, and decimal places come from the channel registry, so `engine.rpm` reads "RPM" with no decimals instead of "10234.00".

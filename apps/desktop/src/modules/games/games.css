@@ -150,6 +150,33 @@
 }
 .games-flicker { animation: games-flicker 0.9s linear forwards; }
 
+/* --------------------------------------------------------------- casino */
+/* Playing card: fixed size, warm-white face (colors set inline per suit),
+ * fanned overlap like a held hand. */
+.games-card {
+  width: 44px;
+  height: 64px;
+  flex: none;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.8);
+}
+.games-card + .games-card {
+  margin-left: -14px;
+}
+/* Face-down card: maroon pinstripe back with a gold keyline — house livery. */
+.games-card-back {
+  background:
+    repeating-linear-gradient(-45deg, #5c1330 0 5px, #3f0d21 5px 10px);
+  border-color: var(--g-gold-dim);
+}
+/* Deal-in: drop from the shoe with a slight settle. */
+@keyframes games-deal {
+  from { opacity: 0; transform: translateY(-12px) rotate(-4deg); }
+  to   { opacity: 1; transform: translateY(0) rotate(0deg); }
+}
+.games-deal { animation: games-deal 0.22s ease-out; }
+
 /* Overlay backdrop fade + card drop-in. */
 @keyframes games-overlay-in {
   from { opacity: 0; }
@@ -176,4 +203,5 @@
   }
   .games-pulse { animation: none; }
   .games-pop { animation: none; }
+  .games-deal { animation: none; }
 }
