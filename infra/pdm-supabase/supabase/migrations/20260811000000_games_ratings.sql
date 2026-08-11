@@ -204,8 +204,11 @@ grant select on games.rating_sessions to authenticated;
 revoke insert, update, delete on games.ratings from authenticated;
 revoke insert, update, delete on games.rating_sessions from authenticated;
 revoke all on games.ratings, games.rating_sessions from anon;
-grant execute on function games.apply_rated_session(text, integer, numeric, text) to authenticated;
-revoke execute on function games.apply_rated_session(text, integer, numeric, text) from anon;
+-- Postgres grants EXECUTE to PUBLIC on every new function, and anon inherits
+-- it through PUBLIC — so revoking "from anon" alone is a no-op that merely
+-- looks like hardening. Revoke PUBLIC first, then grant the one role back.
+revoke execute on function games.apply_rated_session(text, integer, numeric, text) from public;
+grant  execute on function games.apply_rated_session(text, integer, numeric, text) to authenticated;
 
 -- =============================================================================
 -- BOARDS
