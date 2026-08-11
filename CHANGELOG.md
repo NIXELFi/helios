@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.4.1] - 2026-08-11
+
 ### Changed
 
 - **Blackjack is now rated on how you play, not on whether you won.** The old
