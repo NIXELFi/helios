@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   createShoe,
   dealerShouldHit,
-  eloUpdate,
   handValue,
   isBlackjack,
-  outcomeEloScore,
+  netUnits,
   settle,
   DECKS,
-  ELO_K,
-  ELO_START,
   type Card,
   type Rank,
 } from "../games/blackjack/logic";
@@ -126,33 +123,37 @@ describe("settle", () => {
   });
 });
 
-describe("elo scoring", () => {
-  it("maps outcomes to match scores (natural is just a win)", () => {
-    expect(outcomeEloScore("win")).toBe(1);
-    expect(outcomeEloScore("blackjack")).toBe(1);
-    expect(outcomeEloScore("push")).toBe(0.5);
-    expect(outcomeEloScore("lose")).toBe(0);
+// netUnits converts a settled hand into the same currency the EV engine
+// speaks — multiples of the INITIAL bet — which is what makes "how the hand
+// went vs. what the line was worth" a subtractable quantity.
+describe("netUnits", () => {
+  it("reads a flat win as +1 and a loss as -1", () => {
+    expect(netUnits(50, 25, 25)).toBe(1);
+    expect(netUnits(0, 25, 25)).toBe(-1);
   });
-  it("is symmetric at the house rating: ±K/2, push is a wash", () => {
-    expect(eloUpdate(ELO_START, 1)).toBeCloseTo(ELO_START + ELO_K / 2);
-    expect(eloUpdate(ELO_START, 0)).toBeCloseTo(ELO_START - ELO_K / 2);
-    expect(eloUpdate(ELO_START, 0.5)).toBeCloseTo(ELO_START);
+  it("reads a push as zero, doubled or not", () => {
+    expect(netUnits(25, 25, 25)).toBe(0);
+    expect(netUnits(50, 50, 25)).toBe(0);
   });
-  it("makes points harder to gain the further above the house you climb", () => {
-    const winAt1000 = eloUpdate(1000, 1) - 1000;
-    const winAt1200 = eloUpdate(1200, 1) - 1200;
-    expect(winAt1200).toBeLessThan(winAt1000);
-    // ...and a loss up there costs more than it would at par.
-    const lossAt1000 = 1000 - eloUpdate(1000, 0);
-    const lossAt1200 = 1200 - eloUpdate(1200, 0);
-    expect(lossAt1200).toBeGreaterThan(lossAt1000);
-    // A push above par drifts you back toward the house, never away from it.
-    expect(eloUpdate(1200, 0.5)).toBeLessThan(1200);
+  it("reads a natural as +1.5 off the initial bet", () => {
+    const { payout } = settle(hand("A", "K"), hand("10", "8"), 10);
+    expect(netUnits(payout, 10, 10)).toBe(1.5);
   });
-  it("expected value of one rated hand at par is zero", () => {
-    // p·gain + (1−p)·loss with p = 0.5 at equal ratings.
-    const gain = eloUpdate(1000, 1) - 1000;
-    const loss = eloUpdate(1000, 0) - 1000;
-    expect(gain + loss).toBeCloseTo(0);
+  it("reads a doubled hand as ±2 — twice the stake, same denominator", () => {
+    expect(netUnits(100, 50, 25)).toBe(2); // won a double of 25 → 50 staked
+    expect(netUnits(0, 50, 25)).toBe(-2);
+  });
+  it("agrees with settle across every outcome", () => {
+    const bet = 20;
+    const cases: [Card[], Card[], number][] = [
+      [hand("10", "9"), hand("10", "8"), 1],   // win
+      [hand("10", "8"), hand("9", "9"), 0],    // push
+      [hand("10", "6", "10"), hand("10", "6"), -1], // bust
+      [hand("A", "K"), hand("10", "8"), 1.5],  // natural
+    ];
+    for (const [player, dealer, expected] of cases) {
+      const { payout } = settle(player, dealer, bet);
+      expect(netUnits(payout, bet, bet)).toBe(expected);
+    }
   });
 });

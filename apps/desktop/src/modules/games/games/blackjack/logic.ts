@@ -42,7 +42,9 @@ export function createShoe(rng: Rng): Card[] {
   return shoe;
 }
 
-function rankValue(rank: Rank): number {
+/** Pip value with aces as 1 — the +10 promotion is `handValue`'s job (and
+ *  `ev.ts`'s, which shares this mapping). */
+export function rankValue(rank: Rank): number {
   if (rank === "A") return 1;
   if (rank === "K" || rank === "Q" || rank === "J") return 10;
   return Number(rank);
@@ -97,32 +99,28 @@ export function settle(
   return { outcome: "push", payout: bet };
 }
 
-// ---------------------------------------------------------------- Elo score
-// The leaderboard score for blackjack is an Elo rating, not chips: the
-// session starts at ELO_START and every settled hand is a rated game against
-// a house frozen at ELO_HOUSE (win 1, push ½, loss 0 — stake size doesn't
-// enter). Chips are the survival resource that decides how long you get to
-// keep playing; the rating is how well you played. Because the house never
-// moves, climbing above 1000 means sustaining better-than-even results
-// against the house edge, and the expected-score curve makes every further
-// point harder to hold — which is what keeps one lucky streak from running
-// away with the all-time board.
-
-export const ELO_START = 1000;
-export const ELO_HOUSE = 1000;
-export const ELO_K = 32;
-
-/** Match score of a settled hand for the rating update. A natural is just a
- *  win — the 3:2 bonus is chips' business, not the rating's. */
-export function outcomeEloScore(outcome: Outcome): 0 | 0.5 | 1 {
-  if (outcome === "lose") return 0;
-  if (outcome === "push") return 0.5;
-  return 1;
+/** Net chips a settled hand returns, relative to the stake — i.e. what the
+ *  bankroll actually moved by. In units of the initial bet this is the number
+ *  the EV engine predicts, which is what makes "fortune" measurable:
+ *  −2 (lost double) … 0 (push) … +1.5 (natural) … +2 (won double). */
+export function netUnits(payout: number, bet: number, initialBet: number): number {
+  return (payout - bet) / initialBet;
 }
 
-/** One Elo update against the fixed-rating house. Returns the new (float)
- *  rating; display/submission rounding is the caller's business. */
-export function eloUpdate(rating: number, score: 0 | 0.5 | 1): number {
-  const expected = 1 / (1 + Math.pow(10, (ELO_HOUSE - rating) / 400));
-  return rating + ELO_K * (score - expected);
+// ----------------------------------------------------------------- Hi-Lo count
+// The shoe has a memory, and the rating prices it (see rating.ts): raising your
+// bet is only rewarded when the cards left actually favour you. Standard Hi-Lo
+// — low cards gone is good for the player, tens and aces gone is bad.
+
+export function hiLoValue(card: Card): -1 | 0 | 1 {
+  const v = rankValue(card.rank);
+  if (card.rank === "A" || v === 10) return -1;
+  return v <= 6 ? 1 : 0;
+}
+
+/** Running count normalised to decks remaining. Guarded against the tail of
+ *  the shoe, where a half-deck denominator would explode the count. */
+export function trueCount(running: number, cardsRemaining: number): number {
+  const decks = Math.max(1, cardsRemaining / 52);
+  return running / decks;
 }

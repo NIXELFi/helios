@@ -1,25 +1,73 @@
 import { useEffect, useRef, useState } from "react";
-import type { GameProps } from "../types";
+import type { GameProps, RatingSnapshot } from "../types";
 import {
   createShoe,
   dealerShouldHit,
-  eloUpdate,
   handValue,
+  hiLoValue,
   isBlackjack,
-  outcomeEloScore,
+  netUnits,
   settle,
+  trueCount,
   DECKS,
-  ELO_START,
   RESHUFFLE_BELOW,
   type Card,
   type Outcome,
 } from "./logic";
+import { actionEVs, bestAction, optimalEV, referenceEV, type Action } from "./ev";
+import {
+  applySession,
+  displayRating,
+  handAdvantage,
+  lineEV,
+  RATING_START,
+} from "./rating";
 
 const START_BANKROLL = 200;
 const CHIP_VALUES = [5, 25, 100] as const;
+/** The table minimum — the unit every stake is measured in for the rating. */
+const TABLE_MIN = CHIP_VALUES[0];
 const DEALER_DRAW_MS = 450;
 
 type Phase = "bet" | "player" | "dealer" | "settled";
+
+/** Everything the rating needs to know about the hand in progress. Captured at
+ *  the deal so a doubled stake or a drawn card can't retroactively change what
+ *  the spot was worth. */
+interface LiveHand {
+  /** The dealt two cards — the reference player's EV is measured from these. */
+  opening: Card[];
+  /** V* of the opening spot, given the options actually affordable. */
+  evOptimal: number;
+  /** EV surrendered to misplays so far, in initial-bet units. */
+  evLost: number;
+  /** The worst decision made this hand, for the coaching line. */
+  worst: { chosen: Action; best: Action; cost: number } | null;
+  /** Stake before any double, and the bankroll it was risked from. */
+  initialBet: number;
+  bankrollAtBet: number;
+  /** True count when the bet went down — the only information a bet can
+   *  honestly be based on. */
+  trueCountAtBet: number;
+}
+
+/** Running totals for the session, all of them rating inputs or player-facing
+ *  stats. Advantage components are kept apart so the UI can show WHERE the
+ *  rating came from. */
+interface Session {
+  hands: number;
+  play: number;
+  bet: number;
+  risk: number;
+  total: number;
+  /** Realised result minus what the line was worth — pure luck, deliberately
+   *  kept OUT of the rating and shown to the player as its own number. */
+  fortune: number;
+  /** EV thrown away across the whole session. */
+  evLost: number;
+  /** Hands played without a single misplay. */
+  clean: number;
+}
 
 interface Table {
   phase: Phase;
@@ -32,15 +80,20 @@ interface Table {
   dealer: Card[];
   holeShown: boolean;
   outcome: Outcome | null;
-  elo: number; // float; rounded only for display/submission
-  delta: number | null; // last hand's rating change
+  live: LiveHand | null;
+  session: Session;
   wins: number;
   losses: number;
   pushes: number;
   cardsLeft: number;
 }
 
+const EMPTY_SESSION: Session = {
+  hands: 0, play: 0, bet: 0, risk: 0, total: 0, fortune: 0, evLost: 0, clean: 0,
+};
+
 const SUIT_CHAR = { S: "♠", H: "♥", D: "♦", C: "♣" } as const;
+const ACTION_LABEL: Record<Action, string> = { hit: "HIT", stand: "STAND", double: "DOUBLE" };
 
 function PlayingCard({ card, hidden }: { card: Card; hidden?: boolean }) {
   if (hidden) return <div className="games-card games-deal games-card-back" />;
@@ -73,12 +126,33 @@ function totalLabel(cards: Card[]): string {
   return soft ? `soft ${total}` : String(total);
 }
 
-export function BlackjackGame({ onGameOver, paused }: GameProps) {
+function signed(n: number, digits = 2): string {
+  const magnitude = Math.abs(n).toFixed(digits);
+  // A value too small to show mustn't render as "−0.00" — a bet a shade over
+  // the safe fraction costs a rounding error, and printing it as a loss reads
+  // like the game is docking you for nothing.
+  const sign = Number(magnitude) === 0 ? "" : n > 0 ? "+" : "−";
+  return `${sign}${magnitude}`;
+}
+
+export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
+  // Rated cabinets are mounted only once the carried rating has resolved, but
+  // default defensively so the game is still playable if that ever changes.
+  const carried: RatingSnapshot = rating ?? { rating: RATING_START, handsRated: 0 };
+
   // Shoe is draw-only mutable state the UI never maps over — a ref keeps the
   // multi-draw actions (deal = four pops) simple; cardsLeft mirrors it for
   // display.
   const shoeRef = useRef<Card[] | null>(null);
   if (!shoeRef.current) shoeRef.current = createShoe(Math.random);
+  // Hi-Lo running count over every card the player has SEEN. Reset with the
+  // shoe. Cards are counted explicitly at each reveal point rather than inside
+  // draw(), because the hole card is drawn long before it is visible.
+  const runningRef = useRef(0);
+  // The hole card is the one card whose reveal isn't tied to a draw. Several
+  // paths flip it face-up, so it's counted once per hand at settle time —
+  // always before the next deal reads the count — and this guards the double.
+  const holeCountedRef = useRef(false);
 
   const [table, setTable] = useState<Table>(() => ({
     phase: "bet",
@@ -89,8 +163,8 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
     dealer: [],
     holeShown: false,
     outcome: null,
-    elo: ELO_START,
-    delta: null,
+    live: null,
+    session: EMPTY_SESSION,
     wins: 0,
     losses: 0,
     pushes: 0,
@@ -108,11 +182,74 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
     return shoeRef.current!.pop()!; // non-empty by the line above
   }
 
+  /** Fold newly visible cards into the running count. */
+  function see(...cards: Card[]) {
+    for (const c of cards) runningRef.current += hiLoValue(c);
+  }
+
+  /** Charge the player for a decision that wasn't the best one available. */
+  function grade(t: Table, action: Action): Table {
+    const live = t.live;
+    if (!live) return t;
+    const canDouble = t.player.length === 2 && t.bankroll >= t.bet;
+    const evs = actionEVs(t.player, t.dealer[0]!, canDouble);
+    const best = bestAction(t.player, t.dealer[0]!, canDouble);
+    const chosen = action === "double" ? evs.double : evs[action];
+    // A double the player can't afford isn't on the menu; actionEVs returns
+    // null for it and there is nothing to grade.
+    if (chosen === null || chosen === undefined) return t;
+    const cost = Math.max(0, best.ev - chosen);
+    return {
+      ...t,
+      live: {
+        ...live,
+        evLost: live.evLost + cost,
+        worst:
+          cost > 1e-9 && (!live.worst || cost > live.worst.cost)
+            ? { chosen: action, best: best.action, cost }
+            : live.worst,
+      },
+    };
+  }
+
   /** Settle the hand into a new table state (rating, record, bankroll). */
   function settled(t: Table, player: Card[], dealer: Card[]): Table {
     const { outcome, payout } = settle(player, dealer, t.bet);
-    const s = outcomeEloScore(outcome);
-    const elo = eloUpdate(t.elo, s);
+    // The hole card is face-up by now on every path into here, and this always
+    // runs before the next deal samples the count. `t.holeShown` is NOT a
+    // usable guard — stand/double/hit-to-21 all flip it before settling — so
+    // the once-per-hand ref is what keeps the count honest.
+    if (!holeCountedRef.current && dealer[1]) {
+      see(dealer[1]);
+      holeCountedRef.current = true;
+    }
+
+    const live = t.live;
+    let session = t.session;
+    if (live) {
+      // The reference player is measured from the SAME opening cards, which is
+      // what cancels deal luck: a gift hand is a gift to both of us.
+      const evReference = referenceEV(live.opening, dealer[0]!);
+      const evLine = lineEV(live.evOptimal, live.evLost);
+      const adv = handAdvantage({
+        stakeUnits: live.initialBet / TABLE_MIN,
+        bankrollFraction: live.bankrollAtBet > 0 ? live.initialBet / live.bankrollAtBet : 1,
+        evLine,
+        evReference,
+        trueCountAtBet: live.trueCountAtBet,
+      });
+      session = {
+        hands: session.hands + 1,
+        play: session.play + adv.play,
+        bet: session.bet + adv.bet,
+        risk: session.risk + adv.risk,
+        total: session.total + adv.total,
+        fortune: session.fortune + (netUnits(payout, t.bet, live.initialBet) - evLine),
+        evLost: session.evLost + live.evLost,
+        clean: session.clean + (live.evLost <= 1e-9 ? 1 : 0),
+      };
+    }
+
     return {
       ...t,
       phase: "settled",
@@ -120,11 +257,10 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
       dealer,
       holeShown: true,
       outcome,
-      elo,
-      delta: elo - t.elo,
-      wins: t.wins + (s === 1 ? 1 : 0),
-      losses: t.losses + (s === 0 ? 1 : 0),
-      pushes: t.pushes + (s === 0.5 ? 1 : 0),
+      session,
+      wins: t.wins + (outcome === "win" || outcome === "blackjack" ? 1 : 0),
+      losses: t.losses + (outcome === "lose" ? 1 : 0),
+      pushes: t.pushes + (outcome === "push" ? 1 : 0),
       bankroll: t.bankroll + payout,
       cardsLeft: shoeRef.current!.length,
     };
@@ -133,29 +269,62 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
   function deal() {
     const t = tableRef.current;
     if (ended.current || t.phase !== "bet" || t.bet <= 0 || t.bet > t.bankroll) return;
-    if (shoeRef.current!.length < RESHUFFLE_BELOW) shoeRef.current = createShoe(Math.random);
+    if (shoeRef.current!.length < RESHUFFLE_BELOW) {
+      shoeRef.current = createShoe(Math.random);
+      runningRef.current = 0; // a fresh shoe knows nothing
+    }
+    // Sampled BEFORE the deal: this is the whole information set the bet could
+    // legitimately have been based on.
+    const tcAtBet = trueCount(runningRef.current, shoeRef.current!.length);
+
     const player = [draw(), draw()];
     const dealer = [draw(), draw()];
+    see(player[0]!, player[1]!, dealer[0]!); // the hole stays uncounted until it flips
+    holeCountedRef.current = false;
+
+    const bankrollAfter = t.bankroll - t.bet;
+    const live: LiveHand = {
+      opening: player,
+      evOptimal: optimalEV(player, dealer[0]!, bankrollAfter >= t.bet),
+      evLost: 0,
+      worst: null,
+      initialBet: t.bet,
+      bankrollAtBet: t.bankroll,
+      trueCountAtBet: tcAtBet,
+    };
     const dealt: Table = {
       ...t,
       phase: "player",
-      bankroll: t.bankroll - t.bet,
+      bankroll: bankrollAfter,
       baseBet: t.bet,
       player,
       dealer,
       holeShown: false,
       outcome: null,
-      delta: null,
+      live,
       cardsLeft: shoeRef.current!.length,
     };
-    // Naturals settle on the spot — no double into a dealer blackjack.
-    setTable(isBlackjack(player) || isBlackjack(dealer) ? settled(dealt, player, dealer) : dealt);
+    // Naturals settle on the spot — no double into a dealer blackjack. The
+    // player never got a decision, so the hand must carry ZERO play margin:
+    // pinning the line to exactly what the reference would have scored from
+    // the same spot does that. It matters most when the DEALER has the
+    // natural — without this the player would bank the margin of a hand they
+    // were never allowed to play. The stake still answers for itself through
+    // the bet and risk terms.
+    if (isBlackjack(player) || isBlackjack(dealer)) {
+      const flat = { ...dealt, live: { ...live, evOptimal: referenceEV(player, dealer[0]!) } };
+      setTable(settled(flat, player, dealer));
+      return;
+    }
+    setTable(dealt);
   }
 
   function hit() {
-    const t = tableRef.current;
-    if (ended.current || t.phase !== "player") return;
+    const t0 = tableRef.current;
+    if (ended.current || t0.phase !== "player") return;
+    const t = grade(t0, "hit");
     const player = [...t.player, draw()];
+    see(player[player.length - 1]!);
     const total = handValue(player).total;
     if (total > 21) {
       setTable(settled(t, player, t.dealer)); // dealer just shows the hole on a bust
@@ -167,16 +336,19 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
   }
 
   function stand() {
-    const t = tableRef.current;
-    if (ended.current || t.phase !== "player") return;
+    const t0 = tableRef.current;
+    if (ended.current || t0.phase !== "player") return;
+    const t = grade(t0, "stand");
     setTable({ ...t, phase: "dealer", holeShown: true });
   }
 
   function doubleDown() {
-    const t = tableRef.current;
-    if (ended.current || t.phase !== "player" || t.player.length !== 2 || t.bankroll < t.bet) return;
+    const t0 = tableRef.current;
+    if (ended.current || t0.phase !== "player" || t0.player.length !== 2 || t0.bankroll < t0.bet) return;
+    const t = grade(t0, "double");
     const doubled: Table = { ...t, bankroll: t.bankroll - t.bet, bet: t.bet * 2 };
     const player = [...t.player, draw()];
+    see(player[player.length - 1]!);
     setTable(
       handValue(player).total > 21
         ? settled(doubled, player, t.dealer)
@@ -195,6 +367,7 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
       dealer: [],
       holeShown: false,
       outcome: null,
+      live: null,
     });
   }
 
@@ -202,7 +375,16 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
     const t = tableRef.current;
     if (ended.current || (t.phase !== "bet" && t.phase !== "settled")) return;
     ended.current = true;
-    onGameOver(Math.max(0, Math.round(t.elo)));
+    const applied = applySession({
+      rating: carried.rating,
+      handsRated: carried.handsRated,
+      hands: t.session.hands,
+      totalAdvantage: t.session.total,
+    });
+    onGameOver(Math.max(0, Math.round(applied.rating)), {
+      hands: t.session.hands,
+      totalAdvantage: t.session.total,
+    });
   }
 
   function addChip(v: number) {
@@ -220,7 +402,9 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
       const t = tableRef.current;
       if (t.phase !== "dealer") return;
       if (dealerShouldHit(t.dealer)) {
-        setTable({ ...t, dealer: [...t.dealer, draw()], cardsLeft: shoeRef.current!.length });
+        const card = draw();
+        see(card);
+        setTable({ ...t, dealer: [...t.dealer, card], cardsLeft: shoeRef.current!.length });
       } else {
         setTable(settled(t, t.player, t.dealer));
       }
@@ -248,8 +432,19 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused]);
 
-  const { phase, bankroll, bet, player, dealer, holeShown, outcome, elo, delta } = table;
+  const { phase, bankroll, bet, player, dealer, holeShown, outcome, session, live } = table;
   const broke = phase === "settled" && bankroll <= 0;
+
+  // What cashing out right now would do to the carried rating. Shown live so
+  // the ramp is visible — and so it's obvious that leaving after three lucky
+  // hands buys almost nothing.
+  const projected = applySession({
+    rating: carried.rating,
+    handsRated: carried.handsRated,
+    hands: session.hands,
+    totalAdvantage: session.total,
+  });
+  const perHand = session.hands > 0 ? session.total / session.hands : 0;
 
   const outcomeLine =
     outcome === "blackjack" ? { text: "BLACKJACK — PAYS 3:2", cls: "text-asu-gold" }
@@ -266,14 +461,19 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
   return (
     <div className="games-crt">
       <div className="flex w-[400px] flex-col gap-3 p-1">
-        {/* Rating rail — the actual score of this game */}
+        {/* Rating rail — the carried number, and where cashing out now lands it */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-2">
-            <span className="games-display text-[10px] text-helios-dim">ELO</span>
-            <span className="games-num text-lg font-bold text-asu-gold">{Math.round(elo)}</span>
-            {delta !== null && (
-              <span className={`games-num text-[11px] ${delta >= 0 ? "text-asu-gold" : "text-red-300"}`}>
-                {delta >= 0 ? "+" : ""}{delta.toFixed(1)}
+            <span className="games-display text-[10px] text-helios-dim">RATING</span>
+            <span className="games-num text-lg font-bold text-asu-gold">
+              {Math.round(carried.rating)}
+            </span>
+            {session.hands > 0 && (
+              <span
+                className={`games-num text-[11px] ${projected.delta >= 0 ? "text-asu-gold" : "text-red-300"}`}
+                title="Where cashing out right now would leave your rating"
+              >
+                ▸ {Math.round(projected.rating)} ({signed(projected.delta, 1)})
               </span>
             )}
           </div>
@@ -321,11 +521,58 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
           {phase === "settled" && outcomeLine && <span className={outcomeLine.cls}>{outcomeLine.text}</span>}
         </div>
 
+        {/* Coaching line — the rating is built on decisions, so say which one
+            cost you and what the chart wanted instead. Reserved height. */}
+        <div className="min-h-[13px] text-center text-[9px] tracking-wide">
+          {phase === "settled" && live?.worst ? (
+            <span className="text-red-300/90">
+              {ACTION_LABEL[live.worst.chosen]} cost {live.worst.cost.toFixed(2)} EV — chart says{" "}
+              <span className="font-bold">{ACTION_LABEL[live.worst.best]}</span>
+            </span>
+          ) : phase === "settled" && session.hands > 0 ? (
+            <span className="text-helios-dim/70">played by the book</span>
+          ) : null}
+        </div>
+
         {/* Money rail */}
         <div className="games-num flex items-center justify-between text-[10px] text-helios-dim">
           <span>BANK <span className="font-bold text-helios-text">{bankroll}</span></span>
           <span>BET <span className="font-bold text-asu-gold">{bet}</span></span>
           <span>SHOE <span className="text-helios-text">{table.cardsLeft}</span></span>
+        </div>
+
+        {/* Where the rating is coming from. PLAY is your decisions, BET is
+            whether raising was justified by the shoe, RISK is bankroll
+            discipline. Fortune sits outside the rating on purpose. */}
+        <div className="rounded-sm border border-helios-line/70 bg-helios-panel/40 px-2 py-1.5">
+          <div className="games-num flex items-center justify-between text-[9px]">
+            <span className="text-helios-dim">
+              PLAY <span className={session.play >= 0 ? "text-asu-gold" : "text-red-300"}>{signed(session.play)}</span>
+            </span>
+            <span className="text-helios-dim">
+              BET <span className={session.bet >= 0 ? "text-asu-gold" : "text-red-300"}>{signed(session.bet)}</span>
+            </span>
+            <span className="text-helios-dim">
+              RISK <span className={session.risk >= 0 ? "text-helios-text" : "text-red-300"}>{signed(session.risk)}</span>
+            </span>
+            <span
+              className="text-helios-dim"
+              title="How the cards fell versus what your play was worth. Deliberately not part of your rating."
+            >
+              LUCK <span className="text-helios-text">{signed(session.fortune, 1)}</span>
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[9px] text-helios-dim/80">
+            <span>
+              {session.hands} hand{session.hands === 1 ? "" : "s"}
+              {session.hands > 0 && ` · ${session.clean}/${session.hands} by the book`}
+            </span>
+            {session.hands > 0 && (
+              <span className="games-num" title="The rating this session's play would settle at">
+                PLAYING LIKE <span className="text-asu-gold">{Math.round(displayRating(perHand))}</span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Actions */}
@@ -355,6 +602,7 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
                 disabled={paused || bet === bankroll}
                 onClick={() => setTable({ ...tableRef.current, bet: bankroll })}
                 className={lineBtn}
+                title="Staking the stack is priced as the risk it is"
               >
                 ALL-IN
               </button>
@@ -408,8 +656,11 @@ export function BlackjackGame({ onGameOver, paused }: GameProps) {
 
         {/* Cash-out escape hatch while betting; house rules footnote */}
         <div className="flex items-center justify-between">
-          <span className="text-[9px] text-helios-dim/80">
-            Dealer stands on 17 · BJ pays 3:2 · score is your Elo vs the house
+          <span
+            className="text-[9px] text-helios-dim/80"
+            title="Your rating is scored on the expected value of your decisions and your bet sizing — never on whether the hand won. Play the chart to reach 1400; go higher only by raising when the shoe is rich."
+          >
+            Dealer stands on 17 · BJ pays 3:2 · rated on decisions, not luck
           </span>
           {phase === "bet" && (
             <button

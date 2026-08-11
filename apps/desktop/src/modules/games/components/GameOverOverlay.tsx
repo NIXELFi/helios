@@ -5,6 +5,11 @@ export type SubmitStatus = "submitting" | "submitted" | "error";
 interface Props {
   score: number;
   status: SubmitStatus;
+  /** A rated game carries a rating, not a score — which changes the caption,
+   *  the confirmation copy, and whether a session delta is shown. */
+  rated?: boolean;
+  /** Rated games only: how far this session moved the rating. */
+  delta?: number;
   onRetrySubmit: () => void;
   onRestart: () => void;
   onBack: () => void;
@@ -42,7 +47,9 @@ function useCountUp(target: number): number {
   return value;
 }
 
-export function GameOverOverlay({ score, status, onRetrySubmit, onRestart, onBack }: Props) {
+export function GameOverOverlay({
+  score, status, rated, delta, onRetrySubmit, onRestart, onBack,
+}: Props) {
   const shown = useCountUp(score);
 
   return (
@@ -59,20 +66,35 @@ export function GameOverOverlay({ score, status, onRetrySubmit, onRestart, onBac
 
           <div className="flex flex-col gap-0.5">
             <div className="games-display text-[10px] tracking-[0.2em] text-helios-dim">
-              FINAL SCORE
+              {rated ? "RATING" : "FINAL SCORE"}
             </div>
             <div className="games-num text-5xl font-bold leading-none text-helios-text">
               {shown}
             </div>
+            {/* Reserved height so the buttons don't shift once the server
+                answers with the applied delta. */}
+            {delta !== undefined && (
+              <div
+                className={
+                  "games-num text-sm font-bold leading-tight " +
+                  (delta >= 0 ? "text-asu-gold" : "text-red-300")
+                }
+              >
+                {delta >= 0 ? "+" : "−"}
+                {Math.abs(delta).toFixed(1)} this session
+              </div>
+            )}
           </div>
 
           <div className="min-h-[16px] text-xs">
             {status === "submitting" && (
-              <span className="games-pulse text-helios-dim">Submitting score…</span>
+              <span className="games-pulse text-helios-dim">
+                {rated ? "Updating your rating…" : "Submitting score…"}
+              </span>
             )}
             {status === "submitted" && (
               <span className="games-num text-[10px] uppercase tracking-wider text-asu-gold">
-                Score submitted ✓
+                {rated ? "Rating updated ✓" : "Score submitted ✓"}
               </span>
             )}
             {status === "error" && (

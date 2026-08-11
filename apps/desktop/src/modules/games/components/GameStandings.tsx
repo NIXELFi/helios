@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import type { GameId } from "../api";
-import { categoryOf } from "../registry";
 import {
+  boardCaption,
   EmptyState,
   ErrorState,
   PlayerRow,
@@ -109,7 +109,7 @@ export function GameStandings({ client, gameId, refreshToken, children }: Props)
         ) : isTeams ? (
           <>
             <div className="games-display mb-1 text-center text-[9px] tracking-[0.2em] text-helios-dim">
-              {categoryOf(gameId) === "casino" ? "CASINO" : "ARCADE"} · SUM OF BESTS
+              {boardCaption(tab, gameId)}
             </div>
             {!loading && subteams?.length === 0 ? (
               <EmptyState />
