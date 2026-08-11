@@ -36,5 +36,5 @@ export const GAMES: GameDef[] = [
   { id: "breakout", title: "Breakout", blurb: "Clear the wall, level up, speed up.", icon: IconBallTennis, category: "arcade", component: BreakoutGame },
   { id: "flappy", title: "Flappy", blurb: "One button. Endless pipes.", icon: IconFeather, category: "arcade", component: FlappyGame },
   { id: "2048", title: "2048", blurb: "Merge tiles. Chase the big one.", icon: IconGridDots, category: "arcade", component: Twenty48Game },
-  { id: "blackjack", title: "Blackjack", blurb: "Beat the dealer. Score is your Elo.", icon: IconCards, category: "casino", component: BlackjackGame },
+  { id: "blackjack", title: "Blackjack", blurb: "Play the chart. Size your bets. Hold your rating.", icon: IconCards, category: "casino", component: BlackjackGame },
 ];

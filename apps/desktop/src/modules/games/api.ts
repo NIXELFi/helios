@@ -6,12 +6,33 @@ import type { SupabaseClient } from "@helios/auth";
 
 export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack";
 
+/** Games scored by a PERSISTENT rating rather than a high score. These read
+ *  and write games.ratings instead of games.scores: their board shows the
+ *  number a player is currently holding, so it can go down, and quitting on a
+ *  hot streak banks nothing. */
+const RATED_GAMES: ReadonlySet<GameId> = new Set<GameId>(["blackjack"]);
+
+export function isRated(gameId: GameId): boolean {
+  return RATED_GAMES.has(gameId);
+}
+
 export interface LeaderboardEntry {
   userId: string;
   displayName: string;
   subteam: string | null;
   best: number;
   rank: number;
+}
+
+/** A player's carried rating for a rated game. */
+export interface Rating {
+  rating: number;
+  handsRated: number;
+}
+
+/** What the server made of a submitted session. */
+export interface AppliedSession extends Rating {
+  delta: number;
 }
 
 export interface SubteamRanking {
@@ -55,6 +76,63 @@ export async function submitScore(
   if (res.error) throw new Error(`submit score: ${res.error.message}`);
 }
 
+// ------------------------------------------------------------ rated games
+// The client never computes the stored rating. It reports what it measured
+// about the session — hands played and the advantage they were worth — and
+// games.apply_rated_session does the arithmetic under a row lock. That keeps
+// the read-modify-write atomic across windows and keeps the ladder honest.
+
+/** The rating this player is carrying, or a fresh 1000 if they've never
+ *  played. Called before a rated cabinet mounts. */
+export async function fetchRating(
+  client: SupabaseClient,
+  gameId: GameId,
+): Promise<Rating> {
+  const res = await client
+    .schema("games")
+    .from("ratings")
+    .select("rating,hands_rated")
+    .eq("game_id", gameId)
+    .maybeSingle();
+  if (res.error) throw new Error(`fetch rating: ${res.error.message}`);
+  const row = res.data as { rating: number; hands_rated: number } | null;
+  // No row yet is the normal first-play case, not an error.
+  return row
+    ? { rating: Number(row.rating), handsRated: Number(row.hands_rated) }
+    : { rating: 1000, handsRated: 0 };
+}
+
+/** Fold a finished session into the carried rating. `nonce` makes this
+ *  exactly-once: replaying it returns the original result rather than
+ *  applying the session twice. */
+export async function submitRatedSession(
+  client: SupabaseClient,
+  gameId: GameId,
+  session: { hands: number; totalAdvantage: number },
+  nonce: string,
+): Promise<AppliedSession> {
+  if (!Number.isFinite(session.totalAdvantage) || !Number.isInteger(session.hands)) {
+    throw new Error(`invalid session: ${JSON.stringify(session)}`);
+  }
+  const res = await client.schema("games").rpc("apply_rated_session", {
+    p_game_id: gameId,
+    p_hands: session.hands,
+    p_advantage: session.totalAdvantage,
+    p_nonce: nonce,
+  });
+  if (res.error) throw new Error(`submit session: ${res.error.message}`);
+  // RETURNS TABLE arrives as a one-row array.
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
+    | { new_rating: number; applied_delta: number; total_hands: number }
+    | undefined;
+  if (!row) throw new Error("submit session: no result");
+  return {
+    rating: Number(row.new_rating),
+    delta: Number(row.applied_delta),
+    handsRated: Number(row.total_hands),
+  };
+}
+
 interface BoardRow {
   user_id: string;
   display_name: string | null;
@@ -83,7 +161,7 @@ function toEntries(rows: BoardRow[]): LeaderboardEntry[] {
 
 async function fetchBoard(
   client: SupabaseClient,
-  view: "leaderboard_alltime" | "leaderboard_weekly",
+  view: string,
   gameId: GameId,
 ): Promise<LeaderboardEntry[]> {
   const rows = unwrap<BoardRow[]>(
@@ -99,11 +177,16 @@ async function fetchBoard(
   return toEntries(rows);
 }
 
+/** All-time. For a rated game this is the rating each player is holding right
+ *  now — not their best ever, which is the whole point of a rating. */
 export const fetchAllTime = (client: SupabaseClient, gameId: GameId) =>
-  fetchBoard(client, "leaderboard_alltime", gameId);
+  fetchBoard(client, isRated(gameId) ? "leaderboard_ratings" : "leaderboard_alltime", gameId);
 
+/** Weekly. "Best this week" is meaningless for a number you carry, so a rated
+ *  game's weekly board is how far you MOVED it this week — a race that resets,
+ *  and one a newcomer can win. Values can be negative. */
 export const fetchWeekly = (client: SupabaseClient, gameId: GameId) =>
-  fetchBoard(client, "leaderboard_weekly", gameId);
+  fetchBoard(client, isRated(gameId) ? "leaderboard_ratings_weekly" : "leaderboard_weekly", gameId);
 
 // Grand Prix subteam scoring. Raw scores aren't comparable across games — a 2048
 // best runs into the thousands while a Flappy best is in the tens — so summing
@@ -118,18 +201,35 @@ export const fetchWeekly = (client: SupabaseClient, gameId: GameId) =>
 // never scores points on the arcade board or vice versa.
 const PLACEMENT_POINTS = [10, 8, 6, 5, 4, 3, 2, 1] as const;
 
+interface SubteamRow {
+  subteam: string;
+  game_id: GameId;
+  subtotal: number;
+}
+
 export async function fetchSubteams(
   client: SupabaseClient,
   gameIds: readonly GameId[],
 ): Promise<SubteamRanking[]> {
-  const rows = unwrap<{ subteam: string; game_id: GameId; subtotal: number }[]>(
-    await client
-      .schema("games")
-      .from("leaderboard_subteams")
-      .select("subteam,game_id,subtotal")
-      .limit(200),
-    "subteam ranking",
-  );
+  // Score games and rated games keep separate subteam views, so a room fetches
+  // whichever it actually needs (both, once a room mixes the two). Rated
+  // subtotals count how far members have climbed ABOVE the 1000 everyone
+  // starts at — summing raw ratings would just rank subteams by headcount.
+  const wantScores = gameIds.some((g) => !isRated(g));
+  const wantRatings = gameIds.some((g) => isRated(g));
+  const read = (view: string) =>
+    client.schema("games").from(view).select("subteam,game_id,subtotal").limit(200);
+  const [scoreRows, ratingRows] = await Promise.all([
+    wantScores
+      ? read("leaderboard_subteams").then((r) => unwrap<SubteamRow[]>(r, "subteam ranking"))
+      : Promise.resolve([] as SubteamRow[]),
+    wantRatings
+      ? read("leaderboard_ratings_subteams").then((r) =>
+          unwrap<SubteamRow[]>(r, "rated subteam ranking"),
+        )
+      : Promise.resolve([] as SubteamRow[]),
+  ]);
+  const rows = [...scoreRows, ...ratingRows];
   // Group each in-room game's subteam subtotals so we can rank within the game.
   const games = new Map<GameId, { subteam: string; subtotal: number }[]>();
   for (const r of rows) {

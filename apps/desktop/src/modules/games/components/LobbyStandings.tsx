@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import type { GameId } from "../api";
-import { categoryOf } from "../registry";
 import {
+  boardCaption,
   EmptyState,
   ErrorState,
   GameChips,
@@ -69,9 +69,7 @@ export function LobbyStandings({ client, game, onGameChange, refreshToken }: Pro
       <div className="flex min-h-[34px] items-center justify-between gap-2 px-3 pt-2">
         <GameChips value={game} onSelect={onGameChange} muted={isTeams} />
         <span className="games-display shrink-0 text-[9px] tracking-[0.18em] text-helios-dim">
-          {isTeams
-            ? `${categoryOf(game) === "casino" ? "CASINO" : "ARCADE"} · SUM OF BESTS`
-            : "TOP 10"}
+          {boardCaption(tab, game)}
         </span>
       </div>
 

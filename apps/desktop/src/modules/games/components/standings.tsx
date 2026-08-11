@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  fetchAllTime, fetchSubteams, fetchWeekly,
+  fetchAllTime, fetchSubteams, fetchWeekly, isRated,
   type GameId, type LeaderboardEntry, type SubteamRanking,
 } from "../api";
 import { GAMES, categoryOf, gamesInCategory } from "../registry";
@@ -155,6 +155,24 @@ export function useLeaderboardData(
     error,
     retry: () => setRetryToken((n) => n + 1),
   };
+}
+
+/** What a board is actually showing. A rated game's columns mean something
+ *  different from a high-score game's — all-time is the number you're holding
+ *  rather than your best ever, weekly is movement rather than a peak, and the
+ *  subteam total counts climb above the 1000 everyone starts at — so say so
+ *  instead of letting players assume the old meaning. */
+export function boardCaption(tab: Tab, gameId: GameId): string {
+  const room = categoryOf(gameId) === "casino" ? "CASINO" : "ARCADE";
+  if (tab === "subteams") {
+    // A room can mix rated and scored games; describe what's being summed.
+    const games = gamesInCategory(categoryOf(gameId));
+    if (games.every((g) => isRated(g.id))) return `${room} · CLIMB ABOVE 1000`;
+    if (games.some((g) => isRated(g.id))) return `${room} · BESTS + CLIMB`;
+    return `${room} · SUM OF BESTS`;
+  }
+  if (!isRated(gameId)) return tab === "weekly" ? "TOP 10 · THIS WEEK" : "TOP 10";
+  return tab === "weekly" ? "BIGGEST CLIMB THIS WEEK" : "CURRENT RATING";
 }
 
 /** Standard competition ranking ("1224") for an already-total-sorted subteam

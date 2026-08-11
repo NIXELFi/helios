@@ -2,7 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
-import { submitScore, type GameId } from "./api";
+import {
+  fetchRating, isRated, submitRatedSession, submitScore,
+  type GameId, type Rating,
+} from "./api";
+import type { RatedSession } from "./games/types";
 import { GAMES, categoryOf, gamesInCategory, type GameCategory, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
 import { LobbyStandings } from "./components/LobbyStandings";
@@ -28,7 +32,12 @@ export function GamesModule({ paused }: GamesModuleProps) {
   const { client } = useHeliosAuth();
   const [active, setActive] = useState<GameDef | null>(null);
   const [run, setRun] = useState(0); // key bump remounts the game = restart
-  const [over, setOver] = useState<{ score: number; status: SubmitStatus } | null>(null);
+  const [over, setOver] = useState<
+    { score: number; status: SubmitStatus; rated?: boolean; delta?: number } | null
+  >(null);
+  // Rated games continue a carried rating, so it has to be in hand before the
+  // cabinet mounts. `null` means "still loading" for a rated game.
+  const [carried, setCarried] = useState<Rating | null>(null);
   // Idempotency nonce for the current game-over submission: generated once when
   // the game ends, then reused on every retry so a duplicate-insert can never
   // occur on a flaky network.
@@ -78,11 +87,24 @@ export function GamesModule({ paused }: GamesModuleProps) {
   }
 
   function play(game: GameDef) {
+    if (!client) return; // unreachable: the shell auth-gates this module
     submitNonceRef.current = null; // fresh game → fresh submission nonce
     setActive(game);
     setOver(null);
     setRun((n) => n + 1);
     setBoardGame(game.id);
+    if (isRated(game.id)) {
+      setCarried(null); // gate the cabinet until the rating lands
+      void fetchRating(client, game.id)
+        // A failed load must not lock anyone out of the table. The stored
+        // rating is computed server-side from the server's own row, so a wrong
+        // baseline here only misdraws the live projection — it cannot corrupt
+        // what actually gets saved.
+        .catch(() => ({ rating: 1000, handsRated: 0 }))
+        .then(setCarried);
+    } else {
+      setCarried(null);
+    }
     selectSection(game.category); // back-nav lands in the section you played from
     try {
       localStorage.setItem(LAST_GAME_KEY, game.id);
@@ -91,20 +113,34 @@ export function GamesModule({ paused }: GamesModuleProps) {
     }
   }
 
-  async function handleGameOver(score: number) {
+  async function handleGameOver(score: number, session?: RatedSession) {
     if (!active || !client) return;
     // Lazily mint the nonce the first time this game-over fires, then reuse it
     // on every retry so we never insert duplicate rows for the same play.
     if (!submitNonceRef.current) {
       submitNonceRef.current = crypto.randomUUID();
     }
-    setOver({ score, status: "submitting" });
+    const rated = isRated(active.id) && session !== undefined;
+    setOver({ score, status: "submitting", rated });
     try {
-      await submitScore(client, active.id, score, submitNonceRef.current);
-      setOver({ score, status: "submitted" });
+      if (rated) {
+        // The server owns the arithmetic; show what it decided, not what the
+        // client projected, so the two can never appear to disagree.
+        const applied = await submitRatedSession(client, active.id, session, submitNonceRef.current);
+        setCarried({ rating: applied.rating, handsRated: applied.handsRated });
+        setOver({
+          score: Math.round(applied.rating),
+          status: "submitted",
+          rated: true,
+          delta: applied.delta,
+        });
+      } else {
+        await submitScore(client, active.id, score, submitNonceRef.current);
+        setOver({ score, status: "submitted" });
+      }
       setRefreshToken((n) => n + 1);
     } catch {
-      setOver({ score, status: "error" });
+      setOver({ score, status: "error", rated });
     }
   }
 
@@ -113,8 +149,8 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // input-listener effects mid-play.
   const handleGameOverRef = useRef(handleGameOver);
   handleGameOverRef.current = handleGameOver;
-  const stableOnGameOver = useRef((score: number) => {
-    void handleGameOverRef.current(score);
+  const stableOnGameOver = useRef((score: number, session?: RatedSession) => {
+    void handleGameOverRef.current(score, session);
   }).current;
 
   if (!client) return null; // module is auth-gated by the shell; belt-and-braces
@@ -141,11 +177,29 @@ export function GamesModule({ paused }: GamesModuleProps) {
             </div>
             <GameStandings client={client} gameId={active.id} refreshToken={refreshToken}>
               <div className="relative shrink-0 self-center">
-                <ActiveGame key={run} onGameOver={stableOnGameOver} paused={paused} />
+                {isRated(active.id) && !carried ? (
+                  /* A rated cabinet can't open until we know what rating the
+                   * session is continuing from. Sized to the table so the
+                   * layout doesn't jump when it lands. */
+                  <div className="games-crt">
+                    <div className="games-display flex h-[420px] w-[400px] items-center justify-center text-[10px] tracking-[0.2em] text-helios-dim">
+                      <span className="games-pulse">LOADING YOUR RATING…</span>
+                    </div>
+                  </div>
+                ) : (
+                  <ActiveGame
+                    key={run}
+                    onGameOver={stableOnGameOver}
+                    paused={paused}
+                    rating={carried ?? undefined}
+                  />
+                )}
                 {over && (
                   <GameOverOverlay
                     score={over.score}
                     status={over.status}
+                    rated={over.rated}
+                    delta={over.delta}
                     onRetrySubmit={() => void handleGameOver(over.score)}
                     onRestart={() => {
                       submitNonceRef.current = null; // fresh game → fresh nonce

@@ -27,6 +27,35 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Blackjack is now rated on how you play, not on whether you won.** The old
+  score treated every hand as a coin flip against a fixed-1000 house, which
+  made it mathematically unwinnable — under these house rules a flawless
+  basic-strategy player scores about 0.478 per hand against an expectation of
+  0.5, so perfect play drifted down to roughly 985 and could never hold 1000.
+  It also paid you the same for being dealt 20 against a 6 as for grinding out
+  16 against a 10, and rewarded hitting a hard 20 if you got away with it.
+  Your rating is now driven by the expected value of your decisions and your
+  bet sizing, computed exactly, with the cards that actually fell excluded.
+  Every hand shows what it cost you and what the chart wanted instead, and
+  "luck" is reported as its own number so you can see the shoe robbing you
+  without it touching the ladder. The landmarks: play like the house rule
+  (draw to 17, never double) and you sit at 1000; flat-bet the minimum and
+  never misplay a hand and you settle at 1400; above that is earned only by
+  raising your bet when the shoe is genuinely rich, and by not going broke.
+- **Your blackjack rating now carries across sessions.** It is a number you
+  hold, not a high score you beat: the board shows what you are on right now,
+  so it can go down, and a hot three-hand cash-out is worth about a tenth of a
+  full session instead of topping the leaderboard. Sessions are weighted by
+  length and applied server-side, and the rating settles more slowly the more
+  hands you have behind you.
+- Blackjack's weekly board is now "biggest climb this week" rather than a best
+  score, and the casino subteam standings count how far members have climbed
+  above 1000 (so they measure a subteam's play, not its headcount).
+- ALL-IN finally costs something on the scoreboard: staking a large slice of
+  the bankroll is priced as the risk it is, separately from expected value.
+
 ## [5.4.0] - 2026-08-10
 
 ### Added
