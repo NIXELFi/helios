@@ -6,9 +6,11 @@
 // size. The same kind can appear many times in a tab with different config (two
 // breakdowns grouped by different dimensions, several KPI tiles, …).
 //
-// Per-user, localStorage only — like every other PM view setting. A layout
-// shared across all members of a project still needs a project-level shared
-// store (a backend follow-up) and is intentionally out of scope here.
+// The tabs (and their widgets) are SHARED per scope: persisted server-side in
+// pm.dashboard_layouts and editable only with the pm.manage_dashboard
+// capability — see useSharedDashboardLayout.ts. localStorage keeps the
+// last-adopted copy as an offline cache, and the active tab stays per-user
+// (switching tabs never rewrites the shared layout).
 
 import { scopeKey } from "@pm/lib/nav";
 import {
@@ -332,6 +334,16 @@ export function defaultDashboardConfig(isSubteamScope: boolean): DashboardConfig
   return { version: CONFIG_VERSION, tabs, activeTabId: tabs[0]!.id };
 }
 
+// True when a config is structurally identical to the scope's sample defaults
+// (ids are random per build, so they're stripped before comparing). Used to
+// decide whether a layout is worth publishing as the shared one: pristine
+// defaults carry no information — every client renders them on its own.
+export function isDefaultLayout(config: DashboardConfig, isSubteamScope: boolean): boolean {
+  const strip = (tabs: DashboardTab[]) =>
+    tabs.map((t) => ({ name: t.name, widgets: t.widgets.map(({ id: _id, ...rest }) => rest) }));
+  return JSON.stringify(strip(config.tabs)) === JSON.stringify(strip(defaultTabs(isSubteamScope)));
+}
+
 // --- Persistence ------------------------------------------------------------
 
 function storageKey(teamSlug: string | null): string {
@@ -421,6 +433,40 @@ function normalizeConfig(raw: unknown, isSubteamScope: boolean): DashboardConfig
   return { version: CONFIG_VERSION, tabs, activeTabId };
 }
 
+// --- Shared (server-persisted) layout ----------------------------------------
+// What pm.dashboard_layouts stores per scope: the tabs, but NOT activeTabId —
+// which tab a user is looking at is their own business.
+
+export interface SharedDashboardPayload {
+  version: typeof CONFIG_VERSION;
+  tabs: DashboardTab[];
+}
+
+export function sharedDashboardPayload(config: DashboardConfig): SharedDashboardPayload {
+  return { version: CONFIG_VERSION, tabs: config.tabs };
+}
+
+// Validate a raw server payload into tabs, or null when the shape is foreign,
+// a different version, or has no usable tabs (→ caller keeps its local config).
+export function normalizeSharedTabs(raw: unknown): DashboardTab[] | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.version !== CONFIG_VERSION) return null;
+  const tabs = Array.isArray(o.tabs)
+    ? o.tabs.map(normalizeTab).filter((t): t is DashboardTab => t !== null)
+    : [];
+  return tabs.length > 0 ? tabs : null;
+}
+
+// Replace the local tabs with the shared ones, keeping the user's active tab
+// when it still exists in the shared set.
+export function adoptSharedTabs(config: DashboardConfig, tabs: DashboardTab[]): DashboardConfig {
+  const activeTabId = tabs.some((t) => t.id === config.activeTabId)
+    ? config.activeTabId
+    : tabs[0]!.id;
+  return { version: CONFIG_VERSION, tabs, activeTabId };
+}
+
 export function recallDashboardConfig(teamSlug: string | null, isSubteamScope: boolean): DashboardConfig {
   if (typeof window === "undefined") return defaultDashboardConfig(isSubteamScope);
   try {
@@ -437,6 +483,81 @@ export function rememberDashboardConfig(teamSlug: string | null, config: Dashboa
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(storageKey(teamSlug), JSON.stringify(config));
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
+// --- Crash-safe save marker ---------------------------------------------------
+// Set while a shared-layout edit hasn't been confirmed by the server, cleared on
+// a successful save. If the app quits (or the network dies) with the marker up,
+// the next launch knows the localStorage cache MAY be newer than the server row.
+// The marker stores when the edit was made so it can be compared against the
+// server row's updated_at: a row someone else wrote AFTER the pending edit wins
+// (last-write-wins, same as live saves), rather than a week-old offline cache
+// silently reverting the team's layout.
+
+function pendingSaveKey(teamSlug: string | null): string {
+  return `helios:dashboard:pending:${scopeKey(teamSlug)}`;
+}
+
+export function markLayoutSavePending(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(pendingSaveKey(teamSlug), String(Date.now()));
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
+// When the pending edit was made (ms epoch), or null when no marker is set.
+// An unparseable value reads as 0: "very old", so any server write outranks it.
+export function layoutSavePendingSince(teamSlug: string | null): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(pendingSaveKey(teamSlug));
+    if (raw === null) return null;
+    const t = Number(raw);
+    return Number.isFinite(t) ? t : 0;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLayoutSavePending(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(pendingSaveKey(teamSlug));
+  } catch {
+    // ignore
+  }
+}
+
+export function hasLayoutSavePending(teamSlug: string | null): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(pendingSaveKey(teamSlug)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+// --- One-time pre-shared backup ----------------------------------------------
+// The first time a shared layout replaces whatever this machine had locally,
+// keep the old local config under a side key (write-once) so a personal layout
+// built before the shared-layout era is recoverable rather than silently gone.
+
+function preSharedBackupKey(teamSlug: string | null): string {
+  return `helios:dashboard:preshared-backup:${scopeKey(teamSlug)}`;
+}
+
+export function backupPreSharedConfig(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const backup = preSharedBackupKey(teamSlug);
+    if (window.localStorage.getItem(backup) !== null) return; // write-once
+    const current = window.localStorage.getItem(storageKey(teamSlug));
+    if (current !== null) window.localStorage.setItem(backup, current);
   } catch {
     // ignore storage failures (private mode, quota)
   }

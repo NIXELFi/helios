@@ -4,16 +4,25 @@ import {
   activeTab,
   addTab,
   addWidget,
+  adoptSharedTabs,
+  backupPreSharedConfig,
+  clearLayoutSavePending,
   defaultDashboardConfig,
   deleteTab,
+  hasLayoutSavePending,
+  isDefaultLayout,
   kindAvailable,
+  layoutSavePendingSince,
   makeWidget,
+  markLayoutSavePending,
   moveWidget,
+  normalizeSharedTabs,
   recallDashboardConfig,
   rememberDashboardConfig,
   removeWidget,
   renameTab,
   setActiveTab,
+  sharedDashboardPayload,
   updateWidget,
 } from "../dashboardSettings";
 
@@ -190,5 +199,111 @@ describe("makeWidget", () => {
       ids.add(w.id);
     }
     expect(ids.size).toBe(kinds.length);
+  });
+});
+
+describe("shared (server) payload", () => {
+  test("sharedDashboardPayload carries tabs but not activeTabId", () => {
+    const cfg = addTab(defaultDashboardConfig(false), "Extra");
+    const payload = sharedDashboardPayload(cfg);
+    expect(payload.version).toBe(2);
+    expect(payload.tabs).toBe(cfg.tabs);
+    expect("activeTabId" in payload).toBe(false);
+  });
+
+  test("normalizeSharedTabs roundtrips a payload through JSON", () => {
+    const cfg = addTab(defaultDashboardConfig(true), "Pit Wall");
+    const raw = JSON.parse(JSON.stringify(sharedDashboardPayload(cfg))) as unknown;
+    const tabs = normalizeSharedTabs(raw);
+    expect(tabs).not.toBeNull();
+    expect(tabs!.map((t) => t.name)).toEqual(cfg.tabs.map((t) => t.name));
+  });
+
+  test("normalizeSharedTabs rejects foreign versions, non-objects, and empty tabs", () => {
+    expect(normalizeSharedTabs(null)).toBeNull();
+    expect(normalizeSharedTabs("x")).toBeNull();
+    expect(normalizeSharedTabs({ version: 1, tabs: [] })).toBeNull();
+    expect(normalizeSharedTabs({ version: 2, tabs: [] })).toBeNull();
+    expect(normalizeSharedTabs({ version: 2, tabs: "nope" })).toBeNull();
+  });
+
+  test("normalizeSharedTabs drops invalid widgets but keeps the tab", () => {
+    const tabs = normalizeSharedTabs({
+      version: 2,
+      tabs: [{ id: "t1", name: "T", widgets: [{ id: "w1", kind: "bogus" }, { id: "w2", kind: "metric" }] }],
+    });
+    expect(tabs).toHaveLength(1);
+    expect(tabs![0]!.widgets.map((w) => w.id)).toEqual(["w2"]);
+  });
+
+  test("adoptSharedTabs keeps the active tab when it survives, else falls to first", () => {
+    const cfg = defaultDashboardConfig(false);
+    const shared = [cfg.tabs[1]!, cfg.tabs[2]!];
+    const kept = adoptSharedTabs(setActiveTab(cfg, cfg.tabs[1]!.id), shared);
+    expect(kept.activeTabId).toBe(cfg.tabs[1]!.id);
+    const fallen = adoptSharedTabs(setActiveTab(cfg, cfg.tabs[0]!.id), shared);
+    expect(fallen.activeTabId).toBe(shared[0]!.id);
+  });
+});
+
+describe("pending-save marker", () => {
+  test("mark / has / clear roundtrip, scoped per team", () => {
+    expect(hasLayoutSavePending(null)).toBe(false);
+    markLayoutSavePending(null);
+    markLayoutSavePending("aero");
+    expect(hasLayoutSavePending(null)).toBe(true);
+    expect(hasLayoutSavePending("aero")).toBe(true);
+    expect(hasLayoutSavePending("chassis")).toBe(false);
+    clearLayoutSavePending(null);
+    expect(hasLayoutSavePending(null)).toBe(false);
+    expect(hasLayoutSavePending("aero")).toBe(true);
+  });
+
+  test("marker records when the edit was made; garbage reads as very old", () => {
+    expect(layoutSavePendingSince(null)).toBeNull();
+    const before = Date.now();
+    markLayoutSavePending(null);
+    const since = layoutSavePendingSince(null)!;
+    expect(since).toBeGreaterThanOrEqual(before);
+    expect(since).toBeLessThanOrEqual(Date.now());
+    window.localStorage.setItem("helios:dashboard:pending:aero", "garbage");
+    expect(layoutSavePendingSince("aero")).toBe(0);
+  });
+});
+
+describe("isDefaultLayout", () => {
+  test("fresh defaults are default in both scopes (ids ignored)", () => {
+    expect(isDefaultLayout(defaultDashboardConfig(false), false)).toBe(true);
+    expect(isDefaultLayout(defaultDashboardConfig(true), true)).toBe(true);
+    // A recalled (normalized) copy of the defaults still reads as default.
+    rememberDashboardConfig(null, defaultDashboardConfig(false));
+    expect(isDefaultLayout(recallDashboardConfig(null, false), false)).toBe(true);
+  });
+
+  test("any customization makes it non-default", () => {
+    expect(isDefaultLayout(addTab(defaultDashboardConfig(false), "Mine"), false)).toBe(false);
+    expect(isDefaultLayout(addWidget(defaultDashboardConfig(false), "metric"), false)).toBe(false);
+    // Cross-scope defaults don't match each other either.
+    expect(isDefaultLayout(defaultDashboardConfig(true), false)).toBe(false);
+  });
+});
+
+describe("pre-shared backup", () => {
+  test("copies the current cache once and never overwrites the backup", () => {
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Original"));
+    backupPreSharedConfig(null);
+    expect(window.localStorage.getItem("helios:dashboard:preshared-backup:__project__")).toContain("Original");
+
+    // A later call (cache since replaced by a shared layout) must not clobber it.
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Shared Now"));
+    backupPreSharedConfig(null);
+    const backup = window.localStorage.getItem("helios:dashboard:preshared-backup:__project__")!;
+    expect(backup).toContain("Original");
+    expect(backup).not.toContain("Shared Now");
+  });
+
+  test("no cache → no backup written", () => {
+    backupPreSharedConfig("aero");
+    expect(window.localStorage.getItem("helios:dashboard:preshared-backup:aero")).toBeNull();
   });
 });
