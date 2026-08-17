@@ -8,7 +8,7 @@ import { loadSnapshot, saveSnapshot } from "@pm/lib/workspace-snapshot";
 import { SubteamThemeProvider, useSubteamTheme } from "@pm/lib/subteamTheme";
 import { readPersistedActiveProject, usePmStore } from "@pm/lib/pmStore";
 import { PmRouterProvider, usePathname } from "@pm/lib/router";
-import { activeTeamSlug, activeViewSegment, activeWorkspace, recallScopeView } from "@pm/lib/nav";
+import { activeTeamSlug, activeViewSegment, activeWorkspace, recallScopeView, scopeKey } from "@pm/lib/nav";
 import { Sidebar } from "@pm/components/Sidebar";
 import { TaskDetailSheet } from "@pm/components/TaskDetailSheet";
 import { DeadlineReportWindow } from "@pm/components/DeadlineReportWindow";
@@ -85,7 +85,10 @@ function CurrentView() {
 
   switch (view) {
     case "dashboard":
-      return <DashboardViewClient teamSlug={teamSlug} />;
+      // Keyed per scope: the dashboard's shared-layout state (fetch, dirty
+      // tracking, pending saves) must be a fresh instance per scope, not a
+      // prop change — see useSharedDashboardLayout.ts.
+      return <DashboardViewClient key={scopeKey(teamSlug)} teamSlug={teamSlug} />;
     case "board":
       return <BoardViewClient teamSlug={teamSlug} />;
     case "gantt":

@@ -114,8 +114,9 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
 
   // Per-scope layout (tabs of widget instances), SHARED across the team:
   // server-persisted, editable only with pm.manage_dashboard in this scope,
-  // cached in localStorage for offline. This component remounts per scope
-  // (route change), so keying the hook off the scope props is enough.
+  // cached in localStorage for offline. PmModule keys this component per
+  // scope so the hook state is a fresh instance per scope (and the hook also
+  // self-resets if the scope props ever change without a remount).
   const { config, setConfig, canEdit, status, retry } = useSharedDashboardLayout({
     subteamId: currentTeam?.id ?? null,
     teamSlug,

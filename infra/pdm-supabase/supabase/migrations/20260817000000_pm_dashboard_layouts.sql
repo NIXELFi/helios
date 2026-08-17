@@ -22,10 +22,11 @@ create unique index if not exists dashboard_layouts_scope_uniq
 
 alter table pm.dashboard_layouts enable row level security;
 
--- Read: any authenticated member sees the shared layout.
+-- Read: any org member sees the shared layout (org default-deny posture from
+-- 20260714010000 — a role-less account sees nothing, same as dashboard_photos).
 drop policy if exists dashboard_layouts_read on pm.dashboard_layouts;
 create policy dashboard_layouts_read on pm.dashboard_layouts
-  for select to authenticated using (true);
+  for select to authenticated using (pm.is_org_member());
 
 -- Write (insert/update/delete): manage_dashboard in that scope. has_capability
 -- with a NULL subteam_id resolves to org-scoped holders (Executive/Owner) only —

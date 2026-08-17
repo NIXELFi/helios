@@ -5,10 +5,14 @@ import {
   addTab,
   addWidget,
   adoptSharedTabs,
+  backupPreSharedConfig,
+  clearLayoutSavePending,
   defaultDashboardConfig,
   deleteTab,
+  hasLayoutSavePending,
   kindAvailable,
   makeWidget,
+  markLayoutSavePending,
   moveWidget,
   normalizeSharedTabs,
   recallDashboardConfig,
@@ -237,5 +241,39 @@ describe("shared (server) payload", () => {
     expect(kept.activeTabId).toBe(cfg.tabs[1]!.id);
     const fallen = adoptSharedTabs(setActiveTab(cfg, cfg.tabs[0]!.id), shared);
     expect(fallen.activeTabId).toBe(shared[0]!.id);
+  });
+});
+
+describe("pending-save marker", () => {
+  test("mark / has / clear roundtrip, scoped per team", () => {
+    expect(hasLayoutSavePending(null)).toBe(false);
+    markLayoutSavePending(null);
+    markLayoutSavePending("aero");
+    expect(hasLayoutSavePending(null)).toBe(true);
+    expect(hasLayoutSavePending("aero")).toBe(true);
+    expect(hasLayoutSavePending("chassis")).toBe(false);
+    clearLayoutSavePending(null);
+    expect(hasLayoutSavePending(null)).toBe(false);
+    expect(hasLayoutSavePending("aero")).toBe(true);
+  });
+});
+
+describe("pre-shared backup", () => {
+  test("copies the current cache once and never overwrites the backup", () => {
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Original"));
+    backupPreSharedConfig(null);
+    expect(window.localStorage.getItem("helios:dashboard:preshared-backup:__project__")).toContain("Original");
+
+    // A later call (cache since replaced by a shared layout) must not clobber it.
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Shared Now"));
+    backupPreSharedConfig(null);
+    const backup = window.localStorage.getItem("helios:dashboard:preshared-backup:__project__")!;
+    expect(backup).toContain("Original");
+    expect(backup).not.toContain("Shared Now");
+  });
+
+  test("no cache → no backup written", () => {
+    backupPreSharedConfig("aero");
+    expect(window.localStorage.getItem("helios:dashboard:preshared-backup:aero")).toBeNull();
   });
 });

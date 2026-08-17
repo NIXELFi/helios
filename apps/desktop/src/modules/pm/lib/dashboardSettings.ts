@@ -478,6 +478,64 @@ export function rememberDashboardConfig(teamSlug: string | null, config: Dashboa
   }
 }
 
+// --- Crash-safe save marker ---------------------------------------------------
+// Set while a shared-layout edit hasn't been confirmed by the server, cleared on
+// a successful save. If the app quits (or the network dies) with the marker up,
+// the next launch knows the localStorage cache is NEWER than the server row and
+// re-publishes it instead of adopting the stale server copy over it.
+
+function pendingSaveKey(teamSlug: string | null): string {
+  return `helios:dashboard:pending:${scopeKey(teamSlug)}`;
+}
+
+export function markLayoutSavePending(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(pendingSaveKey(teamSlug), "1");
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
+export function clearLayoutSavePending(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(pendingSaveKey(teamSlug));
+  } catch {
+    // ignore
+  }
+}
+
+export function hasLayoutSavePending(teamSlug: string | null): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(pendingSaveKey(teamSlug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// --- One-time pre-shared backup ----------------------------------------------
+// The first time a shared layout replaces whatever this machine had locally,
+// keep the old local config under a side key (write-once) so a personal layout
+// built before the shared-layout era is recoverable rather than silently gone.
+
+function preSharedBackupKey(teamSlug: string | null): string {
+  return `helios:dashboard:preshared-backup:${scopeKey(teamSlug)}`;
+}
+
+export function backupPreSharedConfig(teamSlug: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const backup = preSharedBackupKey(teamSlug);
+    if (window.localStorage.getItem(backup) !== null) return; // write-once
+    const current = window.localStorage.getItem(storageKey(teamSlug));
+    if (current !== null) window.localStorage.setItem(backup, current);
+  } catch {
+    // ignore storage failures (private mode, quota)
+  }
+}
+
 // --- Immutable update helpers ----------------------------------------------
 
 export function activeTab(config: DashboardConfig): DashboardTab {
