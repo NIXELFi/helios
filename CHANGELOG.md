@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-08-17
+
 ### Changed
 
 - **Dashboard layouts are now shared and permanent.** Each dashboard (a
