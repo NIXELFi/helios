@@ -36,6 +36,8 @@ import {
   backupPreSharedConfig,
   clearLayoutSavePending,
   hasLayoutSavePending,
+  isDefaultLayout,
+  layoutSavePendingSince,
   markLayoutSavePending,
   normalizeSharedTabs,
   recallDashboardConfig,
@@ -109,6 +111,11 @@ export function useSharedDashboardLayout({
   // The server's tabs, kept for late adoption (e.g. a recovery that turns out
   // to be unsaveable because the capability check came back false).
   const fetchedTabsRef = useRef<DashboardTab[] | null>(null);
+  // True only when the fetch confirmed NO row exists for this scope. A row
+  // that exists but fails validation (foreign version, corrupt payload) also
+  // reads as status "none" for the UI, but must never be bootstrapped over —
+  // a newer client's layout would flap with ours indefinitely.
+  const noRowRef = useRef(false);
   const bootstrapRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards async completions from mutating refs that now belong to a new scope.
@@ -136,6 +143,7 @@ export function useSharedDashboardLayout({
     recoveryRef.current = dirtyRef.current;
     adoptedTabsRef.current = null;
     fetchedTabsRef.current = null;
+    noRowRef.current = false;
     bootstrapRef.current = false;
     scopeRef.current = scope;
   }
@@ -199,7 +207,7 @@ export function useSharedDashboardLayout({
     setStatus("loading");
     void (async () => {
       try {
-        let q = client.schema("pm").from("dashboard_layouts").select("config");
+        let q = client.schema("pm").from("dashboard_layouts").select("config,updated_at");
         q = subteamId === null ? q.is("subteam_id", null) : q.eq("subteam_id", subteamId);
         const res = await q.maybeSingle();
         if (!active) return;
@@ -208,18 +216,37 @@ export function useSharedDashboardLayout({
           return;
         }
         if (!res.data) {
+          noRowRef.current = true;
           setStatus("none");
           return;
         }
-        const tabs = normalizeSharedTabs((res.data as { config: unknown }).config);
+        const row = res.data as { config: unknown; updated_at: string | null };
+        const tabs = normalizeSharedTabs(row.config);
         if (!tabs) {
+          // A row exists but isn't ours to interpret (foreign version /
+          // corrupt): show the local copy, and never bootstrap over it.
           setStatus("none");
           return;
         }
         fetchedTabsRef.current = tabs;
+        // A marker-recovered layout only wins while the server row is OLDER
+        // than the pending edit; a row someone else wrote after it wins
+        // instead (last-write-wins, same as live saves). Client clock vs
+        // server clock is a rough comparison, but the window is days-vs-
+        // milliseconds, not a tiebreak.
+        if (recoveryRef.current) {
+          const since = layoutSavePendingSince(teamSlug);
+          const rowTime = row.updated_at === null ? Number.NaN : Date.parse(row.updated_at);
+          if (Number.isFinite(rowTime) && (since === null || rowTime > since)) {
+            recoveryRef.current = false;
+            dirtyRef.current = false;
+            editedRef.current = false;
+            clearLayoutSavePending(teamSlug);
+          }
+        }
         // An unsaved local layout wins over the fetch — an edit made while it
         // was in flight, one already saved (the fetch's copy is older than
-        // that save), or one recovered from a previous session's marker.
+        // that save), or a still-live recovery from a previous session.
         if (dirtyRef.current || editedRef.current) return;
         backupPreSharedConfig(teamSlug);
         adoptedTabsRef.current = tabs;
@@ -247,7 +274,13 @@ export function useSharedDashboardLayout({
           stid: subteamId,
         });
         if (!active) return;
-        if (res.error) return;
+        if (res.error) {
+          // Can't tell whether the pending edit is saveable — leave the
+          // recovery in place, but surface it: save_error gives the user the
+          // Retry affordance instead of a silent stale view.
+          if (dirtyRef.current) setStatus("save_error");
+          return;
+        }
         if (res.data === true) {
           setCanEdit(true);
           // A layout recovered from a previous session's marker can now
@@ -272,7 +305,10 @@ export function useSharedDashboardLayout({
           }
         }
       } catch {
-        if (active) setCanEdit(false);
+        if (active) {
+          setCanEdit(false);
+          if (dirtyRef.current) setStatus("save_error");
+        }
       }
     })();
     return () => {
@@ -282,15 +318,20 @@ export function useSharedDashboardLayout({
 
   // --- Bootstrap a scope that has no shared row yet ---------------------------
   // Permanence shouldn't wait for an edit: the first editor to open the
-  // dashboard publishes their current layout (their pre-shared customization,
-  // or the defaults) as the shared row.
+  // dashboard publishes their CUSTOMIZED local layout as the shared row.
+  // Pristine sample defaults are not published — they carry no information
+  // (every client renders them on its own), and publishing them would let an
+  // editor who never customized claim the row before one who did. Gated on
+  // noRowRef: a row that exists but didn't validate (a newer client's format)
+  // must never be bootstrapped over.
   useEffect(() => {
-    if (status !== "none" || !canEdit || bootstrapRef.current) return;
+    if (status !== "none" || !canEdit || bootstrapRef.current || !noRowRef.current) return;
     bootstrapRef.current = true;
+    if (isDefaultLayout(configRef.current, isSubteamScope)) return;
     dirtyRef.current = true;
     markLayoutSavePending(teamSlug);
     schedule();
-  }, [status, canEdit, teamSlug, schedule]);
+  }, [status, canEdit, isSubteamScope, teamSlug, schedule]);
 
   // --- Persist + detect structural change ------------------------------------
   // Every config change lands in the localStorage cache. A change to the tabs

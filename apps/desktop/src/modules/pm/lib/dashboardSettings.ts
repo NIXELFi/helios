@@ -334,6 +334,16 @@ export function defaultDashboardConfig(isSubteamScope: boolean): DashboardConfig
   return { version: CONFIG_VERSION, tabs, activeTabId: tabs[0]!.id };
 }
 
+// True when a config is structurally identical to the scope's sample defaults
+// (ids are random per build, so they're stripped before comparing). Used to
+// decide whether a layout is worth publishing as the shared one: pristine
+// defaults carry no information — every client renders them on its own.
+export function isDefaultLayout(config: DashboardConfig, isSubteamScope: boolean): boolean {
+  const strip = (tabs: DashboardTab[]) =>
+    tabs.map((t) => ({ name: t.name, widgets: t.widgets.map(({ id: _id, ...rest }) => rest) }));
+  return JSON.stringify(strip(config.tabs)) === JSON.stringify(strip(defaultTabs(isSubteamScope)));
+}
+
 // --- Persistence ------------------------------------------------------------
 
 function storageKey(teamSlug: string | null): string {
@@ -481,8 +491,11 @@ export function rememberDashboardConfig(teamSlug: string | null, config: Dashboa
 // --- Crash-safe save marker ---------------------------------------------------
 // Set while a shared-layout edit hasn't been confirmed by the server, cleared on
 // a successful save. If the app quits (or the network dies) with the marker up,
-// the next launch knows the localStorage cache is NEWER than the server row and
-// re-publishes it instead of adopting the stale server copy over it.
+// the next launch knows the localStorage cache MAY be newer than the server row.
+// The marker stores when the edit was made so it can be compared against the
+// server row's updated_at: a row someone else wrote AFTER the pending edit wins
+// (last-write-wins, same as live saves), rather than a week-old offline cache
+// silently reverting the team's layout.
 
 function pendingSaveKey(teamSlug: string | null): string {
   return `helios:dashboard:pending:${scopeKey(teamSlug)}`;
@@ -491,9 +504,23 @@ function pendingSaveKey(teamSlug: string | null): string {
 export function markLayoutSavePending(teamSlug: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(pendingSaveKey(teamSlug), "1");
+    window.localStorage.setItem(pendingSaveKey(teamSlug), String(Date.now()));
   } catch {
     // ignore storage failures (private mode, quota)
+  }
+}
+
+// When the pending edit was made (ms epoch), or null when no marker is set.
+// An unparseable value reads as 0: "very old", so any server write outranks it.
+export function layoutSavePendingSince(teamSlug: string | null): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(pendingSaveKey(teamSlug));
+    if (raw === null) return null;
+    const t = Number(raw);
+    return Number.isFinite(t) ? t : 0;
+  } catch {
+    return null;
   }
 }
 
@@ -509,7 +536,7 @@ export function clearLayoutSavePending(teamSlug: string | null): void {
 export function hasLayoutSavePending(teamSlug: string | null): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return window.localStorage.getItem(pendingSaveKey(teamSlug)) === "1";
+    return window.localStorage.getItem(pendingSaveKey(teamSlug)) !== null;
   } catch {
     return false;
   }

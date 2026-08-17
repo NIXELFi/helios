@@ -23,10 +23,16 @@ const CFG_B = { version: 2, tabs: [{ id: "t2", name: "B", widgets: [] }] };
 
 async function makeSubteam(slugHint: string): Promise<string> {
   const svc = serviceClient().schema("pm");
+  // Subteams persist across tests (test_reset only wipes pdm.*) and `code`
+  // carries subteams_code_unique — every column that is unique gets the suffix.
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const { data, error } = await svc
     .from("subteams")
-    .insert({ name: `Sub ${slugHint} ${suffix}`, code: slugHint.slice(0, 3).toUpperCase(), slug: `${slugHint}-${suffix}` })
+    .insert({
+      name: `Sub ${slugHint} ${suffix}`,
+      code: `${slugHint.slice(0, 3).toUpperCase()}-${suffix}`,
+      slug: `${slugHint}-${suffix}`,
+    })
     .select()
     .single();
   if (error) throw error;

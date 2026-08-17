@@ -10,7 +10,9 @@ import {
   defaultDashboardConfig,
   deleteTab,
   hasLayoutSavePending,
+  isDefaultLayout,
   kindAvailable,
+  layoutSavePendingSince,
   makeWidget,
   markLayoutSavePending,
   moveWidget,
@@ -255,6 +257,34 @@ describe("pending-save marker", () => {
     clearLayoutSavePending(null);
     expect(hasLayoutSavePending(null)).toBe(false);
     expect(hasLayoutSavePending("aero")).toBe(true);
+  });
+
+  test("marker records when the edit was made; garbage reads as very old", () => {
+    expect(layoutSavePendingSince(null)).toBeNull();
+    const before = Date.now();
+    markLayoutSavePending(null);
+    const since = layoutSavePendingSince(null)!;
+    expect(since).toBeGreaterThanOrEqual(before);
+    expect(since).toBeLessThanOrEqual(Date.now());
+    window.localStorage.setItem("helios:dashboard:pending:aero", "garbage");
+    expect(layoutSavePendingSince("aero")).toBe(0);
+  });
+});
+
+describe("isDefaultLayout", () => {
+  test("fresh defaults are default in both scopes (ids ignored)", () => {
+    expect(isDefaultLayout(defaultDashboardConfig(false), false)).toBe(true);
+    expect(isDefaultLayout(defaultDashboardConfig(true), true)).toBe(true);
+    // A recalled (normalized) copy of the defaults still reads as default.
+    rememberDashboardConfig(null, defaultDashboardConfig(false));
+    expect(isDefaultLayout(recallDashboardConfig(null, false), false)).toBe(true);
+  });
+
+  test("any customization makes it non-default", () => {
+    expect(isDefaultLayout(addTab(defaultDashboardConfig(false), "Mine"), false)).toBe(false);
+    expect(isDefaultLayout(addWidget(defaultDashboardConfig(false), "metric"), false)).toBe(false);
+    // Cross-scope defaults don't match each other either.
+    expect(isDefaultLayout(defaultDashboardConfig(true), false)).toBe(false);
   });
 });
 

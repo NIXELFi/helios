@@ -36,11 +36,13 @@ follow [semver](https://semver.org/).
   Editing (Customize, tabs, widgets) is limited to those holding the
   manage-dashboard capability in that scope: a subteam's Leads/VPs, or
   Executives/Owners for the all-team dashboard. Which tab you're looking at
-  stays your own. The first time an editor opens a dashboard that has no
-  shared layout yet, their current layout becomes the shared one — no edit
-  required. If the network is down the dashboard shows the last layout your
-  machine saw and says so, and an edit that didn't reach the server is
-  re-sent on the next launch — nothing is lost.
+  stays your own. The first time an editor with a customized layout opens a
+  dashboard that has no shared layout yet, that layout becomes the shared
+  one — no edit required. If the network is down the dashboard shows the
+  last layout your machine saw and says so, and an edit that didn't reach
+  the server is re-sent on the next launch (unless someone else has saved a
+  newer layout since — the newer save wins). The layout each machine had
+  before this change is kept locally as a one-time backup.
 
 ## [5.4.1] - 2026-08-11
 

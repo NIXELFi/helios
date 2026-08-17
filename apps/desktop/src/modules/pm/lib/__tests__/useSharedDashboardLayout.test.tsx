@@ -26,7 +26,7 @@ vi.mock("@pm/lib/pmStore", () => ({
 // the `remote` box: the row the select resolves, the capability answer, and a
 // log of save_dashboard_layout calls.
 interface RemoteBox {
-  row: { data: { config: unknown } | null; error: { message: string } | null };
+  row: { data: { config: unknown; updated_at?: string } | null; error: { message: string } | null };
   // When set, the row fetch stalls until this resolves (for in-flight races).
   fetchGate: Promise<void> | null;
   canEdit: boolean;
@@ -74,9 +74,17 @@ function mount(props: Props = PROJECT) {
   return renderHook((p: Props) => useSharedDashboardLayout(p), { initialProps: props });
 }
 
-// A shared server row: the project defaults plus one recognizable tab.
-function serverRowWithTab(name: string, isSubteamScope = false) {
-  return { data: { config: sharedDashboardPayload(addTab(defaultDashboardConfig(isSubteamScope), name)) }, error: null };
+// A shared server row: the project defaults plus one recognizable tab. The
+// updated_at default is deliberately OLD so recovery tests where the pending
+// marker should win don't depend on wall-clock ordering.
+function serverRowWithTab(name: string, isSubteamScope = false, updatedAt = "2026-01-01T00:00:00Z") {
+  return {
+    data: {
+      config: sharedDashboardPayload(addTab(defaultDashboardConfig(isSubteamScope), name)),
+      updated_at: updatedAt,
+    },
+    error: null,
+  };
 }
 
 beforeEach(() => {
@@ -146,7 +154,7 @@ describe("capability gating", () => {
 });
 
 describe("bootstrap (no shared row yet)", () => {
-  it("an editor's current local layout is published as the shared row", async () => {
+  it("an editor's customized local layout is published as the shared row", async () => {
     rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Pre-Shared Custom"));
     remote.canEdit = true;
 
@@ -165,6 +173,32 @@ describe("bootstrap (no shared row yet)", () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 900));
     });
+    expect(remote.saves).toHaveLength(0);
+  });
+
+  it("does not publish pristine sample defaults", async () => {
+    // No cached layout: the editor sees the scope's defaults. Publishing them
+    // would claim the row before an editor who actually customized.
+    remote.canEdit = true;
+    const { result } = mount();
+    await waitFor(() => expect(result.current.status).toBe("none"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(remote.saves).toHaveLength(0);
+  });
+
+  it("does not bootstrap over an existing row it merely can't parse (foreign version)", async () => {
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "My v2 Layout"));
+    remote.canEdit = true;
+    remote.row = { data: { config: { version: 3, tabs: [] }, updated_at: "2026-08-17T00:00:00Z" }, error: null };
+
+    const { result } = mount();
+    await waitFor(() => expect(result.current.status).toBe("none"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    // The v3 row is left alone; we just keep showing the local copy.
     expect(remote.saves).toHaveLength(0);
   });
 });
@@ -297,6 +331,25 @@ describe("pending-marker recovery (edit that never reached the server)", () => {
     const payload = remote.saves[0]!.cfg as { tabs: Array<{ name: string }> };
     expect(payload.tabs.map((t) => t.name)).toContain("Recovered Edit");
     expect(hasLayoutSavePending(null)).toBe(false);
+  });
+
+  it("a stale marker loses to a newer server write (someone else saved since)", async () => {
+    // Last week: edit cached, save never confirmed. Yesterday: another lead
+    // rebuilt the shared layout. The newer server write wins.
+    rememberDashboardConfig(null, addTab(defaultDashboardConfig(false), "Old Offline Edit"));
+    window.localStorage.setItem(
+      "helios:dashboard:pending:__project__",
+      String(Date.parse("2026-08-01T00:00:00Z")),
+    );
+    remote.canEdit = true;
+    remote.row = serverRowWithTab("Rebuilt Since", false, "2026-08-16T00:00:00Z");
+
+    const { result } = mount();
+    await waitFor(() => expect(result.current.status).toBe("synced"));
+    expect(result.current.config.tabs.map((t) => t.name)).toContain("Rebuilt Since");
+    expect(result.current.config.tabs.map((t) => t.name)).not.toContain("Old Offline Edit");
+    expect(hasLayoutSavePending(null)).toBe(false);
+    expect(remote.saves).toHaveLength(0);
   });
 
   it("a marker the user can no longer save (capability revoked) is abandoned for the server copy", async () => {
