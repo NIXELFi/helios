@@ -4,16 +4,19 @@ import {
   activeTab,
   addTab,
   addWidget,
+  adoptSharedTabs,
   defaultDashboardConfig,
   deleteTab,
   kindAvailable,
   makeWidget,
   moveWidget,
+  normalizeSharedTabs,
   recallDashboardConfig,
   rememberDashboardConfig,
   removeWidget,
   renameTab,
   setActiveTab,
+  sharedDashboardPayload,
   updateWidget,
 } from "../dashboardSettings";
 
@@ -190,5 +193,49 @@ describe("makeWidget", () => {
       ids.add(w.id);
     }
     expect(ids.size).toBe(kinds.length);
+  });
+});
+
+describe("shared (server) payload", () => {
+  test("sharedDashboardPayload carries tabs but not activeTabId", () => {
+    const cfg = addTab(defaultDashboardConfig(false), "Extra");
+    const payload = sharedDashboardPayload(cfg);
+    expect(payload.version).toBe(2);
+    expect(payload.tabs).toBe(cfg.tabs);
+    expect("activeTabId" in payload).toBe(false);
+  });
+
+  test("normalizeSharedTabs roundtrips a payload through JSON", () => {
+    const cfg = addTab(defaultDashboardConfig(true), "Pit Wall");
+    const raw = JSON.parse(JSON.stringify(sharedDashboardPayload(cfg))) as unknown;
+    const tabs = normalizeSharedTabs(raw);
+    expect(tabs).not.toBeNull();
+    expect(tabs!.map((t) => t.name)).toEqual(cfg.tabs.map((t) => t.name));
+  });
+
+  test("normalizeSharedTabs rejects foreign versions, non-objects, and empty tabs", () => {
+    expect(normalizeSharedTabs(null)).toBeNull();
+    expect(normalizeSharedTabs("x")).toBeNull();
+    expect(normalizeSharedTabs({ version: 1, tabs: [] })).toBeNull();
+    expect(normalizeSharedTabs({ version: 2, tabs: [] })).toBeNull();
+    expect(normalizeSharedTabs({ version: 2, tabs: "nope" })).toBeNull();
+  });
+
+  test("normalizeSharedTabs drops invalid widgets but keeps the tab", () => {
+    const tabs = normalizeSharedTabs({
+      version: 2,
+      tabs: [{ id: "t1", name: "T", widgets: [{ id: "w1", kind: "bogus" }, { id: "w2", kind: "metric" }] }],
+    });
+    expect(tabs).toHaveLength(1);
+    expect(tabs![0]!.widgets.map((w) => w.id)).toEqual(["w2"]);
+  });
+
+  test("adoptSharedTabs keeps the active tab when it survives, else falls to first", () => {
+    const cfg = defaultDashboardConfig(false);
+    const shared = [cfg.tabs[1]!, cfg.tabs[2]!];
+    const kept = adoptSharedTabs(setActiveTab(cfg, cfg.tabs[1]!.id), shared);
+    expect(kept.activeTabId).toBe(cfg.tabs[1]!.id);
+    const fallen = adoptSharedTabs(setActiveTab(cfg, cfg.tabs[0]!.id), shared);
+    expect(fallen.activeTabId).toBe(shared[0]!.id);
   });
 });

@@ -61,8 +61,6 @@ import {
   deleteTab,
   kindAvailable,
   moveWidget,
-  recallDashboardConfig,
-  rememberDashboardConfig,
   removeWidget,
   renameTab,
   setActiveTab,
@@ -74,6 +72,7 @@ import {
   type WidgetKind,
   type WidgetSize,
 } from "@pm/lib/dashboardSettings";
+import { useSharedDashboardLayout, type SharedLayoutStatus } from "@pm/lib/useSharedDashboardLayout";
 
 const FALLBACK_COLOR = "#6B7280";
 
@@ -113,17 +112,21 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
   const isSubteamScope = currentTeam !== null;
   const [primaryOnly, setPrimaryOnly] = usePrimaryOnly();
 
-  // Per-scope customizable layout (tabs of widget instances). Persisted to
-  // localStorage like the Gantt/Graph/Calendar settings; this component remounts
-  // per scope (route change), so a useState initializer keyed off teamSlug is
-  // enough — see graphSettings.ts.
-  const [config, setConfig] = useState(() => recallDashboardConfig(teamSlug, isSubteamScope));
+  // Per-scope layout (tabs of widget instances), SHARED across the team:
+  // server-persisted, editable only with pm.manage_dashboard in this scope,
+  // cached in localStorage for offline. This component remounts per scope
+  // (route change), so keying the hook off the scope props is enough.
+  const { config, setConfig, canEdit, status, retry } = useSharedDashboardLayout({
+    subteamId: currentTeam?.id ?? null,
+    teamSlug,
+    isSubteamScope,
+  });
   const [editing, setEditing] = useState(false);
   const [subsystemsOpen, setSubsystemsOpen] = useState(false);
   const isAdmin = usePmStore(selectIsAdmin);
   useEffect(() => {
-    rememberDashboardConfig(teamSlug, config);
-  }, [teamSlug, config]);
+    if (!canEdit) setEditing(false);
+  }, [canEdit]);
 
   const tab = activeTab(config);
 
@@ -246,20 +249,23 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
                 Subsystems
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setEditing((v) => !v)}
-              aria-pressed={editing}
-              className={
-                "inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm font-medium transition-colors " +
-                (editing
-                  ? "border-asu-gold bg-asu-gold/15 text-asu-gold"
-                  : "border-helios-line text-helios-text hover:bg-helios-base")
-              }
-            >
-              <IconLayoutDashboard size={16} strokeWidth={1.5} />
-              {editing ? "Done" : "Customize"}
-            </button>
+            <LayoutSyncBadge status={status} onRetry={retry} />
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => setEditing((v) => !v)}
+                aria-pressed={editing}
+                className={
+                  "inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm font-medium transition-colors " +
+                  (editing
+                    ? "border-asu-gold bg-asu-gold/15 text-asu-gold"
+                    : "border-helios-line text-helios-text hover:bg-helios-base")
+                }
+              >
+                <IconLayoutDashboard size={16} strokeWidth={1.5} />
+                {editing ? "Done" : "Customize"}
+              </button>
+            ) : null}
           </div>
         }
       />
@@ -270,6 +276,7 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
       <TabStrip
         config={config}
         editing={editing}
+        canEdit={canEdit}
         onSelect={(id) => setConfig((c) => setActiveTab(c, id))}
         onAdd={() => {
           setConfig((c) => addTab(c, `Tab ${c.tabs.length + 1}`));
@@ -287,10 +294,14 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
         {tab.widgets.length === 0 ? (
           <p className="mt-10 text-center text-xs text-helios-dim">
             This tab is empty.{" "}
-            {editing ? "Add a widget above." : (
+            {editing ? (
+              "Add a widget above."
+            ) : canEdit ? (
               <>
                 Click <span className="text-helios-text">Customize</span> to add widgets.
               </>
+            ) : (
+              "A lead or exec can add widgets here."
             )}
           </p>
         ) : (
@@ -322,6 +333,7 @@ export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | n
 function TabStrip({
   config,
   editing,
+  canEdit,
   onSelect,
   onAdd,
   onRename,
@@ -329,6 +341,7 @@ function TabStrip({
 }: {
   config: DashboardConfig;
   editing: boolean;
+  canEdit: boolean;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onRename: (id: string, name: string) => void;
@@ -377,7 +390,7 @@ function TabStrip({
               <button
                 type="button"
                 onClick={() => onSelect(t.id)}
-                onDoubleClick={() => startRename(t.id, t.name)}
+                onDoubleClick={canEdit ? () => startRename(t.id, t.name) : undefined}
                 title={editing ? "Double-click to rename" : undefined}
                 className="max-w-[14rem] truncate"
               >
@@ -399,18 +412,54 @@ function TabStrip({
           </div>
         );
       })}
-      <button
-        type="button"
-        onClick={onAdd}
-        aria-label="New tab"
-        title="New tab"
-        className="-mb-px ml-1 flex items-center gap-1 rounded-t-lg px-2 py-2 text-xs text-helios-dim hover:bg-helios-base/50 hover:text-helios-text"
-      >
-        <IconPlus size={15} strokeWidth={1.5} />
-        New
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label="New tab"
+          title="New tab"
+          className="-mb-px ml-1 flex items-center gap-1 rounded-t-lg px-2 py-2 text-xs text-helios-dim hover:bg-helios-base/50 hover:text-helios-text"
+        >
+          <IconPlus size={15} strokeWidth={1.5} />
+          New
+        </button>
+      ) : null}
     </div>
   );
+}
+
+// Quiet header note about the shared layout's sync state. Silent when synced
+// (or before the first fetch resolves) — it only speaks up when the user
+// should know their view is a cached copy or an edit hasn't landed yet.
+function LayoutSyncBadge({ status, onRetry }: { status: SharedLayoutStatus; onRetry: () => void }) {
+  if (status === "saving") {
+    return <span className="text-[11px] text-helios-dim">Saving layout…</span>;
+  }
+  if (status === "offline") {
+    return (
+      <span
+        className="text-[11px] text-helios-dim"
+        title="Couldn't reach the server — showing the last layout this machine saw."
+      >
+        Offline copy
+      </span>
+    );
+  }
+  if (status === "save_error") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-400">
+        Layout not saved
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded border border-amber-400/40 px-1.5 py-0.5 hover:bg-amber-400/10"
+        >
+          Retry
+        </button>
+      </span>
+    );
+  }
+  return null;
 }
 
 // --- Add-widget palette -----------------------------------------------------

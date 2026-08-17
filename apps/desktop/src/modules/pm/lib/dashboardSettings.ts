@@ -6,9 +6,11 @@
 // size. The same kind can appear many times in a tab with different config (two
 // breakdowns grouped by different dimensions, several KPI tiles, …).
 //
-// Per-user, localStorage only — like every other PM view setting. A layout
-// shared across all members of a project still needs a project-level shared
-// store (a backend follow-up) and is intentionally out of scope here.
+// The tabs (and their widgets) are SHARED per scope: persisted server-side in
+// pm.dashboard_layouts and editable only with the pm.manage_dashboard
+// capability — see useSharedDashboardLayout.ts. localStorage keeps the
+// last-adopted copy as an offline cache, and the active tab stays per-user
+// (switching tabs never rewrites the shared layout).
 
 import { scopeKey } from "@pm/lib/nav";
 import {
@@ -418,6 +420,40 @@ function normalizeConfig(raw: unknown, isSubteamScope: boolean): DashboardConfig
     typeof o.activeTabId === "string" && tabs.some((t) => t.id === o.activeTabId)
       ? o.activeTabId
       : first.id;
+  return { version: CONFIG_VERSION, tabs, activeTabId };
+}
+
+// --- Shared (server-persisted) layout ----------------------------------------
+// What pm.dashboard_layouts stores per scope: the tabs, but NOT activeTabId —
+// which tab a user is looking at is their own business.
+
+export interface SharedDashboardPayload {
+  version: typeof CONFIG_VERSION;
+  tabs: DashboardTab[];
+}
+
+export function sharedDashboardPayload(config: DashboardConfig): SharedDashboardPayload {
+  return { version: CONFIG_VERSION, tabs: config.tabs };
+}
+
+// Validate a raw server payload into tabs, or null when the shape is foreign,
+// a different version, or has no usable tabs (→ caller keeps its local config).
+export function normalizeSharedTabs(raw: unknown): DashboardTab[] | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.version !== CONFIG_VERSION) return null;
+  const tabs = Array.isArray(o.tabs)
+    ? o.tabs.map(normalizeTab).filter((t): t is DashboardTab => t !== null)
+    : [];
+  return tabs.length > 0 ? tabs : null;
+}
+
+// Replace the local tabs with the shared ones, keeping the user's active tab
+// when it still exists in the shared set.
+export function adoptSharedTabs(config: DashboardConfig, tabs: DashboardTab[]): DashboardConfig {
+  const activeTabId = tabs.some((t) => t.id === config.activeTabId)
+    ? config.activeTabId
+    : tabs[0]!.id;
   return { version: CONFIG_VERSION, tabs, activeTabId };
 }
 

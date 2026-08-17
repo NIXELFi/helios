@@ -27,6 +27,18 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard layouts are now shared and permanent.** Each dashboard (a
+  subteam's, or the all-team one) now has a single layout shared by everyone
+  who views it, saved on the server — so it survives reboots, app updates, and
+  switching machines instead of living only in one machine's browser storage.
+  Editing (Customize, tabs, widgets) is limited to those holding the
+  manage-dashboard capability in that scope: a subteam's Leads/VPs, or
+  Executives/Owners for the all-team dashboard. Which tab you're looking at
+  stays your own. If the network is down the dashboard shows the last layout
+  your machine saw and says so — nothing is lost.
+
 ## [5.4.1] - 2026-08-11
 
 ### Changed
