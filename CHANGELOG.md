@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.5.1] - 2026-08-18
+
 ### Changed
 
 - **Blackjack rating is now "skill money" — betting big on good play climbs
