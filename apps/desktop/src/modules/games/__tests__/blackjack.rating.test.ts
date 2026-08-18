@@ -13,6 +13,7 @@ import {
   shoeEdge,
   CHART_EDGE,
   FULL_WEIGHT_HANDS,
+  MAX_HAND_ADVANTAGE,
   MAX_SESSION_DELTA,
   RATING_FLOOR,
   RATING_START,
@@ -35,6 +36,17 @@ function flatPerfectHand(playMargin: number) {
     evLine: playMargin,
     evReference: 0,
     trueCountAtBet: 0,
+  });
+}
+
+/** Chart-perfect play at an arbitrary stake — the v3 money cases. */
+function perfectAt(stakeUnits: number, bankrollFraction: number, tc = 0) {
+  return handAdvantage({
+    stakeUnits,
+    bankrollFraction,
+    evLine: TIER_ADVANTAGE,
+    evReference: 0,
+    trueCountAtBet: tc,
   });
 }
 
@@ -97,11 +109,16 @@ describe("shoeEdge", () => {
 // The landmarks are the whole point: they're what makes the number mean
 // something to a player rather than being an arbitrary score.
 describe("ladder landmarks", () => {
-  it("puts the reference player — mimic the dealer, flat minimum bet — at 1000", () => {
-    // Playing exactly like the house rule means zero margin on every spot.
-    const adv = flatPerfectHand(0);
-    expect(adv.total).toBeCloseTo(0, 10);
-    expect(impliedRating(adv.total)).toBeCloseTo(RATING_START, 6);
+  it("puts the reference player — mimic the dealer — at 1000, at ANY stake", () => {
+    // Playing exactly like the house rule means zero margin on every spot, and
+    // v3 keeps that worth zero no matter how much money it's played for.
+    for (const [units, frac] of [[1, 0.025], [5, 0.125], [20, 0.3]] as const) {
+      const adv = handAdvantage({
+        stakeUnits: units, bankrollFraction: frac, evLine: 0, evReference: 0, trueCountAtBet: 0,
+      });
+      expect(adv.total).toBeCloseTo(0, 10);
+      expect(impliedRating(adv.total)).toBeCloseTo(RATING_START, 6);
+    }
   });
 
   it("puts flawless flat-minimum chart play at 1400", () => {
@@ -109,6 +126,17 @@ describe("ladder landmarks", () => {
     // TIER_ADVANTAGE, by construction of the constants.
     const adv = flatPerfectHand(TIER_ADVANTAGE);
     expect(impliedRating(adv.total)).toBeCloseTo(RATING_START + TIER, 6);
+  });
+
+  it("pays MORE money — and more ladder — for the same good play at a real stake", () => {
+    // The v3 change Nick asked for: the rating is expected money made, so a
+    // 100-chip bet played flawlessly earns 20× the minimum bet's climb rather
+    // than being a trap. 1400 stops being a ceiling; it's the flat-min mark.
+    const min = perfectAt(1, 0.025);
+    const big = perfectAt(20, 0.5);
+    expect(big.play).toBeCloseTo(20 * min.play, 10);
+    expect(big.total).toBeGreaterThan(min.total);
+    expect(impliedRating(big.total)).toBeGreaterThan(RATING_START + TIER);
   });
 
   it("settles a flawless flat bettor at 1400 and holds them there", () => {
@@ -151,9 +179,17 @@ describe("handAdvantage — PLAY", () => {
     expect(adv.play).toBeCloseTo(0.2);
   });
 
+  it("scales linearly with the stake: money made, not a per-unit score", () => {
+    const one = flatPerfectHand(0.1);
+    const twenty = handAdvantage({
+      stakeUnits: 20, bankrollFraction: 0.2, evLine: 0.1, evReference: 0, trueCountAtBet: 0,
+    });
+    expect(twenty.play).toBeCloseTo(20 * one.play, 10);
+  });
+
   it("ignores whether the hand was actually won", () => {
     // Same spot, same decisions, opposite results: handAdvantage never sees a
-    // result at all, which is the entire fix for "my Elo only goes down".
+    // result at all. Skill money, not lucky money.
     const a = flatPerfectHand(TIER_ADVANTAGE);
     const b = flatPerfectHand(TIER_ADVANTAGE);
     expect(a.total).toBe(b.total);
@@ -178,7 +214,8 @@ describe("handAdvantage — PLAY", () => {
   });
 
   it("punishes a blunder immediately and in proportion to the stake", () => {
-    // Hitting a hard 20: evLost is enormous.
+    // Hitting a hard 20: evLost is enormous — and betting big on bad play is
+    // how you lose real money, so it costs rating linearly with the stake.
     const evOptimal = optimalEV(hand("K", "Q"), up("6"));
     const evLost = 1.4;
     const evLine = lineEV(evOptimal, evLost);
@@ -191,7 +228,7 @@ describe("handAdvantage — PLAY", () => {
       evReference: referenceEV(hand("K", "Q"), up("6")), trueCountAtBet: 0,
     });
     expect(small.play).toBeLessThan(0);
-    expect(big.play).toBeLessThan(small.play); // same mistake, more money on it
+    expect(big.play).toBeCloseTo(20 * small.play, 10); // same mistake, 20× the money on it
   });
 });
 
@@ -205,35 +242,42 @@ describe("handAdvantage — BET", () => {
     }
   });
 
-  it("costs rating when you raise into a flat shoe", () => {
+  it("is FREE to raise into a flat shoe — the v2 trap is gone", () => {
+    // v2 charged (√units−1)·(edge − TIER_ADVANTAGE) for any raise at a neutral
+    // count, which made 3 of the 4 chip buttons rating traps. v3's bet term is
+    // the count-justified shift only: zero when the shoe says nothing.
     const adv = handAdvantage({
       stakeUnits: 20, bankrollFraction: 0.1, evLine: 0, evReference: 0, trueCountAtBet: 0,
     });
-    expect(adv.bet).toBeLessThan(0);
+    expect(adv.bet).toBeCloseTo(0, 12);
   });
 
-  it("pays when you raise into a rich shoe", () => {
-    const flat = handAdvantage({
-      stakeUnits: 8, bankrollFraction: 0.1, evLine: 0, evReference: 0, trueCountAtBet: 0,
-    });
+  it("pays for raising into a rich shoe, in proportion to the extra units", () => {
     const rich = handAdvantage({
       stakeUnits: 8, bankrollFraction: 0.1, evLine: 0, evReference: 0, trueCountAtBet: 6,
     });
-    expect(rich.bet).toBeGreaterThan(flat.bet);
+    expect(rich.bet).toBeCloseTo(7 * (shoeEdge(6) - CHART_EDGE), 10);
+    expect(rich.bet).toBeGreaterThan(0);
   });
 
-  it("makes the rating-optimal bet ramp the real one: raise iff the edge is positive", () => {
-    // The property the whole design hangs on. For each count, find whether
-    // advantage increases or decreases with stake, and check it agrees with
-    // the sign of the player's actual edge at that count.
-    const perfect = { bankrollFraction: 0.0, evLine: TIER_ADVANTAGE, evReference: 0 };
-    for (const tc of [-6, -2, 0, 1, 2, 3, 4, 6]) {
-      const min = handAdvantage({ ...perfect, stakeUnits: 1, trueCountAtBet: tc }).total;
-      const max = handAdvantage({ ...perfect, stakeUnits: 16, trueCountAtBet: tc }).total;
-      const edge = shoeEdge(tc);
-      if (edge > 0) expect(max).toBeGreaterThan(min);
-      else expect(max).toBeLessThan(min);
-    }
+  it("costs money to raise into a poor shoe", () => {
+    const poor = handAdvantage({
+      stakeUnits: 8, bankrollFraction: 0.1, evLine: 0, evReference: 0, trueCountAtBet: -4,
+    });
+    expect(poor.bet).toBeLessThan(0);
+  });
+
+  it("rewards betting money in proportion to how justified it is", () => {
+    // Money-honesty, the property v3 hangs on: for a player whose play has a
+    // real margin, more stake means more expected money made — and for one
+    // whose play is worse than the reference, more stake digs faster.
+    const goodSmall = perfectAt(1, 0.02);
+    const goodBig = perfectAt(16, 0.3);
+    expect(goodBig.total).toBeGreaterThan(goodSmall.total);
+    const badLine = { evLine: -0.05, evReference: 0, trueCountAtBet: 0 };
+    const badSmall = handAdvantage({ ...badLine, stakeUnits: 1, bankrollFraction: 0.02 });
+    const badBig = handAdvantage({ ...badLine, stakeUnits: 16, bankrollFraction: 0.3 });
+    expect(badBig.total).toBeLessThan(badSmall.total);
   });
 
   it("lets a competent counter climb past a flawless flat bettor", () => {
@@ -253,32 +297,39 @@ describe("handAdvantage — BET", () => {
 describe("handAdvantage — RISK", () => {
   it("is free for a sane bet", () => {
     expect(handAdvantage({
-      stakeUnits: 5, bankrollFraction: 0.1, evLine: 0, evReference: 0, trueCountAtBet: 0,
+      stakeUnits: 5, bankrollFraction: 0.125, evLine: 0, evReference: 0, trueCountAtBet: 0,
     }).risk).toBe(0);
   });
 
-  it("finally gives ALL-IN a cost", () => {
-    const sane = handAdvantage({
-      stakeUnits: 5, bankrollFraction: 0.125, evLine: TIER_ADVANTAGE, evReference: 0, trueCountAtBet: 0,
-    });
+  it("charges for staking most of the bankroll", () => {
     const shove = handAdvantage({
       stakeUnits: 40, bankrollFraction: 1, evLine: TIER_ADVANTAGE, evReference: 0, trueCountAtBet: 0,
     });
-    expect(sane.risk).toBe(0);
-    expect(shove.risk).toBeLessThan(-0.1);
-    expect(shove.total).toBeLessThan(sane.total);
+    expect(shove.risk).toBeLessThan(-0.5);
     // ...even when the count is good. Ruin isn't priced by EV.
     const richShove = handAdvantage({
       stakeUnits: 40, bankrollFraction: 1, evLine: TIER_ADVANTAGE, evReference: 0, trueCountAtBet: 6,
     });
-    expect(richShove.risk).toBeLessThan(-0.1);
+    expect(richShove.risk).toBeLessThan(-0.5);
+  });
+
+  it("keeps ALL-IN spam from ever beating an honest big flat bet", () => {
+    // 100 chips of a 200 bankroll, played flawlessly, must out-earn shoving
+    // the whole stack every hand — otherwise the rating-optimal strategy is
+    // a coin-flip lifestyle.
+    const bigFlat = perfectAt(20, 0.5);
+    const shove = perfectAt(40, 1);
+    expect(shove.total).toBeLessThan(bigFlat.total);
+    // But the shove is still worth MORE than nothing for a perfect player —
+    // it's a discouragement, not a cliff.
+    expect(shove.total).toBeGreaterThan(0);
   });
 
   it("grows faster than linearly past the safe fraction", () => {
     const at = (f: number) => -handAdvantage({
       stakeUnits: 10, bankrollFraction: f, evLine: 0, evReference: 0, trueCountAtBet: 0,
     }).risk;
-    expect(at(0.35) - at(0.25)).toBeGreaterThan(at(0.25) - at(0.15));
+    expect(at(0.75) - at(0.55)).toBeGreaterThan(at(0.55) - at(0.35));
   });
 });
 
@@ -287,11 +338,20 @@ describe("handAdvantage — bounds", () => {
     const disaster = handAdvantage({
       stakeUnits: 40, bankrollFraction: 1, evLine: -2, evReference: 0.8, trueCountAtBet: -8,
     });
-    expect(disaster.total).toBeGreaterThanOrEqual(-0.6);
+    expect(disaster.total).toBe(-MAX_HAND_ADVANTAGE);
     const jackpot = handAdvantage({
       stakeUnits: 40, bankrollFraction: 0.1, evLine: 2, evReference: -1, trueCountAtBet: 8,
     });
-    expect(jackpot.total).toBeLessThanOrEqual(0.6);
+    expect(jackpot.total).toBe(MAX_HAND_ADVANTAGE);
+  });
+
+  it("leaves room for the biggest legitimate hand under the cap", () => {
+    // A flawless all-in at the richest capped count is the largest hand an
+    // honest client can produce; the cap must sit above it, or the cap would
+    // shave real play instead of just tampering.
+    const best = perfectAt(40, 1, 8);
+    expect(best.total).toBeLessThanOrEqual(MAX_HAND_ADVANTAGE);
+    expect(best.total).toBeGreaterThan(0);
   });
 });
 
@@ -313,6 +373,14 @@ describe("session update", () => {
 
   it("does nothing at all for a session with no settled hands", () => {
     expect(sessionDelta({ rating: 1234, handsRated: 10, hands: 0, totalAdvantage: 0 })).toBe(0);
+  });
+
+  it("moves a fresh 1000 by exactly +K for a full flawless flat session", () => {
+    // The ladder-space update: implied(TIER_ADVANTAGE) − 1000 is one full
+    // tier, so a new player's first perfect session is worth the whole K.
+    const perHand = flatPerfectHand(TIER_ADVANTAGE).total;
+    expect(sessionDelta({ rating: RATING_START, handsRated: 0, hands: 30, totalAdvantage: perHand * 30 }))
+      .toBeCloseTo(kFactor(0), 6);
   });
 
   it("gets harder to gain the higher you already are", () => {
@@ -349,12 +417,18 @@ describe("session update", () => {
 
 describe("expectedAdvantage / impliedRating", () => {
   it("are inverses", () => {
-    for (const r of [400, 1000, 1400, 2000]) {
+    for (const r of [400, 1000, 1400, 2000, 2800]) {
       expect(impliedRating(expectedAdvantage(r))).toBeCloseTo(r, 6);
     }
   });
   it("ask nothing of a player sitting at the reference rating", () => {
     expect(expectedAdvantage(RATING_START)).toBe(0);
+  });
+
+  it("compresses money into the ladder: 4× the money is 2× the tiers", () => {
+    // √ compression keeps big-stake ratings impressive but not absurd: a
+    // player making 4× the flat-perfect money sits 2 tiers up, not 4.
+    expect(impliedRating(4 * TIER_ADVANTAGE)).toBeCloseTo(RATING_START + 2 * TIER, 6);
   });
 
   it("keep the displayed figure on the ladder", () => {

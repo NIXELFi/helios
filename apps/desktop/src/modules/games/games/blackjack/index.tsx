@@ -244,7 +244,11 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
         bet: session.bet + adv.bet,
         risk: session.risk + adv.risk,
         total: session.total + adv.total,
-        fortune: session.fortune + (netUnits(payout, t.bet, live.initialBet) - evLine),
+        // In table-minimum money like every other column: how many minimums
+        // the shoe handed you (or robbed you of) beyond what the line was worth.
+        fortune:
+          session.fortune +
+          (netUnits(payout, t.bet, live.initialBet) - evLine) * (live.initialBet / TABLE_MIN),
         evLost: session.evLost + live.evLost,
         clean: session.clean + (live.evLost <= 1e-9 ? 1 : 0),
       };

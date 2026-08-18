@@ -79,8 +79,11 @@ export async function submitScore(
 // ------------------------------------------------------------ rated games
 // The client never computes the stored rating. It reports what it measured
 // about the session — hands played and the advantage they were worth — and
-// games.apply_rated_session does the arithmetic under a row lock. That keeps
-// the read-modify-write atomic across windows and keeps the ladder honest.
+// games.apply_rated_session_v3 does the arithmetic under a row lock. That
+// keeps the read-modify-write atomic across windows and keeps the ladder
+// honest. The _v3 suffix is the money-scale formula (skill money, √ ladder):
+// the unsuffixed RPC still exists as a harmless no-op so clients from before
+// the 2026-08 ladder reset can't write old-scale sessions onto the new board.
 
 /** The rating this player is carrying, or a fresh 1000 if they've never
  *  played. Called before a rated cabinet mounts. */
@@ -114,7 +117,7 @@ export async function submitRatedSession(
   if (!Number.isFinite(session.totalAdvantage) || !Number.isInteger(session.hands)) {
     throw new Error(`invalid session: ${JSON.stringify(session)}`);
   }
-  const res = await client.schema("games").rpc("apply_rated_session", {
+  const res = await client.schema("games").rpc("apply_rated_session_v3", {
     p_game_id: gameId,
     p_hands: session.hands,
     p_advantage: session.totalAdvantage,
