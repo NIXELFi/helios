@@ -27,6 +27,22 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Blackjack rating is now "skill money" — betting big on good play climbs
+  instead of bleeding.** The previous formula quietly charged for any raise
+  above the table minimum at a neutral count, so three of the four chip
+  buttons lost rating even when played perfectly ("I win hands and still drop
+  Elo"). The rating is still built on what your decisions and bets were
+  *worth* — luck stays a separate stat — but it's now denominated in expected
+  chips: flawless play at a 100-chip bet earns twenty times the climb of the
+  same play at the minimum, sloppy play at 100 chips digs twenty times the
+  hole, raising into a rich count pays extra, and only all-in spam pays a
+  risk premium. Mimic-the-dealer still sits at 1000 and flawless flat-minimum
+  play at 1400, but 1400 is no longer the ceiling. Because the scale changed,
+  **everyone's blackjack rating has been reset to 1000** for a fresh climb;
+  sessions from app versions older than this one no longer move the ladder.
+
 ## [5.5.0] - 2026-08-17
 
 ### Changed
