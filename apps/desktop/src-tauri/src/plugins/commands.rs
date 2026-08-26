@@ -20,7 +20,7 @@
 use tauri::{AppHandle, Manager};
 
 use super::{cache, ActiveVersions};
-use plugin_host::{bundle, verify};
+use plugin_host::{bundle, pack, verify};
 
 /// Hard ceiling mirroring the publish-time 25 MiB cap; a defensive backstop in
 /// case a signed URL points at something larger than the recorded byte count.
@@ -61,25 +61,7 @@ pub async fn install_plugin_bundle(
     //    crossed, so a signed URL pointing at something enormous can never be fully
     //    buffered in memory first (the old `resp.bytes()` read EVERYTHING, then
     //    checked the limit — enforcing it only after the damage was done).
-    let mut resp = reqwest::get(&signed_url)
-        .await
-        .map_err(|e| format!("download failed: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("download failed: HTTP {}", resp.status()));
-    }
-    let mut bytes: Vec<u8> = Vec::with_capacity(bundle_bytes as usize);
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| format!("download read failed: {e}"))?
-    {
-        if bytes.len() as u64 + chunk.len() as u64 > MAX_BUNDLE_BYTES {
-            return Err(format!(
-                "bundle exceeds the {MAX_BUNDLE_BYTES}-byte ceiling; download aborted"
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+    let bytes = download_capped(&signed_url, bundle_bytes).await?;
 
     // 2. Integrity: byte count + sha256 must match the recorded values.
     if bytes.len() as u64 != bundle_bytes {
@@ -122,6 +104,148 @@ pub async fn install_plugin_bundle(
 
     // 6. Register as the active version served at plugin://<id>/.
     app.state::<ActiveVersions>().set(plugin_id, version);
+    Ok(())
+}
+
+/// Download a bundle from a short-lived signed URL, streamed chunk-by-chunk and
+/// aborted the moment the ceiling is crossed — a signed URL pointing at something
+/// enormous can never be fully buffered in memory first. `expected_bytes` only
+/// sizes the initial allocation; the ceiling is what actually bounds the read.
+///
+/// Shared by the verified-install path and the reviewer's inspect path so the two
+/// cannot drift on the one behavior that keeps a hostile URL from exhausting
+/// memory.
+async fn download_capped(signed_url: &str, expected_bytes: u64) -> Result<Vec<u8>, String> {
+    let mut resp = reqwest::get(signed_url)
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download failed: HTTP {}", resp.status()));
+    }
+    let mut bytes: Vec<u8> = Vec::with_capacity(expected_bytes.min(MAX_BUNDLE_BYTES) as usize);
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("download read failed: {e}"))?
+    {
+        if bytes.len() as u64 + chunk.len() as u64 > MAX_BUNDLE_BYTES {
+            return Err(format!(
+                "bundle exceeds the {MAX_BUNDLE_BYTES}-byte ceiling; download aborted"
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+/// What `pack_plugin_bundle` hands back to the submit wizard.
+///
+/// The zip BYTES deliberately do not cross the IPC boundary — a 25 MiB array
+/// serialized through JSON would be miserable. The bundle is staged on disk and
+/// the frontend reads it back with the fs plugin when it uploads, which also means
+/// a failed upload can be retried without re-packing.
+#[derive(serde::Serialize)]
+pub struct PackedBundleInfo {
+    pub staged_path: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub manifest: serde_json::Value,
+    pub entries: Vec<String>,
+    pub texts: std::collections::BTreeMap<String, String>,
+    pub warnings: Vec<String>,
+    pub largest: Vec<(String, u64)>,
+}
+
+/// Pack an author's plugin folder into a `.hplugin`, stage it, and return
+/// everything the wizard needs to pre-flight and submit it.
+///
+/// All the rules (what ships, forward-slash entries, determinism, symlink refusal,
+/// the size ceiling) live in `plugin_host::pack`, which is unit-tested without a
+/// WebView. This is the thin glue: validate the path, call it, stage the bytes.
+#[tauri::command]
+pub fn pack_plugin_bundle(app: AppHandle, dir: String) -> Result<PackedBundleInfo, String> {
+    let root = std::path::PathBuf::from(&dir);
+    if !root.is_dir() {
+        return Err(format!("{dir} is not a folder"));
+    }
+
+    let packed = pack::pack_dir(&root)?;
+
+    let staging = cache::publish_staging_root(&app)?;
+    std::fs::create_dir_all(&staging)
+        .map_err(|e| format!("could not create the staging folder: {e}"))?;
+    // Content-addressed, exactly like the Storage key: packing the same folder
+    // twice reuses the same staged file instead of accumulating copies.
+    let staged_path = staging.join(format!("{}.hplugin", packed.sha256));
+    std::fs::write(&staged_path, &packed.zip)
+        .map_err(|e| format!("could not stage the packed bundle: {e}"))?;
+
+    let manifest: serde_json::Value = serde_json::from_str(&packed.manifest_json)
+        .map_err(|e| format!("manifest.json is not valid JSON: {e}"))?;
+
+    Ok(PackedBundleInfo {
+        staged_path: staged_path.to_string_lossy().to_string(),
+        sha256: packed.sha256,
+        bytes: packed.zip.len() as u64,
+        manifest,
+        entries: packed.entries,
+        texts: packed.texts,
+        warnings: packed.warnings,
+        largest: packed.largest,
+    })
+}
+
+/// What `inspect_plugin_bundle` hands back to the Review tab.
+#[derive(serde::Serialize)]
+pub struct InspectedBundle {
+    pub manifest: serde_json::Value,
+    pub texts: std::collections::BTreeMap<String, String>,
+}
+
+/// Read a published bundle's manifest and sources straight out of Storage, so a
+/// reviewer can re-run the compliance scan against the bytes that were ACTUALLY
+/// uploaded.
+///
+/// This exists because the report submitted alongside a version is author-supplied
+/// and trivially bypassable by calling the publish RPC directly. Nothing is written
+/// to disk: previewing a build is a separate, deliberate action.
+#[tauri::command]
+pub async fn inspect_plugin_bundle(
+    signed_url: String,
+    expected_sha256: String,
+    bundle_bytes: u64,
+) -> Result<InspectedBundle, String> {
+    let bytes = download_capped(&signed_url, bundle_bytes).await?;
+
+    if bytes.len() as u64 != bundle_bytes {
+        return Err(format!(
+            "size mismatch: downloaded {} bytes, expected {bundle_bytes}",
+            bytes.len()
+        ));
+    }
+    // Scanning bytes that are not the bytes the version recorded would make the
+    // whole re-scan meaningless, so this is a hard failure, not a warning.
+    if !verify::verify_sha256(&bytes, &expected_sha256) {
+        return Err("sha256 mismatch (bundle tampered or corrupt)".into());
+    }
+
+    let (manifest_json, texts) = pack::read_zip_texts(&bytes)?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
+        .map_err(|e| format!("manifest.json in the bundle is not valid JSON: {e}"))?;
+
+    Ok(InspectedBundle { manifest, texts })
+}
+
+/// Delete a staged bundle once its submission has landed. Best-effort.
+#[tauri::command]
+pub fn discard_staged_bundle(app: AppHandle, sha256: String) -> Result<(), String> {
+    // The name is derived here rather than taking a caller-supplied path, so this
+    // can only ever delete inside the publish staging area.
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("not a sha256: {sha256:?}"));
+    }
+    let path = cache::publish_staging_root(&app)?.join(format!("{sha256}.hplugin"));
+    let _ = std::fs::remove_file(path);
     Ok(())
 }
 

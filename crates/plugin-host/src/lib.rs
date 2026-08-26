@@ -6,6 +6,7 @@
 //! and calls into here.
 
 pub mod bundle;
+pub mod pack;
 pub mod path;
 pub mod uri;
 pub mod verify;

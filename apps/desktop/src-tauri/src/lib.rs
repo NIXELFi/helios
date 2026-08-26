@@ -196,6 +196,7 @@ pub fn run() {
             // (it doesn't survive a restart); without it an installed plugin would
             // 404 from the plugin:// protocol until reinstalled.
             plugins::cache::restore_active_versions(app.handle());
+            plugins::cache::sweep_publish_staging(app.handle());
 
             // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
             // Best-effort; never block launch. Windows-only (SOLIDWORKS + registry).
@@ -301,6 +302,9 @@ pub fn run() {
             cfd::commands::cfd_data_usage_bytes,
             cfd::commands::cfd_clear_data,
             plugins::commands::install_plugin_bundle,
+            plugins::commands::pack_plugin_bundle,
+            plugins::commands::inspect_plugin_bundle,
+            plugins::commands::discard_staged_bundle,
             plugins::commands::remove_plugin_bundle,
         ])
         .build(tauri::generate_context!())
