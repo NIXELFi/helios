@@ -8,11 +8,12 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:status": "supabase status",
-    "test": "node scripts/test-or-skip.cjs",
+    "test": "vitest run --config vitest.structure.config.ts && node scripts/test-or-skip.cjs",
     "test:run": "vitest run",
     "test:watch": "vitest",
     "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:structure": "vitest run --config vitest.structure.config.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
