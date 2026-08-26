@@ -112,6 +112,36 @@ export const RISK_WEIGHT = 3.0;
  *  count) so it only ever shaves tampering, not play. */
 export const MAX_HAND_ADVANTAGE = 2.0;
 
+// --- the rating's own yardstick ---------------------------------------------
+// Chips now come out of the SUBTEAM BUDGET, which starts at 10,000 — fifty
+// times the 200-chip stack this ladder was calibrated against. Left alone,
+// that breaks the rating in two ways at once, so both are pinned here rather
+// than by re-deriving the (knife-edge) algebra above.
+
+/** Units of a hand's stake that count toward the rating.
+ *
+ *  MAX_HAND_ADVANTAGE was sized for a 200-chip stack: at the table minimum of
+ *  5 that's 40 units, and a flawless 40-unit hand at a capped count lands just
+ *  inside 2.0. A 5%-of-budget bet is ~100 units, whose PLAY term alone is 4.59
+ *  — the clamp would silently eat more than half of it, and past that stake
+ *  betting more would stop paying with nothing on screen to explain why. That
+ *  is precisely the v2 complaint ("win hands, still drop elo") in a new
+ *  costume. Capping the RATED stake makes the ceiling explicit instead:
+ *  above 200 chips a hand plays for money, not for rating. */
+export const RATED_STAKE_CAP = 40;
+
+/** The stack the rating measures you against, in chips.
+ *
+ *  RISK prices ruin, which EV ignores. Scored against a real 10,000-chip team
+ *  budget every legal bet is a rounding error, the term never fires, and
+ *  bankroll discipline stops being rated at all. Scoring against a fixed
+ *  reference stack keeps RISK meaningful AND keeps every rating earned before
+ *  the shared-money change comparable with every rating earned after it —
+ *  which matters, because the ladder is deliberately NOT being reset again.
+ *  The rating answers "how well do you play a 200-chip stack"; the budget
+ *  answers "what did it cost the team". */
+export const RATING_REFERENCE_BANKROLL = 200;
+
 // --- session update ---------------------------------------------------------
 
 /** Hands before a session carries its full weight. Below this the update is
@@ -172,7 +202,9 @@ export interface HandAdvantage {
 
 /** Score one settled hand. Nothing here depends on how the hand turned out. */
 export function handAdvantage(input: HandInput): HandAdvantage {
-  const units = Math.max(1, input.stakeUnits);
+  // Capped here rather than at the call site so no caller can forget and
+  // reintroduce the silent MAX_HAND_ADVANTAGE truncation.
+  const units = clamp(input.stakeUnits, 1, RATED_STAKE_CAP);
   // Linear in the stake: this is expected MONEY over the reference player,
   // and twenty units of good play really do earn twenty units' worth.
   const play = units * (input.evLine - input.evReference);

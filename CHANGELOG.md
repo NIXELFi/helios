@@ -27,6 +27,52 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Blackjack now plays for the subteam's money too.** The 200-chip stack the
+  table used to hand you is gone: chips come from the shared budget, capped at
+  5% per bet like everything else in the casino, and doubling down takes a
+  second, separately capped stake. The chips leave the budget when the cards
+  come out and come back when the hand finishes. **Leaving mid-hand forfeits
+  the bet**, exactly like walking away from a live table — the cabinet clears
+  any hand left open by a previous session when you sit down.
+- **Casino: shared subteam money.** Every subteam now has one chip budget,
+  seeded at 10,000, that all of its members spend from. A single bet can never
+  be more than 5% of what the budget currently holds, checked against the live
+  balance at the moment the bet is placed — so two teammates playing at the
+  same time can't both spend the same chips.
+- **Plinko** joins the casino, spending that shared budget. Three risk levels
+  and 8/12/16-row boards, every one of them returning ~99% (deliberately close
+  to blackjack's chart edge, so the choice is about variance rather than a
+  worse deal). The ball is dropped by the SERVER — the path, the bucket, the
+  payout and the ledger row all land in one transaction, and the cabinet only
+  animates the result.
+- **Casino standings are now chips on hand.** The arcade's placement-points
+  scoring exists to make incomparable scores comparable; the casino has one
+  shared pot per subteam, so the pot is the score. A money game's own boards
+  show chips won and lost per member, which are frequently negative.
+
+### Changed
+
+- **The blackjack leaderboard is money now, not rating.** Chips are what the
+  casino competes on; your rating became a personal number, still shown in the
+  cabinet and still earned per hand exactly as before. It is NOT reset — it
+  keeps scoring your play against the same 200-chip reference stack it always
+  has, so a rating earned last week means the same thing this week. Stakes
+  above 200 chips play for money rather than for rating.
+
+### Security
+
+- Blackjack payouts are checked server-side against the only amounts a legal
+  hand can produce (nothing, the stake back, twice the stake, or the 3:2
+  natural on an unraised hand), and a player can have only one hand open at a
+  time.
+- Budgets and the bet ledger are readable by the team but writable only
+  through the security-definer RPCs, so the 5% cap and the ledger row cannot be
+  bypassed by talking to PostgREST directly. Every bet carries an idempotency
+  nonce: a retry after a dropped connection replays the original ball instead
+  of rolling a second one and charging for it twice.
+
 ## [5.5.1] - 2026-08-18
 
 ### Changed

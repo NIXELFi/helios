@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  fetchAllTime, fetchSubteams, fetchWeekly, isRated,
+  fetchAllTime, fetchBudgetStandings, fetchSubteams, fetchWeekly, isMoney, isRated,
   type GameId, type LeaderboardEntry, type SubteamRanking,
 } from "../api";
 import { GAMES, categoryOf, gamesInCategory } from "../registry";
@@ -78,9 +78,15 @@ async function ensureBoard(
   if (existing) return existing;
   const load: Promise<BoardData> =
     tab === "subteams"
-      ? fetchSubteams(
-          client,
-          gamesInCategory(categoryOf(gameId)).map((g) => g.id),
+      ? // The casino runs on one shared pot per subteam, so its standings are
+        // simply chips on hand — placement points exist to make incomparable
+        // arcade scores comparable, and there is nothing to compare here.
+        (categoryOf(gameId) === "casino"
+          ? fetchBudgetStandings(client)
+          : fetchSubteams(
+              client,
+              gamesInCategory(categoryOf(gameId)).map((g) => g.id),
+            )
         ).then((r) => ({ entries: null, subteams: r }))
       : (tab === "alltime" ? fetchAllTime : fetchWeekly)(client, gameId).then((r) => ({
           entries: r,
@@ -165,11 +171,20 @@ export function useLeaderboardData(
 export function boardCaption(tab: Tab, gameId: GameId): string {
   const room = categoryOf(gameId) === "casino" ? "CASINO" : "ARCADE";
   if (tab === "subteams") {
+    // The casino is one shared pot per subteam — the board is the pot itself,
+    // not a sum of anything.
+    if (categoryOf(gameId) === "casino") return `${room} · CHIPS ON HAND`;
     // A room can mix rated and scored games; describe what's being summed.
     const games = gamesInCategory(categoryOf(gameId));
     if (games.every((g) => isRated(g.id))) return `${room} · CLIMB ABOVE 1000`;
     if (games.some((g) => isRated(g.id))) return `${room} · BESTS + CLIMB`;
     return `${room} · SUM OF BESTS`;
+  }
+  // A money game's board is a ledger: chips this player has put into the
+  // subteam budget, or taken out of it. Say so — "TOP 10" would read as a high
+  // score table and hide that most of these numbers are negative.
+  if (isMoney(gameId)) {
+    return tab === "weekly" ? "CHIPS WON/LOST · THIS WEEK" : "CHIPS WON/LOST";
   }
   if (!isRated(gameId)) return tab === "weekly" ? "TOP 10 · THIS WEEK" : "TOP 10";
   return tab === "weekly" ? "BIGGEST CLIMB THIS WEEK" : "CURRENT RATING";
@@ -327,10 +342,13 @@ export function SubteamRow({ ranking, rank }: { ranking: SubteamRanking; rank: n
           <RankChip rank={rank} />
           <span className="truncate">{ranking.subteam}</span>
         </span>
-        <span className="games-num shrink-0 font-semibold text-asu-gold">{ranking.total}</span>
+        <span className="games-num shrink-0 font-semibold text-asu-gold">
+          {ranking.total.toLocaleString()}
+        </span>
       </div>
       <div className="mt-0.5 pl-[26px] text-[10px] text-helios-dim">
-        {GAMES.filter((g) => ranking.perGame[g.id] !== undefined)
+        {ranking.note ??
+          GAMES.filter((g) => ranking.perGame[g.id] !== undefined)
           .map((g) => (
             <span key={g.id}>
               {g.title} <span className="games-num">{ranking.perGame[g.id]}</span>

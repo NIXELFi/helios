@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@helios/auth";
 // RLS + a BEFORE INSERT trigger own identity, so the client only ever sends
 // (game_id, score). Same unwrap convention as modules/pm/lib/data.ts.
 
-export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack";
+export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack" | "plinko";
 
 /** Games scored by a PERSISTENT rating rather than a high score. These read
  *  and write games.ratings instead of games.scores: their board shows the
@@ -14,6 +14,16 @@ const RATED_GAMES: ReadonlySet<GameId> = new Set<GameId>(["blackjack"]);
 
 export function isRated(gameId: GameId): boolean {
   return RATED_GAMES.has(gameId);
+}
+
+/** Games that spend the SUBTEAM'S SHARED BUDGET. These have no score and no
+ *  rating: what they leave behind is a row in games.bets and a changed balance,
+ *  so their boards are ledgers (and can be negative, which is the point).
+ *  Blackjack joins this set when it moves onto the shared budget. */
+const MONEY_GAMES: ReadonlySet<GameId> = new Set<GameId>(["plinko", "blackjack"]);
+
+export function isMoney(gameId: GameId): boolean {
+  return MONEY_GAMES.has(gameId);
 }
 
 export interface LeaderboardEntry {
@@ -39,6 +49,9 @@ export interface SubteamRanking {
   subteam: string;
   total: number;
   perGame: Partial<Record<GameId, number>>;
+  /** Sub-line shown under the row when there is no per-game breakdown to show
+   *  — the casino board is one shared pot, so it explains the pot instead. */
+  note?: string;
 }
 
 function unwrap<T>(
@@ -181,15 +194,31 @@ async function fetchBoard(
 }
 
 /** All-time. For a rated game this is the rating each player is holding right
- *  now — not their best ever, which is the whole point of a rating. */
+ *  now — not their best ever, which is the whole point of a rating. For a money
+ *  game it's the chips that player has put into (or taken out of) the subteam
+ *  budget, which is a ledger and is frequently negative. */
 export const fetchAllTime = (client: SupabaseClient, gameId: GameId) =>
-  fetchBoard(client, isRated(gameId) ? "leaderboard_ratings" : "leaderboard_alltime", gameId);
+  fetchBoard(
+    client,
+    // Money wins over rating: chips are the casino scoreboard now, and the
+    // rating has become a personal number shown inside the cabinet.
+    isMoney(gameId) ? "leaderboard_money_alltime"
+    : isRated(gameId) ? "leaderboard_ratings"
+    : "leaderboard_alltime",
+    gameId,
+  );
 
 /** Weekly. "Best this week" is meaningless for a number you carry, so a rated
  *  game's weekly board is how far you MOVED it this week — a race that resets,
  *  and one a newcomer can win. Values can be negative. */
 export const fetchWeekly = (client: SupabaseClient, gameId: GameId) =>
-  fetchBoard(client, isRated(gameId) ? "leaderboard_ratings_weekly" : "leaderboard_weekly", gameId);
+  fetchBoard(
+    client,
+    isMoney(gameId) ? "leaderboard_money_weekly"
+    : isRated(gameId) ? "leaderboard_ratings_weekly"
+    : "leaderboard_weekly",
+    gameId,
+  );
 
 // Grand Prix subteam scoring. Raw scores aren't comparable across games — a 2048
 // best runs into the thousands while a Flappy best is in the tens — so summing
@@ -261,4 +290,351 @@ export async function fetchSubteams(
   return [...by.values()].sort(
     (a, b) => b.total - a.total || a.subteam.localeCompare(b.subteam),
   );
+}
+
+// ------------------------------------------------------- shared subteam money
+// The casino spends ONE budget per subteam. The client never computes a
+// balance: it asks the server what the budget holds, asks the server to place
+// a bet, and renders whatever comes back. games.plinko_drop does the cap check,
+// the roll, the payout and the ledger write in a single locked transaction, so
+// two members playing at once can't both spend the same chips.
+
+export interface Budget {
+  subteam: string;
+  balance: number;
+  /** Largest legal single bet right now: 5% of the balance, floored at the
+   *  table minimum. Recomputed server-side on every drop — treat the value
+   *  returned by dropBall as authoritative over this one. */
+  maxBet: number;
+}
+
+/** The caller's subteam budget, created at the starting balance if this is the
+ *  subteam's first visit. */
+export async function fetchBudget(client: SupabaseClient): Promise<Budget> {
+  const res = await client.schema("games").rpc("my_budget");
+  if (res.error) throw new Error(`fetch budget: ${res.error.message}`);
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
+    | { budget_subteam: string; budget_balance: number; budget_max_bet: number }
+    | undefined;
+  if (!row) throw new Error("fetch budget: no result");
+  return {
+    subteam: row.budget_subteam,
+    balance: Number(row.budget_balance),
+    maxBet: Number(row.budget_max_bet),
+  };
+}
+
+export interface DropRequest {
+  rows: number;
+  risk: string;
+  stake: number;
+}
+
+export interface DropResult {
+  /** One L/R per row — the ball the SERVER dropped. The cabinet animates this;
+   *  it does not get a vote in where the ball lands. */
+  path: string;
+  bucket: number;
+  multiplierCents: number;
+  payout: number;
+  /** payout − stake. Negative on a losing drop, which is most of them. */
+  net: number;
+  balance: number;
+  maxBet: number;
+  /** True when this nonce had already been played and the server replayed the
+   *  original result rather than rolling again. */
+  replay: boolean;
+}
+
+/** Drop one ball. `nonce` makes this exactly-once: a retry after a dropped
+ *  connection replays the original ball instead of rolling a second one and
+ *  charging for it twice. */
+export async function dropBall(
+  client: SupabaseClient,
+  req: DropRequest,
+  nonce: string,
+): Promise<DropResult> {
+  if (!Number.isInteger(req.stake) || req.stake <= 0) {
+    throw new Error(`stake must be whole chips: ${req.stake}`);
+  }
+  if (!nonce) throw new Error("nonce required");
+  const res = await client.schema("games").rpc("plinko_drop", {
+    p_rows: req.rows,
+    p_risk: req.risk,
+    p_stake: req.stake,
+    p_nonce: nonce,
+  });
+  if (res.error) throw new Error(res.error.message);
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
+    | {
+        drop_path: string; drop_bucket: number; drop_multiplier: number;
+        drop_payout: number; drop_net: number; new_balance: number;
+        new_max_bet: number; was_replay: boolean;
+      }
+    | undefined;
+  if (!row) throw new Error("drop: no result");
+  return {
+    path: row.drop_path,
+    bucket: Number(row.drop_bucket),
+    multiplierCents: Number(row.drop_multiplier),
+    payout: Number(row.drop_payout),
+    net: Number(row.drop_net),
+    balance: Number(row.new_balance),
+    maxBet: Number(row.new_max_bet),
+    replay: Boolean(row.was_replay),
+  };
+}
+
+export interface BudgetStanding {
+  subteam: string;
+  balance: number;
+  staked: number;
+  returned: number;
+  bets: number;
+  rank: number;
+}
+
+/** Casino standings: chips on hand, per subteam. Unlike the arcade there is
+ *  nothing to normalise across games — every casino game spends the same pot,
+ *  so the pot IS the score. */
+export async function fetchBudgets(client: SupabaseClient): Promise<BudgetStanding[]> {
+  const rows = unwrap<
+    { subteam: string; balance: number; staked: number; returned: number; bets: number }[]
+  >(
+    await client
+      .schema("games")
+      .from("leaderboard_budgets")
+      .select("subteam,balance,staked,returned,bets")
+      .order("balance", { ascending: false })
+      .limit(50),
+    "budget standings",
+  );
+  const sorted = [...rows].sort((a, b) => Number(b.balance) - Number(a.balance));
+  let rank = 0;
+  return sorted.map((r, i) => {
+    if (i === 0 || Number(sorted[i]!.balance) !== Number(sorted[i - 1]!.balance)) {
+      rank = i + 1;
+    }
+    return {
+      subteam: r.subteam,
+      balance: Number(r.balance),
+      staked: Number(r.staked),
+      returned: Number(r.returned),
+      bets: Number(r.bets),
+      rank,
+    };
+  });
+}
+
+export interface LedgerEntry {
+  id: string;
+  subteam: string;
+  userId: string;
+  displayName: string;
+  gameId: GameId;
+  stake: number;
+  payout: number;
+  net: number;
+  balanceAfter: number;
+  /** Plinko only: what the ball did. Null for games without one. */
+  multiplierCents: number | null;
+  bucket: number | null;
+  createdAt: string;
+}
+
+/** The casino's recent activity: who spent what, and how it went. This is the
+ *  display that makes shared money legible — every member can see where the
+ *  budget went without having to ask. */
+export async function fetchLedger(
+  client: SupabaseClient,
+  limit = 30,
+): Promise<LedgerEntry[]> {
+  const rows = unwrap<
+    {
+      id: string; subteam: string; user_id: string; display_name: string | null;
+      game_id: GameId; stake: number; payout: number; net: number;
+      balance_after: number; detail: Record<string, unknown> | null; created_at: string;
+    }[]
+  >(
+    await client
+      .schema("games")
+      .from("ledger_recent")
+      .select("id,subteam,user_id,display_name,game_id,stake,payout,net,balance_after,detail,created_at")
+      .limit(limit),
+    "ledger",
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    subteam: r.subteam,
+    userId: r.user_id,
+    displayName: r.display_name ?? "Unknown",
+    gameId: r.game_id,
+    stake: Number(r.stake),
+    payout: Number(r.payout),
+    net: Number(r.net),
+    balanceAfter: Number(r.balance_after),
+    multiplierCents:
+      r.detail && typeof r.detail.multiplier_cents === "number" ? r.detail.multiplier_cents : null,
+    bucket: r.detail && typeof r.detail.bucket === "number" ? r.detail.bucket : null,
+    createdAt: r.created_at,
+  }));
+}
+
+/** Casino standings, shaped like the arcade's so the same board renders them.
+ *
+ *  The arcade normalises across games with placement points because a 2048
+ *  best and a Snake best aren't comparable quantities. The casino has no such
+ *  problem: every casino game spends the same pot, so the pot IS the score and
+ *  the total is simply chips on hand. */
+export async function fetchBudgetStandings(
+  client: SupabaseClient,
+): Promise<SubteamRanking[]> {
+  const budgets = await fetchBudgets(client);
+  return budgets.map((b) => ({
+    subteam: b.subteam,
+    total: b.balance,
+    perGame: {},
+    note:
+      b.bets === 0
+        ? "untouched"
+        : `${b.staked.toLocaleString()} staked · ${b.bets.toLocaleString()} bets`,
+  }));
+}
+
+// ------------------------------------------------- two-phase bets (blackjack)
+// A blackjack hand is played over many seconds and several decisions, so it
+// can't settle atomically the way a plinko drop does. The chips leave the
+// budget when the cards come out and return when the hand finishes — which is
+// also where they really are in between: on the table.
+//
+// Every call carries its own nonce and is idempotent, because every one of
+// them moves money and all three can be interrupted by a flaky network.
+
+export interface PlacedBet {
+  betId: string;
+  balance: number;
+  maxBet: number;
+  replay: boolean;
+}
+
+export interface RaisedBet {
+  /** Total on the hand after doubling — twice what was placed. */
+  stake: number;
+  balance: number;
+  maxBet: number;
+  replay: boolean;
+}
+
+export interface SettledBet {
+  payout: number;
+  net: number;
+  balance: number;
+  maxBet: number;
+  replay: boolean;
+}
+
+function firstRow<T>(res: { data: unknown; error: { message: string } | null }, what: string): T {
+  if (res.error) throw new Error(res.error.message);
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as T | undefined;
+  if (!row) throw new Error(`${what}: no result`);
+  return row;
+}
+
+/** Take the stake for a hand about to be dealt. Rejects if the subteam can't
+ *  cover it, or if this player already has a hand open. */
+export async function placeBet(
+  client: SupabaseClient,
+  gameId: GameId,
+  stake: number,
+  nonce: string,
+): Promise<PlacedBet> {
+  if (!Number.isInteger(stake) || stake <= 0) {
+    throw new Error(`stake must be whole chips: ${stake}`);
+  }
+  if (!nonce) throw new Error("nonce required");
+  const row = firstRow<{
+    bet_id: string; new_balance: number; new_max_bet: number; was_replay: boolean;
+  }>(
+    await client.schema("games").rpc("place_bet", {
+      p_game_id: gameId, p_stake: stake, p_nonce: nonce,
+    }),
+    "place bet",
+  );
+  return {
+    betId: row.bet_id,
+    balance: Number(row.new_balance),
+    maxBet: Number(row.new_max_bet),
+    replay: Boolean(row.was_replay),
+  };
+}
+
+/** Double down: a second stake of the same size, capped on its own, so a
+ *  doubled hand can carry up to 10% of the budget. */
+export async function raiseBet(
+  client: SupabaseClient,
+  betId: string,
+  nonce: string,
+): Promise<RaisedBet> {
+  if (!nonce) throw new Error("nonce required");
+  const row = firstRow<{
+    new_stake: number; new_balance: number; new_max_bet: number; was_replay: boolean;
+  }>(
+    await client.schema("games").rpc("raise_bet", { p_bet_id: betId, p_nonce: nonce }),
+    "raise bet",
+  );
+  return {
+    stake: Number(row.new_stake),
+    balance: Number(row.new_balance),
+    maxBet: Number(row.new_max_bet),
+    replay: Boolean(row.was_replay),
+  };
+}
+
+/** Pay a finished hand. The server can't know whether the hand was really won
+ *  — the shoe is dealt client-side — but it does refuse any payout no legal
+ *  blackjack hand could produce, and every settle lands in a ledger the whole
+ *  subteam can read. */
+export async function settleBet(
+  client: SupabaseClient,
+  betId: string,
+  payout: number,
+  outcome: string,
+  nonce: string,
+): Promise<SettledBet> {
+  if (!Number.isInteger(payout) || payout < 0) {
+    throw new Error(`payout must be whole chips: ${payout}`);
+  }
+  if (!nonce) throw new Error("nonce required");
+  const row = firstRow<{
+    settled_payout: number; settled_net: number; new_balance: number;
+    new_max_bet: number; was_replay: boolean;
+  }>(
+    await client.schema("games").rpc("settle_bet", {
+      p_bet_id: betId, p_payout: payout, p_outcome: outcome, p_nonce: nonce,
+    }),
+    "settle bet",
+  );
+  return {
+    payout: Number(row.settled_payout),
+    net: Number(row.settled_net),
+    balance: Number(row.new_balance),
+    maxBet: Number(row.new_max_bet),
+    replay: Boolean(row.was_replay),
+  };
+}
+
+/** Close out a hand abandoned by a previous session. The stake is FORFEIT, not
+ *  refunded: the client knows the outcome before it settles, so refunding an
+ *  abandoned hand would pay players to close the window on losing ones.
+ *  Resolves to null when there was nothing open. */
+export async function forfeitOpenBet(
+  client: SupabaseClient,
+  gameId: GameId,
+): Promise<{ betId: string; stake: number } | null> {
+  const res = await client.schema("games").rpc("forfeit_open_bet", { p_game_id: gameId });
+  if (res.error) throw new Error(`forfeit: ${res.error.message}`);
+  const row = (Array.isArray(res.data) ? res.data[0] : res.data) as
+    | { forfeited_id: string; forfeited_stake: number }
+    | undefined;
+  return row ? { betId: row.forfeited_id, stake: Number(row.forfeited_stake) } : null;
 }

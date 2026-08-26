@@ -1,5 +1,6 @@
 import {
-  IconArrowsMove, IconBallTennis, IconCards, IconFeather, IconGridDots, type TablerIcon,
+  IconArrowsMove, IconBallTennis, IconCards, IconFeather, IconGridDots,
+  IconTriangleInverted, type TablerIcon,
 } from "@tabler/icons-react";
 import type { ComponentType } from "react";
 import type { GameId } from "./api";
@@ -9,6 +10,7 @@ import { BreakoutGame } from "./games/breakout";
 import { FlappyGame } from "./games/flappy";
 import { Twenty48Game } from "./games/twenty48"; // folder is twenty48; id stays '2048'
 import { BlackjackGame } from "./games/blackjack";
+import { PlinkoGame } from "./games/plinko";
 
 /** Lobby section a game's cabinet lives in. Standings are section-agnostic —
  *  every game shares the one board with its own chip. */
@@ -37,4 +39,5 @@ export const GAMES: GameDef[] = [
   { id: "flappy", title: "Flappy", blurb: "One button. Endless pipes.", icon: IconFeather, category: "arcade", component: FlappyGame },
   { id: "2048", title: "2048", blurb: "Merge tiles. Chase the big one.", icon: IconGridDots, category: "arcade", component: Twenty48Game },
   { id: "blackjack", title: "Blackjack", blurb: "Play the chart. Size your bets. Hold your rating.", icon: IconCards, category: "casino", component: BlackjackGame },
+  { id: "plinko", title: "Plinko", blurb: "Drop the ball. These are the subteam's chips.", icon: IconTriangleInverted, category: "casino", component: PlinkoGame },
 ];
