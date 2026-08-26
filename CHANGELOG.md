@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-08-26
+
 ### Added
 
 - **Casino: shared subteam money.** Every subteam now has one chip budget,
