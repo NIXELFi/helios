@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plinko drops failed with a database error.** The ball's path is generated
+  server-side by pgcrypto, which lives in a schema the drop routine wasn't
+  looking in, so every drop was rejected the moment you released the ball.
+  Nothing was charged for a failed drop and no other game was affected. Fixed
+  server-side — no app update needed.
+
 ## [5.6.0] - 2026-08-26
 
 ### Added

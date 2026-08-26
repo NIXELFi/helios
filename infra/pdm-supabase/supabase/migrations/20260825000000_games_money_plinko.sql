@@ -330,7 +330,12 @@ returns table (
 )
 language plpgsql
 security definer
-set search_path = games, public, auth
+-- `extensions` is REQUIRED here: this function calls gen_random_bytes(), which is
+-- pgcrypto, and Supabase installs pgcrypto into the "extensions" schema. Without
+-- it the drop fails at run time with "function gen_random_bytes(integer) does not
+-- exist" while every other RPC keeps working (gen_random_uuid is core, so the
+-- table defaults gave no warning). Matches pm.sync_gcal's search_path convention.
+set search_path = games, public, auth, extensions
 as $$
 declare
   v_uid     uuid := auth.uid();

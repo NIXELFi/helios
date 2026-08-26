@@ -33,7 +33,12 @@ const db = await PGlite.create({ extensions: { pgcrypto } });
 
 // ---- Supabase-shaped stubs -------------------------------------------------
 await db.exec(`
-  create extension if not exists pgcrypto;
+  -- Supabase installs pgcrypto into the "extensions" schema, NOT public. Mirror
+  -- that exactly: installing it into public here would silently resolve
+  -- gen_random_bytes() via the public entry in a function's search_path and hide
+  -- a bug that is fatal in prod (it did, 2026-08-26 — plinko_drop shipped broken).
+  create schema extensions;
+  create extension if not exists pgcrypto with schema extensions;
   create role anon;
   create role authenticated;
   create role service_role;
