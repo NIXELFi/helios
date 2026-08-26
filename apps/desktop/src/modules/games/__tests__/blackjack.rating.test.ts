@@ -15,11 +15,14 @@ import {
   FULL_WEIGHT_HANDS,
   MAX_HAND_ADVANTAGE,
   MAX_SESSION_DELTA,
+  RATED_STAKE_CAP,
   RATING_FLOOR,
+  RATING_REFERENCE_BANKROLL,
   RATING_START,
   REFERENCE_EDGE,
   TIER,
   TIER_ADVANTAGE,
+  TRUE_COUNT_CAP,
 } from "../games/blackjack/rating";
 
 function hand(...ranks: Rank[]): Card[] {
@@ -441,5 +444,82 @@ describe("expectedAdvantage / impliedRating", () => {
     expect(displayRating(awful)).toBe(RATING_FLOOR);
     // Anything already on the ladder passes through untouched.
     expect(displayRating(TIER_ADVANTAGE)).toBeCloseTo(RATING_START + TIER, 6);
+  });
+});
+
+// --- shared-money era -------------------------------------------------------
+// Chips now come from the subteam budget, which is orders of magnitude bigger
+// than the 200-chip stack the ladder was calibrated on. Two constants keep the
+// rating meaning exactly what it meant before the change.
+
+describe("rated stake cap", () => {
+  const chartHand = (units: number) => handAdvantage({
+    stakeUnits: units,
+    bankrollFraction: 0,
+    evLine: CHART_EDGE,
+    evReference: REFERENCE_EDGE,
+    trueCountAtBet: 0,
+  });
+
+  it("stops counting stake above the cap, so the ladder can't run away", () => {
+    // Without this, a 5%-of-budget bet is ~100 units and PLAY alone is 4.59 —
+    // more than double MAX_HAND_ADVANTAGE, so the clamp would silently
+    // truncate it. Truncation is exactly the v2 failure Nick reported: past
+    // some stake, betting more stops paying and the player can't see why.
+    expect(chartHand(100).play).toBe(chartHand(RATED_STAKE_CAP).play);
+    expect(chartHand(1000).total).toBe(chartHand(RATED_STAKE_CAP).total);
+  });
+
+  it("leaves every stake at or below the cap scoring exactly as it always did", () => {
+    for (const units of [1, 5, 20, RATED_STAKE_CAP]) {
+      expect(chartHand(units).play).toBeCloseTo(units * TIER_ADVANTAGE, 12);
+    }
+  });
+
+  it("keeps ordinary play at the cap well inside MAX_HAND_ADVANTAGE", () => {
+    // The point of RATED_STAKE_CAP is that normal play is never truncated: the
+    // biggest rated stake at a neutral shoe has to fit with room to spare.
+    const biggest = chartHand(RATED_STAKE_CAP);
+    expect(biggest.play + biggest.bet + biggest.risk).toBeLessThan(MAX_HAND_ADVANTAGE);
+  });
+
+  it("still clamps a max stake at an extreme count — v3 behaviour, unchanged", () => {
+    // Documenting rather than asserting an ideal. rating.ts claims the clamp
+    // was "sized to clear the biggest legitimate hand", and that has never
+    // quite been true: 40 units flawless at a capped true count is 3.40
+    // (PLAY 1.84 + BET 1.56), so the clamp shaves a genuine counter's best
+    // hands. It predates the shared-money change and is left alone here
+    // because raising MAX_HAND_ADVANTAGE would move the ladder, which is
+    // deliberately not being re-scaled.
+    const counted = handAdvantage({
+      stakeUnits: RATED_STAKE_CAP,
+      bankrollFraction: 0,
+      evLine: CHART_EDGE,
+      evReference: REFERENCE_EDGE,
+      trueCountAtBet: TRUE_COUNT_CAP,
+    });
+    expect(counted.play + counted.bet).toBeGreaterThan(MAX_HAND_ADVANTAGE);
+    expect(counted.total).toBe(MAX_HAND_ADVANTAGE);
+  });
+});
+
+describe("rating reference bankroll", () => {
+  it("is the stack the ladder was calibrated on, not the subteam budget", () => {
+    // RISK prices ruin, which EV ignores. Measuring the stake against a 10,000
+    // chip team budget would make every legal bet a rounding error and kill
+    // the term outright — so the rating keeps scoring you as though you were
+    // playing the same 200-chip stack everyone has always been scored on.
+    expect(RATING_REFERENCE_BANKROLL).toBe(200);
+  });
+
+  it("still penalises a hand that would have shoved that reference stack", () => {
+    const shove = handAdvantage({
+      stakeUnits: RATED_STAKE_CAP,
+      bankrollFraction: 1,
+      evLine: CHART_EDGE,
+      evReference: REFERENCE_EDGE,
+      trueCountAtBet: 0,
+    });
+    expect(shove.risk).toBeLessThan(0);
   });
 });

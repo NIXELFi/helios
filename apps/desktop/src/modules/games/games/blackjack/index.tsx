@@ -20,10 +20,27 @@ import {
   displayRating,
   handAdvantage,
   lineEV,
+  RATING_REFERENCE_BANKROLL,
   RATING_START,
 } from "./rating";
 
-const START_BANKROLL = 200;
+// Chips come from the SUBTEAM BUDGET now, not a 200-chip stack the cabinet
+// owns. Two consequences run through this file:
+//
+//  * Money moves in two server round trips per hand — placeBet when the cards
+//    come out, settleBet when the hand finishes — because a blackjack hand is
+//    played over time and can't settle atomically the way a plinko drop does.
+//    The balance on screen is always the server's answer, never one worked out
+//    here, and the stake is gone from the budget the moment the hand is dealt
+//    (which is exactly where those chips are: on the table).
+//  * Leaving mid-hand FORFEITS the bet. Refunding would pay a player to close
+//    the window on a losing hand, since the client knows the outcome before it
+//    settles. The cabinet forfeits any hand it finds still open on mount.
+//
+// The RATING is deliberately untouched by all of this: it still scores play
+// against a fixed 200-chip reference stack (RATING_REFERENCE_BANKROLL), so a
+// rating earned before the change means the same as one earned after it.
+
 const CHIP_VALUES = [5, 25, 100] as const;
 /** The table minimum — the unit every stake is measured in for the rating. */
 const TABLE_MIN = CHIP_VALUES[0];
@@ -43,9 +60,8 @@ interface LiveHand {
   evLost: number;
   /** The worst decision made this hand, for the coaching line. */
   worst: { chosen: Action; best: Action; cost: number } | null;
-  /** Stake before any double, and the bankroll it was risked from. */
+  /** Stake before any double. */
   initialBet: number;
-  bankrollAtBet: number;
   /** True count when the bet went down — the only information a bet can
    *  honestly be based on. */
   trueCountAtBet: number;
@@ -71,7 +87,15 @@ interface Session {
 
 interface Table {
   phase: Phase;
+  /** The SUBTEAM budget, as the server last reported it. Display only — the
+   *  cabinet never does arithmetic on it. */
   bankroll: number;
+  /** Server id of the hand currently on the table, null between hands. */
+  betId: string | null;
+  /** What the finished hand pays, waiting to be sent to settleBet. */
+  lastPayout: number;
+  /** Guards the settle effect so one hand is only ever settled once. */
+  settleSent: boolean;
   /** Staged wager in the bet phase; the live stake (doubled if doubled) once dealt. */
   bet: number;
   /** Pre-double stake — carried into the next hand as the default re-bet. */
@@ -135,7 +159,7 @@ function signed(n: number, digits = 2): string {
   return `${sign}${magnitude}`;
 }
 
-export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
+export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) {
   // Rated cabinets are mounted only once the carried rating has resolved, but
   // default defensively so the game is still playable if that ever changes.
   const carried: RatingSnapshot = rating ?? { rating: RATING_START, handsRated: 0 };
@@ -156,7 +180,10 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
 
   const [table, setTable] = useState<Table>(() => ({
     phase: "bet",
-    bankroll: START_BANKROLL,
+    bankroll: money?.balance ?? 0,
+    betId: null,
+    lastPayout: 0,
+    settleSent: true, // nothing on the table yet
     bet: 0,
     baseBet: 0,
     player: [],
@@ -175,6 +202,62 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
   // dealer timer read the latest table without re-registering per render.
   const tableRef = useRef(table);
   tableRef.current = table;
+  /** A bet or a double is in flight — blocks a second one racing it out. A ref
+   *  because the guard has to be synchronous; `busy` mirrors it for the UI. */
+  const placing = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [tableError, setTableError] = useState<string | null>(null);
+  function setPlacing(v: boolean) {
+    placing.current = v;
+    setBusy(v);
+  }
+
+  // The budget moves under this cabinet whenever a teammate plays, so take the
+  // module's number whenever it changes — except while a hand is being dealt
+  // or settled, when our own round trip is the fresher truth.
+  useEffect(() => {
+    if (!money || placing.current) return;
+    setTable((t) => (t.bankroll === money.balance ? t : { ...t, bankroll: money.balance }));
+  }, [money?.balance]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A hand left open by a previous session (crash, closed window, machine
+  // asleep mid-deal) is FORFEIT. It can't be refunded: the client knows the
+  // outcome before it settles, so refunding would pay players to close the
+  // window on losers. Clear it on mount so the table can be dealt again.
+  useEffect(() => {
+    if (!money) return;
+    void money
+      .forfeitOpen()
+      .then((lost) => {
+        if (lost) setTableError(`a hand left open last time forfeited ${lost.stake} chips`);
+      })
+      .catch(() => undefined);
+    // Mount only — a forfeit mid-session would kill the hand being played.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // THE settle path. settled() is pure and is reached from four places (a
+  // natural, a bust, a double-bust, the dealer's last draw); routing the money
+  // through one effect keyed on `settleSent` means a hand is paid exactly once
+  // however it ended, and a failed settle is retried rather than lost.
+  useEffect(() => {
+    if (!money || table.settleSent || !table.betId || table.phase !== "settled") return;
+    const betId = table.betId;
+    const payout = table.lastPayout;
+    const outcome = table.outcome ?? "unknown";
+    setTable((t) => ({ ...t, settleSent: true }));
+    void money
+      .settleBet(betId, payout, outcome, crypto.randomUUID())
+      .then((res) => {
+        setTable((t) => (t.betId === betId ? { ...t, bankroll: res.balance } : t));
+      })
+      .catch((e: unknown) => {
+        // Let it be retried: the chips are still out, and the server has the
+        // hand open, so the next attempt settles the same bet id.
+        setTable((t) => (t.betId === betId ? { ...t, settleSent: false } : t));
+        setTableError(e instanceof Error ? e.message : "couldn't settle that hand");
+      });
+  }, [table.settleSent, table.betId, table.phase, table.lastPayout, money]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function draw(): Card {
     const shoe = shoeRef.current!;
@@ -233,7 +316,11 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
       const evLine = lineEV(live.evOptimal, live.evLost);
       const adv = handAdvantage({
         stakeUnits: live.initialBet / TABLE_MIN,
-        bankrollFraction: live.bankrollAtBet > 0 ? live.initialBet / live.bankrollAtBet : 1,
+        // Measured against the rating's own reference stack, NOT the subteam
+        // budget. Against a 10,000-chip budget every legal bet is a rounding
+        // error, RISK would never fire, and bankroll discipline would silently
+        // stop being rated at all.
+        bankrollFraction: Math.min(1, live.initialBet / RATING_REFERENCE_BANKROLL),
         evLine,
         evReference,
         trueCountAtBet: live.trueCountAtBet,
@@ -265,14 +352,38 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
       wins: t.wins + (outcome === "win" || outcome === "blackjack" ? 1 : 0),
       losses: t.losses + (outcome === "lose" ? 1 : 0),
       pushes: t.pushes + (outcome === "push" ? 1 : 0),
-      bankroll: t.bankroll + payout,
+      // The budget is NOT credited here. This function is pure and is called
+      // from four different settle paths; the payout is recorded and a single
+      // effect sends it to the server, so one hand can only ever be settled
+      // once no matter which path finished it.
+      lastPayout: payout,
+      settleSent: false,
       cardsLeft: shoeRef.current!.length,
     };
   }
 
-  function deal() {
+  async function deal() {
     const t = tableRef.current;
-    if (ended.current || t.phase !== "bet" || t.bet <= 0 || t.bet > t.bankroll) return;
+    if (ended.current || t.phase !== "bet" || t.bet <= 0 || !money) return;
+    if (t.bet > money.maxBet || placing.current) return;
+
+    // Chips leave the budget BEFORE any card is dealt. If the server refuses
+    // (a teammate just spent the budget down under us, or the hand is somehow
+    // still open) nothing is dealt at all — the alternative is a hand in play
+    // that the team never paid for.
+    setPlacing(true);
+    let placed;
+    try {
+      placed = await money.placeBet(t.bet, crypto.randomUUID());
+    } catch (e) {
+      setPlacing(false);
+      setTableError(e instanceof Error ? e.message : "the house said no");
+      return;
+    }
+    setPlacing(false);
+    setTableError(null);
+    if (ended.current) return;
+
     if (shoeRef.current!.length < RESHUFFLE_BELOW) {
       shoeRef.current = createShoe(Math.random);
       runningRef.current = 0; // a fresh shoe knows nothing
@@ -286,20 +397,22 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
     see(player[0]!, player[1]!, dealer[0]!); // the hole stays uncounted until it flips
     holeCountedRef.current = false;
 
-    const bankrollAfter = t.bankroll - t.bet;
     const live: LiveHand = {
       opening: player,
-      evOptimal: optimalEV(player, dealer[0]!, bankrollAfter >= t.bet),
+      // Doubling is on the menu only if the budget could take a second stake
+      // of the same size — the 5% cap applies to it separately.
+      evOptimal: optimalEV(player, dealer[0]!, placed.maxBet >= t.bet),
       evLost: 0,
       worst: null,
       initialBet: t.bet,
-      bankrollAtBet: t.bankroll,
       trueCountAtBet: tcAtBet,
     };
     const dealt: Table = {
       ...t,
       phase: "player",
-      bankroll: bankrollAfter,
+      bankroll: placed.balance,
+      betId: placed.betId,
+      settleSent: true, // nothing settled yet; settled() flips this
       baseBet: t.bet,
       player,
       dealer,
@@ -346,11 +459,28 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
     setTable({ ...t, phase: "dealer", holeShown: true });
   }
 
-  function doubleDown() {
+  async function doubleDown() {
     const t0 = tableRef.current;
-    if (ended.current || t0.phase !== "player" || t0.player.length !== 2 || t0.bankroll < t0.bet) return;
-    const t = grade(t0, "double");
-    const doubled: Table = { ...t, bankroll: t.bankroll - t.bet, bet: t.bet * 2 };
+    if (ended.current || t0.phase !== "player" || t0.player.length !== 2) return;
+    if (!money || !t0.betId || placing.current) return;
+    // The double is a SECOND debit of the same size, capped on its own — so a
+    // doubled hand can carry up to 10% of the budget. Charge it before the
+    // card comes out, same as the deal.
+    setPlacing(true);
+    let raised;
+    try {
+      raised = await money.raiseBet(t0.betId, crypto.randomUUID());
+    } catch (e) {
+      setPlacing(false);
+      setTableError(e instanceof Error ? e.message : "can't double that");
+      return;
+    }
+    setPlacing(false);
+    setTableError(null);
+    if (ended.current) return;
+
+    const t = grade(tableRef.current, "double");
+    const doubled: Table = { ...t, bankroll: raised.balance, bet: raised.stake };
     const player = [...t.player, draw()];
     see(player[player.length - 1]!);
     setTable(
@@ -362,11 +492,16 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
 
   function nextHand() {
     const t = tableRef.current;
-    if (ended.current || t.phase !== "settled" || t.bankroll <= 0) return;
+    if (ended.current || t.phase !== "settled") return;
+    // Don't deal on top of a hand whose payout hasn't reached the server yet —
+    // the one-open-hand index would reject it anyway, and the error would land
+    // on the player instead of on the retry.
+    if (!t.settleSent || !money || money.maxBet <= 0) return;
     setTable({
       ...t,
       phase: "bet",
-      bet: Math.min(t.baseBet, t.bankroll),
+      betId: null,
+      bet: Math.min(t.baseBet, money.maxBet),
       player: [],
       dealer: [],
       holeShown: false,
@@ -392,8 +527,11 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
   }
 
   function addChip(v: number) {
+    // Touching the chips is the player acknowledging whatever went wrong last
+    // time; leaving a stale refusal on screen just makes the table look broken.
+    if (tableError) setTableError(null);
     const t = tableRef.current;
-    if (ended.current || t.phase !== "bet" || t.bet + v > t.bankroll) return;
+    if (ended.current || t.phase !== "bet" || t.bet + v > (money?.maxBet ?? 0)) return;
     setTable({ ...t, bet: t.bet + v });
   }
 
@@ -425,10 +563,10 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
       if (t.phase === "player") {
         if (k === "h") { e.preventDefault(); hit(); }
         else if (k === "s") { e.preventDefault(); stand(); }
-        else if (k === "d") { e.preventDefault(); doubleDown(); }
+        else if (k === "d") { e.preventDefault(); void doubleDown(); }
       } else if (e.key === "Enter") {
-        if (t.phase === "bet" && t.bet > 0) { e.preventDefault(); deal(); }
-        else if (t.phase === "settled" && t.bankroll > 0) { e.preventDefault(); nextHand(); }
+        if (t.phase === "bet" && t.bet > 0) { e.preventDefault(); void deal(); }
+        else if (t.phase === "settled") { e.preventDefault(); nextHand(); }
       }
     }
     window.addEventListener("keydown", onKey);
@@ -437,7 +575,10 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
   }, [paused]);
 
   const { phase, bankroll, bet, player, dealer, holeShown, outcome, session, live } = table;
-  const broke = phase === "settled" && bankroll <= 0;
+  const maxBet = money?.maxBet ?? 0;
+  // "Broke" is a SUBTEAM-wide condition now: the budget can no longer cover a
+  // legal bet, and nothing this player does at this table will change that.
+  const broke = phase === "settled" && maxBet <= 0;
 
   // What cashing out right now would do to the carried rating. Shown live so
   // the ramp is visible — and so it's obvious that leaving after three lucky
@@ -519,10 +660,24 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
 
         {/* Status line — fixed height so the table never jumps */}
         <div className="games-display min-h-[18px] text-center text-xs tracking-[0.18em]">
-          {phase === "bet" && <span className="text-helios-dim">PLACE YOUR BET</span>}
-          {phase === "player" && <span className="text-helios-dim">HIT · STAND · DOUBLE</span>}
-          {phase === "dealer" && <span className="games-pulse text-helios-dim">DEALER DRAWS…</span>}
-          {phase === "settled" && outcomeLine && <span className={outcomeLine.cls}>{outcomeLine.text}</span>}
+          {/* The money is shared and the server has the last word on it, so a
+              refused bet or a failed settle has to be visible — the whole
+              subteam sees the consequence in the ledger either way. */}
+          {tableError ? (
+            <span className="text-[10px] normal-case tracking-normal text-red-300">
+              {tableError}
+            </span>
+          ) : busy ? (
+            <span className="games-pulse text-helios-dim">TAKING IT FROM THE BUDGET…</span>
+          ) : phase === "bet" ? (
+            <span className="text-helios-dim">PLACE YOUR BET</span>
+          ) : phase === "player" ? (
+            <span className="text-helios-dim">HIT · STAND · DOUBLE</span>
+          ) : phase === "dealer" ? (
+            <span className="games-pulse text-helios-dim">DEALER DRAWS…</span>
+          ) : phase === "settled" && outcomeLine ? (
+            <span className={outcomeLine.cls}>{outcomeLine.text}</span>
+          ) : null}
         </div>
 
         {/* Coaching line — the rating is built on decisions, so say which one
@@ -540,7 +695,13 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
 
         {/* Money rail */}
         <div className="games-num flex items-center justify-between text-[10px] text-helios-dim">
-          <span>BANK <span className="font-bold text-helios-text">{bankroll}</span></span>
+          <span title="Your subteam's shared budget — these are the team's chips">
+            {(money?.subteam ?? "BANK").toUpperCase()}{" "}
+            <span className="font-bold text-helios-text">{bankroll.toLocaleString()}</span>
+          </span>
+          <span title="5% of the budget is the most one bet can be">
+            MAX <span className="text-helios-text">{maxBet}</span>
+          </span>
           <span>BET <span className="font-bold text-asu-gold">{bet}</span></span>
           <span>SHOE <span className="text-helios-text">{table.cardsLeft}</span></span>
         </div>
@@ -587,7 +748,7 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
                 <button
                   key={v}
                   type="button"
-                  disabled={paused || bet + v > bankroll}
+                  disabled={paused || bet + v > maxBet}
                   onClick={() => addChip(v)}
                   className={
                     "games-num h-10 w-10 rounded-full border-2 border-dashed text-xs font-bold transition-transform enabled:hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-35 " +
@@ -603,12 +764,12 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
               ))}
               <button
                 type="button"
-                disabled={paused || bet === bankroll}
-                onClick={() => setTable({ ...tableRef.current, bet: bankroll })}
+                disabled={paused || maxBet <= 0 || bet === maxBet}
+                onClick={() => setTable({ ...tableRef.current, bet: maxBet })}
                 className={lineBtn}
-                title="Staking the stack is priced as the risk it is"
+                title="5% of the subteam budget — the most one bet is allowed to be"
               >
-                ALL-IN
+                MAX {maxBet}
               </button>
               <button
                 type="button"
@@ -618,7 +779,7 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
               >
                 CLEAR
               </button>
-              <button type="button" disabled={paused || bet === 0} onClick={deal} className={goldBtn}>
+              <button type="button" disabled={paused || busy || bet === 0} onClick={() => void deal()} className={goldBtn}>
                 DEAL
               </button>
             </>
@@ -633,8 +794,8 @@ export function BlackjackGame({ onGameOver, paused, rating }: GameProps) {
               </button>
               <button
                 type="button"
-                disabled={paused || player.length !== 2 || bankroll < bet}
-                onClick={doubleDown}
+                disabled={paused || busy || player.length !== 2 || maxBet < bet}
+                onClick={() => void doubleDown()}
                 className={lineBtn}
               >
                 DOUBLE

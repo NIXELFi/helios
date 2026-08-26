@@ -3,10 +3,12 @@ import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
 import {
-  fetchRating, isRated, submitRatedSession, submitScore,
-  type GameId, type Rating,
+  dropBall, fetchBudget, fetchRating, forfeitOpenBet, isMoney, isRated, placeBet,
+  raiseBet, settleBet, submitRatedSession, submitScore,
+  type Budget, type DropRequest, type DropResult, type GameId, type PlacedBet,
+  type RaisedBet, type Rating, type SettledBet,
 } from "./api";
-import type { RatedSession } from "./games/types";
+import type { MoneyTable, RatedSession } from "./games/types";
 import { GAMES, categoryOf, gamesInCategory, type GameCategory, type GameDef } from "./registry";
 import { GameCard } from "./components/GameCard";
 import { LobbyStandings } from "./components/LobbyStandings";
@@ -38,6 +40,9 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // Rated games continue a carried rating, so it has to be in hand before the
   // cabinet mounts. `null` means "still loading" for a rated game.
   const [carried, setCarried] = useState<Rating | null>(null);
+  // Money games spend the subteam's shared budget, which likewise has to be
+  // resolved before the cabinet mounts. `null` means "still loading".
+  const [budget, setBudget] = useState<Budget | null>(null);
   // Idempotency nonce for the current game-over submission: generated once when
   // the game ends, then reused on every retry so a duplicate-insert can never
   // occur on a flaky network.
@@ -93,8 +98,14 @@ export function GamesModule({ paused }: GamesModuleProps) {
     setOver(null);
     setRun((n) => n + 1);
     setBoardGame(game.id);
+    setCarried(null);
+    setBudget(null);
+    // Blackjack is BOTH rated and money — it carries a personal rating AND
+    // spends the subteam budget — so these are two independent ifs, not a
+    // chain. Getting that wrong leaves the cabinet gated forever on a budget
+    // nobody fetched.
     if (isRated(game.id)) {
-      setCarried(null); // gate the cabinet until the rating lands
+      // gate the cabinet until the rating lands
       void fetchRating(client, game.id)
         // A failed load must not lock anyone out of the table. The stored
         // rating is computed server-side from the server's own row, so a wrong
@@ -102,8 +113,15 @@ export function GamesModule({ paused }: GamesModuleProps) {
         // what actually gets saved.
         .catch(() => ({ rating: 1000, handsRated: 0 }))
         .then(setCarried);
-    } else {
-      setCarried(null);
+    }
+    if (isMoney(game.id)) {
+      // Gate the cabinet until the budget lands, and DON'T fall back to a
+      // made-up balance the way the rating does: a wrong rating misdraws a
+      // projection, but a wrong balance would invite bets the budget can't
+      // cover. Leaving it null keeps the cabinet on its loading state.
+      void fetchBudget(client)
+        .then(setBudget)
+        .catch(() => setBudget(null));
     }
     selectSection(game.category); // back-nav lands in the section you played from
     try {
@@ -115,6 +133,11 @@ export function GamesModule({ paused }: GamesModuleProps) {
 
   async function handleGameOver(score: number, session?: RatedSession) {
     if (!active || !client) return;
+    // A money game that carries no rating has nothing to submit: its chips
+    // were already spent one ledger row at a time while it was being played,
+    // and there is no score. Blackjack is money AND rated, so it must NOT take
+    // this exit — it still submits the session that moves its rating.
+    if (isMoney(active.id) && !isRated(active.id)) return;
     // Lazily mint the nonce the first time this game-over fires, then reuse it
     // on every retry so we never insert duplicate rows for the same play.
     if (!submitNonceRef.current) {
@@ -143,6 +166,83 @@ export function GamesModule({ paused }: GamesModuleProps) {
       setOver({ score, status: "error", rated });
     }
   }
+
+  // ---------------------------------------------------------- shared money
+  // The cabinet never touches the network: it calls `place`, we place the bet
+  // and hand back what the server decided. The balance it renders is always
+  // the server's, never one we worked out here.
+  // Every one of these ends the same way: take the server's balance, never
+  // compute one here.
+  const bank = <T extends { balance: number; maxBet: number }>(res: T): T => {
+    setBudget((b) => (b ? { ...b, balance: res.balance, maxBet: res.maxBet } : b));
+    return res;
+  };
+  // Reassigned every render so the closures always see the current client and
+  // cabinet — a ref initialiser would freeze the first render's forever.
+  const moneyOps = useRef<{
+    drop: (req: DropRequest, nonce: string) => Promise<DropResult>;
+    placeBet: (stake: number, nonce: string) => Promise<PlacedBet>;
+    raiseBet: (betId: string, nonce: string) => Promise<RaisedBet>;
+    settleBet: (
+      betId: string, payout: number, outcome: string, nonce: string,
+    ) => Promise<SettledBet>;
+    forfeitOpen: () => Promise<{ stake: number } | null>;
+  } | null>(null);
+  moneyOps.current = {
+    drop: async (req, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await dropBall(client, req, nonce));
+    },
+    placeBet: async (stake, nonce) => {
+      if (!client || !active) throw new Error("no table open");
+      return bank(await placeBet(client, active.id, stake, nonce));
+    },
+    raiseBet: async (betId, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await raiseBet(client, betId, nonce));
+    },
+    settleBet: async (betId, payout, outcome, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await settleBet(client, betId, payout, outcome, nonce));
+    },
+    forfeitOpen: async () => {
+      if (!client || !active) return null;
+      const lost = await forfeitOpenBet(client, active.id);
+      // Forfeiting doesn't move the balance (those chips left when the hand
+      // was dealt) but it does free the table, so re-read what's affordable.
+      if (lost) void fetchBudget(client).then(setBudget).catch(() => undefined);
+      return lost;
+    },
+  };
+  // Stable identities, same reasoning as stableOnGameOver below: a re-render
+  // must not churn the cabinet's effects mid-hand.
+  const stableMoney = useRef({
+    place: (req: DropRequest, nonce: string) => moneyOps.current!.drop(req, nonce),
+    placeBet: (stake: number, nonce: string) => moneyOps.current!.placeBet(stake, nonce),
+    raiseBet: (betId: string, nonce: string) => moneyOps.current!.raiseBet(betId, nonce),
+    settleBet: (betId: string, payout: number, outcome: string, nonce: string) =>
+      moneyOps.current!.settleBet(betId, payout, outcome, nonce),
+    forfeitOpen: () => moneyOps.current!.forfeitOpen(),
+  }).current;
+
+  // Shared money is only shared if you can watch it move. While a money
+  // cabinet is open, re-read the budget so a teammate spending at another desk
+  // shows up as a falling number rather than as a surprise rejection when you
+  // next press DROP. Paused (tab hidden) stops it, like every other loop here.
+  useEffect(() => {
+    if (!client || !active || !isMoney(active.id) || paused) return;
+    const id = setInterval(() => {
+      void fetchBudget(client)
+        .then(setBudget)
+        .catch(() => undefined); // a flaky poll must never disturb the table
+    }, 6000);
+    return () => clearInterval(id);
+  }, [client, active, paused]);
+
+  const money: MoneyTable | undefined =
+    active && isMoney(active.id) && budget
+      ? { ...budget, ...stableMoney }
+      : undefined;
 
   // Keep the latest closure in a ref but hand the games a stable identity, so
   // a GamesModule re-render (e.g. leaderboard refresh) can't churn their
@@ -177,13 +277,25 @@ export function GamesModule({ paused }: GamesModuleProps) {
             </div>
             <GameStandings client={client} gameId={active.id} refreshToken={refreshToken}>
               <div className="relative shrink-0 self-center">
-                {isRated(active.id) && !carried ? (
+                {(isRated(active.id) && !carried) || (isMoney(active.id) && !budget) ? (
                   /* A rated cabinet can't open until we know what rating the
-                   * session is continuing from. Sized to the table so the
-                   * layout doesn't jump when it lands. */
+                   * session is continuing from, and a money cabinet can't open
+                   * until we know what the subteam can afford. Sized to the
+                   * table so the layout doesn't jump when it lands. */
                   <div className="games-crt">
-                    <div className="games-display flex h-[420px] w-[400px] items-center justify-center text-[10px] tracking-[0.2em] text-helios-dim">
-                      <span className="games-pulse">LOADING YOUR RATING…</span>
+                    <div
+                      className={
+                        "games-display flex w-[400px] items-center justify-center text-[10px] tracking-[0.2em] text-helios-dim " +
+                        // Sized to the cabinet it stands in for, so the layout
+                        // doesn't jump when the real table lands.
+                        (isMoney(active.id) ? "h-[510px]" : "h-[420px]")
+                      }
+                    >
+                      <span className="games-pulse">
+                        {isMoney(active.id) && !budget
+                          ? "OPENING THE SUBTEAM BUDGET…"
+                          : "LOADING YOUR RATING…"}
+                      </span>
                     </div>
                   </div>
                 ) : (
@@ -192,6 +304,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                     onGameOver={stableOnGameOver}
                     paused={paused}
                     rating={carried ?? undefined}
+                    money={money}
                   />
                 )}
                 {over && (
