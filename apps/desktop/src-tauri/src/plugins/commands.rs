@@ -145,6 +145,7 @@ async fn download_capped(signed_url: &str, expected_bytes: u64) -> Result<Vec<u8
 /// the frontend reads it back with the fs plugin when it uploads, which also means
 /// a failed upload can be retried without re-packing.
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackedBundleInfo {
     pub staged_path: String,
     pub sha256: String,
@@ -197,6 +198,7 @@ pub fn pack_plugin_bundle(app: AppHandle, dir: String) -> Result<PackedBundleInf
 
 /// What `inspect_plugin_bundle` hands back to the Review tab.
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InspectedBundle {
     pub manifest: serde_json::Value,
     pub texts: std::collections::BTreeMap<String, String>,
