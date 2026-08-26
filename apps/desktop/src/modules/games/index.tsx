@@ -21,6 +21,10 @@ export interface GamesModuleProps {
   paused: boolean;
 }
 
+/** Trailing-edge window for coalescing money-driven board refreshes. Long
+ *  enough that rapid-fire plinko drops refetch once; short enough that the
+ *  standings visibly answer the chips you just spent. */
+const BOARD_REFRESH_MS = 2000;
 const LAST_GAME_KEY = "helios:games:lastGame";
 const LAST_SECTION_KEY = "helios:games:lastSection";
 
@@ -133,11 +137,18 @@ export function GamesModule({ paused }: GamesModuleProps) {
 
   async function handleGameOver(score: number, session?: RatedSession) {
     if (!active || !client) return;
-    // A money game that carries no rating has nothing to submit: its chips
-    // were already spent one ledger row at a time while it was being played,
-    // and there is no score. Blackjack takes this exit now that it is money
-    // only: the chips already moved hand by hand, so leaving banks nothing.
-    if (isMoney(active.id) && !isRated(active.id)) return;
+    // A money game has nothing to SUBMIT: its chips were already spent one
+    // ledger row at a time while it was being played, and there is no score.
+    // But "game over" on a money table means CASH OUT / LEAVE TABLE, so it
+    // still has to do something — returning here silently is what made the
+    // blackjack cash-out button dead. Close the cabinet and let the boards
+    // pick up the chips that moved.
+    if (isMoney(active.id) && !isRated(active.id)) {
+      setActive(null);
+      setOver(null);
+      refreshBoards();
+      return;
+    }
     // Lazily mint the nonce the first time this game-over fires, then reuse it
     // on every retry so we never insert duplicate rows for the same play.
     if (!submitNonceRef.current) {
@@ -167,6 +178,30 @@ export function GamesModule({ paused }: GamesModuleProps) {
     }
   }
 
+  // The boards are wrapped AROUND a live cabinet, so a money game has to move
+  // them while it is being played: its chips never pass through the game-over
+  // path that bumps refreshToken for every other game, which is why the
+  // standings only changed on a full app reload. Coalesced on a trailing edge
+  // so a burst of plinko drops refetches the boards once, not once per ball.
+  const boardBump = useRef<{ last: number; timer: ReturnType<typeof setTimeout> | null }>({
+    last: 0,
+    timer: null,
+  });
+  function refreshBoards() {
+    if (boardBump.current.timer) return; // a trailing refresh is already due
+    const wait = Math.max(0, BOARD_REFRESH_MS - (Date.now() - boardBump.current.last));
+    boardBump.current.timer = setTimeout(() => {
+      boardBump.current = { last: Date.now(), timer: null };
+      setRefreshToken((n) => n + 1);
+    }, wait);
+  }
+  useEffect(
+    () => () => {
+      if (boardBump.current.timer) clearTimeout(boardBump.current.timer);
+    },
+    [],
+  );
+
   // ---------------------------------------------------------- shared money
   // The cabinet never touches the network: it calls `place`, we place the bet
   // and hand back what the server decided. The balance it renders is always
@@ -175,6 +210,8 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // compute one here.
   const bank = <T extends { balance: number; maxBet: number }>(res: T): T => {
     setBudget((b) => (b ? { ...b, balance: res.balance, maxBet: res.maxBet } : b));
+    // Chips moved, so every money board that shows them is now stale.
+    refreshBoards();
     return res;
   };
   // Reassigned every render so the closures always see the current client and
@@ -211,6 +248,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
       // Forfeiting doesn't move the balance (those chips left when the hand
       // was dealt) but it does free the table, so re-read what's affordable.
       if (lost) void fetchBudget(client).then(setBudget).catch(() => undefined);
+      refreshBoards();
       return lost;
     },
   };

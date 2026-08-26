@@ -103,19 +103,19 @@ export function GameStandings({ client, gameId, refreshToken, children }: Props)
       {children}
 
       {/* ── rest of the field ────────────────────────────────────────── */}
-      <div className="min-h-0 w-full shrink overflow-y-auto">
+      <div className="flex min-h-0 w-full shrink flex-col">
         {error ? (
           <ErrorState message={error} onRetry={retry} />
         ) : isTeams ? (
           <>
-            <div className="games-display mb-1 text-center text-[9px] tracking-[0.2em] text-helios-dim">
+            <div className="games-display mb-1 shrink-0 text-center text-[9px] tracking-[0.2em] text-helios-dim">
               {boardCaption(tab, gameId)}
             </div>
             {!loading && subteams?.length === 0 ? (
               <EmptyState />
             ) : (
               restSubteams.length > 0 && (
-                <ol className="flex max-h-44 flex-col gap-1 text-xs text-helios-text">
+                <ol className="flex max-h-44 min-h-0 flex-col gap-1 overflow-y-auto text-xs text-helios-text">
                   {restSubteams.map((s, i) => (
                     <SubteamRow key={s.subteam} ranking={s} rank={teamRanks[i + 3]!} />
                   ))}
@@ -125,7 +125,7 @@ export function GameStandings({ client, gameId, refreshToken, children }: Props)
           </>
         ) : (
           hasRest && (
-            <ol className="grid max-h-44 w-full grid-cols-2 gap-1 text-xs text-helios-text">
+            <ol className="grid max-h-44 min-h-0 w-full grid-cols-2 gap-1 overflow-y-auto text-xs text-helios-text">
               {restPlayers.map((e) => (
                 <PlayerRow key={e.userId} entry={e} />
               ))}

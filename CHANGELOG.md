@@ -27,6 +27,24 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plinko paid out before the ball landed.** The balance jumped to the final
+  number the moment the server answered, while the ball was still falling — so
+  you knew the result before you could watch it. The payout now arrives as the
+  ball hits the bucket. Dropping again while one is still in the air no longer
+  makes the balance bounce either.
+- **The standings never updated while you played.** Boards only refreshed when a
+  game ended with a score to submit, and casino games have no score — so chips
+  moved but the leaderboard sat still until you restarted the app. Money games
+  now refresh the boards as the chips move.
+- **Blackjack's CASH OUT and LEAVE TABLE buttons did nothing.** They tried to
+  end a session that no longer had anything to submit once blackjack stopped
+  being rated. Both now return you to the lobby.
+- **Opening the subteams standings scrolled the whole panel** — including the
+  game — instead of just the list, shoving the table up the screen. Only the
+  standings list scrolls now.
+
 ## [5.6.0] - 2026-08-26
 
 ### Added

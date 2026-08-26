@@ -26,6 +26,19 @@ interface Ball {
   bucket: number;
   cents: number;
   net: number;
+  /** The settled balance this drop produced, held until the ball LANDS. The
+   *  server answers in milliseconds but the ball takes a second or two to
+   *  fall, and paying out before it lands shows the result of a drop the
+   *  player is still watching. */
+  balance: number;
+  maxBet: number;
+  /** Ordering token, so a slow drop landing late can't overwrite a newer
+   *  drop's balance. Same discipline the poll uses. */
+  seq: number;
+  /** What this drop cost. A ball that lands while LATER balls are still in
+   *  the air carries a balance from before those stakes left, so their
+   *  stakes are subtracted back off at landing. */
+  stake: number;
 }
 
 interface Landed {
@@ -99,6 +112,12 @@ export function PlinkoGame({ paused, money }: GameProps) {
   // no drop has been answered since — same `applied` guard the drops use.
   useEffect(() => {
     if (!money) return;
+    // While anything is falling, the parent's balance ALREADY includes the
+    // payout for those balls — it banked the server's answer the moment it
+    // arrived. Applying it here would pay the player before the ball lands,
+    // which is the whole thing the ball is carrying its own balance to avoid.
+    // The landing applies the authoritative number; the next poll re-syncs.
+    if (balls.current.length > 0) return;
     const mine = ++seq.current;
     applied.current = mine;
     setBalance(money.balance);
@@ -115,6 +134,8 @@ export function PlinkoGame({ paused, money }: GameProps) {
     setInFlight((n) => n + 1);
     try {
       const res = await money.place({ rows, risk, stake }, crypto.randomUUID());
+      // The payout rides ON the ball and is applied when it lands, not here.
+      // The stake already left above, which is what a drop costs you up front.
       balls.current.push({
         id: nextId.current++,
         track: ballTrack(res.path),
@@ -122,12 +143,11 @@ export function PlinkoGame({ paused, money }: GameProps) {
         bucket: res.bucket,
         cents: res.multiplierCents,
         net: res.net,
+        balance: res.balance,
+        maxBet: res.maxBet,
+        seq: mine,
+        stake,
       });
-      if (mine > applied.current) {
-        applied.current = mine;
-        setBalance(res.balance);
-        setMaxBet(res.maxBet);
-      }
     } catch (e) {
       // The optimistic debit never happened server-side; put it back.
       setBalance((b) => b + stake);
@@ -145,6 +165,17 @@ export function PlinkoGame({ paused, money }: GameProps) {
       if (b.t >= b.track.length - 1) {
         landed.current.push({ id: b.id, bucket: b.bucket, cents: b.cents, net: b.net, flash: 0.9 });
         setHistory((h) => [{ id: b.id, cents: b.cents, net: b.net }, ...h].slice(0, 8));
+        // NOW the chips arrive — same instant the bucket flashes. b.balance is
+        // the server's balance as of THIS drop, so anything dropped after it
+        // and still falling has already left the budget optimistically but is
+        // not reflected in that number; subtract those stakes back off or the
+        // balance visibly bounces up between two landings.
+        if (b.seq > applied.current) {
+          applied.current = b.seq;
+          const staked = bs.reduce((sum, o) => (o.seq > b.seq ? sum + o.stake : sum), 0);
+          setBalance(b.balance - staked);
+          setMaxBet(b.maxBet);
+        }
         bs.splice(i, 1);
       }
     }
