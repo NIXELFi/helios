@@ -117,9 +117,10 @@ export function usePublish() {
           const rows = ((mine.data ?? []) as MyVersionRow[]).filter(
             (r) => r.plugin_id === packed.manifest.id,
           );
-          if (rows.length > 0) {
+          const first = rows[0];
+          if (first) {
             isNewPlugin = false;
-            lockedSubteam = rows[0].subteam;
+            lockedSubteam = first.subteam;
             const approved = rows
               .filter((r) => r.review_status === "approved")
               .sort((a, b) => b.published_at.localeCompare(a.published_at))[0];

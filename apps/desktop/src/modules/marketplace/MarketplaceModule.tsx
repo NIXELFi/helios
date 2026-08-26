@@ -9,7 +9,15 @@
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { IconArrowLeft, IconPuzzle, IconTerminal2, IconBolt, IconUpload, IconRefresh } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconPuzzle,
+  IconTerminal2,
+  IconBolt,
+  IconUpload,
+  IconRefresh,
+  IconHelpCircle,
+} from "@tabler/icons-react";
 import { useUser } from "@helios/auth";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
@@ -23,6 +31,10 @@ import { InstallConsentModal } from "./components/InstallConsentModal";
 import { UninstallConfirmModal } from "./components/UninstallConfirmModal";
 import { hasHighTrust } from "./components/PermissionList";
 import { FIRST_PARTY_APPS, type FirstPartyApp } from "./firstParty";
+import { useMyCapabilities } from "../org/data/useOrgData";
+import { SubmitWizard } from "./publish/SubmitWizard";
+import { HelpDrawer, useHelpDrawer } from "./authoring/HelpDrawer";
+import { ReviewView } from "./review/ReviewView";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled";
 
 interface LoadError {
@@ -36,7 +48,7 @@ interface ConsoleLine {
   level?: "info" | "warn" | "error";
 }
 
-type Tab = "browse" | "installed";
+type Tab = "browse" | "installed" | "review";
 
 // DEV-ONLY preview flag (see data/demoStore.ts). OFF by default.
 const DEMO = isMarketplaceDemo();
@@ -47,6 +59,13 @@ export function MarketplaceModule() {
   const { uninstall, removing, error: uninstallError } = useUninstall();
 
   const [tab, setTab] = useState<Tab>("browse");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const { canAnywhere } = useMyCapabilities();
+  const help = useHelpDrawer();
+  // Publishing and reviewing are capability-gated, but the Add button stays
+  // visible either way: it explains what the capability is rather than leaving
+  // someone to wonder why the feature seems not to exist.
+  const canReview = canAnywhere("marketplace.review");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [consentFor, setConsentFor] = useState<AvailablePlugin | null>(null);
   const [uninstallFor, setUninstallFor] = useState<AvailablePlugin | null>(null);
@@ -199,19 +218,23 @@ export function MarketplaceModule() {
               <IconRefresh size={14} className={loading ? "animate-spin" : undefined} />
               Refresh
             </button>
-            {/* Publish/upload UI is not built yet — show the affordance disabled so the
-                beta hints at where it's going without pretending it works. */}
             <button
               type="button"
-              disabled
-              title="Coming soon!"
-              aria-label="Upload plugin — coming soon"
-              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim opacity-60"
+              onClick={() => help.openHelp("getting-started")}
+              title="How to build and publish a plugin"
+              aria-label="Plugin author help"
+              className="inline-flex items-center gap-1.5 rounded-sm border border-helios-line px-3 py-1.5 text-xs font-medium text-helios-dim transition-colors hover:border-asu-gold/40 hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
-              <IconUpload size={14} /> Upload plugin
-              <span className="ml-1 rounded-sm bg-helios-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim">
-                Soon
-              </span>
+              <IconHelpCircle size={14} /> Help
+            </button>
+            <button
+              type="button"
+              onClick={() => setWizardOpen(true)}
+              title="Publish a plugin you have built"
+              aria-label="Add to Marketplace"
+              className="inline-flex items-center gap-1.5 rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            >
+              <IconUpload size={14} /> Add to Marketplace
             </button>
           </div>
         </header>
@@ -235,6 +258,11 @@ export function MarketplaceModule() {
               <TabButton active={tab === "installed"} onClick={() => setTab("installed")}>
                 Installed{installed.length > 0 ? ` (${installed.length})` : ""}
               </TabButton>
+              {canReview && (
+                <TabButton active={tab === "review"} onClick={() => setTab("review")}>
+                  Review
+                </TabButton>
+              )}
             </div>
 
             {launchError && (
@@ -283,7 +311,7 @@ export function MarketplaceModule() {
                   onOpen={handleOpen}
                 />
               </>
-            ) : (
+            ) : tab === "installed" ? (
               <InstalledView
                 plugins={installed}
                 loading={loading}
@@ -294,10 +322,27 @@ export function MarketplaceModule() {
                 onUninstall={requestUninstall}
                 onOpenDetail={openDetail}
               />
+            ) : (
+              <ReviewView
+                available={plugins}
+                onHelp={help.openHelp}
+                onPreviewInstalled={refetch}
+              />
             )}
           </>
         )}
       </div>
+
+      {wizardOpen && (
+        <SubmitWizard onClose={() => setWizardOpen(false)} onPublished={refetch} />
+      )}
+
+      <HelpDrawer
+        open={help.open}
+        topic={help.topic}
+        onClose={help.closeHelp}
+        onTopicChange={help.setTopic}
+      />
 
       {consentFor && (
         <InstallConsentModal

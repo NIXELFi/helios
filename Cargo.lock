@@ -3646,6 +3646,7 @@ version = "5.6.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
+ "serde_json",
  "sha2",
  "tempfile",
  "zip 2.4.2",

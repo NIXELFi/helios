@@ -24,6 +24,20 @@ vi.mock("../data/useMarketplace", () => ({
   useUninstall: () => ({ uninstall: mocks.uninstall, removing: false, error: null }),
 }));
 
+// The header's Add to Marketplace / Help affordances and the Review tab are
+// capability-gated, so the module now reads org capabilities. Default to a member
+// who can neither publish nor review — these tests are about the install gate.
+vi.mock("../../org/data/useOrgData", () => ({
+  useMyCapabilities: () => ({
+    can: () => false,
+    canAnywhere: () => false,
+    loading: false,
+    error: null,
+    refetch: () => {},
+  }),
+  useSubteams: () => ({ data: [], refetch: () => {} }),
+}));
+
 import { MarketplaceModule } from "../MarketplaceModule";
 
 afterEach(cleanup);

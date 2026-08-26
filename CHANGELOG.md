@@ -27,6 +27,25 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Add to Marketplace — publish a plugin from inside Helios.** Subteam
+  engineers, leads and VPs can now submit their own add-ons without a terminal:
+  pick your plugin folder and Helios packs it, checks it, and submits it for
+  review. The check is the same compliance scan your reviewer runs, so a green
+  tick here means a green tick in review — and every finding is explained in
+  plain English with a link to the help panel, rather than an error code. Until
+  now every plugin in the marketplace had to be published by hand by one person.
+- **A Review tab for leads and VPs.** Pending submissions arrive with a
+  permission diff against the last approved version (so "asks for nothing new"
+  and "now wants to run MATLAB" look nothing alike), a compliance scan Helios
+  re-runs against the uploaded bundle rather than trusting the author's copy, and
+  a Test-drive button that installs the pending build locally so you can run it
+  before deciding. You still cannot approve your own submission.
+- **A plugin author help panel**, reachable from the Marketplace header and from
+  every step of the submit wizard: what the sandbox blocks and why, what each
+  permission actually grants, how review works, and what to do after a rejection.
+
 ## [5.6.1] - 2026-08-26
 
 ### Fixed

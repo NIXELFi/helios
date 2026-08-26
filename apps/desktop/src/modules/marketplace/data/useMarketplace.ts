@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { installBundle, type InstallMetaRow } from "./installBundle";
 import { useSupabaseClient, useUser } from "@helios/auth";
 import type { PluginManifest } from "@helios/plugin-sdk";
 import { isMarketplaceDemo, demoList, demoSubscribe, demoInstall, demoUninstall } from "./demoStore";
@@ -48,25 +49,6 @@ interface AvailableRow {
   permissions: string[] | null;
   installed_version: string | null;
   published_at: string;
-}
-
-/** Raw row from `marketplace.install_plugin()` — everything needed to download +
- *  verify the bundle on the Rust side. */
-interface InstallMetaRow {
-  plugin_id: string;
-  version: string;
-  manifest: PluginManifest;
-  bundle_sha256: string;
-  bundle_bytes: number;
-  signature: string;
-  sig_alg: string;
-  signing_key_id: string;
-}
-
-interface PublicKeyRow {
-  key_id: string;
-  public_key: string;
-  alg: string;
 }
 
 function toAvailable(r: AvailableRow): AvailablePlugin {
@@ -177,36 +159,9 @@ export function useInstall(): {
         const row = ((meta.data ?? []) as InstallMetaRow[])[0];
         if (!row) throw new Error("install_plugin returned no version metadata");
 
-        // 2. Short-lived signed URL for the content-addressed bundle.
-        const signed = await client.storage
-          .from(BUNDLE_BUCKET)
-          .createSignedUrl(row.bundle_sha256, SIGNED_URL_TTL);
-        if (signed.error || !signed.data?.signedUrl) {
-          throw new Error(signed.error?.message ?? "could not sign bundle URL");
-        }
-
-        // 3. Marketplace public key for client-side signature verification.
-        const pk = await client.schema(SCHEMA).rpc("signing_public_key");
-        if (pk.error) throw new Error(pk.error.message);
-        const keyRow = ((pk.data ?? []) as PublicKeyRow[])[0];
-        if (!keyRow) throw new Error("no marketplace signing key available");
-
-        // 4. Hand off to Rust: verifies sha256 + signature, then unpacks. Tauri
-        //    maps these camelCase args to the command's snake_case params.
-        await invoke("install_plugin_bundle", {
-          pluginId: row.plugin_id,
-          version: row.version,
-          signedUrl: signed.data.signedUrl,
-          expectedSha256: row.bundle_sha256,
-          bundleBytes: row.bundle_bytes,
-          signature: row.signature,
-          sigAlg: row.sig_alg,
-          publicKey: keyRow.public_key,
-          // H1: the approved/consented permission set (from install_plugin's
-          // manifest). The Rust side refuses to install a bundle whose own
-          // manifest.json declares any permission not in this set.
-          approvedPermissions: row.manifest.permissions ?? [],
-        });
+        // 2-4. Signed URL -> signing key -> Rust verify + unpack. Shared with the
+        //      reviewer's test-drive so both run the identical verification.
+        await installBundle(client, row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
