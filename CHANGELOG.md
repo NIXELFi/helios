@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.6.1] - 2026-08-26
+
 ### Fixed
 
 - **Plinko paid out before the ball landed.** The balance jumped to the final
