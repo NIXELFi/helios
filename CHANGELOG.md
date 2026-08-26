@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-08-26
+
 ### Added
 
 - **Blackjack now plays for the subteam's money too.** The 200-chip stack the
