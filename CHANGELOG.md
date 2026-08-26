@@ -27,30 +27,20 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-
-- **Plinko drops failed with a database error.** The ball's path is generated
-  server-side by pgcrypto, which lives in a schema the drop routine wasn't
-  looking in, so every drop was rejected the moment you released the ball.
-  Nothing was charged for a failed drop and no other game was affected. Fixed
-  server-side — no app update needed.
-
-## [5.6.0] - 2026-08-26
-
 ### Added
 
-- **Blackjack now plays for the subteam's money too.** The 200-chip stack the
+- **Casino: shared subteam money.** Every subteam now has one chip budget,
+  seeded at 10,000, that all of its members spend from. A single bet can never
+  be more than 5% of what the budget currently holds, checked against the live
+  balance at the moment the bet is placed — so two teammates playing at the
+  same time can't both spend the same chips.
+- **Blackjack now plays for the subteam's money.** The 200-chip stack the
   table used to hand you is gone: chips come from the shared budget, capped at
   5% per bet like everything else in the casino, and doubling down takes a
   second, separately capped stake. The chips leave the budget when the cards
   come out and come back when the hand finishes. **Leaving mid-hand forfeits
   the bet**, exactly like walking away from a live table — the cabinet clears
   any hand left open by a previous session when you sit down.
-- **Casino: shared subteam money.** Every subteam now has one chip budget,
-  seeded at 10,000, that all of its members spend from. A single bet can never
-  be more than 5% of what the budget currently holds, checked against the live
-  balance at the moment the bet is placed — so two teammates playing at the
-  same time can't both spend the same chips.
 - **Plinko** joins the casino, spending that shared budget. Three risk levels
   and 8/12/16-row boards, every one of them returning ~99% (deliberately close
   to blackjack's chart edge, so the choice is about variance rather than a
@@ -64,12 +54,17 @@ follow [semver](https://semver.org/).
 
 ### Changed
 
-- **The blackjack leaderboard is money now, not rating.** Chips are what the
-  casino competes on; your rating became a personal number, still shown in the
-  cabinet and still earned per hand exactly as before. It is NOT reset — it
-  keeps scoring your play against the same 200-chip reference stack it always
-  has, so a rating earned last week means the same thing this week. Stakes
-  above 200 chips play for money rather than for rating.
+- **Blackjack is no longer rated — the subteam's chips are the whole
+  scoreboard.** The rating, the projected rating, the "playing like" number and
+  the rating leaderboard are all gone; the chip budget now sits where the rating
+  used to, showing your subteam's name and its balance at the top of the table.
+  Hands are no longer scored or submitted, so the ladder no longer moves. Your
+  existing rating has NOT been deleted — it is simply no longer shown or
+  updated, so the ladder can be switched back on later without anyone losing
+  their history. The per-hand coaching stays exactly as it was: the table still
+  tells you which decision cost you and what the chart wanted instead, still
+  counts how much of the session you played by the book, and still reports luck
+  as its own number.
 
 ### Security
 

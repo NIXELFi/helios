@@ -100,10 +100,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
     setBoardGame(game.id);
     setCarried(null);
     setBudget(null);
-    // Blackjack is BOTH rated and money — it carries a personal rating AND
-    // spends the subteam budget — so these are two independent ifs, not a
-    // chain. Getting that wrong leaves the cabinet gated forever on a budget
-    // nobody fetched.
+    // These are two independent ifs, not a chain. No game is rated today, so
+    // only the money branch fires — but chaining them was a real bug once
+    // (blackjack was briefly both, and an `else if` left the cabinet gated
+    // forever on a budget nobody fetched). Keep them independent.
     if (isRated(game.id)) {
       // gate the cabinet until the rating lands
       void fetchRating(client, game.id)
@@ -135,8 +135,8 @@ export function GamesModule({ paused }: GamesModuleProps) {
     if (!active || !client) return;
     // A money game that carries no rating has nothing to submit: its chips
     // were already spent one ledger row at a time while it was being played,
-    // and there is no score. Blackjack is money AND rated, so it must NOT take
-    // this exit — it still submits the session that moves its rating.
+    // and there is no score. Blackjack takes this exit now that it is money
+    // only: the chips already moved hand by hand, so leaving banks nothing.
     if (isMoney(active.id) && !isRated(active.id)) return;
     // Lazily mint the nonce the first time this game-over fires, then reuse it
     // on every retry so we never insert duplicate rows for the same play.

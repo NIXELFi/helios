@@ -10,7 +10,11 @@ export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack" | "p
  *  and write games.ratings instead of games.scores: their board shows the
  *  number a player is currently holding, so it can go down, and quitting on a
  *  hot streak banks nothing. */
-const RATED_GAMES: ReadonlySet<GameId> = new Set<GameId>(["blackjack"]);
+// Empty today: blackjack was the only rated cabinet and it now plays purely for
+// the subteam's money. The ratings table, its RPCs and the whole leaderboard
+// path below are deliberately LEFT IN PLACE — nobody's history is deleted, and
+// putting a game back on the ladder is a one-line change here.
+const RATED_GAMES: ReadonlySet<GameId> = new Set<GameId>([]);
 
 export function isRated(gameId: GameId): boolean {
   return RATED_GAMES.has(gameId);

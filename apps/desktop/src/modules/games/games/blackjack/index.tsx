@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { GameProps, RatingSnapshot } from "../types";
+import type { GameProps } from "../types";
 import {
   createShoe,
   dealerShouldHit,
@@ -16,12 +16,9 @@ import {
 } from "./logic";
 import { actionEVs, bestAction, optimalEV, referenceEV, type Action } from "./ev";
 import {
-  applySession,
-  displayRating,
   handAdvantage,
   lineEV,
   RATING_REFERENCE_BANKROLL,
-  RATING_START,
 } from "./rating";
 
 // Chips come from the SUBTEAM BUDGET now, not a 200-chip stack the cabinet
@@ -37,12 +34,14 @@ import {
 //    the window on a losing hand, since the client knows the outcome before it
 //    settles. The cabinet forfeits any hand it finds still open on mount.
 //
-// The RATING is deliberately untouched by all of this: it still scores play
-// against a fixed 200-chip reference stack (RATING_REFERENCE_BANKROLL), so a
-// rating earned before the change means the same as one earned after it.
+// Blackjack is NOT rated. The chips are the whole scoreboard: the table keeps
+// no score and submits no session, and games.ratings is left alone rather than
+// deleted so the ladder can be switched back on without losing anyone's
+// history. The EV machinery below survives because it still drives the
+// coaching line ("the chart wanted X") and LUCK — not a ladder.
 
 const CHIP_VALUES = [5, 25, 100] as const;
-/** The table minimum — the unit every stake is measured in for the rating. */
+/** The table minimum — the unit every stake is measured in. */
 const TABLE_MIN = CHIP_VALUES[0];
 const DEALER_DRAW_MS = 450;
 
@@ -159,10 +158,7 @@ function signed(n: number, digits = 2): string {
   return `${sign}${magnitude}`;
 }
 
-export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) {
-  // Rated cabinets are mounted only once the carried rating has resolved, but
-  // default defensively so the game is still playable if that ever changes.
-  const carried: RatingSnapshot = rating ?? { rating: RATING_START, handsRated: 0 };
+export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
 
   // Shoe is draw-only mutable state the UI never maps over — a ref keeps the
   // multi-draw actions (deal = four pops) simple; cardsLeft mirrors it for
@@ -514,16 +510,10 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
     const t = tableRef.current;
     if (ended.current || (t.phase !== "bet" && t.phase !== "settled")) return;
     ended.current = true;
-    const applied = applySession({
-      rating: carried.rating,
-      handsRated: carried.handsRated,
-      hands: t.session.hands,
-      totalAdvantage: t.session.total,
-    });
-    onGameOver(Math.max(0, Math.round(applied.rating)), {
-      hands: t.session.hands,
-      totalAdvantage: t.session.total,
-    });
+    // Blackjack is a money game only: the chips already moved, hand by hand,
+    // through place_bet/settle_bet. There is no score and no rating to submit,
+    // so leaving the table just ends the session.
+    onGameOver(0);
   }
 
   function addChip(v: number) {
@@ -580,16 +570,6 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
   // legal bet, and nothing this player does at this table will change that.
   const broke = phase === "settled" && maxBet <= 0;
 
-  // What cashing out right now would do to the carried rating. Shown live so
-  // the ramp is visible — and so it's obvious that leaving after three lucky
-  // hands buys almost nothing.
-  const projected = applySession({
-    rating: carried.rating,
-    handsRated: carried.handsRated,
-    hands: session.hands,
-    totalAdvantage: session.total,
-  });
-  const perHand = session.hands > 0 ? session.total / session.hands : 0;
 
   const outcomeLine =
     outcome === "blackjack" ? { text: "BLACKJACK — PAYS 3:2", cls: "text-asu-gold" }
@@ -606,21 +586,19 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
   return (
     <div className="games-crt">
       <div className="flex w-[400px] flex-col gap-3 p-1">
-        {/* Rating rail — the carried number, and where cashing out now lands it */}
+        {/* Chip rail — the subteam's shared budget is the only scoreboard this
+            table keeps. It moves when a TEAMMATE plays too. */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-2">
-            <span className="games-display text-[10px] text-helios-dim">RATING</span>
-            <span className="games-num text-lg font-bold text-asu-gold">
-              {Math.round(carried.rating)}
+            <span
+              className="games-display text-[10px] text-helios-dim"
+              title="Your subteam's shared budget — these are the team's chips"
+            >
+              {(money?.subteam ?? "BANK").toUpperCase()}
             </span>
-            {session.hands > 0 && (
-              <span
-                className={`games-num text-[11px] ${projected.delta >= 0 ? "text-asu-gold" : "text-red-300"}`}
-                title="Where cashing out right now would leave your rating"
-              >
-                ▸ {Math.round(projected.rating)} ({signed(projected.delta, 1)})
-              </span>
-            )}
+            <span className="games-num text-lg font-bold text-asu-gold">
+              {bankroll.toLocaleString()}
+            </span>
           </div>
           <span className="games-num text-[10px] text-helios-dim">
             W {table.wins} · L {table.losses} · P {table.pushes}
@@ -693,12 +671,8 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
           ) : null}
         </div>
 
-        {/* Money rail */}
+        {/* Table rail */}
         <div className="games-num flex items-center justify-between text-[10px] text-helios-dim">
-          <span title="Your subteam's shared budget — these are the team's chips">
-            {(money?.subteam ?? "BANK").toUpperCase()}{" "}
-            <span className="font-bold text-helios-text">{bankroll.toLocaleString()}</span>
-          </span>
           <span title="5% of the budget is the most one bet can be">
             MAX <span className="text-helios-text">{maxBet}</span>
           </span>
@@ -706,37 +680,18 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
           <span>SHOE <span className="text-helios-text">{table.cardsLeft}</span></span>
         </div>
 
-        {/* Where the rating is coming from. PLAY is your decisions, BET is
-            whether raising was justified by the shoe, RISK is bankroll
-            discipline. Fortune sits outside the rating on purpose. */}
+        {/* Session line. The table is not rated any more, so this is purely
+            coaching: how much of the session followed the chart, and how the
+            cards fell versus what the play was actually worth. */}
         <div className="rounded-sm border border-helios-line/70 bg-helios-panel/40 px-2 py-1.5">
-          <div className="games-num flex items-center justify-between text-[9px]">
-            <span className="text-helios-dim">
-              PLAY <span className={session.play >= 0 ? "text-asu-gold" : "text-red-300"}>{signed(session.play)}</span>
-            </span>
-            <span className="text-helios-dim">
-              BET <span className={session.bet >= 0 ? "text-asu-gold" : "text-red-300"}>{signed(session.bet)}</span>
-            </span>
-            <span className="text-helios-dim">
-              RISK <span className={session.risk >= 0 ? "text-helios-text" : "text-red-300"}>{signed(session.risk)}</span>
-            </span>
-            <span
-              className="text-helios-dim"
-              title="How the cards fell versus what your play was worth. Deliberately not part of your rating."
-            >
-              LUCK <span className="text-helios-text">{signed(session.fortune, 1)}</span>
-            </span>
-          </div>
-          <div className="mt-1 flex items-center justify-between text-[9px] text-helios-dim/80">
+          <div className="games-num flex items-center justify-between text-[9px] text-helios-dim">
             <span>
               {session.hands} hand{session.hands === 1 ? "" : "s"}
               {session.hands > 0 && ` · ${session.clean}/${session.hands} by the book`}
             </span>
-            {session.hands > 0 && (
-              <span className="games-num" title="The rating this session's play would settle at">
-                PLAYING LIKE <span className="text-asu-gold">{Math.round(displayRating(perHand))}</span>
-              </span>
-            )}
+            <span title="How the cards fell versus what your play was worth.">
+              LUCK <span className="text-helios-text">{signed(session.fortune, 1)}</span>
+            </span>
           </div>
         </div>
 
@@ -823,7 +778,7 @@ export function BlackjackGame({ onGameOver, paused, rating, money }: GameProps) 
         <div className="flex items-center justify-between">
           <span
             className="text-[9px] text-helios-dim/80"
-            title="Your rating is scored on the expected value of your decisions and your bet sizing — never on whether the hand won. Play the chart to reach 1400; go higher only by raising when the shoe is rich."
+            title="These are the subteam's chips, not yours. One bet can never be more than 5% of what the budget holds, and the balance moves when a teammate plays too."
           >
             Dealer stands on 17 · BJ pays 3:2 · rated on decisions, not luck
           </span>

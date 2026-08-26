@@ -194,21 +194,29 @@ describe("fetchBudgetStandings (casino standings)", () => {
   });
 });
 
-describe("blackjack is both rated and money", () => {
-  it("spends the shared budget AND carries a rating", () => {
-    // The two flags are independent, not a spectrum. Blackjack takes chips
-    // from the subteam (money) and still moves the player's personal number
-    // (rated); treating them as mutually exclusive silently drops one or the
-    // other — the rating submission, in the case that bit during the port.
+describe("blackjack is a money game and nothing else", () => {
+  it("spends the shared budget and is NOT rated", () => {
+    // The two flags are independent, not a spectrum, and blackjack is now on
+    // exactly one of them: chips are the whole scoreboard. isRated must stay
+    // false or the module fetches a rating the cabinet no longer takes and
+    // submits a session nothing consumes.
     expect(isMoney("blackjack")).toBe(true);
-    expect(isRated("blackjack")).toBe(true);
+    expect(isRated("blackjack")).toBe(false);
     expect(isMoney("plinko")).toBe(true);
     expect(isRated("plinko")).toBe(false);
   });
 
-  it("shows chips on its boards, not the rating", async () => {
-    // Money wins over rating for board routing: chips are the casino
-    // scoreboard now and the rating lives inside the cabinet.
+  it("has no rated games left at all", () => {
+    // The ladder is switched off, not half-wired. If a game is ever put back
+    // on it, that is a deliberate change and this test should be the thing
+    // that makes someone say so out loud.
+    const everyGame = ["snake", "breakout", "flappy", "2048", "blackjack", "plinko"] as const;
+    expect(everyGame.filter((g) => isRated(g))).toEqual([]);
+  });
+
+  it("shows chips on its boards", async () => {
+    // Boards were already money-routed; with the ladder off there is no other
+    // candidate, and this pins that the ratings board is not reachable.
     const { client, from } = stubClient({ data: [], error: null });
     await fetchAllTime(client, "blackjack");
     expect(from).toHaveBeenCalledWith("leaderboard_money_alltime");
