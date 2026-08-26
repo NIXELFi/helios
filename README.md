@@ -2,7 +2,7 @@
 
 **Sun Devil Motorsports engineering suite.** Tauri (Rust + React) desktop app built by an FSAE team for the whole car-development loop: telemetry analysis, CAD vaulting, project management, 1D engine simulation, and a sandboxed plugin marketplace — in one signed, auto-updating binary.
 
-> **Status:** `v5.1.1` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, [`CHANGELOG.md`](CHANGELOG.md) for the release notes, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
+> **Status:** `v5.6.0` — see [GitHub Releases](https://github.com/NIXELFi/helios/releases) for installers and changelogs, [`CHANGELOG.md`](CHANGELOG.md) for the release notes, and [`v2_changes/`](v2_changes/) for the per-issue engineering log.
 
 Seven modules ship today, plus admin-only Org & Access tooling:
 
@@ -10,7 +10,7 @@ Seven modules ship today, plus admin-only Org & Access tooling:
 - **Vault** — a SolidWorks-PDM-style file vault for the team's CAD (details below).
 - **Projects** — Gantt-style project/task management backed by the same Supabase instance, with per-subteam roles, a "primary subteam" view filter (hide tasks your subteam only contributes to), and Slack notifications that surface the task owner and subteam lead on every change.
 - **CFD** — a 1D finite-volume engine simulator (intake/exhaust wave dynamics, calibrated against the team's real dynos) with parameter sweeps, FSAE-points optimization, and print-to-PDF engineering reports — plus a measurement-driven lap simulator: Pacejka `.tir` tire fits, CFD aero maps, and roll-stiffness data load from a team-data folder; grip is pinned by real skidpad/autocross/accel results; fuel burn comes from a solver-derived variable-throttle model (no fudge constants); and a playback "lap player" with a supersport dash, per-axle balance readout, residency histograms, and a filterable channel analyzer.
-- **Games** — arcade lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards.
+- **Games** — an **arcade** lobby (Breakout, Flappy Bird, Snake, 2048) with global leaderboards, scored across subteams by Grand Prix placement points, and a **casino** that plays for the subteam's own money. Every subteam holds one shared chip budget, seeded at 10,000, that any member can stake at most 5% of per bet — checked against the live balance at the moment the bet is placed, so two teammates playing at once can't spend the same chips. Blackjack is dealt from a counted shoe and rated on the expected value of your decisions rather than on whether you won (luck is reported as its own number and never touches the ladder); Plinko drops through 8/12/16-row boards at three risk levels, all returning ~99%. Money games are server-authoritative: the path, the bucket, the payout and the ledger row all land in one transaction, and the cabinet only animates the result.
 - **Amethyst** — a built-in reader for an Obsidian-style Markdown vault: graph view, backlinks, full-text search, and a command palette over a local folder you pick (no backend, no sign-in).
 - **Marketplace** *(beta)* — install sandboxed, signed, team-built plugins (add-ons) that run in an isolated frame; first-party plugins already published include a lap simulator, a chassis torsional-rigidity tool, and an RF antenna studio.
 - **Org & Access** *(admin-only)* — data-driven team structure and role management: subteams, roles, and the capabilities that gate every module. Visible only to owners/admins.
