@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.6.2] - 2026-08-29
+
 ### Changed
 - **Blackjack is now dealt by the house.** Every card comes from a server-side
   shoe and every hand is settled by the server in the same transaction that
