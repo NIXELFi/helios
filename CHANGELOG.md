@@ -27,6 +27,22 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Blackjack is now dealt by the house.** Every card comes from a server-side
+  shoe and every hand is settled by the server in the same transaction that
+  drew the cards. The table plays exactly as before — same rules, same coaching
+  line, same shared subteam chips — but the dealer's hole card genuinely does
+  not exist on your machine until the reveal. Older app versions can no longer
+  open a blackjack hand; update to keep playing.
+- **Games leaderboards got routine maintenance.** Score submission checks were
+  tightened server-side and standings were recalculated.
+
+### Fixed
+- **A signed-out Helios no longer polls the server forever.** When a machine's
+  login expired while the app sat open (a shop PC left running for weeks), the
+  SOLIDWORKS bridge kept requesting vault data it could never receive. It now
+  goes quiet the moment the session ends and resumes at the next sign-in.
+
 ## [5.6.1] - 2026-08-26
 
 ### Fixed

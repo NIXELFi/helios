@@ -3,10 +3,10 @@ import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
 import {
-  dropBall, fetchBudget, fetchRating, forfeitOpenBet, isMoney, isRated, placeBet,
-  raiseBet, settleBet, submitRatedSession, submitScore,
-  type Budget, type DropRequest, type DropResult, type GameId, type PlacedBet,
-  type RaisedBet, type Rating, type SettledBet,
+  bjDeal, bjDouble, bjHit, bjStand, dropBall, fetchBudget, fetchRating,
+  forfeitOpenBet, isMoney, isRated, submitRatedSession, submitScore,
+  type BjTable, type Budget, type DropRequest, type DropResult, type GameId,
+  type Rating,
 } from "./api";
 import type { MoneyTable, RatedSession } from "./games/types";
 import { GAMES, categoryOf, gamesInCategory, type GameCategory, type GameDef } from "./registry";
@@ -218,11 +218,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // cabinet — a ref initialiser would freeze the first render's forever.
   const moneyOps = useRef<{
     drop: (req: DropRequest, nonce: string) => Promise<DropResult>;
-    placeBet: (stake: number, nonce: string) => Promise<PlacedBet>;
-    raiseBet: (betId: string, nonce: string) => Promise<RaisedBet>;
-    settleBet: (
-      betId: string, payout: number, outcome: string, nonce: string,
-    ) => Promise<SettledBet>;
+    deal: (stake: number, nonce: string) => Promise<BjTable>;
+    hit: (betId: string, nonce: string) => Promise<BjTable>;
+    stand: (betId: string, nonce: string) => Promise<BjTable>;
+    double: (betId: string, nonce: string) => Promise<BjTable>;
     forfeitOpen: () => Promise<{ stake: number } | null>;
   } | null>(null);
   moneyOps.current = {
@@ -230,17 +229,21 @@ export function GamesModule({ paused }: GamesModuleProps) {
       if (!client) throw new Error("no table open");
       return bank(await dropBall(client, req, nonce));
     },
-    placeBet: async (stake, nonce) => {
-      if (!client || !active) throw new Error("no table open");
-      return bank(await placeBet(client, active.id, stake, nonce));
-    },
-    raiseBet: async (betId, nonce) => {
+    deal: async (stake, nonce) => {
       if (!client) throw new Error("no table open");
-      return bank(await raiseBet(client, betId, nonce));
+      return bank(await bjDeal(client, stake, nonce));
     },
-    settleBet: async (betId, payout, outcome, nonce) => {
+    hit: async (betId, nonce) => {
       if (!client) throw new Error("no table open");
-      return bank(await settleBet(client, betId, payout, outcome, nonce));
+      return bank(await bjHit(client, betId, nonce));
+    },
+    stand: async (betId, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await bjStand(client, betId, nonce));
+    },
+    double: async (betId, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await bjDouble(client, betId, nonce));
     },
     forfeitOpen: async () => {
       if (!client || !active) return null;
@@ -256,10 +259,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // must not churn the cabinet's effects mid-hand.
   const stableMoney = useRef({
     place: (req: DropRequest, nonce: string) => moneyOps.current!.drop(req, nonce),
-    placeBet: (stake: number, nonce: string) => moneyOps.current!.placeBet(stake, nonce),
-    raiseBet: (betId: string, nonce: string) => moneyOps.current!.raiseBet(betId, nonce),
-    settleBet: (betId: string, payout: number, outcome: string, nonce: string) =>
-      moneyOps.current!.settleBet(betId, payout, outcome, nonce),
+    deal: (stake: number, nonce: string) => moneyOps.current!.deal(stake, nonce),
+    hit: (betId: string, nonce: string) => moneyOps.current!.hit(betId, nonce),
+    stand: (betId: string, nonce: string) => moneyOps.current!.stand(betId, nonce),
+    double: (betId: string, nonce: string) => moneyOps.current!.double(betId, nonce),
     forfeitOpen: () => moneyOps.current!.forfeitOpen(),
   }).current;
 
