@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { GameProps } from "../types";
+import type { BjTable } from "../../api";
 import {
-  createShoe,
-  dealerShouldHit,
   handValue,
   hiLoValue,
-  isBlackjack,
   netUnits,
-  settle,
   trueCount,
-  DECKS,
-  RESHUFFLE_BELOW,
   type Card,
   type Outcome,
 } from "./logic";
@@ -21,18 +16,33 @@ import {
   RATING_REFERENCE_BANKROLL,
 } from "./rating";
 
-// Chips come from the SUBTEAM BUDGET now, not a 200-chip stack the cabinet
-// owns. Two consequences run through this file:
+// The SERVER deals this table. Every action — deal, hit, stand, double — is an
+// RPC against a per-player shoe no client can read; settlement is computed in
+// the same transaction that draws the cards, and the dealer's hole card does
+// not exist client-side until the hand is over. This cabinet renders what it
+// is handed and never decides an outcome, exactly as the plinko board animates
+// a ball the server already dropped. (v5.6.2 — before this, the shoe was dealt
+// client-side and the settle was client-reported.)
 //
-//  * Money moves in two server round trips per hand — placeBet when the cards
-//    come out, settleBet when the hand finishes — because a blackjack hand is
-//    played over time and can't settle atomically the way a plinko drop does.
+// INTENTS, NOT CALLS. Every server action is wrapped in a single pending
+// intent: {kind, nonce}, minted when the player first asks and retried
+// VERBATIM until the server answers. The games.bj_* RPCs replay by nonce, so
+// a response lost to a flaky link costs nothing — the next button press
+// replays the same intent and gets the same hand back, instead of dealing a
+// second hand, drawing a second card, or wedging against the one-open-hand
+// index. Grading (the EV coaching) is charged once, when the intent is
+// created, so a retried network call can't bill the same decision twice.
+//
+// What stays client-side is everything that doesn't move money: the EV
+// coaching line, the Hi-Lo count over the cards this player has SEEN, and the
+// session LUCK number. They read the same reveals the player does.
+//
+//  * Chips come from the SUBTEAM BUDGET. The stake leaves when the cards come
+//    out (bj_deal) and the payout arrives with the settle the server computed.
 //    The balance on screen is always the server's answer, never one worked out
-//    here, and the stake is gone from the budget the moment the hand is dealt
-//    (which is exactly where those chips are: on the table).
-//  * Leaving mid-hand FORFEITS the bet. Refunding would pay a player to close
-//    the window on a losing hand, since the client knows the outcome before it
-//    settles. The cabinet forfeits any hand it finds still open on mount.
+//    here.
+//  * Leaving mid-hand FORFEITS the bet, same as walking away from a live
+//    table. The cabinet forfeits any hand it finds still open on mount.
 //
 // Blackjack is NOT rated. The chips are the whole scoreboard: the table keeps
 // no score and submits no session, and games.ratings is left alone rather than
@@ -44,8 +54,23 @@ const CHIP_VALUES = [5, 25, 100] as const;
 /** The table minimum — the unit every stake is measured in. */
 const TABLE_MIN = CHIP_VALUES[0];
 const DEALER_DRAW_MS = 450;
+/** A brand-new 4-deck shoe minus the four cards a deal consumes. */
+const FRESH_SHOE_AFTER_DEAL = 4 * 52 - 4;
 
 type Phase = "bet" | "player" | "dealer" | "settled";
+
+type IntentKind = "deal" | "hit" | "stand" | "double";
+
+/** One outstanding server intent. Held until the server answers; every retry
+ *  re-sends exactly this, which is what makes the server-side nonce replay
+ *  reachable. `tcAtBet` rides along on deals so the count the bet was priced
+ *  at survives the retries. */
+interface Intent {
+  kind: IntentKind;
+  nonce: string;
+  stake: number;
+  tcAtBet: number;
+}
 
 /** Everything the rating needs to know about the hand in progress. Captured at
  *  the deal so a doubled stake or a drawn card can't retroactively change what
@@ -66,17 +91,15 @@ interface LiveHand {
   trueCountAtBet: number;
 }
 
-/** Running totals for the session, all of them rating inputs or player-facing
- *  stats. Advantage components are kept apart so the UI can show WHERE the
- *  rating came from. */
+/** Running totals for the session, all of them player-facing stats. */
 interface Session {
   hands: number;
   play: number;
   bet: number;
   risk: number;
   total: number;
-  /** Realised result minus what the line was worth — pure luck, deliberately
-   *  kept OUT of the rating and shown to the player as its own number. */
+  /** Realised result minus what the line was worth — pure luck, shown to the
+   *  player as its own number. */
   fortune: number;
   /** EV thrown away across the whole session. */
   evLost: number;
@@ -91,10 +114,6 @@ interface Table {
   bankroll: number;
   /** Server id of the hand currently on the table, null between hands. */
   betId: string | null;
-  /** What the finished hand pays, waiting to be sent to settleBet. */
-  lastPayout: number;
-  /** Guards the settle effect so one hand is only ever settled once. */
-  settleSent: boolean;
   /** Staged wager in the bet phase; the live stake (doubled if doubled) once dealt. */
   bet: number;
   /** Pre-double stake — carried into the next hand as the default re-bet. */
@@ -108,7 +127,8 @@ interface Table {
   wins: number;
   losses: number;
   pushes: number;
-  cardsLeft: number;
+  /** Cards left in the server's shoe; null until the server first says. */
+  cardsLeft: number | null;
 }
 
 const EMPTY_SESSION: Session = {
@@ -118,8 +138,8 @@ const EMPTY_SESSION: Session = {
 const SUIT_CHAR = { S: "♠", H: "♥", D: "♦", C: "♣" } as const;
 const ACTION_LABEL: Record<Action, string> = { hit: "HIT", stand: "STAND", double: "DOUBLE" };
 
-function PlayingCard({ card, hidden }: { card: Card; hidden?: boolean }) {
-  if (hidden) return <div className="games-card games-deal games-card-back" />;
+function PlayingCard({ card, hidden }: { card?: Card; hidden?: boolean }) {
+  if (hidden || !card) return <div className="games-card games-deal games-card-back" />;
   const red = card.suit === "H" || card.suit === "D";
   const sym = SUIT_CHAR[card.suit];
   const corner = (
@@ -158,28 +178,25 @@ function signed(n: number, digits = 2): string {
   return `${sign}${magnitude}`;
 }
 
+/** Server cards are {rank,suit} strings from the same 52-card universe this
+ *  module draws from; narrow them for the pure helpers. */
+function asCards(cards: BjTable["player"]): Card[] {
+  return cards as Card[];
+}
+
 export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
 
-  // Shoe is draw-only mutable state the UI never maps over — a ref keeps the
-  // multi-draw actions (deal = four pops) simple; cardsLeft mirrors it for
-  // display.
-  const shoeRef = useRef<Card[] | null>(null);
-  if (!shoeRef.current) shoeRef.current = createShoe(Math.random);
-  // Hi-Lo running count over every card the player has SEEN. Reset with the
-  // shoe. Cards are counted explicitly at each reveal point rather than inside
-  // draw(), because the hole card is drawn long before it is visible.
+  // Hi-Lo running count over every card the player has SEEN. The shoe itself
+  // lives on the server AND SURVIVES between sessions — so a freshly mounted
+  // cabinet joining a mid-shoe game has no honest count until the server
+  // reshuffles. `trusted` gates the count-derived numbers until then.
   const runningRef = useRef(0);
-  // The hole card is the one card whose reveal isn't tied to a draw. Several
-  // paths flip it face-up, so it's counted once per hand at settle time —
-  // always before the next deal reads the count — and this guards the double.
-  const holeCountedRef = useRef(false);
+  const countTrustedRef = useRef(false);
 
   const [table, setTable] = useState<Table>(() => ({
     phase: "bet",
     bankroll: money?.balance ?? 0,
     betId: null,
-    lastPayout: 0,
-    settleSent: true, // nothing on the table yet
     bet: 0,
     baseBet: 0,
     player: [],
@@ -191,35 +208,42 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     wins: 0,
     losses: 0,
     pushes: 0,
-    cardsLeft: DECKS * 52, // a fresh shoe — the guard above just built it
+    cardsLeft: null,
   }));
   const ended = useRef(false);
   // Same pattern as 2048: mirror state into a ref so the keydown handler and
   // dealer timer read the latest table without re-registering per render.
   const tableRef = useRef(table);
   tableRef.current = table;
-  /** A bet or a double is in flight — blocks a second one racing it out. A ref
-   *  because the guard has to be synchronous; `busy` mirrors it for the UI. */
-  const placing = useRef(false);
+  /** An RPC is in flight — blocks a second one racing it out. A ref because
+   *  the guard has to be synchronous; `busy` mirrors it for the UI. */
+  const acting = useRef(false);
   const [busy, setBusy] = useState(false);
   const [tableError, setTableError] = useState<string | null>(null);
-  function setPlacing(v: boolean) {
-    placing.current = v;
+  function setActing(v: boolean) {
+    acting.current = v;
     setBusy(v);
   }
+  /** The settled table the dealer animation is revealing toward. */
+  const revealRef = useRef<BjTable | null>(null);
+  /** The one outstanding server intent (see the header). Cleared only when
+   *  the server answers; a failed call leaves it in place so the next press
+   *  retries the SAME nonce instead of minting a new action. */
+  const intentRef = useRef<Intent | null>(null);
 
   // The budget moves under this cabinet whenever a teammate plays, so take the
-  // module's number whenever it changes — except while a hand is being dealt
-  // or settled, when our own round trip is the fresher truth.
+  // module's number whenever it changes — except while our own round trip or
+  // the dealer reveal is the fresher truth (the payout must not flash onto the
+  // rail before the cards that earned it are face up; same fix plinko got in
+  // 5.6.1).
   useEffect(() => {
-    if (!money || placing.current) return;
+    if (!money || acting.current || tableRef.current.phase === "dealer") return;
     setTable((t) => (t.bankroll === money.balance ? t : { ...t, bankroll: money.balance }));
   }, [money?.balance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A hand left open by a previous session (crash, closed window, machine
-  // asleep mid-deal) is FORFEIT. It can't be refunded: the client knows the
-  // outcome before it settles, so refunding would pay players to close the
-  // window on losers. Clear it on mount so the table can be dealt again.
+  // asleep mid-deal) is FORFEIT — walking away from a live table. Clear it on
+  // mount so the table can be dealt again.
   useEffect(() => {
     if (!money) return;
     void money
@@ -232,41 +256,20 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // THE settle path. settled() is pure and is reached from four places (a
-  // natural, a bust, a double-bust, the dealer's last draw); routing the money
-  // through one effect keyed on `settleSent` means a hand is paid exactly once
-  // however it ended, and a failed settle is retried rather than lost.
-  useEffect(() => {
-    if (!money || table.settleSent || !table.betId || table.phase !== "settled") return;
-    const betId = table.betId;
-    const payout = table.lastPayout;
-    const outcome = table.outcome ?? "unknown";
-    setTable((t) => ({ ...t, settleSent: true }));
-    void money
-      .settleBet(betId, payout, outcome, crypto.randomUUID())
-      .then((res) => {
-        setTable((t) => (t.betId === betId ? { ...t, bankroll: res.balance } : t));
-      })
-      .catch((e: unknown) => {
-        // Let it be retried: the chips are still out, and the server has the
-        // hand open, so the next attempt settles the same bet id.
-        setTable((t) => (t.betId === betId ? { ...t, settleSent: false } : t));
-        setTableError(e instanceof Error ? e.message : "couldn't settle that hand");
-      });
-  }, [table.settleSent, table.betId, table.phase, table.lastPayout, money]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function draw(): Card {
-    const shoe = shoeRef.current!;
-    if (shoe.length === 0) shoeRef.current = createShoe(Math.random); // unreachable with the between-hand reshuffle; belt-and-braces
-    return shoeRef.current!.pop()!; // non-empty by the line above
-  }
-
-  /** Fold newly visible cards into the running count. */
-  function see(...cards: Card[]) {
+  /** Fold newly revealed cards into the running count, resetting first when
+   *  the server reshuffled before dealing them. A reshuffle also makes the
+   *  count trustworthy: from here on we have seen every card that left it. */
+  function see(reshuffled: boolean, ...cards: Card[]) {
+    if (reshuffled) {
+      runningRef.current = 0;
+      countTrustedRef.current = true;
+    }
     for (const c of cards) runningRef.current += hiLoValue(c);
   }
 
-  /** Charge the player for a decision that wasn't the best one available. */
+  /** Charge the player for a decision that wasn't the best one available.
+   *  Called exactly once per decision, when its intent is CREATED — a retried
+   *  network call must not bill the same choice twice. */
   function grade(t: Table, action: Action): Table {
     const live = t.live;
     if (!live) return t;
@@ -291,16 +294,26 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     };
   }
 
-  /** Settle the hand into a new table state (rating, record, bankroll). */
-  function settled(t: Table, player: Card[], dealer: Card[]): Table {
-    const { outcome, payout } = settle(player, dealer, t.bet);
-    // The hole card is face-up by now on every path into here, and this always
-    // runs before the next deal samples the count. `t.holeShown` is NOT a
-    // usable guard — stand/double/hit-to-21 all flip it before settling — so
-    // the once-per-hand ref is what keeps the count honest.
-    if (!holeCountedRef.current && dealer[1]) {
-      see(dealer[1]);
-      holeCountedRef.current = true;
+  /** Apply a SETTLED server table: session stats, record, bankroll. The
+   *  outcome and payout are the server's — this only does the bookkeeping.
+   *  `countRemainder` is false when the caller already consumed the response's
+   *  reveal/reshuffle (the deal-natural path counts its own cards). */
+  function applySettled(t: Table, res: BjTable, countRemainder = true): Table {
+    const player = asCards(res.player);
+    const dealer = asCards(res.dealer);
+    const outcome = (res.outcome ?? "lose") as Outcome;
+    const payout = res.payout ?? 0;
+
+    // The up card was counted at the deal; the hole and any draws become
+    // visible exactly now. A mid-hand reshuffle voids the count instead —
+    // the revealed cards straddle two shoes.
+    if (countRemainder) {
+      if (res.reshuffled) {
+        runningRef.current = 0;
+        countTrustedRef.current = true;
+      } else {
+        see(false, ...dealer.slice(1));
+      }
     }
 
     const live = t.live;
@@ -331,7 +344,7 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
         // the shoe handed you (or robbed you of) beyond what the line was worth.
         fortune:
           session.fortune +
-          (netUnits(payout, t.bet, live.initialBet) - evLine) * (live.initialBet / TABLE_MIN),
+          (netUnits(payout, res.stake, live.initialBet) - evLine) * (live.initialBet / TABLE_MIN),
         evLost: session.evLost + live.evLost,
         clean: session.clean + (live.evLost <= 1e-9 ? 1 : 0),
       };
@@ -340,6 +353,8 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     return {
       ...t,
       phase: "settled",
+      bankroll: res.balance,
+      bet: res.stake,
       player,
       dealer,
       holeShown: true,
@@ -348,151 +363,193 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
       wins: t.wins + (outcome === "win" || outcome === "blackjack" ? 1 : 0),
       losses: t.losses + (outcome === "lose" ? 1 : 0),
       pushes: t.pushes + (outcome === "push" ? 1 : 0),
-      // The budget is NOT credited here. This function is pure and is called
-      // from four different settle paths; the payout is recorded and a single
-      // effect sends it to the server, so one hand can only ever be settled
-      // once no matter which path finished it.
-      lastPayout: payout,
-      settleSent: false,
-      cardsLeft: shoeRef.current!.length,
+      cardsLeft: res.cardsLeft,
     };
   }
 
-  async function deal() {
-    const t = tableRef.current;
-    if (ended.current || t.phase !== "bet" || t.bet <= 0 || !money) return;
-    if (t.bet > money.maxBet || placing.current) return;
+  /** Route a settled server table either straight onto the felt (a bust only
+   *  flips the hole) or through the dealer reveal, which always gets its beat:
+   *  flip the hole on one tick, lay each draw on the next, settle on the last. */
+  function receiveSettled(t: Table, res: BjTable): Table {
+    if (handValue(asCards(res.player)).total > 21) {
+      return applySettled(t, res);
+    }
+    revealRef.current = res;
+    return {
+      ...t,
+      phase: "dealer",
+      player: asCards(res.player),
+      bet: res.stake,
+      dealer: asCards(res.dealer).slice(0, 2),
+      holeShown: false,
+    };
+  }
 
-    // Chips leave the budget BEFORE any card is dealt. If the server refuses
-    // (a teammate just spent the budget down under us, or the hand is somehow
-    // still open) nothing is dealt at all — the alternative is a hand in play
-    // that the team never paid for.
-    setPlacing(true);
-    let placed;
+  /** Handle the server's answer to an intent. All four kinds resolve here so
+   *  a replayed intent lands exactly like a first answer. */
+  function applyResponse(intent: Intent, res: BjTable) {
+    const t = tableRef.current;
+    const player = asCards(res.player);
+
+    if (intent.kind === "deal") {
+      const dealerUp = asCards(res.dealer)[0]!;
+      see(res.reshuffled || res.cardsLeft === FRESH_SHOE_AFTER_DEAL,
+        player[0]!, player[1]!, dealerUp);
+      const live: LiveHand = {
+        opening: player.slice(0, 2),
+        // Doubling is on the menu only if the budget could take a second stake
+        // of the same size — the 5% cap applies to it separately.
+        evOptimal: optimalEV(player.slice(0, 2), dealerUp, res.maxBet >= res.stake),
+        evLost: 0,
+        worst: null,
+        initialBet: res.stake,
+        trueCountAtBet: res.reshuffled ? 0 : intent.tcAtBet,
+      };
+      const dealt: Table = {
+        ...t,
+        phase: "player",
+        bankroll: res.balance,
+        betId: res.betId,
+        baseBet: intent.stake,
+        bet: res.stake,
+        player,
+        dealer: [dealerUp],
+        holeShown: false,
+        outcome: null,
+        live,
+        cardsLeft: res.cardsLeft,
+      };
+      if (res.state === "settled") {
+        // A natural (either side): the server settled it at the deal. The
+        // player never got a decision, so the hand carries ZERO play margin —
+        // the line is pinned to what the reference would have scored from the
+        // same spot. The hole becomes visible here, so count it; the reshuffle
+        // (if any) was already consumed by the see() above.
+        see(false, ...asCards(res.dealer).slice(1));
+        const flat = {
+          ...dealt,
+          live: { ...live, evOptimal: referenceEV(player.slice(0, 2), dealerUp) },
+        };
+        setTable(applySettled(flat, res, false));
+        return;
+      }
+      setTable(dealt);
+      return;
+    }
+
+    // hit / stand / double. The newly drawn player card (hit, double) becomes
+    // visible with this response — count it exactly once, replay or not: a
+    // replayed intent means the FIRST response was lost, so nothing was
+    // counted for it.
+    if (intent.kind !== "stand" && player.length > t.player.length) {
+      see(res.reshuffled && res.state === "player", player[player.length - 1]!);
+    }
+
+    if (res.state === "player") {
+      // Only a hit leaves the hand open. Auto-stand a 21 — nothing left to
+      // decide, exactly as the old table auto-moved to the dealer.
+      setTable({ ...t, player, bet: res.stake, cardsLeft: res.cardsLeft });
+      if (handValue(player).total === 21) {
+        intentRef.current = {
+          kind: "stand", nonce: crypto.randomUUID(), stake: 0, tcAtBet: 0,
+        };
+        void runIntent();
+      }
+      return;
+    }
+    setTable(receiveSettled(t, res));
+  }
+
+  /** Send the outstanding intent. On failure the intent SURVIVES — the next
+   *  press of any action button retries it verbatim and the server replays. */
+  async function runIntent(): Promise<void> {
+    const intent = intentRef.current;
+    if (!intent || !money || acting.current || ended.current) return;
+    const betId = tableRef.current.betId;
+    if (intent.kind !== "deal" && !betId) {
+      intentRef.current = null;
+      return;
+    }
+    setActing(true);
+    let res: BjTable;
     try {
-      placed = await money.placeBet(t.bet, crypto.randomUUID());
+      res =
+        intent.kind === "deal" ? await money.deal(intent.stake, intent.nonce)
+        : intent.kind === "hit" ? await money.hit(betId!, intent.nonce)
+        : intent.kind === "stand" ? await money.stand(betId!, intent.nonce)
+        : await money.double(betId!, intent.nonce);
     } catch (e) {
-      setPlacing(false);
+      setActing(false);
       setTableError(e instanceof Error ? e.message : "the house said no");
       return;
     }
-    setPlacing(false);
+    setActing(false);
     setTableError(null);
+    intentRef.current = null;
     if (ended.current) return;
+    applyResponse(intent, res);
+  }
 
-    if (shoeRef.current!.length < RESHUFFLE_BELOW) {
-      shoeRef.current = createShoe(Math.random);
-      runningRef.current = 0; // a fresh shoe knows nothing
-    }
-    // Sampled BEFORE the deal: this is the whole information set the bet could
-    // legitimately have been based on.
-    const tcAtBet = trueCount(runningRef.current, shoeRef.current!.length);
+  /** True when an unanswered intent was retried instead of starting `kind`. */
+  function retriedPending(): boolean {
+    if (!intentRef.current) return false;
+    void runIntent();
+    return true;
+  }
 
-    const player = [draw(), draw()];
-    const dealer = [draw(), draw()];
-    see(player[0]!, player[1]!, dealer[0]!); // the hole stays uncounted until it flips
-    holeCountedRef.current = false;
-
-    const live: LiveHand = {
-      opening: player,
-      // Doubling is on the menu only if the budget could take a second stake
-      // of the same size — the 5% cap applies to it separately.
-      evOptimal: optimalEV(player, dealer[0]!, placed.maxBet >= t.bet),
-      evLost: 0,
-      worst: null,
-      initialBet: t.bet,
-      trueCountAtBet: tcAtBet,
+  function deal() {
+    const t = tableRef.current;
+    if (ended.current || acting.current || !money) return;
+    if (retriedPending()) return;
+    if (t.phase !== "bet" || t.bet <= 0 || t.bet > money.maxBet) return;
+    intentRef.current = {
+      kind: "deal",
+      nonce: crypto.randomUUID(),
+      stake: t.bet,
+      // Sampled at intent creation: the whole information set the bet could
+      // legitimately have been based on. Zero until the count is trustworthy
+      // (a remounted cabinet joins a shoe it never saw the start of).
+      tcAtBet: countTrustedRef.current
+        ? trueCount(runningRef.current, Math.max(1, t.cardsLeft ?? 4 * 52))
+        : 0,
     };
-    const dealt: Table = {
-      ...t,
-      phase: "player",
-      bankroll: placed.balance,
-      betId: placed.betId,
-      settleSent: true, // nothing settled yet; settled() flips this
-      baseBet: t.bet,
-      player,
-      dealer,
-      holeShown: false,
-      outcome: null,
-      live,
-      cardsLeft: shoeRef.current!.length,
-    };
-    // Naturals settle on the spot — no double into a dealer blackjack. The
-    // player never got a decision, so the hand must carry ZERO play margin:
-    // pinning the line to exactly what the reference would have scored from
-    // the same spot does that. It matters most when the DEALER has the
-    // natural — without this the player would bank the margin of a hand they
-    // were never allowed to play. The stake still answers for itself through
-    // the bet and risk terms.
-    if (isBlackjack(player) || isBlackjack(dealer)) {
-      const flat = { ...dealt, live: { ...live, evOptimal: referenceEV(player, dealer[0]!) } };
-      setTable(settled(flat, player, dealer));
-      return;
-    }
-    setTable(dealt);
+    void runIntent();
   }
 
   function hit() {
-    const t0 = tableRef.current;
-    if (ended.current || t0.phase !== "player") return;
-    const t = grade(t0, "hit");
-    const player = [...t.player, draw()];
-    see(player[player.length - 1]!);
-    const total = handValue(player).total;
-    if (total > 21) {
-      setTable(settled(t, player, t.dealer)); // dealer just shows the hole on a bust
-    } else if (total === 21) {
-      setTable({ ...t, player, phase: "dealer", holeShown: true, cardsLeft: shoeRef.current!.length });
-    } else {
-      setTable({ ...t, player, cardsLeft: shoeRef.current!.length });
-    }
+    const t = tableRef.current;
+    if (ended.current || acting.current) return;
+    if (retriedPending()) return;
+    if (t.phase !== "player" || !t.betId) return;
+    setTable(grade(t, "hit"));
+    intentRef.current = { kind: "hit", nonce: crypto.randomUUID(), stake: 0, tcAtBet: 0 };
+    void runIntent();
   }
 
   function stand() {
-    const t0 = tableRef.current;
-    if (ended.current || t0.phase !== "player") return;
-    const t = grade(t0, "stand");
-    setTable({ ...t, phase: "dealer", holeShown: true });
+    const t = tableRef.current;
+    if (ended.current || acting.current) return;
+    if (retriedPending()) return;
+    if (t.phase !== "player" || !t.betId) return;
+    setTable(grade(t, "stand"));
+    intentRef.current = { kind: "stand", nonce: crypto.randomUUID(), stake: 0, tcAtBet: 0 };
+    void runIntent();
   }
 
-  async function doubleDown() {
-    const t0 = tableRef.current;
-    if (ended.current || t0.phase !== "player" || t0.player.length !== 2) return;
-    if (!money || !t0.betId || placing.current) return;
-    // The double is a SECOND debit of the same size, capped on its own — so a
-    // doubled hand can carry up to 10% of the budget. Charge it before the
-    // card comes out, same as the deal.
-    setPlacing(true);
-    let raised;
-    try {
-      raised = await money.raiseBet(t0.betId, crypto.randomUUID());
-    } catch (e) {
-      setPlacing(false);
-      setTableError(e instanceof Error ? e.message : "can't double that");
-      return;
-    }
-    setPlacing(false);
-    setTableError(null);
-    if (ended.current) return;
-
-    const t = grade(tableRef.current, "double");
-    const doubled: Table = { ...t, bankroll: raised.balance, bet: raised.stake };
-    const player = [...t.player, draw()];
-    see(player[player.length - 1]!);
-    setTable(
-      handValue(player).total > 21
-        ? settled(doubled, player, t.dealer)
-        : { ...doubled, player, phase: "dealer", holeShown: true, cardsLeft: shoeRef.current!.length },
-    );
+  function doubleDown() {
+    const t = tableRef.current;
+    if (ended.current || acting.current || !money) return;
+    if (retriedPending()) return;
+    if (t.phase !== "player" || t.player.length !== 2 || !t.betId) return;
+    setTable(grade(t, "double"));
+    intentRef.current = { kind: "double", nonce: crypto.randomUUID(), stake: 0, tcAtBet: 0 };
+    void runIntent();
   }
 
   function nextHand() {
     const t = tableRef.current;
-    if (ended.current || t.phase !== "settled") return;
-    // Don't deal on top of a hand whose payout hasn't reached the server yet —
-    // the one-open-hand index would reject it anyway, and the error would land
-    // on the player instead of on the retry.
-    if (!t.settleSent || !money || money.maxBet <= 0) return;
+    if (ended.current || t.phase !== "settled" || intentRef.current) return;
+    if (!money || money.maxBet <= 0) return;
     setTable({
       ...t,
       phase: "bet",
@@ -511,8 +568,8 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     if (ended.current || (t.phase !== "bet" && t.phase !== "settled")) return;
     ended.current = true;
     // Blackjack is a money game only: the chips already moved, hand by hand,
-    // through place_bet/settle_bet. There is no score and no rating to submit,
-    // so leaving the table just ends the session.
+    // through the server-dealt RPCs. There is no score and no rating to
+    // submit, so leaving the table just ends the session.
     onGameOver(0);
   }
 
@@ -521,29 +578,33 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
     // time; leaving a stale refusal on screen just makes the table look broken.
     if (tableError) setTableError(null);
     const t = tableRef.current;
-    if (ended.current || t.phase !== "bet" || t.bet + v > (money?.maxBet ?? 0)) return;
+    if (ended.current || t.phase !== "bet" || intentRef.current) return;
+    if (t.bet + v > (money?.maxBet ?? 0)) return;
     setTable({ ...t, bet: t.bet + v });
   }
 
-  // Dealer draws one card per tick until 17+, then the hand settles. The
-  // effect re-arms itself off the dealer hand changing; pausing simply stops
-  // arming the next tick.
+  // The dealer reveal: the hand is already settled server-side; this lays the
+  // cards out at table pace — flip the hole, then one draw per tick — and only
+  // then shows the outcome and the chips. Pausing simply stops the next tick.
   useEffect(() => {
     if (table.phase !== "dealer" || paused || ended.current) return;
     const id = setTimeout(() => {
       const t = tableRef.current;
-      if (t.phase !== "dealer") return;
-      if (dealerShouldHit(t.dealer)) {
-        const card = draw();
-        see(card);
-        setTable({ ...t, dealer: [...t.dealer, card], cardsLeft: shoeRef.current!.length });
+      const reveal = revealRef.current;
+      if (t.phase !== "dealer" || !reveal) return;
+      const full = asCards(reveal.dealer);
+      if (!t.holeShown) {
+        setTable({ ...t, holeShown: true });
+      } else if (t.dealer.length < full.length) {
+        setTable({ ...t, dealer: full.slice(0, t.dealer.length + 1) });
       } else {
-        setTable(settled(t, t.player, t.dealer));
+        revealRef.current = null;
+        setTable(applySettled(t, reveal));
       }
     }, DEALER_DRAW_MS);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table.phase, table.dealer, paused]);
+  }, [table.phase, table.dealer, table.holeShown, paused]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -553,9 +614,9 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
       if (t.phase === "player") {
         if (k === "h") { e.preventDefault(); hit(); }
         else if (k === "s") { e.preventDefault(); stand(); }
-        else if (k === "d") { e.preventDefault(); void doubleDown(); }
+        else if (k === "d") { e.preventDefault(); doubleDown(); }
       } else if (e.key === "Enter") {
-        if (t.phase === "bet" && t.bet > 0) { e.preventDefault(); void deal(); }
+        if (t.phase === "bet" && t.bet > 0) { e.preventDefault(); deal(); }
         else if (t.phase === "settled") { e.preventDefault(); nextHand(); }
       }
     }
@@ -566,7 +627,7 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
 
   const { phase, bankroll, bet, player, dealer, holeShown, outcome, session, live } = table;
   const maxBet = money?.maxBet ?? 0;
-  // "Broke" is a SUBTEAM-wide condition now: the budget can no longer cover a
+  // "Broke" is a SUBTEAM-wide condition: the budget can no longer cover a
   // legal bet, and nothing this player does at this table will change that.
   const broke = phase === "settled" && maxBet <= 0;
 
@@ -610,7 +671,9 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
           <div className="flex items-baseline justify-between">
             <span className="games-display text-[9px] tracking-[0.2em] text-helios-dim">DEALER</span>
             <span className="games-num text-xs text-helios-text">
-              {dealer.length === 0 ? "—" : holeShown ? totalLabel(dealer) : totalLabel([dealer[0]!])}
+              {dealer.length === 0 ? "—"
+                : dealer.length === 1 || !holeShown ? totalLabel([dealer[0]!])
+                : totalLabel(dealer)}
             </span>
           </div>
           <div className="mt-1 flex min-h-[68px] items-center">
@@ -618,6 +681,9 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
               // Remount the hole card when it flips so it plays the deal-in.
               <PlayingCard key={i === 1 ? `1-${holeShown ? "up" : "down"}` : i} card={c} hidden={i === 1 && !holeShown} />
             ))}
+            {/* The hole card exists only on the server while the hand is live,
+                but the table should still look like blackjack: draw its back. */}
+            {phase === "player" && dealer.length === 1 && <PlayingCard hidden />}
           </div>
         </div>
 
@@ -639,14 +705,14 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
         {/* Status line — fixed height so the table never jumps */}
         <div className="games-display min-h-[18px] text-center text-xs tracking-[0.18em]">
           {/* The money is shared and the server has the last word on it, so a
-              refused bet or a failed settle has to be visible — the whole
-              subteam sees the consequence in the ledger either way. */}
+              refused bet has to be visible — the whole subteam sees the
+              consequence in the ledger either way. */}
           {tableError ? (
             <span className="text-[10px] normal-case tracking-normal text-red-300">
               {tableError}
             </span>
           ) : busy ? (
-            <span className="games-pulse text-helios-dim">TAKING IT FROM THE BUDGET…</span>
+            <span className="games-pulse text-helios-dim">THE HOUSE IS DEALING…</span>
           ) : phase === "bet" ? (
             <span className="text-helios-dim">PLACE YOUR BET</span>
           ) : phase === "player" ? (
@@ -658,8 +724,8 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
           ) : null}
         </div>
 
-        {/* Coaching line — the rating is built on decisions, so say which one
-            cost you and what the chart wanted instead. Reserved height. */}
+        {/* Coaching line — say which decision cost you and what the chart
+            wanted instead. Reserved height. */}
         <div className="min-h-[13px] text-center text-[9px] tracking-wide">
           {phase === "settled" && live?.worst ? (
             <span className="text-red-300/90">
@@ -677,7 +743,7 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
             MAX <span className="text-helios-text">{maxBet}</span>
           </span>
           <span>BET <span className="font-bold text-asu-gold">{bet}</span></span>
-          <span>SHOE <span className="text-helios-text">{table.cardsLeft}</span></span>
+          <span>SHOE <span className="text-helios-text">{table.cardsLeft ?? "—"}</span></span>
         </div>
 
         {/* Session line. The table is not rated any more, so this is purely
@@ -719,8 +785,13 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
               ))}
               <button
                 type="button"
-                disabled={paused || maxBet <= 0 || bet === maxBet}
-                onClick={() => setTable({ ...tableRef.current, bet: maxBet })}
+                disabled={paused || busy || maxBet <= 0 || bet === maxBet}
+                onClick={() => {
+                  // Same pending-intent guard as addChip: an unanswered deal
+                  // retries with ITS stake, so the rail must not drift.
+                  if (intentRef.current) return;
+                  setTable({ ...tableRef.current, bet: maxBet });
+                }}
                 className={lineBtn}
                 title="5% of the subteam budget — the most one bet is allowed to be"
               >
@@ -728,30 +799,38 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
               </button>
               <button
                 type="button"
-                disabled={paused || bet === 0}
-                onClick={() => setTable({ ...tableRef.current, bet: 0 })}
+                disabled={paused || busy || bet === 0}
+                onClick={() => {
+                  if (intentRef.current) return;
+                  setTable({ ...tableRef.current, bet: 0 });
+                }}
                 className={lineBtn}
               >
                 CLEAR
               </button>
-              <button type="button" disabled={paused || busy || bet === 0} onClick={() => void deal()} className={goldBtn}>
+              <button type="button" disabled={paused || busy || bet === 0} onClick={deal} className={goldBtn}>
                 DEAL
               </button>
             </>
           )}
           {phase === "player" && (
             <>
-              <button type="button" disabled={paused} onClick={hit} className={goldBtn}>
+              <button type="button" disabled={paused || busy} onClick={hit} className={goldBtn}>
                 HIT
               </button>
-              <button type="button" disabled={paused} onClick={stand} className={lineBtn}>
+              <button type="button" disabled={paused || busy} onClick={stand} className={lineBtn}>
                 STAND
               </button>
               <button
                 type="button"
                 disabled={paused || busy || player.length !== 2 || maxBet < bet}
-                onClick={() => void doubleDown()}
+                onClick={doubleDown}
                 className={lineBtn}
+                title={
+                  maxBet < bet
+                    ? "Doubling debits a SECOND stake this size, and the 5% cap must cover it on its own — the budget can't right now"
+                    : "Double the stake, take exactly one more card"
+                }
               >
                 DOUBLE
               </button>
@@ -778,9 +857,9 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
         <div className="flex items-center justify-between">
           <span
             className="text-[9px] text-helios-dim/80"
-            title="These are the subteam's chips, not yours. One bet can never be more than 5% of what the budget holds, and the balance moves when a teammate plays too."
+            title="These are the subteam's chips, not yours. The server deals every card and settles every hand. One bet can never be more than 5% of what the budget holds, and the balance moves when a teammate plays too."
           >
-            Dealer stands on 17 · BJ pays 3:2 · rated on decisions, not luck
+            Dealer stands on 17 · BJ pays 3:2 · the house deals
           </span>
           {phase === "bet" && (
             <button

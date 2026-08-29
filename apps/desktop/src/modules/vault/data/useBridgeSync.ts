@@ -111,6 +111,16 @@ export function useBridgeSync(): void {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [locks, setLocks] = useState<Lock[]>([]);
 
+  // Signed-in gate for every Supabase pull below. Once the session is truly
+  // gone (SIGNED_OUT — e.g. the refresh token expired on a machine left
+  // running for weeks), supabase-js falls back to the anon key and every pull
+  // becomes a guaranteed 401. A shop PC in exactly that state produced ~62% of
+  // the project's daily Postgres errors by polling locks/files/vaults/folders
+  // forever. A ref (not a dep) so the loaders don't re-create — and re-arm
+  // their effects — on every benign session refresh.
+  const signedInRef = useRef<boolean>(user !== null);
+  signedInRef.current = user !== null;
+
   // Failure backoff: after a failed reload, skip the next SKIP_AFTER_ERROR
   // interval ticks before trying again, so a persistent error (network down,
   // RLS denial) doesn't hammer Supabase every interval. `skipTicks` is consumed
@@ -150,7 +160,7 @@ export function useBridgeSync(): void {
   }, [refreshSession]);
 
   const reloadLocks = useCallback(async () => {
-    if (!client) return;
+    if (!client || !signedInRef.current) return;
     try {
       const { rows, error } = await fetchAllRows<Lock>(
         () => (client.from("locks") as any)
@@ -167,7 +177,7 @@ export function useBridgeSync(): void {
   }, [client, onReloadError]);
 
   const reloadStructure = useCallback(async () => {
-    if (!client) return;
+    if (!client || !signedInRef.current) return;
     try {
       const [v, f, fo] = await Promise.all([
         fetchAllRows<Vault>(() => (client.from("vaults") as any)
@@ -215,6 +225,8 @@ export function useBridgeSync(): void {
   // nothing to feed, and a (re)connect fires an immediate refresh via the event
   // below, so the snapshot still populates the moment it's needed.
   useEffect(() => {
+    // Sign-OUT also lands here (user?.id -> undefined); the loaders' signed-in
+    // gate makes that a no-op instead of four dead-token pulls.
     void (async () => {
       if (await addinActive()) {
         void reloadStructure();
@@ -258,13 +270,16 @@ export function useBridgeSync(): void {
     if (skipTicks.current > 0) { skipTicks.current -= 1; return false; }
     return true;
   }, []);
+  // Also gated on a live sign-in: with the session gone every pull is a
+  // guaranteed anon 401, so the intervals stop entirely (delay null) and
+  // re-arm the moment someone signs back in.
   useInterval(
     () => void (async () => { if (backoffElapsed() && await addinActive()) void reloadStructure(); })(),
-    client ? FILES_REFRESH_MS : null,
+    client && user ? FILES_REFRESH_MS : null,
   );
   useInterval(
     () => void (async () => { if (backoffElapsed() && await addinActive()) void reloadLocks(); })(),
-    client ? LOCKS_REFRESH_MS : null,
+    client && user ? LOCKS_REFRESH_MS : null,
   );
 
   // Expensive path resolution, memoized on the structural inputs only — so a
