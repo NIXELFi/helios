@@ -30,8 +30,10 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
+import { AutoGrowTextarea } from "@pm/components/ui/AutoGrowTextarea";
 import { TaskLookup } from "@pm/components/TaskLookup";
 import { TaskOwnerChips } from "@pm/components/TaskOwnerChips";
+import { ownerOptions } from "@pm/lib/ownerScope";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { useState } from "react";
@@ -112,6 +114,13 @@ export function TaskDetailSheet() {
     ? selectCanEditTask({ projectRoles, currentUserId }, task)
     : { allowed: true, reason: null };
   const canEdit = editPerm.allowed;
+
+  // Owner picker options with this task's own subteam floated to the top, so
+  // assigning doesn't mean scrolling the whole directory (see lib/ownerScope.ts).
+  const ownerGroups = useMemo(
+    () => ownerOptions(users, tasks, task?.subteam_id ?? null, task?.subteam?.name ?? null),
+    [users, tasks, task?.subteam_id, task?.subteam?.name],
+  );
 
   // Live critical-path set — the DB `on_critical_path` flag is never populated,
   // so compute it from the same DAG the Gantt/Graph use (single source of truth).
@@ -372,10 +381,7 @@ export function TaskDetailSheet() {
                 onChange={(v) => updateTask(task.id, { owner_id: v || null })}
                 disabled={!canEdit}
                 ariaLabel="Owner"
-                options={[
-                  { value: "", label: "Unassigned" },
-                  ...users.map((u) => ({ value: u.id, label: u.name })),
-                ]}
+                options={[{ value: "", label: "Unassigned" }, ...ownerGroups]}
               />
             </Field>
 
@@ -523,7 +529,7 @@ export function TaskDetailSheet() {
           {/* Description */}
           <div className="mb-4">
             <Field label="Description">
-              <textarea
+              <AutoGrowTextarea
                 value={descDraft}
                 disabled={!canEdit}
                 onChange={(e) => setDescDraft(e.target.value)}
@@ -534,7 +540,6 @@ export function TaskDetailSheet() {
                   }
                 }}
                 placeholder="Add a description…"
-                rows={3}
                 className={selectStyle + " resize-none"}
               />
             </Field>
