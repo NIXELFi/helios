@@ -49,11 +49,17 @@
 
 /* Scope identity aura — soft colored glows behind the active view, tinted by the
    current subteam (or ASU maroon+gold for all-subteams). Slow drift so it feels
-   alive without distracting. */
+   alive without distracting.
+
+   PERF: deliberately NO `filter: blur()` here. The radial-gradients already fade
+   to transparent, so the blur added almost nothing visually — but a filtered
+   layer has to be re-rasterised on every frame of the drift/pulse animations,
+   which run forever on every PM view. Measured on a 6x-throttled CPU with the
+   Board mounted (234 cards): dropping the filter took the idle frame time from
+   21ms to 17ms (p95 30ms -> 18ms). Keep the gradients soft here, not the layer. */
 .pm-aura {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(36px);
   will-change: transform, opacity;
 }
 .pm-aura-tl {
@@ -109,3 +115,4 @@
 .react-flow__minimap {
   background-color: #16171b !important;
 }
+

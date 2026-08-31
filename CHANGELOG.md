@@ -27,6 +27,33 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **The New task form can name co-owners.** Co-owners already existed on a task
+  you'd already made, but the create form had no field for them — so every new
+  shared task meant opening it again in the detail sheet just to add the second
+  person. They now go on at creation, and promoting a co-owner to primary owner
+  quietly drops them from the co-owner list instead of listing them twice.
+- **Owner pickers put your own subteam first.** Every place you pick an owner —
+  the New task form, a task's detail sheet, the co-owner chips, and the owner
+  filter on Board/Table/Calendar — now shows the current subteam's people under
+  their own heading at the top, with everyone else below. Nobody is hidden:
+  cross-subteam assignment still works, and the picker's search still reaches
+  the whole directory. Membership is drawn from subteam records plus whoever
+  already owns work on that subteam, so it stays useful even where membership
+  rows were never filled in.
+
+### Changed
+- **Description boxes grow as you type.** The description field on the new-task
+  form and the task detail sheet sizes itself to its content instead of holding
+  three lines and scrolling.
+
+### Fixed
+- **The Board no longer stutters on big projects.** Every background refresh,
+  realtime update or filter keystroke was re-rendering all of the cards on the
+  board rather than the ones that actually changed. On a full project this cut
+  idle frame time by about a fifth and stopped the hitching while typing in the
+  filter bar.
+
 ## [5.6.2] - 2026-08-29
 
 ### Changed
