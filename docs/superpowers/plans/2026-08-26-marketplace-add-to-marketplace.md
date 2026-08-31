@@ -12,6 +12,72 @@
 
 ---
 
+## STATUS — 2026-08-26
+
+**PHASE 1 IS COMPLETE AND COMMITTED** on `feat/marketplace-add-to-marketplace`
+(branched from `main` @ `ff1b19be`). **Not pushed, no PR, not applied to prod.**
+
+| Commit | What |
+|---|---|
+| `71c0840f` | spec |
+| `ef4eb36c` | plan + migration `20260826010000` + 16 structural tests + CI-only RLS tests |
+| `14826ef5` | `plugin-host::pack` + the two Tauri commands |
+| `6866a765` | pre-flight / permission diff / publish errors / state machine (49 tests) |
+| `71b60938` | submit wizard + Review tab + help drawer + screenshot harness |
+
+Verified at the Phase 1 gate: `cargo test -p plugin-host` 35 green ·
+`cargo check` clean in `src-tauri` · desktop typecheck clean · marketplace suite
+127 green · full desktop suite **2357 green** · all four screens screenshotted and
+reviewed · no horizontal overflow at 1024/1280/1600.
+
+One caveat on the full-suite run: it reports `2357 passed | 1 error`. The stderr
+in that run is all pre-existing noise from **other** modules (a games
+`saveLedger` test whose `@tauri-apps/plugin-fs` mock lacks `mkdir`, and vault
+"no tauri in test" lines). Nothing marketplace-related, and the marketplace suite
+is clean on its own — but **confirm it is pre-existing** by running the suite on
+`main` before blaming anything here.
+
+### Next session starts here
+
+1. **Phase 2** (Task 10–11): My Plugins. All four RPCs it needs already exist in
+   the migration and are structurally tested — only the hook and the view are
+   left.
+2. **Phase 3** (Task 12–14): scaffold + agent prompt + wiring the help drawer's
+   "Start a new plugin" entry point.
+3. Then: push, PR, and apply the migration to prod **via the Management API with
+   an `sbp_` token** — never `supabase db push` (stamp drift: ~100 local versions
+   read as pending against 64 recorded). Record the version manually afterwards.
+4. Nick has not yet seen any of this in the real app. The screenshots were taken
+   against `uiharness/`, which stubs the IO — a live `pnpm dev` smoke test with a
+   real folder is still owed, and is the only thing that exercises
+   `pack_plugin_bundle` against a genuine plugin project on disk.
+
+### Gotchas banked while building Phase 1
+
+- **`signInAs(email)` takes an email string, not the user object** from
+  `createTestUser`. Costs a typecheck failure in every new RLS test otherwise.
+- **`infra/pdm-supabase` tests all hard-require DB credentials** — `tests/setup.ts`
+  throws without them, so the whole vitest run dies. DB-less structural tests
+  therefore live under `vitest.structure.config.ts` (no `setupFiles`), wired into
+  the package's `test` script so they always run. Use that pattern for any future
+  migration-shape test.
+- **`npx vitest` resolves a DIFFERENT vitest** from the npx cache and dies on a
+  missing `jsdom`. Always run through the workspace: `pnpm --filter @helios/desktop test`.
+- **A Tauri command's return struct keeps its Rust field names** across IPC unless
+  you add `#[serde(rename_all = "camelCase")]`. Only the *arguments* are converted
+  automatically. Both new command structs carry the attribute.
+- **jsdom has no `Element.scrollTo`**, so `ref.current?.scrollTo({...})` throws
+  inside an effect. `?.scrollTo?.()` — the guard belongs in the component.
+- **`MarketplaceModule` now reads org capabilities**, so any test rendering it must
+  mock `../../org/data/useOrgData` or it throws
+  "useAuth* hooks must be used inside <SupabaseAuthProvider>".
+- **The harness renders black-on-black** unless Tailwind's `content` globs are made
+  absolute — with Vite's root at `uiharness/`, the app config's relative globs match
+  nothing and every utility class is purged. That is what
+  `uiharness/tailwind.config.ts` exists to fix.
+
+---
+
 ## Ground rules for this plan
 
 - **Do NOT `--no-verify`.** A pre-commit hook runs the full Rust parity suite (~5–10 min) on every commit. Let it run.
