@@ -20,6 +20,10 @@ export interface SelectOption<T extends string> {
   fill?: { background: string; color: string };
   // Fully custom node rendered in place of swatch + label (e.g. <TypeBadge/>).
   node?: React.ReactNode;
+  // Optional heading this option sits under. Consecutive options sharing a
+  // group render one heading above the first of the run (owner pickers use it
+  // to float the current subteam's people above the rest of the directory).
+  group?: string;
 }
 
 export interface SelectProps<T extends string> {
@@ -325,8 +329,24 @@ export function Select<T extends string>({
                   filtered.map((opt, i) => {
                     const isSelected = opt.value === value;
                     const isActive = i === activeIndex;
+                    // The heading lives INSIDE the option's own <li> on purpose:
+                    // keyboard nav indexes ul.children against `filtered`, so a
+                    // separate heading <li> would shift every option by one.
+                    const heading =
+                      opt.group && opt.group !== filtered[i - 1]?.group ? opt.group : null;
                     return (
                       <li key={opt.value}>
+                        {heading ? (
+                          <span
+                            aria-hidden
+                            className={
+                              "block px-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-helios-dim " +
+                              (i === 0 ? "pt-0.5" : "mt-1 border-t border-helios-line pt-1.5")
+                            }
+                          >
+                            {heading}
+                          </span>
+                        ) : null}
                         <button
                           type="button"
                           role="option"

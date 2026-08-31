@@ -23,12 +23,13 @@ import {
 } from "@tabler/icons-react";
 import { useRouter, useSearchParams } from "@pm/lib/router";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { BulkActionBar } from "@pm/components/BulkActionBar";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { SelectCheckbox } from "@pm/components/ui/SelectCheckbox";
 import { StatusLegend } from "@pm/components/StatusLegend";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
+import { ownerOptions } from "@pm/lib/ownerScope";
 import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { TaskSubteamChips } from "@pm/components/TaskSubteamChips";
 import { ViewHeader } from "@pm/components/ViewHeader";
@@ -148,6 +149,13 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
     return out;
   }, [filteredTasks, relationByTaskId]);
 
+  // Owner filter options with the scoped subteam's own people first — the flat
+  // 100+ entry directory was the specific complaint (see lib/ownerScope.ts).
+  const ownerFilterOptions = useMemo(
+    () => ownerOptions(users, tasks, currentTeam?.id ?? null, currentTeam?.name ?? null),
+    [users, tasks, currentTeam],
+  );
+
   const filtersActive =
     filters.status.length > 0 ||
     filters.subteamIds.length > 0 ||
@@ -223,6 +231,7 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         filters={filters}
         subteams={subteams}
         users={users}
+        ownerOptions={ownerFilterOptions}
         active={filtersActive}
         scopedToTeam={currentTeam !== null}
         primaryOnly={primaryOnly}
@@ -295,7 +304,10 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
   );
 }
 
-function Column({
+// Memoized alongside the cards: with the search-params fix above, every prop a
+// column gets (its task array, the relation map, the dimmed/selected sets) is
+// referentially stable across a re-render that didn't touch tasks or filters.
+const Column = memo(function Column({
   status,
   tasks,
   relations,
@@ -344,17 +356,22 @@ function Column({
               relation={relations.get(t.id) ?? "owned"}
               dimmed={dimmedById.has(t.id)}
               selected={selectedIds.has(t.id)}
-              onToggleSelect={() => onToggleSelect(t.id)}
-              onOpen={() => onOpen(t.id)}
+              onToggleSelect={onToggleSelect}
+              onOpen={onOpen}
             />
           ))
         )}
       </div>
     </div>
   );
-}
+});
 
-function DraggableCard({
+// Memoized, and deliberately given the store's own (stable) `onToggleSelect` /
+// `onOpen` rather than a per-card arrow, so the props of an unchanged card are
+// referentially identical between renders. Without this, ANY re-render of the
+// board — a 20s background probe, a realtime event, a filter keystroke —
+// re-rendered every card on the board, each with a useDraggable subscription.
+const DraggableCard = memo(function DraggableCard({
   task,
   relation,
   dimmed,
@@ -366,8 +383,8 @@ function DraggableCard({
   relation: CrossTeamRelation;
   dimmed: boolean;
   selected: boolean;
-  onToggleSelect: () => void;
-  onOpen: () => void;
+  onToggleSelect: (id: string) => void;
+  onOpen: (id: string) => void;
 }) {
   const disabled = relation !== "owned";
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -390,9 +407,9 @@ function DraggableCard({
       />
     </div>
   );
-}
+});
 
-function Card({
+const Card = memo(function Card({
   task,
   relation,
   dragging = false,
@@ -404,14 +421,14 @@ function Card({
   relation: CrossTeamRelation;
   dragging?: boolean;
   selected?: boolean;
-  onToggleSelect?: () => void;
-  onOpen?: () => void;
+  onToggleSelect?: (id: string) => void;
+  onOpen?: (id: string) => void;
 }) {
   const isExternal = relation !== "owned";
   const outline = taskOutline(task);
   return (
     <article
-      onClick={onOpen}
+      onClick={onOpen ? () => onOpen(task.id) : undefined}
       className={
         "rounded border bg-helios-base px-3 py-2 text-sm " +
         (isExternal ? "border-helios-line/60 opacity-70 cursor-pointer " : "border-helios-line cursor-grab ") +
@@ -432,7 +449,7 @@ function Card({
               <SelectCheckbox
                 ariaLabel={`Select task ${task.title}`}
                 checked={selected}
-                onChange={onToggleSelect}
+                onChange={() => onToggleSelect(task.id)}
               />
             </span>
           ) : null}
@@ -467,7 +484,7 @@ function Card({
       ) : null}
     </article>
   );
-}
+});
 
 function RelationChip({ relation }: { relation: CrossTeamRelation }) {
   if (relation === "prerequisite_of_team") {

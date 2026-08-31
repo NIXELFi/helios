@@ -20,6 +20,7 @@ export function TaskFilterBar({
   filters,
   subteams,
   users,
+  ownerOptions,
   active,
   scopedToTeam,
   hideTypes = false,
@@ -31,6 +32,9 @@ export function TaskFilterBar({
   filters: TaskFilters;
   subteams: ReadonlyArray<Subteam>;
   users: ReadonlyArray<{ id: string; name: string }>;
+  /** Pre-built (usually subteam-grouped) owner options from the view, which
+   *  knows its own scope. Falls back to the flat directory in `users`. */
+  ownerOptions?: ReadonlyArray<SelectOption<string>>;
   active: boolean;
   scopedToTeam: boolean;
   hideTypes?: boolean;
@@ -89,7 +93,7 @@ export function TaskFilterBar({
             options={[
               { value: "", label: "All" },
               { value: "__unassigned__", label: "Unassigned" },
-              ...users.map((u) => ({ value: u.id, label: u.name })),
+              ...(ownerOptions ?? users.map((u) => ({ value: u.id, label: u.name }))),
             ]}
           />
         </FilterField>
