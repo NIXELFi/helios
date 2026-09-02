@@ -7,6 +7,6 @@ pub mod live;
 pub mod types;
 
 pub use error::HtpError;
-// pub use frame::{decode_frame, encode_frame, Frame, Window, HEADER_LEN, MAGIC, VERSION};
+pub use frame::{decode_frame, encode_frame, parse_header, Frame, Window, HEADER_LEN, MAGIC, VERSION};
 // pub use live::{live_len, pack_live, unpack_live, LiveMessage};
 pub use types::{ChannelDef, ChannelSetDef, Enc, GroupDef};
