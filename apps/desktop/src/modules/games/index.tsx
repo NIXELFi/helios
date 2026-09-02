@@ -81,8 +81,15 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // Warm every standings board on mount (and re-warm after each submit) so
   // the first click on any tab or game chip renders instantly from cache
   // instead of cold-loading.
+  // A money-driven bump (chips moved on the open cabinet) only re-pulls that
+  // game's boards; everything else re-warms the lot. The scope rides on a ref
+  // set by whoever bumps the token, so this effect stays keyed on the token.
+  const refreshScope = useRef<GameId | null>(null);
   useEffect(() => {
-    if (client) prefetchBoards(client, refreshToken);
+    if (!client) return;
+    const only = refreshScope.current;
+    refreshScope.current = null;
+    prefetchBoards(client, refreshToken, only ?? undefined);
   }, [client, refreshToken]);
 
   /** Lobby board game switch — persisted like play() so the choice sticks. */
@@ -190,8 +197,11 @@ export function GamesModule({ paused }: GamesModuleProps) {
   function refreshBoards() {
     if (boardBump.current.timer) return; // a trailing refresh is already due
     const wait = Math.max(0, BOARD_REFRESH_MS - (Date.now() - boardBump.current.last));
+    const game = active?.id ?? null;
     boardBump.current.timer = setTimeout(() => {
       boardBump.current = { last: Date.now(), timer: null };
+      // Chips only move on the cabinet that's open, so only its boards changed.
+      refreshScope.current = game;
       setRefreshToken((n) => n + 1);
     }, wait);
   }

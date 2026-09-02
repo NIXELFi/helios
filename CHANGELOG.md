@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Plinko no longer lags when you spam the DROP button.** Every drop was
+  triggering a refresh of all fourteen standings boards, and each of those
+  asked the auth server who you were while holding the sign-in lock that every
+  drop also needs. A burst of drops paid for that lock over and over. The
+  standings now read your identity locally and only re-pull the boards a bet
+  on the open cabinet can have changed.
+
 ## [5.6.2] - 2026-08-29
 
 ### Changed
