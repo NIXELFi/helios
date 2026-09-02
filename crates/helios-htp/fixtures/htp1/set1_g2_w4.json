@@ -1,0 +1,161 @@
+{
+  "channel_set_id": 1,
+  "group_key": 2,
+  "send_timestamp_ms": 1781234567890,
+  "seq": 1042,
+  "session_id": "9b2f1c3e-4d5a-4b6c-8d7e-0f1a2b3c4d5e",
+  "windows": [
+    {
+      "samples": {
+        "engine.battery_voltage": [
+          23.5
+        ],
+        "engine.fuel_pressure": [
+          22.650000000000002
+        ],
+        "engine.oil_pressure": [
+          21.75
+        ],
+        "engine.oil_temp": [
+          20.88
+        ],
+        "engine.water_temp": [
+          20.0
+        ],
+        "gps.fix_quality": [
+          29.0
+        ],
+        "power.supply_current": [
+          24.38
+        ],
+        "tire.surface_temp_fl": [
+          25.25
+        ],
+        "tire.surface_temp_fr": [
+          26.13
+        ],
+        "tire.surface_temp_rl": [
+          27.0
+        ],
+        "tire.surface_temp_rr": [
+          27.88
+        ]
+      },
+      "t_start_us": 1781234560000000
+    },
+    {
+      "samples": {
+        "engine.battery_voltage": [
+          32.767
+        ],
+        "engine.fuel_pressure": [
+          null
+        ],
+        "engine.oil_pressure": [
+          46.75
+        ],
+        "engine.oil_temp": [
+          45.88
+        ],
+        "engine.water_temp": [
+          45.0
+        ],
+        "gps.fix_quality": [
+          54.0
+        ],
+        "power.supply_current": [
+          49.38
+        ],
+        "tire.surface_temp_fl": [
+          50.25
+        ],
+        "tire.surface_temp_fr": [
+          51.13
+        ],
+        "tire.surface_temp_rl": [
+          52.0
+        ],
+        "tire.surface_temp_rr": [
+          52.88
+        ]
+      },
+      "t_start_us": 1781234561000000
+    },
+    {
+      "samples": {
+        "engine.battery_voltage": [
+          32.767
+        ],
+        "engine.fuel_pressure": [
+          72.65
+        ],
+        "engine.oil_pressure": [
+          71.75
+        ],
+        "engine.oil_temp": [
+          70.88
+        ],
+        "engine.water_temp": [
+          70.0
+        ],
+        "gps.fix_quality": [
+          79.0
+        ],
+        "power.supply_current": [
+          74.38
+        ],
+        "tire.surface_temp_fl": [
+          75.25
+        ],
+        "tire.surface_temp_fr": [
+          null
+        ],
+        "tire.surface_temp_rl": [
+          77.0
+        ],
+        "tire.surface_temp_rr": [
+          77.88
+        ]
+      },
+      "t_start_us": 1781234562000000
+    },
+    {
+      "samples": {
+        "engine.battery_voltage": [
+          32.767
+        ],
+        "engine.fuel_pressure": [
+          97.65
+        ],
+        "engine.oil_pressure": [
+          96.75
+        ],
+        "engine.oil_temp": [
+          95.88
+        ],
+        "engine.water_temp": [
+          95.0
+        ],
+        "gps.fix_quality": [
+          104.0
+        ],
+        "power.supply_current": [
+          99.38
+        ],
+        "tire.surface_temp_fl": [
+          100.25
+        ],
+        "tire.surface_temp_fr": [
+          101.13
+        ],
+        "tire.surface_temp_rl": [
+          102.0
+        ],
+        "tire.surface_temp_rr": [
+          102.88
+        ]
+      },
+      "t_start_us": 1781234563000000
+    }
+  ]
+}

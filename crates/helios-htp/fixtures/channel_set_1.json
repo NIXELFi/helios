@@ -1,0 +1,237 @@
+{
+  "groups": {
+    "0": {
+      "rate_hz": 10,
+      "channels": [
+        {
+          "id": "engine.rpm",
+          "enc": "i16fp",
+          "scale": 0.5,
+          "offset": 0
+        },
+        {
+          "id": "engine.tps",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "engine.aps",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "engine.map",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "engine.lambda",
+          "enc": "i16fp",
+          "scale": 0.0001,
+          "offset": 0.6
+        },
+        {
+          "id": "engine.gear",
+          "enc": "i16fp",
+          "scale": 1,
+          "offset": 0
+        },
+        {
+          "id": "chassis.steering_angle",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "imu.lat_g",
+          "enc": "i16fp",
+          "scale": 0.001,
+          "offset": 0
+        },
+        {
+          "id": "imu.long_g",
+          "enc": "i16fp",
+          "scale": 0.001,
+          "offset": 0
+        },
+        {
+          "id": "imu.vert_g",
+          "enc": "i16fp",
+          "scale": 0.001,
+          "offset": 0
+        },
+        {
+          "id": "imu.yaw_rate",
+          "enc": "i16fp",
+          "scale": 0.02,
+          "offset": 0
+        },
+        {
+          "id": "brake.front_pressure",
+          "enc": "i16fp",
+          "scale": 0.5,
+          "offset": 0
+        },
+        {
+          "id": "brake.rear_pressure",
+          "enc": "i16fp",
+          "scale": 0.5,
+          "offset": 0
+        },
+        {
+          "id": "suspension.travel_fl",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "suspension.travel_fr",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "suspension.travel_rl",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "suspension.travel_rr",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "drivetrain.wheel_speed_fl",
+          "enc": "i16fp",
+          "scale": 0.125,
+          "offset": 0
+        },
+        {
+          "id": "drivetrain.wheel_speed_fr",
+          "enc": "i16fp",
+          "scale": 0.125,
+          "offset": 0
+        },
+        {
+          "id": "drivetrain.wheel_speed_rl",
+          "enc": "i16fp",
+          "scale": 0.125,
+          "offset": 0
+        },
+        {
+          "id": "drivetrain.wheel_speed_rr",
+          "enc": "i16fp",
+          "scale": 0.125,
+          "offset": 0
+        },
+        {
+          "id": "drivetrain.vehicle_speed",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        }
+      ]
+    },
+    "1": {
+      "rate_hz": 10,
+      "channels": [
+        {
+          "id": "gps.lat_ref",
+          "enc": "f32"
+        },
+        {
+          "id": "gps.lat_d",
+          "enc": "f32"
+        },
+        {
+          "id": "gps.lon_ref",
+          "enc": "f32"
+        },
+        {
+          "id": "gps.lon_d",
+          "enc": "f32"
+        },
+        {
+          "id": "gps.speed",
+          "enc": "f32"
+        }
+      ]
+    },
+    "2": {
+      "rate_hz": 1,
+      "channels": [
+        {
+          "id": "engine.water_temp",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "engine.oil_temp",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "engine.oil_pressure",
+          "enc": "i16fp",
+          "scale": 0.05,
+          "offset": 0
+        },
+        {
+          "id": "engine.fuel_pressure",
+          "enc": "i16fp",
+          "scale": 0.05,
+          "offset": 0
+        },
+        {
+          "id": "engine.battery_voltage",
+          "enc": "i16fp",
+          "scale": 0.001,
+          "offset": 0
+        },
+        {
+          "id": "power.supply_current",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "tire.surface_temp_fl",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "tire.surface_temp_fr",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "tire.surface_temp_rl",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "tire.surface_temp_rr",
+          "enc": "i16fp",
+          "scale": 0.01,
+          "offset": 0
+        },
+        {
+          "id": "gps.fix_quality",
+          "enc": "i16fp",
+          "scale": 1,
+          "offset": 0
+        }
+      ]
+    }
+  }
+}

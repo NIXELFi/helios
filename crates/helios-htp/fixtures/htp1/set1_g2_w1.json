@@ -1,0 +1,47 @@
+{
+  "channel_set_id": 1,
+  "group_key": 2,
+  "send_timestamp_ms": 1781234567890,
+  "seq": 1042,
+  "session_id": "9b2f1c3e-4d5a-4b6c-8d7e-0f1a2b3c4d5e",
+  "windows": [
+    {
+      "samples": {
+        "engine.battery_voltage": [
+          23.5
+        ],
+        "engine.fuel_pressure": [
+          22.650000000000002
+        ],
+        "engine.oil_pressure": [
+          21.75
+        ],
+        "engine.oil_temp": [
+          20.88
+        ],
+        "engine.water_temp": [
+          20.0
+        ],
+        "gps.fix_quality": [
+          29.0
+        ],
+        "power.supply_current": [
+          24.38
+        ],
+        "tire.surface_temp_fl": [
+          25.25
+        ],
+        "tire.surface_temp_fr": [
+          26.13
+        ],
+        "tire.surface_temp_rl": [
+          27.0
+        ],
+        "tire.surface_temp_rr": [
+          27.88
+        ]
+      },
+      "t_start_us": 1781234560000000
+    }
+  ]
+}
