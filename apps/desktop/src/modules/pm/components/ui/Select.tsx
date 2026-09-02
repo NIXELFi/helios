@@ -20,6 +20,10 @@ export interface SelectOption<T extends string> {
   fill?: { background: string; color: string };
   // Fully custom node rendered in place of swatch + label (e.g. <TypeBadge/>).
   node?: React.ReactNode;
+  // Optional heading this option sits under. Consecutive options sharing a
+  // group render one heading above the first of the run (owner pickers use it
+  // to float the current subteam's people above the rest of the directory).
+  group?: string;
 }
 
 export interface SelectProps<T extends string> {
@@ -96,6 +100,16 @@ export function Select<T extends string>({
     if (q === "") return options;
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
+
+  // Headings only mean something when there are at least two buckets on
+  // screen. When a search (or an emptied "this subteam" bucket) leaves a single
+  // group, a lone "EVERYONE ELSE" rule over the whole list reads as though
+  // something is missing above it.
+  const showHeadings = useMemo(() => {
+    const groups = new Set<string>();
+    for (const o of filtered) if (o.group) groups.add(o.group);
+    return groups.size > 1;
+  }, [filtered]);
 
   const measure = useCallback(() => {
     const node = triggerRef.current;
@@ -178,13 +192,19 @@ export function Select<T extends string>({
   }, [open, rect]);
 
   // On open: clear the filter and start the highlight on the current value.
+  // Keyed on `open` ALONE. The owner pickers derive their options from the
+  // store's tasks slice, so a background hydrate or realtime tick while the
+  // menu is open hands us a new options array; keying on it wiped the typed
+  // search and snapped the highlight back to the first person, and the next
+  // Enter added whoever that was.
   useEffect(() => {
     if (open) {
       setQuery("");
       const idx = options.findIndex((o) => o.value === value);
       setActiveIndex(idx < 0 ? 0 : idx);
     }
-  }, [open, options, value]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Focus the search box once the menu has mounted (rect set).
   useEffect(() => {
@@ -201,7 +221,9 @@ export function Select<T extends string>({
     if (!open) return;
     const ul = menuRef.current?.querySelector("ul");
     const el = ul?.children[activeIndex] as HTMLElement | undefined;
-    el?.scrollIntoView({ block: "nearest" });
+    // Optional call: jsdom has no scrollIntoView, and a menu that can't scroll
+    // its highlight into view is still a working menu.
+    el?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, open]);
 
   function commit(v: T) {
@@ -325,8 +347,26 @@ export function Select<T extends string>({
                   filtered.map((opt, i) => {
                     const isSelected = opt.value === value;
                     const isActive = i === activeIndex;
+                    // The heading lives INSIDE the option's own <li> on purpose:
+                    // keyboard nav indexes ul.children against `filtered`, so a
+                    // separate heading <li> would shift every option by one.
+                    const heading =
+                      showHeadings && opt.group && opt.group !== filtered[i - 1]?.group
+                        ? opt.group
+                        : null;
                     return (
                       <li key={opt.value}>
+                        {heading ? (
+                          <span
+                            aria-hidden
+                            className={
+                              "block px-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-helios-dim " +
+                              (i === 0 ? "pt-0.5" : "mt-1 border-t border-helios-line pt-1.5")
+                            }
+                          >
+                            {heading}
+                          </span>
+                        ) : null}
                         <button
                           type="button"
                           role="option"

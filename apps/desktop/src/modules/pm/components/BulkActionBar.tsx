@@ -51,9 +51,13 @@ export interface BulkActionBarProps {
   // batch back. Intersecting against this set guarantees every write touches
   // only rows the active view actually owns.
   selectableIds?: ReadonlySet<string>;
+  /** Subteam-grouped owner options from the view (see lib/ownerScope.ts) so
+   *  "Set owner" ranks the same way every other picker does. Falls back to the
+   *  flat directory. */
+  ownerOptions?: ReadonlyArray<SelectOption<string>>;
 }
 
-export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
+export function BulkActionBar({ selectableIds, ownerOptions }: BulkActionBarProps = {}) {
   const selectedTaskIds = usePmStore((s) => s.selectedTaskIds);
   const clearSelection = usePmStore((s) => s.clearSelection);
   const bulkUpdateTasks = usePmStore((s) => s.bulkUpdateTasks);
@@ -166,7 +170,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
             options={[
               { value: ACTION, label: "Owner…" },
               { value: "__unassign__", label: "Unassigned" },
-              ...users.map((u) => ({ value: u.id, label: u.name })),
+              ...(ownerOptions ?? users.map((u) => ({ value: u.id, label: u.name }))),
             ]}
             onChange={(v) => {
               if (v === ACTION) return;

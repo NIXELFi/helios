@@ -33,6 +33,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
+import { AutoGrowTextarea } from "@pm/components/ui/AutoGrowTextarea";
+import { ownerOptions } from "@pm/lib/ownerScope";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { TaskLookup } from "@pm/components/TaskLookup";
 import { usePmStore } from "@pm/lib/pmStore";
@@ -201,6 +203,11 @@ export function CreateTaskDialog({
   // The form's `subteam_id` is always the PRIMARY; these are everyone else.
   const [extraSubteamIds, setExtraSubteamIds] = useState<string[]>([]);
   const [subteamPickerOpen, setSubteamPickerOpen] = useState(false);
+  // CO-OWNERS staged for after the insert. The form's `owner_id` is the PRIMARY
+  // owner; these are the rest. Requested 2026-08-26 — co-owners already existed
+  // on an existing task (TaskOwnerChips) but the New task form had no field for
+  // them, so every new task needed a second trip through the detail sheet.
+  const [coOwnerIds, setCoOwnerIds] = useState<string[]>([]);
 
   const watchedSubteamId = watch("subteam_id");
 
@@ -221,6 +228,37 @@ export function CreateTaskDialog({
     const taken = new Set(stagedSubteamIds);
     return subteams.filter((s) => !taken.has(s.id));
   }, [subteams, stagedSubteamIds]);
+
+  const watchedOwnerId = watch("owner_id");
+  const usersById = useMemo(() => {
+    const m = new Map<string, User>();
+    for (const u of users) m.set(u.id, u);
+    return m;
+  }, [users]);
+
+  // Owner + co-owner pickers both float the chosen subteam's own people to the
+  // top rather than making you hunt the whole directory (see lib/ownerScope.ts).
+  const ownerGroups = useMemo(
+    () => ownerOptions(users, allTasks, watchedSubteamId, subteamById.get(watchedSubteamId)?.name ?? null),
+    [users, allTasks, watchedSubteamId, subteamById],
+  );
+
+  // Anyone not already the primary owner or a staged co-owner.
+  const availableCoOwners = useMemo(() => {
+    const taken = new Set<string>(coOwnerIds);
+    if (watchedOwnerId) taken.add(watchedOwnerId);
+    return ownerGroups.filter((o) => !taken.has(o.value));
+  }, [ownerGroups, coOwnerIds, watchedOwnerId]);
+
+  // Primary owner and co-owner are exclusive roles (the store would otherwise
+  // persist a duplicate task_owners row), so the staged list is DERIVED: the
+  // current primary is simply not shown and not submitted. Deriving rather than
+  // deleting means promoting Bo and then changing your mind brings Bo's chip
+  // straight back instead of making you re-add them.
+  const stagedCoOwnerIds = useMemo(
+    () => coOwnerIds.filter((id) => id !== watchedOwnerId),
+    [coOwnerIds, watchedOwnerId],
+  );
 
   // Promote a staged extra to primary: swap the old primary down into extras and
   // lift the chosen one into `subteam_id`. Subsystem resets via the existing effect.
@@ -259,6 +297,7 @@ export function CreateTaskDialog({
       setDependentIds([]);
       setExtraSubteamIds([]);
       setSubteamPickerOpen(false);
+      setCoOwnerIds([]);
     }
   }, [open, defaults, reset]);
 
@@ -316,9 +355,17 @@ export function CreateTaskDialog({
       subteams: [subteam],
       subsystem,
       owner,
-      // The (primary) owner seeds the owners list; co-owners are added later from
-      // the task detail sheet. The DB trigger seeds the same primary membership.
-      owners: owner ? [owner] : [],
+      // Primary owner first, then any staged co-owners. addTask persists the
+      // non-primary entries as task_owners rows one by one AFTER the task INSERT
+      // commits (the DB trigger seeds the primary from owner_id). They are
+      // separate statements, not one write: if a co-owner row is refused the
+      // task still exists, and the store reports a partial save and re-pulls.
+      owners: [
+        ...(owner ? [owner] : []),
+        ...stagedCoOwnerIds
+          .map((id) => users.find((u) => u.id === id))
+          .filter((u): u is User => !!u),
+      ],
     };
 
     // Hand the staged ADDITIONAL subteams + dependencies to addTask (via the
@@ -337,6 +384,7 @@ export function CreateTaskDialog({
     setPrereqIds([]);
     setDependentIds([]);
     setExtraSubteamIds([]);
+    setCoOwnerIds([]);
     onClose();
   });
 
@@ -611,15 +659,55 @@ export function CreateTaskDialog({
                   value={field.value ?? ""}
                   onChange={(v) => field.onChange(v === "" ? null : v)}
                   ariaLabel="Owner"
-                  options={[
-                    { value: "", label: "Unassigned" },
-                    ...users.map((u) => ({ value: u.id, label: u.name })),
-                  ]}
+                  options={[{ value: "", label: "Unassigned" }, ...ownerGroups]}
                 />
               )}
             />
           </Field>
-          <div />
+          <Field label="Co-owners">
+            <div className="flex flex-wrap items-center gap-1">
+              {stagedCoOwnerIds.map((id) => {
+                const u = usersById.get(id);
+                if (!u) return null;
+                return (
+                  <span
+                    key={id}
+                    title={u.email ?? u.name}
+                    className="inline-flex items-center gap-1 rounded border border-helios-line bg-helios-base/60 px-1.5 py-0.5 text-[11px] leading-none text-helios-text"
+                  >
+                    <span className="font-medium">{u.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCoOwnerIds((prev) => prev.filter((x) => x !== id))}
+                      aria-label={`Remove co-owner ${u.name}`}
+                      title="Remove co-owner"
+                      className="shrink-0 rounded text-helios-dim hover:text-red-400"
+                    >
+                      <IconX size={11} strokeWidth={1.5} />
+                    </button>
+                  </span>
+                );
+              })}
+              {availableCoOwners.length > 0 ? (
+                // Fire-once action menu: pick a person, they become a chip, the
+                // control snaps back to its placeholder for the next one. Uses
+                // Select so the co-owner picker gets the same search + subteam
+                // grouping as the Owner dropdown above.
+                <div className="min-w-[9rem] flex-1">
+                  <Select
+                    value=""
+                    onChange={(v) => {
+                      if (v) setCoOwnerIds((prev) => (prev.includes(v) ? prev : [...prev, v]));
+                    }}
+                    size="sm"
+                    ariaLabel="Add co-owner"
+                    placeholder="Add co-owner…"
+                    options={availableCoOwners}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </Field>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
@@ -655,9 +743,8 @@ export function CreateTaskDialog({
         </div>
 
         <Field label="Description" htmlFor="task-description">
-          <textarea
+          <AutoGrowTextarea
             id="task-description"
-            rows={3}
             placeholder="Add a description…"
             className={inputClass + " resize-none"}
             {...register("description", { setValueAs: (v) => (v === "" ? null : v) })}
