@@ -11,6 +11,7 @@ members = [
   "crates/cfd-core",
   "crates/plugin-host",
   "crates/helios-bench",
+  "crates/helios-compactor",
   "crates/helios-mcp",
   "apps/desktop/src-tauri",
 ]
@@ -23,6 +24,7 @@ license = "MIT"
 [workspace.dependencies]
 arrow = "53"
 arrow-ipc = "53"
+parquet = { version = "53", default-features = false, features = ["arrow", "zstd"] }
 csv = "1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

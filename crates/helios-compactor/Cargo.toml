@@ -1,0 +1,28 @@
+[package]
+name = "helios-compactor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Telemetry staging compactor: Arrow IPC staging chunks -> zstd parquet in Supabase storage"
+
+[[bin]]
+name = "helios-compactor"
+path = "src/main.rs"
+
+[lib]
+name = "helios_compactor"
+path = "src/lib.rs"
+
+[dependencies]
+helios-arrow = { path = "../helios-arrow" }
+arrow.workspace = true
+parquet.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+clap.workspace = true
+chrono.workspace = true
+bytes = "1"

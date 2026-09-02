@@ -1,0 +1,31 @@
+{
+  "session_id": "1c7d34e2-48d5-450d-821e-bcb03deffec0",
+  "duration_s": 60,
+  "offered_frames": 168,
+  "windows_sent": {
+    "2": 56,
+    "0": 56,
+    "1": 56
+  },
+  "staged_rows": 168,
+  "integrity_exact": true,
+  "ack_ms": {
+    "p50": 558,
+    "p95": 995,
+    "p99": 1569,
+    "min": 217,
+    "max": 1981
+  },
+  "dup_retries_correct": "18/18",
+  "bytes_sent": 44464,
+  "staging_depth_samples": [
+    30,
+    55,
+    84,
+    113,
+    142,
+    168
+  ],
+  "errors": [],
+  "cleanup_residue_rows": 0
+}
