@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.7.0] - 2026-09-02
+
 ### Added
 - **The New task form can name co-owners.** Co-owners already existed on a task
   you'd already made, but the create form had no field for them — so every new
