@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Cellular telemetry ingest (server side).** The HTP/1 wire protocol, `telemetry` schema, `telemetry-ingest` edge function and staging compactor from the June pipeline branch are now on main. No user-facing change yet.
+
 ## [5.7.0] - 2026-09-02
 
 ### Added
