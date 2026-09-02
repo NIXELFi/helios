@@ -1,0 +1,2 @@
+crates/helios-htp/fixtures/**/*.htp binary
+crates/helios-htp/fixtures/**/*.bin binary
