@@ -51,6 +51,21 @@ function keyFor(tab: Tab, gameId: GameId): string {
   return tab === "subteams" ? `subteams:${categoryOf(gameId)}` : `${tab}:${gameId}`;
 }
 
+/** Who the client is signed in as, from the LOCAL session — no network.
+ *
+ *  This used to be `client.auth.getUser()`, which is a round trip to the auth
+ *  server on every call, made while holding supabase-auth's global session
+ *  lock. Every board refresh fanned out 14 of them, serialised behind that
+ *  lock (~1.5–2 s per burst on the work network), and every plinko drop had to
+ *  take the same lock to fetch its bearer token — so a burst of drops paid up
+ *  to a full auth round trip each, every two seconds, for as long as the
+ *  player kept clicking. Reported as "plinko lags when you spam". The cache
+ *  key only needs to know WHICH user this is, and the local session says so. */
+async function signedInUserId(client: SupabaseClient): Promise<string | null> {
+  const { data: { session } } = await client.auth.getSession();
+  return session?.user.id ?? null;
+}
+
 /** Fetch a board into the cache unless it's already fresh for `token`.
  *  Deduplicates concurrent requests per board. */
 async function ensureBoard(
@@ -62,8 +77,7 @@ async function ensureBoard(
   // Boards are user-specific: drop the cache when the Supabase client changes
   // OR when the signed-in user changes (sign-out → sign-in on the same client
   // singleton would otherwise serve stale cached boards to the new user).
-  const { data: { user } } = await client.auth.getUser();
-  const userId = user?.id ?? null;
+  const userId = await signedInUserId(client);
   if (cacheClient !== client || cacheUserId !== userId) {
     cacheClient = client;
     cacheUserId = userId;
@@ -109,14 +123,26 @@ async function ensureBoard(
  *  again on every refreshToken bump; errors are swallowed here — a board that
  *  failed to prefetch simply cold-loads (with visible error/retry) when it's
  *  actually viewed. */
-export function prefetchBoards(client: SupabaseClient, token: number): void {
+export function prefetchBoards(
+  client: SupabaseClient,
+  token: number,
+  /** Refresh only the boards a bet on THIS game can have moved: its own
+   *  all-time + weekly ledgers and its room's subteam board. A money cabinet
+   *  bumps the token every couple of seconds while it's being played, and
+   *  re-pulling all fourteen boards for each bump was most of the traffic
+   *  behind "plinko lags when you spam". Omit to warm everything (mount, a
+   *  score submitted). */
+  only?: GameId,
+): void {
+  const games = only ? GAMES.filter((g) => g.id === only) : GAMES;
   for (const tab of ["alltime", "weekly"] as const) {
-    for (const g of GAMES) {
+    for (const g of games) {
       void ensureBoard(client, tab, g.id, token).catch(() => {});
     }
   }
   // One subteams board per room — warm each through its first game.
-  for (const category of ["arcade", "casino"] as const) {
+  const rooms = only ? [categoryOf(only)] : (["arcade", "casino"] as const);
+  for (const category of rooms) {
     const first = gamesInCategory(category)[0];
     if (first) void ensureBoard(client, "subteams", first.id, token).catch(() => {});
   }

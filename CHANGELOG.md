@@ -57,6 +57,13 @@ follow [semver](https://semver.org/).
   board rather than the ones that actually changed. On a full project this cut
   idle frame time by about a fifth and stopped the hitching while typing in the
   filter bar.
+- **Plinko no longer lags when you spam the DROP button.** Every drop was
+  triggering a refresh of all fourteen standings boards, and each of those
+  asked the auth server who you were while holding the sign-in lock that every
+  drop also needs. A burst of drops paid for that lock over and over. The
+  standings now read your identity locally, and a bet only re-pulls the open
+  cabinet's own boards right away — the others refresh when you next look at
+  them.
 
 ## [5.6.2] - 2026-08-29
 
