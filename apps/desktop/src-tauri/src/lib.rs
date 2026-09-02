@@ -199,12 +199,25 @@ pub fn run() {
 
             // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
             // Best-effort; never block launch. Windows-only (SOLIDWORKS + registry).
+            //
+            // On its OWN thread. This setup hook runs on the main thread, and the
+            // webview's very first document request (tauri.localhost/index.html)
+            // is answered by that same thread — so every millisecond spent here
+            // is a millisecond the window sits on the boot spinner. Measured
+            // 2026-09-02: index.html took ~700 ms to be served, matching the
+            // injector's PE-version read + DLL staging + registry walk (with the
+            // endpoint AV scanning the staged DLL on top). Nothing in the app
+            // waits on the injector's result, so it runs alongside boot instead.
             #[cfg(windows)]
             {
                 let ah = app.handle().clone();
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    addin_injector::run(&ah);
-                }));
+                let _ = std::thread::Builder::new()
+                    .name("helios-addin-injector".into())
+                    .spawn(move || {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            addin_injector::run(&ah);
+                        }));
+                    });
             }
 
             // System tray — keeps Helios resident so the bridge stays live even

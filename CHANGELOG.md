@@ -27,6 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The window comes up sooner on launch.** The SOLIDWORKS add-in provisioning
+  that runs on every start was holding up the very first page load; it now
+  runs alongside boot instead of ahead of it.
+
 ## [5.6.2] - 2026-08-29
 
 ### Changed
