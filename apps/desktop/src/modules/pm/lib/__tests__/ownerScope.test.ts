@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
 import type { Subteam, TaskRow, User } from "@helios/pm-ui";
-import { ownerOptions, partitionBySubteam, usersInSubteam } from "../ownerScope";
+import { ownerOptions, partitionBySubteam, usersInSubteam, useOwnerOptions } from "../ownerScope";
 
 const DAQ: Subteam = { id: "st-daq", name: "Data Acquisition", code: "DAQ", slug: "daq", color: null } as Subteam;
 const AERO: Subteam = { id: "st-aero", name: "Aero", code: "AE", slug: "aero", color: null } as Subteam;
@@ -77,5 +78,32 @@ describe("ownerOptions", () => {
     const all = USERS.map((u) => ({ ...u, subteam_ids: [DAQ.id] }));
     expect(usersInSubteam(all, [], DAQ.id)).toEqual(everyone);
     expect(ownerOptions(all, [], DAQ.id, DAQ.name).every((o) => o.group === undefined)).toBe(true);
+  });
+});
+
+describe("useOwnerOptions", () => {
+  // Review of the first cut: the views memoised on the tasks slice, so every
+  // inline edit handed every memo'd Table row a fresh options array.
+  it("keeps the same options reference when a task edit doesn't change who is in the subteam", () => {
+    const users = [
+      { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Alex", email: null },
+      { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Bo", email: null },
+    ] as unknown as User[];
+    const t1 = { id: "t1", subteam_id: "st1", subteams: [], owner_id: users[0]!.id, owners: [], title: "a" } as unknown as TaskRow;
+    const tasks1 = [t1];
+    const { result, rerender } = renderHook(
+      ({ tasks }) => useOwnerOptions(users, tasks, "st1", "DAQ"),
+      { initialProps: { tasks: tasks1 } },
+    );
+    const first = result.current;
+    expect(first.map((o) => o.label)).toEqual(["Alex", "Bo"]);
+
+    // Same owner, new title, new array: an ordinary edit.
+    rerender({ tasks: [{ ...t1, title: "b" } as unknown as TaskRow] });
+    expect(result.current).toBe(first);
+
+    // Bo picks up work on the subteam: membership changed, options rebuilt.
+    rerender({ tasks: [t1, { ...t1, id: "t2", owner_id: users[1]!.id } as unknown as TaskRow] });
+    expect(result.current).not.toBe(first);
   });
 });

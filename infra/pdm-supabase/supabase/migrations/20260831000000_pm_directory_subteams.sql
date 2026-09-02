@@ -52,7 +52,7 @@ as $$
         -- notify.lead_email (20260714020000) resolves leads. Reading only the
         -- legacy table would freeze the ranking at June and miss everyone
         -- granted since.
-        select array_agg(distinct c.subteam_id order by c.subteam_id)
+        select array_agg(c.subteam_id order by c.subteam_id)  -- UNION already de-duplicates
         from (
           select rm.subteam_id
             from pm.role_memberships rm

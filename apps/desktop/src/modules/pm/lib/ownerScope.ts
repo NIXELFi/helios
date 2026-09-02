@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { SelectOption } from "@pm/components/ui/Select";
 import type { TaskRow, User } from "@helios/pm-ui";
 
@@ -55,6 +56,35 @@ export function partitionBySubteam(
   const b: User[] = [];
   for (const u of users) (inTeam.has(u.id) ? a : b).push(u);
   return { inTeam: a, others: b };
+}
+
+/**
+ * `ownerOptions` for a view, memoised on what actually changes the answer.
+ *
+ * Memoising on the tasks slice itself is not enough: every inline edit,
+ * realtime tick and optimistic write replaces that array, which would hand
+ * every memo'd row a fresh options reference and re-render the whole table for
+ * one changed cell. The membership set, on the other hand, only moves when
+ * someone starts or stops owning work on this subteam — so the options are
+ * rebuilt on THAT, and otherwise keep their identity.
+ */
+export function useOwnerOptions(
+  users: ReadonlyArray<User>,
+  tasks: ReadonlyArray<TaskRow>,
+  subteamId: string | null,
+  subteamName: string | null,
+): SelectOption<string>[] {
+  const membershipKey = useMemo(
+    () => [...usersInSubteam(users, tasks, subteamId)].sort().join("|"),
+    [users, tasks, subteamId],
+  );
+  return useMemo(
+    () => ownerOptions(users, tasks, subteamId, subteamName),
+    // `tasks` is deliberately NOT a dependency: membershipKey already captures
+    // the only thing about tasks that the options depend on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [users, membershipKey, subteamId, subteamName],
+  );
 }
 
 /**

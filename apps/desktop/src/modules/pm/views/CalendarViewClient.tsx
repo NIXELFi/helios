@@ -52,7 +52,7 @@ import { EventDialog } from "@pm/components/EventDialog";
 import { MilestoneDialog } from "@pm/components/MilestoneDialog";
 import { TaskPeekCard } from "@pm/components/TaskPeekCard";
 import { TaskFilterBar } from "@pm/components/TaskFilterBar";
-import { ownerOptions } from "@pm/lib/ownerScope";
+import { useOwnerOptions } from "@pm/lib/ownerScope";
 import { usePrimaryOnly } from "@pm/lib/primaryOnly";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
@@ -248,9 +248,8 @@ export function CalendarViewClient({
 
   // Owner filter options with the scoped subteam's own people first — the flat
   // 100+ entry directory was the specific complaint (see lib/ownerScope.ts).
-  const ownerFilterOptions = useMemo(
-    () => ownerOptions(users, tasks, currentTeam?.id ?? null, currentTeam?.name ?? null),
-    [users, tasks, currentTeam],
+  const ownerFilterOptions = useOwnerOptions(
+    users, tasks, currentTeam?.id ?? null, currentTeam?.name ?? null,
   );
 
   const filtersActive =

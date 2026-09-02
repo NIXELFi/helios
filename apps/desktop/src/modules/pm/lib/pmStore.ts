@@ -1356,9 +1356,9 @@ export const usePmStore = create<PmState>((set, get) => {
             for (const d of newDeps) await db.insertDependency(c, d);
           } catch (err) {
             if (err instanceof db.PartialWriteError) throw err;
-            const raw = err instanceof Error ? err.message : String(err);
+            const raw = (err instanceof Error ? err.message : String(err)).replace(/\.\s*$/, "");
             throw new db.PartialWriteError(
-              `"${seeded.title}" was created, but not everything on it saved: ${raw} ` +
+              `"${seeded.title}" was created, but not everything on it saved: ${raw}. ` +
                 "Reloading to show what actually stuck.",
             );
           }
