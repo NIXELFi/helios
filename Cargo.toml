@@ -12,6 +12,7 @@ members = [
   "crates/plugin-host",
   "crates/helios-bench",
   "crates/helios-compactor",
+  "crates/helios-htp",
   "crates/helios-mcp",
   "apps/desktop/src-tauri",
 ]
@@ -42,3 +43,5 @@ num_cpus = "1"
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
+base64 = "0.22"
+hmac = "0.12"
