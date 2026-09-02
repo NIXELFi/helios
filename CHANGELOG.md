@@ -50,6 +50,9 @@ follow [semver](https://semver.org/).
 - **Description boxes grow as you type.** The description field on the new-task
   form and the task detail sheet sizes itself to its content instead of holding
   three lines and scrolling.
+- **The window comes up sooner on launch.** The SOLIDWORKS add-in provisioning
+  that runs on every start was holding up the very first page load; it now
+  runs alongside boot instead of ahead of it.
 
 ### Fixed
 - **The Board no longer stutters on big projects.** Every background refresh,
