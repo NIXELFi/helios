@@ -80,7 +80,9 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
   const addTask = usePmStore((s) => s.addTask);
   const updateTask = usePmStore((s) => s.updateTask);
   const selectTask = usePmStore((s) => s.selectTask);
-  const selectedTaskIds = usePmStore((s) => s.selectedTaskIds);
+  // No board-level selection subscription: each card reads its own bit (see
+  // DraggableCard) and the bulk bar subscribes on its own, so a checkbox click
+  // never re-renders the board, the columns, or the DndContext above them.
   const toggleSelected = usePmStore((s) => s.toggleSelected);
   const clearSelection = usePmStore((s) => s.clearSelection);
 
@@ -255,7 +257,6 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
                 tasks={byStatus.get(status) ?? []}
                 relations={relationByTaskId}
                 dimmedById={dimmedById}
-                selectedIds={selectedTaskIds}
                 onToggleSelect={toggleSelected}
                 onOpen={selectTask}
               />
@@ -299,20 +300,22 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
         defaultSubteamId={currentTeam?.id ?? null}
       />
 
-      <BulkActionBar selectableIds={selectableSet} />
+      <BulkActionBar selectableIds={selectableSet} ownerOptions={ownerFilterOptions} />
     </>
   );
 }
 
 // Memoized alongside the cards: with the search-params fix above, every prop a
-// column gets (its task array, the relation map, the dimmed/selected sets) is
+// column gets (its task array, the relation map, the dimmed set) is
 // referentially stable across a re-render that didn't touch tasks or filters.
+// Selection is deliberately NOT a column prop: toggleSelected replaces the
+// store's Set on every click, so passing it here re-ran all five columns for
+// the one interaction the memo exists for. Each card reads its own bit.
 const Column = memo(function Column({
   status,
   tasks,
   relations,
   dimmedById,
-  selectedIds,
   onToggleSelect,
   onOpen,
 }: {
@@ -320,7 +323,6 @@ const Column = memo(function Column({
   tasks: TaskRow[];
   relations: Map<string, CrossTeamRelation>;
   dimmedById: Set<string>;
-  selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onOpen: (id: string) => void;
 }) {
@@ -355,7 +357,6 @@ const Column = memo(function Column({
               task={t}
               relation={relations.get(t.id) ?? "owned"}
               dimmed={dimmedById.has(t.id)}
-              selected={selectedIds.has(t.id)}
               onToggleSelect={onToggleSelect}
               onOpen={onOpen}
             />
@@ -375,17 +376,18 @@ const DraggableCard = memo(function DraggableCard({
   task,
   relation,
   dimmed,
-  selected,
   onToggleSelect,
   onOpen,
 }: {
   task: TaskRow;
   relation: CrossTeamRelation;
   dimmed: boolean;
-  selected: boolean;
   onToggleSelect: (id: string) => void;
   onOpen: (id: string) => void;
 }) {
+  // A boolean selector: only the two cards whose bit actually flipped re-render
+  // on a selection change; every other subscriber sees the same `false`.
+  const selected = usePmStore((s) => s.selectedTaskIds.has(task.id));
   const disabled = relation !== "owned";
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,

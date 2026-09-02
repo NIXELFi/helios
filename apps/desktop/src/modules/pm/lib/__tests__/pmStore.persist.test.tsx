@@ -189,6 +189,45 @@ describe("optimistic persistence with rollback", () => {
     expect(usePmStore.getState().lastWriteError?.message).toMatch(/don't have permission/i);
   });
 
+  test("addTask keeps a task whose row committed when a co-owner row is then refused", async () => {
+    // The co-owner rows are separate statements issued AFTER the task INSERT
+    // commits. A refused co-owner used to roll the whole optimistic add back,
+    // so the task vanished from the screen while it existed on the server.
+    const ok = recorderClient(null);
+    const bad = recorderClient({ message: "permission denied for table task_owners" });
+    const client = {
+      schema: () => ({
+        from: (t: string) =>
+          (t === "task_owners" ? bad.client : ok.client).schema("pm").from(t),
+        rpc: (name: string, args: unknown) => ok.client.schema("pm").rpc(name, args),
+      }),
+    } as unknown as SupabaseClient;
+    seed(client);
+    const bob = { id: "u-bob", name: "Bob" } as never;
+    const task = makeTask("t1", { owner_id: "u-alice", owner: USER1, owners: [USER1, bob] });
+
+    usePmStore.getState().addTask(task);
+    await flush();
+
+    expect(ok.writes.some((w) => w.table === "tasks" && w.op === "insert")).toBe(true);
+    expect(bad.writes.some((w) => w.table === "task_owners" && w.op === "insert")).toBe(true);
+    // The task row landed, so it stays on screen…
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeTruthy();
+    // …and the failure is reported as the partial write it is, with a resync.
+    const err = usePmStore.getState().lastWriteError;
+    expect(err?.message).toMatch(/created, but not everything/i);
+    expect(err?.needsReload).toBe(true);
+  });
+
+  test("addTask still rolls back when the task row itself is refused", async () => {
+    const { client } = recorderClient({ message: "permission denied for table tasks" });
+    seed(client);
+    usePmStore.getState().addTask(makeTask("t1", { owners: [USER1, { id: "u-bob", name: "Bob" } as never] }));
+    await flush();
+    expect(usePmStore.getState().tasks.find((t) => t.id === "t1")).toBeFalsy();
+    expect(usePmStore.getState().lastWriteError?.needsReload).toBeFalsy();
+  });
+
   test("updateTask rolls back + surfaces an error when RLS silently denies (zero rows, no error)", async () => {
     // The Nora bug: PostgREST returns 200 + no error but updates zero rows
     // because RLS hid the task from the UPDATE. The edit must NOT stick — it has

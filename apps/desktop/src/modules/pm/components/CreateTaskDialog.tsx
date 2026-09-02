@@ -250,13 +250,15 @@ export function CreateTaskDialog({
     return ownerGroups.filter((o) => !taken.has(o.value));
   }, [ownerGroups, coOwnerIds, watchedOwnerId]);
 
-  // Promoting someone to PRIMARY owner drops them from the co-owner list — the
-  // two roles are exclusive, and the store would otherwise persist a duplicate
-  // task_owners row for the same person.
-  useEffect(() => {
-    if (!watchedOwnerId) return;
-    setCoOwnerIds((prev) => (prev.includes(watchedOwnerId) ? prev.filter((id) => id !== watchedOwnerId) : prev));
-  }, [watchedOwnerId]);
+  // Primary owner and co-owner are exclusive roles (the store would otherwise
+  // persist a duplicate task_owners row), so the staged list is DERIVED: the
+  // current primary is simply not shown and not submitted. Deriving rather than
+  // deleting means promoting Bo and then changing your mind brings Bo's chip
+  // straight back instead of making you re-add them.
+  const stagedCoOwnerIds = useMemo(
+    () => coOwnerIds.filter((id) => id !== watchedOwnerId),
+    [coOwnerIds, watchedOwnerId],
+  );
 
   // Promote a staged extra to primary: swap the old primary down into extras and
   // lift the chosen one into `subteam_id`. Subsystem resets via the existing effect.
@@ -354,14 +356,13 @@ export function CreateTaskDialog({
       subsystem,
       owner,
       // Primary owner first, then any staged co-owners. addTask persists the
-      // non-primary entries as task_owners rows sequentially AFTER the task
-      // INSERT commits (the DB trigger seeds the primary from owner_id), so the
-      // co-owners land in the same write as the task instead of needing a
-      // second pass through the detail sheet.
+      // non-primary entries as task_owners rows one by one AFTER the task INSERT
+      // commits (the DB trigger seeds the primary from owner_id). They are
+      // separate statements, not one write: if a co-owner row is refused the
+      // task still exists, and the store reports a partial save and re-pulls.
       owners: [
         ...(owner ? [owner] : []),
-        ...coOwnerIds
-          .filter((id) => id !== input.owner_id)
+        ...stagedCoOwnerIds
           .map((id) => users.find((u) => u.id === id))
           .filter((u): u is User => !!u),
       ],
@@ -665,7 +666,7 @@ export function CreateTaskDialog({
           </Field>
           <Field label="Co-owners">
             <div className="flex flex-wrap items-center gap-1">
-              {coOwnerIds.map((id) => {
+              {stagedCoOwnerIds.map((id) => {
                 const u = usersById.get(id);
                 if (!u) return null;
                 return (

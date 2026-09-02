@@ -92,7 +92,11 @@ export const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, AutoGrowTextarea
         value={value}
         onChange={(e) => {
           onChange?.(e);
-          resize();
+          // A controlled caller re-renders with the new value and the layout
+          // effect above re-measures then; measuring here as well forced a
+          // second synchronous layout per keystroke. Only the uncontrolled
+          // path (react-hook-form's `register`) needs this call.
+          if (value === undefined) resize();
         }}
         {...rest}
       />

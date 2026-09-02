@@ -12,9 +12,10 @@
 -- that ignores the new column behaves exactly as before. Postgres will not let
 -- CREATE OR REPLACE change a function's OUT columns, hence the drop + create.
 --
--- Membership is INCOMPLETE in practice (41 of 107 users carry a subteam_memberships
--- row), which is precisely why the client RANKS on this column rather than
--- filtering by it -- filtering would hide two thirds of the team, and assigning
+-- Membership is INCOMPLETE in practice (41 of 107 users carried a legacy
+-- subteam_memberships row at the time of writing; Org & Access grants are
+-- unioned in below), which is precisely why the client RANKS on this column
+-- rather than filtering by it -- filtering would hide two thirds of the team, and assigning
 -- across subteams has to stay possible either way.
 --
 -- GRANTS: deliberately restored to exactly what the function had before this
@@ -44,9 +45,23 @@ as $$
     u.email::text,
     coalesce(
       (
-        select array_agg(m.subteam_id order by m.subteam_id)
-        from pm.subteam_memberships m
-        where m.user_id = u.id
+        -- Org & Access is the LIVE source: grant_role writes pm.role_memberships
+        -- (subteam_id null = org-scoped, skipped). pm.subteam_memberships is the
+        -- one-shot 2026-06-17 backfill nothing writes to any more -- kept as a
+        -- second source so the June seed still counts, exactly the way
+        -- notify.lead_email (20260714020000) resolves leads. Reading only the
+        -- legacy table would freeze the ranking at June and miss everyone
+        -- granted since.
+        select array_agg(distinct c.subteam_id order by c.subteam_id)
+        from (
+          select rm.subteam_id
+            from pm.role_memberships rm
+           where rm.user_id = u.id and rm.subteam_id is not null
+          union
+          select sm.subteam_id
+            from pm.subteam_memberships sm
+           where sm.user_id = u.id
+        ) c
       ),
       '{}'::uuid[]
     )

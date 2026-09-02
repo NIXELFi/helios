@@ -1336,17 +1336,36 @@ export const usePmStore = create<PmState>((set, get) => {
       // Same for owners: the DB trigger seeds the PRIMARY owner from owner_id, so
       // we only persist the ADDITIONAL co-owners the task was created with.
       const ownerExtras = seeded.owners.filter((u) => u.id !== seeded.owner_id);
+      // Once the task row has committed, a failure in one of the follow-up rows
+      // (a co-owner, an extra subteam, a dependency) must NOT roll the task off
+      // the screen: it exists on the server, and hiding it until the next
+      // refresh is exactly the "my task vanished" report. Past that point the
+      // failure is a partial write — keep the task, surface it as one, and let
+      // the resync show what actually stuck.
+      let taskCommitted = false;
       persist(
         async (c) => {
           // Order is FK-critical: the task row MUST commit before any membership
           // or dependency that references it (bug H-10 — these used to be
           // separate fire-and-forget writes that raced the INSERT).
           await db.insertTask(c, seeded);
-          for (const st of extras) await db.insertTaskSubteam(c, seeded.id, st.id);
-          for (const u of ownerExtras) await db.insertTaskOwner(c, seeded.id, u.id);
-          for (const d of newDeps) await db.insertDependency(c, d);
+          taskCommitted = true;
+          try {
+            for (const st of extras) await db.insertTaskSubteam(c, seeded.id, st.id);
+            for (const u of ownerExtras) await db.insertTaskOwner(c, seeded.id, u.id);
+            for (const d of newDeps) await db.insertDependency(c, d);
+          } catch (err) {
+            if (err instanceof db.PartialWriteError) throw err;
+            const raw = err instanceof Error ? err.message : String(err);
+            throw new db.PartialWriteError(
+              `"${seeded.title}" was created, but not everything on it saved: ${raw} ` +
+                "Reloading to show what actually stuck.",
+            );
+          }
         },
-        () => set(snap),
+        () => {
+          if (!taskCommitted) set(snap);
+        },
       );
     },
 

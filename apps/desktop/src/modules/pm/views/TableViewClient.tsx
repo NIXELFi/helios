@@ -266,6 +266,13 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
     () => ownerOptions(users, tasks, currentTeam?.id ?? null, currentTeam?.name ?? null),
     [users, tasks, currentTeam],
   );
+  // The same grouping for the inline Owner cell on every row — the cell you
+  // actually assign from. Built ONCE here (not per row per render) and handed
+  // down as a stable reference so the row memo comparator can see it.
+  const ownerRowOptions = useMemo<SelectOption<string>[]>(
+    () => [{ value: "", label: "Unassigned" }, ...ownerFilterOptions],
+    [ownerFilterOptions],
+  );
 
   const filtersActive =
     filters.status.length > 0 ||
@@ -327,6 +334,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
         relation={relation}
         dimmed={dimmed}
         users={users}
+        ownerRowOptions={ownerRowOptions}
         isViewer={isViewer}
         selected={selectedTaskIds.has(task.id)}
         onToggleSelect={() => toggleSelected(task.id)}
@@ -530,7 +538,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
           })()
         : null}
 
-      <BulkActionBar selectableIds={selectableSet} />
+      <BulkActionBar selectableIds={selectableSet} ownerOptions={ownerFilterOptions} />
     </>
   );
 }
@@ -578,6 +586,7 @@ function RowFragmentInner({
   relation,
   dimmed,
   users,
+  ownerRowOptions,
   isViewer,
   selected,
   onToggleSelect,
@@ -602,6 +611,9 @@ function RowFragmentInner({
   relation: CrossTeamRelation;
   dimmed: boolean;
   users: ReadonlyArray<{ id: string; name: string }>;
+  /** Pre-built, subteam-grouped owner options (see lib/ownerScope.ts), with the
+   *  "Unassigned" entry already at the head. Falls back to the flat directory. */
+  ownerRowOptions?: ReadonlyArray<SelectOption<string>>;
   isViewer: boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -721,10 +733,12 @@ function RowFragmentInner({
             disabled={editsDisabled}
             ariaLabel="Owner"
             onChange={(v) => onChangeOwner(v === "" ? null : v)}
-            options={[
-              { value: "", label: "Unassigned" },
-              ...users.map((u) => ({ value: u.id, label: u.name })),
-            ]}
+            options={
+              ownerRowOptions ?? [
+                { value: "", label: "Unassigned" },
+                ...users.map((u) => ({ value: u.id, label: u.name })),
+              ]
+            }
           />
         </td>
         <td className="px-3 py-2">
@@ -821,6 +835,7 @@ const RowFragment = memo(RowFragmentInner, (prev, next) => {
     prev.relation === next.relation &&
     prev.dimmed === next.dimmed &&
     prev.users === next.users &&
+    prev.ownerRowOptions === next.ownerRowOptions &&
     prev.isViewer === next.isViewer &&
     prev.selected === next.selected &&
     prev.subsystemOptions === next.subsystemOptions &&

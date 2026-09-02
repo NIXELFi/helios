@@ -15,13 +15,6 @@ const N = Number(qs.get("tasks") ?? "234");
 const NDEPS = Number(qs.get("deps") ?? "213");
 const WITH_AURA = qs.get("aura") !== "0";
 const VIEW = qs.get("view") ?? "board";
-// A/B switch for the board-card containment (pm-board-card in pm.css).
-if (qs.get("cv") === "0") {
-  const st = document.createElement("style");
-  st.textContent = ".pm-board-card{content-visibility:visible!important;contain-intrinsic-size:auto!important}";
-  document.head.appendChild(st);
-}
-
 const subteams = Array.from({ length: 16 }, (_, i) => ({
   id: uuid(i, "st"), name: `Subteam ${i}`, code: `S${i}`,
   slug: `subteam-${i}`, color: "#8899aa", icon: null,

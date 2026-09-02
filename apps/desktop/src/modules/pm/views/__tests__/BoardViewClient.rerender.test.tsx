@@ -16,6 +16,20 @@ vi.mock("@helios/pm-ui", async (importOriginal) => {
   };
 });
 
+// Column calls useDroppable exactly once per render, so counting the calls
+// counts the columns React actually re-rendered.
+const droppableCalls = vi.fn();
+vi.mock("@dnd-kit/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@dnd-kit/core")>();
+  return {
+    ...actual,
+    useDroppable: (...args: Parameters<typeof actual.useDroppable>) => {
+      droppableCalls();
+      return actual.useDroppable(...args);
+    },
+  };
+});
+
 const { PmRouterProvider } = await import("@pm/lib/router");
 const { usePmStore } = await import("@pm/lib/pmStore");
 const { BoardViewClient } = await import("../BoardViewClient");
@@ -62,7 +76,10 @@ function renderBoard() {
   );
 }
 
-beforeEach(() => outlineCalls.mockClear());
+beforeEach(() => {
+  outlineCalls.mockClear();
+  droppableCalls.mockClear();
+});
 afterEach(() => {
   cleanup();
   act(() => usePmStore.getState().clearSelection());
@@ -92,11 +109,25 @@ describe("BoardViewClient re-render cost", () => {
     expect(outlineCalls).toHaveBeenCalledTimes(1);
   });
 
+  // Review of the first cut: the columns were handed the store's selection Set,
+  // which toggleSelected replaces on every click — so the card-level count above
+  // passed while all five Column bodies re-ran and re-mapped every task.
+  it("re-renders no column when the selection changes", () => {
+    const tasks = seed();
+    renderBoard();
+    droppableCalls.mockClear();
+
+    act(() => usePmStore.getState().toggleSelected(tasks[0]!.id));
+    expect(droppableCalls).not.toHaveBeenCalled();
+  });
+
   it("re-renders no cards when an unrelated slice of the store changes", () => {
     seed();
     renderBoard();
     outlineCalls.mockClear();
+    droppableCalls.mockClear();
     act(() => usePmStore.setState({ inFlightWrites: 3 } as never));
     expect(outlineCalls).not.toHaveBeenCalled();
+    expect(droppableCalls).not.toHaveBeenCalled();
   });
 });

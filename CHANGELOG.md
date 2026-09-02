@@ -32,15 +32,19 @@ follow [semver](https://semver.org/).
   you'd already made, but the create form had no field for them — so every new
   shared task meant opening it again in the detail sheet just to add the second
   person. They now go on at creation, and promoting a co-owner to primary owner
-  quietly drops them from the co-owner list instead of listing them twice.
+  quietly drops them from the co-owner list instead of listing them twice
+  (changing the primary back restores them). If a co-owner can't be saved the
+  task itself still lands, and you're told what didn't.
 - **Owner pickers put your own subteam first.** Every place you pick an owner —
-  the New task form, a task's detail sheet, the co-owner chips, and the owner
-  filter on Board/Table/Calendar — now shows the current subteam's people under
-  their own heading at the top, with everyone else below. Nobody is hidden:
+  the New task form, a task's detail sheet, the co-owner chips, the Table view's
+  inline Owner cell, the bulk "Set owner" action, and the owner filter on
+  Board/Table/Calendar — now shows the current subteam's people under their own
+  heading at the top, with everyone else below. Nobody is hidden:
   cross-subteam assignment still works, and the picker's search still reaches
-  the whole directory. Membership is drawn from subteam records plus whoever
+  the whole directory. Membership is drawn from Org & Access grants plus whoever
   already owns work on that subteam, so it stays useful even where membership
-  rows were never filled in.
+  rows were never filled in. Typing in a picker's search box is no longer wiped
+  by a background refresh.
 
 ### Changed
 - **Description boxes grow as you type.** The description field on the new-task

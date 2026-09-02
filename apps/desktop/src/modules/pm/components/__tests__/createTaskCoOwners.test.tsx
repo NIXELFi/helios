@@ -91,6 +91,26 @@ describe("CreateTaskDialog — co-owners", () => {
     expect(task.owners.map((u) => u.id)).toEqual([BO.id]);
   });
 
+  test("changing the primary back restores the co-owner it had displaced", async () => {
+    // The first cut deleted the promoted co-owner from state; picking a
+    // different Owner afterwards left Bo gone for good.
+    const onCreate = vi.fn();
+    renderDialog(onCreate);
+
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Loom v2" } });
+    pick("Add co-owner", "Bo Nguyen");
+    pick("Owner", "Bo Nguyen");
+    expect(screen.queryByRole("button", { name: "Remove co-owner Bo Nguyen" })).not.toBeInTheDocument();
+
+    pick("Owner", "Alex Rumer");
+    expect(screen.getByRole("button", { name: "Remove co-owner Bo Nguyen" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    const task = onCreate.mock.calls[0]![0] as TaskRow;
+    expect(task.owners.map((u) => u.id)).toEqual([ALEX.id, BO.id]);
+  });
+
   test("the owner picker puts the chosen subteam's people above everyone else", () => {
     renderDialog(vi.fn());
     fireEvent.click(screen.getByLabelText("Owner"));

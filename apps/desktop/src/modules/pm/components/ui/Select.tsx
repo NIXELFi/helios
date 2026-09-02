@@ -101,6 +101,16 @@ export function Select<T extends string>({
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
 
+  // Headings only mean something when there are at least two buckets on
+  // screen. When a search (or an emptied "this subteam" bucket) leaves a single
+  // group, a lone "EVERYONE ELSE" rule over the whole list reads as though
+  // something is missing above it.
+  const showHeadings = useMemo(() => {
+    const groups = new Set<string>();
+    for (const o of filtered) if (o.group) groups.add(o.group);
+    return groups.size > 1;
+  }, [filtered]);
+
   const measure = useCallback(() => {
     const node = triggerRef.current;
     if (!node) return;
@@ -182,13 +192,19 @@ export function Select<T extends string>({
   }, [open, rect]);
 
   // On open: clear the filter and start the highlight on the current value.
+  // Keyed on `open` ALONE. The owner pickers derive their options from the
+  // store's tasks slice, so a background hydrate or realtime tick while the
+  // menu is open hands us a new options array; keying on it wiped the typed
+  // search and snapped the highlight back to the first person, and the next
+  // Enter added whoever that was.
   useEffect(() => {
     if (open) {
       setQuery("");
       const idx = options.findIndex((o) => o.value === value);
       setActiveIndex(idx < 0 ? 0 : idx);
     }
-  }, [open, options, value]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Focus the search box once the menu has mounted (rect set).
   useEffect(() => {
@@ -205,7 +221,9 @@ export function Select<T extends string>({
     if (!open) return;
     const ul = menuRef.current?.querySelector("ul");
     const el = ul?.children[activeIndex] as HTMLElement | undefined;
-    el?.scrollIntoView({ block: "nearest" });
+    // Optional call: jsdom has no scrollIntoView, and a menu that can't scroll
+    // its highlight into view is still a working menu.
+    el?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, open]);
 
   function commit(v: T) {
@@ -333,7 +351,9 @@ export function Select<T extends string>({
                     // keyboard nav indexes ul.children against `filtered`, so a
                     // separate heading <li> would shift every option by one.
                     const heading =
-                      opt.group && opt.group !== filtered[i - 1]?.group ? opt.group : null;
+                      showHeadings && opt.group && opt.group !== filtered[i - 1]?.group
+                        ? opt.group
+                        : null;
                     return (
                       <li key={opt.value}>
                         {heading ? (
