@@ -48,9 +48,73 @@ export interface Workspace {
   roles: Record<string, TeamRole>;
 }
 
+// The tasks read, with its three embeds. Shared by the full workspace pull and
+// by fetchTaskRowsByIds (the incremental realtime path), so a task row assembled
+// from a live event has exactly the same shape as one from a full pull.
+const TASK_SELECT =
+  "id,project_id,subteam_id,subsystem_id,parent_task_id,title,description,type,status,priority,owner_id,start_date,due_date,estimate_days,mrl,on_critical_path,created_by," +
+  // Pin the PRIMARY subteam embed to the direct tasks.subteam_id FK.
+  // task_subteams adds a SECOND tasks->subteams path, so an unqualified
+  // `subteams` embed is ambiguous ("more than one relationship found").
+  "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color,icon)," +
+  "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
+  "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color,icon))," +
+  // Owner ids only (auth.users can't be embedded cross-schema); the User
+  // objects are resolved client-side from the directory, like owner.
+  "task_owners(owner_id,is_primary)";
+
+/**
+ * The workspace as the server returned it: every read unwrapped, nothing
+ * transformed. PmModule keeps the last one of these in a ref so a teammate's
+ * realtime event can be applied to the cached rows and the workspace rebuilt
+ * locally (buildWorkspace) instead of re-pulling all ~17 reads on every edit.
+ *
+ * It must stay JSON-round-trippable (it is plain rows) and must contain
+ * everything buildWorkspace needs — nothing else derives from the client.
+ */
+export interface RawWorkspace {
+  projectsRaw: Array<{ id: string; name: string; description: string | null; car_code: string }>;
+  subteams: Subteam[];
+  subsystems: Subsystem[];
+  users: User[];
+  tasksRaw: Array<Record<string, unknown>>;
+  /** UNTOUCHED dependency rows; the dep_type/lag_days coercion lives in buildWorkspace. */
+  depsRaw: Array<Record<string, unknown>>;
+  milestones: Milestone[];
+  pages: Page[];
+  blocks: Block[];
+  vendors: Vendor[];
+  comments: TaskComment[];
+  links: TaskLink[];
+  build: BuildRecord[];
+  events: CalendarEvent[];
+  activity: Activity[];
+  rolesRaw: Array<{ project_id: string; team_role: TeamRole }>;
+  hiddenSubteamsRaw: Array<{ project_id: string; subteam_id: string }>;
+}
+
 // Fetch the entire workspace (all projects + the shared org) in one shot and
 // assemble the per-project working sets the store hydrates from.
 export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> {
+  return buildWorkspace(await fetchWorkspaceRaw(client));
+}
+
+/**
+ * Re-read a handful of task rows (with the same embeds as the full pull) after
+ * a realtime event on tasks / task_subteams / task_owners. Ids the server does
+ * not return are gone for this user — deleted, or moved out of RLS reach.
+ */
+export async function fetchTaskRowsByIds(
+  client: SupabaseClient,
+  ids: string[],
+): Promise<Array<Record<string, unknown>>> {
+  if (ids.length === 0) return [];
+  const res = await client.schema("pm").from("tasks").select(TASK_SELECT).in("id", ids);
+  return unwrap<Array<Record<string, unknown>>>(res, "tasks by id");
+}
+
+/** Every workspace read, unwrapped but not transformed. */
+export async function fetchWorkspaceRaw(client: SupabaseClient): Promise<RawWorkspace> {
   const sb = client.schema("pm");
   const [
     projectsR,
@@ -77,20 +141,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
       .select("id,subteam_id,parent_subsystem_id,name,code,color")
       .order("display_order"),
     sb.rpc("list_directory"),
-    sb
-      .from("tasks")
-      .select(
-        "id,project_id,subteam_id,subsystem_id,parent_task_id,title,description,type,status,priority,owner_id,start_date,due_date,estimate_days,mrl,on_critical_path,created_by," +
-          // Pin the PRIMARY subteam embed to the direct tasks.subteam_id FK.
-          // task_subteams adds a SECOND tasks->subteams path, so an unqualified
-          // `subteams` embed is ambiguous ("more than one relationship found").
-          "subteam:subteams!tasks_subteam_id_fkey(id,name,code,slug,color,icon)," +
-          "subsystem:subsystems(id,subteam_id,parent_subsystem_id,name,code,color)," +
-          "task_subteams(subteam_id,is_primary,subteam:subteams(id,name,code,slug,color,icon))," +
-          // Owner ids only (auth.users can't be embedded cross-schema); the User
-          // objects are resolved client-side from the directory, like owner.
-          "task_owners(owner_id,is_primary)",
-      ),
+    sb.from("tasks").select(TASK_SELECT),
     sb.from("task_dependencies").select("predecessor_id,successor_id,dep_type,lag_days"),
     sb
       .from("milestones")
@@ -146,15 +197,7 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
   const subsystems = unwrap<Subsystem[]>(subsystemsR, "subsystems");
   const users = unwrap<User[]>(dirR, "list_directory");
   const tasksRaw = unwrap<Array<Record<string, unknown>>>(tasksR, "tasks");
-  const deps = unwrap<Array<Record<string, unknown>>>(depsR, "dependencies").map(
-    (d) =>
-      ({
-        predecessor_id: d.predecessor_id as string,
-        successor_id: d.successor_id as string,
-        dep_type: d.dep_type as TaskDependency["dep_type"],
-        lag_days: num(d.lag_days) ?? 0,
-      }) satisfies TaskDependency,
-  );
+  const depsRaw = unwrap<Array<Record<string, unknown>>>(depsR, "dependencies");
   const milestones = unwrap<Milestone[]>(milestonesR, "milestones");
   const pages = unwrap<Page[]>(pagesR, "pages");
   const blocks = unwrap<Block[]>(blocksR, "blocks");
@@ -167,8 +210,6 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     rolesR,
     "my_team_roles",
   );
-  const roles: Record<string, TeamRole> = {};
-  for (const r of rolesRaw) roles[r.project_id] = r.team_role;
   const activity = unwrap<Activity[]>(activityR, "activity");
   // Do NOT route through unwrap (which throws on res.error): a PostgREST error
   // here (e.g. the table not yet migrated) must degrade to "nothing hidden".
@@ -178,6 +219,65 @@ export async function loadWorkspace(client: SupabaseClient): Promise<Workspace> 
     project_id: string;
     subteam_id: string;
   }>;
+
+  return {
+    projectsRaw,
+    subteams,
+    subsystems,
+    users,
+    tasksRaw,
+    depsRaw,
+    milestones,
+    pages,
+    blocks,
+    vendors,
+    comments,
+    links,
+    build,
+    events,
+    activity,
+    rolesRaw,
+    hiddenSubteamsRaw,
+  };
+}
+
+/**
+ * The pure transform: raw rows in, the store's per-project working sets out.
+ * Verbatim the second half of the old loadWorkspace (see data-build.test.ts,
+ * which pins it against output captured before the split).
+ */
+export function buildWorkspace(raw: RawWorkspace): Workspace {
+  const {
+    projectsRaw,
+    subteams,
+    subsystems,
+    users,
+    tasksRaw,
+    depsRaw,
+    milestones,
+    pages,
+    blocks,
+    vendors,
+    comments,
+    links,
+    build,
+    events,
+    activity,
+    rolesRaw,
+    hiddenSubteamsRaw,
+  } = raw;
+
+  const deps = depsRaw.map(
+    (d) =>
+      ({
+        predecessor_id: d.predecessor_id as string,
+        successor_id: d.successor_id as string,
+        dep_type: d.dep_type as TaskDependency["dep_type"],
+        lag_days: num(d.lag_days) ?? 0,
+      }) satisfies TaskDependency,
+  );
+  const roles: Record<string, TeamRole> = {};
+  for (const r of rolesRaw) roles[r.project_id] = r.team_role;
 
   const userById = new Map(users.map((u) => [u.id, u]));
 
