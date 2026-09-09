@@ -27,6 +27,39 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Helios asks the server far less of the time.** The Vault and Project
+  Manager background change-checks are now a single server call each instead of
+  four or five row-counting requests, and the row-level read policies evaluate
+  your membership once per query instead of once per row. The database work
+  behind an idle Helios drops by roughly half, so the app — and everyone
+  else's — stays responsive when the whole team is online at once.
+- Logs opens as soon as your primary session is loaded; the other recent sessions come in behind it instead of holding up the first paint (at most 12 are reopened automatically).
+- The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
+- Vault and Project Manager stop their background checks while you are in another module or the window is hidden, and catch up with one small request when you come back. Coming back to the window no longer re-downloads the whole workspace.
+- Modules other than Logs are loaded the first time you open them, which makes launch lighter.
+- **The Vault's local-folder scan and file downloads now run in the native
+  layer.** Launch no longer re-reads and re-hashes every local file through the
+  app window — the hashes are remembered between runs, so a folder that hasn't
+  changed is scanned almost instantly — and a 200-file sync no longer holds the
+  files in memory.
+- **The Vault reads its file catalog once per vault instead of twice**,
+  refreshes only the part that changed when a teammate edits, and keeps one live
+  connection per vault instead of two. Moving between folders is instant now
+  that a folder view is read from the catalog already in memory rather than
+  fetched again.
+- **Project Manager applies a teammate's edit directly from the live event
+  instead of re-downloading the whole workspace**, so the board no longer
+  flickers when someone else saves. A comment, link, milestone, calendar event
+  or dependency now costs your computer nothing at all to take in, and a task
+  edit costs one small read of just that task.
+
+### Fixed
+- **Rescans of large vault folders no longer stutter the interface on slower
+  laptops.**
+- A background Project Manager refresh no longer re-writes the local cache on
+  every change; edits arriving in a burst are saved once, a moment later.
+
 ## [5.7.0] - 2026-09-02
 
 ### Added

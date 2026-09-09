@@ -11,7 +11,7 @@ import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE, applySessionMeta, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
 import { saveChannelOverrides } from "./lib/channel-overrides";
-import { classifyPaths, loadUserSession } from "./lib/load-user-session";
+import { classifyPaths, loadUserSession, userSessionIdFor } from "./lib/load-user-session";
 import { useFileDrop } from "./lib/use-file-drop";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { TileSpec, Workspace } from "./workspaces/types";
@@ -21,8 +21,9 @@ import {
   loadRecentSessions, addRecentSession, removeRecentSession,
   loadViewStateFor, saveViewStateFor,
   loadLapSelection, saveLapSelection,
-  saveSessionMeta, removeSessionMeta,
+  saveSessionMeta, removeSessionMeta, loadSessionMeta,
 } from "./lib/app-state";
+import { planRecentsBoot } from "./lib/boot-order";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
 import { stepToLapBoundary } from "./lib/lap-step";
 import { progressFraction } from "./lib/load-progress";
@@ -198,31 +199,96 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   useEffect(() => {
     loadAllSessions((p) => setLoadProgress(p))
       .then(async (bundled) => {
-        // Silently re-load recent user sessions before the first paint. Files
-        // that no longer exist (deleted, moved off a removable drive) are
-        // dropped from the recents list and never bother the user with a
-        // popup — they came from days-ago activity, not the current intent.
-        const recents = loadRecentSessions();
-        // One monotonic total for every post-load stage: each recent file is a
-        // step, plus a "compute math" step and a final "ready" step. The bar's
-        // monotonic floor (progressFraction) guards the boundary against the
-        // bundled-only denominator used during the loadAllSessions phase.
-        const total = bundled.length + recents.length + 2;
+        // PAINT-FIRST BOOT. Silently re-load recent user sessions. Files that
+        // no longer exist (deleted, moved off a removable drive) are dropped
+        // from the recents list and never bother the user with a popup — they
+        // came from days-ago activity, not the current intent.
+        //
+        // Only ONE of them is loaded before the first paint: the one that will
+        // become primary. Reopening the whole history first meant a user with
+        // a dozen remembered logs watched the loading screen parse every last
+        // one before seeing anything. The rest stream in behind the first
+        // frame and merge into the session list as they arrive.
+        const plan = planRecentsBoot(
+          loadRecentSessions(),
+          (p) => loadSessionMeta(userSessionIdFor(p))?.visible === false,
+        );
+        // One monotonic total for every post-load stage: the single pre-paint
+        // recent is a step, plus a "compute math" step and a final "ready"
+        // step. The bar's monotonic floor (progressFraction) guards the
+        // boundary against the bundled-only denominator used during the
+        // loadAllSessions phase.
+        const total = bundled.length + 1 + 2;
         const userLoaded: LoadedSession[] = [];
-        let colorIdx = bundled.length;
-        for (let i = 0; i < recents.length; i++) {
-          const path = recents[i]!;
+        if (plan.first !== null) {
+          const path = plan.first;
           setLoadProgress({
             label: `Re-opening ${path.split(/[\\/]/).pop() ?? path}`,
-            loaded: bundled.length + i,
+            loaded: bundled.length,
             total,
           });
           try {
-            const session = await loadUserSession(path, colorForIndex(colorIdx));
-            colorIdx++;
-            userLoaded.push(session);
+            userLoaded.push(await loadUserSession(path, colorForIndex(bundled.length)));
           } catch {
             removeRecentSession(path);
+          }
+        }
+
+        /** Load the remaining recents AFTER the first paint and fold them into
+         *  the committed session list. Never touches the loading screen: by the
+         *  time this runs the user is already looking at their primary session.
+         *  `recovering` is true when boot ended with nothing loaded at all — a
+         *  session that arrives here can still rescue that state. */
+        async function loadRest(paths: string[], recovering: boolean): Promise<void> {
+          try {
+            await loadRestInner(paths, recovering);
+          } catch (e) {
+            // Nothing here may strand the user: the app is already usable.
+            console.error("Background re-open of recent sessions failed:", e);
+          }
+        }
+        async function loadRestInner(paths: string[], recovering: boolean): Promise<void> {
+          if (paths.length === 0) return;
+          const settled = await Promise.allSettled(
+            paths.map((p) => loadUserSession(p, colorForIndex(0))),
+          );
+          const arrived: LoadedSession[] = [];
+          for (let i = 0; i < settled.length; i++) {
+            const r = settled[i]!;
+            if (r.status === "fulfilled") arrived.push(r.value);
+            else removeRecentSession(paths[i]!);
+          }
+          if (arrived.length === 0) return;
+          // Math channels for the newcomers only; merge their error maps into
+          // whatever the pre-paint phase already recorded.
+          const errors = new Map<string, Map<string, string>>();
+          for (const session of arrived) {
+            try {
+              errors.set(session.id, applyMathChannels(session.store, mathChannelsRef.current, session.laps).errors);
+            } catch (mathErr) {
+              errors.set(session.id, new Map([["*", String(mathErr)]]));
+            }
+          }
+          setMathErrors((prev) => {
+            const next = new Map(prev);
+            for (const [id, e] of errors) next.set(id, e);
+            return next;
+          });
+          // applySessionMeta AFTER the merge so a pinned color wins over the
+          // positional one the merge just assigned — same order as the
+          // explicit file-open path.
+          const merged = applySessionMeta(
+            mergeSessionsWithColors(sessionsRef.current ?? [], arrived),
+          );
+          setSessions(() => merged);
+          if (recovering) {
+            // Boot had nothing to show; adopt a primary and clear the notice.
+            setPrimaryId((cur) =>
+              cur && merged.some((s) => s.id === cur)
+                ? cur
+                : merged.find((s) => s.visible)?.id ?? merged[0]?.id ?? null,
+            );
+            setError(null);
           }
         }
         // Apply the user's saved per-session overrides (custom label, pinned
@@ -234,7 +300,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         const loaded = applySessionMeta([...bundled, ...userLoaded]);
         setLoadProgress({
           label: "Computing math channels",
-          loaded: bundled.length + recents.length,
+          loaded: bundled.length + 1,
           total,
         });
         // Everything from here through the lap-restore is best-effort: a single
@@ -257,6 +323,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         if (loaded.length === 0) {
           setError(`No data loaded yet — open a CSV (${shortcut("O")}), or switch to Vault / CFD in the sidebar.`);
           setLoadProgress({ label: "No sessions", loaded: total, total });
+          // A later recent may still load and rescue the empty state.
+          void loadRest(plan.rest, true);
           return;
         }
         try {
@@ -320,6 +388,9 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           console.error("Lap-selection restore failed during boot:", lapErr);
         }
         setLoadProgress({ label: "Ready", loaded: total, total });
+        // First paint is unblocked from here — the remaining recents load
+        // behind it. Deliberately NOT awaited.
+        void loadRest(plan.rest, false);
       })
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -779,6 +850,33 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     return prim ? prim.store.list().filter((c) => c.source !== "math") : [];
   }, [sessions, primaryId, mathChannels, mathErrors]);
 
+  // These three callbacks are hooks, so they MUST sit above the LoadingScreen
+  // early return below: the first (loading) render would otherwise call fewer
+  // hooks than the renders after it, which React reports as error #310 the
+  // moment the sessions land (caught by the 5.7.1 real-app smoke test).
+  // Stable across renders (setWorkspaces is stable, saveWorkspaces is a module
+  // import) so the callbacks built on it — updateTile in particular — can be
+  // stable too and keep the memoised Tile from re-rendering on every App tick.
+  const commitWorkspaces = useCallback((updater: (prev: Workspace[]) => Workspace[]) => {
+    setWorkspaces((prev) => {
+      const next = updater(prev);
+      saveWorkspaces(next);
+      return next;
+    });
+  }, []);
+
+  // Stable per workspace: passed to every Tile as `onChange`, so an unstable
+  // identity would re-render all of them on each App render.
+  const updateTile = useCallback((nextTile: TileSpec) => {
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
+      ? w
+      : { ...w, tiles: w.tiles.map((t) => (t.id === nextTile.id ? nextTile : t)) }
+    )));
+  }, [commitWorkspaces, workspaceId]);
+
+  /** Stable tile-selection callback — the Tile passes its own id back. */
+  const onSelectTile = useCallback((id: string) => setSelectedTileId(id), []);
+
   if (error || !sessions || !primaryId) {
     // Clamp to [0,1] and never let the bar slide backward as the denominator
     // changes between boot stages.
@@ -859,13 +957,6 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
    *  the LATEST committed state instead of whatever was in scope when the
    *  closure was created, so a stale-closure can't quietly clobber a
    *  previous edit (the "field reverts instantly after edit" bug). */
-  function commitWorkspaces(updater: (prev: Workspace[]) => Workspace[]) {
-    setWorkspaces((prev) => {
-      const next = updater(prev);
-      saveWorkspaces(next);
-      return next;
-    });
-  }
 
   function handleCreateWorkspace() {
     const usedColors = new Set(workspaces.map((w) => w.color));
@@ -1030,12 +1121,6 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     });
   }
 
-  function updateTile(nextTile: TileSpec) {
-    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
-      ? w
-      : { ...w, tiles: w.tiles.map((t) => (t.id === nextTile.id ? nextTile : t)) }
-    )));
-  }
 
   function deleteTile(tileId: string) {
     commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
@@ -1473,7 +1558,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
               gpsPickerEmitter={gpsPickerEmitter}
               editMode={editMode}
               selected={editMode && spec.id === selectedTileId}
-              onSelect={() => setSelectedTileId(spec.id)}
+              onSelect={onSelectTile}
               onChange={updateTile}
             />
           ))}
