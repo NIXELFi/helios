@@ -38,6 +38,15 @@ follow [semver](https://semver.org/).
 - The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
 - Vault and Project Manager stop their background checks while you are in another module or the window is hidden, and catch up with one small request when you come back. Coming back to the window no longer re-downloads the whole workspace.
 - Modules other than Logs are loaded the first time you open them, which makes launch lighter.
+- **The Vault's local-folder scan and file downloads now run in the native
+  layer.** Launch no longer re-reads and re-hashes every local file through the
+  app window — the hashes are remembered between runs, so a folder that hasn't
+  changed is scanned almost instantly — and a 200-file sync no longer holds the
+  files in memory.
+
+### Fixed
+- **Rescans of large vault folders no longer stutter the interface on slower
+  laptops.**
 
 ## [5.7.0] - 2026-09-02
 

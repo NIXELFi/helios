@@ -292,6 +292,8 @@ pub fn run() {
             commands::parse_refs::parse_sw_properties,
             commands::reveal::reveal_in_explorer,
             commands::open_url::open_external_url,
+            commands::scan_folder::scan_vault_folder,
+            commands::download::download_object_to_temp,
             bridge::bridge_set_session,
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,

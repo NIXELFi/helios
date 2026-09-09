@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { readDir, readFile, stat, watchImmediate } from "@tauri-apps/plugin-fs";
 import { useThrottledFocus } from "../../../lib/use-throttled-focus";
+import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 
 export interface LocalFile {
   basename: string;
@@ -134,6 +136,141 @@ async function walk(
   }
 }
 
+/** Shape of `commands::scan_folder::ScanResult` (serde camelCase). */
+interface NativeScanResult {
+  rootExists: boolean;
+  entries: LocalFile[];
+  openInSw: string[];
+}
+
+/**
+ * Run the walk in the native layer (`scan_vault_folder`): one IPC round-trip
+ * for the whole tree, hashes served from a cache that survives relaunch.
+ *
+ * Returns null when the command isn't reachable — no Tauri host (vitest, the
+ * Lite web build) or an older shell without the command. Note that the jsdom
+ * transport in `tests/setup.ts` RESOLVES every invoke to null instead of
+ * throwing, so a missing/shape-less result counts as "unavailable" too.
+ * Callers fall back to the JS walk below, which stays the reference
+ * implementation for the path/relativePath format.
+ */
+async function scanViaNative(
+  rootPath: string,
+): Promise<{ rootExists: boolean; entries: LocalFile[]; openInSw: Set<string> } | null> {
+  let raw: unknown;
+  try {
+    raw = await invoke("scan_vault_folder", { root: rootPath });
+  } catch {
+    return null;
+  }
+  const res = raw as NativeScanResult | null;
+  if (!res || typeof res !== "object" || !Array.isArray(res.entries)) return null;
+  const openInSw = new Set<string>(
+    Array.isArray(res.openInSw) ? res.openInSw : [],
+  );
+  return { rootExists: res.rootExists !== false, entries: res.entries, openInSw };
+}
+
+// ── Native-vs-JS shadow check ────────────────────────────────────────────────
+//
+// `relativePath` (and `absolutePath`) are the keys auto-sync's locally-deleted
+// detection and the deleted-file reaper match on. If the Rust walk ever built
+// them differently from the JS walk — a backslash instead of a slash, a
+// different prefix — every local file would look deleted and the vault could
+// propagate those deletes. Unit tests pin the format on both sides, but the
+// first time a REAL machine runs the command we cross-check it anyway.
+//
+// The check is cheap (a `readDir` recursion with no stat and no hashing) and
+// runs once per root per session. Any difference is treated as a failure: this
+// is a canary, not a diff tool, and a real format regression makes the two
+// listings almost entirely disjoint. A one-off difference (a file that became
+// unreadable between the two passes) costs only a session on the JS path,
+// which is exactly the behaviour that shipped in 5.7.0.
+
+/** Roots whose native scan already matched the JS listing this session. */
+const shadowVerifiedRoots = new Set<string>();
+/** Latched on the first mismatch: no more native scans this session. */
+let nativeScanDisabled = false;
+
+async function listPathsJs(
+  dir: string,
+  relPrefix: string,
+  paths: Set<string>,
+  openInSw: Set<string>,
+  depth = 0,
+): Promise<void> {
+  if (depth > MAX_DEPTH) return;
+  const entries = await readDir(dir);
+  for (const e of entries) {
+    // Same skip rules as `walk`, in the same order.
+    if (e.name.startsWith(".")) continue;
+    if (e.name.startsWith("~$")) {
+      const realName = e.name.slice(2);
+      if (realName) {
+        openInSw.add(relPrefix ? `${relPrefix}/${realName}` : realName);
+      }
+      continue;
+    }
+    if (e.isSymlink) continue;
+    const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name;
+    if (e.isDirectory) {
+      await listPathsJs(`${dir}/${e.name}`, rel, paths, openInSw, depth + 1);
+    } else if (e.isFile) {
+      paths.add(rel);
+    }
+  }
+}
+
+const sample = (values: Iterable<string>): string[] => [...values].slice(0, 5);
+
+/**
+ * Compare a native scan against a JS listing of the same tree. Returns true
+ * when they agree (or when the listing couldn't be produced at all — a failed
+ * cross-check must not condemn the native path). On disagreement it logs,
+ * records a breadcrumb, and latches the native scan off for the session.
+ */
+async function shadowVerifyNativeScan(
+  rootPath: string,
+  native: { entries: LocalFile[]; openInSw: Set<string> },
+): Promise<boolean> {
+  const jsPaths = new Set<string>();
+  const jsOpenInSw = new Set<string>();
+  try {
+    await listPathsJs(rootPath, "", jsPaths, jsOpenInSw);
+  } catch {
+    // No fs access to cross-check with — leave the root unverified so a later
+    // scan tries again, and let this scan's native result through.
+    return true;
+  }
+  const nativePaths = new Set(native.entries.map((f) => f.relativePath));
+  const onlyInJs = [...jsPaths].filter((p) => !nativePaths.has(p));
+  const onlyInNative = [...nativePaths].filter((p) => !jsPaths.has(p));
+  const swOnlyInJs = [...jsOpenInSw].filter((p) => !native.openInSw.has(p));
+  const swOnlyInNative = [...native.openInSw].filter((p) => !jsOpenInSw.has(p));
+  if (
+    onlyInJs.length === 0 && onlyInNative.length === 0 &&
+    swOnlyInJs.length === 0 && swOnlyInNative.length === 0
+  ) {
+    return true;
+  }
+  const detail = {
+    root: rootPath,
+    jsCount: jsPaths.size,
+    nativeCount: nativePaths.size,
+    onlyInJs: sample(onlyInJs),
+    onlyInNative: sample(onlyInNative),
+    swOnlyInJs: sample(swOnlyInJs),
+    swOnlyInNative: sample(swOnlyInNative),
+  };
+  console.error(
+    `[vault] native folder scan disagrees with the JS walk for ${rootPath} — using the JS scan for the rest of this session`,
+    detail,
+  );
+  recordBreadcrumb("error", "native folder scan mismatch", detail);
+  nativeScanDisabled = true;
+  return false;
+}
+
 export interface UseLocalFolderScanOptions {
   /** Re-scan the folder on this interval. 0 / undefined = no polling. */
   intervalMs?: number;
@@ -242,8 +379,31 @@ export function useLocalFolderScan(
         // locally-deleted detection, the deleted-file reaper's rescans) that
         // the user deleted everything — which can propagate vault deletes.
         // Treat that as an ERROR and keep the last good snapshot instead.
+        //
+        // Native path first: the Rust command reports `rootExists` itself, so
+        // there is no separate stat() pre-check to pay for.
+        let native = nativeScanDisabled ? null : await scanViaNative(rootPath);
+        // First native scan of this root: prove the path format matches the
+        // JS walk before anything downstream acts on it. Nulling `native`
+        // sends this scan (and, via the latch, every later one) down the JS
+        // path — the native result is never published once the check fails.
+        if (native && native.rootExists && !shadowVerifiedRoots.has(rootPath)) {
+          if (await shadowVerifyNativeScan(rootPath, native)) {
+            shadowVerifiedRoots.add(rootPath);
+          } else {
+            native = null;
+          }
+        }
         let rootExists = true;
-        try { await stat(rootPath); } catch { rootExists = false; }
+        const collected: LocalFile[] = [];
+        const openSw = new Set<string>();
+        if (native) {
+          rootExists = native.rootExists;
+          collected.push(...native.entries);
+          for (const rel of native.openInSw) openSw.add(rel);
+        } else {
+          try { await stat(rootPath); } catch { rootExists = false; }
+        }
         if (!rootExists && hadFilesRef.current) {
           if (mounted) {
             // Surface the flag too: the kept snapshot is trustworthy for
@@ -257,9 +417,7 @@ export function useLocalFolderScan(
           }
           return;
         }
-        const collected: LocalFile[] = [];
-        const openSw = new Set<string>();
-        if (rootExists) {
+        if (!native && rootExists) {
           await walk(rootPath, "", collected, openSw, shaCacheRef.current);
         }
         // Skip the commit if paused flipped true while we were walking (and it

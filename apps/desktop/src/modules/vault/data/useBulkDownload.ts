@@ -54,13 +54,13 @@ export interface BulkDownloadAPI extends BulkDownloadState {
 }
 
 /**
- * Worker count for parallel downloads. Each worker does fetch + arrayBuffer
- * + gunzip + Tauri writeFile. Pushing too many saturates the webview IPC
- * bridge and can stutter the UI; manual bulk downloads run with a progress
- * modal that consumes most paint frames anyway, so we push harder than the
- * auto-sync default. 8 saturates typical residential upstream + the Tauri
- * fs plugin without obvious jank on Apple-Silicon laptops; if a slower
- * machine struggles we'll dial back.
+ * Worker count for parallel downloads. Since v5.7.1 each worker's transfer,
+ * gunzip, hash and write happen in the native layer
+ * (`download_object_to_temp`): the file bytes never cross the webview IPC
+ * bridge and never sit in renderer memory, so the old "8 workers = 8 whole
+ * files buffered in JS" ceiling is gone and the limit is now network and disk.
+ * 8 saturates typical residential upstream without obvious jank; the
+ * remaining per-file webview work is one mkdir + one rename.
  */
 const WORKERS = 8;
 
