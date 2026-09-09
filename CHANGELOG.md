@@ -43,6 +43,11 @@ follow [semver](https://semver.org/).
   app window — the hashes are remembered between runs, so a folder that hasn't
   changed is scanned almost instantly — and a 200-file sync no longer holds the
   files in memory.
+- **The Vault reads its file catalog once per vault instead of twice**,
+  refreshes only the part that changed when a teammate edits, and keeps one live
+  connection per vault instead of two. Moving between folders is instant now
+  that a folder view is read from the catalog already in memory rather than
+  fetched again.
 
 ### Fixed
 - **Rescans of large vault folders no longer stutter the interface on slower

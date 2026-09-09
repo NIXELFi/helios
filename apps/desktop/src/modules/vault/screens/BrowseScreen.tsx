@@ -4,7 +4,6 @@ import { useUser, useSupabaseClient } from "@helios/auth";
 import { FILE_MANAGER } from "../../../lib/platform";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
-import { useFiles } from "../data/useFiles";
 import { useLocks } from "../data/useLocks";
 import { useIsAdmin } from "../data/useIsAdmin";
 import { useMyRole } from "../data/useMyRole";
@@ -27,7 +26,7 @@ import { TreeContextMenu, type MenuAction } from "../components/TreeContextMenu"
 import type { TreeContextTarget, TreeSelection } from "../components/FolderTree";
 import { emptyTreeSelection } from "../components/FolderTree";
 import { useLocalFolderScan } from "../data/useLocalFolderScan";
-import { useAllFiles } from "../data/useAllFiles";
+import { useFolderFiles, useVaultFiles } from "../data/vault-files-context";
 import { useDeletedFiles } from "../data/useDeletedFiles";
 import { applyFileEvent, applyVersionEvent, type RowEvent } from "../data/apply-events";
 import { useDeletedFolders } from "../data/useDeletedFolders";
@@ -36,6 +35,7 @@ import { ensureLocalFolderTree } from "../data/ensureLocalFolderTree";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useVaultCursor } from "../data/useVaultCursor";
+import type { VaultCursor } from "../data/vault-cursor";
 import { useModuleLive } from "../../../shell/module-activity";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { findUnmatchedLocal, vaultSnapshotConsistent } from "../data/find-unmatched";
@@ -107,7 +107,6 @@ export function BrowseScreen() {
   const { data: folders, loading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(vaultId ?? undefined);
   const [selectedFolder, setSelectedFolder] = useState<FolderId | null>(null);
 
-  const { data: filesInFolder, loading: filesLoading, error: filesError, refetch: refetchFiles, patch: patchFiles } = useFiles(selectedFolder ?? undefined);
   const { data: locks, error: locksError, refetch: refetchLocks } = useLocks();
   const [selectedFile, setSelectedFile] = useState<FileId | null>(null);
   const [selected, setSelected] = useState<Set<FileId>>(new Set());
@@ -118,6 +117,10 @@ export function BrowseScreen() {
     setSelectedFolder(null);
     setSelectedFile(null);
     setSelected(new Set());
+    // Version watermarks are per-vault; carrying SDM25's newest timestamp into
+    // SDM26 would make the delta query skip real check-ins. (The ref is
+    // declared further down — effects run after the whole render body.)
+    lastVersionSeenRef.current = "";
   }, [vaultId]);
 
   // Clear the checkbox multi-selection whenever the effective folder context
@@ -173,9 +176,25 @@ export function BrowseScreen() {
   // is the safe "no data yet" state every consumer already handles.
   const localFiles = scanRoot === vaultFolderPath ? localFilesRaw : null;
 
-  // Use vault-wide files for the auto-sync pass (so it covers folders the user
-  // hasn't opened yet) and for unmatched-local detection.
-  const { data: allFiles, error: allFilesError, refetch: refetchAllFiles, patch: patchAllFiles } = useAllFiles(vaultId ?? undefined);
+  // The vault-wide catalog, provided ONCE by VaultHome (vault-files-context).
+  // It drives the auto-sync pass (so it covers folders the user hasn't opened
+  // yet), unmatched-local detection, AND the file table — the per-folder query
+  // that used to run alongside it is gone; a folder view is a filter over this
+  // list, refreshed folder-at-a-time after a mutation.
+  const {
+    data: allFiles,
+    error: allFilesError,
+    refetch: refetchAllFiles,
+    patch: patchAllFiles,
+    refreshFolder,
+    refreshIds,
+  } = useVaultFiles();
+  // "Re-read the folder the user is looking at." Replaces the old
+  // refetchFiles() at call sites that only needed the current folder back from
+  // the server; call sites that already refetch the whole catalog don't need it.
+  const refreshFolderView = useCallback(() => {
+    refreshFolder(selectedFolder);
+  }, [refreshFolder, selectedFolder]);
   // Property map for search (lazy, loads once per vault). When null (loading)
   // VaultSearch falls back to filename-only matching — no errors.
   const vaultPropertiesMap = useVaultProperties(vaultId ?? undefined, allFiles);
@@ -264,44 +283,17 @@ export function BrowseScreen() {
     onAdded: () => {
       refetchAllFiles();
       refetchFolders();
-      refetchFiles();
       refetchLocks();
       rescan();
     },
   });
 
-  // When the user has the vault root selected (selectedFolder === null) we
-  // derive the file list from the vault-wide query instead of asking the
-  // server for "files where folder_id IS NULL" — keeps the wiring simple and
-  // avoids a second query. allFiles paginates, so this is correct at scale.
-  const rootFiles = useMemo(
-    () => (allFiles ?? []).filter((f) => f.folder_id === null),
-    [allFiles],
-  );
-  // Instant folder navigation (NAV-FLASH): while the per-folder query is in
-  // flight, derive the folder's files from the vault-wide list already in
-  // memory instead of flashing a skeleton on every click. The per-folder
-  // result swaps in silently when it lands (same embed, same content). The
-  // skeleton now only appears on the FIRST load of a vault, before allFiles
-  // exists.
-  const folderFilesFallback = useMemo(
-    () => (selectedFolder === null ? null : (allFiles ?? []).filter((f) => f.folder_id === selectedFolder)),
-    [allFiles, selectedFolder],
-  );
-  const filesUnsorted =
-    selectedFolder === null
-      ? rootFiles
-      : (filesInFolder ?? (allFiles === null ? null : folderFilesFallback));
-  // One canonical sort regardless of source: useFiles orders by name but
-  // useAllFiles orders by id, so without this the rows visibly reshuffled the
-  // moment the per-folder query replaced the in-memory fallback.
-  const files = useMemo(
-    () =>
-      filesUnsorted === null
-        ? null
-        : [...filesUnsorted].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
-    [filesUnsorted],
-  );
+  // The current folder view (selectedFolder === null means the VAULT ROOT, not
+  // "nothing selected") derived from the shared catalog. Folder navigation is
+  // therefore instant and free — no query at all — and the rows can never
+  // reshuffle when a second, differently-ordered result lands, which is what
+  // the old per-folder query did.
+  const files = useFolderFiles(selectedFolder);
 
   // The "Download all" button operates on every file underneath the current
   // view recursively — i.e. picking Brakes downloads every file in Brakes
@@ -324,43 +316,32 @@ export function BrowseScreen() {
     return all.filter((f) => f.folder_id && wanted.has(f.folder_id));
   }, [selectedFolder, allFiles, folders]);
 
-  // Latest version per file, read from the `latest` row EMBEDDED by the file
-  // queries (useFiles / useAllFiles) — no separate per-vault version fetch.
-  // Built from BOTH the current folder (fast, scoped) and the vault-wide list
-  // (covers folders the user hasn't opened yet, for auto-sync / bulk download).
-  // The folder query lands first, so on a big vault (SDM25 ≈ 8.6k files) the
-  // current folder's Download buttons appear immediately instead of waiting for
-  // the whole-vault list — the perf fix that motivated v3.8.2.
+  // Latest version per file, read from the `latest` row EMBEDDED by the catalog
+  // query — no separate per-vault version fetch. The folder view is a subset of
+  // this list, so one pass covers both the visible rows and the folders the
+  // user hasn't opened yet (auto-sync / bulk download).
   const versionsByFileId = useMemo(() => {
     const m = new Map<FileId, Version[]>();
-    const add = (list: VaultFile[] | null | undefined) => {
-      for (const f of list ?? []) {
-        if (f.latest) m.set(f.id, [{ ...f.latest, properties: null }]);
-      }
-    };
-    add(allFiles);
-    add(filesInFolder);
+    for (const f of allFiles ?? []) {
+      if (f.latest) m.set(f.id, [{ ...f.latest, properties: null }]);
+    }
     return m;
-  }, [allFiles, filesInFolder]);
+  }, [allFiles]);
 
-  // File-area error/loading state (H1). The file list itself comes from the
-  // vault-wide query at root (allFilesError) or the per-folder query inside a
-  // folder (filesError); either blocks the table. The locks and latest-version
-  // queries feed the per-row status pills — a failure there doesn't blank the
-  // list but must not be swallowed, so we fold all into one banner with a
-  // single retry rather than leaving any on a permanent spinner.
-  const fileListError = selectedFolder === null ? allFilesError : filesError;
-  const fileAreaError = fileListError ?? locksError;
-  const fileAreaErrorCtx: PgErrorContext = fileListError ? "file" : "lock";
-  // Loading is now "we have NOTHING to show" — with the in-memory fallback
-  // above, that's only the first load of a vault (allFiles not yet in), never
-  // ordinary folder-to-folder navigation.
-  const fileListLoading = files === null || (selectedFolder === null && allFiles === null);
+  // File-area error/loading state (H1). Every file row now comes from the one
+  // catalog query, so a failure there blocks the table wherever the user is.
+  // The locks query feeds the per-row status pills — a failure there doesn't
+  // blank the list but must not be swallowed, so we fold both into one banner
+  // with a single retry rather than leaving either on a permanent spinner.
+  const fileAreaError = allFilesError ?? locksError;
+  const fileAreaErrorCtx: PgErrorContext = allFilesError ? "file" : "lock";
+  // Loading is "we have NOTHING to show" — only the first load of a vault,
+  // never ordinary folder-to-folder navigation.
+  const fileListLoading = files === null;
   const retryFileArea = useCallback(() => {
-    refetchFiles();
     refetchAllFiles();
     refetchLocks();
-  }, [refetchFiles, refetchAllFiles, refetchLocks]);
+  }, [refetchAllFiles, refetchLocks]);
 
   // Realtime: when anyone checks in / locks / unlocks / adds a file in this
   // vault, update the affected slice. With VAULT_INCREMENTAL_APPLY we patch the
@@ -369,28 +350,27 @@ export function BrowseScreen() {
   // and the hook refetches that list) — we fall back to a full refetch. The
   // auto-sync hook below picks up the new version state and downloads the bytes.
   const onVersion = useCallback((payload?: unknown) => {
-    if (!VAULT_INCREMENTAL_APPLY || !payload) { refetchAllFiles(); refetchFiles(); return; }
+    if (!VAULT_INCREMENTAL_APPLY || !payload) { refetchAllFiles(); return; }
     const ev = payload as RowEvent<Version>;
+    // One patch, one list: the folder view is derived from the catalog, so the
+    // second patch the old code needed (the per-folder list) is gone.
     patchAllFiles((rows) => applyVersionEvent(rows, ev));
-    patchFiles((rows) => applyVersionEvent(rows, ev));
-  }, [refetchAllFiles, refetchFiles, patchAllFiles, patchFiles]);
+  }, [refetchAllFiles, patchAllFiles]);
   const onLock = useCallback(() => { refetchLocks(); }, [refetchLocks]);
   const onFile = useCallback((payload?: unknown) => {
     if (!VAULT_INCREMENTAL_APPLY || !payload || !vaultId) {
-      refetchAllFiles(); refetchFiles(); refetchDeleted(); refetchDeletedFolders(); return;
+      refetchAllFiles(); refetchDeleted(); refetchDeletedFolders(); return;
     }
     const ev = payload as RowEvent<VaultFile>;
     // Each list's `belongs` predicate mirrors its query WHERE clause; a single
     // soft-delete UPDATE thus drops the row from `allFiles` AND adds it to
-    // `deletedFiles` (and vice-versa on restore).
+    // `deletedFiles` (and vice-versa on restore). The folder view follows for
+    // free because it filters the same list.
     patchAllFiles((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.deleted_at == null }));
-    if (selectedFolder !== null) {
-      patchFiles((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.folder_id === selectedFolder && f.deleted_at == null }));
-    }
     patchDeleted((rows) => applyFileEvent(rows, ev, { vaultId, belongs: (f) => f.deleted_at != null }));
     // A folder-cascade delete soft-deletes child files (fires file events,
     // handled above) but the deleted FOLDERS list is refreshed by onFolder.
-  }, [vaultId, selectedFolder, refetchAllFiles, refetchFiles, refetchDeleted, refetchDeletedFolders, patchAllFiles, patchFiles, patchDeleted]);
+  }, [vaultId, refetchAllFiles, refetchDeleted, refetchDeletedFolders, patchAllFiles, patchDeleted]);
   // Folder create/rename/move/delete by anyone. The folder set is small, so a
   // refetch feels instant — no incremental apply needed. Without this, folder
   // changes weren't realtime at all (folders weren't subscribed), and a rename
@@ -398,17 +378,61 @@ export function BrowseScreen() {
   const onFolder = useCallback(() => { refetchFolders(); refetchDeletedFolders(); }, [refetchFolders, refetchDeletedFolders]);
   useVaultRealtime(vaultId ?? undefined, { onVersion, onLock, onFile, onFolder });
 
+  // Newest version timestamp this client has seen, used to ask the server for
+  // ONLY the check-ins that happened since. Tracked off the catalog's embedded
+  // `latest` rows, so it advances by itself as merges land.
+  const lastVersionSeenRef = useRef<string>("");
+  useEffect(() => {
+    let max = lastVersionSeenRef.current;
+    for (const f of allFiles ?? []) {
+      const t = f.latest?.created_at;
+      if (t && t > max) max = t;
+    }
+    lastVersionSeenRef.current = max;
+  }, [allFiles]);
+
   // Full reconcile of the vault metadata — the heavy path that re-pulls the
-  // file catalog, locks and recycle-bin lists. Triggered by realtime (the fast
-  // path) and, as a safety net, by useVaultCursor below.
-  const reconcile = useCallback(() => {
+  // file catalog, locks and recycle-bin lists. The safety net of last resort:
+  // used when the probe itself failed, so we can't know what moved.
+  const reconcileAll = useCallback(() => {
     refetchAllFiles();
-    refetchFiles();
     refetchFolders();
     refetchLocks();
     refetchDeleted();
     refetchDeletedFolders();
-  }, [refetchAllFiles, refetchFiles, refetchFolders, refetchLocks, refetchDeleted, refetchDeletedFolders]);
+  }, [refetchAllFiles, refetchFolders, refetchLocks, refetchDeleted, refetchDeletedFolders]);
+
+  // A version count moved: someone checked in. Ask which files, then re-read
+  // exactly those rows instead of the whole catalog. A failure, or a count that
+  // moved with nothing newer visible, falls back to the full pull.
+  const refreshCheckedInFiles = useCallback(async () => {
+    const since = lastVersionSeenRef.current;
+    if (!since) { refetchAllFiles(); return; }
+    try {
+      const { data, error } = await (supabase.from("versions") as any)
+        .select("file_id,created_at")
+        .gt("created_at", since);
+      const rows = (data ?? []) as Array<{ file_id: FileId }>;
+      if (error || rows.length === 0) { refetchAllFiles(); return; }
+      refreshIds(rows.map((r) => r.file_id));
+    } catch {
+      refetchAllFiles();
+    }
+  }, [supabase, refetchAllFiles, refreshIds]);
+
+  // Targeted reconcile: the cursor tells us WHICH of the four signals moved, so
+  // refresh only the list behind it. Before this, any single change re-pulled
+  // all six lists — the catalog page alone was 30% of prod database time.
+  const reconcile = useCallback(
+    (prev: VaultCursor | null, next: VaultCursor | null) => {
+      if (!prev || !next) { reconcileAll(); return; } // probe failed — reconcile everything
+      if (prev.liveFiles !== next.liveFiles) { refetchAllFiles(); refetchDeleted(); }
+      if (prev.versions !== next.versions) { void refreshCheckedInFiles(); }
+      if (prev.liveFolders !== next.liveFolders) { refetchFolders(); refetchDeletedFolders(); }
+      if (prev.activeLocks !== next.activeLocks) { refetchLocks(); }
+    },
+    [reconcileAll, refetchAllFiles, refetchDeleted, refreshCheckedInFiles, refetchFolders, refetchDeletedFolders, refetchLocks],
+  );
   // Periodic safety net behind realtime, but WITHOUT a per-cycle full re-pull.
   // If realtime's channel drops, the app was backgrounded, or an event is
   // missed, the old code re-fetched the entire catalog (~MBs) every 15s to find
@@ -416,9 +440,10 @@ export function BrowseScreen() {
   // cheap count signature each cycle and only runs `reconcile` when something
   // actually changed, so an idle vault costs a few empty head requests instead
   // of megabytes. Realtime still delivers the live, instant updates.
-  // `enabled: live` stops the probe entirely while another module is on screen:
-  // realtime is still subscribed, so a teammate's change still reconciles, and
-  // the probe re-baselines the moment the user comes back.
+  // `enabled: live` stops the probe entirely while another module is on screen.
+  // The hook remembers the last cursor it saw per vault, so the first probe
+  // after the user comes back compares against what was true when they left and
+  // reconciles anything that moved in between.
   useVaultCursor(vaultId ?? undefined, {
     intervalMs: VAULT_POLL_MS,
     onChange: reconcile,
@@ -488,7 +513,7 @@ export function BrowseScreen() {
     folders: folders ?? [],
     versionsByFileId,
     onPickedRoot: setHeliosRoot,
-    onDone: () => { refetchFiles(); rescan(); },
+    onDone: () => { refreshFolderView(); rescan(); },
   });
   function handleTreeContextMenu(target: TreeContextTarget, x: number, y: number) {
     setCtxMenu({ x, y, target });
@@ -598,7 +623,7 @@ export function BrowseScreen() {
     } else {
       const r = await createFile.run(vaultId, selectedFolder, name);
       if (r) {
-        refetchFiles();
+        refreshFolderView();
         setPrompt(null);
         setPromptValue("");
         toast(`Created ${name}`);
@@ -615,8 +640,9 @@ export function BrowseScreen() {
   }
 
   function handleActionComplete() {
-    refetchFiles();
     refetchLocks();
+    // Re-reads every live file in the vault, which covers the current folder —
+    // no separate folder query any more.
     refetchAllFiles();
     rescan();
   }
@@ -648,7 +674,6 @@ export function BrowseScreen() {
     onComplete: () => {
       refetchFolders();
       refetchAllFiles();
-      refetchFiles();
       refetchLocks();
       rescan();
     },
@@ -686,13 +711,12 @@ export function BrowseScreen() {
             : ((folders ?? []).find((f) => f.id === targetFolderId)?.name ?? "folder");
         toast(`Moved ${file.name} to ${destName}`);
         refetchAllFiles();
-        refetchFiles();
         rescan();
       } else if (moveFile.error) {
         toast(moveFile.error.message, "error");
       }
     },
-    [allFiles, vaultId, moveFile, vaultFolderPath, folders, vault, refetchAllFiles, refetchFiles, rescan],
+    [allFiles, vaultId, moveFile, vaultFolderPath, folders, vault, refetchAllFiles, rescan],
   );
 
   // Subfolders of the current view, shown as navigable rows in the file table
@@ -772,7 +796,6 @@ export function BrowseScreen() {
           onDone={() => {
             refetchAllFiles();
             refetchFolders();
-            refetchFiles();
             refetchLocks();
             rescan();
           }}
@@ -951,7 +974,7 @@ export function BrowseScreen() {
                       vaultName={vault?.name ?? null}
                       folders={folders ?? []}
                       onPickedRoot={setHeliosRoot}
-                      onDone={() => { refetchFiles(); rescan(); }}
+                      onDone={() => { refreshFolderView(); rescan(); }}
                     />
                   )}
                   {/* Master vault button — always visible, never about the
@@ -1011,7 +1034,7 @@ export function BrowseScreen() {
                   selectedIds={Array.from(selected)}
                   onClear={clearSelection}
                   onDone={() => {
-                    refetchFiles();
+                    refreshFolderView();
                     refetchLocks();
                     rescan();
                     // Intentionally do NOT clearSelection() here: clearing the
@@ -1159,7 +1182,6 @@ export function BrowseScreen() {
         const afterMutate = () => {
           refetchFolders();
           refetchAllFiles();
-          refetchFiles();
           refetchDeleted();
           refetchDeletedFolders();
           refetchLocks();

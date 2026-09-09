@@ -12,13 +12,34 @@ import { RecycleScreen } from "./screens/RecycleScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { useLocks } from "./data/useLocks";
 import { useActiveVault } from "./data/useActiveVault";
-import { useAllFiles } from "./data/useAllFiles";
+import { VaultFilesProvider, useVaultFiles } from "./data/vault-files-context";
+import { useVaultRealtimeFeed } from "./data/useVaultRealtime";
 import { useVaultUsers } from "./data/useVaultUsers";
 import { useWatchedFiles } from "./data/useWatchedFiles";
 import { useNotifications } from "./data/useNotifications";
 import { WatchedFilesContext } from "./data/WatchedFilesContext";
+import type { VaultId } from "./data/types";
 
+/**
+ * Owns the two things there must be exactly ONE of per vault:
+ *   - the realtime channel (useVaultRealtimeFeed → the vault-events bus), and
+ *   - the whole-vault file catalog (VaultFilesProvider → useAllFiles).
+ * Both used to be opened twice — the channel by the file lists and the
+ * notification feed, the catalog by this component and BrowseScreen — which
+ * the 2026-09-09 load audit measured as 30% of prod database time plus a
+ * doubled realtime subscription count.
+ */
 export function VaultHome() {
+  const { activeVaultId: vaultId } = useActiveVault();
+  useVaultRealtimeFeed(vaultId ?? undefined);
+  return (
+    <VaultFilesProvider vaultId={vaultId ?? undefined}>
+      <VaultHomeShell vaultId={vaultId ?? undefined} />
+    </VaultFilesProvider>
+  );
+}
+
+function VaultHomeShell({ vaultId }: { vaultId: VaultId | undefined }) {
   const [active, setActive] = useState<VaultScreenId>("browse");
   const user = useUser();
   // Live count of the current user's checkouts, shown as a badge on the
@@ -31,26 +52,24 @@ export function VaultHome() {
     [locks, user],
   );
 
-  const { activeVaultId: vaultId } = useActiveVault();
-
   // Single useWatchedFiles instance owned here and shared via WatchedFilesContext
   // so FileDetailPanel's star and this notification feed both read/write the
   // same React state.  A second independent instance (formerly in BrowseScreen)
   // caused the notification feed to miss stars toggled in the detail panel
   // within the same session (HIGH defect).
-  const watchedFiles = useWatchedFiles(vaultId ?? undefined);
-  // useAllFiles provides a flat file list across the whole vault — used to
+  const watchedFiles = useWatchedFiles(vaultId);
+  // The shared catalog gives a flat file list across the whole vault — used to
   // resolve fileId → name in notifications without requiring a per-folder query.
-  const { data: allFiles } = useAllFiles(vaultId ?? undefined);
+  const { data: allFiles } = useVaultFiles();
   const { items: notifItems, unread, markAllRead, clear: clearNotifs } = useNotifications(
-    vaultId ?? undefined,
+    vaultId,
     watchedFiles.watched,
     allFiles ?? [],
   );
   // Resolve notification actor ids → human labels (email / display name) so the
   // feed shows "by jane@asu.edu" instead of a raw UUID prefix. Best-effort: the
   // RPC raises for non-members and the feed falls back to the id prefix.
-  const { data: vaultUsers } = useVaultUsers(vaultId);
+  const { data: vaultUsers } = useVaultUsers(vaultId ?? null);
   const actorNames = useMemo(() => {
     const m = new Map<string, string>();
     for (const u of vaultUsers ?? []) {
