@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { widgetRegistry, SPEED_CHANNEL_CANDIDATES, type OverlaySession } from "@helios/widgets";
 import type { CursorEmitter, ViewStateEmitter, LapSelectionEmitter, LapSelection, GpsPickerEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
@@ -16,7 +16,11 @@ interface Props {
   gpsPickerEmitter: GpsPickerEmitter;
   editMode: boolean;
   selected: boolean;
-  onSelect?: () => void;
+  /** Called with this tile's id. Takes the id (rather than closing over it in
+   *  the parent) so App can pass ONE stable callback to every tile — an inline
+   *  `() => setSelectedTileId(spec.id)` changed identity on every App render
+   *  and defeated the memo below. */
+  onSelect?: (id: string) => void;
   /** Called on pointer-up after a drag/resize, with the snapped final spec.
    *  Only invoked while editMode is true. */
   onChange?: (next: TileSpec) => void;
@@ -36,7 +40,14 @@ type DragState =
   | { kind: "move"; clientX0: number; clientY0: number; dx: number; dy: number; captureEl: Element; pointerId: number }
   | { kind: "resize"; dw: number; dh: number; captureEl: Element; pointerId: number };
 
-export function Tile({
+/** Memoised: every tile re-rendered on every App state change (cursor moves,
+ *  playback ticks, panel toggles) even when none of its own props moved, and
+ *  each re-render rebuilds a ChannelSlice per visible session. With a stable
+ *  `onSelect`/`onChange` from App, only the tiles whose spec or session data
+ *  actually changed re-render. */
+export const Tile = memo(TileImpl);
+
+function TileImpl({
   spec, primary, visibleSessions, cursorEmitter, viewState,
   lapSelectionEmitter, lapSelection, gpsPickerEmitter,
   editMode, selected, onSelect, onChange,
@@ -174,7 +185,7 @@ export function Tile({
     if (drag.kind === "none" || drag.pointerId !== e.pointerId) return;
     releaseCapture(drag);
     if (drag.kind === "press") {
-      onSelect?.();
+      onSelect?.(spec.id);
     } else if (drag.kind === "move" && onChange) {
       const snapped = snapTile({ ...spec, x: liveX, y: liveY });
       if (snapped.x !== spec.x || snapped.y !== spec.y) onChange(snapped);

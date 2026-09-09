@@ -27,6 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Logs opens as soon as your primary session is loaded; the other recent sessions come in behind it instead of holding up the first paint (at most 12 are reopened automatically).
+- The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
+
 ## [5.7.0] - 2026-09-02
 
 ### Added
