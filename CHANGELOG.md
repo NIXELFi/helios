@@ -43,10 +43,17 @@ follow [semver](https://semver.org/).
   app window — the hashes are remembered between runs, so a folder that hasn't
   changed is scanned almost instantly — and a 200-file sync no longer holds the
   files in memory.
+- **Project Manager applies a teammate's edit directly from the live event
+  instead of re-downloading the whole workspace**, so the board no longer
+  flickers when someone else saves. A comment, link, milestone, calendar event
+  or dependency now costs your computer nothing at all to take in, and a task
+  edit costs one small read of just that task.
 
 ### Fixed
 - **Rescans of large vault folders no longer stutter the interface on slower
   laptops.**
+- A background Project Manager refresh no longer re-writes the local cache on
+  every change; edits arriving in a burst are saved once, a moment later.
 
 ## [5.7.0] - 2026-09-02
 

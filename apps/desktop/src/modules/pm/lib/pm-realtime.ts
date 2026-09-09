@@ -34,6 +34,16 @@ const MAX_BACKOFF_MS = 30000;
 // deterministic (no Math.random / Date.now).
 let instanceCounter = 0;
 
+/** One change event: which published table fired, and its raw supabase-js
+ *  `postgres_changes` payload (`{ eventType, new, old, … }`). The table name is
+ *  passed separately because the payload's own `table` field is not guaranteed
+ *  across supabase-js versions, and the subscriber keys its incremental apply
+ *  on it. Normalise a payload with `pmEventFrom` in pm-apply.ts. */
+export interface PmRealtimeEvent {
+  table: (typeof PM_REALTIME_TABLES)[number];
+  payload: unknown;
+}
+
 /**
  * Subscribe to realtime change events on the published `pm` tables and call
  * `onEvent` on any of them. A plain function (not a hook) so PmModule can wire
@@ -43,7 +53,10 @@ let instanceCounter = 0;
  * capped reconnect backoff on CHANNEL_ERROR / TIMED_OUT. No-ops quietly when the
  * client has no realtime API (test stubs / non-realtime environments).
  */
-export function subscribePmRealtime(client: SupabaseClient, onEvent: () => void): () => void {
+export function subscribePmRealtime(
+  client: SupabaseClient,
+  onEvent: (event: PmRealtimeEvent) => void,
+): () => void {
   const c = client as unknown as {
     channel?: (name: string) => any;
     removeChannel?: (ch: unknown) => void;
@@ -69,7 +82,9 @@ export function subscribePmRealtime(client: SupabaseClient, onEvent: () => void)
     teardown();
     let ch = c.channel!(name);
     for (const table of PM_REALTIME_TABLES) {
-      ch = ch.on("postgres_changes", { event: "*", schema: "pm", table }, () => onEvent());
+      ch = ch.on("postgres_changes", { event: "*", schema: "pm", table }, (payload: unknown) =>
+        onEvent({ table, payload }),
+      );
     }
     current = ch.subscribe((status: string, err?: unknown) => {
       if (disposed) return;
