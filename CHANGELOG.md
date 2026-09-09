@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Helios asks the server far less of the time.** The Vault and Project
+  Manager background change-checks are now a single server call each instead of
+  four or five row-counting requests, and the row-level read policies evaluate
+  your membership once per query instead of once per row. The database work
+  behind an idle Helios drops by roughly half, so the app — and everyone
+  else's — stays responsive when the whole team is online at once.
+
 ## [5.7.0] - 2026-09-02
 
 ### Added

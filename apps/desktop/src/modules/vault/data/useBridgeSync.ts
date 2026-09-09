@@ -54,6 +54,17 @@ function safeInvoke(cmd: string, args?: Record<string, unknown>): void {
 // persistent error (network down, RLS denial) doesn't hammer Supabase.
 const SKIP_AFTER_ERROR = 4;
 
+/** Has this process seen "no such function" for pdm.bridge_live_files? A
+ *  database that predates 20260909100400 answers that every time, so we latch
+ *  it once and use the plain RLS'd table read for the rest of the session.
+ *
+ *  fetchAllRows flattens the PostgREST error to `new Error(message)` and drops
+ *  `error.code`, so unlike the cursor probes this can only match on wording —
+ *  which is fine: "Could not find the function ..." is PostgREST's own PGRST202
+ *  message, and "does not exist" is Postgres 42883. */
+let bridgeRpcMissing = false;
+const MISSING_FUNCTION_RE = /could not find the function|does not exist/i;
+
 /** Detect an expired/invalid-token failure. fetchAllRows flattens the PostgREST
  *  error to its message, so we match the auth-failure messages (JWT expired /
  *  invalid credentials / PGRST301) rather than an HTTP status code. */
@@ -179,17 +190,41 @@ export function useBridgeSync(): void {
   const reloadStructure = useCallback(async () => {
     if (!client || !signedInRef.current) return;
     try {
+      // Live files only: without the deleted_at filter the add-in's path map
+      // treated recycle-bin files as live, and a bridge getLatest could
+      // re-materialize a teammate's deleted file — auto-add then resurrected
+      // the soft-deleted row (the delete silently undone as a phantom re-add).
+      //
+      // The fast path is pdm.bridge_live_files(), a security-definer RPC that
+      // returns exactly the same columns with exactly the same visibility rule
+      // (live, and published or the caller's own draft) but resolves vault
+      // membership once instead of per row — this pull was 14 pages at a mean
+      // of 207 ms each in prod. rpc() returns a PostgrestFilterBuilder and
+      // PostgREST honours limit/offset on POST /rpc, so fetchAllRows' range
+      // paging works unchanged.
+      const filesViaRpc = () => (client.rpc("bridge_live_files") as any)
+        .order("id", { ascending: true });
+      const filesViaTable = () => (client.from("files") as any)
+        .select("id,vault_id,folder_id,name,latest_version_id")
+        .is("deleted_at", null)
+        .order("id", { ascending: true });
+      const loadFiles = async (): Promise<{ rows: VaultFile[]; error: Error | null }> => {
+        if (!bridgeRpcMissing) {
+          const res = await fetchAllRows<VaultFile>(filesViaRpc);
+          if (!res.error) return res;
+          // Anything other than "the migration isn't applied here" is a real
+          // failure and must surface (backoff + session refresh), not silently
+          // fall back to the expensive read.
+          if (!MISSING_FUNCTION_RE.test(res.error.message)) return res;
+          bridgeRpcMissing = true;
+        }
+        return fetchAllRows<VaultFile>(filesViaTable);
+      };
+
       const [v, f, fo] = await Promise.all([
         fetchAllRows<Vault>(() => (client.from("vaults") as any)
           .select("id,name").order("id", { ascending: true })),
-        // Live files only: without the deleted_at filter the add-in's path map
-        // treated recycle-bin files as live, and a bridge getLatest could
-        // re-materialize a teammate's deleted file — auto-add then resurrected
-        // the soft-deleted row (the delete silently undone as a phantom re-add).
-        fetchAllRows<VaultFile>(() => (client.from("files") as any)
-          .select("id,vault_id,folder_id,name,latest_version_id")
-          .is("deleted_at", null)
-          .order("id", { ascending: true })),
+        loadFiles(),
         fetchAllRows<Folder>(() => (client.from("folders") as any)
           .select("id,vault_id,parent_id,name").order("id", { ascending: true })),
       ]);
