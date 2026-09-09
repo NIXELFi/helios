@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.7.1] - 2026-09-09
+
 ### Changed
 - **Helios asks the server far less of the time.** The Vault and Project
   Manager background change-checks are now a single server call each instead of
