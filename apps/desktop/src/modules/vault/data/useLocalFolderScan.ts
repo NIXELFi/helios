@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readDir, readFile, stat, watchImmediate } from "@tauri-apps/plugin-fs";
+import { useThrottledFocus } from "../../../lib/use-throttled-focus";
 
 export interface LocalFile {
   basename: string;
@@ -307,13 +308,13 @@ export function useLocalFolderScan(
   }, [rootPath, intervalMs, refetch]);
 
   // Re-scan when the user comes back to the window — covers the common case
-  // of editing a file in another app and tabbing back.
-  useEffect(() => {
-    if (!rootPath || !rescanOnFocus) return;
-    const onFocus = () => { if (!pausedRef.current) refetch(); };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [rootPath, rescanOnFocus, refetch]);
+  // of editing a file in another app and tabbing back. Throttled: alt-tabbing
+  // between Helios and SOLIDWORKS fired a full disk walk on every switch.
+  useThrottledFocus(
+    () => { if (!pausedRef.current) refetch(); },
+    10_000,
+    Boolean(rootPath) && rescanOnFocus,
+  );
 
   // Native filesystem watcher (Tauri/notify). Debounce small bursts of events
   // — saving a file often produces several events in quick succession.

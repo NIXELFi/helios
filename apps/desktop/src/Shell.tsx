@@ -1,13 +1,7 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
-import { VaultModule } from "./modules/vault";
-import { CfdModule } from "./modules/cfd";
-import { PmModule } from "./modules/pm";
-import { GamesModule } from "./modules/games";
-import { AmethystModule } from "./modules/amethyst";
-import { MarketplaceModule } from "./modules/marketplace";
-import { OrgModule } from "./modules/org";
+import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
 import { TitleBar } from "./shell/TitleBar";
 import { IS_WINDOWS } from "./lib/platform";
@@ -27,6 +21,35 @@ import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
 import type { ReportKind } from "./shell/report/types";
+
+// Every module except Logs is code-split and fetched the first time the user
+// opens it, so launch parses the Logs app instead of one 3.9 MB bundle holding
+// Vault + CFD + PM + Games + Amethyst + Marketplace + Org as well.
+//
+// The CFD specifier is deliberately the same module the marketplace's
+// first-party entry lazy-loads (`modules/marketplace/firstParty.tsx` uses
+// `import("../cfd")`), so both resolve to ONE chunk rather than duplicating it.
+const VaultModule = lazy(() => import("./modules/vault").then((m) => ({ default: m.VaultModule })));
+const CfdModule = lazy(() => import("./modules/cfd").then((m) => ({ default: m.CfdModule })));
+const PmModule = lazy(() => import("./modules/pm").then((m) => ({ default: m.PmModule })));
+const GamesModule = lazy(() => import("./modules/games").then((m) => ({ default: m.GamesModule })));
+const AmethystModule = lazy(() =>
+  import("./modules/amethyst").then((m) => ({ default: m.AmethystModule })),
+);
+const MarketplaceModule = lazy(() =>
+  import("./modules/marketplace").then((m) => ({ default: m.MarketplaceModule })),
+);
+const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.OrgModule })));
+
+// Shown while a module's chunk is in flight — normally a few hundred ms on
+// first open, instant afterwards (the chunk is cached).
+function ModuleLoading() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-helios-panel text-helios-dim">
+      Loading…
+    </div>
+  );
+}
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -307,16 +330,23 @@ function HeliosShell() {
       <main className="relative min-w-0 flex-1">
         {/* Each module gets its own boundary so a crash in one (an unexpected
             data shape, a render bug) shows a contained error in that pane while
-            the rail + sibling modules stay usable. */}
+            the rail + sibling modules stay usable. Each also gets its OWN
+            Suspense boundary: one shared boundary around <main> would unmount
+            the already-mounted Logs tree (and its uPlot canvases) behind the
+            fallback the first time any other module's chunk loads.
+            ModuleActivityProvider tells each module whether it is the one on
+            screen so hidden modules can stand their polling down. */}
         {visited.has("logs") && (
           <div className={"absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
             <ErrorBoundary label="Logs" compact>
-              <LogsApp
-                appVersion={appVersion}
-                playing={logsPlaying}
-                onPlayingChange={setLogsPlaying}
-                keyboardShortcutsEnabled={active === "logs"}
-              />
+              <ModuleActivityProvider active={active === "logs"}>
+                <LogsApp
+                  appVersion={appVersion}
+                  playing={logsPlaying}
+                  onPlayingChange={setLogsPlaying}
+                  keyboardShortcutsEnabled={active === "logs"}
+                />
+              </ModuleActivityProvider>
             </ErrorBoundary>
           </div>
         )}
@@ -337,49 +367,77 @@ function HeliosShell() {
         {visited.has("vault") && vaultEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
             <ErrorBoundary label="Vault" compact>
-              <VaultModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "vault"}>
+                  <VaultModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("cfd") && (
           <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
             <ErrorBoundary label="CFD" compact>
-              <CfdModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "cfd"}>
+                  <CfdModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("pm") && pmEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
             <ErrorBoundary label="PM" compact>
-              <PmModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "pm"}>
+                  <PmModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("games") && gamesEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
-              <GamesModule paused={active !== "games"} />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "games"}>
+                  <GamesModule paused={active !== "games"} />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("amethyst") && (
           <div className={"absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
             <ErrorBoundary label="Amethyst" compact>
-              <AmethystModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "amethyst"}>
+                  <AmethystModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("marketplace") && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
             <ErrorBoundary label="Marketplace" compact>
-              <MarketplaceModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "marketplace"}>
+                  <MarketplaceModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
         {visited.has("org") && orgEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
             <ErrorBoundary label="Org & Access" compact>
-              <OrgModule />
+              <Suspense fallback={<ModuleLoading />}>
+                <ModuleActivityProvider active={active === "org"}>
+                  <OrgModule />
+                </ModuleActivityProvider>
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}

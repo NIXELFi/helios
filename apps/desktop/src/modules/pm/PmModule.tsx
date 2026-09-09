@@ -1,5 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
+import { useModuleLive } from "../../shell/module-activity";
+import { useThrottledFocus } from "../../lib/use-throttled-focus";
 import { hexToRgba } from "@helios/pm-ui";
 import { loadWorkspace, type Workspace } from "@pm/lib/data";
 import { fetchPmCursor, pmCursorChanged, type PmCursor } from "@pm/lib/workspace-cursor";
@@ -26,9 +28,11 @@ import "./pm.css";
 const PM_PROBE_MS = 20_000;
 // Slow full re-hydrate backstop. The cheap probe only tracks tasks/activity, so
 // this catches the long tail (milestone/vendor/event/page edits, which have no
-// cheap change signal) while the window stays focused but idle. Window focus
-// also forces a full refresh, so an active user never waits this long.
-const PM_BACKSTOP_MS = 180_000;
+// cheap change signal) while PM is on screen but idle. Realtime is the live
+// path for all of those tables, so this really is a backstop — at 3 minutes it
+// was re-pulling the whole workspace 20 times an hour per idle client for
+// nothing (load audit 2026-09-09). It only ticks while PM is live.
+const PM_BACKSTOP_MS = 600_000;
 // Coalesce a burst of realtime events (e.g. a multi-row edit, or tasks +
 // task_subteams firing together) into one re-hydrate. Short enough to still feel
 // instant.
@@ -229,6 +233,44 @@ export function PmModule() {
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
+  // "Is PM the module on screen, in a visible window?" The Shell keeps every
+  // visited module mounted, so without this a backgrounded PM kept probing and
+  // full-refreshing forever. Mirrored into a ref so the long-lived effect below
+  // reads the current value without re-subscribing realtime on every flip.
+  const live = useModuleLive();
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  // Set when realtime fires while PM is not live: don't re-pull in the
+  // background, just remember the workspace moved and catch up on return.
+  const staleWhileHiddenRef = useRef(false);
+  // The refresh effect publishes its two entry points here so the
+  // re-activation effect and the focus handler can reach them.
+  const probeRef = useRef<(() => Promise<void>) | null>(null);
+  const refreshRef = useRef<(() => void) | null>(null);
+
+  // Window focus used to force a FULL workspace pull, on every alt-tab, with no
+  // throttle. The cheap probe detects task churn and the backstop covers the
+  // long tail, so a returning user costs one small request at most every 15 s.
+  useThrottledFocus(() => {
+    void probeRef.current?.();
+  }, 15_000);
+
+  // Catch up when PM comes back on screen (module re-activated, or the window
+  // un-hidden): one cheap probe normally, a full refresh only if realtime told
+  // us something actually changed while we were away.
+  const wasLiveRef = useRef(live);
+  useEffect(() => {
+    const wasLive = wasLiveRef.current;
+    wasLiveRef.current = live;
+    if (!live || wasLive) return;
+    if (staleWhileHiddenRef.current) {
+      staleWhileHiddenRef.current = false;
+      refreshRef.current?.();
+    } else {
+      void probeRef.current?.();
+    }
+  }, [live]);
+
   useEffect(() => {
     if (!client || !userId) return;
     const c = client;
@@ -308,9 +350,13 @@ export function PmModule() {
   //     path, so a teammate's task/milestone/comment edit lands near-instantly,
   //   - a cheap task/activity change-probe (fetchPmCursor) every PM_PROBE_MS —
   //     covers the UNpublished tables + any missed realtime event,
-  //   - window focus — a full refresh (catches the long tail instantly), and
+  //   - window focus — one throttled probe (see useThrottledFocus above), and
   //   - a slow full-rehydrate backstop (PM_BACKSTOP_MS) for the long tail while
-  //     the window stays focused but idle.
+  //     PM stays on screen but idle.
+  //
+  // All four stand down while PM isn't live (another module is on screen, or
+  // the window is hidden): the timers no-op and realtime just marks the
+  // workspace stale, and the re-activation effect above catches up.
   useEffect(() => {
     if (!client || !userId) return;
     const c = client;
@@ -366,6 +412,8 @@ export function PmModule() {
     // redundant refresh for a change the full pull already captured.
     let prevCursor: PmCursor | null = null;
     async function probe() {
+      // Hidden module / hidden window: nothing is on screen to keep fresh.
+      if (!liveRef.current) return;
       const st = usePmStore.getState();
       // Mirror refresh()'s guards: don't probe before hydration, mid-write, or
       // while a refresh is already running.
@@ -390,10 +438,16 @@ export function PmModule() {
       void refresh();
     };
 
-    const onFocus = fullRefresh;
-    window.addEventListener("focus", onFocus);
+    // Publish the two entry points for the focus handler and the re-activation
+    // effect at component scope (both live outside this effect's closure).
+    probeRef.current = probe;
+    refreshRef.current = fullRefresh;
+
     const probeInterval = window.setInterval(() => void probe(), PM_PROBE_MS);
-    const backstopInterval = window.setInterval(fullRefresh, PM_BACKSTOP_MS);
+    const backstopInterval = window.setInterval(() => {
+      if (!liveRef.current) return;
+      fullRefresh();
+    }, PM_BACKSTOP_MS);
 
     // Realtime is the live path: the published pm tables (tasks, comments,
     // dependencies, task_subteams, milestones, calendar_events, subteams) push
@@ -403,6 +457,13 @@ export function PmModule() {
     // for the UNpublished tables and any missed events.
     let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
     const onRealtime = () => {
+      // Not on screen: a full re-pull would repaint nothing anyone can see (and
+      // every client in the org does it at once on every edit). Remember that
+      // the workspace moved; the re-activation effect refreshes on return.
+      if (!liveRef.current) {
+        staleWhileHiddenRef.current = true;
+        return;
+      }
       if (realtimeDebounce) clearTimeout(realtimeDebounce);
       realtimeDebounce = setTimeout(() => {
         realtimeDebounce = null;
@@ -426,7 +487,8 @@ export function PmModule() {
     });
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      probeRef.current = null;
+      refreshRef.current = null;
       window.clearInterval(probeInterval);
       window.clearInterval(backstopInterval);
       if (realtimeDebounce) clearTimeout(realtimeDebounce);

@@ -36,6 +36,7 @@ import { ensureLocalFolderTree } from "../data/ensureLocalFolderTree";
 import { useAutoSync } from "../data/useAutoSync";
 import { useVaultRealtime } from "../data/useVaultRealtime";
 import { useVaultCursor } from "../data/useVaultCursor";
+import { useModuleLive } from "../../../shell/module-activity";
 import { useVaultUsers } from "../data/useVaultUsers";
 import { findUnmatchedLocal, vaultSnapshotConsistent } from "../data/find-unmatched";
 import { friendlyPgError, type PgErrorContext } from "../data/pg-errors";
@@ -147,6 +148,11 @@ export function BrowseScreen() {
   // file table doesn't flicker between modified/synced as bytes land; the
   // explicit rescan from onComplete catches the final state.
   const [syncBusy, setSyncBusy] = useState(false);
+  // Vault is kept mounted by the Shell when the user switches modules. While it
+  // isn't the module on screen (or the window is hidden) the periodic disk walk
+  // and the Supabase change-probe stand down — the filesystem WATCHER stays on
+  // so background auto-sync still reacts to a SOLIDWORKS save.
+  const live = useModuleLive();
   const {
     files: localFilesRaw,
     scanRoot,
@@ -154,8 +160,8 @@ export function BrowseScreen() {
     openInSw,
     refetch: rescan,
   } = useLocalFolderScan(vaultFolderPath, {
-    intervalMs: LOCAL_RESCAN_INTERVAL_MS,
-    rescanOnFocus: true,
+    intervalMs: live ? LOCAL_RESCAN_INTERVAL_MS : 0,
+    rescanOnFocus: live,
     watchFs: true,
     paused: syncBusy,
   });
@@ -410,7 +416,14 @@ export function BrowseScreen() {
   // cheap count signature each cycle and only runs `reconcile` when something
   // actually changed, so an idle vault costs a few empty head requests instead
   // of megabytes. Realtime still delivers the live, instant updates.
-  useVaultCursor(vaultId ?? undefined, { intervalMs: VAULT_POLL_MS, onChange: reconcile });
+  // `enabled: live` stops the probe entirely while another module is on screen:
+  // realtime is still subscribed, so a teammate's change still reconciles, and
+  // the probe re-baselines the moment the user comes back.
+  useVaultCursor(vaultId ?? undefined, {
+    intervalMs: VAULT_POLL_MS,
+    onChange: reconcile,
+    enabled: live,
+  });
 
   // Background auto-sync lives inside <VaultSyncSection> so its rapid status
   // updates (one per file start + one per file end) re-render only that

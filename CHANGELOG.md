@@ -36,6 +36,8 @@ follow [semver](https://semver.org/).
   else's — stays responsive when the whole team is online at once.
 - Logs opens as soon as your primary session is loaded; the other recent sessions come in behind it instead of holding up the first paint (at most 12 are reopened automatically).
 - The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
+- Vault and Project Manager stop their background checks while you are in another module or the window is hidden, and catch up with one small request when you come back. Coming back to the window no longer re-downloads the whole workspace.
+- Modules other than Logs are loaded the first time you open them, which makes launch lighter.
 
 ## [5.7.0] - 2026-09-02
 
