@@ -9,7 +9,8 @@
 **Tech Stack:** React 18 + TypeScript (Vite, vitest + jsdom), Tauri 2 (Rust: tokio, reqwest, sha2, flate2, walkdir), Supabase (PostgREST, Realtime, Postgres RLS), pnpm workspace, CHANGELOG-driven release workflow.
 
 **Ground rules for every task**
-- Integration branch: `perf/load-audit-0909` in worktree `C:/Users/nmurray/Documents/Helios/worktrees/perf-5.7.1`. Wave 1 and Wave 3 tasks run in their own worktree/branch created off that branch and are merged back into it with a merge commit.
+- Integration branch: `perf/load-audit-0909` in worktree `C:/Users/nmurray/Documents/Helios/worktrees/perf-5.7.1`. Wave 1 and Wave 3 tasks run in their own worktree/branch created off that branch and are merged back into it with a merge commit. The Wave 1 worktrees ALREADY EXIST (created 2026-09-09, deps installed): `worktrees/perf-sql` (branch `perf/sql-cursors`), `worktrees/perf-rust` (`perf/rust-io`), `worktrees/perf-bundle` (`perf/bundle-boot`) — do not run the `git worktree add` lines again.
+- The pre-commit hook runs a Rust parity suite that takes 2–3 minutes per commit (first commit in a fresh worktree also compiles those crates). That is expected; never bypass it.
 - Every task adds bullets under `## [Unreleased]` in root `CHANGELOG.md` (Keep a Changelog groups). The release gate fails without them.
 - TDD where the code is pure or hookable: write the failing test first, run it, implement, run again, commit. Test commands: `pnpm --filter @helios/desktop test -- <path>` (vitest, jsdom), `pnpm --filter @helios/widgets test`, `cargo test -p helios-desktop` (from `apps/desktop/src-tauri`), `pnpm typecheck` at the root.
 - Never edit source files with PowerShell `Get-Content`/`Set-Content` (encoding gotcha). Use the Edit tool.
@@ -114,13 +115,18 @@ Also rewrite `pm.database_views` "members read views" to
 and `pm.role_memberships` "role_memberships_select_self" to `user_id = (select auth.uid())`.
 Semantics are unchanged: same predicates, same truth table.
 
+**Roles must be preserved exactly.** In prod three of these policies are granted `to public`, not `to authenticated`: `members read task_subteams`, `members read task_owners`, `members read task_links` (see `20260603110000_pm_role_capability_mapping.sql:152`, `20260617012000_pm_task_owners.sql:27`, `20260617013000_pm_task_links.sql:19`). Write those three `for select to public`; the other 15 read policies plus `members read views` and `role_memberships_select_self` are `to authenticated`. The committed rollback file `docs/superpowers/plans/2026-09-09-rollback.sql` shows the deployed role of every policy; the migration must agree with it.
+
 - [ ] **Step 4: Write `20260909100300_pdm_my_vault_ids_read_policies.sql`**
 
 ```sql
 -- Set of vault ids the caller may read: a GLOBAL role row (vault_id null)
 -- grants every vault, otherwise exactly the listed vaults. Equivalent to
 -- pdm.is_member_in(v) for every v that exists in pdm.vaults, but evaluated
--- ONCE per statement as a hashed subplan instead of once per row.
+-- ONCE per statement as a hashed subplan instead of once per row. The one
+-- difference is a NULL vault (is_member_in(NULL) is true for a global role,
+-- NULL in (...) is NULL → denied); FKs make that unreachable for the rows
+-- these policies guard.
 create or replace function pdm.my_vault_ids()
 returns setof uuid language sql stable security definer set search_path = pdm, public as $$
   select v.id from pdm.vaults v
@@ -189,7 +195,7 @@ Same pattern in `workspace-cursor.ts`: `client.schema("pm").rpc("workspace_curso
 
 - [ ] **Step 8: Client — bridge structure uses `bridge_live_files`**
 
-In `useBridgeSync.ts` `reloadStructure`, replace the files `fetchAllRows` builder with `() => (client.rpc("bridge_live_files") as any).order("id", { ascending: true })` (PostgREST supports `order` and `Range` on set-returning functions, so `fetchAllRows` paging still works). On the missing-function signal fall back to the previous builder. Keep vaults/folders as they are.
+In `useBridgeSync.ts` `reloadStructure`, replace the files `fetchAllRows` builder with `() => (client.rpc("bridge_live_files") as any).order("id", { ascending: true })` (`rpc()` returns a `PostgrestFilterBuilder`, and `range()` sets `limit`/`offset` query params that PostgREST honours on `POST /rpc`, so `fetchAllRows` paging still works). Note `fetchAllRows` returns `{ rows, error: new Error(message) }` and discards `error.code`, so the missing-function fallback here matches on message text only: `/could not find the function|does not exist/i` (that is PostgREST's PGRST202 wording). On that signal re-run the previous builder. Keep vaults/folders as they are.
 
 - [ ] **Step 9: RLS suite test**
 
@@ -213,7 +219,7 @@ Worktree: `git worktree add -b perf/rust-io ../perf-rust perf/load-audit-0909`.
 - Create: `apps/desktop/src-tauri/src/commands/scan_folder.rs`
 - Create: `apps/desktop/src-tauri/src/commands/download.rs`
 - Modify: `apps/desktop/src-tauri/src/commands/mod.rs`, `apps/desktop/src-tauri/src/lib.rs:286-318` (register `commands::scan_folder::scan_vault_folder`, `commands::download::download_object_to_temp`)
-- Modify: `apps/desktop/src-tauri/Cargo.toml` (add `walkdir = "2"`, `sha2 = { workspace = true }`, `flate2 = "1"`, `uuid = { workspace = true }`; enable `reqwest` feature `stream` and add `futures-util = "0.3"`, `tokio` feature `fs`)
+- Modify: `apps/desktop/src-tauri/Cargo.toml` (add `walkdir = "2"`, `sha2 = { workspace = true }`, `flate2 = "1"`, `uuid = { workspace = true }`; change the reqwest line to `reqwest = { workspace = true, features = ["blocking"] }` — the download runs the whole transfer inside `spawn_blocking` with `reqwest::blocking`, no `stream`/`futures-util`/tokio `fs`)
 - Modify: `apps/desktop/src/modules/vault/data/useLocalFolderScan.ts` (walk → invoke, JS walk kept as fallback)
 - Modify: `apps/desktop/src/modules/vault/data/useDownloadVersion.ts` (`downloadVersionOnce` → invoke, JS path kept as fallback)
 - Test: Rust unit tests inside both modules (`#[cfg(test)]` with `tempfile`-free temp dirs under `std::env::temp_dir()`), `apps/desktop/src/modules/vault/data/__tests__/local-scan-invoke.test.ts`, `apps/desktop/src/modules/vault/data/__tests__/download-invoke.test.ts`
@@ -279,7 +285,7 @@ Test `download-invoke.test.ts`: mock `invoke` to resolve `{tempPath, bytes, wasG
 
 - [ ] **Step 5: Bulk/auto-sync worker counts**
 
-With the transfer off the webview, `useAutoSync.ts:398` stays at 4 and `useBulkDownload.ts:66` stays at 8; just update the comment on `useBulkDownload.ts:57-64` to say the bytes no longer cross the webview.
+With the transfer off the webview, `useAutoSync.ts:398` stays at 4 and `WORKERS = 8` at `useBulkDownload.ts:65` stays; just update the comment above it (`useBulkDownload.ts:56-64`) to say the bytes no longer cross the webview.
 
 - [ ] **Step 6: Build, test, CHANGELOG, commit**
 
@@ -315,7 +321,7 @@ Test `pages.test.ts`: `WIKI_INDEX` has README first, titles derived as specified
 
 - [ ] **Step 3: One zlib**
 
-`compression.ts`: replace the pako import with `import { gzipSync, gunzipSync } from "fflate"`; `gzipBytes` fallback → `gzipSync(bytes)`, `gunzipIfNeeded` fallback → `gunzipSync(bytes)`. Remove `pako` and `@tanstack/react-query` from `apps/desktop/package.json`, run `pnpm install`, confirm `grep -r "from \"pako\"\|react-query" apps packages --include=*.ts --include=*.tsx` is empty. Test: round-trip a 1 MB random buffer through `gzipBytes` → `gunzipIfNeeded` with `CompressionStream` stubbed to undefined so the fallback runs.
+`compression.ts`: replace the pako import with `import { gzipSync, gunzipSync } from "fflate"`; `gzipBytes` fallback → `gzipSync(bytes)`, `gunzipIfNeeded` fallback → `gunzipSync(bytes)`. Remove `pako`, `@types/pako` (devDependency, `apps/desktop/package.json:63`) and `@tanstack/react-query` from `apps/desktop/package.json`, run `pnpm install`, confirm `grep -r "from \"pako\"\|react-query" apps packages --include=*.ts --include=*.tsx` is empty. Test: round-trip a 1 MB random buffer through `gzipBytes` → `gunzipIfNeeded` with `CompressionStream` stubbed to undefined so the fallback runs.
 
 - [ ] **Step 4: Tile memo and stable select**
 
@@ -336,7 +342,7 @@ export function planRecentsBoot(recents: string[], isHidden: (path: string) => b
 
 Test it in `boot-order.test.ts` (empty list, all hidden → first = recents[0], cap applied to rest, order preserved).
 
-Then restructure the effect in `App.tsx:198-325`: load bundled → `planRecentsBoot(loadRecentSessions(), p => loadSessionMeta(userSessionIdFor(p))?.visible === false)` → load `first` (existing `loadUserSession` + `removeRecentSession` on failure) → `applySessionMeta`, math channels, `setSessions`, `setPrimaryId`, lap-selection restore exactly as today (this is where the LoadingScreen clears) → then, without awaiting before the commit above, `Promise.allSettled(rest.map(loadUserSession…))` → for the fulfilled ones `applySessionMeta`, `applyMathChannels` (merge the error maps into `mathErrors` with `setMathErrors(prev => …)`), then `setSessions(prev => mergeSessionsWithColors(prev, loaded))`; rejected ones call `removeRecentSession(path)`. Progress labels: keep the existing `setLoadProgress` calls for the first phase with `total = bundled.length + 1 + 2`; the background phase does not touch the loading screen. Check `loadSessionMeta`/`userSessionIdFor` import names in `lib/session.ts` and `lib/load-user-session.ts` before writing.
+Then restructure the effect in `App.tsx:198-325`: load bundled → `planRecentsBoot(loadRecentSessions(), p => loadSessionMeta(userSessionIdFor(p))?.visible === false)` → load `first` (existing `loadUserSession` + `removeRecentSession` on failure) → `applySessionMeta`, math channels, `setSessions`, `setPrimaryId`, lap-selection restore exactly as today (this is where the LoadingScreen clears) → then, without awaiting before the commit above, `Promise.allSettled(rest.map(loadUserSession…))` → for the fulfilled ones `applySessionMeta`, `applyMathChannels` (merge the error maps into `mathErrors` with `setMathErrors(prev => …)`), then `setSessions(prev => mergeSessionsWithColors(prev, loaded))`; rejected ones call `removeRecentSession(path)`. Progress labels: keep the existing `setLoadProgress` calls for the first phase with `total = bundled.length + 1 + 2`; the background phase does not touch the loading screen. Names: `loadSessionMeta` is exported from `apps/desktop/src/lib/app-state.ts:234`, `userSessionIdFor` from `apps/desktop/src/lib/load-user-session.ts:22`, and `mergeSessionsWithColors` is defined in `App.tsx:1926` (already in scope). Put the helper test at `apps/desktop/src/lib/__tests__/boot-order.test.ts` like the other lib tests.
 
 - [ ] **Step 6: Build size check, tests, CHANGELOG, commit**
 
@@ -384,7 +390,7 @@ Tests: default true without a provider; provider false → false; flipping `docu
 
 - [ ] **Step 3: Shell — providers and lazy modules**
 
-In `Shell.tsx` replace the static module imports (Vault, Cfd, Pm, Games, Amethyst, Marketplace, Org) with `React.lazy(() => import("./modules/vault").then(m => ({ default: m.VaultModule })))` etc. (`LogsApp` stays static). Wrap the `<main>` children in one `<Suspense fallback={<ModuleLoading />}>` where `ModuleLoading` is a centred `text-helios-dim` "Loading…" div (same classes the vault Notice uses). Wrap each module element in `<ModuleActivityProvider active={active === "<id>"}>`. `GamesModule` keeps its `paused` prop as well.
+In `Shell.tsx` replace the static module imports (Vault, Cfd, Pm, Games, Amethyst, Marketplace, Org) with `React.lazy(() => import("./modules/vault").then(m => ({ default: m.VaultModule })))` etc. (`LogsApp` stays static). Give each lazy module its own `<Suspense fallback={<ModuleLoading />}>` inside its `absolute inset-0` wrapper (one shared boundary around `<main>` would hide the mounted Logs tree, and its uPlot canvases, behind the fallback the first time any other module loads). `ModuleLoading` is a centred `text-helios-dim` "Loading…" div (same classes the vault Notice uses). Wrap each module element in `<ModuleActivityProvider active={active === "<id>"}>`. `GamesModule` keeps its `paused` prop as well.
 
 - [ ] **Step 4: PM — gate polling on live, focus → probe**
 
@@ -462,7 +468,7 @@ Worktree: `git worktree add -b perf/pm-incremental ../perf-pm perf/load-audit-09
 
 - [ ] **Step 1: Split `loadWorkspace`**
 
-`RawWorkspace` = the un-transformed arrays exactly as unwrapped today (`projectsRaw, subteams, subsystems, users, tasksRaw, depsRaw, milestones, pages, blocks, vendors, comments, links, build, events, activity, rolesRaw, hiddenSubteamsRaw`). `fetchWorkspaceRaw(client)` does the reads; `buildWorkspace(raw)` is the existing transform verbatim; `loadWorkspace(client) = buildWorkspace(await fetchWorkspaceRaw(client))`. Also export `fetchTaskRowsByIds(client, ids)` (the tasks select with its three embeds, `.in("id", ids)`).
+`RawWorkspace` = the un-transformed arrays exactly as unwrapped today (`projectsRaw, subteams, subsystems, users, tasksRaw, depsRaw, milestones, pages, blocks, vendors, comments, links, build, events, activity, rolesRaw, hiddenSubteamsRaw`). One exception: today's `data.ts:149-157` already `.map()`s the dependency rows during unwrap — keep `depsRaw` as the untouched rows and move that map into `buildWorkspace`. `fetchWorkspaceRaw(client)` does the reads; `buildWorkspace(raw)` is the existing transform verbatim; `loadWorkspace(client) = buildWorkspace(await fetchWorkspaceRaw(client))`. Also export `fetchTaskRowsByIds(client, ids)` (the tasks select with its three embeds, `.in("id", ids)`).
 
 - [ ] **Step 2: `applyPmEvents` (pure, TDD)**
 
@@ -477,7 +483,7 @@ Returns the same `raw` reference when nothing changed. Tests cover each table, t
 
 - [ ] **Step 3: PmModule wiring**
 
-Keep `rawRef` next to the existing effect state; every `loadWorkspace` path stores `raw` (`fetchWorkspaceRaw` → `buildWorkspace`). `subscribePmRealtime` now hands `onEvent({ table, payload })`; PmModule buffers events and, after the 150 ms debounce, runs `applyIncremental()`: same guards as `refresh()` (`hydrated`, `inFlightWrites === 0`, `!running`, else `retryPending`); `applyPmEvents` → if `full` → `refresh()`; else if `refetchTaskIds.length` → `fetchTaskRowsByIds` and splice into `tasksRaw` (ids not returned are removed: RLS hid them or they were deleted) → `buildWorkspace` → `hydrateFrom(ws)` with `preserveWriteError: true` → debounced `saveSnapshot`. Replace the direct `saveSnapshot` calls with a 2 s trailing debounce (`saveSnapshotDebounced`), flushed on unmount. The cursor-probe change path still calls `refresh()` (full) — that is the safety net for events realtime missed.
+Keep `rawRef` (a `useRef<RawWorkspace | null>(null)`) at component scope; every network `loadWorkspace` path (the first effect's revalidate at `PmModule.tsx:277`, `registerReloadWorkspace`, and `refresh()` in the second effect) stores `raw` (`fetchWorkspaceRaw` → `buildWorkspace`). The cold-launch snapshot paint (`PmModule.tsx:268-272`) hydrates from `loadSnapshot(uid)`, which is a built `Workspace`, so `rawRef` stays null until the network load resolves — `applyIncremental()` must treat `rawRef.current === null` as "fall back to `refresh()`". Note `hydrateFrom` is a closure local to the FIRST effect (`PmModule.tsx:238-251`) and does not take `preserveWriteError`; `applyIncremental()` lives in the SECOND effect, so inline the `usePmStore.getState().hydrate({ …, preserveWriteError: true })` call exactly the way `refresh()` does at lines 343-353 (or lift `hydrateFrom` to component scope with an options argument — either is fine, but do one deliberately). `subscribePmRealtime` now hands `onEvent({ table, payload })`; PmModule buffers events and, after the 150 ms debounce, runs `applyIncremental()`: same guards as `refresh()` (`hydrated`, `inFlightWrites === 0`, `!running`, else `retryPending`) plus the null-raw guard; `applyPmEvents` → if `full` → `refresh()`; else if `refetchTaskIds.length` → `fetchTaskRowsByIds` and splice into `tasksRaw` (ids not returned are removed: RLS hid them or they were deleted) → `buildWorkspace` → hydrate with `preserveWriteError: true` → debounced `saveSnapshot`. Replace the direct `saveSnapshot` calls with a 2 s trailing debounce (`saveSnapshotDebounced`), flushed on unmount. The cursor-probe change path still calls `refresh()` (full) — that is the safety net for events realtime missed.
 
 - [ ] **Step 4: Typecheck, tests, CHANGELOG, commit**
 
@@ -495,7 +501,7 @@ CHANGELOG → Changed: "Project Manager applies a teammate's edit directly from 
 
 ### Task 8: Prod migrations, then release
 
-- [ ] Apply the five migrations to prod in order through the Management API query endpoint (`node <scratchpad>/sbq.mjs -f <file>`; the helper sends `read_only: true` — remove that flag for these calls), then record each version in `supabase_migrations.schema_migrations` the way `helios-migration-apply-management-api` describes. Verify: `select pdm.vault_cursor('<SDM25 id>')`, `select * from pm.workspace_cursor()` with a user's claims set, `select count(*) from pdm.bridge_live_files()` with claims set, and `pg_policies` shows the new `using` text. Keep a rollback file (`docs/superpowers/plans/2026-09-09-rollback.sql`) that restores the previous policy bodies from `20260610100000_pdm_vault_scoped_reads.sql` and `20260603110000_pm_role_capability_mapping.sql` and drops the three functions.
+- [ ] Apply the five migrations to prod in order through the Management API query endpoint (`node <scratchpad>/sbq.mjs -f <file>`; the helper sends `read_only: true` — remove that flag for these calls), then record each version in `supabase_migrations.schema_migrations` the way `helios-migration-apply-management-api` describes. Verify: `select pdm.vault_cursor('<SDM25 id>')`, `select * from pm.workspace_cursor()` with a user's claims set, `select count(*) from pdm.bridge_live_files()` with claims set, and `pg_policies` shows the new `using` text. The rollback file already exists and is committed (`docs/superpowers/plans/2026-09-09-rollback.sql`, captured from the prod catalog on 2026-09-09 with the deployed role of every policy); re-check it still matches the tables the migrations touch before applying.
 - [ ] Merge `perf/load-audit-0909` into `main` with a merge commit (repo style) in `worktrees/release`; `node scripts/bump-version.mjs 5.7.1`; commit `chore(release): 5.7.1 - lighter on Supabase and on slow machines`; tag `v5.7.1`; push `main` and the tag.
 - [ ] Watch the Release run. If two drafts appear for the tag, apply the repair recipe from memory `helios-release-duplicate-draft-race` (move assets, delete the secondary, `gh run rerun --failed`). Confirm 11 assets, `latest.json` for all four targets, Slack post ok.
 - [ ] Update memory (`helios-load-audit-0909` → shipped state, gotchas) and the memory index.
