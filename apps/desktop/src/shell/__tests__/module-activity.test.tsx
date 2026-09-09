@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
+import { useRef } from "react";
 import type { ReactNode } from "react";
 import {
   ModuleActivityProvider,
@@ -74,5 +75,24 @@ describe("useModuleLive", () => {
   it("is false for a hidden module even while the window is visible", () => {
     const { result } = renderHook(() => useModuleLive(), { wrapper: wrapperWith(false) });
     expect(result.current).toBe(false);
+  });
+  it("calls the same hooks whether or not the module is active (hook order must not change)", () => {
+    // Regression: `useModuleActive() && useDocumentVisible()` short-circuited
+    // when inactive, skipped useDocumentVisible's useState/useEffect, and every
+    // later hook read the wrong slot — PM crashed with "Cannot create property
+    // 'current' on boolean" and the Vault with React #311 in the real app.
+    const seen: Array<{ live: boolean; ref: object }> = [];
+    function Probe() {
+      const live = useModuleLive();
+      const ref = useRef({ tag: "ref" });
+      seen.push({ live, ref: ref.current });
+      return null;
+    }
+    const view = render(<ModuleActivityProvider active={true}><Probe /></ModuleActivityProvider>);
+    view.rerender(<ModuleActivityProvider active={false}><Probe /></ModuleActivityProvider>);
+    view.rerender(<ModuleActivityProvider active={true}><Probe /></ModuleActivityProvider>);
+    expect(seen.map((s) => s.live)).toEqual([true, false, true]);
+    // The ref slot must be the SAME object every render, never a shifted hook value.
+    expect(seen.every((s) => s.ref === seen[0]!.ref && typeof s.ref === "object")).toBe(true);
   });
 });

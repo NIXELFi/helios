@@ -52,5 +52,12 @@ export function useDocumentVisible(): boolean {
  * cheap request rather than a full re-pull.
  */
 export function useModuleLive(): boolean {
-  return useModuleActive() && useDocumentVisible();
+  // Both hooks must run on EVERY render. `useModuleActive() && useDocumentVisible()`
+  // short-circuits when the module is inactive, skipping useDocumentVisible's
+  // useState/useEffect and shifting every later hook slot — the real app then
+  // threw "Cannot create property 'current' on boolean" in PM and React #311
+  // in the Vault the moment a module was hidden (5.7.1 smoke test).
+  const active = useModuleActive();
+  const visible = useDocumentVisible();
+  return active && visible;
 }
