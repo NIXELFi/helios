@@ -27,6 +27,17 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **The Vault's local-folder scan and file downloads now run in the native
+  layer.** Launch no longer re-reads and re-hashes every local file through the
+  app window — the hashes are remembered between runs, so a folder that hasn't
+  changed is scanned almost instantly — and a 200-file sync no longer holds the
+  files in memory.
+
+### Fixed
+- **Rescans of large vault folders no longer stutter the interface on slower
+  laptops.**
+
 ## [5.7.0] - 2026-09-02
 
 ### Added

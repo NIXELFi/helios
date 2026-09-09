@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { readDir, readFile, stat, watchImmediate } from "@tauri-apps/plugin-fs";
 
 export interface LocalFile {
@@ -133,6 +134,41 @@ async function walk(
   }
 }
 
+/** Shape of `commands::scan_folder::ScanResult` (serde camelCase). */
+interface NativeScanResult {
+  rootExists: boolean;
+  entries: LocalFile[];
+  openInSw: string[];
+}
+
+/**
+ * Run the walk in the native layer (`scan_vault_folder`): one IPC round-trip
+ * for the whole tree, hashes served from a cache that survives relaunch.
+ *
+ * Returns null when the command isn't reachable — no Tauri host (vitest, the
+ * Lite web build) or an older shell without the command. Note that the jsdom
+ * transport in `tests/setup.ts` RESOLVES every invoke to null instead of
+ * throwing, so a missing/shape-less result counts as "unavailable" too.
+ * Callers fall back to the JS walk below, which stays the reference
+ * implementation for the path/relativePath format.
+ */
+async function scanViaNative(
+  rootPath: string,
+): Promise<{ rootExists: boolean; entries: LocalFile[]; openInSw: Set<string> } | null> {
+  let raw: unknown;
+  try {
+    raw = await invoke("scan_vault_folder", { root: rootPath });
+  } catch {
+    return null;
+  }
+  const res = raw as NativeScanResult | null;
+  if (!res || typeof res !== "object" || !Array.isArray(res.entries)) return null;
+  const openInSw = new Set<string>(
+    Array.isArray(res.openInSw) ? res.openInSw : [],
+  );
+  return { rootExists: res.rootExists !== false, entries: res.entries, openInSw };
+}
+
 export interface UseLocalFolderScanOptions {
   /** Re-scan the folder on this interval. 0 / undefined = no polling. */
   intervalMs?: number;
@@ -241,8 +277,20 @@ export function useLocalFolderScan(
         // locally-deleted detection, the deleted-file reaper's rescans) that
         // the user deleted everything — which can propagate vault deletes.
         // Treat that as an ERROR and keep the last good snapshot instead.
+        //
+        // Native path first: the Rust command reports `rootExists` itself, so
+        // there is no separate stat() pre-check to pay for.
+        const native = await scanViaNative(rootPath);
         let rootExists = true;
-        try { await stat(rootPath); } catch { rootExists = false; }
+        const collected: LocalFile[] = [];
+        const openSw = new Set<string>();
+        if (native) {
+          rootExists = native.rootExists;
+          collected.push(...native.entries);
+          for (const rel of native.openInSw) openSw.add(rel);
+        } else {
+          try { await stat(rootPath); } catch { rootExists = false; }
+        }
         if (!rootExists && hadFilesRef.current) {
           if (mounted) {
             // Surface the flag too: the kept snapshot is trustworthy for
@@ -256,9 +304,7 @@ export function useLocalFolderScan(
           }
           return;
         }
-        const collected: LocalFile[] = [];
-        const openSw = new Set<string>();
-        if (rootExists) {
+        if (!native && rootExists) {
           await walk(rootPath, "", collected, openSw, shaCacheRef.current);
         }
         // Skip the commit if paused flipped true while we were walking (and it
