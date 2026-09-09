@@ -34,6 +34,8 @@ follow [semver](https://semver.org/).
   your membership once per query instead of once per row. The database work
   behind an idle Helios drops by roughly half, so the app — and everyone
   else's — stays responsive when the whole team is online at once.
+- Logs opens as soon as your primary session is loaded; the other recent sessions come in behind it instead of holding up the first paint (at most 12 are reopened automatically).
+- The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
 
 ## [5.7.0] - 2026-09-02
 

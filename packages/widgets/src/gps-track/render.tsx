@@ -1,12 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import type { Map as MapLibreMap, StyleSpecification } from "maplibre-gl";
 import type { ChannelSlice } from "@helios/store";
 import type { GpsPickRequest } from "@helios/lib";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { detectTrackLabels, SENSITIVITY_PRESETS, type Sensitivity, type TrackLabel } from "./turns";
+
+/** maplibre-gl (plus its stylesheet) is ~780 KB minified — bigger than the
+ *  rest of the widget package put together — and only the `basemap !== "none"`
+ *  modes ever touch it. Loading it statically put all of it in the app's main
+ *  chunk, so every launch parsed a map engine most sessions never open. It is
+ *  now imported the first time a GPS widget actually needs a basemap, and the
+ *  promise is memoised so a second widget reuses the same module. */
+type MapLibreModule = typeof import("maplibre-gl");
+let maplibrePromise: Promise<MapLibreModule> | null = null;
+function loadMaplibre(): Promise<MapLibreModule> {
+  return (maplibrePromise ??= Promise.all([
+    import("maplibre-gl"),
+    import("maplibre-gl/dist/maplibre-gl.css"),
+  ]).then(([m]) => (m as unknown as { default?: MapLibreModule }).default ?? m));
+}
 
 export type BasemapMode = "none" | "dark" | "satellite" | "custom";
 
@@ -236,7 +250,20 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         fitBoundsToData();
         drawRef.current();
       });
-    } else {
+      return;
+    }
+
+    // No map yet: fetch the engine, then build. `cancelled` guards the gap —
+    // a widget that unmounts (or flips basemap) while the chunk is in flight
+    // must never end up with an orphan Map that nothing tears down.
+    let cancelled = false;
+    void loadMaplibre().then((maplibregl) => {
+      if (cancelled) return;
+      // A concurrent effect run may already have built one; never build twice.
+      if (mapRef.current) return;
+      const container = mapDivRef.current;
+      if (!container) return;
+
       // Compute initial bounds up-front so the map opens already framed on
       // the GPS data instead of flashing at zoom 0 / world view. fitBounds
       // after-the-fact races the container's first layout, which left the
@@ -247,7 +274,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       let map: MapLibreMap;
       try {
         map = new maplibregl.Map({
-          container: div,
+          container,
           style: buildStyle(basemap, config.customTileUrl),
           attributionControl: { compact: true },
           // Read-only basemap: keeps the canvas overlay's click/drag scrub
@@ -283,7 +310,13 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       map.on("zoom", () => drawRef.current());
       map.on("rotate", () => drawRef.current());
       map.on("pitch", () => drawRef.current());
-    }
+      // The map only exists now, so refresh the overlay against it.
+      fitBoundsToData();
+      drawRef.current();
+    }).catch((e) => {
+      console.error("[helios/gps-track] maplibre failed to load:", e);
+    });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useMap, basemap, config.customTileUrl]);
 
