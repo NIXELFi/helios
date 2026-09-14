@@ -301,6 +301,33 @@ describe("ProductivityViewClient", () => {
     expect(usePmStore.getState().selectedTaskId).toBe("b1");
   });
 
+  it("compares subteams stuck-first with a status bar and a Table link per row", async () => {
+    fetchTaskHistory.mockResolvedValue({
+      rows: [
+        row({ action: "open", task_id: "a1", event_time: "x", task_status_now: "in_progress" }),
+        row({ action: "open", task_id: "c1", event_time: "x", task_status_now: "blocked", subteam_id: "st-chas", subteam_name: "Chassis" }),
+        row({ action: "open", task_id: "c2", event_time: "x", task_status_now: "not_started", subteam_id: "st-chas", subteam_name: "Chassis" }),
+      ],
+      failure: null,
+      message: null,
+    });
+    renderView(null);
+
+    expect(await screen.findByText("Subteams")).toBeInTheDocument();
+    const rows_ = screen.getAllByRole("img", { name: /^(Aero|Chassis):/ });
+    // Chassis has the stuck task, so it leads.
+    expect(rows_[0]).toHaveAccessibleName(/^Chassis: 0 Done, 0 In Progress, 0 Needs Review, 1 Blocked, 1 Not Started/);
+    const link = screen.getByRole("link", { name: "Chassis" });
+    expect(link.getAttribute("href")).toBe("/table?team=st-chas&mode=hide");
+  });
+
+  it("hides the Subteams comparison inside a single subteam's route", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    renderView("aero");
+    expect(await screen.findByText("Attention")).toBeInTheDocument();
+    expect(screen.queryByText("Subteams")).not.toBeInTheDocument();
+  });
+
   it("carries a picked subteam into the Table links as a hide-others team filter", async () => {
     fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
     renderView(null);

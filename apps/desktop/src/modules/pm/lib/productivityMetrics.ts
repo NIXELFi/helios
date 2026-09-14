@@ -750,3 +750,99 @@ export function attentionLists(
   out.stale.sort(daysDesc);
   return out;
 }
+
+// --- subteam comparison -----------------------------------------------------
+
+export interface SubteamSummary {
+  /** "" = no subteam. */
+  subteamId: string;
+  subteamName: string;
+  /** Live open snapshot. */
+  open: number;
+  notStarted: number;
+  inProgress: number;
+  needsReview: number;
+  blocked: number;
+  /** blocked + needsReview. */
+  stuck: number;
+  /** Open and past due. */
+  overdue: number;
+  /** Completed inside the selected window. */
+  done: number;
+  /** Windowed on-time share, null when no completion had a due date. */
+  onTimeRate: number | null;
+  onTimeConsidered: number;
+}
+
+/**
+ * One row per subteam for the Subteams panel: the live open mix from the
+ * snapshot rows plus the window's completions and on-time share from the
+ * built metrics. Sorted by stuck, then overdue, then open — the order a lead
+ * should look at them in — with ties broken by name.
+ */
+export function subteamSummaries(
+  rows: ReadonlyArray<TaskHistoryRow>,
+  metrics: ProductivityMetrics,
+  now: Date,
+): SubteamSummary[] {
+  const today = localDayKey(now);
+  const byId = new Map<string, SubteamSummary>();
+  const get = (id: string, name: string | null): SubteamSummary => {
+    let s = byId.get(id);
+    if (!s) {
+      s = {
+        subteamId: id,
+        subteamName: name ?? UNKNOWN_SUBTEAM,
+        open: 0,
+        notStarted: 0,
+        inProgress: 0,
+        needsReview: 0,
+        blocked: 0,
+        stuck: 0,
+        overdue: 0,
+        done: 0,
+        onTimeRate: null,
+        onTimeConsidered: 0,
+      };
+      byId.set(id, s);
+    } else if (name && s.subteamName === UNKNOWN_SUBTEAM) {
+      s.subteamName = name;
+    }
+    return s;
+  };
+
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.action !== "open" || seen.has(r.task_id)) continue;
+    seen.add(r.task_id);
+    const status = r.task_status_now;
+    if (status === null || CLOSED_STATUSES.has(status)) continue;
+    const s = get(r.subteam_id ?? "", r.subteam_name);
+    s.open += 1;
+    if (status === "not_started") s.notStarted += 1;
+    else if (status === "in_progress") s.inProgress += 1;
+    else if (status === "needs_review") s.needsReview += 1;
+    else if (status === "blocked") s.blocked += 1;
+    if (r.due_date && r.due_date < today) s.overdue += 1;
+  }
+  for (const w of metrics.throughput) {
+    for (const [id, n] of Object.entries(w.bySubteam)) {
+      const name = metrics.subteams.find((t) => t.id === id)?.name ?? null;
+      get(id, name).done += n;
+    }
+  }
+  for (const t of metrics.onTimeBySubteam) {
+    const s = get(t.subteamId, t.subteamName);
+    s.onTimeRate = t.rate;
+    s.onTimeConsidered = t.considered;
+  }
+  for (const s of byId.values()) s.stuck = s.blocked + s.needsReview;
+
+  return [...byId.values()].sort(
+    (a, b) =>
+      b.stuck - a.stuck ||
+      b.overdue - a.overdue ||
+      b.open - a.open ||
+      a.subteamName.localeCompare(b.subteamName),
+  );
+}

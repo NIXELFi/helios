@@ -4,6 +4,7 @@ import {
   buildProductivity,
   isoWeekKey,
   sliceWindow,
+  subteamSummaries,
   stateCounts,
   weeklyCompletions,
   windowDeltas,
@@ -449,5 +450,55 @@ describe("attentionLists", () => {
     expect(a.blocked.every((i) => i.days === null)).toBe(true);
     // Overdue-by still works: it only needs the due date.
     expect(a.overdue.map((i) => i.days)).toEqual([1, 10]);
+  });
+});
+
+describe("subteamSummaries", () => {
+  const now = new Date(2026, 8, 16, 9, 0, 0);
+  const open = (over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "task_id">) =>
+    row({ action: "open", event_time: "x", task_status_now: "in_progress", ...over });
+  const rows = [
+    // Aero: 3 open (1 blocked, 1 review, 1 in progress overdue), 2 done in window.
+    open({ task_id: "a1", task_status_now: "blocked" }),
+    open({ task_id: "a2", task_status_now: "needs_review" }),
+    open({ task_id: "a3", due_date: "2026-09-01" }),
+    row({ action: "completed", task_id: "a4", event_time: "2026-09-10T10:00:00Z", due_date: "2026-09-12" }),
+    row({ action: "completed", task_id: "a5", event_time: "2026-09-11T10:00:00Z", due_date: "2026-09-01" }),
+    // Chassis: 2 open not started, nothing done.
+    open({ task_id: "c1", task_status_now: "not_started", subteam_id: "st-2", subteam_name: "Chassis" }),
+    open({ task_id: "c2", task_status_now: "not_started", subteam_id: "st-2", subteam_name: "Chassis" }),
+    // No subteam: one done, no open.
+    row({ action: "completed", task_id: "n1", event_time: "2026-09-10T10:00:00Z", subteam_id: null, subteam_name: null }),
+  ];
+  const metrics = buildProductivity(rows, { now });
+
+  it("summarises the open mix, windowed done count and on-time per subteam", () => {
+    const s = subteamSummaries(rows, metrics, now);
+    expect(s.map((t) => t.subteamName)).toEqual(["Aero", "Chassis", "Unassigned"]);
+    const aero = s[0]!;
+    expect(aero).toMatchObject({
+      open: 3,
+      inProgress: 1,
+      needsReview: 1,
+      blocked: 1,
+      stuck: 2,
+      overdue: 1,
+      done: 2,
+      onTimeRate: 0.5,
+      onTimeConsidered: 2,
+    });
+    expect(s[1]).toMatchObject({ open: 2, notStarted: 2, stuck: 0, done: 0, onTimeRate: null });
+    expect(s[2]).toMatchObject({ subteamId: "", open: 0, done: 1 });
+  });
+
+  it("sorts by stuck, then overdue, then open", () => {
+    const tie = [
+      open({ task_id: "x1", task_status_now: "not_started", subteam_id: "st-2", subteam_name: "Chassis", due_date: "2026-01-01" }),
+      open({ task_id: "y1", task_status_now: "not_started", subteam_id: "st-3", subteam_name: "Aero" }),
+      open({ task_id: "y2", task_status_now: "not_started", subteam_id: "st-3", subteam_name: "Aero" }),
+    ];
+    const s = subteamSummaries(tie, buildProductivity(tie, { now }), now);
+    // Chassis has the overdue task and wins despite having fewer open.
+    expect(s.map((t) => t.subteamName)).toEqual(["Chassis", "Aero"]);
   });
 });

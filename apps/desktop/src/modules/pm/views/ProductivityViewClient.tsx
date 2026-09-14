@@ -14,7 +14,7 @@ import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { viewHref } from "@pm/lib/nav";
 import { EMPTY_FILTERS, filtersToParams, type TaskFilters } from "@pm/lib/filters";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
-import { STATUS_DOT, type Subteam, type TaskStatus } from "@helios/pm-ui";
+import { STATUS_DOT, STATUS_LABEL, type Subteam, type TaskStatus } from "@helios/pm-ui";
 import { Link } from "@pm/lib/router";
 import {
   attentionLists,
@@ -24,15 +24,18 @@ import {
   localDayKey,
   sliceWindow,
   stateCounts,
+  subteamSummaries,
   weeklyCompletions,
   windowDeltas,
   type AttentionItem,
   type AttentionLists,
   type ProductivityMetrics,
   type StateCounts,
+  type SubteamSummary,
   type WindowDeltas,
 } from "@pm/lib/productivityMetrics";
 import { StackedWeeks, type WeekColumn, type WeekSeries } from "@pm/components/charts/StackedWeeks";
+import { BarStrip, type BarSegment } from "@pm/components/charts/BarStrip";
 import { KpiTile } from "@pm/components/charts/KpiTile";
 import { Delta } from "@pm/components/charts/Delta";
 import { Sparkline } from "@pm/components/charts/Sparkline";
@@ -238,6 +241,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   // not hide the Person toggle from someone who is allowed to see it.
   const actorsAvailable = useMemo(() => rows.some((r) => r.actor_id !== null), [rows]);
   const attention = useMemo<AttentionLists>(() => attentionLists(rows, now), [rows, now]);
+  const teams = useMemo<SubteamSummary[]>(() => subteamSummaries(rows, metrics, now), [rows, metrics, now]);
   const selectTask = usePmStore((s) => s.selectTask);
   const subteamById = useMemo(() => new Map(subteams.map((s) => [s.id, s])), [subteams]);
   const rangeCaption = range
@@ -431,14 +435,21 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
               subteamColor={(id) => subteamColor.get(id) ?? null}
               today={now}
             />
-            <AttentionPanel
-              lists={attention}
-              now={now}
-              tableHref={tableHref}
-              subteamById={subteamById}
-              onOpenTask={selectTask}
-            />
-            <PeoplePanel metrics={metrics} />
+            <div className="grid gap-6 xl:grid-cols-2">
+              <AttentionPanel
+                lists={attention}
+                now={now}
+                tableHref={tableHref}
+                subteamById={subteamById}
+                onOpenTask={selectTask}
+              />
+              <div className="flex flex-col gap-6">
+                {routeTeam ? null : (
+                  <SubteamsPanel teams={teams} subteamById={subteamById} tableHref={tableHref} />
+                )}
+                <PeoplePanel metrics={metrics} />
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -648,6 +659,114 @@ function AttentionPanel({
               ) : null}
             </section>
           ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// --- subteams ---------------------------------------------------------------
+
+/** The status mix of a row as bar segments, in the order the bar reads. */
+function statusSegments(s: {
+  done: number;
+  inProgress: number;
+  needsReview: number;
+  blocked: number;
+  notStarted: number;
+}): BarSegment[] {
+  return [
+    { key: "done", label: STATUS_LABEL.done, value: s.done, color: STATUS_DOT.done },
+    { key: "in_progress", label: STATUS_LABEL.in_progress, value: s.inProgress, color: STATUS_DOT.in_progress },
+    { key: "needs_review", label: STATUS_LABEL.needs_review, value: s.needsReview, color: STATUS_DOT.needs_review },
+    { key: "blocked", label: STATUS_LABEL.blocked, value: s.blocked, color: STATUS_DOT.blocked },
+    { key: "not_started", label: STATUS_LABEL.not_started, value: s.notStarted, color: STATUS_DOT.not_started },
+  ];
+}
+
+const COL = "w-12 text-right";
+
+function Num({ value, tone = "dim" }: { value: string | number; tone?: "dim" | "text" | "warn" | "danger" }) {
+  const cls =
+    tone === "danger"
+      ? "text-helios-danger"
+      : tone === "warn"
+        ? "text-helios-warn"
+        : tone === "text"
+          ? "text-helios-text"
+          : "text-helios-dim";
+  return <span className={`${COL} ${cls}`}>{value}</span>;
+}
+
+function pct(rate: number | null): string {
+  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+}
+
+function SubteamsPanel({
+  teams,
+  subteamById,
+  tableHref,
+}: {
+  teams: SubteamSummary[];
+  subteamById: Map<string, Subteam>;
+  tableHref: (patch: Partial<TaskFilters>) => string;
+}) {
+  const max = Math.max(1, ...teams.map((t) => t.open + t.done));
+  return (
+    <Panel
+      title="Subteams"
+      subtitle="Open work by status, with this window's completions. Stuck first. A name opens that subteam in the Table."
+    >
+      {teams.length === 0 ? (
+        <Empty>No open or completed work in this scope.</Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-helios-dim">
+            <span className="w-32 shrink-0" />
+            <span className="min-w-0 flex-1" />
+            <span className="flex shrink-0 gap-3">
+              <span className={COL}>done</span>
+              <span className={COL}>stuck</span>
+              <span className={COL}>late</span>
+              <span className={COL}>on time</span>
+            </span>
+          </div>
+          {teams.map((t) => {
+            const st = subteamById.get(t.subteamId);
+            const color = st?.color ?? NO_SUBTEAM_COLOR;
+            return (
+              <BarStrip
+                key={t.subteamId || "__none__"}
+                title={t.subteamName}
+                max={max}
+                segments={statusSegments(t)}
+                label={
+                  t.subteamId ? (
+                    <Link
+                      href={tableHref({ subteamIds: [t.subteamId], showMode: "hide" })}
+                      className="inline-flex max-w-full items-center gap-1.5 text-helios-text hover:underline"
+                    >
+                      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                      <span className="truncate">{t.subteamName}</span>
+                    </Link>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-helios-dim">
+                      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                      {t.subteamName}
+                    </span>
+                  )
+                }
+                trailing={
+                  <>
+                    <Num value={t.done} tone={t.done > 0 ? "text" : "dim"} />
+                    <Num value={t.stuck} tone={t.stuck > 0 ? "danger" : "dim"} />
+                    <Num value={t.overdue} tone={t.overdue > 0 ? "warn" : "dim"} />
+                    <Num value={pct(t.onTimeRate)} tone={t.onTimeRate === null ? "dim" : "text"} />
+                  </>
+                }
+              />
+            );
+          })}
         </div>
       )}
     </Panel>
