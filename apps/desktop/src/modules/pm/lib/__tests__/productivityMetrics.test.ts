@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGING_BUCKETS,
-  buildProductivity,
   attentionLists,
+  buildProductivity,
   isoWeekKey,
-  percentile,
   sliceWindow,
   stateCounts,
   weeklyCompletions,
@@ -58,24 +56,6 @@ describe("isoWeekKey", () => {
   });
 });
 
-describe("percentile", () => {
-  it("returns null for an empty sample", () => {
-    expect(percentile([], 0.5)).toBeNull();
-  });
-
-  it("returns the median of an odd sample", () => {
-    expect(percentile([5, 1, 3], 0.5)).toBe(3);
-  });
-
-  it("interpolates the median of an even sample", () => {
-    expect(percentile([1, 2, 3, 4], 0.5)).toBe(2.5);
-  });
-
-  it("computes p85", () => {
-    expect(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.85)).toBeCloseTo(8.65, 5);
-  });
-});
-
 describe("buildProductivity — completion rule", () => {
   it("counts a reopened-and-redone task ONCE, at its LAST completion", () => {
     const rows = [
@@ -86,9 +66,7 @@ describe("buildProductivity — completion rule", () => {
     ];
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     expect(m.totalCompleted).toBe(1);
-    // Cycle time is measured to the LAST completion: Jan 5 -> Jan 20 = 15 days.
-    expect(m.cycleTimeOverall.median).toBe(15);
-    // And it lands in the week of the last completion only.
+    // It lands in the week of the LAST completion only.
     const weeksWithCompletions = m.throughput.filter((w) => w.completed > 0);
     expect(weeksWithCompletions).toHaveLength(1);
     expect(weeksWithCompletions[0]!.week).toBe(isoWeekKey(new Date("2026-01-20T10:00:00Z")));
@@ -104,7 +82,7 @@ describe("buildProductivity — completion rule", () => {
   });
 });
 
-describe("buildProductivity — throughput + burn-up", () => {
+describe("buildProductivity — throughput", () => {
   const rows = [
     row({ action: "created", task_id: "t1", event_time: "2026-01-05T10:00:00Z", task_created_at: "2026-01-05T10:00:00Z" }),
     row({ action: "created", task_id: "t2", event_time: "2026-01-06T10:00:00Z", task_created_at: "2026-01-06T10:00:00Z", subteam_name: "Chassis", subteam_id: "st-2" }),
@@ -130,50 +108,6 @@ describe("buildProductivity — throughput + burn-up", () => {
     const keys = m.throughput.map((w) => w.week);
     expect(keys).toEqual([...keys].sort());
     expect(new Set(keys).size).toBe(keys.length);
-  });
-
-  it("burns up cumulative created and completed", () => {
-    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
-    const last = m.burnup[m.burnup.length - 1]!;
-    expect(last.createdCumulative).toBe(3);
-    expect(last.completedCumulative).toBe(2);
-    // Monotonic non-decreasing.
-    for (let i = 1; i < m.burnup.length; i += 1) {
-      expect(m.burnup[i]!.createdCumulative).toBeGreaterThanOrEqual(m.burnup[i - 1]!.createdCumulative);
-      expect(m.burnup[i]!.completedCumulative).toBeGreaterThanOrEqual(m.burnup[i - 1]!.completedCumulative);
-    }
-  });
-});
-
-describe("buildProductivity — cycle time", () => {
-  it("reports median and p85 per subteam plus a histogram", () => {
-    const mk = (id: string, createdDay: number, doneDay: number, team: string) => [
-      row({ action: "created", task_id: id, event_time: `2026-03-${String(createdDay).padStart(2, "0")}T00:00:00Z`, task_created_at: `2026-03-${String(createdDay).padStart(2, "0")}T00:00:00Z`, subteam_name: team, subteam_id: team }),
-      row({ action: "completed", task_id: id, event_time: `2026-03-${String(doneDay).padStart(2, "0")}T00:00:00Z`, task_created_at: `2026-03-${String(createdDay).padStart(2, "0")}T00:00:00Z`, subteam_name: team, subteam_id: team }),
-    ];
-    const rows = [
-      ...mk("a", 1, 3, "Aero"),
-      ...mk("b", 1, 5, "Aero"),
-      ...mk("c", 1, 11, "Aero"),
-      ...mk("d", 1, 2, "Chassis"),
-    ];
-    const m = buildProductivity(rows, { now: new Date("2026-04-01T00:00:00Z") });
-    const aero = m.cycleTimeBySubteam.find((s) => s.subteamName === "Aero")!;
-    expect(aero.n).toBe(3);
-    expect(aero.median).toBe(4);
-    expect(aero.p85).toBeCloseTo(8.2, 5);
-    const chassis = m.cycleTimeBySubteam.find((s) => s.subteamName === "Chassis")!;
-    expect(chassis.median).toBe(1);
-    // Histogram totals equal the completions with a known creation time.
-    expect(m.cycleHistogram.reduce((a, b) => a + b.count, 0)).toBe(4);
-  });
-
-  it("skips completions whose task_created_at is unknown", () => {
-    const rows = [row({ action: "completed", task_id: "t1", event_time: "2026-01-08T10:00:00Z" })];
-    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
-    expect(m.totalCompleted).toBe(1);
-    expect(m.cycleTimeOverall.n).toBe(0);
-    expect(m.cycleTimeOverall.median).toBeNull();
   });
 });
 
@@ -207,34 +141,23 @@ describe("buildProductivity — on-time rate", () => {
     expect(m.onTime.rate).toBe(1);
   });
 
+  it("splits on-time per subteam, keeping the no-due-date count beside it", () => {
+    const rows = [
+      row({ action: "completed", task_id: "a", event_time: "2026-01-10T10:00:00Z", due_date: "2026-01-12" }),
+      row({ action: "completed", task_id: "b", event_time: "2026-01-10T10:00:00Z", due_date: "2026-01-01" }),
+      row({ action: "completed", task_id: "c", event_time: "2026-01-10T10:00:00Z", due_date: null }),
+      row({ action: "completed", task_id: "d", event_time: "2026-01-10T10:00:00Z", due_date: "2026-01-12", subteam_id: "st-2", subteam_name: "Chassis" }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.onTimeBySubteam).toEqual([
+      { subteamId: "st-1", subteamName: "Aero", considered: 2, onTime: 1, rate: 0.5, excludedNoDueDate: 1 },
+      { subteamId: "st-2", subteamName: "Chassis", considered: 1, onTime: 1, rate: 1, excludedNoDueDate: 0 },
+    ]);
+  });
+
   it("has a null rate when nothing qualifies", () => {
     const m = buildProductivity([], { now: new Date("2026-02-01T00:00:00Z") });
     expect(m.onTime.rate).toBeNull();
-  });
-});
-
-describe("buildProductivity — open work aging", () => {
-  it("buckets open tasks by age and leaves done/deleted tasks out", () => {
-    const now = new Date("2026-02-01T00:00:00Z");
-    const rows = [
-      // 3 days old, open
-      row({ action: "created", task_id: "t1", event_time: "2026-01-29T00:00:00Z", task_created_at: "2026-01-29T00:00:00Z", task_status_now: "active" }),
-      // 10 days old, open
-      row({ action: "created", task_id: "t2", event_time: "2026-01-22T00:00:00Z", task_created_at: "2026-01-22T00:00:00Z", task_status_now: "backlog" }),
-      // 20 days old, open
-      row({ action: "created", task_id: "t3", event_time: "2026-01-12T00:00:00Z", task_created_at: "2026-01-12T00:00:00Z", task_status_now: "blocked" }),
-      // 60 days old, open
-      row({ action: "created", task_id: "t4", event_time: "2025-12-03T00:00:00Z", task_created_at: "2025-12-03T00:00:00Z", task_status_now: "active" }),
-      // done -> not open
-      row({ action: "created", task_id: "t5", event_time: "2026-01-20T00:00:00Z", task_created_at: "2026-01-20T00:00:00Z", task_status_now: "done" }),
-      // deleted -> not open
-      row({ action: "created", task_id: "t6", event_time: "2026-01-20T00:00:00Z", task_created_at: "2026-01-20T00:00:00Z", task_status_now: "active" }),
-      row({ action: "deleted", task_id: "t6", event_time: "2026-01-21T00:00:00Z" }),
-    ];
-    const m = buildProductivity(rows, { now });
-    expect(m.aging.map((b) => b.count)).toEqual([1, 1, 1, 1]);
-    expect(m.aging.map((b) => b.label)).toEqual(AGING_BUCKETS.map((b) => b.label));
-    expect(m.totalOpen).toBe(4);
   });
 });
 
@@ -246,7 +169,7 @@ describe("buildProductivity — person aggregation", () => {
     expect(m.perPerson).toEqual([]);
   });
 
-  it("aggregates completions, cycle time, on-time and open work per person", () => {
+  it("aggregates completions, on-time and open work per person", () => {
     const rows = [
       row({ action: "created", task_id: "t1", event_time: "2026-01-01T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", task_status_now: "done" }),
       row({ action: "completed", task_id: "t1", event_time: "2026-01-05T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", due_date: "2026-01-06", task_status_now: "done" }),
@@ -259,7 +182,6 @@ describe("buildProductivity — person aggregation", () => {
     const ada = m.perPerson.find((p) => p.actorId === "u1")!;
     expect(ada.actorName).toBe("Ada");
     expect(ada.completions).toBe(2);
-    expect(ada.medianCycleDays).toBe(7);
     expect(ada.onTimeRate).toBe(0.5);
     expect(ada.open).toBe(0);
     const grace = m.perPerson.find((p) => p.actorId === "u2")!;
@@ -276,7 +198,7 @@ describe("buildProductivity — synthetic rows from the RPC", () => {
   // snapshot, deliberately not window-filtered) so that open work with no
   // recent activity is still visible. It is a state, not an event: it must
   // never be counted as a creation or a completion.
-  it("ages a task whose ONLY row is a synthetic open row", () => {
+  it("counts a task whose ONLY row is a synthetic open row as open, not as work done", () => {
     const rows = [
       row({
         action: "open",
@@ -288,13 +210,10 @@ describe("buildProductivity — synthetic rows from the RPC", () => {
     ];
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     expect(m.totalOpen).toBe(1);
-    // 92 days old -> the last bucket.
-    expect(m.aging[3]!.count).toBe(1);
     // ...and it is NOT work anyone did in the window.
     expect(m.totalCreated).toBe(0);
     expect(m.totalCompleted).toBe(0);
     expect(m.throughput).toEqual([]);
-    expect(m.burnup).toEqual([]);
   });
 
   it("does not double-count a task that has both an open row and a created event", () => {
@@ -335,7 +254,6 @@ describe("buildProductivity — synthetic rows from the RPC", () => {
     ];
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     expect(m.totalCompleted).toBe(1);
-    expect(m.cycleTimeOverall.median).toBe(10);
     expect(m.onTime.rate).toBe(1);
     expect(m.totalOpen).toBe(0);
   });
@@ -348,7 +266,8 @@ describe("buildProductivity — synthetic rows from the RPC", () => {
     ];
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     expect(m.totalCompleted).toBe(1);
-    expect(m.cycleTimeOverall.median).toBe(10);
+    // The later (synthetic) one wins the on-time check: due the 25th, done the 20th.
+    expect(m.throughput.find((w) => w.completed === 1)!.weekStart).toBe("2026-01-19");
   });
 
   it("leaves open rows out of the per-person open count (they carry no actor)", () => {
@@ -370,9 +289,8 @@ describe("buildProductivity — empty window", () => {
     expect(m.totalCompleted).toBe(0);
     expect(m.totalCreated).toBe(0);
     expect(m.throughput).toEqual([]);
-    expect(m.burnup).toEqual([]);
-    expect(m.cycleTimeBySubteam).toEqual([]);
-    expect(m.aging.every((b) => b.count === 0)).toBe(true);
+    expect(m.onTimeBySubteam).toEqual([]);
+    expect(m.onTime.rate).toBeNull();
   });
 });
 

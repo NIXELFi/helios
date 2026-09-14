@@ -438,14 +438,6 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
               subteamById={subteamById}
               onOpenTask={selectTask}
             />
-            <BurnupPanel metrics={metrics} />
-            <div className="grid gap-6 lg:grid-cols-2">
-              <CycleTimePanel metrics={metrics} />
-              <div className="flex flex-col gap-6">
-                <OnTimePanel metrics={metrics} />
-                <AgingPanel metrics={metrics} />
-              </div>
-            </div>
             <PeoplePanel metrics={metrics} />
           </div>
         )}
@@ -785,146 +777,6 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-helios-dim">{children}</p>;
 }
 
-// Scaled-viewBox constants, only the burn-up still uses them (it goes next).
-const CHART_W = 760;
-const CHART_H = 200;
-const PAD_L = 34;
-const PAD_B = 22;
-
-function BurnupPanel({ metrics }: { metrics: ProductivityMetrics }) {
-  const pts = metrics.burnup;
-  const max = Math.max(1, ...pts.map((p) => p.createdCumulative));
-  const plotH = CHART_H - PAD_B;
-  const x = (i: number) => PAD_L + (pts.length > 1 ? (i / (pts.length - 1)) * (CHART_W - PAD_L) : 0);
-  const y = (v: number) => plotH - (v / max) * (plotH - 8);
-  const path = (get: (p: (typeof pts)[number]) => number) =>
-    pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(get(p)).toFixed(1)}`).join(" ");
-
-  return (
-    <Panel title="Created vs completed" subtitle="Cumulative over the window.">
-      <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        className="w-full"
-        role="img"
-        aria-label="Cumulative created versus completed"
-      >
-        <line x1={PAD_L} y1={plotH} x2={CHART_W} y2={plotH} stroke="currentColor" opacity={0.2} />
-        <text x={2} y={12} className="fill-current text-[10px] opacity-50">
-          {max}
-        </text>
-        <path d={path((p) => p.createdCumulative)} fill="none" stroke="#8C1D40" strokeWidth={2} />
-        <path d={path((p) => p.completedCumulative)} fill="none" stroke="#FFC627" strokeWidth={2} />
-      </svg>
-      <ul className="flex gap-4 text-xs text-helios-dim">
-        <li className="flex items-center gap-1.5">
-          <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: "#8C1D40" }} />
-          Created ({metrics.totalCreated})
-        </li>
-        <li className="flex items-center gap-1.5">
-          <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: "#FFC627" }} />
-          Completed ({metrics.totalCompleted})
-        </li>
-      </ul>
-    </Panel>
-  );
-}
-
-function days(n: number | null): string {
-  return n === null ? "—" : `${n.toFixed(1)} d`;
-}
-
-function CycleTimePanel({ metrics }: { metrics: ProductivityMetrics }) {
-  const maxBucket = Math.max(1, ...metrics.cycleHistogram.map((b) => b.count));
-  return (
-    <Panel
-      title="Cycle time"
-      subtitle="Days from task creation to its last completion."
-    >
-      <p className="text-sm text-helios-text">
-        Median {days(metrics.cycleTimeOverall.median)} · p85 {days(metrics.cycleTimeOverall.p85)}{" "}
-        <span className="text-helios-dim">({metrics.cycleTimeOverall.n} tasks)</span>
-      </p>
-
-      <div className="flex flex-col gap-1.5">
-        {metrics.cycleHistogram.map((b) => (
-          <div key={b.label} className="flex items-center gap-2 text-xs text-helios-dim">
-            <span className="w-14 shrink-0 text-right">{b.label}</span>
-            <span className="h-3 flex-1 overflow-hidden rounded-sm bg-helios-base">
-              <span
-                className="block h-full rounded-sm"
-                style={{ width: `${(b.count / maxBucket) * 100}%`, backgroundColor: "#FFC627" }}
-              />
-            </span>
-            <span className="w-6 shrink-0 tabular-nums">{b.count}</span>
-          </div>
-        ))}
-      </div>
-
-      {metrics.cycleTimeBySubteam.length > 1 ? (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-helios-line text-left text-[10px] uppercase tracking-widest text-helios-dim">
-              <th className="py-1.5">Subteam</th>
-              <th className="py-1.5 text-right">n</th>
-              <th className="py-1.5 text-right">Median</th>
-              <th className="py-1.5 text-right">p85</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.cycleTimeBySubteam.map((s) => (
-              <tr key={s.subteamName} className="border-b border-helios-line/60 last:border-b-0">
-                <td className="py-1.5 text-helios-text">{s.subteamName}</td>
-                <td className="py-1.5 text-right tabular-nums text-helios-dim">{s.n}</td>
-                <td className="py-1.5 text-right tabular-nums text-helios-dim">{days(s.median)}</td>
-                <td className="py-1.5 text-right tabular-nums text-helios-dim">{days(s.p85)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
-    </Panel>
-  );
-}
-
-function OnTimePanel({ metrics }: { metrics: ProductivityMetrics }) {
-  const { rate, onTime, considered, excludedNoDueDate } = metrics.onTime;
-  return (
-    <Panel title="On-time rate" subtitle="Completed on or before the due date.">
-      <p className="text-2xl font-medium text-helios-text">
-        {rate === null ? "—" : `${Math.round(rate * 100)}%`}
-      </p>
-      <p className="text-xs text-helios-dim">
-        {onTime} of {considered} completed tasks with a due date.
-        {excludedNoDueDate > 0
-          ? ` ${excludedNoDueDate} completed task${excludedNoDueDate === 1 ? "" : "s"} had no due date and ${excludedNoDueDate === 1 ? "is" : "are"} excluded.`
-          : ""}
-      </p>
-    </Panel>
-  );
-}
-
-function AgingPanel({ metrics }: { metrics: ProductivityMetrics }) {
-  const max = Math.max(1, ...metrics.aging.map((b) => b.count));
-  return (
-    <Panel title="Open work aging" subtitle="Currently open tasks, by age since creation.">
-      <div className="flex flex-col gap-1.5">
-        {metrics.aging.map((b) => (
-          <div key={b.label} className="flex items-center gap-2 text-xs text-helios-dim">
-            <span className="w-20 shrink-0 text-right">{b.label}</span>
-            <span className="h-3 flex-1 overflow-hidden rounded-sm bg-helios-base">
-              <span
-                className="block h-full rounded-sm"
-                style={{ width: `${(b.count / max) * 100}%`, backgroundColor: "#8C1D40" }}
-              />
-            </span>
-            <span className="w-6 shrink-0 tabular-nums">{b.count}</span>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
 function PeoplePanel({ metrics }: { metrics: ProductivityMetrics }) {
   if (!metrics.actorsAvailable) {
     return (
@@ -945,7 +797,6 @@ function PeoplePanel({ metrics }: { metrics: ProductivityMetrics }) {
           <tr className="border-b border-helios-line text-left text-[10px] uppercase tracking-widest text-helios-dim">
             <th className="py-1.5">Person</th>
             <th className="py-1.5 text-right">Completed</th>
-            <th className="py-1.5 text-right">Median cycle</th>
             <th className="py-1.5 text-right">On time</th>
             <th className="py-1.5 text-right">Open (created)</th>
           </tr>
@@ -955,9 +806,6 @@ function PeoplePanel({ metrics }: { metrics: ProductivityMetrics }) {
             <tr key={p.actorId} className="border-b border-helios-line/60 last:border-b-0">
               <td className="py-1.5 text-helios-text">{p.actorName}</td>
               <td className="py-1.5 text-right tabular-nums text-helios-dim">{p.completions}</td>
-              <td className="py-1.5 text-right tabular-nums text-helios-dim">
-                {days(p.medianCycleDays)}
-              </td>
               <td className="py-1.5 text-right tabular-nums text-helios-dim">
                 {p.onTimeRate === null ? "—" : `${Math.round(p.onTimeRate * 100)}%`}
               </td>

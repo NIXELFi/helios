@@ -106,10 +106,11 @@ describe("ProductivityViewClient", () => {
     const chart = screen.getByRole("img", { name: "Tasks completed per week" });
     expect(chart).toHaveAttribute("width");
     expect(chart).not.toHaveAttribute("viewBox");
-    expect(screen.getByText("Created vs completed")).toBeInTheDocument();
-    expect(screen.getByText("Cycle time")).toBeInTheDocument();
-    expect(screen.getByText("On-time rate")).toBeInTheDocument();
-    expect(screen.getByText("Open work aging")).toBeInTheDocument();
+    expect(screen.getByText("Attention")).toBeInTheDocument();
+    // The import-wall metrics are gone for good.
+    expect(screen.queryByText("Created vs completed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cycle time")).not.toBeInTheDocument();
+    expect(screen.queryByText("Open work aging")).not.toBeInTheDocument();
     // The header reads the live snapshot: one open task, nothing overdue.
     expect(screen.getByText(/completed in window · 1 open · 0 overdue/)).toBeInTheDocument();
     // The KPI row is four linked tiles.
@@ -142,7 +143,6 @@ describe("ProductivityViewClient", () => {
     // The fixture completion is two weeks old: widen past the default window.
     fireEvent.click(await screen.findByRole("radio", { name: "12 weeks" }));
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("Median cycle")).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Stack by" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Person" })).toBeInTheDocument();
   });

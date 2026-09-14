@@ -14,9 +14,9 @@
 // the activity log (migration 20260914000100):
 //   - `open` — one per currently-open task, a LIVE SNAPSHOT that ignores the
 //     window entirely. Open work with no recent activity (107 of 240 tasks in
-//     prod) would otherwise be invisible to the aging panel. It is a STATE, not
-//     an event: it feeds the open/aging numbers and nothing else — never
-//     throughput, never the burn-up, never the CSV.
+//     prod) would otherwise be invisible to the state panels. It is a STATE,
+//     not an event: it feeds the open / due / stuck numbers and nothing else —
+//     never throughput, never the CSV.
 //   - `completed` with a null `status_from` — stands in for a completion the
 //     trigger never logged (tasks seeded already-done). Indistinguishable from
 //     a real completion here on purpose; it counts identically.
@@ -56,31 +56,8 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const UNKNOWN_SUBTEAM = "Unassigned";
 
 // Statuses that mean "this task is finished". Everything else that still exists
-// counts as open work for the aging panel.
+// counts as open work.
 const CLOSED_STATUSES = new Set(["done", "cancelled", "canceled"]);
-
-export interface AgingBucketDef {
-  label: string;
-  /** Inclusive lower bound in days. */
-  minDays: number;
-  /** Inclusive upper bound in days, or null for the open-ended last bucket. */
-  maxDays: number | null;
-}
-
-export const AGING_BUCKETS: ReadonlyArray<AgingBucketDef> = [
-  { label: "0–7 days", minDays: 0, maxDays: 7 },
-  { label: "8–14 days", minDays: 8, maxDays: 14 },
-  { label: "15–30 days", minDays: 15, maxDays: 30 },
-  { label: "30+ days", minDays: 31, maxDays: null },
-];
-
-const CYCLE_HISTOGRAM_BUCKETS: ReadonlyArray<AgingBucketDef> = [
-  { label: "0–2 d", minDays: 0, maxDays: 2 },
-  { label: "3–7 d", minDays: 3, maxDays: 7 },
-  { label: "8–14 d", minDays: 8, maxDays: 14 },
-  { label: "15–30 d", minDays: 15, maxDays: 30 },
-  { label: "30+ d", minDays: 31, maxDays: null },
-];
 
 // --- small date helpers -----------------------------------------------------
 
@@ -127,39 +104,6 @@ export function isoWeekKey(d: Date): string {
   return `${year}-W${pad2(week)}`;
 }
 
-/**
- * Linear-interpolated percentile (the "R-7" / Excel definition), so a 2-sample
- * median is the mean of the two. Returns null for an empty sample. The input
- * array is copied before sorting — callers keep their order.
- */
-export function percentile(values: ReadonlyArray<number>, p: number): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 1) return sorted[0]!;
-  const idx = p * (sorted.length - 1);
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo]!;
-  return sorted[lo]! + (idx - lo) * (sorted[hi]! - sorted[lo]!);
-}
-
-function bucketize(
-  defs: ReadonlyArray<AgingBucketDef>,
-  days: ReadonlyArray<number>,
-): Array<{ label: string; count: number }> {
-  const out = defs.map((b) => ({ label: b.label, count: 0 }));
-  for (const d of days) {
-    for (let i = 0; i < defs.length; i += 1) {
-      const def = defs[i]!;
-      if (d >= def.minDays && (def.maxDays === null || d <= def.maxDays)) {
-        out[i]!.count += 1;
-        break;
-      }
-    }
-  }
-  return out;
-}
-
 // --- result shapes ----------------------------------------------------------
 
 export interface WeekThroughput {
@@ -174,20 +118,6 @@ export interface WeekThroughput {
   byPerson: Record<string, number>;
 }
 
-export interface BurnupPoint {
-  week: string;
-  weekStart: string;
-  createdCumulative: number;
-  completedCumulative: number;
-}
-
-export interface CycleTimeStat {
-  subteamName: string;
-  n: number;
-  median: number | null;
-  p85: number | null;
-}
-
 export interface OnTimeStat {
   /** Completions that had a due date, i.e. the denominator. */
   considered: number;
@@ -196,11 +126,16 @@ export interface OnTimeStat {
   excludedNoDueDate: number;
 }
 
+export interface SubteamOnTime extends OnTimeStat {
+  /** "" = no subteam. */
+  subteamId: string;
+  subteamName: string;
+}
+
 export interface PersonStat {
   actorId: string;
   actorName: string;
   completions: number;
-  medianCycleDays: number | null;
   onTimeRate: number | null;
   /**
    * Open tasks this person CREATED in the window (history has no owner column —
@@ -216,12 +151,9 @@ export interface ProductivityMetrics {
   totalCompleted: number;
   totalOpen: number;
   throughput: WeekThroughput[];
-  burnup: BurnupPoint[];
-  cycleTimeOverall: { n: number; median: number | null; p85: number | null };
-  cycleTimeBySubteam: CycleTimeStat[];
-  cycleHistogram: Array<{ label: string; count: number }>;
   onTime: OnTimeStat;
-  aging: Array<{ label: string; count: number }>;
+  /** On-time per subteam, sorted by name. Only meaningful beside the no-due-date count. */
+  onTimeBySubteam: SubteamOnTime[];
   /** True when the RPC returned at least one non-null actor, i.e. the caller is gated in. */
   actorsAvailable: boolean;
   /** Empty unless `actorsAvailable`. */
@@ -231,7 +163,7 @@ export interface ProductivityMetrics {
 }
 
 export interface ProductivityOptions {
-  /** Reference "now" for the aging buckets. Required; nothing here reads the clock. */
+  /** Reference "now". Required; nothing here reads the clock. */
   now: Date;
   /**
    * The selected window. When given, the week series is padded to cover it
@@ -280,8 +212,6 @@ export function buildProductivity(
   rows: ReadonlyArray<TaskHistoryRow>,
   opts: ProductivityOptions,
 ): ProductivityMetrics {
-  const nowMidnightMs = atLocalMidnight(opts.now).getTime();
-
   // Tasks that were deleted inside the window drop out of every metric: their
   // completions are no longer real work anyone can point at, and they are not
   // open work either.
@@ -402,68 +332,49 @@ export function buildProductivity(
     }
   }
 
-  // --- burn-up --------------------------------------------------------------
-  let cCreated = 0;
-  let cCompleted = 0;
-  const burnup: BurnupPoint[] = throughput.map((w) => {
-    cCreated += w.created;
-    cCompleted += w.completed;
-    return {
-      week: w.week,
-      weekStart: w.weekStart,
-      createdCumulative: cCreated,
-      completedCumulative: cCompleted,
-    };
-  });
-
-  // --- cycle time -----------------------------------------------------------
-  const cycleAll: number[] = [];
-  const cycleByTeam = new Map<string, number[]>();
-  for (const c of lastCompletion.values()) {
-    if (!c.createdAt) continue;
-    const days = (c.at.getTime() - c.createdAt.getTime()) / MS_PER_DAY;
-    if (days < 0) continue; // clock skew; not a real cycle
-    cycleAll.push(days);
-    const list = cycleByTeam.get(c.subteamName) ?? [];
-    list.push(days);
-    cycleByTeam.set(c.subteamName, list);
-  }
-
-  const cycleTimeBySubteam: CycleTimeStat[] = [...cycleByTeam.entries()]
-    .map(([subteamName, vals]) => ({
-      subteamName,
-      n: vals.length,
-      median: percentile(vals, 0.5),
-      p85: percentile(vals, 0.85),
-    }))
-    .sort((a, b) => a.subteamName.localeCompare(b.subteamName));
-
   // --- on-time --------------------------------------------------------------
   let considered = 0;
   let onTimeCount = 0;
   let excludedNoDueDate = 0;
+  const onTimeByTeam = new Map<string, SubteamOnTime>();
   for (const c of lastCompletion.values()) {
+    let team = onTimeByTeam.get(c.subteamId);
+    if (!team) {
+      team = {
+        subteamId: c.subteamId,
+        subteamName: c.subteamName,
+        considered: 0,
+        onTime: 0,
+        rate: null,
+        excludedNoDueDate: 0,
+      };
+      onTimeByTeam.set(c.subteamId, team);
+    }
     if (!c.dueDate) {
       excludedNoDueDate += 1;
+      team.excludedNoDueDate += 1;
       continue;
     }
     considered += 1;
+    team.considered += 1;
     // Compare calendar days, not instants: a task due the 10th and finished at
     // 23:00 on the 10th is on time.
-    if (localDayKey(c.at) <= c.dueDate) onTimeCount += 1;
+    if (localDayKey(c.at) <= c.dueDate) {
+      onTimeCount += 1;
+      team.onTime += 1;
+    }
   }
+  const onTimeBySubteam = [...onTimeByTeam.values()]
+    .map((t) => ({ ...t, rate: t.considered > 0 ? t.onTime / t.considered : null }))
+    .sort((a, b) => a.subteamName.localeCompare(b.subteamName));
 
-  // --- open work aging ------------------------------------------------------
+  // --- open work ------------------------------------------------------------
   const openTaskIds: string[] = [];
-  const openAges: number[] = [];
   for (const [taskId, snap] of snapshot.entries()) {
     if (deleted.has(taskId)) continue;
-    if (snap.statusNow === null) continue; // task row is gone — nothing to age
+    if (snap.statusNow === null) continue; // task row is gone
     if (CLOSED_STATUSES.has(snap.statusNow)) continue;
     openTaskIds.push(taskId);
-    const created = snap.createdAt ?? createdAtByTask.get(taskId) ?? null;
-    if (!created) continue;
-    openAges.push(Math.max(0, Math.floor((nowMidnightMs - atLocalMidnight(created).getTime()) / MS_PER_DAY)));
   }
   const openSet = new Set(openTaskIds);
 
@@ -477,12 +388,12 @@ export function buildProductivity(
   if (actorsAvailable) {
     const byActor = new Map<
       string,
-      { name: string; cycles: number[]; completions: number; due: number; onTime: number; open: number }
+      { name: string; completions: number; due: number; onTime: number; open: number }
     >();
     const bump = (id: string, name: string | null) => {
       let e = byActor.get(id);
       if (!e) {
-        e = { name: name ?? "Unknown", cycles: [], completions: 0, due: 0, onTime: 0, open: 0 };
+        e = { name: name ?? "Unknown", completions: 0, due: 0, onTime: 0, open: 0 };
         byActor.set(id, e);
       } else if (name && e.name === "Unknown") {
         e.name = name;
@@ -494,10 +405,6 @@ export function buildProductivity(
       if (!c.actorId) continue;
       const e = bump(c.actorId, c.actorName);
       e.completions += 1;
-      if (c.createdAt) {
-        const days = (c.at.getTime() - c.createdAt.getTime()) / MS_PER_DAY;
-        if (days >= 0) e.cycles.push(days);
-      }
       if (c.dueDate) {
         e.due += 1;
         if (localDayKey(c.at) <= c.dueDate) e.onTime += 1;
@@ -515,7 +422,6 @@ export function buildProductivity(
         actorId,
         actorName: e.name,
         completions: e.completions,
-        medianCycleDays: percentile(e.cycles, 0.5),
         onTimeRate: e.due > 0 ? e.onTime / e.due : null,
         open: e.open,
       });
@@ -538,21 +444,13 @@ export function buildProductivity(
     totalCompleted: lastCompletion.size,
     totalOpen: openTaskIds.length,
     throughput,
-    burnup,
-    cycleTimeOverall: {
-      n: cycleAll.length,
-      median: percentile(cycleAll, 0.5),
-      p85: percentile(cycleAll, 0.85),
-    },
-    cycleTimeBySubteam,
-    cycleHistogram: bucketize(CYCLE_HISTOGRAM_BUCKETS, cycleAll),
     onTime: {
       considered,
       onTime: onTimeCount,
       rate: considered > 0 ? onTimeCount / considered : null,
       excludedNoDueDate,
     },
-    aging: bucketize(AGING_BUCKETS, openAges),
+    onTimeBySubteam,
     actorsAvailable,
     perPerson,
     subteams,
