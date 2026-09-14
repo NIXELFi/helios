@@ -108,8 +108,12 @@ describe("buildProductivity — throughput + burn-up", () => {
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     const week3 = m.throughput.find((w) => w.week === isoWeekKey(new Date("2026-01-14T10:00:00Z")))!;
     expect(week3.completed).toBe(2);
-    expect(week3.bySubteam.Aero).toBe(1);
-    expect(week3.bySubteam.Chassis).toBe(1);
+    expect(week3.bySubteam["st-1"]).toBe(1);
+    expect(week3.bySubteam["st-2"]).toBe(1);
+    expect(m.subteams).toEqual([
+      { id: "st-1", name: "Aero" },
+      { id: "st-2", name: "Chassis" },
+    ]);
   });
 
   it("emits a contiguous week series with no gaps", () => {

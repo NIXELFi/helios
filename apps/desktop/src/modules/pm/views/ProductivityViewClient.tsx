@@ -13,10 +13,11 @@ import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
 import {
   buildProductivity,
+  isoWeekKey,
   isoWeekStart,
   type ProductivityMetrics,
-  type WeekThroughput,
 } from "@pm/lib/productivityMetrics";
+import { StackedWeeks, type WeekColumn, type WeekSeries } from "@pm/components/charts/StackedWeeks";
 import {
   countExportableEvents,
   taskHistoryFileName,
@@ -171,10 +172,11 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     [subteams],
   );
 
+  // Series colour by subteam ID (never by name), with the chips' grey fallback.
   const subteamColor = useMemo(() => {
-    const byName = new Map<string, string>();
-    for (const s of subteams) if (s.color) byName.set(s.name, s.color);
-    return byName;
+    const byId = new Map<string, string>();
+    for (const s of subteams) if (s.color) byId.set(s.id, s.color);
+    return byId;
   }, [subteams]);
 
   const exportCsv = useCallback(async () => {
@@ -307,7 +309,8 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
             <ThroughputPanel
               metrics={metrics}
               byPerson={showPeople && metrics.actorsAvailable}
-              colorFor={(name) => subteamColor.get(name) ?? null}
+              subteamColor={(id) => subteamColor.get(id) ?? null}
+              today={new Date()}
             />
             <BurnupPanel metrics={metrics} />
             <div className="grid gap-6 lg:grid-cols-2">
@@ -355,135 +358,73 @@ function Panel({
   );
 }
 
-// A stable, readable series colour for a name with no subteam colour of its own.
-const FALLBACK_COLORS = [
-  "#8C1D40",
-  "#FFC627",
-  "#3B82F6",
-  "#10B981",
-  "#A855F7",
-  "#F97316",
-  "#14B8A6",
-  "#EC4899",
-];
-
-function fallbackColor(name: string, index: number): string {
-  return FALLBACK_COLORS[index % FALLBACK_COLORS.length] ?? FALLBACK_COLORS[0]!;
-}
-
-function weekLabel(w: WeekThroughput): string {
-  // "Jan 12" — the Monday of the week, which reads better on an axis than W03.
-  const [y, m, d] = w.weekStart.split("-").map(Number);
-  if (!y || !m || !d) return w.week;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 // --- panels -----------------------------------------------------------------
 
-const CHART_W = 760;
-const CHART_H = 200;
-const PAD_L = 34;
-const PAD_B = 22;
+const NO_SUBTEAM_COLOR = "#6B7280";
 
 function ThroughputPanel({
   metrics,
   byPerson,
-  colorFor,
+  subteamColor,
+  today,
 }: {
   metrics: ProductivityMetrics;
   byPerson: boolean;
-  colorFor: (name: string) => string | null;
+  subteamColor: (id: string) => string | null;
+  today: Date;
 }) {
   const weeks = metrics.throughput;
-  const series = byPerson
-    ? [...new Set(weeks.flatMap((w) => Object.keys(w.byPerson)))].sort()
-    : metrics.subteamNames;
-  const pick = (w: WeekThroughput) => (byPerson ? w.byPerson : w.bySubteam);
-  const max = Math.max(1, ...weeks.map((w) => w.completed));
-  const plotH = CHART_H - PAD_B;
-  const slot = weeks.length > 0 ? (CHART_W - PAD_L) / weeks.length : 0;
-  const barW = Math.max(2, slot * 0.66);
+  const currentKey = isoWeekKey(today);
+  const series: WeekSeries[] = byPerson
+    ? [...new Set(weeks.flatMap((w) => Object.keys(w.byPerson)))]
+        .sort()
+        .map((name) => ({ id: name, label: name, color: personColor(name) }))
+    : metrics.subteams.map((s) => ({
+        id: s.id,
+        label: s.name,
+        color: subteamColor(s.id) ?? NO_SUBTEAM_COLOR,
+      }));
+  const columns: WeekColumn[] = weeks.map((w) => ({
+    key: w.week,
+    weekStart: w.weekStart,
+    values: byPerson ? w.byPerson : w.bySubteam,
+    total: w.completed,
+    inWindow: true,
+    isCurrent: w.week === currentKey,
+  }));
 
   return (
     <Panel
-      title="Throughput"
-      subtitle={`Tasks completed per ISO week, stacked by ${byPerson ? "person" : "subteam"}.`}
+      title="Weeks"
+      subtitle={`Tasks completed per ISO week, stacked by ${byPerson ? "person" : "subteam"}. Hover a week for the split.`}
     >
-      <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        className="w-full"
-        role="img"
-        aria-label="Tasks completed per week"
-      >
-        <line x1={PAD_L} y1={plotH} x2={CHART_W} y2={plotH} stroke="currentColor" opacity={0.2} />
-        <text x={2} y={12} className="fill-current text-[10px] opacity-50">
-          {max}
-        </text>
-        {weeks.map((w, i) => {
-          const counts = pick(w);
-          let yCursor = plotH;
-          return (
-            <g key={w.week}>
-              {series.map((name, si) => {
-                const n = counts[name] ?? 0;
-                if (n === 0) return null;
-                const h = (n / max) * (plotH - 8);
-                yCursor -= h;
-                return (
-                  <rect
-                    key={name}
-                    x={PAD_L + i * slot + (slot - barW) / 2}
-                    y={yCursor}
-                    width={barW}
-                    height={h}
-                    fill={colorFor(name) ?? fallbackColor(name, si)}
-                  >
-                    <title>{`${name} · ${weekLabel(w)} · ${n}`}</title>
-                  </rect>
-                );
-              })}
-              {i % Math.max(1, Math.ceil(weeks.length / 12)) === 0 ? (
-                <text
-                  x={PAD_L + i * slot + slot / 2}
-                  y={CHART_H - 6}
-                  textAnchor="middle"
-                  className="fill-current text-[9px] opacity-50"
-                >
-                  {weekLabel(w)}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
-      <Legend names={series} colorFor={colorFor} />
+      {columns.length === 0 ? (
+        <Empty>No completions in this window.</Empty>
+      ) : (
+        <StackedWeeks columns={columns} series={series} ariaLabel="Tasks completed per week" />
+      )}
     </Panel>
   );
 }
 
-function Legend({
-  names,
-  colorFor,
-}: {
-  names: string[];
-  colorFor: (name: string) => string | null;
-}) {
-  if (names.length === 0) return null;
-  return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1">
-      {names.map((n, i) => (
-        <li key={n} className="flex items-center gap-1.5 text-xs text-helios-dim">
-          <span
-            aria-hidden
-            className="size-2 shrink-0 rounded-full"
-            style={{ backgroundColor: colorFor(n) ?? fallbackColor(n, i) }}
-          />
-          {n}
-        </li>
-      ))}
-    </ul>
-  );
+// People have no colour of their own. Derive a stable hue from the name so a
+// person keeps their colour across windows and reloads — an index-based
+// palette would reshuffle everyone whenever the set of names changed.
+function personColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 55% 60%)`;
 }
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-helios-dim">{children}</p>;
+}
+
+// Scaled-viewBox constants, only the burn-up still uses them (it goes next).
+const CHART_W = 760;
+const CHART_H = 200;
+const PAD_L = 34;
+const PAD_B = 22;
 
 function BurnupPanel({ metrics }: { metrics: ProductivityMetrics }) {
   const pts = metrics.burnup;

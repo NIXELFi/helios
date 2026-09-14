@@ -159,7 +159,7 @@ export interface WeekThroughput {
   weekStart: string;
   completed: number;
   created: number;
-  /** Completions in this week keyed by subteam name. */
+  /** Completions in this week keyed by subteam ID ("" = no subteam), so series colour by id. */
   bySubteam: Record<string, number>;
   /** Completions in this week keyed by actor name. Empty when actors are gated. */
   byPerson: Record<string, number>;
@@ -217,8 +217,8 @@ export interface ProductivityMetrics {
   actorsAvailable: boolean;
   /** Empty unless `actorsAvailable`. */
   perPerson: PersonStat[];
-  /** Subteam names seen in the window, sorted — the stacked-chart series order. */
-  subteamNames: string[];
+  /** Subteams seen in the window, sorted by name — the stacked-chart series order. "" id = no subteam. */
+  subteams: Array<{ id: string; name: string }>;
 }
 
 export interface ProductivityOptions {
@@ -231,6 +231,7 @@ export interface ProductivityOptions {
 interface CompletionRecord {
   taskId: string;
   at: Date;
+  subteamId: string;
   subteamName: string;
   actorId: string | null;
   actorName: string | null;
@@ -310,6 +311,7 @@ export function buildProductivity(
         lastCompletion.set(r.task_id, {
           taskId: r.task_id,
           at,
+          subteamId: r.subteam_id ?? "",
           subteamName,
           actorId: r.actor_id,
           actorName: r.actor_name,
@@ -348,7 +350,7 @@ export function buildProductivity(
   for (const c of lastCompletion.values()) {
     const b = touch(c.at);
     b.completed += 1;
-    b.bySubteam[c.subteamName] = (b.bySubteam[c.subteamName] ?? 0) + 1;
+    b.bySubteam[c.subteamId] = (b.bySubteam[c.subteamId] ?? 0) + 1;
     if (c.actorName) b.byPerson[c.actorName] = (b.byPerson[c.actorName] ?? 0) + 1;
   }
 
@@ -502,7 +504,11 @@ export function buildProductivity(
     );
   }
 
-  const subteamNames = [...new Set(throughput.flatMap((w) => Object.keys(w.bySubteam)))].sort();
+  const subteamById = new Map<string, string>();
+  for (const c of lastCompletion.values()) subteamById.set(c.subteamId, c.subteamName);
+  const subteams = [...subteamById.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     totalCreated: createdEvent.size,
@@ -526,6 +532,6 @@ export function buildProductivity(
     aging: bucketize(AGING_BUCKETS, openAges),
     actorsAvailable,
     perPerson,
-    subteamNames,
+    subteams,
   };
 }

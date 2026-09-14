@@ -95,7 +95,11 @@ describe("ProductivityViewClient", () => {
     fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
     renderView();
 
-    expect(await screen.findByText("Throughput")).toBeInTheDocument();
+    expect(await screen.findByText("Weeks")).toBeInTheDocument();
+    // Measured SVG, not a scaled viewBox: the chart carries a pixel width.
+    const chart = screen.getByRole("img", { name: "Tasks completed per week" });
+    expect(chart).toHaveAttribute("width");
+    expect(chart).not.toHaveAttribute("viewBox");
     expect(screen.getByText("Created vs completed")).toBeInTheDocument();
     expect(screen.getByText("Cycle time")).toBeInTheDocument();
     expect(screen.getByText("On-time rate")).toBeInTheDocument();
@@ -140,7 +144,7 @@ describe("ProductivityViewClient", () => {
     renderView();
 
     expect(await screen.findByText(/isn.t available on this server yet/i)).toBeInTheDocument();
-    expect(screen.queryByText("Throughput")).not.toBeInTheDocument();
+    expect(screen.queryByText("Weeks")).not.toBeInTheDocument();
     // Nothing to export.
     expect(screen.getByRole("button", { name: "Export CSV" })).toBeDisabled();
   });
