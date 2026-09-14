@@ -5,6 +5,7 @@ import { STATUS_DOT, STATUS_LABEL, TASK_STATUSES, TASK_TYPES } from "@helios/pm-
 import { IconEye, IconEyeOff, IconX } from "@tabler/icons-react";
 import type { TaskFilters } from "@pm/lib/filters";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
+import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
 import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
 
 const STATUS_FILTER_OPTIONS: SelectOption<string>[] = [
@@ -200,34 +201,16 @@ export function TaskFilterBar({
           ) : null}
 
           {scopeActive ? (
-            <div className="ml-auto inline-flex rounded-md border border-helios-line bg-helios-base p-0.5 text-[11px]">
-              <button
-                type="button"
-                onClick={() => onPatch({ showMode: "dim" })}
-                className={
-                  "inline-flex items-center gap-1 rounded px-2 py-0.5 transition-colors " +
-                  (filters.showMode === "dim"
-                    ? "bg-helios-panel text-helios-text"
-                    : "text-helios-dim hover:text-helios-text")
-                }
-              >
-                <IconEyeOff size={11} strokeWidth={1.5} />
-                Dim others
-              </button>
-              <button
-                type="button"
-                onClick={() => onPatch({ showMode: "hide" })}
-                className={
-                  "inline-flex items-center gap-1 rounded px-2 py-0.5 transition-colors " +
-                  (filters.showMode === "hide"
-                    ? "bg-helios-panel text-helios-text"
-                    : "text-helios-dim hover:text-helios-text")
-                }
-              >
-                <IconEye size={11} strokeWidth={1.5} />
-                Hide others
-              </button>
-            </div>
+            <SegmentedControl
+              value={filters.showMode}
+              onChange={(mode) => onPatch({ showMode: mode })}
+              ariaLabel="Non-matching tasks"
+              className="ml-auto"
+              options={[
+                { value: "dim", label: "Dim others", icon: <IconEyeOff size={11} strokeWidth={1.5} /> },
+                { value: "hide", label: "Hide others", icon: <IconEye size={11} strokeWidth={1.5} /> },
+              ]}
+            />
           ) : null}
         </div>
       </div>
@@ -235,7 +218,7 @@ export function TaskFilterBar({
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+export function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-medium uppercase tracking-widest text-helios-dim">
@@ -246,6 +229,7 @@ function FilterField({ label, children }: { label: string; children: React.React
   );
 }
 
-const filterInput =
+// Exported so sibling control bars (Productivity) share the exact input chrome.
+export const filterInput =
   "rounded border border-helios-line bg-helios-base px-2 py-1.5 text-sm text-helios-text " +
   "placeholder:text-helios-dim focus:border-asu-gold focus:outline-none";

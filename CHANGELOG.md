@@ -27,6 +27,31 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Project Manager has a new Productivity view — a lead's Monday page.** Four
+  tiles up top answer the questions a lead asks first: how many tasks got done
+  this window (against the previous one, with a twelve-week sparkline), what is
+  due this week (with a Monday-to-Sunday strip and the overdue count), what is
+  stuck in Blocked or Needs Review, and the share that landed on or before its
+  due date. Under them, a Weeks strip charts completions per ISO week stacked
+  by subteam (or by owner, for leads), with gridlines, a hover breakdown, the
+  current week banded and the project's milestones marked as diamonds. An
+  Attention column lists the tasks to chase — overdue, due by Sunday, waiting
+  on review for more than a week, blocked, and in progress but untouched for a
+  fortnight — each opening the task on click. A Subteams panel compares open
+  work by status, stuck-first, and a Workload panel shows who is carrying how
+  much, with Unowned as its own row, sorted by load rather than by finishes.
+  Every number links into the Table with the matching filters. Pick This week
+  (the default), 4 weeks, 12 weeks, Season or a custom range; scope to a
+  subteam from the picker or by opening the view inside a team. Person-level
+  rows are only shown to people who can manage that scope's dashboard —
+  everyone else sees their own row, the unowned pile, and the team picture.
+- **Task history exports to CSV.** The Export CSV button on the Productivity
+  view saves every task event in the window — when it happened, what changed,
+  the task and its subteam, due date, estimate and actual days — so you can take
+  the numbers into a spreadsheet. The person column is included only when you
+  are allowed to see it.
+
 ## [5.7.1] - 2026-09-09
 
 ### Changed

@@ -28,6 +28,7 @@ import { GanttViewClient } from "@pm/views/GanttViewClient";
 import { GraphViewClient } from "@pm/views/GraphViewClient";
 import { CalendarViewClient } from "@pm/views/CalendarViewClient";
 import { ActivityFeedClient } from "@pm/views/ActivityFeedClient";
+import { ProductivityViewClient } from "@pm/views/ProductivityViewClient";
 import "./pm.css";
 
 // Cheap task-change probe cadence — keeps task churn feeling live (~20s)
@@ -118,6 +119,10 @@ function CurrentView() {
       return <CalendarViewClient teamSlug={teamSlug} />;
     case "activity":
       return <ActivityFeedClient teamSlug={teamSlug} />;
+    case "productivity":
+      // Keyed per scope: the view owns its own fetch + range state, and a scope
+      // switch must start that over rather than re-filter a stale window.
+      return <ProductivityViewClient key={scopeKey(teamSlug)} teamSlug={teamSlug} />;
     case "pages":
       return <ComingSoon label="The Pages editor" />;
     case "table":
