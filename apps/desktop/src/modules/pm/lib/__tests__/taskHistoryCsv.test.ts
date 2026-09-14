@@ -25,6 +25,10 @@ function row(over: Partial<TaskHistoryRow> = {}): TaskHistoryRow {
     task_status_now: "done",
     estimate_days: 2,
     actual_days: 4,
+    status_since: null,
+    task_updated_at: null,
+    owner_ids: null,
+    may_see_actors: null,
     ...over,
   };
 }

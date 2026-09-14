@@ -41,6 +41,15 @@ export interface TaskHistoryRow {
   task_status_now: string | null;
   estimate_days: number | null;
   actual_days: number | null;
+  // --- v3 columns (migration 20260914000200). Each is null when the server
+  // has not applied v3 yet — the client degrades, it never crashes. ---
+  /** When the task entered its current status (latest matching status_changed, else updated_at). */
+  status_since: string | null;
+  task_updated_at: string | null;
+  /** Owners, primary first. Ungated. null = unowned, or unknown on a pre-v3 server. */
+  owner_ids: string[] | null;
+  /** The server's gate verdict. null on a pre-v3 server (infer from actor_id then). */
+  may_see_actors: boolean | null;
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -716,5 +725,130 @@ export function stateCounts(rows: ReadonlyArray<TaskHistoryRow>, now: Date): Sta
     const dayIdx = dayKeys.indexOf(r.due_date);
     if (dayIdx >= 0) out.dueByDay[dayIdx]! += 1;
   }
+  return out;
+}
+
+// --- attention lists (what a lead chases on Monday) --------------------------
+
+export interface AttentionItem {
+  taskId: string;
+  title: string;
+  subteamId: string | null;
+  subteamName: string | null;
+  status: string;
+  dueDate: string | null;
+  /**
+   * Whole days: overdue-by for the due lists, in-status for stuck lists, since
+   * last touch for the stale list. null when the server sent no v3 timestamps.
+   */
+  days: number | null;
+  ownerIds: string[];
+}
+
+export interface AttentionLists {
+  /** Open, due before today. Most recently slipped first — the ones still worth chasing. */
+  overdue: AttentionItem[];
+  /** Open, due today through Sunday, soonest first. */
+  dueThisWeek: AttentionItem[];
+  /** needs_review for longer than `reviewDays`, longest first. */
+  needsReview: AttentionItem[];
+  /** Every blocked task, longest blocked first. */
+  blocked: AttentionItem[];
+  /** in_progress and not touched for `staleDays` or more, longest first. */
+  stale: AttentionItem[];
+  /** False when no row carried status_since / task_updated_at (pre-v3 server): the age filters were skipped. */
+  agesKnown: boolean;
+}
+
+export interface AttentionOptions {
+  /** Needs-review threshold in days. Default 7. */
+  reviewDays?: number;
+  /** Untouched in-progress threshold in days. Default 14. */
+  staleDays?: number;
+}
+
+function wholeDaysBetween(from: Date, to: Date): number {
+  return Math.max(0, Math.floor((atLocalMidnight(to).getTime() - atLocalMidnight(from).getTime()) / MS_PER_DAY));
+}
+
+/**
+ * The four questions behind the Attention column, answered from the live open
+ * snapshot. Ages come from the v3 columns (time in status / last touch), never
+ * from created_at, which is the import date for most of the corpus. On a
+ * pre-v3 server the age-gated lists fall back to "every task in that status"
+ * with null days, and `agesKnown` tells the view to say so.
+ */
+export function attentionLists(
+  rows: ReadonlyArray<TaskHistoryRow>,
+  now: Date,
+  opts: AttentionOptions = {},
+): AttentionLists {
+  const reviewDays = opts.reviewDays ?? 7;
+  const staleDays = opts.staleDays ?? 14;
+  const today = localDayKey(now);
+  const sunday = isoWeekStart(now);
+  sunday.setDate(sunday.getDate() + 6);
+  const sundayKey = localDayKey(sunday);
+
+  const out: AttentionLists = {
+    overdue: [],
+    dueThisWeek: [],
+    needsReview: [],
+    blocked: [],
+    stale: [],
+    agesKnown: false,
+  };
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.action !== "open" || seen.has(r.task_id)) continue;
+    seen.add(r.task_id);
+    const status = r.task_status_now;
+    if (status === null || CLOSED_STATUSES.has(status)) continue;
+
+    const since = parseTs(r.status_since);
+    const updated = parseTs(r.task_updated_at);
+    if (since || updated) out.agesKnown = true;
+    const inStatus = since ? wholeDaysBetween(since, now) : updated ? wholeDaysBetween(updated, now) : null;
+    const lastTouch =
+      since && updated
+        ? wholeDaysBetween(new Date(Math.max(since.getTime(), updated.getTime())), now)
+        : inStatus;
+
+    const base = {
+      taskId: r.task_id,
+      title: r.task_title ?? "Untitled task",
+      subteamId: r.subteam_id,
+      subteamName: r.subteam_name,
+      status,
+      dueDate: r.due_date,
+      ownerIds: r.owner_ids ?? [],
+    };
+
+    if (r.due_date && r.due_date < today) {
+      const due = parseDayKey(r.due_date);
+      out.overdue.push({ ...base, days: due ? wholeDaysBetween(due, now) : null });
+    } else if (r.due_date && r.due_date <= sundayKey) {
+      const due = parseDayKey(r.due_date);
+      out.dueThisWeek.push({ ...base, days: due ? wholeDaysBetween(now, due) : null });
+    }
+
+    if (status === "blocked") {
+      out.blocked.push({ ...base, days: inStatus });
+    } else if (status === "needs_review") {
+      if (inStatus === null || inStatus > reviewDays) out.needsReview.push({ ...base, days: inStatus });
+    } else if (status === "in_progress") {
+      if (lastTouch === null || lastTouch >= staleDays) out.stale.push({ ...base, days: lastTouch });
+    }
+  }
+
+  const byTitle = (a: AttentionItem, b: AttentionItem) => a.title.localeCompare(b.title);
+  const daysDesc = (a: AttentionItem, b: AttentionItem) => (b.days ?? -1) - (a.days ?? -1) || byTitle(a, b);
+  // Overdue: most recently slipped first (smallest overdue-by). A task that
+  // slipped yesterday is the one that can still be rescued.
+  out.overdue.sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity) || byTitle(a, b));
+  out.dueThisWeek.sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || byTitle(a, b));
+  out.needsReview.sort(daysDesc);
+  out.blocked.sort(daysDesc);
+  out.stale.sort(daysDesc);
   return out;
 }

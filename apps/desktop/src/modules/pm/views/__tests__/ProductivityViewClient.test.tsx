@@ -52,6 +52,10 @@ function row(over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "action" | "ta
     task_status_now: null,
     estimate_days: null,
     actual_days: null,
+    status_since: null,
+    task_updated_at: null,
+    owner_ids: null,
+    may_see_actors: null,
     ...over,
   };
 }
@@ -268,6 +272,33 @@ describe("ProductivityViewClient", () => {
     expect(stuck.getAttribute("href")).toBe("/table?status=blocked%2Cneeds_review");
     expect(stuck).toHaveTextContent("1 blocked");
     expect(screen.getByText(/1 already overdue/)).toBeInTheDocument();
+  });
+
+  it("lists attention items, opens a task on click and links each heading to the Table", async () => {
+    const twentyDaysAgo = isoDaysAgo(20);
+    fetchTaskHistory.mockResolvedValue({
+      rows: [
+        row({ action: "open", task_id: "b1", event_time: "x", task_title: "Diff mount", task_status_now: "blocked", status_since: twentyDaysAgo, task_updated_at: twentyDaysAgo }),
+        row({ action: "open", task_id: "o1", event_time: "x", task_title: "Front wing mould", task_status_now: "not_started", due_date: "2020-01-01", status_since: twentyDaysAgo, task_updated_at: twentyDaysAgo, subteam_id: "st-chas", subteam_name: "Chassis" }),
+      ],
+      failure: null,
+      message: null,
+    });
+    renderView(null);
+
+    const blocked = await screen.findByRole("region", { name: "Blocked" });
+    expect(blocked).toHaveTextContent("Diff mount");
+    expect(blocked).toHaveTextContent("20 d");
+    const overdue = screen.getByRole("region", { name: "Overdue" });
+    expect(overdue).toHaveTextContent("Front wing mould");
+    expect(overdue).toHaveTextContent("CH"); // subteam code chip
+    const heading = overdue.querySelector("a")!;
+    const params = new URLSearchParams((heading.getAttribute("href") ?? "").split("?")[1]);
+    expect(params.get("status")).toBe("not_started,in_progress,blocked,needs_review");
+    expect(params.get("to")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Diff mount/ }));
+    expect(usePmStore.getState().selectedTaskId).toBe("b1");
   });
 
   it("carries a picked subteam into the Table links as a hide-others team filter", async () => {

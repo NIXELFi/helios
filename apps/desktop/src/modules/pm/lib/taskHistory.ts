@@ -76,6 +76,12 @@ function normalize(raw: Record<string, unknown>): TaskHistoryRow {
     task_status_now: str(raw.task_status_now),
     estimate_days: num(raw.estimate_days),
     actual_days: num(raw.actual_days),
+    // v3 columns (20260914000200). A server still on the v2 signature simply
+    // does not send them; `undefined` becomes null and the view degrades.
+    status_since: str(raw.status_since),
+    task_updated_at: str(raw.task_updated_at),
+    owner_ids: Array.isArray(raw.owner_ids) ? raw.owner_ids.map(String) : null,
+    may_see_actors: typeof raw.may_see_actors === "boolean" ? raw.may_see_actors : null,
   };
 }
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
+import { IconArrowRight } from "@tabler/icons-react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
@@ -13,7 +14,10 @@ import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { viewHref } from "@pm/lib/nav";
 import { EMPTY_FILTERS, filtersToParams, type TaskFilters } from "@pm/lib/filters";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
+import { STATUS_DOT, type Subteam, type TaskStatus } from "@helios/pm-ui";
+import { Link } from "@pm/lib/router";
 import {
+  attentionLists,
   buildProductivity,
   isoWeekKey,
   isoWeekStart,
@@ -22,6 +26,8 @@ import {
   stateCounts,
   weeklyCompletions,
   windowDeltas,
+  type AttentionItem,
+  type AttentionLists,
   type ProductivityMetrics,
   type StateCounts,
   type WindowDeltas,
@@ -231,6 +237,9 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   // pm.manage_dashboard in scope. Read off the WIDE pull, so a quiet week does
   // not hide the Person toggle from someone who is allowed to see it.
   const actorsAvailable = useMemo(() => rows.some((r) => r.actor_id !== null), [rows]);
+  const attention = useMemo<AttentionLists>(() => attentionLists(rows, now), [rows, now]);
+  const selectTask = usePmStore((s) => s.selectTask);
+  const subteamById = useMemo(() => new Map(subteams.map((s) => [s.id, s])), [subteams]);
   const rangeCaption = range
     ? `${range.from.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${range.to.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
     : null;
@@ -422,6 +431,13 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
               subteamColor={(id) => subteamColor.get(id) ?? null}
               today={now}
             />
+            <AttentionPanel
+              lists={attention}
+              now={now}
+              tableHref={tableHref}
+              subteamById={subteamById}
+              onOpenTask={selectTask}
+            />
             <BurnupPanel metrics={metrics} />
             <div className="grid gap-6 lg:grid-cols-2">
               <CycleTimePanel metrics={metrics} />
@@ -478,6 +494,172 @@ function thisWeekBounds(now: Date): { from: string; to: string } {
   const sun = new Date(mon.getTime());
   sun.setDate(sun.getDate() + 6);
   return { from: localDayKey(now), to: localDayKey(sun) };
+}
+
+// --- attention --------------------------------------------------------------
+
+const ATTENTION_PREVIEW = 5;
+
+interface AttentionSection {
+  key: string;
+  title: string;
+  hint: string;
+  items: AttentionItem[];
+  href: string;
+  /** Right-hand meta for one row. */
+  meta: (item: AttentionItem) => string;
+}
+
+function shortDate(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+function dayCount(n: number | null, suffix = ""): string {
+  if (n === null) return "—";
+  return `${n} d${suffix}`;
+}
+
+function AttentionPanel({
+  lists,
+  now,
+  tableHref,
+  subteamById,
+  onOpenTask,
+}: {
+  lists: AttentionLists;
+  now: Date;
+  tableHref: (patch: Partial<TaskFilters>) => string;
+  subteamById: Map<string, Subteam>;
+  onOpenTask: (id: string) => void;
+}) {
+  const week = thisWeekBounds(now);
+  const yesterday = new Date(now.getTime() - MS_PER_DAY);
+  const sections: AttentionSection[] = [
+    {
+      key: "overdue",
+      title: "Overdue",
+      hint: "open, past due — most recently slipped first",
+      items: lists.overdue,
+      href: tableHref({ status: [...OPEN_STATUSES], dueTo: localDayKey(yesterday) }),
+      meta: (i) => dayCount(i.days, " late"),
+    },
+    {
+      key: "due",
+      title: "Due this week",
+      hint: "open, due by Sunday",
+      items: lists.dueThisWeek,
+      href: tableHref({ status: [...OPEN_STATUSES], dueFrom: week.from, dueTo: week.to }),
+      meta: (i) => (i.days === 0 ? "today" : i.dueDate ? shortDate(i.dueDate) : "—"),
+    },
+    {
+      key: "review",
+      title: lists.agesKnown ? "Waiting on review > 7 d" : "Waiting on review",
+      hint: lists.agesKnown ? "needs review for more than a week" : "needs review",
+      items: lists.needsReview,
+      href: tableHref({ status: ["needs_review"] }),
+      meta: (i) => dayCount(i.days),
+    },
+    {
+      key: "blocked",
+      title: "Blocked",
+      hint: "longest blocked first",
+      items: lists.blocked,
+      href: tableHref({ status: ["blocked"] }),
+      meta: (i) => dayCount(i.days),
+    },
+    {
+      key: "stale",
+      title: lists.agesKnown ? "In progress, untouched 14 d" : "In progress",
+      hint: lists.agesKnown ? "no change in two weeks or more" : "ages need the latest server update",
+      items: lists.stale,
+      href: tableHref({ status: ["in_progress"] }),
+      meta: (i) => dayCount(i.days),
+    },
+  ];
+  const total = sections.reduce((n, s) => n + s.items.length, 0);
+
+  return (
+    <Panel title="Attention" subtitle="What a lead chases this week. Click a task to open it; each heading opens the full list in the Table.">
+      {total === 0 ? (
+        <Empty>Nothing overdue, stuck or stale. Enjoy it.</Empty>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {sections.map((s) => (
+            <section key={s.key} aria-label={s.title} className="flex flex-col gap-1">
+              <Link
+                href={s.href}
+                className="group flex items-center justify-between gap-2 rounded px-1 py-0.5 text-xs hover:bg-helios-base"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="font-medium text-helios-text">{s.title}</span>
+                  <span className="truncate text-helios-dim/70">{s.hint}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <span
+                    className={`font-mono text-sm tabular-nums ${s.items.length > 0 ? "text-helios-text" : "text-helios-dim/60"}`}
+                  >
+                    {s.items.length}
+                  </span>
+                  <IconArrowRight
+                    size={12}
+                    strokeWidth={1.5}
+                    aria-hidden
+                    className="text-helios-dim opacity-0 transition-opacity group-hover:opacity-100"
+                  />
+                </span>
+              </Link>
+              {s.items.length > 0 ? (
+                <ul className="flex flex-col">
+                  {s.items.slice(0, ATTENTION_PREVIEW).map((item) => {
+                    const st = subteamById.get(item.subteamId ?? "");
+                    return (
+                      <li key={item.taskId}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenTask(item.taskId)}
+                          className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:bg-helios-base"
+                        >
+                          <span
+                            aria-hidden
+                            className="size-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: STATUS_DOT[item.status as TaskStatus] ?? "#9097A0" }}
+                          />
+                          <span className="min-w-0 flex-1 truncate text-helios-text">{item.title}</span>
+                          {st ? (
+                            <span
+                              className="shrink-0 rounded-full border px-1.5 text-[10px] leading-4"
+                              style={{ borderColor: `${st.color ?? NO_SUBTEAM_COLOR}80`, color: st.color ?? NO_SUBTEAM_COLOR }}
+                            >
+                              {st.code}
+                            </span>
+                          ) : null}
+                          <span className="w-14 shrink-0 text-right font-mono tabular-nums text-helios-dim">
+                            {s.meta(item)}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                  {s.items.length > ATTENTION_PREVIEW ? (
+                    <li>
+                      <Link
+                        href={s.href}
+                        className="block px-1 py-1 text-[11px] text-helios-dim hover:text-helios-text"
+                      >
+                        + {s.items.length - ATTENTION_PREVIEW} more in the Table
+                      </Link>
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </section>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
 }
 
 function KpiRow({

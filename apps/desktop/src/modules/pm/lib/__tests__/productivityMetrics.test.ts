@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGING_BUCKETS,
   buildProductivity,
+  attentionLists,
   isoWeekKey,
   percentile,
   sliceWindow,
@@ -30,6 +31,10 @@ function row(over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "action" | "ta
     task_status_now: null,
     estimate_days: null,
     actual_days: null,
+    status_since: null,
+    task_updated_at: null,
+    owner_ids: null,
+    may_see_actors: null,
     ...over,
   };
 }
@@ -468,5 +473,63 @@ describe("stateCounts", () => {
     expect(c.needsReview).toBe(1);
     expect(c.stuck).toBe(2);
     expect(c.dueByDay).toEqual([0, 0, 1, 0, 0, 0, 1]);
+  });
+});
+
+describe("attentionLists", () => {
+  // Wednesday 2026-09-16 09:00 local.
+  const now = new Date(2026, 8, 16, 9, 0, 0);
+  const daysAgo = (n: number) => new Date(2026, 8, 16 - n, 12, 0, 0).toISOString();
+  const open = (over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "task_id">) =>
+    row({ action: "open", event_time: "x", task_status_now: "in_progress", ...over });
+
+  const rows = [
+    // Overdue: slipped 1 day ago and 10 days ago. (Not started, so they stay
+    // out of the stale list — an in-progress overdue task would rightly be in both.)
+    open({ task_id: "o1", task_title: "Slipped yesterday", task_status_now: "not_started", due_date: "2026-09-15", status_since: daysAgo(3), task_updated_at: daysAgo(3) }),
+    open({ task_id: "o2", task_title: "Slipped last week", task_status_now: "not_started", due_date: "2026-09-06", status_since: daysAgo(30), task_updated_at: daysAgo(30) }),
+    // Due this week: today and Saturday.
+    open({ task_id: "d1", task_title: "Due Saturday", due_date: "2026-09-19", status_since: daysAgo(1), task_updated_at: daysAgo(1) }),
+    open({ task_id: "d2", task_title: "Due today", due_date: "2026-09-16", status_since: daysAgo(1), task_updated_at: daysAgo(1) }),
+    // Review: 9 days (listed) and 2 days (not yet).
+    open({ task_id: "r1", task_title: "Old review", task_status_now: "needs_review", status_since: daysAgo(9), task_updated_at: daysAgo(9) }),
+    open({ task_id: "r2", task_title: "Fresh review", task_status_now: "needs_review", status_since: daysAgo(2), task_updated_at: daysAgo(2) }),
+    // Blocked: always listed, longest first.
+    open({ task_id: "b1", task_title: "Blocked short", task_status_now: "blocked", status_since: daysAgo(1), task_updated_at: daysAgo(1) }),
+    open({ task_id: "b2", task_title: "Blocked long", task_status_now: "blocked", status_since: daysAgo(20), task_updated_at: daysAgo(20), owner_ids: ["u1", "u2"] }),
+    // Stale: in progress for 30 days but touched 3 days ago -> NOT stale.
+    open({ task_id: "s1", task_title: "Touched recently", status_since: daysAgo(30), task_updated_at: daysAgo(3) }),
+    // Stale: in progress and untouched for 21 days.
+    open({ task_id: "s2", task_title: "Forgotten", status_since: daysAgo(21), task_updated_at: daysAgo(21) }),
+    // Done and not_started never appear in status lists.
+    open({ task_id: "x1", task_title: "Done", task_status_now: "done", due_date: "2026-09-01" }),
+    open({ task_id: "x2", task_title: "Not started", task_status_now: "not_started", status_since: daysAgo(60), task_updated_at: daysAgo(60) }),
+  ];
+
+  it("fills the five lists from the open snapshot with the right ages", () => {
+    const a = attentionLists(rows, now);
+    expect(a.agesKnown).toBe(true);
+    expect(a.overdue.map((i) => [i.taskId, i.days])).toEqual([["o1", 1], ["o2", 10]]);
+    expect(a.dueThisWeek.map((i) => [i.taskId, i.days])).toEqual([["d2", 0], ["d1", 3]]);
+    expect(a.needsReview.map((i) => [i.taskId, i.days])).toEqual([["r1", 9]]);
+    expect(a.blocked.map((i) => [i.taskId, i.days])).toEqual([["b2", 20], ["b1", 1]]);
+    expect(a.blocked[0]!.ownerIds).toEqual(["u1", "u2"]);
+    expect(a.stale.map((i) => [i.taskId, i.days])).toEqual([["s2", 21]]);
+  });
+
+  it("honours custom thresholds", () => {
+    const a = attentionLists(rows, now, { reviewDays: 1, staleDays: 2 });
+    expect(a.needsReview.map((i) => i.taskId)).toEqual(["r1", "r2"]);
+    expect(a.stale.map((i) => i.taskId).sort()).toEqual(["s1", "s2"]);
+  });
+
+  it("degrades on a pre-v3 server: no ages, age-gated lists show every task in status", () => {
+    const old = rows.map((r) => ({ ...r, status_since: null, task_updated_at: null }));
+    const a = attentionLists(old, now);
+    expect(a.agesKnown).toBe(false);
+    expect(a.needsReview.map((i) => i.taskId).sort()).toEqual(["r1", "r2"]);
+    expect(a.blocked.every((i) => i.days === null)).toBe(true);
+    // Overdue-by still works: it only needs the due date.
+    expect(a.overdue.map((i) => i.days)).toEqual([1, 10]);
   });
 });
