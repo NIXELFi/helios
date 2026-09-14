@@ -224,6 +224,13 @@ export interface ProductivityMetrics {
 export interface ProductivityOptions {
   /** Reference "now" for the aging buckets. Required; nothing here reads the clock. */
   now: Date;
+  /**
+   * The selected window. When given, the week series is padded to cover it
+   * end to end (an empty week is a real zero, not a missing column); without
+   * it the series spans the first populated week to the last.
+   */
+  from?: Date;
+  to?: Date;
 }
 
 // --- the builder ------------------------------------------------------------
@@ -237,6 +244,13 @@ interface CompletionRecord {
   actorName: string | null;
   dueDate: string | null;
   createdAt: Date | null;
+}
+
+function parseDayKey(key: string | undefined): Date | null {
+  if (!key) return null;
+  const [y, m, d] = key.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 }
 
 function parseTs(iso: string | null): Date | null {
@@ -355,14 +369,14 @@ export function buildProductivity(
   }
 
   // Fill the gaps so the chart has no missing columns: walk Mondays from the
-  // first populated week to the last.
+  // first week (of the window when given, else the first populated) to the last.
   const throughput: WeekThroughput[] = [];
-  if (weekBuckets.size > 0) {
-    const starts = [...weekBuckets.values()].map((b) => b.weekStart).sort();
-    const [y0, m0, d0] = starts[0]!.split("-").map(Number);
-    const [y1, m1, d1] = starts[starts.length - 1]!.split("-").map(Number);
-    const cursor = new Date(y0!, m0! - 1, d0!);
-    const end = new Date(y1!, m1! - 1, d1!);
+  const starts = [...weekBuckets.values()].map((b) => b.weekStart).sort();
+  const firstStart = opts.from ? isoWeekStart(opts.from) : parseDayKey(starts[0]);
+  const lastStart = opts.to ? isoWeekStart(opts.to) : parseDayKey(starts[starts.length - 1]);
+  if (firstStart && lastStart) {
+    const cursor = new Date(firstStart.getTime());
+    const end = lastStart;
     while (cursor.getTime() <= end.getTime()) {
       const key = isoWeekKey(cursor);
       throughput.push(
@@ -534,4 +548,173 @@ export function buildProductivity(
     perPerson,
     subteams,
   };
+}
+
+// --- windows and comparisons ------------------------------------------------
+
+/**
+ * Keep the EVENT rows whose time falls inside [from, to] and every synthetic
+ * `open` row regardless (they are a live snapshot, not events — see the header
+ * note). Lets one wide RPC pull feed the selected window, the previous window
+ * and the trailing sparkline context without three round trips.
+ */
+export function sliceWindow(
+  rows: ReadonlyArray<TaskHistoryRow>,
+  from: Date,
+  to: Date,
+): TaskHistoryRow[] {
+  const lo = from.getTime();
+  const hi = to.getTime();
+  return rows.filter((r) => {
+    if (r.action === "open") return true;
+    const t = parseTs(r.event_time);
+    return t !== null && t.getTime() >= lo && t.getTime() <= hi;
+  });
+}
+
+/**
+ * Completions per ISO week for the `weeks` weeks ending in the week of
+ * `endingAt`, oldest first, zero-filled — the sparkline series. Same
+ * last-completion-per-task rule as everything else, evaluated over the rows
+ * given (pass the wide pull, not a slice).
+ */
+export function weeklyCompletions(
+  rows: ReadonlyArray<TaskHistoryRow>,
+  opts: { weeks: number; endingAt: Date },
+): Array<{ week: string; weekStart: string; completed: number }> {
+  const deleted = new Set<string>();
+  for (const r of rows) if (r.action === "deleted") deleted.add(r.task_id);
+  const last = new Map<string, Date>();
+  for (const r of rows) {
+    if (r.action !== "completed" || deleted.has(r.task_id)) continue;
+    const at = parseTs(r.event_time);
+    if (!at) continue;
+    const prev = last.get(r.task_id);
+    if (!prev || at > prev) last.set(r.task_id, at);
+  }
+  const counts = new Map<string, number>();
+  for (const at of last.values()) {
+    const k = isoWeekKey(at);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const n = Math.max(1, opts.weeks);
+  const out: Array<{ week: string; weekStart: string; completed: number }> = [];
+  const cursor = isoWeekStart(opts.endingAt);
+  cursor.setDate(cursor.getDate() - 7 * (n - 1));
+  for (let i = 0; i < n; i += 1) {
+    const key = isoWeekKey(cursor);
+    out.push({ week: key, weekStart: localDayKey(cursor), completed: counts.get(key) ?? 0 });
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  return out;
+}
+
+export interface WindowDelta {
+  /** Current-window value. */
+  value: number;
+  /** Previous-window value, null when there is nothing to compare against. */
+  previous: number | null;
+  /** value - previous, null when previous is null. */
+  delta: number | null;
+}
+
+export interface WindowDeltas {
+  completed: WindowDelta;
+  /** On-time rate in percentage points (0-100); null when no completion had a due date. */
+  onTimePct: { value: number | null; previous: number | null; delta: number | null };
+}
+
+/**
+ * "Is this better or worse than last time?" for the two windowed numbers.
+ * The previous window is the caller's business (same length, ending where
+ * this one starts); this only does the arithmetic and the null-handling.
+ */
+export function windowDeltas(
+  current: ProductivityMetrics,
+  previous: ProductivityMetrics | null,
+): WindowDeltas {
+  const pct = (m: ProductivityMetrics | null): number | null =>
+    m === null || m.onTime.rate === null ? null : Math.round(m.onTime.rate * 100);
+  const curPct = pct(current);
+  const prevPct = pct(previous);
+  return {
+    completed: {
+      value: current.totalCompleted,
+      previous: previous ? previous.totalCompleted : null,
+      delta: previous ? current.totalCompleted - previous.totalCompleted : null,
+    },
+    onTimePct: {
+      value: curPct,
+      previous: prevPct,
+      delta: curPct !== null && prevPct !== null ? curPct - prevPct : null,
+    },
+  };
+}
+
+// --- live state (what is due, what is stuck) --------------------------------
+
+/** Statuses that mean "someone is waiting on someone" — the stuck set. */
+export const STUCK_STATUSES: ReadonlySet<string> = new Set(["blocked", "needs_review"]);
+
+export interface StateCounts {
+  open: number;
+  /** Open, due today through the coming Sunday (inclusive). */
+  dueThisWeek: number;
+  /** Open, due before today. */
+  overdue: number;
+  /** Open with no due date at all — a hygiene number, not a risk one. */
+  noDueDate: number;
+  blocked: number;
+  needsReview: number;
+  stuck: number;
+  /** Open tasks due on each day Monday..Sunday of the current ISO week. */
+  dueByDay: number[];
+}
+
+/**
+ * Counts over the live open snapshot. Everything here is a STATE question so
+ * it ignores the window entirely; `now` decides what "today" and "this week"
+ * mean. Deleted tasks never reach the snapshot (the RPC emits open rows from
+ * pm.tasks, and a deleted task has no row).
+ */
+export function stateCounts(rows: ReadonlyArray<TaskHistoryRow>, now: Date): StateCounts {
+  const today = localDayKey(now);
+  const monday = isoWeekStart(now);
+  const dayKeys: string[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const d = new Date(monday.getTime());
+    d.setDate(d.getDate() + i);
+    dayKeys.push(localDayKey(d));
+  }
+  const sunday = dayKeys[6]!;
+
+  const out: StateCounts = {
+    open: 0,
+    dueThisWeek: 0,
+    overdue: 0,
+    noDueDate: 0,
+    blocked: 0,
+    needsReview: 0,
+    stuck: 0,
+    dueByDay: [0, 0, 0, 0, 0, 0, 0],
+  };
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.action !== "open" || seen.has(r.task_id)) continue;
+    seen.add(r.task_id);
+    if (r.task_status_now === null || CLOSED_STATUSES.has(r.task_status_now)) continue;
+    out.open += 1;
+    if (r.task_status_now === "blocked") out.blocked += 1;
+    if (r.task_status_now === "needs_review") out.needsReview += 1;
+    if (STUCK_STATUSES.has(r.task_status_now)) out.stuck += 1;
+    if (!r.due_date) {
+      out.noDueDate += 1;
+      continue;
+    }
+    if (r.due_date < today) out.overdue += 1;
+    else if (r.due_date <= sunday) out.dueThisWeek += 1;
+    const dayIdx = dayKeys.indexOf(r.due_date);
+    if (dayIdx >= 0) out.dueByDay[dayIdx]! += 1;
+  }
+  return out;
 }

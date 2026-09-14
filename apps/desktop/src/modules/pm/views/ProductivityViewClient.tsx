@@ -10,14 +10,27 @@ import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
 import { FilterField, filterInput } from "@pm/components/TaskFilterBar";
 import { usePmStore } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
+import { viewHref } from "@pm/lib/nav";
+import { EMPTY_FILTERS, filtersToParams, type TaskFilters } from "@pm/lib/filters";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
 import {
   buildProductivity,
   isoWeekKey,
   isoWeekStart,
+  localDayKey,
+  sliceWindow,
+  stateCounts,
+  weeklyCompletions,
+  windowDeltas,
   type ProductivityMetrics,
+  type StateCounts,
+  type WindowDeltas,
 } from "@pm/lib/productivityMetrics";
 import { StackedWeeks, type WeekColumn, type WeekSeries } from "@pm/components/charts/StackedWeeks";
+import { KpiTile } from "@pm/components/charts/KpiTile";
+import { Delta } from "@pm/components/charts/Delta";
+import { Sparkline } from "@pm/components/charts/Sparkline";
+import { DayStrip } from "@pm/components/charts/DayStrip";
 import {
   countExportableEvents,
   taskHistoryFileName,
@@ -82,6 +95,43 @@ function presetRange(key: PresetKey, now: Date): { from: Date; to: Date } | null
   return { from, to };
 }
 
+const OPEN_STATUSES = ["not_started", "in_progress", "blocked", "needs_review"] as const;
+const SPARK_WEEKS = 12;
+
+interface Range {
+  from: Date;
+  to: Date;
+}
+
+/** The window of the same length that ends the instant before `r` starts. */
+function previousRange(r: Range): Range {
+  const len = r.to.getTime() - r.from.getTime();
+  const to = new Date(r.from.getTime() - 1);
+  return { from: new Date(to.getTime() - len), to };
+}
+
+/**
+ * ONE RPC pull feeds three readings: the selected window, the previous window
+ * (deltas) and the trailing twelve weeks (sparklines and the Weeks strip's
+ * context columns). Fetching the union and slicing client-side is cheaper than
+ * three round trips and gives one loading state instead of three.
+ */
+function fetchRange(r: Range): Range {
+  const prev = previousRange(r);
+  const context = isoWeekStart(r.to);
+  context.setDate(context.getDate() - 7 * (SPARK_WEEKS - 1));
+  const from = new Date(Math.min(prev.from.getTime(), context.getTime()));
+  return { from, to: r.to };
+}
+
+function compareLabel(key: PresetKey, r: Range): string {
+  if (key === "week") return "vs last week";
+  if (key === "4w") return "vs previous 4 weeks";
+  if (key === "12w") return "vs previous 12 weeks";
+  const days = Math.max(1, Math.round((r.to.getTime() - r.from.getTime()) / MS_PER_DAY));
+  return `vs previous ${days} days`;
+}
+
 export interface ProductivityViewClientProps {
   teamSlug?: string | null;
 }
@@ -132,8 +182,10 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset, customFrom, customTo]);
 
+  const pull = useMemo(() => (range ? fetchRange(range) : null), [range]);
+
   useEffect(() => {
-    if (!projectId || !range) {
+    if (!projectId || !pull) {
       setLoading(false);
       return;
     }
@@ -142,8 +194,8 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     setFailure(null);
     void fetchTaskHistory(client, {
       projectId,
-      from: range.from,
-      to: range.to,
+      from: pull.from,
+      to: pull.to,
       subteamId: scopeSubteamId,
     }).then((res) => {
       if (cancelled) return;
@@ -155,11 +207,53 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     return () => {
       cancelled = true;
     };
-  }, [client, projectId, range, scopeSubteamId, reloadKey]);
+  }, [client, projectId, pull, scopeSubteamId, reloadKey]);
 
+  // `rows` is the wide pull; everything below slices it. `now` is read once
+  // per pull so every panel agrees on what "today" is.
+  const now = useMemo(() => new Date(), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const windowRows = useMemo(
+    () => (range ? sliceWindow(rows, range.from, range.to) : []),
+    [rows, range],
+  );
   const metrics = useMemo<ProductivityMetrics>(
-    () => buildProductivity(rows, { now: new Date() }),
-    [rows],
+    () => buildProductivity(windowRows, { now, from: range?.from, to: range?.to }),
+    [windowRows, now, range],
+  );
+  const previousMetrics = useMemo<ProductivityMetrics | null>(() => {
+    if (!range) return null;
+    const prev = previousRange(range);
+    return buildProductivity(sliceWindow(rows, prev.from, prev.to), { now, from: prev.from, to: prev.to });
+  }, [rows, range, now]);
+  const deltas = useMemo<WindowDeltas>(() => windowDeltas(metrics, previousMetrics), [metrics, previousMetrics]);
+  const state = useMemo<StateCounts>(() => stateCounts(rows, now), [rows, now]);
+  // Gate mirror: the server nulls every actor unless the caller holds
+  // pm.manage_dashboard in scope. Read off the WIDE pull, so a quiet week does
+  // not hide the Person toggle from someone who is allowed to see it.
+  const actorsAvailable = useMemo(() => rows.some((r) => r.actor_id !== null), [rows]);
+  const rangeCaption = range
+    ? `${range.from.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${range.to.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+    : null;
+  const spark = useMemo(
+    () => (range ? weeklyCompletions(rows, { weeks: SPARK_WEEKS, endingAt: range.to }) : []),
+    [rows, range],
+  );
+
+  // Every number links into the Table with the matching filters. Inside a
+  // subteam route the Table is already scoped; at project scope a picked
+  // subteam travels along as a hide-others team filter.
+  const tableHref = useCallback(
+    (patch: Partial<TaskFilters>) => {
+      const filters: TaskFilters = {
+        ...EMPTY_FILTERS,
+        ...(routeTeam || !pickedSubteamId ? {} : { subteamIds: [pickedSubteamId], showMode: "hide" as const }),
+        ...patch,
+      };
+      const qs = filtersToParams(filters, { key: "due_date", dir: "asc" }).toString();
+      const base = viewHref("table", teamSlug);
+      return qs ? `${base}?${qs}` : base;
+    },
+    [routeTeam, pickedSubteamId, teamSlug],
   );
 
   // The house picker: swatch dots in each subteam's colour, keyboard nav, and a
@@ -183,7 +277,8 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     if (!range) return;
     setExportError(null);
     try {
-      const csv = taskHistoryToCsv(rows);
+      // The SELECTED window's events, not the wide pull behind the sparklines.
+      const csv = taskHistoryToCsv(windowRows);
       const path = await save({
         defaultPath: taskHistoryFileName(scopeLabel, toDayInput(range.from), toDayInput(range.to)),
         filters: [{ name: "CSV", extensions: ["csv"] }],
@@ -193,17 +288,17 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     } catch (e) {
       setExportError(e instanceof Error ? e.message : String(e));
     }
-  }, [range, rows, scopeLabel]);
+  }, [range, windowRows, scopeLabel]);
 
   // The CSV drops the synthetic `open` snapshot rows, so a window whose only
   // rows are open tasks has nothing to export even though `rows` is non-empty.
-  const exportableCount = useMemo(() => countExportableEvents(rows), [rows]);
+  const exportableCount = useMemo(() => countExportableEvents(windowRows), [windowRows]);
 
   const headerDescription = loading
     ? "Loading history…"
     : failure
       ? "History unavailable"
-      : `${metrics.totalCompleted} completed · ${metrics.totalCreated} created · ${metrics.totalOpen} open`;
+      : `${metrics.totalCompleted} completed in window · ${state.open} open · ${state.overdue} overdue`;
 
   return (
     <>
@@ -229,6 +324,11 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
           options={PRESETS.map((p) => ({ value: p.key, label: p.label }))}
           ariaLabel="Date range"
         />
+        {rangeCaption ? (
+          <span className="font-mono text-[11px] tabular-nums text-helios-dim" aria-label="Selected window">
+            {rangeCaption}
+          </span>
+        ) : null}
 
         {preset === "custom" ? (
           <div className="flex items-end gap-2">
@@ -262,7 +362,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
           />
         )}
 
-        {metrics.actorsAvailable ? (
+        {actorsAvailable ? (
           <SegmentedControl
             value={showPeople ? "person" : "team"}
             onChange={(v) => setShowPeople(v === "person")}
@@ -306,11 +406,21 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
               <p className="text-xs text-red-400">Export failed: {exportError}</p>
             ) : null}
 
+            <KpiRow
+              metrics={metrics}
+              deltas={deltas}
+              state={state}
+              spark={spark.map((w) => w.completed)}
+              compare={compareLabel(preset, range)}
+              now={now}
+              tableHref={tableHref}
+            />
+
             <ThroughputPanel
               metrics={metrics}
-              byPerson={showPeople && metrics.actorsAvailable}
+              byPerson={showPeople && actorsAvailable}
               subteamColor={(id) => subteamColor.get(id) ?? null}
-              today={new Date()}
+              today={now}
             />
             <BurnupPanel metrics={metrics} />
             <div className="grid gap-6 lg:grid-cols-2">
@@ -361,6 +471,79 @@ function Panel({
 // --- panels -----------------------------------------------------------------
 
 const NO_SUBTEAM_COLOR = "#6B7280";
+
+/** The Monday..Sunday window that contains `now`, as due-date filter bounds. */
+function thisWeekBounds(now: Date): { from: string; to: string } {
+  const mon = isoWeekStart(now);
+  const sun = new Date(mon.getTime());
+  sun.setDate(sun.getDate() + 6);
+  return { from: localDayKey(now), to: localDayKey(sun) };
+}
+
+function KpiRow({
+  metrics,
+  deltas,
+  state,
+  spark,
+  compare,
+  now,
+  tableHref,
+}: {
+  metrics: ProductivityMetrics;
+  deltas: WindowDeltas;
+  state: StateCounts;
+  spark: number[];
+  compare: string;
+  now: Date;
+  tableHref: (patch: Partial<TaskFilters>) => string;
+}) {
+  const week = thisWeekBounds(now);
+  const todayIndex = (now.getDay() + 6) % 7;
+  const onTime = deltas.onTimePct.value;
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <KpiTile
+        label="Completed"
+        value={deltas.completed.value}
+        sub={`${metrics.subteams.length} subteam${metrics.subteams.length === 1 ? "" : "s"} contributed`}
+        compare={<Delta delta={deltas.completed.delta} label={compare} />}
+        chart={<Sparkline values={spark} label={`Completions over the last ${spark.length} weeks`} />}
+        href={tableHref({ status: ["done"] })}
+        linkLabel="Open completed tasks in the Table"
+      />
+      <KpiTile
+        label="Due this week"
+        value={state.dueThisWeek}
+        sub={`${state.overdue} already overdue · ${state.noDueDate} with no due date`}
+        chart={<DayStrip values={state.dueByDay} todayIndex={todayIndex} label="Open tasks due each day this week" />}
+        href={tableHref({ status: [...OPEN_STATUSES], dueFrom: week.from, dueTo: week.to })}
+        linkLabel="Open tasks due this week in the Table"
+        tone={state.dueThisWeek > 0 ? "warn" : "neutral"}
+      />
+      <KpiTile
+        label="Stuck"
+        value={state.stuck}
+        sub={`${state.blocked} blocked · ${state.needsReview} waiting on review`}
+        href={tableHref({ status: ["blocked", "needs_review"] })}
+        linkLabel="Open blocked and needs-review tasks in the Table"
+        tone={state.stuck > 0 ? "danger" : "neutral"}
+      />
+      <KpiTile
+        label="On time"
+        value={onTime === null ? "—" : `${onTime}%`}
+        sub={
+          metrics.onTime.considered === 0
+            ? "No completions with a due date in this window"
+            : `${metrics.onTime.onTime} of ${metrics.onTime.considered} with a due date · ${metrics.onTime.excludedNoDueDate} had none`
+        }
+        compare={<Delta delta={deltas.onTimePct.delta} label={compare} unit=" pts" />}
+        // A due-from at the epoch is how the Table says "has a due date".
+        href={tableHref({ status: ["done"], dueFrom: "2000-01-01" })}
+        linkLabel="Open completed tasks with a due date in the Table"
+      />
+    </div>
+  );
+}
 
 function ThroughputPanel({
   metrics,

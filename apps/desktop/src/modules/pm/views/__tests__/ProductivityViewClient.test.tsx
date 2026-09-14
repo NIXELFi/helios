@@ -59,7 +59,9 @@ function row(over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "action" | "ta
 const FIXTURE: TaskHistoryRow[] = [
   row({ action: "created", task_id: "t1", event_time: isoDaysAgo(20), task_created_at: isoDaysAgo(20), task_status_now: "done" }),
   row({ action: "completed", task_id: "t1", event_time: isoDaysAgo(14), task_created_at: isoDaysAgo(20), task_status_now: "done", due_date: "2020-01-01" }),
-  row({ action: "created", task_id: "t2", event_time: isoDaysAgo(10), task_created_at: isoDaysAgo(10), task_status_now: "active", subteam_id: "st-chas", subteam_name: "Chassis" }),
+  row({ action: "created", task_id: "t2", event_time: isoDaysAgo(10), task_created_at: isoDaysAgo(10), task_status_now: "in_progress", subteam_id: "st-chas", subteam_name: "Chassis" }),
+  // The RPC's live snapshot row for the one open task.
+  row({ action: "open", task_id: "t2", event_time: isoDaysAgo(10), task_created_at: isoDaysAgo(10), task_status_now: "in_progress", subteam_id: "st-chas", subteam_name: "Chassis" }),
 ];
 
 function seedStore() {
@@ -104,8 +106,12 @@ describe("ProductivityViewClient", () => {
     expect(screen.getByText("Cycle time")).toBeInTheDocument();
     expect(screen.getByText("On-time rate")).toBeInTheDocument();
     expect(screen.getByText("Open work aging")).toBeInTheDocument();
-    // 1 completed, 2 created, 1 open.
-    expect(screen.getByText("1 completed · 2 created · 1 open")).toBeInTheDocument();
+    // The header reads the live snapshot: one open task, nothing overdue.
+    expect(screen.getByText(/completed in window · 1 open · 0 overdue/)).toBeInTheDocument();
+    // The KPI row is four linked tiles.
+    expect(screen.getByRole("link", { name: "Open completed tasks in the Table" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open tasks due this week in the Table" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open blocked and needs-review tasks in the Table" })).toBeInTheDocument();
   });
 
   it("hides the per-person table and explains why when the RPC returned no actors", async () => {
@@ -129,6 +135,8 @@ describe("ProductivityViewClient", () => {
     });
     renderView();
 
+    // The fixture completion is two weeks old: widen past the default window.
+    fireEvent.click(await screen.findByRole("radio", { name: "12 weeks" }));
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("Median cycle")).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Stack by" })).toBeInTheDocument();
@@ -206,13 +214,16 @@ describe("ProductivityViewClient", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Season" }));
 
     await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
-    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date };
-    expect(q.from.getMonth()).toBe(5); // June
-    expect(q.from.getDate()).toBe(1);
     const now = new Date();
-    // The season that is currently running, not a future one.
-    expect(q.from.getFullYear()).toBe(now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1);
-    expect(q.from.getTime()).toBeLessThanOrEqual(now.getTime());
+    const seasonYear = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+    const june1 = new Date(seasonYear, 5, 1);
+    // The selected window starts on June 1 of the running season...
+    expect(screen.getByLabelText("Selected window")).toHaveTextContent(/^Jun 1 –/);
+    // ...and the pull behind it reaches at least that far back (it also covers
+    // the previous window for the deltas, so it may start earlier).
+    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date; to: Date };
+    expect(q.from.getTime()).toBeLessThanOrEqual(june1.getTime());
+    expect(q.to.getTime()).toBeGreaterThanOrEqual(now.getTime() - 1000);
   });
 
   it("defaults to THIS WEEK — Monday of the current ISO week to now", async () => {
@@ -220,12 +231,55 @@ describe("ProductivityViewClient", () => {
     renderView();
     await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
     expect(screen.getByRole("radio", { name: "This week" })).toHaveAttribute("aria-checked", "true");
-    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date; to: Date };
-    expect(q.from.getDay()).toBe(1); // Monday
-    expect(q.from.getHours()).toBe(0);
     const now = new Date();
-    expect(now.getTime() - q.from.getTime()).toBeLessThan(7 * 24 * 60 * 60 * 1000);
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    const mondayLabel = monday.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    expect(screen.getByLabelText("Selected window")).toHaveTextContent(`${mondayLabel} –`);
+    // The pull reaches back past Monday (previous week + sparkline context)
+    // and ends now.
+    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date; to: Date };
+    expect(q.from.getTime()).toBeLessThanOrEqual(monday.getTime());
     expect(q.to.getTime()).toBeGreaterThanOrEqual(now.getTime() - 1000);
+  });
+
+  it("links every KPI tile into the Table with the matching filters", async () => {
+    const today = new Date();
+    const dayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    fetchTaskHistory.mockResolvedValue({
+      rows: [
+        row({ action: "open", task_id: "d1", event_time: "x", task_status_now: "in_progress", due_date: dayKey }),
+        row({ action: "open", task_id: "b1", event_time: "x", task_status_now: "blocked", due_date: "2020-01-01" }),
+      ],
+      failure: null,
+      message: null,
+    });
+    renderView(null);
+
+    const due = await screen.findByRole("link", { name: "Open tasks due this week in the Table" });
+    const href = due.getAttribute("href") ?? "";
+    expect(href.startsWith("/table?")).toBe(true);
+    const params = new URLSearchParams(href.slice("/table?".length));
+    expect(params.get("status")).toBe("not_started,in_progress,blocked,needs_review");
+    expect(params.get("from")).toBe(dayKey);
+    expect(params.get("to")).not.toBeNull();
+    expect(due).toHaveTextContent("1");
+
+    const stuck = screen.getByRole("link", { name: "Open blocked and needs-review tasks in the Table" });
+    expect(stuck.getAttribute("href")).toBe("/table?status=blocked%2Cneeds_review");
+    expect(stuck).toHaveTextContent("1 blocked");
+    expect(screen.getByText(/1 already overdue/)).toBeInTheDocument();
+  });
+
+  it("carries a picked subteam into the Table links as a hide-others team filter", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    renderView(null);
+    fireEvent.click(await screen.findByRole("button", { name: "Subteam" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Aero" }));
+
+    const stuck = await screen.findByRole("link", { name: "Open blocked and needs-review tasks in the Table" });
+    const params = new URLSearchParams((stuck.getAttribute("href") ?? "").split("?")[1]);
+    expect(params.get("team")).toBe("st-aero");
+    expect(params.get("mode")).toBe("hide");
   });
 
   it("disables the export when the window holds only synthetic open rows", async () => {
@@ -245,7 +299,7 @@ describe("ProductivityViewClient", () => {
     renderView();
 
     // The open task still shows up in the numbers...
-    expect(await screen.findByText("0 completed · 0 created · 1 open")).toBeInTheDocument();
+    expect(await screen.findByText(/0 completed in window · 1 open/)).toBeInTheDocument();
     // ...but there is no EVENT to export.
     expect(screen.getByRole("button", { name: "Export CSV" })).toBeDisabled();
   });

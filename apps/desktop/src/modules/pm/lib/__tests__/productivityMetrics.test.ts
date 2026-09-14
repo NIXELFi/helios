@@ -4,6 +4,10 @@ import {
   buildProductivity,
   isoWeekKey,
   percentile,
+  sliceWindow,
+  stateCounts,
+  weeklyCompletions,
+  windowDeltas,
   type TaskHistoryRow,
 } from "@pm/lib/productivityMetrics";
 
@@ -364,5 +368,105 @@ describe("buildProductivity — empty window", () => {
     expect(m.burnup).toEqual([]);
     expect(m.cycleTimeBySubteam).toEqual([]);
     expect(m.aging.every((b) => b.count === 0)).toBe(true);
+  });
+});
+
+// --- windows, deltas and live state (Productivity overhaul) ------------------
+
+describe("buildProductivity — window padding", () => {
+  it("pads the week series to the whole window when from/to are given", () => {
+    const rows = [row({ action: "completed", task_id: "a", event_time: "2026-09-09T10:00:00Z" })];
+    const m = buildProductivity(rows, {
+      now: new Date(2026, 8, 14),
+      from: new Date(2026, 7, 24),
+      to: new Date(2026, 8, 14),
+    });
+    expect(m.throughput.map((w) => w.weekStart)).toEqual([
+      "2026-08-24",
+      "2026-08-31",
+      "2026-09-07",
+      "2026-09-14",
+    ]);
+    expect(m.throughput.map((w) => w.completed)).toEqual([0, 0, 1, 0]);
+  });
+});
+
+describe("sliceWindow", () => {
+  const rows = [
+    row({ action: "completed", task_id: "a", event_time: "2026-09-01T10:00:00Z" }),
+    row({ action: "completed", task_id: "b", event_time: "2026-09-08T10:00:00Z" }),
+    row({ action: "open", task_id: "c", event_time: "2026-03-01T10:00:00Z", task_status_now: "in_progress" }),
+  ];
+  it("keeps events inside the window and every open row regardless", () => {
+    const out = sliceWindow(rows, new Date("2026-09-07T00:00:00Z"), new Date("2026-09-14T00:00:00Z"));
+    expect(out.map((r) => r.task_id)).toEqual(["b", "c"]);
+  });
+  it("is inclusive at both ends", () => {
+    const out = sliceWindow(rows, new Date("2026-09-01T10:00:00Z"), new Date("2026-09-08T10:00:00Z"));
+    expect(out.map((r) => r.task_id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("weeklyCompletions", () => {
+  it("zero-fills N weeks ending in the week of endingAt, oldest first", () => {
+    const rows = [
+      row({ action: "completed", task_id: "a", event_time: "2026-09-01T10:00:00Z" }),
+      // Re-done: counts once, at the LAST completion.
+      row({ action: "completed", task_id: "a", event_time: "2026-09-09T10:00:00Z" }),
+      row({ action: "completed", task_id: "b", event_time: "2026-09-09T11:00:00Z" }),
+    ];
+    const s = weeklyCompletions(rows, { weeks: 4, endingAt: new Date(2026, 8, 14) });
+    expect(s.map((w) => w.weekStart)).toEqual(["2026-08-24", "2026-08-31", "2026-09-07", "2026-09-14"]);
+    expect(s.map((w) => w.completed)).toEqual([0, 0, 2, 0]);
+  });
+});
+
+describe("windowDeltas", () => {
+  const cur = buildProductivity(
+    [
+      row({ action: "completed", task_id: "a", event_time: "2026-09-09T10:00:00Z", due_date: "2026-09-10" }),
+      row({ action: "completed", task_id: "b", event_time: "2026-09-09T10:00:00Z", due_date: "2026-09-01" }),
+    ],
+    { now: new Date("2026-09-14T00:00:00Z") },
+  );
+  const prev = buildProductivity(
+    [row({ action: "completed", task_id: "z", event_time: "2026-09-02T10:00:00Z", due_date: "2026-09-03" })],
+    { now: new Date("2026-09-14T00:00:00Z") },
+  );
+  it("compares completed counts and on-time points against the previous window", () => {
+    const d = windowDeltas(cur, prev);
+    expect(d.completed).toEqual({ value: 2, previous: 1, delta: 1 });
+    expect(d.onTimePct).toEqual({ value: 50, previous: 100, delta: -50 });
+  });
+  it("reports null deltas with no previous window", () => {
+    const d = windowDeltas(cur, null);
+    expect(d.completed.delta).toBeNull();
+    expect(d.onTimePct.delta).toBeNull();
+    expect(d.onTimePct.value).toBe(50);
+  });
+});
+
+describe("stateCounts", () => {
+  // Wednesday 2026-09-16; the ISO week runs Monday the 14th to Sunday the 20th.
+  const now = new Date(2026, 8, 16, 9, 0, 0);
+  const rows = [
+    row({ action: "open", task_id: "a", event_time: "x", task_status_now: "in_progress", due_date: "2026-09-16" }),
+    row({ action: "open", task_id: "b", event_time: "x", task_status_now: "blocked", due_date: "2026-09-20" }),
+    row({ action: "open", task_id: "c", event_time: "x", task_status_now: "needs_review", due_date: "2026-09-21" }),
+    row({ action: "open", task_id: "d", event_time: "x", task_status_now: "not_started", due_date: "2026-09-01" }),
+    row({ action: "open", task_id: "e", event_time: "x", task_status_now: "not_started", due_date: null }),
+    row({ action: "open", task_id: "f", event_time: "x", task_status_now: "done", due_date: "2026-09-16" }),
+    row({ action: "completed", task_id: "g", event_time: "2026-09-15T10:00:00Z", task_status_now: "done" }),
+  ];
+  it("counts due-this-week, overdue, stuck and no-due-date over the open snapshot only", () => {
+    const c = stateCounts(rows, now);
+    expect(c.open).toBe(5);
+    expect(c.dueThisWeek).toBe(2); // a (today) + b (Sunday); c is next week
+    expect(c.overdue).toBe(1);
+    expect(c.noDueDate).toBe(1);
+    expect(c.blocked).toBe(1);
+    expect(c.needsReview).toBe(1);
+    expect(c.stuck).toBe(2);
+    expect(c.dueByDay).toEqual([0, 0, 1, 0, 0, 0, 1]);
   });
 });
