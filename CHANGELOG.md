@@ -27,6 +27,22 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Project Manager has a new Productivity view.** It reads the project's task
+  history and charts how the work has actually moved: tasks completed per week
+  (stacked by subteam), created versus completed over the window, cycle time
+  from a task being made to the last time it was finished, the share of tasks
+  that landed on or before their due date, and how old the still-open work is.
+  Pick a 4-week, 12-week or season-to-date window (or a custom one), and scope
+  it to a subteam either from the picker or just by opening it inside a team.
+  Per-person numbers are only shown to people who can manage that scope's
+  dashboard — everyone else sees the team-level picture.
+- **Task history exports to CSV.** The Export CSV button on the Productivity
+  view saves every task event in the window — when it happened, what changed,
+  the task and its subteam, due date, estimate and actual days — so you can take
+  the numbers into a spreadsheet. The person column is included only when you
+  are allowed to see it.
+
 ## [5.7.1] - 2026-09-09
 
 ### Changed

@@ -4,6 +4,7 @@ import type { Subteam } from "@helios/pm-ui";
 import {
   IconActivity,
   IconCalendar,
+  IconChartBar,
   IconCheck,
   IconChevronDown,
   IconChevronsLeft,
@@ -100,6 +101,7 @@ const VIEW_LABEL: Record<ViewSegment, string> = {
   graph: "Graph",
   pages: "Pages",
   activity: "Activity",
+  productivity: "Productivity",
 };
 
 const VIEW_ICON: Record<ViewSegment, NavItem["Icon"]> = {
@@ -111,6 +113,7 @@ const VIEW_ICON: Record<ViewSegment, NavItem["Icon"]> = {
   graph: IconGraph,
   pages: IconFileText,
   activity: IconActivity,
+  productivity: IconChartBar,
 };
 
 // One draggable Views row. The whole row is the drag handle, but the 4px
