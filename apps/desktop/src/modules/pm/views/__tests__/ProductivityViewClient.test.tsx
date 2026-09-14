@@ -75,7 +75,11 @@ function seedStore() {
     activeProjectId: PROJECT_ID,
     tasks: [],
     subteams: SUBTEAMS,
-    users: [],
+    currentUserId: "u-me",
+    users: [
+      { id: "u-ada", name: "Ada Lovelace", email: null },
+      { id: "u-me", name: "Me", email: null },
+    ],
     subsystems: [],
     dependencies: [],
     selectedTaskIds: new Set<string>(),
@@ -119,32 +123,51 @@ describe("ProductivityViewClient", () => {
     expect(screen.getByRole("link", { name: "Open blocked and needs-review tasks in the Table" })).toBeInTheDocument();
   });
 
-  it("hides the per-person table and explains why when the RPC returned no actors", async () => {
-    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
-    renderView();
+  const WORKLOAD_ROWS: TaskHistoryRow[] = [
+    row({ action: "open", task_id: "w1", event_time: "x", task_status_now: "in_progress", owner_ids: ["u-ada"], due_date: "2020-01-01" }),
+    row({ action: "open", task_id: "w2", event_time: "x", task_status_now: "in_progress", owner_ids: ["u-ada"] }),
+    row({ action: "open", task_id: "w3", event_time: "x", task_status_now: "not_started", owner_ids: ["u-me"] }),
+    row({ action: "open", task_id: "w4", event_time: "x", task_status_now: "not_started", owner_ids: null }),
+  ];
 
-    expect(await screen.findByText("By person")).toBeInTheDocument();
-    expect(
-      screen.getByText(/only visible to people who can manage this scope/i),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Median cycle")).not.toBeInTheDocument();
-    // The Team/Person toggle is not offered either.
-    expect(screen.queryByRole("radiogroup", { name: "Stack by" })).not.toBeInTheDocument();
-  });
-
-  it("shows the per-person table when actors came back", async () => {
+  it("shows only the caller's own row and Unowned when the server gated the actors out", async () => {
     fetchTaskHistory.mockResolvedValue({
-      rows: FIXTURE.map((r) => ({ ...r, actor_id: "u1", actor_name: "Ada Lovelace" })),
+      rows: WORKLOAD_ROWS.map((r) => ({ ...r, may_see_actors: false })),
       failure: null,
       message: null,
     });
     renderView();
 
-    // The fixture completion is two weeks old: widen past the default window.
-    fireEvent.click(await screen.findByRole("radio", { name: "12 weeks" }));
+    expect(await screen.findByText("Workload")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Me you$/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Unowned" })).toBeInTheDocument();
+    expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+    expect(screen.getByText(/1 other person's row is hidden/)).toBeInTheDocument();
+    // The Team/Person toggle is not offered either.
+    expect(screen.queryByRole("radiogroup", { name: "Stack by" })).not.toBeInTheDocument();
+  });
+
+  it("shows everyone's workload, most loaded first, when the server says the caller may see actors", async () => {
+    fetchTaskHistory.mockResolvedValue({
+      rows: WORKLOAD_ROWS.map((r) => ({ ...r, may_see_actors: true })),
+      failure: null,
+      message: null,
+    });
+    renderView();
+
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
+    const bars = screen.getAllByRole("img", { name: /^(Ada Lovelace|Me|Unowned):/ });
+    expect(bars[0]).toHaveAccessibleName(/^Ada Lovelace:/);
+    expect(screen.getByRole("link", { name: "Ada Lovelace" }).getAttribute("href")).toBe("/table?owner=u-ada");
+    expect(screen.getByRole("link", { name: "Unowned" }).getAttribute("href")).toBe("/table?owner=__unassigned__");
     expect(screen.getByRole("radiogroup", { name: "Stack by" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Person" })).toBeInTheDocument();
+  });
+
+  it("says so when a pre-v3 server sends no owners", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    renderView();
+    expect(await screen.findByText(/Workload needs the latest server update/)).toBeInTheDocument();
   });
 
   it("renders the not-available notice when the migration is missing", async () => {

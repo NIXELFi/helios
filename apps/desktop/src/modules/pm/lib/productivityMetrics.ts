@@ -132,20 +132,6 @@ export interface SubteamOnTime extends OnTimeStat {
   subteamName: string;
 }
 
-export interface PersonStat {
-  actorId: string;
-  actorName: string;
-  completions: number;
-  onTimeRate: number | null;
-  /**
-   * Open tasks this person CREATED in the window (history has no owner column —
-   * see below). An open task whose creation predates the window arrives as a
-   * synthetic `open` row with no actor at all, so it counts toward `totalOpen`
-   * but toward nobody's personal column.
-   */
-  open: number;
-}
-
 export interface ProductivityMetrics {
   totalCreated: number;
   totalCompleted: number;
@@ -156,8 +142,6 @@ export interface ProductivityMetrics {
   onTimeBySubteam: SubteamOnTime[];
   /** True when the RPC returned at least one non-null actor, i.e. the caller is gated in. */
   actorsAvailable: boolean;
-  /** Empty unless `actorsAvailable`. */
-  perPerson: PersonStat[];
   /** Subteams seen in the window, sorted by name — the stacked-chart series order. "" id = no subteam. */
   subteams: Array<{ id: string; name: string }>;
 }
@@ -205,8 +189,9 @@ function parseTs(iso: string | null): Date | null {
  *
  * Person-level output is driven entirely by whether the server sent actors: if
  * every `actor_id` is null (the caller lacks pm.manage_dashboard in scope),
- * `actorsAvailable` is false and `perPerson` is empty, so the view has nothing
- * to render even by accident. The gate lives on the server; this is the mirror.
+ * `actorsAvailable` is false and `byPerson` stays empty, so the view has
+ * nothing to render even by accident. The gate lives on the server; this is
+ * the mirror.
  */
 export function buildProductivity(
   rows: ReadonlyArray<TaskHistoryRow>,
@@ -222,7 +207,7 @@ export function buildProductivity(
   const lastCompletion = new Map<string, CompletionRecord>();
   // First `created` event per task, plus the task snapshot we need for aging.
   const createdAtByTask = new Map<string, Date>();
-  const createdEvent = new Map<string, { at: Date; actorId: string | null; actorName: string | null }>();
+  const createdEvent = new Map<string, { at: Date }>();
   const snapshot = new Map<
     string,
     { statusNow: string | null; createdAt: Date | null; subteamName: string }
@@ -254,7 +239,7 @@ export function buildProductivity(
     if (r.action === "created") {
       const existing = createdEvent.get(r.task_id);
       if (!existing || at < existing.at) {
-        createdEvent.set(r.task_id, { at, actorId: r.actor_id, actorName: r.actor_name });
+        createdEvent.set(r.task_id, { at });
       }
     } else if (r.action === "completed") {
       const existing = lastCompletion.get(r.task_id);
@@ -376,62 +361,6 @@ export function buildProductivity(
     if (CLOSED_STATUSES.has(snap.statusNow)) continue;
     openTaskIds.push(taskId);
   }
-  const openSet = new Set(openTaskIds);
-
-  // --- per person -----------------------------------------------------------
-  // NOTE on `open`: the history carries the ACTOR of each event, not the task's
-  // current owner (owners live in pm.task_owners, which this RPC deliberately
-  // does not join — it would multiply the row count and widen the personal data
-  // surface). So a person's open count is the open tasks they CREATED. The view
-  // labels the column accordingly.
-  const perPerson: PersonStat[] = [];
-  if (actorsAvailable) {
-    const byActor = new Map<
-      string,
-      { name: string; completions: number; due: number; onTime: number; open: number }
-    >();
-    const bump = (id: string, name: string | null) => {
-      let e = byActor.get(id);
-      if (!e) {
-        e = { name: name ?? "Unknown", completions: 0, due: 0, onTime: 0, open: 0 };
-        byActor.set(id, e);
-      } else if (name && e.name === "Unknown") {
-        e.name = name;
-      }
-      return e;
-    };
-
-    for (const c of lastCompletion.values()) {
-      if (!c.actorId) continue;
-      const e = bump(c.actorId, c.actorName);
-      e.completions += 1;
-      if (c.dueDate) {
-        e.due += 1;
-        if (localDayKey(c.at) <= c.dueDate) e.onTime += 1;
-      }
-    }
-
-    for (const [taskId, ev] of createdEvent.entries()) {
-      if (!ev.actorId) continue;
-      const e = bump(ev.actorId, ev.actorName);
-      if (openSet.has(taskId)) e.open += 1;
-    }
-
-    for (const [actorId, e] of byActor.entries()) {
-      perPerson.push({
-        actorId,
-        actorName: e.name,
-        completions: e.completions,
-        onTimeRate: e.due > 0 ? e.onTime / e.due : null,
-        open: e.open,
-      });
-    }
-    // Most completions first, then most open work, then name.
-    perPerson.sort(
-      (a, b) =>
-        b.completions - a.completions || b.open - a.open || a.actorName.localeCompare(b.actorName),
-    );
-  }
 
   const subteamById = new Map<string, string>();
   for (const c of lastCompletion.values()) subteamById.set(c.subteamId, c.subteamName);
@@ -452,7 +381,6 @@ export function buildProductivity(
     },
     onTimeBySubteam,
     actorsAvailable,
-    perPerson,
     subteams,
   };
 }
@@ -845,4 +773,113 @@ export function subteamSummaries(
       b.open - a.open ||
       a.subteamName.localeCompare(b.subteamName),
   );
+}
+
+// --- workload balance (never a leaderboard) ---------------------------------
+
+export interface WorkloadRow {
+  /** "" = Unowned, a first-class row. */
+  ownerId: string;
+  /** Live open snapshot; a task with several owners counts once for each. */
+  open: number;
+  notStarted: number;
+  inProgress: number;
+  needsReview: number;
+  blocked: number;
+  stuck: number;
+  /** Open, due today through the next seven days. */
+  dueSoon: number;
+  /** Open and past due. */
+  overdue: number;
+  /** Completed inside the selected window, attributed to the PRIMARY owner only so nothing is counted twice. */
+  done: number;
+}
+
+export interface Workload {
+  rows: WorkloadRow[];
+  /** False when no row carried owner_ids — a pre-v3 server; the panel cannot be drawn. */
+  ownersKnown: boolean;
+}
+
+/**
+ * Open work per owner, framed as balance: who is carrying how much, and how
+ * much of it is due soon or already late. Sorted by open + dueSoon (most
+ * loaded first), NEVER by completions — this is a student team, not a
+ * scoreboard. Unowned is a real row so the pile nobody has picked up is
+ * visible next to everyone else's. `windowRows` supplies the completions
+ * (last completion per task, primary owner), `rows` the open snapshot.
+ */
+export function workload(
+  rows: ReadonlyArray<TaskHistoryRow>,
+  windowRows: ReadonlyArray<TaskHistoryRow>,
+  now: Date,
+): Workload {
+  const today = localDayKey(now);
+  const horizon = new Date(now.getTime());
+  horizon.setDate(horizon.getDate() + 7);
+  const horizonKey = localDayKey(horizon);
+
+  const byOwner = new Map<string, WorkloadRow>();
+  const get = (id: string): WorkloadRow => {
+    let r = byOwner.get(id);
+    if (!r) {
+      r = {
+        ownerId: id,
+        open: 0,
+        notStarted: 0,
+        inProgress: 0,
+        needsReview: 0,
+        blocked: 0,
+        stuck: 0,
+        dueSoon: 0,
+        overdue: 0,
+        done: 0,
+      };
+      byOwner.set(id, r);
+    }
+    return r;
+  };
+
+  let ownersKnown = false;
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.owner_ids !== null) ownersKnown = true;
+    if (r.action !== "open" || seen.has(r.task_id)) continue;
+    seen.add(r.task_id);
+    const status = r.task_status_now;
+    if (status === null || CLOSED_STATUSES.has(status)) continue;
+    const owners = r.owner_ids && r.owner_ids.length > 0 ? r.owner_ids : [""];
+    for (const id of owners) {
+      const w = get(id);
+      w.open += 1;
+      if (status === "not_started") w.notStarted += 1;
+      else if (status === "in_progress") w.inProgress += 1;
+      else if (status === "needs_review") w.needsReview += 1;
+      else if (status === "blocked") w.blocked += 1;
+      if (r.due_date) {
+        if (r.due_date < today) w.overdue += 1;
+        else if (r.due_date <= horizonKey) w.dueSoon += 1;
+      }
+    }
+  }
+
+  // Completions in the window: latest per task, then the primary owner.
+  const deleted = new Set<string>();
+  for (const r of windowRows) if (r.action === "deleted") deleted.add(r.task_id);
+  const last = new Map<string, { at: Date; owner: string }>();
+  for (const r of windowRows) {
+    if (r.action !== "completed" || deleted.has(r.task_id)) continue;
+    const at = parseTs(r.event_time);
+    if (!at) continue;
+    const prev = last.get(r.task_id);
+    if (!prev || at > prev.at) last.set(r.task_id, { at, owner: r.owner_ids?.[0] ?? "" });
+  }
+  for (const c of last.values()) get(c.owner).done += 1;
+
+  for (const w of byOwner.values()) w.stuck = w.blocked + w.needsReview;
+
+  const out = [...byOwner.values()].sort(
+    (a, b) => b.open + b.dueSoon - (a.open + a.dueSoon) || b.overdue - a.overdue || a.ownerId.localeCompare(b.ownerId),
+  );
+  return { rows: out, ownersKnown };
 }

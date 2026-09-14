@@ -27,12 +27,14 @@ import {
   subteamSummaries,
   weeklyCompletions,
   windowDeltas,
+  workload,
   type AttentionItem,
   type AttentionLists,
   type ProductivityMetrics,
   type StateCounts,
   type SubteamSummary,
   type WindowDeltas,
+  type Workload,
 } from "@pm/lib/productivityMetrics";
 import { StackedWeeks, type WeekColumn, type WeekSeries } from "@pm/components/charts/StackedWeeks";
 import { BarStrip, type BarSegment } from "@pm/components/charts/BarStrip";
@@ -150,6 +152,8 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   const client = useSupabaseClient();
   const projectId = usePmStore((s) => s.projectId);
   const subteams = usePmStore((s) => s.subteams);
+  const users = usePmStore((s) => s.users);
+  const currentUserId = usePmStore((s) => s.currentUserId);
 
   const routeTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
@@ -239,9 +243,20 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   // Gate mirror: the server nulls every actor unless the caller holds
   // pm.manage_dashboard in scope. Read off the WIDE pull, so a quiet week does
   // not hide the Person toggle from someone who is allowed to see it.
-  const actorsAvailable = useMemo(() => rows.some((r) => r.actor_id !== null), [rows]);
+  const actorsAvailable = useMemo(() => {
+    // v3 states the verdict on every row; a v2 server leaves it null and we
+    // fall back to "did any actor come back", as before.
+    const stated = rows.find((r) => r.may_see_actors !== null)?.may_see_actors;
+    return stated ?? rows.some((r) => r.actor_id !== null);
+  }, [rows]);
   const attention = useMemo<AttentionLists>(() => attentionLists(rows, now), [rows, now]);
   const teams = useMemo<SubteamSummary[]>(() => subteamSummaries(rows, metrics, now), [rows, metrics, now]);
+  const load = useMemo<Workload>(() => workload(rows, windowRows, now), [rows, windowRows, now]);
+  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  const userName = useCallback(
+    (id: string) => usersById.get(id) ?? "Unknown member",
+    [usersById],
+  );
   const selectTask = usePmStore((s) => s.selectTask);
   const subteamById = useMemo(() => new Map(subteams.map((s) => [s.id, s])), [subteams]);
   const rangeCaption = range
@@ -447,7 +462,13 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
                 {routeTeam ? null : (
                   <SubteamsPanel teams={teams} subteamById={subteamById} tableHref={tableHref} />
                 )}
-                <PeoplePanel metrics={metrics} />
+                <WorkloadPanel
+                  load={load}
+                  gated={actorsAvailable}
+                  currentUserId={currentUserId}
+                  userName={userName}
+                  tableHref={tableHref}
+                />
               </div>
             </div>
           </div>
@@ -896,43 +917,112 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-helios-dim">{children}</p>;
 }
 
-function PeoplePanel({ metrics }: { metrics: ProductivityMetrics }) {
-  if (!metrics.actorsAvailable) {
+// --- workload ---------------------------------------------------------------
+
+const WORKLOAD_PREVIEW = 12;
+
+/**
+ * Workload balance: open work per owner, Unowned as a first-class row, sorted
+ * by open + due soon — never by completions. Gated like every person-level
+ * surface: without pm.manage_dashboard in scope only the caller's own row and
+ * the Unowned pile are shown, so a member can still see what they carry and
+ * what nobody has picked up.
+ */
+function WorkloadPanel({
+  load,
+  gated,
+  currentUserId,
+  userName,
+  tableHref,
+}: {
+  load: Workload;
+  /** True when the caller may see other people's rows. */
+  gated: boolean;
+  currentUserId: string;
+  userName: (id: string) => string;
+  tableHref: (patch: Partial<TaskFilters>) => string;
+}) {
+  if (!load.ownersKnown) {
     return (
-      <Panel title="By person">
-        <p className="text-sm text-helios-dim">
-          Per-person numbers are only visible to people who can manage this scope’s dashboard.
-        </p>
+      <Panel title="Workload">
+        <Empty>Workload needs the latest server update (task owners are not in this history yet).</Empty>
       </Panel>
     );
   }
+  const visible = gated
+    ? load.rows
+    : load.rows.filter((r) => r.ownerId === "" || r.ownerId === currentUserId);
+  const hidden = load.rows.length - visible.length;
+  const max = Math.max(1, ...load.rows.map((r) => r.open + r.done));
+  const shown = visible.slice(0, WORKLOAD_PREVIEW);
+
   return (
     <Panel
-      title="By person"
-      subtitle="Open counts are tasks the person created — task history records who acted, not who currently owns the task."
+      title="Workload"
+      subtitle={
+        gated
+          ? "Open work per owner, most loaded first. Balance, not a scoreboard. A name opens their tasks in the Table."
+          : "Your own row and the unowned pile. Other people's rows are only visible to people who can manage this scope's dashboard."
+      }
     >
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-helios-line text-left text-[10px] uppercase tracking-widest text-helios-dim">
-            <th className="py-1.5">Person</th>
-            <th className="py-1.5 text-right">Completed</th>
-            <th className="py-1.5 text-right">On time</th>
-            <th className="py-1.5 text-right">Open (created)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {metrics.perPerson.map((p) => (
-            <tr key={p.actorId} className="border-b border-helios-line/60 last:border-b-0">
-              <td className="py-1.5 text-helios-text">{p.actorName}</td>
-              <td className="py-1.5 text-right tabular-nums text-helios-dim">{p.completions}</td>
-              <td className="py-1.5 text-right tabular-nums text-helios-dim">
-                {p.onTimeRate === null ? "—" : `${Math.round(p.onTimeRate * 100)}%`}
-              </td>
-              <td className="py-1.5 text-right tabular-nums text-helios-dim">{p.open}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {visible.length === 0 ? (
+        <Empty>No open work in this scope.</Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-helios-dim">
+            <span className="w-32 shrink-0" />
+            <span className="min-w-0 flex-1" />
+            <span className="flex shrink-0 gap-3">
+              <span className={COL}>open</span>
+              <span className={COL}>due 7d</span>
+              <span className={COL}>late</span>
+              <span className={COL}>done</span>
+            </span>
+          </div>
+          {shown.map((r) => {
+            const isSelf = r.ownerId !== "" && r.ownerId === currentUserId;
+            const name = r.ownerId === "" ? "Unowned" : userName(r.ownerId);
+            return (
+              <BarStrip
+                key={r.ownerId || "__unowned__"}
+                title={name}
+                max={max}
+                emphasis={isSelf}
+                segments={statusSegments(r)}
+                label={
+                  <Link
+                    href={tableHref({ ownerIds: [r.ownerId === "" ? "__unassigned__" : r.ownerId] })}
+                    className={`inline-flex max-w-full items-center gap-1.5 hover:underline ${
+                      r.ownerId === "" ? "text-helios-dim" : "text-helios-text"
+                    }`}
+                  >
+                    <span className="truncate">{name}</span>
+                    {isSelf ? <span className="shrink-0 text-[10px] text-asu-gold">you</span> : null}
+                  </Link>
+                }
+                trailing={
+                  <>
+                    <Num value={r.open} tone="text" />
+                    <Num value={r.dueSoon} tone={r.dueSoon > 0 ? "warn" : "dim"} />
+                    <Num value={r.overdue} tone={r.overdue > 0 ? "danger" : "dim"} />
+                    <Num value={r.done} tone={r.done > 0 ? "text" : "dim"} />
+                  </>
+                }
+              />
+            );
+          })}
+          {visible.length > shown.length ? (
+            <p className="text-[11px] text-helios-dim">
+              + {visible.length - shown.length} more with open work — the Table's Owner filter lists everyone.
+            </p>
+          ) : null}
+          {hidden > 0 ? (
+            <p className="text-[11px] text-helios-dim">
+              {hidden} other {hidden === 1 ? "person's row is" : "people's rows are"} hidden.
+            </p>
+          ) : null}
+        </div>
+      )}
     </Panel>
   );
 }

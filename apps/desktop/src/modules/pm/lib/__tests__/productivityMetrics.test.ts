@@ -8,6 +8,7 @@ import {
   stateCounts,
   weeklyCompletions,
   windowDeltas,
+  workload,
   type TaskHistoryRow,
 } from "@pm/lib/productivityMetrics";
 
@@ -162,38 +163,6 @@ describe("buildProductivity — on-time rate", () => {
   });
 });
 
-describe("buildProductivity — person aggregation", () => {
-  it("hides people entirely when the RPC returned no actors", () => {
-    const rows = [row({ action: "completed", task_id: "t1", event_time: "2026-01-08T10:00:00Z", task_created_at: "2026-01-01T00:00:00Z" })];
-    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
-    expect(m.actorsAvailable).toBe(false);
-    expect(m.perPerson).toEqual([]);
-  });
-
-  it("aggregates completions, on-time and open work per person", () => {
-    const rows = [
-      row({ action: "created", task_id: "t1", event_time: "2026-01-01T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", task_status_now: "done" }),
-      row({ action: "completed", task_id: "t1", event_time: "2026-01-05T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", due_date: "2026-01-06", task_status_now: "done" }),
-      row({ action: "created", task_id: "t2", event_time: "2026-01-01T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", task_status_now: "done" }),
-      row({ action: "completed", task_id: "t2", event_time: "2026-01-11T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", actor_id: "u1", actor_name: "Ada", due_date: "2026-01-06", task_status_now: "done" }),
-      row({ action: "created", task_id: "t3", event_time: "2026-01-02T00:00:00Z", task_created_at: "2026-01-02T00:00:00Z", actor_id: "u2", actor_name: "Grace", task_status_now: "active" }),
-    ];
-    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
-    expect(m.actorsAvailable).toBe(true);
-    const ada = m.perPerson.find((p) => p.actorId === "u1")!;
-    expect(ada.actorName).toBe("Ada");
-    expect(ada.completions).toBe(2);
-    expect(ada.onTimeRate).toBe(0.5);
-    expect(ada.open).toBe(0);
-    const grace = m.perPerson.find((p) => p.actorId === "u2")!;
-    expect(grace.completions).toBe(0);
-    expect(grace.open).toBe(1);
-    expect(grace.onTimeRate).toBeNull();
-    // Most completions first.
-    expect(m.perPerson[0]!.actorId).toBe("u1");
-  });
-});
-
 describe("buildProductivity — synthetic rows from the RPC", () => {
   // The RPC emits a synthetic `open` row per currently-open task (a LIVE
   // snapshot, deliberately not window-filtered) so that open work with no
@@ -269,18 +238,6 @@ describe("buildProductivity — synthetic rows from the RPC", () => {
     expect(m.totalCompleted).toBe(1);
     // The later (synthetic) one wins the on-time check: due the 25th, done the 20th.
     expect(m.throughput.find((w) => w.completed === 1)!.weekStart).toBe("2026-01-19");
-  });
-
-  it("leaves open rows out of the per-person open count (they carry no actor)", () => {
-    const rows = [
-      row({ action: "created", task_id: "t1", event_time: "2026-01-02T00:00:00Z", task_created_at: "2026-01-02T00:00:00Z", actor_id: "u1", actor_name: "Ada", task_status_now: "designing" }),
-      row({ action: "open", task_id: "t1", event_time: "2026-01-02T00:00:00Z", task_created_at: "2026-01-02T00:00:00Z", task_status_now: "designing" }),
-      // No creation event in the window -> nobody owns this one's open count.
-      row({ action: "open", task_id: "t2", event_time: "2025-06-02T00:00:00Z", task_created_at: "2025-06-02T00:00:00Z", task_status_now: "designing" }),
-    ];
-    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
-    expect(m.totalOpen).toBe(2);
-    expect(m.perPerson.find((p) => p.actorId === "u1")!.open).toBe(1);
   });
 });
 
@@ -500,5 +457,48 @@ describe("subteamSummaries", () => {
     const s = subteamSummaries(tie, buildProductivity(tie, { now }), now);
     // Chassis has the overdue task and wins despite having fewer open.
     expect(s.map((t) => t.subteamName)).toEqual(["Chassis", "Aero"]);
+  });
+});
+
+describe("workload", () => {
+  const now = new Date(2026, 8, 16, 9, 0, 0);
+  const open = (over: Partial<TaskHistoryRow> & Pick<TaskHistoryRow, "task_id">) =>
+    row({ action: "open", event_time: "x", task_status_now: "in_progress", ...over });
+  const rows = [
+    open({ task_id: "k1", owner_ids: ["kim"], due_date: "2026-09-18" }), // due soon
+    open({ task_id: "k2", owner_ids: ["kim"], due_date: "2026-09-01", task_status_now: "blocked" }), // overdue + stuck
+    open({ task_id: "k3", owner_ids: ["kim", "ana"], due_date: null }), // shared: counts for both
+    open({ task_id: "a1", owner_ids: ["ana"], due_date: "2026-10-30", task_status_now: "not_started" }),
+    open({ task_id: "u1", owner_ids: null, due_date: "2026-09-17" }), // unowned, due soon
+    open({ task_id: "u2", owner_ids: [], task_status_now: "not_started" }), // unowned
+    open({ task_id: "x1", owner_ids: ["kim"], task_status_now: "done" }), // closed: ignored
+  ];
+  const windowRows = [
+    row({ action: "completed", task_id: "d1", event_time: "2026-09-10T10:00:00Z", owner_ids: ["ana", "kim"] }),
+    row({ action: "completed", task_id: "d2", event_time: "2026-09-10T10:00:00Z", owner_ids: null }),
+  ];
+
+  it("balances open work per owner with Unowned as a first-class row", () => {
+    const w = workload(rows, windowRows, now);
+    expect(w.ownersKnown).toBe(true);
+    const kim = w.rows.find((r) => r.ownerId === "kim")!;
+    expect(kim).toMatchObject({ open: 3, dueSoon: 1, overdue: 1, blocked: 1, stuck: 1, done: 0 });
+    const ana = w.rows.find((r) => r.ownerId === "ana")!;
+    expect(ana).toMatchObject({ open: 2, dueSoon: 0, overdue: 0, done: 1 }); // primary owner of d1
+    const unowned = w.rows.find((r) => r.ownerId === "")!;
+    expect(unowned).toMatchObject({ open: 2, dueSoon: 1, done: 1 });
+  });
+
+  it("sorts by open + due soon, never by completions", () => {
+    const w = workload(rows, windowRows, now);
+    expect(w.rows.map((r) => r.ownerId)).toEqual(["kim", "", "ana"]);
+  });
+
+  it("reports ownersKnown=false on a pre-v3 server", () => {
+    const old = rows.map((r) => ({ ...r, owner_ids: null }));
+    const w = workload(old, [], now);
+    expect(w.ownersKnown).toBe(false);
+    // Everything piles into Unowned because nothing says otherwise.
+    expect(w.rows.map((r) => r.ownerId)).toEqual([""]);
   });
 });
