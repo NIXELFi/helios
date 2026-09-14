@@ -166,6 +166,24 @@ describe("ProductivityViewClient", () => {
     expect(screen.getByRole("radio", { name: "Person" })).toBeInTheDocument();
   });
 
+  it("stacks the Weeks strip by task OWNER in Person mode, naming people from the directory", async () => {
+    fetchTaskHistory.mockResolvedValue({
+      rows: [
+        row({ action: "completed", task_id: "c1", event_time: isoDaysAgo(1), owner_ids: ["u-ada"], actor_id: "u-me", actor_name: "Me", may_see_actors: true }),
+        row({ action: "completed", task_id: "c2", event_time: isoDaysAgo(1), owner_ids: null, actor_id: "u-me", actor_name: "Me", may_see_actors: true }),
+      ],
+      failure: null,
+      message: null,
+    });
+    renderView();
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Person" }));
+    // Legend lists the OWNER (Ada) and the unowned bucket — not the actor.
+    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("Unowned")).toBeInTheDocument();
+    expect(screen.getByText(/stacked by person/)).toBeInTheDocument();
+  });
+
   it("says so when a pre-v3 server sends no owners", async () => {
     fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
     renderView();

@@ -468,6 +468,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
                 subteamColor={(id) => subteamColor.get(id) ?? null}
                 today={now}
                 milestones={milestones}
+                userName={userName}
               />
             ) : null}
             <div className="grid gap-6 xl:grid-cols-2">
@@ -952,6 +953,7 @@ function ThroughputPanel({
   today,
   milestones,
   windowStart,
+  userName,
 }: {
   /** The STRIP's metrics: the window plus trailing context weeks. */
   metrics: ProductivityMetrics;
@@ -961,6 +963,8 @@ function ThroughputPanel({
   milestones: ReadonlyArray<Milestone>;
   /** Monday (YYYY-MM-DD) of the selected window's first week; earlier columns are context. */
   windowStart: string;
+  /** Owner id -> display name, for Person stacking. */
+  userName: (id: string) => string;
 }) {
   const weeks = metrics.throughput;
   const currentKey = isoWeekKey(today);
@@ -977,8 +981,8 @@ function ThroughputPanel({
   const next = nextMilestone(milestones, today);
   const series: WeekSeries[] = byPerson
     ? [...new Set(weeks.flatMap((w) => Object.keys(w.byPerson)))]
-        .sort()
-        .map((name) => ({ id: name, label: name, color: personColor(name) }))
+        .map((id) => ({ id, label: id === "" ? "Unowned" : userName(id), color: id === "" ? NO_SUBTEAM_COLOR : personColor(id) }))
+        .sort((a, b) => a.label.localeCompare(b.label))
     : metrics.subteams.map((s) => ({
         id: s.id,
         label: s.name,
@@ -1016,12 +1020,12 @@ function ThroughputPanel({
   );
 }
 
-// People have no colour of their own. Derive a stable hue from the name so a
-// person keeps their colour across windows and reloads — an index-based
-// palette would reshuffle everyone whenever the set of names changed.
-function personColor(name: string): string {
+// People have no colour of their own. Derive a stable hue from the owner id so
+// a person keeps their colour across windows and reloads — an index-based
+// palette would reshuffle everyone whenever the set of people changed.
+function personColor(id: string): string {
   let h = 0;
-  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return `hsl(${h % 360} 55% 60%)`;
 }
 

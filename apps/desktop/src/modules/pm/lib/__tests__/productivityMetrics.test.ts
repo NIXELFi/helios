@@ -105,6 +105,18 @@ describe("buildProductivity — throughput", () => {
     ]);
   });
 
+  it("stacks by PRIMARY OWNER for Person mode, with unowned under an empty key", () => {
+    const owned = [
+      row({ action: "completed", task_id: "p1", event_time: "2026-01-14T10:00:00Z", owner_ids: ["kim", "ana"] }),
+      row({ action: "completed", task_id: "p2", event_time: "2026-01-14T11:00:00Z", owner_ids: ["ana"] }),
+      row({ action: "completed", task_id: "p3", event_time: "2026-01-14T12:00:00Z", owner_ids: null, actor_id: "kim", actor_name: "Kim" }),
+    ];
+    const m = buildProductivity(owned, { now: new Date("2026-02-01T00:00:00Z") });
+    const week = m.throughput.find((w) => w.completed === 3)!;
+    // Owners, not actors: p3 was clicked Done by Kim but belongs to nobody.
+    expect(week.byPerson).toEqual({ kim: 1, ana: 1, "": 1 });
+  });
+
   it("emits a contiguous week series with no gaps", () => {
     const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
     const keys = m.throughput.map((w) => w.week);

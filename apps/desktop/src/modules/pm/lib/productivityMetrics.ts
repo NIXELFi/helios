@@ -114,7 +114,12 @@ export interface WeekThroughput {
   created: number;
   /** Completions in this week keyed by subteam ID ("" = no subteam), so series colour by id. */
   bySubteam: Record<string, number>;
-  /** Completions in this week keyed by actor name. Empty when actors are gated. */
+  /**
+   * Completions in this week keyed by the task's PRIMARY owner id ("" =
+   * unowned or, on a pre-v3 server, unknown). Owners, not actors: the person
+   * responsible for the task, not whoever clicked Done. The view only offers
+   * this stacking to callers the server let see people.
+   */
   byPerson: Record<string, number>;
 }
 
@@ -165,6 +170,8 @@ interface CompletionRecord {
   at: Date;
   subteamId: string;
   subteamName: string;
+  /** Primary owner id, "" when unowned or unknown. */
+  ownerId: string;
   actorId: string | null;
   actorName: string | null;
   dueDate: string | null;
@@ -251,6 +258,7 @@ export function buildProductivity(
           at,
           subteamId: r.subteam_id ?? "",
           subteamName,
+          ownerId: r.owner_ids?.[0] ?? "",
           actorId: r.actor_id,
           actorName: r.actor_name,
           dueDate: r.due_date,
@@ -289,7 +297,7 @@ export function buildProductivity(
     const b = touch(c.at);
     b.completed += 1;
     b.bySubteam[c.subteamId] = (b.bySubteam[c.subteamId] ?? 0) + 1;
-    if (c.actorName) b.byPerson[c.actorName] = (b.byPerson[c.actorName] ?? 0) + 1;
+    b.byPerson[c.ownerId] = (b.byPerson[c.ownerId] ?? 0) + 1;
   }
 
   // Fill the gaps so the chart has no missing columns: walk Mondays from the
