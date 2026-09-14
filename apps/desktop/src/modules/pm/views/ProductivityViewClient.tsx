@@ -424,7 +424,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
         {range === null ? (
           <Notice>Pick a valid date range — the end date must not be before the start.</Notice>
         ) : loading ? (
-          <Notice>Loading task history…</Notice>
+          <LoadingSkeleton showSubteams={!routeTeam} />
         ) : failure === "unavailable" ? (
           <Notice>
             Task history isn’t available on this server yet. The database migration that adds it
@@ -443,7 +443,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
             </button>
           </Notice>
         ) : rows.length === 0 ? (
-          <Notice>No task activity in this window.</Notice>
+          <Notice>Nothing here yet — no open tasks in this scope and no activity in this window.</Notice>
         ) : (
           <div className="flex flex-col gap-6">
             {exportError ? (
@@ -499,6 +499,51 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
 }
 
 // --- shared chrome ----------------------------------------------------------
+
+/**
+ * Loading = the page's own shape in .helios-skeleton blocks (the shell's
+ * shimmer, styles.css), so the layout does not jump when the numbers land.
+ * Mirrors the real grid: four tiles, the Weeks strip, then Attention beside
+ * Subteams + Workload.
+ */
+function Bone({ className }: { className: string }) {
+  return <div className={`helios-skeleton rounded-md ${className}`} aria-hidden />;
+}
+
+function BonePanel({ rows, rowClass }: { rows: number; rowClass: string }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-helios-line bg-helios-panel p-5">
+      <Bone className="h-2.5 w-20" />
+      {Array.from({ length: rows }, (_, i) => (
+        <Bone key={i} className={rowClass} />
+      ))}
+    </div>
+  );
+}
+
+function LoadingSkeleton({ showSubteams }: { showSubteams: boolean }) {
+  return (
+    <div role="status" aria-busy="true" aria-label="Loading task history" className="flex flex-col gap-6">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex flex-col gap-3 rounded-md border border-helios-line bg-helios-panel p-4">
+            <Bone className="h-2.5 w-20" />
+            <Bone className="h-8 w-16" />
+            <Bone className="h-2.5 w-32" />
+          </div>
+        ))}
+      </div>
+      <BonePanel rows={1} rowClass="h-[200px] w-full" />
+      <div className="grid gap-6 xl:grid-cols-2">
+        <BonePanel rows={5} rowClass="h-6 w-full" />
+        <div className="flex flex-col gap-6">
+          {showSubteams ? <BonePanel rows={3} rowClass="h-4 w-full" /> : null}
+          <BonePanel rows={3} rowClass="h-4 w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Notice({ children }: { children: React.ReactNode }) {
   return (

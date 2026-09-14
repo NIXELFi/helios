@@ -199,7 +199,22 @@ describe("ProductivityViewClient", () => {
     fetchTaskHistory.mockResolvedValue({ rows: [], failure: null, message: null });
     renderView();
 
-    expect(await screen.findByText("No task activity in this window.")).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument();
+  });
+
+  it("shows a page-shaped skeleton while the history loads", async () => {
+    let resolve: (r: TaskHistoryResult) => void = () => {};
+    fetchTaskHistory.mockReturnValue(new Promise<TaskHistoryResult>((r) => (resolve = r)));
+    const { container } = renderView();
+
+    const status = await screen.findByRole("status", { name: "Loading task history" });
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelectorAll(".helios-skeleton").length).toBeGreaterThan(8);
+    expect(screen.queryByText("Loading task history…")).not.toBeInTheDocument();
+
+    resolve({ rows: FIXTURE, failure: null, message: null });
+    expect(await screen.findByText("Weeks")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading task history" })).not.toBeInTheDocument();
   });
 
   it("scopes the query to the route's subteam and hides the subteam picker", async () => {
