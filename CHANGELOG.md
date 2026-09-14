@@ -27,7 +27,10 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.7.2] - 2026-09-14
+
 ### Added
+- **Cellular telemetry ingest (server side).** The HTP/1 wire protocol, `telemetry` schema, `telemetry-ingest` edge function and staging compactor from the June pipeline branch are now on main. No user-facing change yet.
 - **Project Manager has a new Productivity view — a lead's Monday page.** Four
   tiles up top answer the questions a lead asks first: how many tasks got done
   this window (against the previous one, with a twelve-week sparkline), what is
