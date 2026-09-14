@@ -116,10 +116,21 @@ interface Range {
   to: Date;
 }
 
-/** The window of the same length that ends the instant before `r` starts. */
-function previousRange(r: Range): Range {
-  const len = r.to.getTime() - r.from.getTime();
+/**
+ * The comparison window. Same length, ending the instant before `r` starts —
+ * except for "This week", which compares against ALL of last week: on a
+ * Monday morning the same-length rule would compare one day against one day
+ * and read "0 vs 0", which answers nothing. A partial week against a full one
+ * is the comparison a lead actually makes, and the label says so.
+ */
+function previousRange(r: Range, key: PresetKey): Range {
   const to = new Date(r.from.getTime() - 1);
+  if (key === "week") {
+    const from = isoWeekStart(r.from);
+    from.setDate(from.getDate() - 7);
+    return { from, to };
+  }
+  const len = r.to.getTime() - r.from.getTime();
   return { from: new Date(to.getTime() - len), to };
 }
 
@@ -129,8 +140,8 @@ function previousRange(r: Range): Range {
  * context columns). Fetching the union and slicing client-side is cheaper than
  * three round trips and gives one loading state instead of three.
  */
-function fetchRange(r: Range): Range {
-  const prev = previousRange(r);
+function fetchRange(r: Range, key: PresetKey): Range {
+  const prev = previousRange(r, key);
   const context = isoWeekStart(r.to);
   context.setDate(context.getDate() - 7 * (SPARK_WEEKS - 1));
   const from = new Date(Math.min(prev.from.getTime(), context.getTime()));
@@ -138,7 +149,7 @@ function fetchRange(r: Range): Range {
 }
 
 function compareLabel(key: PresetKey, r: Range): string {
-  if (key === "week") return "vs last week";
+  if (key === "week") return "vs all of last week";
   if (key === "4w") return "vs previous 4 weeks";
   if (key === "12w") return "vs previous 12 weeks";
   const days = Math.max(1, Math.round((r.to.getTime() - r.from.getTime()) / MS_PER_DAY));
@@ -198,7 +209,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset, customFrom, customTo]);
 
-  const pull = useMemo(() => (range ? fetchRange(range) : null), [range]);
+  const pull = useMemo(() => (range ? fetchRange(range, preset) : null), [range, preset]);
 
   useEffect(() => {
     if (!projectId || !pull) {
@@ -238,9 +249,9 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   );
   const previousMetrics = useMemo<ProductivityMetrics | null>(() => {
     if (!range) return null;
-    const prev = previousRange(range);
+    const prev = previousRange(range, preset);
     return buildProductivity(sliceWindow(rows, prev.from, prev.to), { now, from: prev.from, to: prev.to });
-  }, [rows, range, now]);
+  }, [rows, range, preset, now]);
   const deltas = useMemo<WindowDeltas>(() => windowDeltas(metrics, previousMetrics), [metrics, previousMetrics]);
   // The Weeks strip always shows at least STRIP_MIN_WEEKS columns: a one-week
   // window still gets trailing context, drawn faded and excluded from every
@@ -268,7 +279,15 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   const attention = useMemo<AttentionLists>(() => attentionLists(rows, now), [rows, now]);
   const teams = useMemo<SubteamSummary[]>(() => subteamSummaries(rows, metrics, now), [rows, metrics, now]);
   const load = useMemo<Workload>(() => workload(rows, windowRows, now), [rows, windowRows, now]);
-  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  // Directory first; the history's own actor names (gated, so only present
+  // when the caller may see people) fill in anyone the directory has not
+  // synced yet.
+  const usersById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of rows) if (r.actor_id && r.actor_name) m.set(r.actor_id, r.actor_name);
+    for (const u of users) m.set(u.id, u.name);
+    return m;
+  }, [users, rows]);
   const userName = useCallback(
     (id: string) => usersById.get(id) ?? "Unknown member",
     [usersById],
@@ -396,14 +415,16 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
         ) : null}
 
         {routeTeam ? null : (
-          <Select
-            value={pickedSubteamId ?? ""}
-            onChange={(v) => setPickedSubteamId(v || null)}
-            options={subteamOptions}
-            size="sm"
-            ariaLabel="Subteam"
-            className="min-w-[160px]"
-          />
+          // The Select trigger is w-full; box it so it sits inline with the pills.
+          <div className="w-44">
+            <Select
+              value={pickedSubteamId ?? ""}
+              onChange={(v) => setPickedSubteamId(v || null)}
+              options={subteamOptions}
+              size="sm"
+              ariaLabel="Subteam"
+            />
+          </div>
         )}
 
         {actorsAvailable ? (
@@ -725,7 +746,7 @@ function AttentionPanel({
                               {st.code}
                             </span>
                           ) : null}
-                          <span className="w-14 shrink-0 text-right font-mono tabular-nums text-helios-dim">
+                          <span className="w-16 shrink-0 whitespace-nowrap text-right font-mono tabular-nums text-helios-dim">
                             {s.meta(item)}
                           </span>
                         </button>
@@ -771,7 +792,7 @@ function statusSegments(s: {
   ];
 }
 
-const COL = "w-12 text-right";
+const COL = "w-14 whitespace-nowrap text-right";
 
 function Num({ value, tone = "dim" }: { value: string | number; tone?: "dim" | "text" | "warn" | "danger" }) {
   const cls =
@@ -809,7 +830,7 @@ function SubteamsPanel({
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-helios-dim">
-            <span className="w-32 shrink-0" />
+            <span className="w-36 shrink-0" />
             <span className="min-w-0 flex-1" />
             <span className="flex shrink-0 gap-3">
               <span className={COL}>done</span>
@@ -885,7 +906,11 @@ function KpiRow({
       <KpiTile
         label="Completed"
         value={deltas.completed.value}
-        sub={`${metrics.subteams.length} subteam${metrics.subteams.length === 1 ? "" : "s"} contributed`}
+        sub={
+          deltas.completed.value === 0
+            ? "Nothing finished yet in this window"
+            : `${metrics.subteams.length} subteam${metrics.subteams.length === 1 ? "" : "s"} contributed`
+        }
         compare={<Delta delta={deltas.completed.delta} label={compare} />}
         chart={<Sparkline values={spark} label={`Completions over the last ${spark.length} weeks`} />}
         href={tableHref({ status: ["done"] })}
@@ -1086,7 +1111,7 @@ function WorkloadPanel({
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-helios-dim">
-            <span className="w-32 shrink-0" />
+            <span className="w-36 shrink-0" />
             <span className="min-w-0 flex-1" />
             <span className="flex shrink-0 gap-3">
               <span className={COL}>open</span>

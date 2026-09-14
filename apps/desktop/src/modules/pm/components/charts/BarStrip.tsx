@@ -39,7 +39,7 @@ export function BarStrip({
   max,
   trailing,
   title,
-  labelClass = "w-32",
+  labelClass = "w-36",
   emphasis = false,
 }: BarStripProps) {
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);

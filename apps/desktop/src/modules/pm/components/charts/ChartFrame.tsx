@@ -87,7 +87,7 @@ export function ChartFrame({ height, yMax, columns, milestones = [], ariaLabel, 
             y={plotTop}
             width={slot}
             height={plotBottom - plotTop}
-            className="fill-asu-gold/10"
+            className="fill-asu-gold/[0.07]"
           />
         ) : null}
 
