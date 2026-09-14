@@ -5,6 +5,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { ViewHeader } from "@pm/components/ViewHeader";
+import { Select, type SelectOption } from "@pm/components/ui/Select";
+import { FilterField, filterInput } from "@pm/components/TaskFilterBar";
 import { usePmStore } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
@@ -153,6 +155,16 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     [rows],
   );
 
+  // The house picker: swatch dots in each subteam's colour, keyboard nav, and a
+  // portal menu — so WebView2 never paints a native (white) popup list.
+  const subteamOptions = useMemo<SelectOption<string>[]>(
+    () => [
+      { value: "", label: "All subteams" },
+      ...subteams.map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? "#6B7280" })),
+    ],
+    [subteams],
+  );
+
   const subteamColor = useMemo(() => {
     const byName = new Map<string, string>();
     for (const s of subteams) if (s.color) byName.set(s.name, s.color);
@@ -222,44 +234,35 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
         </div>
 
         {preset === "custom" ? (
-          <div className="flex items-center gap-2 text-xs text-helios-dim">
-            <label className="flex items-center gap-1">
-              From
+          <div className="flex items-end gap-2">
+            <FilterField label="From">
               <input
                 type="date"
                 value={customFrom}
                 onChange={(e) => setCustomFrom(e.target.value)}
-                className="rounded border border-helios-line bg-transparent px-1.5 py-0.5 text-helios-text"
+                className={filterInput}
               />
-            </label>
-            <label className="flex items-center gap-1">
-              To
+            </FilterField>
+            <FilterField label="To">
               <input
                 type="date"
                 value={customTo}
                 onChange={(e) => setCustomTo(e.target.value)}
-                className="rounded border border-helios-line bg-transparent px-1.5 py-0.5 text-helios-text"
+                className={filterInput}
               />
-            </label>
+            </FilterField>
           </div>
         ) : null}
 
         {routeTeam ? null : (
-          <label className="flex items-center gap-1 text-xs text-helios-dim">
-            Subteam
-            <select
-              value={pickedSubteamId ?? ""}
-              onChange={(e) => setPickedSubteamId(e.target.value || null)}
-              className="rounded border border-helios-line bg-transparent px-1.5 py-0.5 text-helios-text"
-            >
-              <option value="">All teams</option>
-              {subteams.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            value={pickedSubteamId ?? ""}
+            onChange={(v) => setPickedSubteamId(v || null)}
+            options={subteamOptions}
+            size="sm"
+            ariaLabel="Subteam"
+            className="min-w-[160px]"
+          />
         )}
 
         {metrics.actorsAvailable ? (

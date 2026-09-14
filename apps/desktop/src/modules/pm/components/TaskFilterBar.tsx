@@ -235,7 +235,7 @@ export function TaskFilterBar({
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+export function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-medium uppercase tracking-widest text-helios-dim">
@@ -246,6 +246,7 @@ function FilterField({ label, children }: { label: string; children: React.React
   );
 }
 
-const filterInput =
+// Exported so sibling control bars (Productivity) share the exact input chrome.
+export const filterInput =
   "rounded border border-helios-line bg-helios-base px-2 py-1.5 text-sm text-helios-text " +
   "placeholder:text-helios-dim focus:border-asu-gold focus:outline-none";

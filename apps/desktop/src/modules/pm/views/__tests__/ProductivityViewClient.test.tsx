@@ -172,6 +172,18 @@ describe("ProductivityViewClient", () => {
     expect(await screen.findByText("Aero · Productivity")).toBeInTheDocument();
   });
 
+  it("renders the subteam picker as the house Select, never a native <select>", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    const { container } = renderView(null);
+
+    const trigger = await screen.findByRole("button", { name: "Subteam" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+    expect(container.querySelector("select")).toBeNull();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("option", { name: "All subteams" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Aero" })).toBeInTheDocument();
+  });
+
   it("queries project-wide with a null subteam at project scope", async () => {
     fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
     renderView(null);
