@@ -258,6 +258,99 @@ describe("buildProductivity — person aggregation", () => {
   });
 });
 
+describe("buildProductivity — synthetic rows from the RPC", () => {
+  // The RPC emits a synthetic `open` row per currently-open task (a LIVE
+  // snapshot, deliberately not window-filtered) so that open work with no
+  // recent activity is still visible. It is a state, not an event: it must
+  // never be counted as a creation or a completion.
+  it("ages a task whose ONLY row is a synthetic open row", () => {
+    const rows = [
+      row({
+        action: "open",
+        task_id: "t1",
+        event_time: "2025-11-01T00:00:00Z",
+        task_created_at: "2025-11-01T00:00:00Z",
+        task_status_now: "designing",
+      }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalOpen).toBe(1);
+    // 92 days old -> the last bucket.
+    expect(m.aging[3]!.count).toBe(1);
+    // ...and it is NOT work anyone did in the window.
+    expect(m.totalCreated).toBe(0);
+    expect(m.totalCompleted).toBe(0);
+    expect(m.throughput).toEqual([]);
+    expect(m.burnup).toEqual([]);
+  });
+
+  it("does not double-count a task that has both an open row and a created event", () => {
+    const rows = [
+      row({ action: "created", task_id: "t1", event_time: "2026-01-20T00:00:00Z", task_created_at: "2026-01-20T00:00:00Z", task_status_now: "designing" }),
+      row({ action: "open", task_id: "t1", event_time: "2026-01-20T00:00:00Z", task_created_at: "2026-01-20T00:00:00Z", task_status_now: "designing" }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalOpen).toBe(1);
+    expect(m.totalCreated).toBe(1);
+    expect(m.throughput.reduce((a, w) => a + w.created, 0)).toBe(1);
+  });
+
+  it("drops an open row for a task that was also deleted in the window", () => {
+    const rows = [
+      row({ action: "open", task_id: "t1", event_time: "2026-01-01T00:00:00Z", task_created_at: "2026-01-01T00:00:00Z", task_status_now: "designing" }),
+      row({ action: "deleted", task_id: "t1", event_time: "2026-01-09T00:00:00Z" }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalOpen).toBe(0);
+  });
+
+  // The RPC also synthesises a `completed` row (status_from null, status_to
+  // 'done', timestamped updated_at) for done tasks the activity log never
+  // recorded a completion for — 46 of prod's were seeded already-done.
+  it("counts a synthetic completion exactly like a logged one", () => {
+    const rows = [
+      row({
+        action: "completed",
+        task_id: "t1",
+        event_time: "2026-01-20T00:00:00Z",
+        status_from: null,
+        status_to: "done",
+        task_created_at: "2026-01-10T00:00:00Z",
+        task_status_now: "done",
+        due_date: "2026-01-25",
+      }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalCompleted).toBe(1);
+    expect(m.cycleTimeOverall.median).toBe(10);
+    expect(m.onTime.rate).toBe(1);
+    expect(m.totalOpen).toBe(0);
+  });
+
+  it("keeps the LAST completion when a synthetic and a logged one both arrive", () => {
+    const rows = [
+      row({ action: "completed", task_id: "t1", event_time: "2026-01-12T00:00:00Z", task_created_at: "2026-01-10T00:00:00Z", task_status_now: "done" }),
+      // A synthetic row stamped later (updated_at moved after the completion).
+      row({ action: "completed", task_id: "t1", event_time: "2026-01-20T00:00:00Z", status_to: "done", task_created_at: "2026-01-10T00:00:00Z", task_status_now: "done" }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalCompleted).toBe(1);
+    expect(m.cycleTimeOverall.median).toBe(10);
+  });
+
+  it("leaves open rows out of the per-person open count (they carry no actor)", () => {
+    const rows = [
+      row({ action: "created", task_id: "t1", event_time: "2026-01-02T00:00:00Z", task_created_at: "2026-01-02T00:00:00Z", actor_id: "u1", actor_name: "Ada", task_status_now: "designing" }),
+      row({ action: "open", task_id: "t1", event_time: "2026-01-02T00:00:00Z", task_created_at: "2026-01-02T00:00:00Z", task_status_now: "designing" }),
+      // No creation event in the window -> nobody owns this one's open count.
+      row({ action: "open", task_id: "t2", event_time: "2025-06-02T00:00:00Z", task_created_at: "2025-06-02T00:00:00Z", task_status_now: "designing" }),
+    ];
+    const m = buildProductivity(rows, { now: new Date("2026-02-01T00:00:00Z") });
+    expect(m.totalOpen).toBe(2);
+    expect(m.perPerson.find((p) => p.actorId === "u1")!.open).toBe(1);
+  });
+});
+
 describe("buildProductivity — empty window", () => {
   it("returns a well-formed empty result", () => {
     const m = buildProductivity([], { now: new Date("2026-02-01T00:00:00Z") });

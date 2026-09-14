@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Subteam } from "@helios/pm-ui";
 import type { TaskHistoryResult, TaskHistoryRow } from "@pm/lib/taskHistory";
 
@@ -179,5 +179,44 @@ describe("ProductivityViewClient", () => {
     await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
     const q = fetchTaskHistory.mock.calls[0]![1] as { subteamId: string | null };
     expect(q.subteamId).toBeNull();
+  });
+  it("starts the season-to-date window on JUNE 1, not the academic year", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    renderView();
+    await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
+    fetchTaskHistory.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Season to date" }));
+
+    await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
+    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date };
+    expect(q.from.getMonth()).toBe(5); // June
+    expect(q.from.getDate()).toBe(1);
+    const now = new Date();
+    // The season that is currently running, not a future one.
+    expect(q.from.getFullYear()).toBe(now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1);
+    expect(q.from.getTime()).toBeLessThanOrEqual(now.getTime());
+  });
+
+  it("disables the export when the window holds only synthetic open rows", async () => {
+    fetchTaskHistory.mockResolvedValue({
+      rows: [
+        row({
+          action: "open",
+          task_id: "t9",
+          event_time: isoDaysAgo(300),
+          task_created_at: isoDaysAgo(300),
+          task_status_now: "designing",
+        }),
+      ],
+      failure: null,
+      message: null,
+    });
+    renderView();
+
+    // The open task still shows up in the numbers...
+    expect(await screen.findByText("0 completed · 0 created · 1 open")).toBeInTheDocument();
+    // ...but there is no EVENT to export.
+    expect(screen.getByRole("button", { name: "Export CSV" })).toBeDisabled();
   });
 });

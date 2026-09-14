@@ -4,7 +4,23 @@ import type { TaskHistoryRow } from "@pm/lib/productivityMetrics";
 // CSV rendering of the raw task-history rows — the "export the numbers and go
 // analyse them in a spreadsheet" path. Pure: no file system, no dialogs. The
 // view owns the Tauri save plumbing (same split as deadlineReport.ts).
+//
+// This file is an EVENT LOG. The RPC's synthetic `open` rows (migration
+// 20260914000100) are a live snapshot of what is still open — a state, not
+// something that happened at the timestamp they carry — so they are dropped
+// here rather than exported under an action a reader would mistake for a
+// logged event.
 // ---------------------------------------------------------------------------
+
+/** True for rows that represent something that actually happened. */
+export function isEventRow(r: TaskHistoryRow): boolean {
+  return r.action !== "open";
+}
+
+/** How many rows the CSV would actually contain — what the export button gates on. */
+export function countExportableEvents(rows: ReadonlyArray<TaskHistoryRow>): number {
+  return rows.reduce((n, r) => n + (isEventRow(r) ? 1 : 0), 0);
+}
 
 const BASE_COLUMNS = [
   "event_time",
@@ -57,11 +73,12 @@ export function taskHistoryToCsv(
   rows: ReadonlyArray<TaskHistoryRow>,
   opts: { includeActor?: boolean } = {},
 ): string {
-  const includeActor = opts.includeActor ?? rows.some((r) => r.actor_id !== null);
+  const events = rows.filter(isEventRow);
+  const includeActor = opts.includeActor ?? events.some((r) => r.actor_id !== null);
   const header = [...BASE_COLUMNS, ...(includeActor ? (["actor"] as const) : []), ...TAIL_COLUMNS];
 
   const lines = [csvRow(header)];
-  for (const r of rows) {
+  for (const r of events) {
     lines.push(
       csvRow([
         r.event_time,

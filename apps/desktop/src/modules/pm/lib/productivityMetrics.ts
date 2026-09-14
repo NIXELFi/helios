@@ -9,13 +9,25 @@
 // A task that was finished, reopened and finished again counts ONCE, at its
 // last completion. Nothing here reads a completed_at column, because there
 // isn't one.
+//
+// Two of the RPC's actions are SYNTHESISED server-side rather than read from
+// the activity log (migration 20260914000100):
+//   - `open` — one per currently-open task, a LIVE SNAPSHOT that ignores the
+//     window entirely. Open work with no recent activity (107 of 240 tasks in
+//     prod) would otherwise be invisible to the aging panel. It is a STATE, not
+//     an event: it feeds the open/aging numbers and nothing else — never
+//     throughput, never the burn-up, never the CSV.
+//   - `completed` with a null `status_from` — stands in for a completion the
+//     trigger never logged (tasks seeded already-done). Indistinguishable from
+//     a real completion here on purpose; it counts identically.
 // ---------------------------------------------------------------------------
 
 /** One row as pm.task_history returns it. Actor fields are NULL when the caller lacks pm.manage_dashboard in scope. */
 export interface TaskHistoryRow {
+  /** Empty for the server-synthesised `open` / backfilled `completed` rows. */
   activity_id: string;
   event_time: string;
-  action: "created" | "status_changed" | "completed" | "deleted";
+  action: "created" | "status_changed" | "completed" | "deleted" | "open";
   task_id: string;
   task_title: string | null;
   subteam_id: string | null;
@@ -181,7 +193,12 @@ export interface PersonStat {
   completions: number;
   medianCycleDays: number | null;
   onTimeRate: number | null;
-  /** Open tasks this person CREATED (history has no owner column — see below). */
+  /**
+   * Open tasks this person CREATED in the window (history has no owner column —
+   * see below). An open task whose creation predates the window arrives as a
+   * synthetic `open` row with no actor at all, so it counts toward `totalOpen`
+   * but toward nobody's personal column.
+   */
   open: number;
 }
 

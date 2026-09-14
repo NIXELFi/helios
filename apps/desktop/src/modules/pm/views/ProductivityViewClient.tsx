@@ -13,7 +13,11 @@ import {
   type ProductivityMetrics,
   type WeekThroughput,
 } from "@pm/lib/productivityMetrics";
-import { taskHistoryFileName, taskHistoryToCsv } from "@pm/lib/taskHistoryCsv";
+import {
+  countExportableEvents,
+  taskHistoryFileName,
+  taskHistoryToCsv,
+} from "@pm/lib/taskHistoryCsv";
 
 // ---------------------------------------------------------------------------
 // Productivity — task history over time, read from the pm.task_history RPC and
@@ -51,13 +55,13 @@ function fromDayInput(s: string): Date | null {
 }
 
 /**
- * The competition season is the academic year: it starts on the most recent
- * August 1st. (There is no season table in `pm`; this is the same
- * fall-to-summer window the team plans its car around.)
+ * The competition season starts on JUNE 1 — the design year begins right after
+ * competition, not with the academic calendar. (There is no season table in
+ * `pm`; this is the window the team plans its car around.)
  */
 function seasonStart(now: Date): Date {
-  const august = new Date(now.getFullYear(), 7, 1);
-  return now >= august ? august : new Date(now.getFullYear() - 1, 7, 1);
+  const june = new Date(now.getFullYear(), 5, 1);
+  return now >= june ? june : new Date(now.getFullYear() - 1, 5, 1);
 }
 
 function presetRange(key: PresetKey, now: Date): { from: Date; to: Date } | null {
@@ -171,6 +175,10 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     }
   }, [range, rows, scopeLabel]);
 
+  // The CSV drops the synthetic `open` snapshot rows, so a window whose only
+  // rows are open tasks has nothing to export even though `rows` is non-empty.
+  const exportableCount = useMemo(() => countExportableEvents(rows), [rows]);
+
   const headerDescription = loading
     ? "Loading history…"
     : failure
@@ -186,7 +194,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
           <button
             type="button"
             onClick={() => void exportCsv()}
-            disabled={loading || failure !== null || rows.length === 0}
+            disabled={loading || failure !== null || exportableCount === 0}
             className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-black hover:bg-asu-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Export CSV

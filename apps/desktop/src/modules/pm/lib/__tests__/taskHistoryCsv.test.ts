@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TaskHistoryRow } from "@pm/lib/productivityMetrics";
 import {
+  countExportableEvents,
   csvField,
   taskHistoryFileName,
   taskHistoryToCsv,
@@ -115,6 +116,48 @@ describe("taskHistoryToCsv", () => {
   it("leaves null numeric columns empty rather than writing 'null'", () => {
     const csv = taskHistoryToCsv([row({ estimate_days: null, actual_days: null })]);
     expect(csv.split("\r\n")[1]!.endsWith("done,,")).toBe(true);
+  });
+});
+
+describe("taskHistoryToCsv — synthetic open rows", () => {
+  // The CSV is an EVENT LOG. The RPC's synthetic `open` rows are a live
+  // snapshot of what is still open, not something that happened, so they are
+  // dropped rather than exported as events with an invented action.
+  it("omits open rows", () => {
+    const csv = taskHistoryToCsv([
+      row({ action: "open", task_id: "t9", event_time: "2026-01-02T00:00:00Z" }),
+      row({ action: "completed", task_id: "t1" }),
+    ]);
+    const lines = csv.split("\r\n").filter(Boolean);
+    expect(lines).toHaveLength(2); // header + the one real event
+    expect(csv).not.toContain("t9");
+    expect(csv).not.toContain("open");
+  });
+
+  it("emits only the header when every row is an open row", () => {
+    const csv = taskHistoryToCsv([row({ action: "open", task_id: "t9" })]);
+    expect(csv.split("\r\n").filter(Boolean)).toHaveLength(1);
+  });
+
+  it("does not let an open row's actor decide the actor column", () => {
+    // An open row never carries an actor, so a window whose only actor-bearing
+    // rows are open rows must not sprout an empty actor column.
+    const csv = taskHistoryToCsv([
+      row({ action: "open", task_id: "t9", actor_id: "u1", actor_name: "Ada" }),
+      row({ action: "completed", task_id: "t1" }),
+    ]);
+    expect(csv.split("\r\n")[0]).not.toContain("actor");
+  });
+
+  it("counts only real events", () => {
+    expect(
+      countExportableEvents([
+        row({ action: "open", task_id: "t9" }),
+        row({ action: "completed", task_id: "t1" }),
+        row({ action: "created", task_id: "t2" }),
+      ]),
+    ).toBe(2);
+    expect(countExportableEvents([row({ action: "open", task_id: "t9" })])).toBe(0);
   });
 });
 
