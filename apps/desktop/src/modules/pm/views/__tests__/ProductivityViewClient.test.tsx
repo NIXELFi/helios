@@ -113,8 +113,8 @@ describe("ProductivityViewClient", () => {
       screen.getByText(/only visible to people who can manage this scope/i),
     ).toBeInTheDocument();
     expect(screen.queryByText("Median cycle")).not.toBeInTheDocument();
-    // The stack-by-person toggle is not offered either.
-    expect(screen.queryByText("Stack by person")).not.toBeInTheDocument();
+    // The Team/Person toggle is not offered either.
+    expect(screen.queryByRole("radiogroup", { name: "Stack by" })).not.toBeInTheDocument();
   });
 
   it("shows the per-person table when actors came back", async () => {
@@ -127,7 +127,8 @@ describe("ProductivityViewClient", () => {
 
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("Median cycle")).toBeInTheDocument();
-    expect(screen.getByText("Stack by person")).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Stack by" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Person" })).toBeInTheDocument();
   });
 
   it("renders the not-available notice when the migration is missing", async () => {
@@ -198,7 +199,7 @@ describe("ProductivityViewClient", () => {
     await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
     fetchTaskHistory.mockClear();
 
-    fireEvent.click(screen.getByRole("button", { name: "Season to date" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Season" }));
 
     await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
     const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date };
@@ -208,6 +209,19 @@ describe("ProductivityViewClient", () => {
     // The season that is currently running, not a future one.
     expect(q.from.getFullYear()).toBe(now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1);
     expect(q.from.getTime()).toBeLessThanOrEqual(now.getTime());
+  });
+
+  it("defaults to THIS WEEK — Monday of the current ISO week to now", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: FIXTURE, failure: null, message: null });
+    renderView();
+    await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
+    expect(screen.getByRole("radio", { name: "This week" })).toHaveAttribute("aria-checked", "true");
+    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date; to: Date };
+    expect(q.from.getDay()).toBe(1); // Monday
+    expect(q.from.getHours()).toBe(0);
+    const now = new Date();
+    expect(now.getTime() - q.from.getTime()).toBeLessThan(7 * 24 * 60 * 60 * 1000);
+    expect(q.to.getTime()).toBeGreaterThanOrEqual(now.getTime() - 1000);
   });
 
   it("disables the export when the window holds only synthetic open rows", async () => {

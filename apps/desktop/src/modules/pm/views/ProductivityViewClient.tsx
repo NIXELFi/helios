@@ -6,12 +6,14 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { useSupabaseClient } from "@helios/auth";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
+import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
 import { FilterField, filterInput } from "@pm/components/TaskFilterBar";
 import { usePmStore } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
 import {
   buildProductivity,
+  isoWeekStart,
   type ProductivityMetrics,
   type WeekThroughput,
 } from "@pm/lib/productivityMetrics";
@@ -32,9 +34,10 @@ import {
 // ---------------------------------------------------------------------------
 
 const PRESETS = [
+  { key: "week", label: "This week", weeks: null },
   { key: "4w", label: "4 weeks", weeks: 4 },
   { key: "12w", label: "12 weeks", weeks: 12 },
-  { key: "season", label: "Season to date", weeks: null },
+  { key: "season", label: "Season", weeks: null },
   { key: "custom", label: "Custom", weeks: null },
 ] as const;
 
@@ -69,6 +72,9 @@ function seasonStart(now: Date): Date {
 function presetRange(key: PresetKey, now: Date): { from: Date; to: Date } | null {
   const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   if (key === "season") return { from: seasonStart(now), to };
+  // "This week" is the ISO week so far — Monday to now — because that is the
+  // question a lead asks on any given morning, not "the last seven days".
+  if (key === "week") return { from: isoWeekStart(now), to };
   const preset = PRESETS.find((p) => p.key === key);
   if (!preset?.weeks) return null;
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - preset.weeks * 7);
@@ -87,7 +93,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
 
   const routeTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
-  const [preset, setPreset] = useState<PresetKey>("12w");
+  const [preset, setPreset] = useState<PresetKey>("week");
   // Custom range, only consulted when preset === "custom".
   const [customFrom, setCustomFrom] = useState(() =>
     toDayInput(new Date(Date.now() - 84 * MS_PER_DAY)),
@@ -215,23 +221,12 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
       />
 
       <div className="flex flex-wrap items-center gap-3 border-b border-helios-line bg-helios-panel/20 px-6 py-3">
-        <div className="flex items-center gap-1" role="group" aria-label="Date range">
-          {PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => setPreset(p.key)}
-              aria-pressed={preset === p.key}
-              className={`rounded px-2.5 py-1 text-xs ${
-                preset === p.key
-                  ? "bg-asu-gold/20 text-helios-text"
-                  : "text-helios-dim hover:bg-helios-base hover:text-helios-text"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          value={preset}
+          onChange={setPreset}
+          options={PRESETS.map((p) => ({ value: p.key, label: p.label }))}
+          ariaLabel="Date range"
+        />
 
         {preset === "custom" ? (
           <div className="flex items-end gap-2">
@@ -266,14 +261,16 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
         )}
 
         {metrics.actorsAvailable ? (
-          <label className="flex items-center gap-1.5 text-xs text-helios-dim">
-            <input
-              type="checkbox"
-              checked={showPeople}
-              onChange={(e) => setShowPeople(e.target.checked)}
-            />
-            Stack by person
-          </label>
+          <SegmentedControl
+            value={showPeople ? "person" : "team"}
+            onChange={(v) => setShowPeople(v === "person")}
+            options={[
+              { value: "team", label: "Team" },
+              { value: "person", label: "Person" },
+            ]}
+            ariaLabel="Stack by"
+            className="ml-auto"
+          />
         ) : null}
       </div>
 
