@@ -136,6 +136,31 @@ Build hrefs with `viewHref("table", teamSlug)` (`lib/nav.ts:74`) plus `filtersTo
 10. Skeleton loading and `Empty` states per panel; keyboard-focusable week columns.
 11. "Person" stacking in the week strip uses owners, not actors, once item 8 lands.
 
+### Implemented 2026-09-14 — deviations from the text above
+MUST 1–7 and SHOULD 8–11 shipped on `feat/pm-productivity`. Where the build
+diverged from this proposal:
+- **One wide RPC pull, not a second call** (item 4). The view fetches the union
+  of the window, the previous window and the trailing 12 weeks once, then
+  slices client-side (`sliceWindow`). Same numbers, one loading state.
+- **"This week" compares against ALL of last week.** The same-length rule made
+  Monday morning read "0 vs 0" (one day against one day). Other presets keep
+  the same-length previous window. The delta label says which.
+- **The Weeks strip always shows at least 8 columns**; weeks before the window
+  are drawn faded and excluded from every number. A one-week window otherwise
+  had a single bar.
+- **Slipping is split into Overdue (77 in SDM27) and Due this week (19)** —
+  one list would have buried this week's dates under two months of slippage.
+  Overdue sorts most-recently-slipped first (the ones still worth chasing).
+- **No open count on milestone diamonds** (item 9): `pm.task_milestones` has
+  zero rows for SDM27 and SDM27e, so there is nothing to count. The diamond
+  shows name, date and kind; the subtitle names the next milestone.
+- **`may_see_actors` column added to the RPC** (beyond the two columns in
+  items 5 and 8) so the gate is stated per row instead of inferred from
+  whether any actor happened to be non-null in a quiet week.
+- **Stale = untouched**, measured as `max(status_since, updated_at)`, not time
+  in status alone: a task in progress for a month but edited yesterday is not
+  stale.
+
 ### LATER
 12. Estimate vs actual scatter per subteam (sparse today; gate on ≥ 20 pairs).
 13. Season overlay by week-of-season (needs a clean second season).
