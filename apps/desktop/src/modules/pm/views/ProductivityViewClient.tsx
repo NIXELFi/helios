@@ -14,7 +14,8 @@ import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { viewHref } from "@pm/lib/nav";
 import { EMPTY_FILTERS, filtersToParams, type TaskFilters } from "@pm/lib/filters";
 import { fetchTaskHistory, type TaskHistoryFailure, type TaskHistoryRow } from "@pm/lib/taskHistory";
-import { STATUS_DOT, STATUS_LABEL, type Subteam, type TaskStatus } from "@helios/pm-ui";
+import { STATUS_DOT, STATUS_LABEL, type Milestone, type Subteam, type TaskStatus } from "@helios/pm-ui";
+import type { FrameMilestone } from "@pm/components/charts/ChartFrame";
 import { Link } from "@pm/lib/router";
 import {
   attentionLists,
@@ -108,6 +109,7 @@ function presetRange(key: PresetKey, now: Date): { from: Date; to: Date } | null
 
 const OPEN_STATUSES = ["not_started", "in_progress", "blocked", "needs_review"] as const;
 const SPARK_WEEKS = 12;
+const STRIP_MIN_WEEKS = 8;
 
 interface Range {
   from: Date;
@@ -154,6 +156,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   const subteams = usePmStore((s) => s.subteams);
   const users = usePmStore((s) => s.users);
   const currentUserId = usePmStore((s) => s.currentUserId);
+  const milestones = usePmStore((s) => s.milestones);
 
   const routeTeam = teamSlug ? subteams.find((s) => s.slug === teamSlug) ?? null : null;
 
@@ -239,6 +242,19 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
     return buildProductivity(sliceWindow(rows, prev.from, prev.to), { now, from: prev.from, to: prev.to });
   }, [rows, range, now]);
   const deltas = useMemo<WindowDeltas>(() => windowDeltas(metrics, previousMetrics), [metrics, previousMetrics]);
+  // The Weeks strip always shows at least STRIP_MIN_WEEKS columns: a one-week
+  // window still gets trailing context, drawn faded and excluded from every
+  // number on the page.
+  const strip = useMemo(() => {
+    if (!range) return null;
+    const contextFrom = isoWeekStart(range.to);
+    contextFrom.setDate(contextFrom.getDate() - 7 * (STRIP_MIN_WEEKS - 1));
+    const from = new Date(Math.min(range.from.getTime(), contextFrom.getTime()));
+    return {
+      metrics: buildProductivity(sliceWindow(rows, from, range.to), { now, from, to: range.to }),
+      windowStart: localDayKey(isoWeekStart(range.from)),
+    };
+  }, [rows, range, now]);
   const state = useMemo<StateCounts>(() => stateCounts(rows, now), [rows, now]);
   // Gate mirror: the server nulls every actor unless the caller holds
   // pm.manage_dashboard in scope. Read off the WIDE pull, so a quiet week does
@@ -444,12 +460,16 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
               tableHref={tableHref}
             />
 
-            <ThroughputPanel
-              metrics={metrics}
-              byPerson={showPeople && actorsAvailable}
-              subteamColor={(id) => subteamColor.get(id) ?? null}
-              today={now}
-            />
+            {strip ? (
+              <ThroughputPanel
+                metrics={strip.metrics}
+                windowStart={strip.windowStart}
+                byPerson={showPeople && actorsAvailable}
+                subteamColor={(id) => subteamColor.get(id) ?? null}
+                today={now}
+                milestones={milestones}
+              />
+            ) : null}
             <div className="grid gap-6 xl:grid-cols-2">
               <AttentionPanel
                 lists={attention}
@@ -859,19 +879,57 @@ function KpiRow({
   );
 }
 
+const MILESTONE_KIND: Record<Milestone["type"], string> = {
+  design_review: "design review",
+  integration: "integration",
+  validation: "validation",
+  gate: "gate",
+  comp_event: "competition event",
+};
+
+/** "CDR in 31 d" — the next milestone on or after today, or null. */
+function nextMilestone(milestones: ReadonlyArray<Milestone>, today: Date): { name: string; days: number } | null {
+  const todayKey = localDayKey(today);
+  const upcoming = milestones
+    .filter((m) => m.target_date >= todayKey)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date))[0];
+  if (!upcoming) return null;
+  const [y, mo, d] = upcoming.target_date.split("-").map(Number);
+  if (!y || !mo || !d) return null;
+  const days = Math.round((new Date(y, mo - 1, d).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / MS_PER_DAY);
+  return { name: upcoming.name, days };
+}
+
 function ThroughputPanel({
   metrics,
   byPerson,
   subteamColor,
   today,
+  milestones,
+  windowStart,
 }: {
+  /** The STRIP's metrics: the window plus trailing context weeks. */
   metrics: ProductivityMetrics;
   byPerson: boolean;
   subteamColor: (id: string) => string | null;
   today: Date;
+  milestones: ReadonlyArray<Milestone>;
+  /** Monday (YYYY-MM-DD) of the selected window's first week; earlier columns are context. */
+  windowStart: string;
 }) {
   const weeks = metrics.throughput;
   const currentKey = isoWeekKey(today);
+  const hasContext = weeks.some((w) => w.weekStart < windowStart);
+  // Diamonds on the baseline for every milestone inside the strip's weeks;
+  // ChartFrame drops the ones outside. The caption names the next one so the
+  // strip still says something when nothing falls in range.
+  const markers: FrameMilestone[] = milestones.map((m) => ({
+    id: m.id,
+    name: m.name,
+    day: m.target_date,
+    kind: MILESTONE_KIND[m.type],
+  }));
+  const next = nextMilestone(milestones, today);
   const series: WeekSeries[] = byPerson
     ? [...new Set(weeks.flatMap((w) => Object.keys(w.byPerson)))]
         .sort()
@@ -886,19 +944,28 @@ function ThroughputPanel({
     weekStart: w.weekStart,
     values: byPerson ? w.byPerson : w.bySubteam,
     total: w.completed,
-    inWindow: true,
+    inWindow: w.weekStart >= windowStart,
     isCurrent: w.week === currentKey,
   }));
 
   return (
     <Panel
       title="Weeks"
-      subtitle={`Tasks completed per ISO week, stacked by ${byPerson ? "person" : "subteam"}. Hover a week for the split.`}
+      subtitle={
+        `Tasks completed per ISO week, stacked by ${byPerson ? "person" : "subteam"}. Hover a week for the split; diamonds are milestones.` +
+        (hasContext ? " Faded weeks are before the window." : "") +
+        (next ? ` Next: ${next.name} ${next.days === 0 ? "today" : `in ${next.days} d`}.` : "")
+      }
     >
       {columns.length === 0 ? (
         <Empty>No completions in this window.</Empty>
       ) : (
-        <StackedWeeks columns={columns} series={series} ariaLabel="Tasks completed per week" />
+        <StackedWeeks
+          columns={columns}
+          series={series}
+          milestones={markers}
+          ariaLabel="Tasks completed per week"
+        />
       )}
     </Panel>
   );

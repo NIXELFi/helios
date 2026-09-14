@@ -82,6 +82,8 @@ function seedStore() {
     ],
     subsystems: [],
     dependencies: [],
+    milestones: [],
+    selectedTaskId: null,
     selectedTaskIds: new Set<string>(),
   } as never);
 }
@@ -342,6 +344,47 @@ describe("ProductivityViewClient", () => {
     expect(rows_[0]).toHaveAccessibleName(/^Chassis: 0 Done, 0 In Progress, 0 Needs Review, 1 Blocked, 1 Not Started/);
     const link = screen.getByRole("link", { name: "Chassis" });
     expect(link.getAttribute("href")).toBe("/table?team=st-chas&mode=hide");
+  });
+
+  it("draws the store's milestones as diamonds on the Weeks strip and names the next one", async () => {
+    const inRange = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const inRangeKey = `${inRange.getFullYear()}-${String(inRange.getMonth() + 1).padStart(2, "0")}-${String(inRange.getDate()).padStart(2, "0")}`;
+    const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000);
+    const laterKey = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, "0")}-${String(later.getDate()).padStart(2, "0")}`;
+    usePmStore.setState({
+      milestones: [
+        { id: "m1", project_id: PROJECT_ID, name: "PDR", target_date: inRangeKey, type: "design_review", description: null },
+        { id: "m2", project_id: PROJECT_ID, name: "CDR", target_date: laterKey, type: "design_review", description: null },
+      ],
+    } as never);
+    fetchTaskHistory.mockResolvedValue({
+      rows: [row({ action: "completed", task_id: "t1", event_time: isoDaysAgo(1), task_status_now: "done" })],
+      failure: null,
+      message: null,
+    });
+    renderView();
+
+    // The one inside the strip is a focusable marker; the future one is only in the caption.
+    expect(await screen.findByRole("img", { name: /^Milestone PDR,/ })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /^Milestone CDR,/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Next: CDR in 40 d/)).toBeInTheDocument();
+  });
+
+  it("pads the Weeks strip to eight columns on a one-week window and fades the context", async () => {
+    fetchTaskHistory.mockResolvedValue({
+      rows: [row({ action: "completed", task_id: "t1", event_time: isoDaysAgo(1), task_status_now: "done" })],
+      failure: null,
+      message: null,
+    });
+    renderView();
+
+    await screen.findByText("Weeks");
+    const columns = screen.getAllByRole("img", { name: /^Week of / });
+    expect(columns).toHaveLength(8);
+    expect(screen.getByText(/Faded weeks are before the window/)).toBeInTheDocument();
+    // Keyboard: focusing a column shows its tip.
+    fireEvent.focus(columns[7]!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/Week of/);
   });
 
   it("hides the Subteams comparison inside a single subteam's route", async () => {
