@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Folder, VaultFile, Version, Lock } from "./types";
 import type { LocalFile } from "./useLocalFolderScan";
-import { matchLocal, vaultRelativePath } from "./local-match";
+import { matchLocal, shouldHoldBack, vaultRelativePath, normalizePathForCompare } from "./local-match";
 import { localDestPath, resolvableFolderIds } from "./folder-paths";
 import { useDownloadVersion } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
@@ -355,14 +355,23 @@ export function useAutoSync(input: {
       //     (a newer version landed) → safe to refresh (download overwrites it;
       //     the download clears the read-only bit first, then reconciliation
       //     re-applies it).
-      //   - writable local copy   → a possible unsaved local edit (predates the
-      //     read-only model, or the user cleared the bit) → DON'T clobber it.
-      //     Hold it back and surface it; the user resolves by checking it in or
-      //     discarding (undo check-out). A missing file (no m.local) downloads.
-      if (m.local && m.local.readonly !== true) {
-        heldBack.push(file.name);
-        skipped++;
-        continue;
+      //   - writable local copy   - normally a possible unsaved local edit
+      //     (predates the read-only model, or the user cleared the bit) -
+      //     DON'T clobber it. Hold it back and surface it; the user resolves
+      //     by checking it in or discarding (undo check-out). EXCEPT: if the
+      //     writable copy's sha matches what the sync ledger says THIS machine
+      //     previously materialized for this path, it isn't an edit at all,
+      //     it's a clean older revision (the read-only bit is just stale),
+      //     so it's safe to refresh same as the read-only case. No ledger
+      //     entry for the path keeps the old behaviour (hold back). A missing
+      //     file (no m.local) always downloads.
+      if (m.local) {
+        const ledgerSha = ledger.entries[normalizePathForCompare(vaultRelativePath(file, folders))]?.sha256;
+        if (shouldHoldBack(m.local, ledgerSha)) {
+          heldBack.push(file.name);
+          skipped++;
+          continue;
+        }
       }
       tasks.push({
         id: ++taskIdSeq.current,

@@ -1,11 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import type { GameProps } from "../types";
-import { createInitialBoard, move, addRandomTile, canMove, type Dir } from "./logic";
+import { canMove, moveTiles, spawnTile, tilesToBoard, type Dir, type Tile } from "./logic";
+
+// Cell + gap sizes match the Tailwind classes on each tile (h-16/w-16 = 64px,
+// gap-2 = 8px). Tile position is computed from these rather than CSS grid so
+// a moving tile can transition its own transform instead of being redrawn.
+const CELL = 64;
+const GAP = 8;
+const STEP = CELL + GAP;
+const BOARD_PX = CELL * 4 + GAP * 3;
 
 interface GameState {
-  board: number[];
+  tiles: Tile[];
+  nextId: number;
   score: number;
   over: boolean;
+  // Ids to animate THIS render only: a spawned tile pops in, a merged tile
+  // bumps. Replaced wholesale on every move so the classes correctly toggle
+  // off between moves (needed for the animation to re-trigger on reuse).
+  spawnedIds: Set<number>;
+  mergedIds: Set<number>;
+  /** Increments per move. Merged tiles key their inner node on it so the
+   *  bump keyframe restarts even when the same survivor merges on
+   *  consecutive moves (a stable className would never re-trigger). */
+  moveSeq: number;
 }
 
 const KEY_DIR: Record<string, Dir> = {
@@ -44,12 +62,28 @@ function tileTextSize(v: number): string {
   return "text-xl";
 }
 
+// Seeds the two starting tiles the same way createInitialBoard() does (two
+// spawnTile calls), just against the identity-aware tile list instead of a
+// plain Board.
+function createInitialTiles(rng: () => number): { tiles: Tile[]; nextId: number } {
+  const first = spawnTile([], rng, 1);
+  const second = spawnTile(first.tiles, rng, first.nextId);
+  return { tiles: second.tiles, nextId: second.nextId };
+}
+
 export function Twenty48Game({ onGameOver, paused }: GameProps) {
-  const [game, setGame] = useState<GameState>(() => ({
-    board: createInitialBoard(Math.random),
-    score: 0,
-    over: false,
-  }));
+  const [game, setGame] = useState<GameState>(() => {
+    const { tiles, nextId } = createInitialTiles(Math.random);
+    return {
+      tiles,
+      nextId,
+      score: 0,
+      over: false,
+      spawnedIds: new Set(tiles.map((t) => t.id)),
+      mergedIds: new Set(),
+      moveSeq: 0,
+    };
+  });
   const ended = useRef(false);
   // Mirror game state into a ref so the keydown handler can read the latest
   // board/score/over without being re-registered on every move. Previously
@@ -65,19 +99,31 @@ export function Twenty48Game({ onGameOver, paused }: GameProps) {
       if (!dir || paused || gameRef.current.over) return;
       e.preventDefault();
 
-      const result = move(gameRef.current.board, dir);
+      const result = moveTiles(gameRef.current.tiles, dir, gameRef.current.nextId);
       if (!result.moved) return;
 
-      const newBoard = addRandomTile(result.board, Math.random);
+      const spawn = spawnTile(result.tiles, Math.random, result.nextId);
+      const spawnedId =
+        spawn.tiles.length > result.tiles.length
+          ? spawn.tiles[spawn.tiles.length - 1]!.id
+          : undefined;
       const newScore = gameRef.current.score + result.gained;
-      const over = !canMove(newBoard);
+      const over = !canMove(tilesToBoard(spawn.tiles));
 
       if (over && !ended.current) {
         ended.current = true;
         onGameOver(newScore);
       }
 
-      setGame({ board: newBoard, score: newScore, over });
+      setGame({
+        tiles: spawn.tiles,
+        nextId: spawn.nextId,
+        score: newScore,
+        over,
+        spawnedIds: spawnedId === undefined ? new Set() : new Set([spawnedId]),
+        mergedIds: new Set(result.merged),
+        moveSeq: gameRef.current.moveSeq + 1,
+      });
     }
 
     window.addEventListener("keydown", onKey);
@@ -96,29 +142,42 @@ export function Twenty48Game({ onGameOver, paused }: GameProps) {
         <div
           role="grid"
           aria-label="2048 board"
-          className={`grid grid-cols-4 gap-2 rounded-sm transition-opacity duration-300 ${
+          className={`relative rounded-sm transition-opacity duration-300 ${
             game.over ? "opacity-40" : "opacity-100"
           }`}
+          style={{ width: BOARD_PX, height: BOARD_PX }}
         >
-          {game.board.map((v, i) =>
-            v === 0 ? (
+          {/* Fixed background grid of empty cells - tiles float on top of it,
+              so a cell's own box never remounts as tiles slide across it. */}
+          <div className="grid grid-cols-4 gap-2">
+            {Array.from({ length: 16 }, (_, i) => (
+              <div key={i} className="h-16 w-16 rounded-sm bg-helios-base shadow-inner" />
+            ))}
+          </div>
+
+          <div className="absolute inset-0">
+            {game.tiles.map((tile) => (
+              // Keyed by stable id (not position) so a sliding tile keeps its
+              // DOM node and .games-slide transitions its transform instead
+              // of popping in a new element at the destination.
               <div
-                key={i}
-                className="h-16 w-16 rounded-sm bg-helios-base shadow-inner"
-              />
-            ) : (
-              // Key by index+value so a cell whose value changes remounts and
-              // pops; unchanged cells keep their key and don't re-animate.
-              <div
-                key={`${i}-${v}`}
-                className={`games-pop flex h-16 w-16 items-center justify-center rounded-sm font-bold ${tileTextSize(
-                  v,
-                )} ${tileClass(v)}`}
+                key={tile.id}
+                className="games-slide absolute left-0 top-0 h-16 w-16"
+                style={{ transform: `translate(${tile.col * STEP}px, ${tile.row * STEP}px)` }}
               >
-                {v}
+                <div
+                  key={game.mergedIds.has(tile.id) ? `m${game.moveSeq}` : "t"}
+                  className={`flex h-16 w-16 items-center justify-center rounded-sm font-bold ${tileTextSize(
+                    tile.value,
+                  )} ${tileClass(tile.value)} ${
+                    game.spawnedIds.has(tile.id) ? "games-pop" : ""
+                  } ${game.mergedIds.has(tile.id) ? "games-merge" : ""}`}
+                >
+                  {tile.value}
+                </div>
               </div>
-            ),
-          )}
+            ))}
+          </div>
         </div>
       </div>
     </div>

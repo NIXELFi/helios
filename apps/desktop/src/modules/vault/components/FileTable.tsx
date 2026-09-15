@@ -1,7 +1,10 @@
+import { useMemo } from "react";
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
 import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
 import { revealInExplorer } from "../data/reveal";
 import { FILE_MANAGER } from "../../../lib/platform";
+import { useLocalVersionNums, localVersionKey } from "../data/useLocalVersionNums";
+import { versionBadge } from "./version-badge";
 import type { FileId, Folder, Lock, UserId, VaultFile, Version } from "../data/types";
 import type { LocalFile } from "../data/useLocalFolderScan";
 
@@ -289,6 +292,26 @@ export function FileTable({
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
   const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
 
+  // (fileId, local sha256) for every "modified" row in view - the only rows
+  // that need an older-version lookup (synced is already at latest,
+  // vault-only has no local file). Memoized on the file/local/version
+  // snapshots so useLocalVersionNums only refetches when the underlying data
+  // actually changes, not on every render.
+  const modifiedPairs = useMemo(() => {
+    if (!localFiles) return [];
+    const pairs: { fileId: FileId; sha256: string }[] = [];
+    for (const f of files) {
+      const m = matchLocal(f, localFiles, versionsMap, folders);
+      if (m.status === "modified" && m.local?.sha256) {
+        pairs.push({ fileId: f.id, sha256: m.local.sha256 });
+      }
+    }
+    return pairs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- versionsMap is
+    // recomputed every render (see above); depend on its source prop instead.
+  }, [files, localFiles, versionsByFileId, folders]);
+  const localVersionNums = useLocalVersionNums(modifiedPairs);
+
   // Lock-holder name resolution is supplied by the parent (BrowseScreen wires
   // useVaultUsers). When absent we use an empty map, which falls through to the
   // generic "Locked by other" label in deriveRowState.
@@ -533,7 +556,33 @@ export function FileTable({
                     : "No versions yet"
                 }
               >
-                {f.latest ? ago(f.latest.created_at) : "—"}
+                <span className="flex items-center gap-1.5">
+                  {(() => {
+                    // Which version the LOCAL copy actually is, not just that
+                    // it's stale - versionsMap only carries the latest per
+                    // file, so an older "modified" revision is named via the
+                    // separate localVersionNums lookup (by fileId + local sha).
+                    const localNum = localMatch?.local?.sha256
+                      ? localVersionNums.get(localVersionKey(f.id, localMatch.local.sha256))
+                      : undefined;
+                    const badge = versionBadge(localMatch?.status, f.latest?.version_num, localNum);
+                    if (!badge) return null;
+                    return (
+                      <span
+                        className={
+                          "rounded border px-1 py-0.5 text-[10px] font-medium leading-none " +
+                          (badge.tone === "warn"
+                            ? "border-[#FFB800]/40 bg-[#FFB800]/20 text-[#FFD24D]"
+                            : "border-helios-line bg-helios-line/40 text-helios-dim")
+                        }
+                        title={badge.title}
+                      >
+                        {badge.text}
+                      </span>
+                    );
+                  })()}
+                  {f.latest ? ago(f.latest.created_at) : "-"}
+                </span>
               </td>
               <td className="px-2.5 py-1.5">
                 <div className="flex flex-wrap items-center justify-start gap-1.5">

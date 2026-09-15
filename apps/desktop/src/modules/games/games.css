@@ -139,6 +139,20 @@
 }
 .games-pop { animation: games-pop 0.16s ease-out; }
 
+/* 2048 tile slide - the position wrapper transitions transform whenever a
+ * tile's row/col changes; the tile itself (child) stays untransformed so the
+ * merge bump below can scale it without fighting this translate. */
+.games-slide { transition: transform 120ms ease-out; }
+
+/* 2048 merge bump - a short scale-up-and-back on the surviving tile. Delayed
+ * past the slide duration so the movement reads first, then the merge lands. */
+@keyframes games-merge {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.games-merge { animation: games-merge 150ms ease-out 120ms; }
+
 /* GAME OVER marquee flicker — one-shot, restrained, like a tube warming up. */
 @keyframes games-flicker {
   0% { opacity: 0; }
@@ -204,4 +218,6 @@
   .games-pulse { animation: none; }
   .games-pop { animation: none; }
   .games-deal { animation: none; }
+  .games-slide { transition: none; }
+  .games-merge { animation: none; }
 }

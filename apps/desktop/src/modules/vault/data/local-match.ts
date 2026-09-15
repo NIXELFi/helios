@@ -67,3 +67,30 @@ export function matchLocal(
     local,
   };
 }
+
+/**
+ * Decide whether auto-sync should HOLD BACK a locally-present file that
+ * differs from the latest vault version (true = hold back / don't touch,
+ * false = safe to refresh by downloading the new version over it).
+ *
+ * The read-only bit is the primary "clean copy" signal (reconciliation only
+ * ever sets a SYNCED file read-only): a read-only local copy is always safe
+ * to refresh regardless of the ledger.
+ *
+ * A WRITABLE copy is normally held back - it might be an unsaved local edit -
+ * UNLESS its content is byte-identical to what THIS machine previously
+ * materialized for this exact path, per the per-vault sync ledger
+ * (`ledgerEntrySha`, i.e. `SyncLedger.entries[normalizedRelPath].sha256`). In
+ * that case the writable bit is stale (predates the read-only model, or got
+ * cleared some other way) but the content itself is just an older revision
+ * this machine already had, not an edit, so it's safe to refresh. No
+ * ledger entry for the path means we've never recorded materializing it here,
+ * so there's nothing to compare against and the writable copy is held back.
+ */
+export function shouldHoldBack(local: LocalFile, ledgerEntrySha: string | undefined): boolean {
+  if (local.readonly === true) return false;
+  if (!ledgerEntrySha) return true;
+  // Case-insensitive for the same reason as the synced/modified compare above:
+  // ledger shas are written lowercase, but be defensive either way.
+  return local.sha256?.toLowerCase() !== ledgerEntrySha.toLowerCase();
+}

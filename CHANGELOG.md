@@ -27,6 +27,41 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.7.3] - 2026-09-15
+
+### Added
+- **Admin has a new Pulse tab: Supabase health and team growth in one place.**
+  Owners and global admins see who is online right now, how many members had
+  Helios open each day, sign-ups, vault files, versions and stored content over
+  30 days, 90 days or since launch, activity split by Vault / PM / Games, a
+  day-by-hour heatmap of when the team works, per-vault size and activity, a
+  people list sorted by last active with a 30-day activity bar per person, and
+  an infrastructure strip (database size, connections, cache hit rate,
+  notification queue, scheduled jobs, largest tables). A nightly job snapshots
+  the day's numbers so the history keeps growing even after auth sessions age
+  out; the backfill covers every day since the first sign-up.
+- **Vault rows show which revision your local copy is.** The version column
+  now reads "v14" when your file matches the latest, "v12 of v14" when it is an
+  older revision, or "edited" when it matches no vault version, so you can tell
+  at a glance whether you have the latest Master Assembly.
+- **2048 moves like the original.** Tiles slide into place, merges bump, and
+  new tiles pop in, instead of the board repainting.
+
+### Fixed
+- **Subteam leads can create, rename and delete subsystems for their subteam.**
+  The subsystem write policy keyed on a legacy project team-membership row that
+  most accounts never received (every EV-side lead included), so "Add
+  subsystem" was denied. It now follows the pm.manage_subsystems capability.
+- **Auto-sync refreshes files that fell behind.** A local copy that was a
+  clean older revision but had lost its read-only bit was held back forever as
+  a "possible unsaved edit", so new revisions never arrived. If the local bytes
+  match what Helios last downloaded to that path, the newer revision now
+  replaces them; genuinely edited files are still left alone.
+- **SDM27 vault now shows every file imported from glassyPDM.** Imported
+  files had landed as private drafts nobody could see; they have been
+  published on the server (no app change; the import tooling was fixed so it
+  cannot recur).
+
 ## [5.7.2] - 2026-09-14
 
 ### Added

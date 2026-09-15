@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  IconActivity,
   IconBolt,
   IconDeviceFloppy,
   IconEngine,
@@ -31,13 +32,16 @@ import {
   type RoleWithCaps,
 } from "./data/useOrgData";
 import { useOrgMutations } from "./data/useOrgMutations";
+import { useMyRole } from "../vault/data/useMyRole";
+import { PulsePanel } from "./pulse/PulsePanel";
 
-type Tab = "people" | "structure" | "roles";
+type Tab = "people" | "structure" | "roles" | "pulse";
 
 const TABS: { id: Tab; label: string; Icon: typeof IconUsers }[] = [
   { id: "people", label: "People & Roles", Icon: IconUsers },
   { id: "structure", label: "Org Structure", Icon: IconSitemap },
   { id: "roles", label: "Role Editor", Icon: IconShieldLock },
+  { id: "pulse", label: "Pulse", Icon: IconActivity },
 ];
 
 export function OrgModule() {
@@ -53,10 +57,18 @@ export function OrgModule() {
     can("org.grant_roles") ||
     can("org.manage_roles") ||
     canAnywhere("pm.grant_subteam_roles");
-  const visibleTabs = TABS.filter((t) => t.id !== "people" || canSeePeople);
+  // Pulse reads the pdm_admin_ops_* RPCs, which are gated server-side on a
+  // GLOBAL owner/admin row (pdm.is_global_admin) - capability holders such as
+  // subteam leads get a 42501, so hide the tab unless the global role allows.
+  const myRole = useMyRole();
+  const canSeePulse = myRole === "owner" || myRole === "admin";
+  const visibleTabs = TABS.filter(
+    (t) => (t.id !== "people" || canSeePeople) && (t.id !== "pulse" || canSeePulse),
+  );
   useEffect(() => {
     if (tab === "people" && !capsLoading && !canSeePeople) setTab("structure");
-  }, [tab, capsLoading, canSeePeople]);
+    if (tab === "pulse" && !canSeePulse) setTab("structure");
+  }, [tab, capsLoading, canSeePeople, canSeePulse]);
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 flex-col gap-3 border-b border-helios-line px-5 pt-4">
@@ -101,6 +113,7 @@ export function OrgModule() {
         {tab === "people" && <PeopleRolesPanel />}
         {tab === "structure" && <StructurePanel />}
         {tab === "roles" && <RoleEditorPanel />}
+        {tab === "pulse" && <PulsePanel />}
       </div>
     </div>
   );
