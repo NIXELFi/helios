@@ -178,9 +178,13 @@ describe("ProductivityViewClient", () => {
     renderView();
 
     fireEvent.click(await screen.findByRole("radio", { name: "Person" }));
-    // Legend lists the OWNER (Ada) and the unowned bucket — not the actor.
-    expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("Unowned")).toBeInTheDocument();
+    // Legend lists the OWNER (Ada) and the unowned bucket, not the actor.
+    // "Yesterday" sits in the CURRENT ISO week on Tue-Sun and in the previous
+    // one on Mondays, so the name can also appear as a direct label on the
+    // strip; assert presence, not uniqueness, so the test does not depend on
+    // the weekday it happens to run on.
+    expect((await screen.findAllByText("Ada Lovelace")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unowned").length).toBeGreaterThan(0);
     expect(screen.getByText(/stacked by person/)).toBeInTheDocument();
   });
 
