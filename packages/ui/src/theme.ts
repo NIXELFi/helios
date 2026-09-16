@@ -44,9 +44,9 @@ export const PALETTES: Record<ThemeName, Record<TokenName, string>> = {
     maroon: "#8C1D40",
   },
   light: {
-    base: "#F4F5F7",
-    panel: "#FFFFFF",
-    deep: "#E9EBEF",
+    base: "#FFFFFF",
+    panel: "#F4F5F7",
+    deep: "#EAECF0",
     line: "#D6DAE1",
     grid: "#E6E8EE",
     text: "#1B1D22",

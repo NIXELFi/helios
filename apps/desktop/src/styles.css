@@ -23,9 +23,9 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --helios-base: 244 245 247;   /* #F4F5F7 */
-  --helios-panel: 255 255 255;  /* #FFFFFF */
-  --helios-deep: 233 235 239;   /* #E9EBEF */
+  --helios-base: 255 255 255;   /* #FFFFFF — page + main content */
+  --helios-panel: 244 245 247;  /* #F4F5F7 — rail, side strips, cards */
+  --helios-deep: 234 236 240;   /* #EAECF0 — wells */
   --helios-line: 214 218 225;   /* #D6DAE1 */
   --helios-grid: 230 232 238;   /* #E6E8EE */
   --helios-text: 27 29 34;      /* #1B1D22 */
@@ -119,6 +119,46 @@ body { background: rgb(var(--helios-base)); color: rgb(var(--helios-text)); font
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
   ::view-transition-new(root) { animation: none; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Light theme: Tailwind tint text. The app's status/role chips were built on
+   dark with the pale 100–400 shades (text-amber-300 on bg-amber-500/15). On
+   white those read as washed out, so under the light theme the same classes
+   resolve to the 600/700 shades. Generated from the classes actually used
+   (scratchpad/tints.py, session f72ed227); add a line if you introduce a new
+   tint class. Opacity variants intentionally become solid.
+   ────────────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  .text-amber-200 { color: theme(colors.amber.700); }
+  .text-amber-200\/90 { color: theme(colors.amber.700); }
+  .text-amber-300 { color: theme(colors.amber.700); }
+  .text-amber-400 { color: theme(colors.amber.600); }
+  .text-blue-300 { color: theme(colors.blue.700); }
+  .text-cyan-300 { color: theme(colors.cyan.700); }
+  .text-emerald-300 { color: theme(colors.emerald.700); }
+  .text-emerald-400 { color: theme(colors.emerald.600); }
+  .text-green-200 { color: theme(colors.green.700); }
+  .text-green-300 { color: theme(colors.green.700); }
+  .text-green-400 { color: theme(colors.green.600); }
+  .text-orange-300 { color: theme(colors.orange.700); }
+  .text-orange-400 { color: theme(colors.orange.600); }
+  .text-pink-300 { color: theme(colors.pink.700); }
+  .text-red-100 { color: theme(colors.red.700); }
+  .text-red-200 { color: theme(colors.red.700); }
+  .text-red-200\/70 { color: theme(colors.red.700); }
+  .text-red-200\/80 { color: theme(colors.red.700); }
+  .text-red-300 { color: theme(colors.red.700); }
+  .text-red-300\/90 { color: theme(colors.red.700); }
+  .text-red-400 { color: theme(colors.red.600); }
+  .text-sky-300 { color: theme(colors.sky.700); }
+  .text-sky-300\/80 { color: theme(colors.sky.700); }
+  .text-sky-400 { color: theme(colors.sky.600); }
+  .text-violet-300 { color: theme(colors.violet.700); }
+  .hover\:text-red-100:hover { color: theme(colors.red.700); }
+  .hover\:text-red-200:hover { color: theme(colors.red.700); }
+  .hover\:text-red-300:hover { color: theme(colors.red.700); }
+  .hover\:text-red-400:hover { color: theme(colors.red.600); }
 }
 
 /* Module first-open placeholder (ModuleTransition): held invisible for the

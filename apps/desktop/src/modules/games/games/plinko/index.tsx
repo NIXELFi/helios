@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { tc } from "@helios/ui";
 import { useGameLoop } from "../../lib/useGameLoop";
 import type { GameProps } from "../types";
 import {
@@ -203,7 +204,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
     const px = (u: number) => (u + 0.5) * bucketW;
 
     // Pegs
-    ctx.fillStyle = "#5b6070";
+    ctx.fillStyle = tc("muted");
     for (const [i, row] of pegRows(rows).entries()) {
       const y = rowH * (i + 1);
       for (const u of row) {
@@ -243,8 +244,8 @@ export function PlinkoGame({ paused, money }: GameProps) {
       const u = b.track[i]! + (b.track[i + 1]! - b.track[i]!) * f;
       const y = rowH * (i + f) + rowH * 0.5 - Math.sin(f * Math.PI) * rowH * 0.28;
       ctx.beginPath();
-      ctx.fillStyle = "#ffc627";
-      ctx.shadowColor = "#ffc627";
+      ctx.fillStyle = tc("gold");
+      ctx.shadowColor = tc("gold");
       ctx.shadowBlur = 8;
       ctx.arc(px(u), y, rows > 12 ? 3.4 : 4.4, 0, Math.PI * 2);
       ctx.fill();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { avatarStyle, useTheme } from "../../lib/theme";
+import { avatarStyle, chipStyle, useTheme } from "../../lib/theme";
 import {
   IconActivity,
   IconBolt,
@@ -424,6 +424,7 @@ function PersonRow(props: {
   onUpdate: (target: string, name: string | null, subteam: string | null) => void;
   onDelete: (person: Person) => void;
 }) {
+  const theme = useTheme();
   const { person, roles, subteams, subteamName, busy, isMe, can, onGrant, onRevoke, onUpdate, onDelete } = props;
   const [adding, setAdding] = useState(false);
   const [roleKey, setRoleKey] = useState("");
@@ -639,7 +640,7 @@ function PersonRow(props: {
                 <span
                   key={`${r.role}-${r.subteam_id ?? "org"}-${i}`}
                   className="inline-flex items-center gap-1 rounded-full py-0.5 pl-2 pr-1 text-[10px] font-medium"
-                  style={{ backgroundColor: color + "22", color, boxShadow: `inset 0 0 0 1px ${color}33` }}
+                  style={chipStyle(color, theme)}
                   title={r.scope === "subteam" && r.subteam_id ? subteamName.get(r.subteam_id) ?? "" : "org-wide"}
                 >
                   <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: color }} />

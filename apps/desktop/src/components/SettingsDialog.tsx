@@ -74,7 +74,7 @@ export function SettingsDialog(props: Props) {
         ref={dialogRef}
         className="flex h-[min(88vh,620px)] w-[min(94vw,820px)] overflow-hidden rounded-md border border-helios-line bg-helios-panel text-helios-text helios-elevate helios-modal-in"
       >
-        <nav aria-label="Settings sections" className="flex w-44 shrink-0 flex-col border-r border-helios-line bg-helios-base">
+        <nav aria-label="Settings sections" className="flex w-44 shrink-0 flex-col border-r border-helios-line bg-helios-panel">
           <div id="settings-title" className="px-4 pb-2 pt-4 text-[11px] uppercase tracking-wider text-asu-gold">
             Settings
           </div>

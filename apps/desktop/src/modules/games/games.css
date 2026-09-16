@@ -20,6 +20,13 @@
   --g-base: rgb(var(--helios-base));
   --g-text: rgb(var(--helios-text));
   --g-dim: rgb(var(--helios-dim));
+  /* CRT shade (scanlines, vignette, bezel shadow): black on dark; in light a
+     faint ink so the board reads as a frame, not a smudge. */
+  --g-shade: 0 0 0;
+  --g-scan: 0.16;
+  --g-vig: 0.4;
+  --g-ring: 0.6;
+  --g-drop: 0.9;
 }
 
 /* ------------------------------------------------------------ atmosphere */
@@ -72,8 +79,8 @@
   background: linear-gradient(180deg, rgb(var(--helios-panel)) 0%, rgb(var(--helios-deep)) 100%);
   border: 1px solid var(--g-line);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.6),
-    0 18px 50px -18px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgb(var(--g-shade) / var(--g-ring)),
+    0 18px 50px -18px rgb(var(--g-shade) / var(--g-drop)),
     0 0 36px -6px var(--g-gold-glow);
 }
 .games-crt::after {
@@ -86,12 +93,12 @@
   background:
     repeating-linear-gradient(
       to bottom,
-      rgba(0, 0, 0, 0.16) 0px,
-      rgba(0, 0, 0, 0.16) 1px,
+      rgb(var(--g-shade) / var(--g-scan)) 0px,
+      rgb(var(--g-shade) / var(--g-scan)) 1px,
       transparent 1px,
       transparent 3px
     ),
-    radial-gradient(ellipse 105% 105% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.4) 100%);
+    radial-gradient(ellipse 105% 105% at 50% 50%, transparent 62%, rgb(var(--g-shade) / var(--g-vig)) 100%);
 }
 
 /* -------------------------------------------------------------- hazard */
@@ -222,3 +229,11 @@
   .games-merge { animation: none; }
 }
 
+
+:root[data-theme="light"] .games-root {
+  --g-shade: 27 29 34;
+  --g-scan: 0.045;
+  --g-vig: 0.10;
+  --g-ring: 0.12;
+  --g-drop: 0.35;
+}

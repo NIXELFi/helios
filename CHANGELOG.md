@@ -45,8 +45,10 @@ follow [semver](https://semver.org/).
 - **Light mode.** Settings → General → Appearance: System, Dark or Light.
   Every module, dialog, chart and canvas widget follows the choice. In light
   the accent is ASU maroon instead of gold (buttons, active states, the
-  wordmark), avatars go pastel, and switching themes crossfades the whole
-  window instead of snapping. Dark stays the default.
+  wordmark), the page is white with light-grey side strips and cards, status
+  and role chips use darker text so they read on white, avatars go pastel,
+  the arcade and every game board follow the theme, and switching themes
+  crossfades the whole window instead of snapping. Dark stays the default.
   Under the hood the whole
   palette moved to design tokens (CSS variables + a runtime lookup for canvas
   and SVG), replacing ~2,300 hardcoded colours.
