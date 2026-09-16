@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { tc, tca } from "@helios/ui";
+import { tcDark, tcaDark } from "@helios/ui";
 import { useGameLoop } from "../../lib/useGameLoop";
 import type { GameProps } from "../types";
 import { GRID, createInitialState, step, type Dir, type SnakeState } from "./logic";
@@ -89,7 +89,7 @@ function draw(canvas: HTMLCanvasElement | null, s: SnakeState) {
   if (!ctx) return;
 
   // Flat dark surface.
-  ctx.fillStyle = tc("deep");
+  ctx.fillStyle = tcDark("deep");
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   // Faint 1px grid every CELL.
@@ -134,7 +134,7 @@ function draw(canvas: HTMLCanvasElement | null, s: SnakeState) {
   if (head) {
     const hx = head.x * CELL;
     const hy = head.y * CELL;
-    ctx.fillStyle = tc("deep");
+    ctx.fillStyle = tcDark("deep");
     const eye = 2.2;
     let e1x = 0, e1y = 0, e2x = 0, e2y = 0;
     const near = CELL * 0.32;
@@ -158,15 +158,15 @@ function draw(canvas: HTMLCanvasElement | null, s: SnakeState) {
   // HUD: SCORE microlabel + tabular number, top-left.
   ctx.textBaseline = "alphabetic";
   ctx.font = "700 9px Orbitron, sans-serif";
-  ctx.fillStyle = tc("dim");
+  ctx.fillStyle = tcDark("dim");
   ctx.fillText("SCORE", 10, 18);
   ctx.font = "700 18px Orbitron, sans-serif";
-  ctx.fillStyle = tc("text");
+  ctx.fillStyle = tcDark("text");
   ctx.fillText(String(s.score), 10, 38);
 
   // Dim the board on game over so the overlay pops.
   if (s.gameOver) {
-    ctx.fillStyle = tca("base", 0.55);
+    ctx.fillStyle = tcaDark("base", 0.55);
     ctx.fillRect(0, 0, SIZE, SIZE);
   }
 }

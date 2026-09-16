@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { tca } from "@helios/ui";
+import { tcaDark } from "@helios/ui";
 import { useGameLoop } from "../../lib/useGameLoop";
 import type { GameProps } from "../types";
 import {
@@ -233,7 +233,7 @@ function draw(canvas: HTMLCanvasElement | null, s: FlappyState, sc: DrawScratch)
 
   // --- Dead: dim overlay ----------------------------------------------------
   if (s.dead) {
-    ctx.fillStyle = tca("base", 0.5);
+    ctx.fillStyle = tcaDark("base", 0.5);
     ctx.fillRect(0, 0, WORLD.w, WORLD.h);
   }
 }

@@ -122,6 +122,16 @@ export function tca(name: TokenName, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/** Dark-palette colour regardless of the active theme — for surfaces that
+ *  are dark by design in both themes (the arcade CRT screen). */
+export function tcDark(name: TokenName): string {
+  return PALETTES.dark[name];
+}
+export function tcaDark(name: TokenName, alpha: number): string {
+  const [r, g, b] = hexToChannels(PALETTES.dark[name]).split(" ");
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 export function resolveTheme(pref: ThemePref): ThemeName {
   if (pref !== "system") return pref;
   if (typeof window === "undefined" || !window.matchMedia) return "dark";

@@ -230,10 +230,25 @@
 }
 
 
-:root[data-theme="light"] .games-root {
-  --g-shade: 27 29 34;
-  --g-scan: 0.045;
-  --g-vig: 0.10;
-  --g-ring: 0.12;
-  --g-drop: 0.35;
+/* The arcade lobby follows the theme, but the SCREEN is a dark display in
+   both themes — an arcade cabinet in a lit room. Everything rendered inside
+   .games-screen (the CRT, the Blackjack table, the game-over overlay) gets
+   the dark tokens; the canvases themselves draw with tcDark() to match. */
+:root[data-theme="light"] .games-screen {
+  color-scheme: dark;
+  --helios-base: 14 14 16;
+  --helios-panel: 22 23 27;
+  --helios-deep: 11 11 13;
+  --helios-line: 42 44 50;
+  --helios-grid: 35 37 43;
+  --helios-text: 216 220 226;
+  --helios-dim: 144 151 160;
+  --helios-muted: 90 95 102;
+  --helios-on-gold: 14 14 16;
+  --asu-gold: 255 198 39;
+  --g-shade: 0 0 0;
+  --g-scan: 0.16;
+  --g-vig: 0.4;
+  --g-ring: 0.35;
+  --g-drop: 0.5;
 }

@@ -47,7 +47,8 @@ follow [semver](https://semver.org/).
   the accent is ASU maroon instead of gold (buttons, active states, the
   wordmark), the page is white with light-grey side strips and cards, status
   and role chips use darker text so they read on white, avatars go pastel,
-  the arcade and every game board follow the theme, and switching themes
+  the arcade lobby follows the theme while each game screen stays a dark
+  display like a real cabinet, and switching themes
   crossfades the whole window instead of snapping. Dark stays the default.
   Under the hood the whole
   palette moved to design tokens (CSS variables + a runtime lookup for canvas
