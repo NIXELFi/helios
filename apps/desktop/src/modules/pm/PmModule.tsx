@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Splash } from "../../components/Splash";
+import { ModuleTransition } from "../../components/ModuleTransition";
+import { IconClipboardList } from "@tabler/icons-react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { useModuleLive } from "../../shell/module-activity";
 import { useThrottledFocus } from "../../lib/use-throttled-focus";
@@ -686,7 +687,7 @@ export function PmModule() {
     };
   }, [client, userId]);
 
-  if (phase === "loading") return <Splash stage="Loading your projects…" animate={false} />;
+  if (phase === "loading") return <ModuleTransition label="Loading your projects" Icon={IconClipboardList} />;
   if (phase === "error")
     return (
       <Centered>

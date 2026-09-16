@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
+import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
 import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
 import { TitleBar } from "./shell/TitleBar";
@@ -18,6 +18,7 @@ import { useOrgAccess } from "./shell/useOrgAccess";
 import { NoAccessScreen } from "./shell/NoAccessScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Splash } from "./components/Splash";
+import { ModuleTransition } from "./components/ModuleTransition";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
@@ -44,8 +45,8 @@ const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.O
 
 // Shown while a module's chunk is in flight — normally a few hundred ms on
 // first open, instant afterwards (the chunk is cached).
-function ModuleLoading({ label }: { label: string }) {
-  return <Splash stage={`Loading ${label}…`} animate={false} />;
+function ModuleLoading({ id, label }: { id: ModuleId; label: string }) {
+  return <ModuleTransition label={label} Icon={MODULE_ICON[id]} />;
 }
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
@@ -362,7 +363,7 @@ function HeliosShell() {
             ModuleActivityProvider tells each module whether it is the one on
             screen so hidden modules can stand their polling down. */}
         {visited.has("logs") && (
-          <div className={"absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
             <ErrorBoundary label="Logs" compact>
               <ModuleActivityProvider active={active === "logs"}>
                 <LogsApp
@@ -390,9 +391,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("vault") && vaultEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
             <ErrorBoundary label="Vault" compact>
-              <Suspense fallback={<ModuleLoading label="Vault" />}>
+              <Suspense fallback={<ModuleLoading id="vault" label="Vault" />}>
                 <ModuleActivityProvider active={active === "vault"}>
                   <VaultModule />
                 </ModuleActivityProvider>
@@ -401,9 +402,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("cfd") && (
-          <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
             <ErrorBoundary label="CFD" compact>
-              <Suspense fallback={<ModuleLoading label="CFD" />}>
+              <Suspense fallback={<ModuleLoading id="cfd" label="CFD" />}>
                 <ModuleActivityProvider active={active === "cfd"}>
                   <CfdModule />
                 </ModuleActivityProvider>
@@ -412,9 +413,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("pm") && pmEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
             <ErrorBoundary label="PM" compact>
-              <Suspense fallback={<ModuleLoading label="PM" />}>
+              <Suspense fallback={<ModuleLoading id="pm" label="PM" />}>
                 <ModuleActivityProvider active={active === "pm"}>
                   <PmModule />
                 </ModuleActivityProvider>
@@ -423,9 +424,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("games") && gamesEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
-              <Suspense fallback={<ModuleLoading label="Games" />}>
+              <Suspense fallback={<ModuleLoading id="games" label="Games" />}>
                 <ModuleActivityProvider active={active === "games"}>
                   <GamesModule paused={active !== "games"} />
                 </ModuleActivityProvider>
@@ -434,9 +435,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("amethyst") && (
-          <div className={"absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
             <ErrorBoundary label="Amethyst" compact>
-              <Suspense fallback={<ModuleLoading label="Amethyst" />}>
+              <Suspense fallback={<ModuleLoading id="amethyst" label="Amethyst" />}>
                 <ModuleActivityProvider active={active === "amethyst"}>
                   <AmethystModule />
                 </ModuleActivityProvider>
@@ -445,9 +446,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("marketplace") && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
             <ErrorBoundary label="Marketplace" compact>
-              <Suspense fallback={<ModuleLoading label="Marketplace" />}>
+              <Suspense fallback={<ModuleLoading id="marketplace" label="Marketplace" />}>
                 <ModuleActivityProvider active={active === "marketplace"}>
                   <MarketplaceModule />
                 </ModuleActivityProvider>
@@ -456,9 +457,9 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("org") && orgEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
+          <div className={"helios-pane-in absolute inset-0 " + (active === "org" ? "" : "hidden")}>
             <ErrorBoundary label="Org & Access" compact>
-              <Suspense fallback={<ModuleLoading label="Org & Access" />}>
+              <Suspense fallback={<ModuleLoading id="org" label="Org & Access" />}>
                 <ModuleActivityProvider active={active === "org"}>
                   <OrgModule />
                 </ModuleActivityProvider>

@@ -33,9 +33,11 @@ follow [semver](https://semver.org/).
   module rail to match. Signed-out launches still land on Logs, which works
   offline. Logs is no longer booted in the background on every launch, so a
   PM-bound start does less work.
-- **One branded boot screen.** The HELIOS splash now carries the app from
-  sign-in through the first PM load (and any module's first open) with the
-  wordmark held in place, replacing the bare "Loading…" panes.
+- **One branded boot screen.** The HELIOS splash covers sign-in at launch;
+  opening a module for the first time shows a light placeholder (the module's
+  glyph, its name, a thin gold line along the top) that only appears if the
+  open takes longer than a blink, and the module then fades in. Replaces the
+  bare "Loading…" / "Checking access…" panes.
 - The rail's user pill shows a quiet placeholder while your session is
   restored instead of flashing "Sign in" at a returning user.
 

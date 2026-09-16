@@ -25,7 +25,7 @@ export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "amethyst" | 
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
-const MODULE_ICON: Record<ModuleId, TablerIcon> = {
+export const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   logs: IconChartLine,
   vault: IconArchive,
   cfd: IconWind,
