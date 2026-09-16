@@ -18,6 +18,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use flate2::read::MultiGzDecoder;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,29 @@ pub struct DownloadRequest {
     pub apikey: String,
     pub dest_path: String,
     pub expected_sha256: String,
+    /// Uncompressed size from `pdm.versions.size_bytes`, when the caller
+    /// knows it. Only used to scale the per-request stall timeout.
+    #[serde(default)]
+    pub expected_bytes: Option<u64>,
+}
+
+/// reqwest's blocking client ships a 30 s TOTAL request timeout by default.
+/// That silently capped every download at whatever 30 s of the user's link
+/// could carry (~45 MB on a good day, far less on shop Wi-Fi): a 47 MB ANSYS
+/// result hit the limit three times in a row — each retry from byte zero —
+/// and the sync looked "hung" on that file for ~95 s before it failed
+/// (regression from moving the transfer native in 5.7.1; the webview fetch
+/// had no timeout). The client is now unbounded and each request gets a
+/// budget scaled to its size so a genuinely stalled connection still ends.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const MIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
+/// Floor throughput the budget assumes: 64 KiB/s → a 47 MB file gets ~12 min.
+const MIN_BYTES_PER_SEC: u64 = 64 * 1024;
+
+pub fn request_timeout(expected_bytes: Option<u64>) -> Duration {
+    let bytes = expected_bytes.unwrap_or(0);
+    let scaled = Duration::from_secs(60 + bytes / MIN_BYTES_PER_SEC);
+    scaled.max(MIN_REQUEST_TIMEOUT)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -50,6 +74,8 @@ static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 fn client() -> &'static reqwest::blocking::Client {
     CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
+            .timeout(None)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .unwrap_or_else(|_| reqwest::blocking::Client::new())
     })
@@ -119,6 +145,7 @@ fn fetch(
         .get(&req.url)
         .header("Authorization", format!("Bearer {}", req.bearer))
         .header("apikey", req.apikey.as_str())
+        .timeout(request_timeout(req.expected_bytes))
         .send()
         .map_err(|e| FetchError::Transport(format!("network error: {e}")))?;
 
@@ -327,7 +354,16 @@ mod tests {
             apikey: "anon456".to_string(),
             dest_path: dest,
             expected_sha256: expected.to_string(),
+            expected_bytes: None,
         }
+    }
+
+    #[test]
+    fn request_timeout_scales_with_size_and_never_drops_below_the_floor() {
+        assert_eq!(request_timeout(None), MIN_REQUEST_TIMEOUT);
+        assert_eq!(request_timeout(Some(1_097)), MIN_REQUEST_TIMEOUT);
+        // 47 MB ANSYS result: 60 s + 47_054_848 / 65_536 s ≈ 778 s.
+        assert_eq!(request_timeout(Some(47_054_848)), Duration::from_secs(60 + 718));
     }
 
     #[test]

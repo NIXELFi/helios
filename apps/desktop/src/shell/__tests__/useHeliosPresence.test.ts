@@ -71,3 +71,16 @@ describe("dedupePresence", () => {
     expect(out[0]!.module).toBe("org");
   });
 });
+
+describe("dedupePresence app_version", () => {
+  it("surfaces the newest window's app version and tolerates clients that don't send one", () => {
+    const state = {
+      old: [{ user_id: "u1", name: "Nick", module: "logs", online_at: 100, app_version: "5.7.3" }],
+      newer: [{ user_id: "u1", name: "Nick", module: "pm", online_at: 200, app_version: "5.7.4" }],
+      legacy: [{ user_id: "u2", name: "Kenna", module: "vault", online_at: 50 }],
+    };
+    const out = dedupePresence(state as any);
+    expect(out.find((u) => u.userId === "u1")!.version).toBe("5.7.4");
+    expect(out.find((u) => u.userId === "u2")!.version).toBeNull();
+  });
+});

@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { readDir, readFile, stat, watchImmediate } from "@tauri-apps/plugin-fs";
+import { readDir, readFile, stat, watch } from "@tauri-apps/plugin-fs";
+
+/**
+ * Rust-side debounce window for the vault-folder watcher (plugin-fs `watch`
+ * → notify-debouncer-full). MUST stay a debounced watch, never
+ * `watchImmediate`: the native downloader streams each file to disk in
+ * 8 KiB writes and Windows reports a modify event per write, and with
+ * watchImmediate every one of those crossed the bridge as its own
+ * `webview.eval` on the Tauri main thread. A 4-worker auto-sync pass
+ * produced thousands of evals per second — the same thread that serves
+ * every invoke (the title-bar close button included) and pumps WebView2, so
+ * the whole app appeared to hang until the pass finished. The debouncer
+ * collapses a file's write burst into a single event before it reaches IPC.
+ * The JS-side timer below then coalesces across files into one rescan.
+ */
+export const WATCH_DEBOUNCE_MS = 1000;
 import { useThrottledFocus } from "../../../lib/use-throttled-focus";
 import { recordBreadcrumb } from "../../../lib/breadcrumbs";
 
@@ -474,8 +489,9 @@ export function useLocalFolderScan(
     Boolean(rootPath) && rescanOnFocus,
   );
 
-  // Native filesystem watcher (Tauri/notify). Debounce small bursts of events
-  // — saving a file often produces several events in quick succession.
+  // Native filesystem watcher (Tauri/notify), debounced in Rust — see
+  // WATCH_DEBOUNCE_MS for why this must never be `watchImmediate`. A second,
+  // longer JS debounce coalesces the per-file events into one rescan.
   useEffect(() => {
     if (!rootPath || !watchFs) return;
     let unwatch: (() => void) | null = null;
@@ -483,18 +499,18 @@ export function useLocalFolderScan(
     let cancelled = false;
     (async () => {
       try {
-        const stop = await watchImmediate(
+        const stop = await watch(
           rootPath,
           () => {
             if (pausedRef.current) return;
-            // Long debounce: a parallel auto-sync pass produces dozens of
-            // events per second across many files. Coalescing into a single
-            // rescan ~1.5 s after the last event keeps the UI responsive
-            // and lets the sha-cache below absorb most of the work anyway.
+            // A parallel auto-sync pass still yields one event per file per
+            // debounce window. Coalescing into a single rescan ~1.5 s after
+            // the last event keeps the UI responsive and lets the sha-cache
+            // absorb most of the work anyway.
             if (timer) clearTimeout(timer);
             timer = setTimeout(refetch, 1500);
           },
-          { recursive: true },
+          { recursive: true, delayMs: WATCH_DEBOUNCE_MS },
         );
         if (cancelled) {
           stop();

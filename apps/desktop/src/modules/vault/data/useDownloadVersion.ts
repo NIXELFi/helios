@@ -223,6 +223,7 @@ async function nativeDownload(
   client: SupabaseClient,
   sha: string,
   destPath: string,
+  expectedBytes?: number,
 ): Promise<NativeDownloadResult | null> {
   const supabaseUrl =
     (client as unknown as { supabaseUrl?: string }).supabaseUrl ??
@@ -245,6 +246,9 @@ async function nativeDownload(
     apikey,
     destPath,
     expectedSha256: String(sha).toLowerCase(),
+    // Lets the native layer size its stall timeout to the file instead of
+    // reqwest's 30 s default, which capped every download at ~30 s of link.
+    ...(expectedBytes != null && expectedBytes > 0 ? { expectedBytes } : {}),
   };
   const res = (await invoke("download_object_to_temp", { req })) as
     | NativeDownloadResult
@@ -272,7 +276,7 @@ export async function downloadVersionOnce(
   client: SupabaseClient,
   sha: string,
   destPath: string,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; expectedBytes?: number },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const signal = opts?.signal;
   if (signal?.aborted) return { ok: false, error: "aborted" };
@@ -282,7 +286,7 @@ export async function downloadVersionOnce(
     try {
       let native: NativeDownloadResult | null;
       try {
-        native = await nativeDownload(client, sha, destPath);
+        native = await nativeDownload(client, sha, destPath, opts?.expectedBytes);
       } catch (e) {
         if (!isMissingTauriHost(e)) throw e;
         native = null;
@@ -339,10 +343,10 @@ export function useDownloadVersion() {
    * the bytes are never written to disk and the call returns `false`.
    */
   const run = useCallback(
-    async (sha: string, destPath: string, signal?: AbortSignal): Promise<boolean> => {
+    async (sha: string, destPath: string, signal?: AbortSignal, expectedBytes?: number): Promise<boolean> => {
       setLoading(true);
       setError(null);
-      const result = await downloadVersionOnce(client, sha, destPath, { signal });
+      const result = await downloadVersionOnce(client, sha, destPath, { signal, expectedBytes });
       if (result.ok) {
         setLoading(false);
         return true;

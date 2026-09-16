@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import type { ModuleId } from "./ModulePicker";
+import { publishConnectionState } from "../lib/connection-status";
 
 /** One signed-in person currently connected to Helios, collapsed across all of
  *  their open windows/tabs. */
@@ -14,6 +15,9 @@ export interface PresenceUser {
   since: number;
   /** Number of distinct connections (windows) they have open. */
   connections: number;
+  /** Helios version their most-recently-active window is running; null for
+   *  clients that predate version tracking. */
+  version: string | null;
 }
 
 /** Raw per-connection payload we `track()` into the presence channel. */
@@ -23,6 +27,9 @@ interface TrackedMeta {
   subteam: string | null;
   module: ModuleId;
   online_at: number;
+  /** App version (package.json / tauri.conf.json) — lets admins see who is
+   *  still on an old build. Optional: older clients don't send it. */
+  app_version?: string;
 }
 
 const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set<ModuleId>([
@@ -68,6 +75,7 @@ export function dedupePresence(
           module: asModule(m.module),
           since,
           connections: 1,
+          version: typeof m.app_version === "string" ? m.app_version : null,
         });
         newest.set(m.user_id, since);
       } else {
@@ -78,6 +86,7 @@ export function dedupePresence(
         if (since > (newest.get(m.user_id) ?? -Infinity)) {
           newest.set(m.user_id, since);
           existing.module = asModule(m.module);
+          existing.version = typeof m.app_version === "string" ? m.app_version : null;
         }
       }
     }
@@ -101,14 +110,16 @@ export function useHeliosPresence(input: {
   name: string;
   subteam: string | null;
   module: ModuleId;
+  /** Running app version, announced alongside the module. */
+  appVersion?: string;
 }): PresenceUser[] {
-  const { client, userId, name, subteam, module } = input;
+  const { client, userId, name, subteam, module, appVersion } = input;
   const [roster, setRoster] = useState<PresenceUser[]>([]);
 
   // Keep the latest identity/module in a ref so the channel callbacks always
   // announce current values without re-subscribing on every module switch.
-  const metaRef = useRef({ name, subteam, module });
-  metaRef.current = { name, subteam, module };
+  const metaRef = useRef({ name, subteam, module, appVersion });
+  metaRef.current = { name, subteam, module, appVersion };
 
   const channelRef = useRef<any>(null);
   // True only between a successful SUBSCRIBED and teardown — gates re-tracks so
@@ -142,6 +153,7 @@ export function useHeliosPresence(input: {
         subteam: metaRef.current.subteam,
         module: metaRef.current.module,
         online_at: Date.now(),
+        app_version: metaRef.current.appVersion,
       } satisfies TrackedMeta);
     };
 
@@ -168,9 +180,13 @@ export function useHeliosPresence(input: {
       // means a reconnect re-announces us automatically.
       if (status === "SUBSCRIBED") {
         subscribedRef.current = true;
+        publishConnectionState("up");
         announce();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
         subscribedRef.current = false;
+        // This channel is the app's one always-on socket, so its health
+        // stands in for "is Helios live" (see lib/connection-status).
+        publishConnectionState("down");
       }
     });
 
@@ -178,6 +194,8 @@ export function useHeliosPresence(input: {
       disposed = true;
       subscribedRef.current = false;
       channelRef.current = null;
+      // A deliberate teardown (sign-out, client swap) is not an outage.
+      publishConnectionState("unknown");
       try {
         void channel.untrack();
       } catch {
@@ -200,8 +218,9 @@ export function useHeliosPresence(input: {
       subteam,
       module,
       online_at: Date.now(),
+      app_version: appVersion,
     } satisfies TrackedMeta);
-  }, [module, name, subteam, userId]);
+  }, [module, name, subteam, userId, appVersion]);
 
   return useMemo(() => roster, [roster]);
 }

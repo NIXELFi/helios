@@ -19,6 +19,7 @@ import {
 } from "./local-delete-events";
 import { useSupabaseClient } from "@helios/auth";
 import { exists } from "@tauri-apps/plugin-fs";
+import { publishVaultSyncStatus } from "../../../lib/vault-sync-status";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -419,7 +420,7 @@ export function useAutoSync(input: {
         if (myLocksLiveRef.current.has(t.fileId)) { skipped++; continue; }
         activeTaskIds.set(t.id, t.name);
         guardedSet((s) => ({ ...s, activeFiles: [...s.activeFiles, t.name] }));
-        const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal);
+        const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal, t.size);
         // Freeze the just-downloaded file read-only immediately. Auto-sync only
         // ever downloads clean vault copies — files the user has locked/edited
         // are held back earlier in this same pass — so freezing here is always
@@ -638,6 +639,13 @@ export function useAutoSync(input: {
       }
     };
   }, [enabled, run]);
+
+  // Mirror every status change app-wide so the shell's title-bar chip can
+  // show progress after the user clicks off the Vault (see lib/vault-sync-status).
+  useEffect(() => {
+    publishVaultSyncStatus(status);
+  }, [status]);
+  useEffect(() => () => publishVaultSyncStatus(null), []);
 
   return status;
 }
