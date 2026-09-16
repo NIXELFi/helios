@@ -257,6 +257,7 @@ export function useBulkDownload(opts: {
         refreshActive();
         const result = await downloadVersionOnce(client, version.sha256, dest, {
           signal: myAbort.signal,
+          expectedBytes: version.size_bytes,
         });
         // Post-await guard: if a Cancel/Restart happened while we were
         // downloading, drop this result on the floor — it belongs to a

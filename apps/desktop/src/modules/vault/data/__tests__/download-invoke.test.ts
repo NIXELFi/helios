@@ -80,6 +80,15 @@ describe("downloadVersionOnce native path", () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
+  it("forwards the expected size so the native layer can scale its stall timeout", async () => {
+    invoke.mockResolvedValue({ tempPath: TEMP, bytes: 5, wasGzip: false });
+    await downloadVersionOnce(client, SHA, DEST, { expectedBytes: 47_054_848 });
+    expect(invoke).toHaveBeenCalledWith(
+      "download_object_to_temp",
+      { req: expect.objectContaining({ expectedBytes: 47_054_848 }) },
+    );
+  });
+
   it("removes the temp file and reports 'aborted' when superseded mid-transfer", async () => {
     const controller = new AbortController();
     invoke.mockImplementation(async () => {

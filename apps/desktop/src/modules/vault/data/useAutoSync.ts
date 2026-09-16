@@ -420,7 +420,7 @@ export function useAutoSync(input: {
         if (myLocksLiveRef.current.has(t.fileId)) { skipped++; continue; }
         activeTaskIds.set(t.id, t.name);
         guardedSet((s) => ({ ...s, activeFiles: [...s.activeFiles, t.name] }));
-        const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal);
+        const ok = await downloadRunRef.current(t.sha, t.dest, myAbort.signal, t.size);
         // Freeze the just-downloaded file read-only immediately. Auto-sync only
         // ever downloads clean vault copies — files the user has locked/edited
         // are held back earlier in this same pass — so freezing here is always
