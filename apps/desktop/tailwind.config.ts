@@ -15,6 +15,7 @@ export default {
         // tc() from @helios/ui.
         "helios-base":    "rgb(var(--helios-base) / <alpha-value>)",
         "helios-panel":   "rgb(var(--helios-panel) / <alpha-value>)",
+        "helios-strip":   "rgb(var(--helios-strip) / <alpha-value>)",
         "helios-deep":    "rgb(var(--helios-deep) / <alpha-value>)",
         "helios-line":    "rgb(var(--helios-line) / <alpha-value>)",
         "helios-grid":    "rgb(var(--helios-grid) / <alpha-value>)",

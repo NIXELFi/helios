@@ -17,7 +17,8 @@ export type ThemePref = ThemeName | "system";
 
 export type TokenName =
   | "base" // page / window background
-  | "panel" // raised surfaces: rail, cards, dialogs
+  | "panel" // raised surfaces: cards, dialogs, tiles
+  | "strip" // side strips next to the rail (sidebars, session panel)
   | "deep" // recessed wells (inputs, code)
   | "line" // hairline borders
   | "grid" // chart grid lines (quieter than line)
@@ -33,6 +34,7 @@ export const PALETTES: Record<ThemeName, Record<TokenName, string>> = {
   dark: {
     base: "#0E0E10",
     panel: "#16171B",
+    strip: "#16171B",
     deep: "#0B0B0D",
     line: "#2A2C32",
     grid: "#23252B",
@@ -45,7 +47,8 @@ export const PALETTES: Record<ThemeName, Record<TokenName, string>> = {
   },
   light: {
     base: "#FFFFFF",
-    panel: "#F4F5F7",
+    panel: "#FFFFFF",
+    strip: "#F9FAFB",
     deep: "#EAECF0",
     line: "#D6DAE1",
     grid: "#E6E8EE",

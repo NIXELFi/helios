@@ -45,7 +45,7 @@ follow [semver](https://semver.org/).
 - **Light mode.** Settings → General → Appearance: System, Dark or Light.
   Every module, dialog, chart and canvas widget follows the choice. In light
   the accent is ASU maroon instead of gold (buttons, active states, the
-  wordmark), the page is white with light-grey side strips and cards, status
+  wordmark), the page and cards are white with light-grey side strips, status
   and role chips use darker text so they read on white, avatars go pastel,
   the arcade lobby follows the theme while each game screen stays a dark
   display like a real cabinet, and switching themes

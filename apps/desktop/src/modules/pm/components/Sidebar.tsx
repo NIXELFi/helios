@@ -422,7 +422,7 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-10 shrink-0 flex-col items-center border-r border-helios-line bg-helios-panel py-2">
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r border-helios-line bg-helios-strip py-2">
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -437,7 +437,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-60 shrink-0 flex-col overflow-hidden border-r border-helios-line bg-helios-panel">
+    <aside className="flex h-full min-h-0 w-60 shrink-0 flex-col overflow-hidden border-r border-helios-line bg-helios-strip">
       <div className="flex justify-end border-b border-helios-line px-2 py-1">
         <button
           type="button"

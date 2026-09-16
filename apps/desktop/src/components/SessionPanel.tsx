@@ -80,7 +80,7 @@ export function SessionPanel({
 
   if (collapsed) {
     return (
-      <aside className="w-8 flex-shrink-0 border-r border-helios-line bg-helios-panel flex flex-col items-center pt-2">
+      <aside className="w-8 flex-shrink-0 border-r border-helios-line bg-helios-strip flex flex-col items-center pt-2">
         <button
           aria-label="Expand sessions panel"
           onClick={() => setCollapsed(false)}
@@ -92,7 +92,7 @@ export function SessionPanel({
   }
 
   return (
-    <aside className="w-60 flex-shrink-0 border-r border-helios-line bg-helios-panel flex flex-col">
+    <aside className="w-60 flex-shrink-0 border-r border-helios-line bg-helios-strip flex flex-col">
       <div className="h-8 flex items-center justify-between px-2 border-b border-helios-line">
         <span className="text-[10px] uppercase tracking-wider text-helios-dim">Sessions</span>
         <div className="flex items-center gap-1">
