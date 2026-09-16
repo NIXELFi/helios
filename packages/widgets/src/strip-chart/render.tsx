@@ -11,7 +11,7 @@ import { datumNearPx } from "./hit-test";
 import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
-import { tc } from "@helios/ui";
+import { tc, tca } from "@helios/ui";
 export interface StripChartChannel {
   id: string;
   color: string;
@@ -499,7 +499,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
         zoomBox.style.position = "absolute";
         zoomBox.style.top = "0";
         zoomBox.style.bottom = "0";
-        zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
+        zoomBox.style.background = tca("gold", 0.18);
         zoomBox.style.borderLeft = "1px solid #FFC627";
         zoomBox.style.borderRight = "1px solid #FFC627";
         zoomBox.style.pointerEvents = "none";

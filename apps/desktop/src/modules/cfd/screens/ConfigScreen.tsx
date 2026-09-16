@@ -221,7 +221,7 @@ function HeaderButton({
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "gold" }) {
   const cls =
     variant === "gold"
-      ? "rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-40"
+      ? "rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-40"
       : "rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-40";
   return (
     <button type="button" className={cls} onClick={onClick} disabled={disabled} {...rest}>
@@ -250,7 +250,7 @@ function EmptyState({ onOpen, onNew }: { onOpen: () => void; onNew: () => void }
         </button>
         <button
           type="button"
-          className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
+          className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90"
           onClick={onOpen}
         >
           Open…

@@ -318,7 +318,7 @@ export function OptimizationParamsModal({
               type="button"
               onClick={submit}
               disabled={validationErrors.length > 0}
-              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start optimization
               {rpmParse.ok &&

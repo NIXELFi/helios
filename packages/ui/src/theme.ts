@@ -24,8 +24,8 @@ export type TokenName =
   | "text" // primary text
   | "dim" // secondary text
   | "muted" // tertiary text, disabled, axis ticks
-  | "onGold" // text on a gold surface (dark in both themes)
-  | "gold"
+  | "onGold" // text on the accent surface (dark on gold, white on maroon)
+  | "gold" // the ACCENT: gold in dark, ASU maroon in light
   | "maroon";
 
 /** Hex per token per theme. Keep in sync with styles.css :root blocks. */
@@ -52,8 +52,8 @@ export const PALETTES: Record<ThemeName, Record<TokenName, string>> = {
     text: "#1B1D22",
     dim: "#4F5665",
     muted: "#7C838F",
-    onGold: "#0E0E10",
-    gold: "#D69E00",
+    onGold: "#FFFFFF",
+    gold: "#8C1D40", // the accent is ASU maroon in light
     maroon: "#8C1D40",
   },
 };

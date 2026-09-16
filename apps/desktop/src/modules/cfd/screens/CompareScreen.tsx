@@ -121,7 +121,7 @@ export function CompareScreen() {
               <div className="mt-3">
                 <button
                   type="button"
-                  className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
+                  className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90"
                   onClick={() => navigateTo("studies")}
                 >
                   Go to studies

@@ -11,8 +11,8 @@
 /* ---------------------------------------------------------------- tokens */
 .games-root {
   --g-gold: rgb(var(--asu-gold));
-  --g-gold-dim: rgba(255, 198, 39, 0.55);
-  --g-gold-glow: rgba(255, 198, 39, 0.12);
+  --g-gold-dim: rgb(var(--asu-gold) / 0.55);
+  --g-gold-glow: rgb(var(--asu-gold) / 0.12);
   --g-silver: #c0c7d1;
   --g-bronze: #b87333;
   --g-line: rgb(var(--helios-line));

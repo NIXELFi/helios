@@ -211,7 +211,7 @@ export function SweepParamsModal({
               Cancel
             </button>
             <button type="button" disabled={!canStart}
-              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
               onClick={() => {
                 if (!parsed.ok) return;
                 onStart({

@@ -170,7 +170,7 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-asu-gold/90 rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >Got it</button>
           </div>
         </div>
@@ -226,7 +226,7 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
             <button
               type="button"
               onClick={onRetry ?? onInstall}
-              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-asu-gold/90 rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >Try again</button>
           </div>
         </div>
@@ -322,7 +322,7 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
             type="button"
             onClick={onInstall}
             disabled={inFlight || playbackBlocked}
-            className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-asu-gold/90 rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
           >Install and restart</button>
         </div>
       </div>

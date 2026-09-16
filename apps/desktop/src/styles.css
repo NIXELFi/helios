@@ -9,16 +9,16 @@
    ────────────────────────────────────────────────────────────────────────── */
 :root {
   color-scheme: dark;
-  --helios-base: 14 14 16;      /* rgb(var(--helios-base)) */
-  --helios-panel: 22 23 27;     /* rgb(var(--helios-panel)) */
-  --helios-deep: 11 11 13;      /* rgb(var(--helios-deep)) */
-  --helios-line: 42 44 50;      /* rgb(var(--helios-line)) */
-  --helios-grid: 35 37 43;      /* rgb(var(--helios-grid)) */
-  --helios-text: 216 220 226;   /* rgb(var(--helios-text)) */
-  --helios-dim: 144 151 160;    /* rgb(var(--helios-dim)) */
-  --helios-muted: 90 95 102;    /* rgb(var(--helios-muted)) */
-  --helios-on-gold: 14 14 16;   /* rgb(var(--helios-base)) */
-  --asu-gold: 255 198 39;       /* rgb(var(--asu-gold)) */
+  --helios-base: 14 14 16;      /* #0E0E10 */
+  --helios-panel: 22 23 27;     /* #16171B */
+  --helios-deep: 11 11 13;      /* #0B0B0D */
+  --helios-line: 42 44 50;      /* #2A2C32 */
+  --helios-grid: 35 37 43;      /* #23252B */
+  --helios-text: 216 220 226;   /* #D8DCE2 */
+  --helios-dim: 144 151 160;    /* #9097A0 */
+  --helios-muted: 90 95 102;    /* #5A5F66 */
+  --helios-on-gold: 14 14 16;   /* #0E0E10 */
+  --asu-gold: 255 198 39;       /* #FFC627 — the ACCENT: gold in dark, maroon in light */
   --asu-maroon: 140 29 64;      /* rgb(var(--asu-maroon)) */
 }
 :root[data-theme="light"] {
@@ -31,8 +31,8 @@
   --helios-text: 27 29 34;      /* #1B1D22 */
   --helios-dim: 79 86 101;      /* #4F5665 */
   --helios-muted: 124 131 143;  /* #7C838F */
-  --helios-on-gold: 14 14 16;   /* rgb(var(--helios-base)) */
-  --asu-gold: 214 158 0;        /* #D69E00 — deeper for contrast on white */
+  --helios-on-gold: 255 255 255; /* white on the maroon accent */
+  --asu-gold: 140 29 64;        /* #8C1D40 — the accent is ASU maroon in light */
   --asu-maroon: 140 29 64;
 }
 

@@ -43,10 +43,10 @@
 .kb-prose a.kb-link {
   color: rgb(var(--asu-gold));
   text-decoration: none;
-  border-bottom: 1px solid rgba(255, 198, 39, 0.35);
+  border-bottom: 1px solid rgb(var(--asu-gold) / 0.35);
   cursor: pointer;
 }
-.kb-prose a.kb-link:hover { border-bottom-color: rgb(var(--asu-gold)); background: rgba(255, 198, 39, 0.08); }
+.kb-prose a.kb-link:hover { border-bottom-color: rgb(var(--asu-gold)); background: rgb(var(--asu-gold) / 0.08); }
 .kb-prose a.kb-link-missing {
   color: #9A6B7E;
   border-bottom: 1px dashed rgba(154, 107, 126, 0.5);
@@ -77,7 +77,7 @@
   margin: 0.9rem 0;
   padding: 0.6rem 1rem;
   border-left: 3px solid rgb(var(--asu-gold));
-  background: rgba(255, 198, 39, 0.05);
+  background: rgb(var(--asu-gold) / 0.05);
   border-radius: 0 6px 6px 0;
   color: rgb(var(--helios-dim));
 }
@@ -142,30 +142,30 @@
 
 /* Search-hit highlight (jump-to-match from the search pane) */
 .kb-prose mark.kb-search-hit {
-  background: rgba(255, 198, 39, 0.28);
+  background: rgb(var(--asu-gold) / 0.28);
   color: rgb(var(--asu-gold));
   border-radius: 3px;
   padding: 0 1px;
-  box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.35);
+  box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.35);
 }
 .kb-prose mark.kb-phrase {
-  background: rgba(255, 198, 39, 0.42);
+  background: rgb(var(--asu-gold) / 0.42);
   color: rgb(var(--asu-gold));
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.5);
+  box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.5);
 }
 .kb-prose mark.kb-search-current {
-  background: rgba(255, 198, 39, 0.78) !important;
+  background: rgb(var(--asu-gold) / 0.78) !important;
   color: #1a1400 !important;
-  box-shadow: 0 0 0 2px rgba(255, 198, 39, 0.9);
+  box-shadow: 0 0 0 2px rgb(var(--asu-gold) / 0.9);
   scroll-margin: 40vh;
 }
 .kb-prose mark.kb-search-hit.kb-search-first {
   animation: kb-hit-pulse 1.6s ease-out 1;
 }
 @keyframes kb-hit-pulse {
-  0%   { background: rgba(255, 198, 39, 0.75); box-shadow: 0 0 0 4px rgba(255, 198, 39, 0.35); }
-  100% { background: rgba(255, 198, 39, 0.28); box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.35); }
+  0%   { background: rgb(var(--asu-gold) / 0.75); box-shadow: 0 0 0 4px rgb(var(--asu-gold) / 0.35); }
+  100% { background: rgb(var(--asu-gold) / 0.28); box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.35); }
 }
 
 /* Thin scrollbars for the KB panes */

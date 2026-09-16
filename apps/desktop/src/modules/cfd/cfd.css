@@ -32,7 +32,7 @@
   border-radius: 8px;
 }
 .cfd-root ::-webkit-scrollbar-thumb:hover {
-  background: #ffd24d;
+  background: rgb(var(--asu-gold) / 0.85);
   background-clip: content-box;
   border: 2px solid transparent;
 }

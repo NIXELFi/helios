@@ -195,7 +195,7 @@ function ClusterNode({ data }: NodeProps<ClusterNodeType>) {
   return (
     <div
       style={{ width: CLUSTER_W, height: data.height, borderColor: data.color }}
-      className="cursor-pointer overflow-hidden rounded-xl border bg-helios-panel/90 transition-shadow hover:shadow-[0_0_0_2px_rgba(255,198,39,0.4)]"
+      className="cursor-pointer overflow-hidden rounded-xl border bg-helios-panel/90 transition-shadow hover:shadow-[0_0_0_2px_rgb(var(--asu-gold)/0.4)]"
     >
       <div className="absolute left-0 top-0 h-full w-1.5 rounded-l-xl" style={{ background: data.color }} />
       <div className="p-3">

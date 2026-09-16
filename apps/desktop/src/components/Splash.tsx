@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { tca } from "@helios/ui";
 
 /** The HELIOS wordmark + subtitle, with the soft gold halo. Shared by every
  *  full-pane loading surface (boot landing, module chunk fallback, PM's first
@@ -10,11 +11,11 @@ export function Wordmark({ animate = true }: { animate?: boolean }) {
       <div
         aria-hidden
         className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,198,39,0.12) 0%, transparent 70%)" }}
+        style={{ background: `radial-gradient(circle, ${tca("gold", 0.12)} 0%, transparent 70%)` }}
       />
       <h1
         className="font-helios text-[5rem] leading-none text-asu-gold md:text-[7rem]"
-        style={{ textShadow: "0 0 48px rgba(255,198,39,0.25)" }}
+        style={{ textShadow: `0 0 48px ${tca("gold", 0.25)}` }}
       >
         HELIOS
       </h1>

@@ -63,7 +63,7 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
   return (
     <div className="border-b border-[#FFB800]/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
       <div className="flex items-center gap-3">
-        <span className="text-[#FFD24D]">
+        <span className="text-asu-gold/90">
           {unmatched.length} local file{unmatched.length === 1 ? "" : "s"} not in vault
         </span>
         <button
@@ -75,12 +75,12 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
         </button>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20"
+          className="rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-asu-gold/90 hover:bg-[#FFB800]/20"
         >
           {expanded ? "Hide" : "Show"}
         </button>
         {addFile.error && <span className="text-xs text-red-300">{addFile.error.message}</span>}
-        {summary && <span className="text-xs text-[#FFD24D]">{summary}</span>}
+        {summary && <span className="text-xs text-asu-gold/90">{summary}</span>}
       </div>
       {expanded && (
         <ul className="mt-2 max-h-48 space-y-1 overflow-auto rounded border border-[#FFB800]/30 bg-helios-base p-2 font-mono-num text-xs">
@@ -90,7 +90,7 @@ export function UnmatchedFilesBanner({ vaultId, unmatched, onDone }: Props) {
               <button
                 onClick={(e) => { e.stopPropagation(); addOne(f); }}
                 disabled={busy}
-                className="shrink-0 rounded border border-[#FFB800]/40 px-2 py-0.5 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20 disabled:opacity-50"
+                className="shrink-0 rounded border border-[#FFB800]/40 px-2 py-0.5 text-xs text-asu-gold/90 hover:bg-[#FFB800]/20 disabled:opacity-50"
               >
                 Add
               </button>

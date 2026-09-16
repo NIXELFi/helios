@@ -182,7 +182,7 @@ export function AuthModal({ open, onClose }: Props) {
                   <button
                     type="button"
                     onClick={() => setStep("connect")}
-                    className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300"
+                    className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90"
                   >
                     Change connection…
                   </button>
@@ -268,7 +268,7 @@ function ConnectStep(props: {
       <div className="flex justify-end">
         <button
           type="submit"
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90"
         >
           Connect
         </button>
@@ -508,7 +508,7 @@ function CredentialsStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : mode === "signin" ? "Sign in" : "Create account"}
         </button>
@@ -614,7 +614,7 @@ function ForgotStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : "Send code"}
         </button>
@@ -729,7 +729,7 @@ function ResetStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : "Reset password"}
         </button>

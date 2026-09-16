@@ -211,7 +211,7 @@ export function GraphView({
         const b = nodes[e.b]!;
         const lit = focus !== undefined && (e.a === focus || e.b === focus);
         ctx!.strokeStyle = lit
-          ? `rgba(255,198,39,${0.55 * fade + 0.18})`
+          ? `${tca("gold", 0.55 * fade + 0.18)}`
           : `rgba(130,134,142,${0.16 - 0.1 * fade})`;
         ctx!.beginPath();
         ctx!.moveTo(a.x, a.y);
@@ -227,7 +227,7 @@ export function GraphView({
         const off = focus !== undefined && !isFocus && !isNeighbor;
         ctx!.globalAlpha = reveal * (off ? 1 - 0.78 * fade : 1);
         if (isFocus) {
-          ctx!.shadowColor = "rgba(255,198,39,0.9)";
+          ctx!.shadowColor = tca("gold", 0.9);
           ctx!.shadowBlur = 16;
         }
         ctx!.fillStyle = colorMap.get(nd.subteam) ?? tc("dim");

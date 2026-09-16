@@ -53,7 +53,7 @@ export function ConfirmModal({
               "rounded px-3 py-1.5 text-sm font-medium " +
               (confirmVariant === "danger"
                 ? "bg-red-600 text-white hover:bg-red-700"
-                : "bg-asu-gold text-helios-on-gold hover:bg-yellow-300")
+                : "bg-asu-gold text-helios-on-gold hover:bg-asu-gold/90")
             }
             onClick={onConfirm}
           >

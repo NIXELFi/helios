@@ -20,3 +20,12 @@ export function useTheme(): ThemeName {
     currentTheme,
   );
 }
+
+/** Initials-avatar tint for a stable hue. Dark: deep disc + light initials.
+ *  Light: pastel disc + dark initials, so the rail and people list don't
+ *  read as a row of saturated blobs on white. */
+export function avatarStyle(hue: number, theme: ThemeName): { backgroundColor: string; color: string; borderColor: string } {
+  return theme === "light"
+    ? { backgroundColor: `hsl(${hue} 60% 90%)`, color: `hsl(${hue} 45% 32%)`, borderColor: `hsl(${hue} 45% 78%)` }
+    : { backgroundColor: `hsl(${hue} 42% 20%)`, color: `hsl(${hue} 70% 76%)`, borderColor: `hsl(${hue} 38% 34%)` };
+}

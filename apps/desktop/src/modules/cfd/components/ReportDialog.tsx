@@ -152,7 +152,7 @@ export function ReportDialog({ open, onClose, defaultSelected, title }: Props) {
             Save HTML
           </button>
           <button type="button" disabled={selected.size === 0 || busy} onClick={() => void printPdf()}
-            className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-40">
+            className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-40">
             Print → PDF
           </button>
         </div>

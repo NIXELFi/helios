@@ -254,7 +254,7 @@ export function StudiesScreen() {
         </button>
         <button
           type="button"
-          className="rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
           disabled={noConfig}
           onClick={openNewStudy}
         >
@@ -629,7 +629,7 @@ function SingleRpmParamsModal({
               Cancel
             </button>
             <button type="button"
-              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90"
               onClick={() => onStart({
                 rpm,
                 nCyclesMax: nCycles,

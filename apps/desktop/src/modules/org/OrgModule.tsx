@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { avatarStyle, useTheme } from "../../lib/theme";
 import {
   IconActivity,
   IconBolt,
@@ -143,14 +144,16 @@ function Avatar({ person }: { person: Person }) {
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
     return h;
   }, [person.user_id, person.email]);
+  const theme = useTheme();
+  const tint = avatarStyle(hue, theme);
   return (
     <span
       aria-hidden
       className="flex size-7 shrink-0 select-none items-center justify-center rounded-full text-[10px] font-semibold tracking-wide"
       style={{
-        backgroundColor: `hsl(${hue} 45% 22%)`,
-        color: `hsl(${hue} 70% 78%)`,
-        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
+        backgroundColor: tint.backgroundColor,
+        color: tint.color,
+        boxShadow: `inset 0 0 0 1px ${tint.borderColor}`,
       }}
     >
       {initialsOf(person)}

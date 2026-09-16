@@ -164,7 +164,7 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300"
+                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90"
                 >Done</button>
               </div>
             </div>
@@ -197,7 +197,7 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
+                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
                 >{busy ? "…" : "Update password"}</button>
               </div>
             </form>

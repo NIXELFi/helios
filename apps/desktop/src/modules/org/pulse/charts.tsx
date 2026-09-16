@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { DOW_LABELS, niceMax, type Point } from "./pulse-lib";
 
-import { tc } from "@helios/ui";
+import { tc, tca } from "@helios/ui";
 // Chart primitives for Admin > Pulse. Hand-rolled SVG like the Vault Insights
 // charts (no library), but with a hover layer: every plotted chart answers
 // "what is this exact value" on pointer-over, and the text always wears the
@@ -411,7 +411,7 @@ export function Heatmap({ grid, hourLabel = (h: number) => `${h}:00` }: { grid: 
                   key={h}
                   className="h-[14px] min-w-0"
                   style={{
-                    backgroundColor: `rgba(255,198,39,${alpha.toFixed(3)})`,
+                    backgroundColor: `${tca("gold", alpha)}`,
                     outline: isHover ? `1px solid ${C.text}` : undefined,
                     outlineOffset: -1,
                   }}

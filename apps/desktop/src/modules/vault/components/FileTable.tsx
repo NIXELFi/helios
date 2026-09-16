@@ -126,7 +126,7 @@ interface RowStateInfo {
 // so the user can tell at a glance which lock is theirs.
 const PILL = {
   green: "bg-[#66BB6A]/20 text-[#9CCC65] border-[#66BB6A]/40",
-  gold: "bg-[#FFB800]/20 text-[#FFD24D] border-[#FFB800]/40",
+  gold: "bg-[#FFB800]/20 text-asu-gold/90 border-[#FFB800]/40",
   redMe: "bg-[#EF5350]/30 text-[#EF9A9A] border-[#EF5350]/50",
   redOther: "bg-[#EF5350]/20 text-[#E57373] border-[#EF5350]/40",
   neutral: "bg-helios-line/40 text-helios-dim border-helios-line",
@@ -572,7 +572,7 @@ export function FileTable({
                         className={
                           "rounded border px-1 py-0.5 text-[10px] font-medium leading-none " +
                           (badge.tone === "warn"
-                            ? "border-[#FFB800]/40 bg-[#FFB800]/20 text-[#FFD24D]"
+                            ? "border-[#FFB800]/40 bg-[#FFB800]/20 text-asu-gold/90"
                             : "border-helios-line bg-helios-line/40 text-helios-dim")
                         }
                         title={badge.title}

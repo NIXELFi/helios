@@ -1145,7 +1145,7 @@ export function BrowseScreen() {
           </div>
           {dropImport.importing && (
             <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-helios-line">
-              <div className="h-full w-1/3 animate-pulse bg-yellow-400" />
+              <div className="h-full w-1/3 animate-pulse bg-asu-gold" />
             </div>
           )}
           {dropImport.results.length > 0 && (
@@ -1675,7 +1675,7 @@ function SyncStatusPill({ status, onRescan }: {
     const base = totalTasks > 0 ? `Syncing ${completedTasks}/${totalTasks}` : "Syncing…";
     label = inFlight ? `${base} · ${inFlight}` : base;
     tone = "text-asu-gold";
-    dot = "bg-yellow-400 animate-pulse";
+    dot = "bg-asu-gold animate-pulse";
   } else if (lastFailed > 0) {
     label = `${lastFailed} failed`;
     tone = "text-[#EF5350]";
@@ -1721,7 +1721,7 @@ function SyncStatusPill({ status, onRescan }: {
                 </div>
                 <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-helios-line">
                   <div
-                    className="h-full bg-yellow-400 transition-[width] duration-300"
+                    className="h-full bg-asu-gold transition-[width] duration-300"
                     style={{ width: `${pct}%` }}
                   />
                 </div>

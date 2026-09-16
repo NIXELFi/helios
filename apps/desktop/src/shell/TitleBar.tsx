@@ -1,4 +1,5 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { tca } from "@helios/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import heliosIcon from "../assets/helios-icon.png";
 
@@ -91,7 +92,7 @@ export function TitleBar({ context }: { context: string | null }) {
           src={heliosIcon}
           alt=""
           draggable={false}
-          className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgba(255,198,39,0.35)]"
+          className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgb(var(--asu-gold)/0.35)]"
         />
         <span className="font-helios text-[12.5px] text-asu-gold">
           HELIOS
