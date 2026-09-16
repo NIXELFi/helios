@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { tca } from "@helios/ui";
 import heliosIcon from "../assets/helios-icon.png";
 import { handleWindowDragMouseDown, tauriWindow } from "./windowDrag";
@@ -23,7 +23,13 @@ const TITLEBAR_HEIGHT_PX = 38;
  * Design per the approved 2026-06-16 mockup: logo + HELIOS wordmark +
  * module crumb left, min/max/close right, red close hover.
  */
-export function TitleBar({ context }: { context: string | null }) {
+export function TitleBar({ context, trailing }: {
+  context: string | null;
+  /** Optional status content rendered just left of the window controls
+   *  (e.g. the Vault SyncStatusChip). Buttons inside it are click targets,
+   *  never drag handles; see handleWindowDragMouseDown. */
+  trailing?: ReactNode;
+}) {
   const [maximized, setMaximized] = useState(false);
 
   // Publish the bar height app-wide while mounted (see TITLEBAR_HEIGHT_PX).
@@ -85,6 +91,7 @@ export function TitleBar({ context }: { context: string | null }) {
         )}
       </div>
       <div className="flex-1 self-stretch" />
+      {trailing}
       <div className="flex h-full">
         <button
           type="button"

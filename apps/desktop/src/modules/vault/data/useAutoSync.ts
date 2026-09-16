@@ -21,6 +21,7 @@ import {
 import { useSupabaseClient } from "@helios/auth";
 import { exists } from "@tauri-apps/plugin-fs";
 import { isAnsysSolverOutput } from "./ansys-solver-output";
+import { publishVaultSyncStatus } from "../../../lib/vault-sync-status";
 
 export interface AutoSyncStatus {
   /** True while the sync pass is running. */
@@ -672,6 +673,13 @@ export function useAutoSync(input: {
       }
     };
   }, [enabled, run, retryTick]);
+
+  // Mirror every status change app-wide so the shell's title-bar chip can
+  // show progress after the user clicks off the Vault (see lib/vault-sync-status).
+  useEffect(() => {
+    publishVaultSyncStatus(status);
+  }, [status]);
+  useEffect(() => () => publishVaultSyncStatus(null), []);
 
   return status;
 }
