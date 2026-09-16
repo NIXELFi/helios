@@ -5,6 +5,7 @@ import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
 import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
 import { TitleBar } from "./shell/TitleBar";
+import { SyncStatusChip } from "./components/SyncStatusChip";
 import { IS_WINDOWS } from "./lib/platform";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
@@ -423,6 +424,7 @@ function HeliosShell() {
     name: userLabel ?? "Unknown",
     subteam: userSubteamLabel,
     module: active,
+    appVersion,
   });
   // Presence roster + bug-report triage: legacy owner/admin OR anyone with
   // role-granting capabilities (leads/execs). Server side mirrors this —
@@ -446,7 +448,12 @@ function HeliosShell() {
       {/* Windows runs frameless (decorations:false in tauri.windows.conf.json)
           and gets the custom in-app title bar; macOS keeps its native overlay
           traffic lights and skips it. */}
-      {IS_WINDOWS && <TitleBar context={landed ? MODULE_LABEL[active] : null} />}
+      {IS_WINDOWS && (
+        <TitleBar
+          context={landed ? MODULE_LABEL[active] : null}
+          trailing={landed ? <SyncStatusChip onClick={() => activate("vault")} /> : null}
+        />
+      )}
       <div className="flex min-h-0 w-full flex-1">
       <ModulePicker
         active={landed ? active : null}
