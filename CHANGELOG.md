@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.7.4] - 2026-09-16
+
 ### Added
 - **Settings.** An app-wide Settings dialog (Ctrl/⌘+, · the gear in the rail
   · the account menu) with General, Notifications, Data, Shortcuts and About
