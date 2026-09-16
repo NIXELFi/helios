@@ -27,6 +27,25 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Vault sync status in the title bar.** When the Vault is downloading files
+  and you switch to another module, a chip next to the window controls keeps
+  showing progress ("Vault · Syncing 3/12" with a progress line), turns red if
+  any file failed, and flashes the result ("Pulled 5" / "Up to date") for a
+  few seconds when the pass finishes. Click it to jump back to the Vault.
+- **Who's on which version.** The "On Helios" roster now shows each person's
+  Helios version next to their module, so admins can see who is still on an
+  old build.
+
+### Fixed
+- **App froze during Vault sync.** While auto-sync was pulling files the
+  whole app could stop responding — the close button did nothing and
+  switching modules crawled. The vault-folder watcher forwarded every raw
+  filesystem event to the app, and a download produces one for every 8 KiB
+  written; a multi-file sync flooded the bridge with thousands of events per
+  second. The watcher is now debounced in the native layer, so a file's
+  write burst arrives as a single event.
+
 ## [5.7.4] - 2026-09-16
 
 ### Added

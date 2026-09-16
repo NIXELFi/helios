@@ -96,7 +96,9 @@ export function PresencePanel({ users, currentUserId, railCollapsed }: Props) {
   // Rail collapsed to icons → compact vertical indicator (live dot + count),
   // with the roster names in the tooltip.
   if (railCollapsed) {
-    const names = users.map((u) => (u.userId === currentUserId ? `${u.name} (you)` : u.name)).join("\n");
+    const names = users
+      .map((u) => `${u.name}${u.userId === currentUserId ? " (you)" : ""}${u.version ? ` · v${u.version}` : ""}`)
+      .join("\n");
     return (
       <div
         role="img"
@@ -154,7 +156,7 @@ export function PresencePanel({ users, currentUserId, railCollapsed }: Props) {
                   key={u.userId}
                   className="helios-presence-row flex items-center gap-2 rounded-sm px-1.5 py-1 hover:bg-helios-panel"
                   style={{ animationDelay: `${Math.min(i, 12) * 35}ms` }}
-                  title={`${u.name}${you ? " (you)" : ""} — in ${MODULE_LABEL[u.module]}${u.subteam ? ` · ${u.subteam}` : ""}`}
+                  title={`${u.name}${you ? " (you)" : ""} — in ${MODULE_LABEL[u.module]}${u.subteam ? ` · ${u.subteam}` : ""}${u.version ? ` · Helios v${u.version}` : ""}`}
                 >
                   <Avatar user={u} />
                   <span className="flex min-w-0 flex-1 flex-col leading-tight">
@@ -169,6 +171,7 @@ export function PresencePanel({ users, currentUserId, railCollapsed }: Props) {
                     <span className="truncate text-[10px] text-helios-dim">
                       {MODULE_LABEL[u.module]}
                       {u.subteam ? <span className="text-helios-muted"> · {u.subteam}</span> : null}
+                      {u.version ? <span className="font-mono-num text-helios-muted"> · v{u.version}</span> : null}
                     </span>
                   </span>
                   <LiveDot size={6} />
