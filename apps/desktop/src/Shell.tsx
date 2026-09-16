@@ -6,6 +6,8 @@ import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
 import { TitleBar } from "./shell/TitleBar";
 import { SyncStatusChip } from "./components/SyncStatusChip";
+import { PmAttentionChip } from "./components/PmAttentionChip";
+import { ConnectionChip } from "./components/ConnectionChip";
 import { IS_WINDOWS } from "./lib/platform";
 import { useUpdater } from "./lib/use-updater";
 import { UpdateModal } from "./components/UpdateModal";
@@ -451,7 +453,19 @@ function HeliosShell() {
       {IS_WINDOWS && (
         <TitleBar
           context={landed ? MODULE_LABEL[active] : null}
-          trailing={landed ? <SyncStatusChip onClick={() => activate("vault")} /> : null}
+          trailing={
+            landed ? (
+              <>
+                {/* Background activity + "needs you" strip: each chip renders
+                    nothing unless it has something to say. */}
+                {pmEnabled && (
+                  <PmAttentionChip client={client} userId={user?.id ?? null} onClick={() => activate("pm")} />
+                )}
+                <SyncStatusChip onClick={() => activate("vault")} />
+                <ConnectionChip />
+              </>
+            ) : null
+          }
         />
       )}
       <div className="flex min-h-0 w-full flex-1">

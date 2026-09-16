@@ -33,6 +33,13 @@ follow [semver](https://semver.org/).
   showing progress ("Vault · Syncing 3/12" with a progress line), turns red if
   any file failed, and flashes the result ("Pulled 5" / "Up to date") for a
   few seconds when the pass finishes. Click it to jump back to the Vault.
+- **What's due for you, in the title bar.** A "PM · 2 overdue · 1 due today"
+  chip appears next to the window controls whenever you own an open task
+  that is due today or late (red when anything is overdue). Works even if
+  you haven't opened PM this session; click it to go there.
+- **Connection lost indicator.** If Helios loses its live connection to the
+  server for more than a few seconds, a red "Reconnecting…" (or "Offline")
+  chip shows in the title bar so stale data is never a mystery.
 - **Who's on which version.** The "On Helios" roster now shows each person's
   Helios version next to their module, so admins can see who is still on an
   old build.
@@ -45,6 +52,12 @@ follow [semver](https://semver.org/).
   written; a multi-file sync flooded the bridge with thousands of events per
   second. The watcher is now debounced in the native layer, so a file's
   write burst arrives as a single event.
+- **Large files never finished syncing.** Since 5.7.1 the native downloader
+  gave up on any file that took longer than 30 seconds to transfer, retried
+  it twice more from the start, and only then reported a failure — so a big
+  ANSYS result or assembly looked "stuck" for a minute and a half and then
+  failed. Downloads now get a time budget that scales with the file's size,
+  so slow links finish and only a genuinely dead connection times out.
 
 ## [5.7.4] - 2026-09-16
 
