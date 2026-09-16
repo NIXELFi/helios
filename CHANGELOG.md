@@ -44,8 +44,9 @@ follow [semver](https://semver.org/).
 - Desktop notification when an update is ready (Settings → Notifications).
 - **Light mode.** Settings → General → Appearance: System, Dark or Light.
   Every module, dialog, chart and canvas widget follows the choice; the
-  wordmark gold deepens slightly on white for contrast; the Games arcade keeps
-  its dark cabinet by design. Dark stays the default. Under the hood the whole
+  wordmark gold deepens slightly on white for contrast, and switching themes
+  crossfades the whole window instead of snapping. Dark stays the default.
+  Under the hood the whole
   palette moved to design tokens (CSS variables + a runtime lookup for canvas
   and SVG), replacing ~2,300 hardcoded colours.
 

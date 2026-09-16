@@ -30,10 +30,10 @@
   background-color: var(--g-base);
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -10%, var(--g-gold-glow), transparent 70%),
-    linear-gradient(to right, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
-    linear-gradient(to right, rgba(42, 44, 50, 0.28) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(42, 44, 50, 0.28) 1px, transparent 1px);
+    linear-gradient(to right, rgb(var(--helios-line) / 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--helios-line) / 0.55) 1px, transparent 1px),
+    linear-gradient(to right, rgb(var(--helios-line) / 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--helios-line) / 0.28) 1px, transparent 1px);
   background-size:
     100% 100%,
     120px 120px,
@@ -222,18 +222,3 @@
   .games-merge { animation: none; }
 }
 
-/* The arcade is designed as a dark cabinet — blueprint grid, CRT canvases,
-   neon gold. Under the light theme the rail and chrome go light but this
-   pane keeps the dark tokens so the games render as designed. */
-:root[data-theme="light"] .games-root {
-  color-scheme: dark;
-  --helios-base: 14 14 16;
-  --helios-panel: 22 23 27;
-  --helios-deep: 11 11 13;
-  --helios-line: 42 44 50;
-  --helios-grid: 35 37 43;
-  --helios-text: 216 220 226;
-  --helios-dim: 144 151 160;
-  --helios-muted: 90 95 102;
-  --asu-gold: 255 198 39;
-}

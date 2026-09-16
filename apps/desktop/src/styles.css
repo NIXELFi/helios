@@ -29,10 +29,10 @@
   --helios-line: 214 218 225;   /* #D6DAE1 */
   --helios-grid: 230 232 238;   /* #E6E8EE */
   --helios-text: 27 29 34;      /* #1B1D22 */
-  --helios-dim: 91 98 112;      /* #5B6270 */
-  --helios-muted: 138 144 155;  /* #8A909B */
+  --helios-dim: 79 86 101;      /* #4F5665 */
+  --helios-muted: 124 131 143;  /* #7C838F */
   --helios-on-gold: 14 14 16;   /* rgb(var(--helios-base)) */
-  --asu-gold: 224 168 0;        /* #E0A800 — deeper for contrast on white */
+  --asu-gold: 214 158 0;        /* #D69E00 — deeper for contrast on white */
   --asu-maroon: 140 29 64;
 }
 
@@ -100,6 +100,26 @@ body { background: rgb(var(--helios-base)); color: rgb(var(--helios-text)); font
 }
 .helios-modal-in   { animation: helios-modal-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 .helios-overlay-in { animation: helios-overlay-in 120ms ease both; }
+
+/* Theme switch. With the View Transitions API the whole window crossfades
+   between the dark and light frames (packages/ui theme.ts wraps the swap in
+   document.startViewTransition). Without it, .helios-theme-fade briefly
+   transitions colours on every element instead. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 380ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  mix-blend-mode: normal;
+}
+.helios-theme-fade *,
+.helios-theme-fade *::before,
+.helios-theme-fade *::after {
+  transition: background-color 320ms ease, color 320ms ease, border-color 320ms ease, fill 320ms ease, stroke 320ms ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none; }
+}
 
 /* Module first-open placeholder (ModuleTransition): held invisible for the
    first 150 ms so a fast chunk load never flashes it, then a quick fade. The

@@ -395,7 +395,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                       "games-display-heavy text-2xl tracking-[0.22em] transition-colors " +
                       (section === s.id
                         ? "text-asu-gold"
-                        : "text-helios-line hover:text-helios-dim")
+                        : "text-helios-muted hover:text-helios-dim")
                     }
                   >
                     {s.label}

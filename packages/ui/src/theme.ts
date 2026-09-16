@@ -50,10 +50,10 @@ export const PALETTES: Record<ThemeName, Record<TokenName, string>> = {
     line: "#D6DAE1",
     grid: "#E6E8EE",
     text: "#1B1D22",
-    dim: "#5B6270",
-    muted: "#8A909B",
+    dim: "#4F5665",
+    muted: "#7C838F",
     onGold: "#0E0E10",
-    gold: "#E0A800",
+    gold: "#D69E00",
     maroon: "#8C1D40",
   },
 };
@@ -128,16 +128,68 @@ export function resolveTheme(pref: ThemePref): ThemeName {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-function setTheme(next: ThemeName): void {
+function commitTheme(next: ThemeName): void {
   if (typeof document !== "undefined") {
     document.documentElement.dataset.theme = next;
     document.documentElement.style.colorScheme = next;
   }
-  if (next === current && version > 0) return;
   current = next;
   version++;
   for (const l of listeners) l(next);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("helios:theme", { detail: next }));
+}
+
+type DocWithVT = Document & {
+  startViewTransition?: (cb: () => void | Promise<void>) => {
+    finished: Promise<void>;
+    ready?: Promise<void>;
+    updateCallbackDone?: Promise<void>;
+  };
+};
+
+/** Apply a theme with a crossfade. The View Transitions API snapshots the
+ *  old frame, lets us swap tokens + remount canvases underneath, then fades
+ *  to the new frame (~350 ms, see styles.css ::view-transition-*). Where the
+ *  API is missing, a short colour transition class does the softening.
+ *  Honours prefers-reduced-motion; the very first apply at boot is instant. */
+function setTheme(next: ThemeName): void {
+  if (next === current && version > 0) {
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.theme = next;
+      document.documentElement.style.colorScheme = next;
+    }
+    return;
+  }
+  const doc = typeof document !== "undefined" ? (document as DocWithVT) : null;
+  const firstApply = version === 0;
+  const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (!doc || firstApply || reduce) {
+    commitTheme(next);
+    return;
+  }
+  if (typeof doc.startViewTransition === "function") {
+    doc.documentElement.classList.add("helios-theme-switching");
+    const vt = doc.startViewTransition(async () => {
+      commitTheme(next);
+      // Let React commit the remounted panes before the new frame is captured.
+      // Rendering is paused inside the DOM-update phase, so rAF never fires
+      // here — a macrotask hop is what lets React flush its batched updates.
+      await new Promise<void>((r) => setTimeout(r, 0));
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+    // A transition can be skipped/aborted (another one started, the tab was
+    // hidden, a screenshot tool stalled the frame) — that is not an error for
+    // us: the DOM swap already happened. Swallow the rejections.
+    vt.ready?.catch(() => {});
+    vt.updateCallbackDone?.catch(() => {});
+    void vt.finished
+      .catch(() => {})
+      .then(() => doc.documentElement.classList.remove("helios-theme-switching"));
+    return;
+  }
+  doc.documentElement.classList.add("helios-theme-fade");
+  commitTheme(next);
+  window.setTimeout(() => doc.documentElement.classList.remove("helios-theme-fade"), 400);
 }
 
 /** Apply a preference. With "system", follows the OS setting live. */
