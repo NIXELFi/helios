@@ -27,6 +27,29 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Settings.** An app-wide Settings dialog (Ctrl/⌘+, · the gear in the rail
+  · the account menu) with General, Notifications, Data, Shortcuts and About
+  tabs: which module Helios opens on, launch at login, what the close button
+  does (keep in tray / quit), desktop-notification switches per source with
+  quiet hours and a test button, the CFD team data folder, a one-click clear
+  of the PM workspace cache, a link to the app-data folder, the full
+  shortcut list, updater status with a manual check, and "Copy diagnostics"
+  for bug reports. Launch-at-login moved here from Vault → Settings.
+- **Automatic updates.** On by default: when a new version is found Helios
+  downloads it and restarts after a 20-second countdown shown in the update
+  dialog (it waits while Logs playback is running). You can postpone once
+  for 30 minutes; after that it installs. Turn it off in Settings → General
+  to go back to being asked.
+- Desktop notification when an update is ready (Settings → Notifications).
+
+### Fixed
+- **macOS: the post-update restart now actually brings the new Helios up.**
+  The old build launched the new copy while it was still running, so the
+  single-instance guard swallowed the launch and the app just vanished.
+  The relaunch is now handed to a detached shell that waits for the old
+  process to exit first.
+
 ### Changed
 - **Helios now opens on PM.** A signed-in member lands on the PM tab (the
   project's last-used view) instead of Logs; PM moved to the top of the

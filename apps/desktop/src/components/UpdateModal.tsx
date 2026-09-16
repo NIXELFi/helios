@@ -34,9 +34,16 @@ interface Props {
    *  view's "Try again" rechecks to get back to an installable state. */
   onRetry?: () => void;
   onClose: () => void;
+  /** Auto-update (Settings → General): seconds until the install starts on
+   *  its own, or null when the user must click. */
+  autoInstallIn?: number | null;
+  /** "Postpone" during an auto-update countdown — one 30-minute deferral. */
+  onDefer?: () => void;
+  /** False once the single deferral has been used; the button disappears. */
+  canDefer?: boolean;
 }
 
-export function UpdateModal({ state, playbackBlocked, installAttempted = false, onInstall, onRetry, onClose }: Props) {
+export function UpdateModal({ state, playbackBlocked, installAttempted = false, onInstall, onRetry, onClose, autoInstallIn = null, onDefer, canDefer = true }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Capture whatever was focused before the modal opened so we can restore
   // it on close (focus-restore, per the modal a11y recipe).
@@ -281,17 +288,36 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
           )}
           {playbackBlocked && !inFlight && (
             <div className="mt-3 text-xs text-[#FFB800]">
-              Pause playback before installing — the app will restart and lose your scrub position.
+              {autoInstallIn !== null
+                ? "Installing automatically once playback stops — the app will restart."
+                : "Pause playback before installing — the app will restart and lose your scrub position."}
+            </div>
+          )}
+          {autoInstallIn !== null && !inFlight && !playbackBlocked && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-[#FFB800]" role="status" aria-live="polite">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#FFB800] animate-pulse" aria-hidden />
+              Installing automatically in <span className="font-mono-num tabular-nums">{autoInstallIn}s</span> — the app will restart.
             </div>
           )}
         </div>
         <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-[#2A2C32]">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={inFlight}
-            className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
-          >Remind me later</button>
+          {autoInstallIn !== null ? (
+            canDefer && onDefer && (
+              <button
+                type="button"
+                onClick={onDefer}
+                disabled={inFlight}
+                className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+              >Postpone 30 min</button>
+            )
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={inFlight}
+              className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+            >Remind me later</button>
+          )}
           <button
             type="button"
             onClick={onInstall}

@@ -12,6 +12,17 @@ use tauri::{Emitter, Manager};
 
 pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
 
+/// Settings → General → "When I close the window". `true` (default) hides the
+/// window to the tray so the SOLIDWORKS bridge stays live; `false` lets the
+/// close go through, which exits the app. The frontend pushes the stored
+/// preference at boot and on every change (`set_close_to_tray`).
+pub struct CloseBehavior(pub std::sync::atomic::AtomicBool);
+
+#[tauri::command]
+fn set_close_to_tray(state: tauri::State<'_, CloseBehavior>, enabled: bool) {
+    state.0.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Show + focus the main window (from the tray).
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -176,6 +187,7 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .manage(pending)
+        .manage(CloseBehavior(std::sync::atomic::AtomicBool::new(true)))
         .manage(cfd::CfdState::default())
         .manage(bridge_state.clone())
         // Active installed-plugin versions, read by the `plugin://` asset protocol
@@ -269,8 +281,15 @@ pub fn run() {
             // Close → hide to tray (real quit only from the tray menu), so the
             // localhost bridge keeps serving the SOLIDWORKS add-in.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                let to_tray = window
+                    .state::<CloseBehavior>()
+                    .0
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // else: let the close proceed — last window gone, app exits.
             }
         })
         .on_page_load(|window, _payload| {
@@ -284,6 +303,7 @@ pub fn run() {
             let _ = window.emit("helios://open-files", drained);
         })
         .invoke_handler(tauri::generate_handler![
+            set_close_to_tray,
             commands::load_csv::load_csv,
             commands::restart::helios_relaunch,
             commands::set_readonly::set_path_readonly,

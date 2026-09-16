@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
 import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
@@ -19,6 +20,9 @@ import { NoAccessScreen } from "./shell/NoAccessScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Splash } from "./components/Splash";
 import { ModuleTransition } from "./components/ModuleTransition";
+import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
+import { usePrefs } from "./lib/prefs";
+import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
@@ -79,6 +83,10 @@ function HeliosShell() {
   // Flips once we have chosen the landing module (or the user picked one
   // first). Keeps the landing effect from yanking someone who already clicked.
   const [landed, setLanded] = useState(false);
+  const prefs = usePrefs((s) => s.prefs);
+  const updatePrefs = usePrefs((s) => s.update);
+  // App Settings dialog (Ctrl/Cmd+, · user pill · rail gear · Vault settings link).
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const updater = useUpdater();
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("dev");
@@ -166,11 +174,63 @@ function HeliosShell() {
   // works offline. Runs exactly once; a rail click before auth resolves wins.
   useEffect(() => {
     if (landed || authLoading) return;
-    const home: ModuleId = pmEnabled && !noOrgAccess ? "pm" : "logs";
+    let home: ModuleId = "logs";
+    if (pmEnabled && !noOrgAccess) {
+      // Settings → General → "Open Helios on". "Last used" falls back to PM
+      // when the remembered module is gated (org-only) or unknown.
+      const wanted = prefs.landing === "last" ? prefs.lastModule : prefs.landing;
+      const openable = new Set<ModuleId>(["pm", "logs", "vault", "cfd", "games", "amethyst", "marketplace"]);
+      home = wanted && openable.has(wanted as ModuleId) ? (wanted as ModuleId) : "pm";
+    }
     setLanded(true);
     setActive(home);
     setVisited((prev) => (prev.has(home) ? prev : new Set(prev).add(home)));
-  }, [landed, authLoading, pmEnabled, noOrgAccess]);
+  }, [landed, authLoading, pmEnabled, noOrgAccess, prefs.landing, prefs.lastModule]);
+
+  // Remember where the user is for landing: "last".
+  useEffect(() => {
+    if (!landed) return;
+    if (prefs.lastModule !== active) updatePrefs({ lastModule: active });
+  }, [landed, active, prefs.lastModule, updatePrefs]);
+
+  // Push the stored close-button preference to the Rust side once per boot
+  // (the default there is hide-to-tray, so only a "quit" preference matters).
+  useEffect(() => {
+    if (!prefs.closeToTray) void invoke("set_close_to_tray", { enabled: false }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ctrl/Cmd+, opens Settings from anywhere; Vault's settings screen can also
+  // ask for it via a window event.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "," && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        setSettingsTab((t) => t ?? "general");
+      }
+    }
+    function onOpen(e: Event) {
+      const tab = (e as CustomEvent<SettingsTab | undefined>).detail;
+      setSettingsTab(tab ?? "general");
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("helios:open-settings", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("helios:open-settings", onOpen);
+    };
+  }, []);
+
+  // Desktop toast when an update has been found — once per version, gated by
+  // Settings → Notifications → App updates.
+  const notifiedUpdateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (updater.state.kind !== "available") return;
+    const v = updater.state.update.version;
+    if (notifiedUpdateRef.current === v) return;
+    notifiedUpdateRef.current = v;
+    void osNotify("updates", "Helios update ready", `v${v} has been downloaded. Open Helios to install it.`);
+  }, [updater.state]);
 
   // Record module navigation as a breadcrumb so a bug report shows where the
   // user had been just before filing it.
@@ -189,12 +249,66 @@ function HeliosShell() {
   // Escape (one keypress would close both) and is disorienting. If another
   // modal is open we hold off; the moment it closes (this effect re-runs on the
   // anotherModalOpen dep) the update modal pops.
-  const anotherModalOpen = authModalOpen || changePwOpen;
+  const anotherModalOpen = authModalOpen || changePwOpen || settingsTab !== null;
   useEffect(() => {
     if (updater.state.kind !== "available") return;
     if (anotherModalOpen) return;
     setUpdateModalOpen(true);
   }, [updater.state.kind, anotherModalOpen]);
+
+  // AUTO-UPDATE (Settings → General, default on): once an update is found,
+  // count down 20 s in the UpdateModal, then download + install + restart
+  // without a click. Waits while Logs playback is running (a restart would
+  // drop the scrub position). One "Postpone 30 min" per update; after that
+  // the countdown returns and cannot be postponed again — the point is that
+  // the team stays current instead of dismissing the prompt forever.
+  const AUTO_UPDATE_COUNTDOWN_S = 20;
+  const AUTO_UPDATE_DEFER_MS = 30 * 60 * 1000;
+  const [autoInstallIn, setAutoInstallIn] = useState<number | null>(null);
+  const [deferredUntil, setDeferredUntil] = useState<number | null>(null);
+  const [deferUsedFor, setDeferUsedFor] = useState<string | null>(null);
+  const autoArmedForRef = useRef<string | null>(null);
+  const availableVersion = updater.state.kind === "available" ? updater.state.update.version : null;
+  const autoUpdateActive = prefs.autoUpdate && availableVersion !== null;
+  useEffect(() => {
+    if (!autoUpdateActive || availableVersion === null) {
+      setAutoInstallIn(null);
+      return;
+    }
+    // Postponed: re-arm when the deferral lapses.
+    if (deferredUntil !== null && Date.now() < deferredUntil) {
+      setAutoInstallIn(null);
+      const t = setTimeout(() => setDeferredUntil(null), deferredUntil - Date.now());
+      return () => clearTimeout(t);
+    }
+    // Hold while playback runs (the modal explains why) or while another
+    // modal has the screen — same stacking rule as the auto-open above.
+    if (logsPlaying || anotherModalOpen) {
+      setAutoInstallIn(null);
+      return;
+    }
+    autoArmedForRef.current = availableVersion;
+    setAutoInstallIn(AUTO_UPDATE_COUNTDOWN_S);
+    setUpdateModalOpen(true);
+    const tick = setInterval(() => {
+      setAutoInstallIn((n) => (n === null ? null : Math.max(0, n - 1)));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [autoUpdateActive, availableVersion, deferredUntil, logsPlaying, anotherModalOpen]);
+  useEffect(() => {
+    if (autoInstallIn !== 0) return;
+    setAutoInstallIn(null);
+    setInstallAttempted(true);
+    void updater.installAndRelaunch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoInstallIn]);
+  function deferAutoUpdate() {
+    if (availableVersion === null) return;
+    setDeferUsedFor(availableVersion);
+    setDeferredUntil(Date.now() + AUTO_UPDATE_DEFER_MS);
+    setUpdateModalOpen(false);
+  }
+
 
   // If the user navigates away from Vault (or signs out while on Vault),
   // bounce them to Logs so they don't sit on a forbidden module. Otherwise
@@ -337,6 +451,7 @@ function HeliosShell() {
         onSignOut={() => void handleSignOut()}
         onDisconnect={() => void handleDisconnect()}
         onChangePassword={() => setChangePwOpen(true)}
+        onOpenSettings={() => setSettingsTab("general")}
         vaultEnabled={vaultEnabled}
         pmEnabled={pmEnabled}
         gamesEnabled={gamesEnabled}
@@ -493,6 +608,9 @@ function HeliosShell() {
             setUpdateModalOpen(false);
             setInstallAttempted(false);
           }}
+          autoInstallIn={autoInstallIn}
+          onDefer={deferAutoUpdate}
+          canDefer={deferUsedFor !== availableVersion}
         />
       )}
       {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
@@ -503,6 +621,22 @@ function HeliosShell() {
         open={changePwOpen}
         client={client}
         onClose={() => setChangePwOpen(false)}
+      />
+      <SettingsDialog
+        open={settingsTab !== null}
+        initialTab={settingsTab ?? undefined}
+        onClose={() => setSettingsTab(null)}
+        appVersion={appVersion}
+        updater={updater}
+        onOpenUpdate={() => setUpdateModalOpen(true)}
+        onOpenReport={setReportKind}
+        onGoToVaultSettings={() => {
+          activate("vault");
+          // VaultHome listens for this once mounted; a tick lets a first
+          // mount happen before the event fires.
+          setTimeout(() => window.dispatchEvent(new CustomEvent("helios:vault:screen", { detail: "settings" })), 50);
+        }}
+        account={user ? { email: user.email ?? null, id: user.id, role: myDisplayRole } : null}
       />
       {reportKind && (
         <ReportModal

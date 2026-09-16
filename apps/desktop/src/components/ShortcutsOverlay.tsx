@@ -5,17 +5,17 @@ import { IS_MAC, MOD_KEY, shortcut } from "../lib/platform";
  *  `e.altKey`, which is what Option sets on macOS. */
 const ALT_KEY = IS_MAC ? "option" : "alt";
 
-interface Shortcut {
+export interface Shortcut {
   keys: string[];
   label: string;
 }
 
-interface Group {
+export interface Group {
   title: string;
   items: Shortcut[];
 }
 
-const GROUPS: Group[] = [
+export const SHORTCUT_GROUPS: Group[] = [
   {
     title: "Workspace",
     items: [
@@ -23,6 +23,7 @@ const GROUPS: Group[] = [
       { keys: [MOD_KEY, "E"], label: "Toggle edit mode" },
       { keys: [MOD_KEY, "K"], label: "Open command palette" },
       { keys: [MOD_KEY, "O"], label: "Open data file…" },
+      { keys: [MOD_KEY, ","], label: "Open Settings" },
       { keys: ["?"],      label: "Show this overlay" },
       { keys: ["F1"],     label: "Open Help & Wiki" },
     ],
@@ -52,7 +53,7 @@ const GROUPS: Group[] = [
   },
 ];
 
-function KeyChip({ children }: { children: React.ReactNode }) {
+export function KeyChip({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 border border-helios-line bg-helios-base text-helios-text rounded-sm text-[10px] font-mono-num">
       {children}
@@ -147,7 +148,7 @@ export function ShortcutsOverlay({ open, onClose }: Props) {
           >×</button>
         </div>
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          {GROUPS.map((g) => (
+          {SHORTCUT_GROUPS.map((g) => (
             <div key={g.title}>
               <div className="text-[10px] uppercase tracking-wider text-helios-dim mb-2">{g.title}</div>
               <ul className="space-y-1.5">

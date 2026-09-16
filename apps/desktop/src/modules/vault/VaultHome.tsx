@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useUser } from "@helios/auth";
 import { NavRail, type VaultScreenId } from "./components/NavRail";
 import { DownloadModeWelcome } from "./components/DownloadModeWelcome";
@@ -41,6 +41,17 @@ export function VaultHome() {
 
 function VaultHomeShell({ vaultId }: { vaultId: VaultId | undefined }) {
   const [active, setActive] = useState<VaultScreenId>("browse");
+  // App Settings → Data → "Open Vault settings" lands here after the Shell
+  // switches modules; decoupled via a window event so the Shell needs no
+  // handle into this component.
+  useEffect(() => {
+    function onNav(e: Event) {
+      const screen = (e as CustomEvent<VaultScreenId>).detail;
+      if (screen) setActive(screen);
+    }
+    window.addEventListener("helios:vault:screen", onNav);
+    return () => window.removeEventListener("helios:vault:screen", onNav);
+  }, []);
   const user = useUser();
   // Live count of the current user's checkouts, shown as a badge on the
   // "Who has what" rail entry — one glance answers "do I have anything out?".

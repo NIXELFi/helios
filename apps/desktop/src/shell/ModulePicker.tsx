@@ -9,6 +9,7 @@ import {
   IconDeviceGamepad2,
   IconDiamond,
   IconPuzzle,
+  IconSettings,
   IconShieldLock,
   IconUserCircle,
   IconWind,
@@ -89,6 +90,7 @@ interface Props {
   onDisconnect: () => void;
   /** Open the self-service change-password modal. */
   onChangePassword: () => void;
+  onOpenSettings: () => void;
   /** True when the user is allowed to enter the Vault module. Pulled up
    *  to a prop so the same gate is shared with click-routing in the
    *  parent Shell. */
@@ -133,6 +135,7 @@ export function ModulePicker(props: Props) {
     onSignOut,
     onDisconnect,
     onChangePassword,
+    onOpenSettings,
     vaultEnabled,
     pmEnabled,
     gamesEnabled,
@@ -300,6 +303,7 @@ export function ModulePicker(props: Props) {
       {/* Report a bug / request a feature — sits directly above the user pill so
           it's one click away from any module, for every signed-in user. */}
       <div className="border-t border-helios-line p-2">
+        <SettingsRailButton collapsed={collapsed} onClick={onOpenSettings} />
         <ReportRailButton
           collapsed={collapsed}
           canViewReports={canViewReports}
@@ -318,6 +322,7 @@ export function ModulePicker(props: Props) {
           onSignOut={onSignOut}
           onDisconnect={onDisconnect}
           onChangePassword={onChangePassword}
+          onOpenSettings={onOpenSettings}
           authLoading={authLoading}
         />
       </div>
@@ -393,6 +398,33 @@ function NavButton(props: {
   );
 }
 
+function SettingsRailButton({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label="Settings"
+        title="Settings (Ctrl+,)"
+        className="flex w-full items-center justify-center rounded p-2 text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      >
+        <IconSettings size={18} strokeWidth={1.5} />
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Settings (Ctrl+,)"
+      className="mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+    >
+      <IconSettings size={16} strokeWidth={1.5} className="shrink-0" />
+      <span className="truncate">Settings</span>
+    </button>
+  );
+}
+
 function ReportRailButton(props: {
   collapsed: boolean;
   canViewReports: boolean;
@@ -446,11 +478,12 @@ function UserPill(props: {
   onSignOut: () => void;
   onDisconnect: () => void;
   onChangePassword: () => void;
+  onOpenSettings: () => void;
   /** Boot: session not resolved yet. Show a quiet placeholder instead of
    *  flashing "Sign in" at a returning user for the first few hundred ms. */
   authLoading?: boolean;
 }) {
-  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword, authLoading = false } = props;
+  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword, onOpenSettings, authLoading = false } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -625,6 +658,14 @@ function UserPill(props: {
           onKeyDown={onMenuKeyDown}
           className="absolute bottom-full left-0 mb-1 min-w-[11rem] rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text helios-elevate helios-modal-in"
         >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { closeAndRestore(); onOpenSettings(); }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
+          >
+            Settings…
+          </button>
           <button
             type="button"
             role="menuitem"

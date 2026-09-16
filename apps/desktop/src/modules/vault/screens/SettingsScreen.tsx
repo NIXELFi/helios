@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useUser, useSupabaseClient } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
@@ -23,21 +23,6 @@ export function SettingsScreen() {
   const [pickError, setPickError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
-
-  // Launch-on-login (keeps Helios in the tray so the SOLIDWORKS add-in stays
-  // connected). null while we read the current state from the backend.
-  const [autostart, setAutostart] = useState<boolean | null>(null);
-  useEffect(() => {
-    void invoke<boolean>("get_autostart").then(setAutostart).catch(() => setAutostart(null));
-  }, []);
-  async function setAutostartEnabled(enabled: boolean) {
-    try {
-      await invoke("set_autostart", { enabled });
-      setAutostart(enabled);
-    } catch {
-      /* non-Tauri context / denied — leave the state as-is */
-    }
-  }
 
   // Install / repair the SOLIDWORKS add-in registration. Prompts once for
   // elevation (the machine-wide discovery entry SOLIDWORKS reads needs admin).
@@ -119,32 +104,16 @@ export function SettingsScreen() {
           hides it to the tray; quit from the tray icon.
         </p>
         <div className="rounded border border-helios-line bg-helios-base p-4 text-sm">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-helios-dim">
+              Launch at login and the close-button behaviour moved to the app-wide Settings.
+            </span>
             <button
               type="button"
-              onClick={() => void setAutostartEnabled(true)}
-              aria-pressed={autostart === true}
-              className={
-                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-                (autostart === true
-                  ? "bg-asu-gold text-helios-base"
-                  : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
-              }
+              onClick={() => window.dispatchEvent(new CustomEvent("helios:open-settings", { detail: "general" }))}
+              className="shrink-0 rounded border border-helios-line px-3 py-1.5 text-xs text-helios-text hover:bg-helios-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
-              Start on login (in tray)
-            </button>
-            <button
-              type="button"
-              onClick={() => void setAutostartEnabled(false)}
-              aria-pressed={autostart === false}
-              className={
-                "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-                (autostart === false
-                  ? "bg-asu-gold text-helios-base"
-                  : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
-              }
-            >
-              Don&apos;t start on login
+              Open Settings
             </button>
           </div>
           <div className="mt-3 border-t border-helios-line pt-3">
