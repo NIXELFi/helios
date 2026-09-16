@@ -42,11 +42,11 @@ const TILE_STYLES: Record<number, string> = {
   16: "bg-[#3a3422] text-[#f0d488]",
   32: "bg-[#4d3d1c] text-[#ffd766]",
   64: "bg-[#6b4f1a] text-[#ffdf7a]",
-  128: "bg-[#9c7415] text-helios-base",
-  256: "bg-[#c79412] text-helios-base",
-  512: "bg-[#e2ad11] text-helios-base",
-  1024: "bg-asu-gold text-helios-base shadow-[0_0_18px_rgba(255,198,39,0.45)]",
-  2048: "bg-asu-gold text-helios-base shadow-[0_0_18px_rgba(255,198,39,0.45)]",
+  128: "bg-[#9c7415] text-helios-on-gold",
+  256: "bg-[#c79412] text-helios-on-gold",
+  512: "bg-[#e2ad11] text-helios-on-gold",
+  1024: "bg-asu-gold text-helios-on-gold shadow-[0_0_18px_rgba(255,198,39,0.45)]",
+  2048: "bg-asu-gold text-helios-on-gold shadow-[0_0_18px_rgba(255,198,39,0.45)]",
 };
 const TILE_BEYOND = "bg-asu-maroon text-asu-gold shadow-[0_0_18px_rgba(140,29,64,0.55)]";
 

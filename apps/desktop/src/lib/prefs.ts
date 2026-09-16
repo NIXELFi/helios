@@ -16,6 +16,7 @@ export const PREFS_KEY = "helios:prefs";
 const PREFS_VERSION = 1;
 
 export type LandingPref = "pm" | "logs" | "last";
+export type ThemePref = "system" | "dark" | "light";
 export type NotificationSource = "vault" | "updates";
 
 export interface QuietHours {
@@ -26,6 +27,8 @@ export interface QuietHours {
 }
 
 export interface Prefs {
+  /** Dark (the Helios default), light, or follow the OS. */
+  theme: ThemePref;
   /** Which module a signed-in launch opens on. */
   landing: LandingPref;
   /** Module the user was on last — what `landing: "last"` reopens. */
@@ -44,6 +47,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
+  theme: "dark",
   landing: "pm",
   lastModule: null,
   closeToTray: true,
@@ -57,6 +61,7 @@ export const DEFAULT_PREFS: Prefs = {
 };
 
 const LANDING: ReadonlySet<string> = new Set<LandingPref>(["pm", "logs", "last"]);
+const THEMES: ReadonlySet<string> = new Set<ThemePref>(["system", "dark", "light"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function bool(v: unknown, fallback: boolean): boolean {
@@ -70,6 +75,7 @@ export function sanitize(raw: unknown): Prefs {
   const q = (n.quiet && typeof n.quiet === "object" ? n.quiet : {}) as Record<string, unknown>;
   const d = DEFAULT_PREFS;
   return {
+    theme: typeof r.theme === "string" && THEMES.has(r.theme) ? (r.theme as ThemePref) : d.theme,
     landing: typeof r.landing === "string" && LANDING.has(r.landing) ? (r.landing as LandingPref) : d.landing,
     lastModule: typeof r.lastModule === "string" ? r.lastModule : null,
     closeToTray: bool(r.closeToTray, d.closeToTray),

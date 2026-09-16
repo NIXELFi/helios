@@ -2,6 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Theme tokens. Channel triplets so Tailwind can apply opacity modifiers
+   (rgb(var(--x) / 0.5)). Source of truth for the hex values is
+   packages/ui/src/theme.ts (PALETTES) — keep the two in sync.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --helios-base: 14 14 16;      /* rgb(var(--helios-base)) */
+  --helios-panel: 22 23 27;     /* rgb(var(--helios-panel)) */
+  --helios-deep: 11 11 13;      /* rgb(var(--helios-deep)) */
+  --helios-line: 42 44 50;      /* rgb(var(--helios-line)) */
+  --helios-grid: 35 37 43;      /* rgb(var(--helios-grid)) */
+  --helios-text: 216 220 226;   /* rgb(var(--helios-text)) */
+  --helios-dim: 144 151 160;    /* rgb(var(--helios-dim)) */
+  --helios-muted: 90 95 102;    /* rgb(var(--helios-muted)) */
+  --helios-on-gold: 14 14 16;   /* rgb(var(--helios-base)) */
+  --asu-gold: 255 198 39;       /* rgb(var(--asu-gold)) */
+  --asu-maroon: 140 29 64;      /* rgb(var(--asu-maroon)) */
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --helios-base: 244 245 247;   /* #F4F5F7 */
+  --helios-panel: 255 255 255;  /* #FFFFFF */
+  --helios-deep: 233 235 239;   /* #E9EBEF */
+  --helios-line: 214 218 225;   /* #D6DAE1 */
+  --helios-grid: 230 232 238;   /* #E6E8EE */
+  --helios-text: 27 29 34;      /* #1B1D22 */
+  --helios-dim: 91 98 112;      /* #5B6270 */
+  --helios-muted: 138 144 155;  /* #8A909B */
+  --helios-on-gold: 14 14 16;   /* rgb(var(--helios-base)) */
+  --asu-gold: 224 168 0;        /* #E0A800 — deeper for contrast on white */
+  --asu-maroon: 140 29 64;
+}
+
+
 html, body, #root { height: 100%; margin: 0; }
 /* Height of the custom in-app title bar. 0 by default; the TitleBar component
    (Windows only — frameless window) sets it to its real height while mounted.
@@ -19,7 +54,7 @@ html, body, #root { height: 100%; margin: 0; }
    swipes on the trackpad don't translate the whole page sideways. Vertical
    overscroll is still allowed where needed. */
 html, body { overscroll-behavior-x: none; overflow-x: hidden; }
-body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { background: rgb(var(--helios-base)); color: rgb(var(--helios-text)); font-family: "Inter Variable", Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 .font-mono-num { font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -31,7 +66,7 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
      style use `outline-none` (always on), which overrides this — so this only
      fills the gaps where a control previously had no focus affordance. */
   :focus-visible {
-    outline: 2px solid #FFC627;
+    outline: 2px solid rgb(var(--asu-gold));
     outline-offset: 2px;
     border-radius: 3px;
   }
@@ -48,7 +83,7 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
      drop shadow that lifts the surface off the near-black base. Subtle. */
   .helios-elevate {
     box-shadow:
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+      inset 0 1px 0 0 rgb(var(--helios-panel) / 0.6),
       0 10px 30px -12px rgba(0, 0, 0, 0.7);
   }
 }
@@ -92,7 +127,7 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
   100% { background-position: -200% 0; }
 }
 .helios-skeleton {
-  background: linear-gradient(90deg, #16171B 25%, #20222a 50%, #16171B 75%);
+  background: linear-gradient(90deg, rgb(var(--helios-panel)) 25%, rgb(var(--helios-line)) 50%, rgb(var(--helios-panel)) 75%);
   background-size: 200% 100%;
   animation: helios-shimmer 1.4s linear infinite;
   border-radius: 4px;
@@ -103,16 +138,16 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
    WebView2 (Windows) + WebKit (macOS) use the ::-webkit-* pseudo-elements;
    Firefox uses scrollbar-color. (The CFD/PM rails keep their own always-gold
    variant via more-specific scoped rules.) */
-* { scrollbar-width: thin; scrollbar-color: #2A2C32 transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--helios-line)) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #2A2C32;
+  background: rgb(var(--helios-line));
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 8px;
 }
-::-webkit-scrollbar-thumb:hover { background: #FFC627; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--asu-gold)); background-clip: content-box; }
 
 /* Config-panel form language. Widget config editors render mostly-bare native
    inputs/selects; these scoped rules (on the ConfigPanel's .helios-config
@@ -123,8 +158,8 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
 .helios-config input[type="text"],
 .helios-config input[type="number"],
 .helios-config select {
-  background: #0E0E10;
-  border: 1px solid #2A2C32;
+  background: rgb(var(--helios-base));
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 2px;
   padding: 1px 4px;
   outline: none;
@@ -133,12 +168,12 @@ body { background: #0E0E10; color: #D8DCE2; font-family: "Inter Variable", Inter
 }
 .helios-config input[type="text"]:hover,
 .helios-config input[type="number"]:hover,
-.helios-config select:hover { border-color: #3A3D45; }
+.helios-config select:hover { border-color: rgb(var(--helios-line)); }
 .helios-config input[type="text"]:focus,
 .helios-config input[type="number"]:focus,
-.helios-config select:focus { border-color: #FFC627; }
+.helios-config select:focus { border-color: rgb(var(--asu-gold)); }
 .helios-config select { cursor: pointer; }
-.helios-config input[type="checkbox"] { accent-color: #FFC627; cursor: pointer; }
+.helios-config input[type="checkbox"] { accent-color: rgb(var(--asu-gold)); cursor: pointer; }
 
 /* Shared button language. Use `btn btn-primary` (gold), `btn btn-secondary`
    (outlined), `btn btn-danger` (red), or `btn btn-ghost` (borderless). One place
@@ -228,12 +263,12 @@ input[type="range"].wave-scrubber {
 }
 input[type="range"].wave-scrubber::-webkit-slider-runnable-track {
   height: 4px;
-  background: #2A2C32;
+  background: rgb(var(--helios-line));
   border-radius: 9999px;
 }
 input[type="range"].wave-scrubber::-moz-range-track {
   height: 4px;
-  background: #2A2C32;
+  background: rgb(var(--helios-line));
   border-radius: 9999px;
 }
 input[type="range"].wave-scrubber::-webkit-slider-thumb {
@@ -242,17 +277,17 @@ input[type="range"].wave-scrubber::-webkit-slider-thumb {
   width: 12px;
   height: 12px;
   margin-top: -4px;
-  background: #FFC627;
+  background: rgb(var(--asu-gold));
   border-radius: 9999px;
-  border: 1px solid #0E0E10;
+  border: 1px solid rgb(var(--helios-base));
   cursor: grab;
 }
 input[type="range"].wave-scrubber::-moz-range-thumb {
   width: 12px;
   height: 12px;
-  background: #FFC627;
+  background: rgb(var(--asu-gold));
   border-radius: 9999px;
-  border: 1px solid #0E0E10;
+  border: 1px solid rgb(var(--helios-base));
   cursor: grab;
 }
 input[type="range"].wave-scrubber:active::-webkit-slider-thumb { cursor: grabbing; }
@@ -261,30 +296,30 @@ input[type="range"].wave-scrubber:focus { outline: none; }
 
 /* In-app wiki / help-menu typography. Tailwind's @tailwindcss/typography is
    not installed; we style the rendered markdown directly here. */
-.helios-wiki-prose { color: #D8DCE2; font-size: 13px; line-height: 1.6; }
-.helios-wiki-prose h1 { font-size: 1.65rem; font-weight: 700; color: #FFC627; margin: 0 0 0.75em; letter-spacing: 0.01em; }
-.helios-wiki-prose h2 { font-size: 1.3rem;  font-weight: 700; color: #D8DCE2; margin: 1.6em 0 0.5em; border-bottom: 1px solid #2A2C32; padding-bottom: 0.25em; }
-.helios-wiki-prose h3 { font-size: 1.05rem; font-weight: 600; color: #D8DCE2; margin: 1.4em 0 0.4em; }
-.helios-wiki-prose h4 { font-size: 0.95rem; font-weight: 600; color: #9097A0; margin: 1.2em 0 0.3em; text-transform: uppercase; letter-spacing: 0.05em; }
+.helios-wiki-prose { color: rgb(var(--helios-text)); font-size: 13px; line-height: 1.6; }
+.helios-wiki-prose h1 { font-size: 1.65rem; font-weight: 700; color: rgb(var(--asu-gold)); margin: 0 0 0.75em; letter-spacing: 0.01em; }
+.helios-wiki-prose h2 { font-size: 1.3rem;  font-weight: 700; color: rgb(var(--helios-text)); margin: 1.6em 0 0.5em; border-bottom: 1px solid rgb(var(--helios-line)); padding-bottom: 0.25em; }
+.helios-wiki-prose h3 { font-size: 1.05rem; font-weight: 600; color: rgb(var(--helios-text)); margin: 1.4em 0 0.4em; }
+.helios-wiki-prose h4 { font-size: 0.95rem; font-weight: 600; color: rgb(var(--helios-dim)); margin: 1.2em 0 0.3em; text-transform: uppercase; letter-spacing: 0.05em; }
 .helios-wiki-prose p  { margin: 0.6em 0; }
-.helios-wiki-prose strong { color: #FFC627; font-weight: 600; }
-.helios-wiki-prose em { color: #D8DCE2; font-style: italic; }
+.helios-wiki-prose strong { color: rgb(var(--asu-gold)); font-weight: 600; }
+.helios-wiki-prose em { color: rgb(var(--helios-text)); font-style: italic; }
 .helios-wiki-prose a  { color: #4FC3F7; text-decoration: none; }
-.helios-wiki-prose a:hover { text-decoration: underline; color: #FFC627; }
+.helios-wiki-prose a:hover { text-decoration: underline; color: rgb(var(--asu-gold)); }
 .helios-wiki-prose ul, .helios-wiki-prose ol { margin: 0.5em 0 0.8em 1.4em; padding: 0; }
 .helios-wiki-prose li { margin: 0.15em 0; }
 .helios-wiki-prose code {
   font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.85em;
-  background: #16171B;
-  border: 1px solid #2A2C32;
+  background: rgb(var(--helios-panel));
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 3px;
   padding: 1px 5px;
-  color: #FFC627;
+  color: rgb(var(--asu-gold));
 }
 .helios-wiki-prose pre {
-  background: #16171B;
-  border: 1px solid #2A2C32;
+  background: rgb(var(--helios-panel));
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 4px;
   padding: 12px 14px;
   margin: 0.8em 0;
@@ -294,18 +329,18 @@ input[type="range"].wave-scrubber:focus { outline: none; }
   background: transparent;
   border: none;
   padding: 0;
-  color: #D8DCE2;
+  color: rgb(var(--helios-text));
   font-size: 0.85em;
 }
 .helios-wiki-prose blockquote {
-  border-left: 3px solid #FFC627;
-  background: #16171B;
+  border-left: 3px solid rgb(var(--asu-gold));
+  background: rgb(var(--helios-panel));
   margin: 0.8em 0;
   padding: 0.5em 1em;
-  color: #9097A0;
+  color: rgb(var(--helios-dim));
 }
 .helios-wiki-prose blockquote p { margin: 0.25em 0; }
-.helios-wiki-prose hr { border: none; border-top: 1px solid #2A2C32; margin: 1.6em 0; }
+.helios-wiki-prose hr { border: none; border-top: 1px solid rgb(var(--helios-line)); margin: 1.6em 0; }
 .helios-wiki-prose table {
   border-collapse: collapse;
   width: 100%;
@@ -313,12 +348,12 @@ input[type="range"].wave-scrubber:focus { outline: none; }
   font-size: 0.95em;
 }
 .helios-wiki-prose th, .helios-wiki-prose td {
-  border: 1px solid #2A2C32;
+  border: 1px solid rgb(var(--helios-line));
   padding: 6px 10px;
 }
 .helios-wiki-prose th {
-  background: #16171B;
-  color: #FFC627;
+  background: rgb(var(--helios-panel));
+  color: rgb(var(--asu-gold));
   font-weight: 600;
   text-align: left;
 }

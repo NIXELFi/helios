@@ -6,6 +6,7 @@ import { IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 
+import { tc } from "@helios/ui";
 const inputClass =
   "rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm text-helios-text " +
   "placeholder:text-helios-dim focus:border-asu-gold focus:outline-none";
@@ -225,7 +226,7 @@ export function EventDialog({
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: s.color ?? "#6B7280" }}
+                    style={{ backgroundColor: s.color ?? tc("dim") }}
                   />
                   {s.code}
                 </button>

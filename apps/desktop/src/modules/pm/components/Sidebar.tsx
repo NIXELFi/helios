@@ -77,6 +77,7 @@ import {
   type ViewSegment,
 } from "@pm/lib/nav";
 
+import { tc } from "@helios/ui";
 type IconComponent = TablerIcon;
 
 interface NavItem {
@@ -545,7 +546,7 @@ export function Sidebar() {
                 className={
                   "flex-1 rounded px-2 py-1 text-center text-xs font-medium transition-colors " +
                   (active
-                    ? "bg-asu-gold text-helios-base"
+                    ? "bg-asu-gold text-helios-on-gold"
                     : "text-helios-dim hover:bg-helios-panel hover:text-asu-gold")
                 }
               >
@@ -660,7 +661,7 @@ export function Sidebar() {
                           aria-label={`Change ${s.name} icon`}
                           title="Change icon"
                           className="shrink-0 cursor-pointer rounded transition-opacity hover:opacity-70"
-                          style={{ color: s.color ?? "#6B7280" }}
+                          style={{ color: s.color ?? tc("dim") }}
                         >
                           <SubteamIcon glyph={s.icon} name={s.name} code={s.code} size={17} />
                         </span>
@@ -671,7 +672,7 @@ export function Sidebar() {
                           code={s.code}
                           size={17}
                           className="shrink-0"
-                          style={{ color: s.color ?? "#6B7280" }}
+                          style={{ color: s.color ?? tc("dim") }}
                         />
                       )}
                       <span className="truncate">{s.name}</span>
@@ -814,7 +815,7 @@ export function Sidebar() {
         open={iconPicker !== null}
         anchorRect={iconPicker?.rect ?? null}
         current={(iconPicker?.subteam.icon ?? null) as SubteamGlyph | null}
-        color={iconPicker?.subteam.color ?? "#6B7280"}
+        color={iconPicker?.subteam.color ?? tc("dim")}
         onPick={(glyph) => {
           if (iconPicker) setSubteamIcon(iconPicker.subteam.id, glyph);
         }}

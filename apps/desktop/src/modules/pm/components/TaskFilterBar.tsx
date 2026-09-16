@@ -8,6 +8,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
 import { PrimaryOnlyToggle } from "@pm/components/PrimaryOnlyToggle";
 
+import { tc } from "@helios/ui";
 const STATUS_FILTER_OPTIONS: SelectOption<string>[] = [
   { value: "", label: "All" },
   ...TASK_STATUSES.map((s) => ({
@@ -162,7 +163,7 @@ export function TaskFilterBar({
                       : "border-helios-line bg-transparent text-helios-dim hover:text-helios-text")
                   }
                 >
-                  <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? "#6B7280" }} />
+                  <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? tc("dim") }} />
                   {s.code}
                 </button>
               );

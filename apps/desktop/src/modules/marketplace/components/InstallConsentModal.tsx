@@ -99,7 +99,7 @@ export function InstallConsentModal({
               "inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-xs font-semibold transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-60 " +
               (highTrust
                 ? "bg-helios-danger text-white hover:opacity-90"
-                : "bg-asu-gold text-helios-base hover:opacity-90")
+                : "bg-asu-gold text-helios-on-gold hover:opacity-90")
             }
           >
             {installing && <IconLoader2 size={14} className="animate-spin" />}

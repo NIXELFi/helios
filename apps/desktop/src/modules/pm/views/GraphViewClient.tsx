@@ -51,6 +51,7 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 
+import { tc, tca } from "@helios/ui";
 type GraphSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GraphSort, string> = {
@@ -315,7 +316,7 @@ function buildClusterModel(
     const isExpanded = expanded.has(id);
     const d: ClusterNodeData = {
       name: g.st.name,
-      color: g.st.color ?? "#6B7280",
+      color: g.st.color ?? tc("dim"),
       total: g.tasks.length,
       done,
       open: g.tasks.length - done,
@@ -407,7 +408,7 @@ function TaskNode({ data }: NodeProps<TaskNodeType>) {
         backgroundColor: marker.background,
         borderColor: highlighted ? undefined : marker.borderColor ?? "transparent",
         borderLeftWidth: 6,
-        borderLeftColor: task.subteam.color ?? "#6B7280",
+        borderLeftColor: task.subteam.color ?? tc("dim"),
       }}
     >
       <Handle type="target" position={Position.Left}  style={handleStyle} />
@@ -417,7 +418,7 @@ function TaskNode({ data }: NodeProps<TaskNodeType>) {
         <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: STATUS_DOT[task.status] }} />
         <span
           className="truncate text-[10px] font-medium uppercase tracking-widest"
-          style={{ color: task.subteam.color ?? "#9097A0" }}
+          style={{ color: task.subteam.color ?? tc("dim") }}
         >
           {task.subteam.code}
         </span>
@@ -446,7 +447,7 @@ function TaskNode({ data }: NodeProps<TaskNodeType>) {
 const handleStyle = {
   width: 8,
   height: 8,
-  background: "#5A5F66",
+  background: tc("muted"),
   border: "1px solid #16171B",
 };
 
@@ -696,7 +697,7 @@ function laneLayout(
   currentTeam: { id: string } | null,
   relationByTaskId: Map<string, CrossTeamRelation>,
 ): { pos: Map<string, { x: number; y: number }>; lanes: LaneInfo[] } {
-  const FALLBACK = "#6B7280";
+  const FALLBACK = tc("dim");
   const laneFor = (t: TaskRow): LaneAssign => {
     if (currentTeam) {
       const rel = relationByTaskId.get(t.id) ?? "owned";
@@ -1501,7 +1502,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
 
         const dimmed = dimmedByChain || dimmedByFilter;
 
-        let stroke = "#5A5F66";
+        let stroke = tc("muted");
         if (highlightCritical && onCritical) stroke = "#FFC627";
         else if (inChain) stroke = "#FFC627";
         else if (crossTeam) stroke = "#FB923C";
@@ -1521,8 +1522,8 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           label: d.lag_days > 0 ? `+${d.lag_days}d` : undefined,
           labelBgPadding: [4, 2],
           labelBgBorderRadius: 3,
-          labelBgStyle: { fill: "#16171B", stroke: "#2A2C32" },
-          labelStyle: { fill: "#9097A0", fontSize: 9, fontWeight: 500 },
+          labelBgStyle: { fill: tc("panel"), stroke: tc("line") },
+          labelStyle: { fill: tc("dim"), fontSize: 9, fontWeight: 500 },
           style: {
             stroke,
             strokeWidth,
@@ -1707,7 +1708,7 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
             <button
               type="button"
               onClick={() => setDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
             >
               <IconPlus size={16} strokeWidth={1.5} />
               New task
@@ -1763,17 +1764,17 @@ function GraphInner({ teamSlug }: { teamSlug: string | null }) {
           style={{ backgroundColor: "transparent" }}
           defaultEdgeOptions={{ type: "smoothstep" }}
         >
-          <Background color="#23252B" gap={20} />
+          <Background color={tc("grid")} gap={20} />
           <Controls position="bottom-right" />
           <MiniMap
             pannable
             zoomable
             nodeColor={(n) => {
               const d = (n.data as TaskNodeData | undefined)?.task;
-              return d ? STATUS_DOT[d.status] : "#9097A0";
+              return d ? STATUS_DOT[d.status] : tc("dim");
             }}
-            maskColor="rgba(14,14,16,0.7)"
-            style={{ backgroundColor: "#16171B", border: "1px solid #2A2C32" }}
+            maskColor={tca("base", 0.7)}
+            style={{ backgroundColor: tc("panel"), border: "1px solid #2A2C32" }}
           />
 
           <Panel position="top-left" className="!m-3">
@@ -1861,7 +1862,7 @@ function FilterPanel({
           <IconFilter size={12} strokeWidth={1.5} />
           Filters
           {anyActive ? (
-            <span className="ml-1 rounded-full bg-asu-gold px-1.5 text-[9px] font-medium text-helios-base">
+            <span className="ml-1 rounded-full bg-asu-gold px-1.5 text-[9px] font-medium text-helios-on-gold">
               {filters.subteamIds.size + filters.types.size}
             </span>
           ) : null}
@@ -1887,7 +1888,7 @@ function FilterPanel({
                         : "border-helios-line bg-transparent text-helios-dim hover:text-helios-text")
                     }
                   >
-                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? "#6B7280" }} />
+                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? tc("dim") }} />
                     {s.code}
                   </button>
                 );

@@ -9,14 +9,22 @@ export default {
   theme: {
     extend: {
       colors: {
-        "helios-base": "#0E0E10",
-        "helios-panel": "#16171B",
-        "helios-line": "#2A2C32",
-        "helios-text": "#D8DCE2",
-        "helios-dim":  "#9097A0",
-        "asu-maroon": "#8C1D40",
-        "asu-gold":   "#FFC627",
-        // Semantic status palette — use these instead of scattering raw hexes.
+        // Theme tokens — channel triplets on :root in src/styles.css, swapped
+        // under [data-theme="light"]. The `<alpha-value>` form keeps /50-style
+        // opacity modifiers working. Imperative code reads the same values via
+        // tc() from @helios/ui.
+        "helios-base":    "rgb(var(--helios-base) / <alpha-value>)",
+        "helios-panel":   "rgb(var(--helios-panel) / <alpha-value>)",
+        "helios-deep":    "rgb(var(--helios-deep) / <alpha-value>)",
+        "helios-line":    "rgb(var(--helios-line) / <alpha-value>)",
+        "helios-grid":    "rgb(var(--helios-grid) / <alpha-value>)",
+        "helios-text":    "rgb(var(--helios-text) / <alpha-value>)",
+        "helios-dim":     "rgb(var(--helios-dim) / <alpha-value>)",
+        "helios-muted":   "rgb(var(--helios-muted) / <alpha-value>)",
+        "helios-on-gold": "rgb(var(--helios-on-gold) / <alpha-value>)",
+        "asu-gold":       "rgb(var(--asu-gold) / <alpha-value>)",
+        "asu-maroon":     "rgb(var(--asu-maroon) / <alpha-value>)",
+        // Semantic status palette — same in both themes by design.
         "helios-success": "#66BB6A",
         "helios-warn":    "#F5A623",
         "helios-danger":  "#EF5350",

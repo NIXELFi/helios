@@ -80,11 +80,11 @@ export function SessionPanel({
 
   if (collapsed) {
     return (
-      <aside className="w-8 flex-shrink-0 border-r border-[#2A2C32] bg-[#0E0E10] flex flex-col items-center pt-2">
+      <aside className="w-8 flex-shrink-0 border-r border-helios-line bg-helios-base flex flex-col items-center pt-2">
         <button
           aria-label="Expand sessions panel"
           onClick={() => setCollapsed(false)}
-          className="w-6 h-6 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+          className="w-6 h-6 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
           title="Sessions"
         >›</button>
       </aside>
@@ -92,20 +92,20 @@ export function SessionPanel({
   }
 
   return (
-    <aside className="w-60 flex-shrink-0 border-r border-[#2A2C32] bg-[#0E0E10] flex flex-col">
-      <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Sessions</span>
+    <aside className="w-60 flex-shrink-0 border-r border-helios-line bg-helios-base flex flex-col">
+      <div className="h-8 flex items-center justify-between px-2 border-b border-helios-line">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Sessions</span>
         <div className="flex items-center gap-1">
           <button
             aria-label="Add session"
             onClick={onAddSession}
-            className="w-5 h-5 flex items-center justify-center text-[#FFC627] hover:bg-[#16171B] rounded-sm font-bold"
+            className="w-5 h-5 flex items-center justify-center text-asu-gold hover:bg-helios-panel rounded-sm font-bold"
             title="Add CSV file(s) — drag-and-drop also works"
           >+</button>
           <button
             aria-label="Collapse sessions panel"
             onClick={() => setCollapsed(true)}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
             title="Collapse"
           >‹</button>
         </div>
@@ -123,11 +123,11 @@ export function SessionPanel({
           const lapCount = s.laps?.laps.filter((l) => l.trusted).length ?? 0;
           const bestLap = s.laps && s.laps.bestLapIndex >= 0 ? s.laps.laps[s.laps.bestLapIndex] : null;
           return (
-            <div key={s.id} className="border-b border-[#16171B] last:border-b-0 group">
+            <div key={s.id} className="border-b border-helios-panel last:border-b-0 group">
               <div
                 className={
                   "flex items-center gap-2 px-2 py-1 cursor-pointer text-xs " +
-                  (isPrimary ? "bg-[#16171B]" : "hover:bg-[#16171B]")
+                  (isPrimary ? "bg-helios-panel" : "hover:bg-helios-panel")
                 }
                 onClick={() => { if (s.visible) onSetPrimary(s.id); }}
                 title={s.visible
@@ -139,7 +139,7 @@ export function SessionPanel({
                   checked={s.visible}
                   onChange={(e) => { e.stopPropagation(); onToggleVisibility(s.id); }}
                   onClick={(e) => e.stopPropagation()}
-                  className="cursor-pointer accent-[#FFC627]"
+                  className="cursor-pointer accent-asu-gold"
                 />
                 <SessionSwatch session={s} onPick={(hex) => onRecolorSession(s.id, hex)} />
                 {isRenaming ? (
@@ -164,49 +164,49 @@ export function SessionPanel({
                     // the user is editing text inside it.
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-[#0B0B0D] border border-[#FFC627] text-[#D8DCE2] rounded-sm px-1 outline-none text-xs"
+                    className="flex-1 min-w-0 bg-helios-deep border border-asu-gold text-helios-text rounded-sm px-1 outline-none text-xs"
                   />
                 ) : (
                   <span
                     title={isRenamed ? `${s.label} — renamed from "${baseLabel}"` : s.label}
                     onDoubleClick={(e) => { e.stopPropagation(); startRename(s); }}
-                    className={"flex-1 truncate " + (s.visible ? "text-[#D8DCE2]" : "text-[#5A5F66]")}
+                    className={"flex-1 truncate " + (s.visible ? "text-helios-text" : "text-helios-muted")}
                   >
                     {s.label}
                   </span>
                 )}
                 {isPrimary && (
-                  <span className="text-[9px] uppercase tracking-wider text-[#FFC627] flex-shrink-0">primary</span>
+                  <span className="text-[9px] uppercase tracking-wider text-asu-gold flex-shrink-0">primary</span>
                 )}
                 <button
                   aria-label="Remove session"
-                  className="text-[#5A5F66] opacity-0 group-hover:opacity-100 hover:text-[#EF5350] text-[12px] flex-shrink-0 px-1 transition-opacity"
+                  className="text-helios-muted opacity-0 group-hover:opacity-100 hover:text-[#EF5350] text-[12px] flex-shrink-0 px-1 transition-opacity"
                   onClick={(e) => { e.stopPropagation(); onRemoveSession(s.id); }}
                   title="Remove from session list"
                 >×</button>
                 <button
-                  className="text-[#5A5F66] hover:text-[#FFC627] text-[10px] flex-shrink-0 px-1"
+                  className="text-helios-muted hover:text-asu-gold text-[10px] flex-shrink-0 px-1"
                   onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : s.id); }}
                   title="Show lap detection details"
                 >{isExpanded ? "▼" : "▶"}</button>
               </div>
               {isExpanded && (
-                <div className="px-3 py-1.5 bg-[#0B0B0D] flex flex-col gap-1.5 text-[10px]">
+                <div className="px-3 py-1.5 bg-helios-deep flex flex-col gap-1.5 text-[10px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-[#9097A0] uppercase tracking-wider">Laps</span>
-                    <span className="text-[#D8DCE2]">
+                    <span className="text-helios-dim uppercase tracking-wider">Laps</span>
+                    <span className="text-helios-text">
                       {s.lapConfig.mode === "none"
-                        ? <span className="text-[#9097A0]">not configured</span>
+                        ? <span className="text-helios-dim">not configured</span>
                         : `${lapCount} trusted${bestLap ? ` · best ${formatLapTime(bestLap.durationS * 1_000_000)}` : ""}`}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[#9097A0] uppercase tracking-wider">Mode</span>
+                    <span className="text-helios-dim uppercase tracking-wider">Mode</span>
                     <span className="text-[#9AA0A6] font-mono-num">{s.lapConfig.mode}</span>
                   </div>
                   <button
                     onClick={() => onConfigureLaps(s.id)}
-                    className="self-stretch px-2 py-0.5 text-[10px] border border-[#2A2C32] hover:border-[#FFC627] hover:text-[#FFC627] mt-1"
+                    className="self-stretch px-2 py-0.5 text-[10px] border border-helios-line hover:border-asu-gold hover:text-asu-gold mt-1"
                   >Configure lap detection…</button>
                 </div>
               )}
@@ -219,7 +219,7 @@ export function SessionPanel({
         emitter={lapSelectionEmitter}
         selection={lapSelection}
       />
-      <div className="px-2 py-1.5 border-t border-[#2A2C32] text-[10px] text-[#5A5F66]">
+      <div className="px-2 py-1.5 border-t border-helios-line text-[10px] text-helios-muted">
         Drag CSVs anywhere to add. + to browse.
       </div>
     </aside>
@@ -273,12 +273,12 @@ function SessionSwatch({ session, onPick }: {
         aria-expanded={open}
         title="Change trace color"
         onClick={() => setOpen((o) => !o)}
-        className="w-4 h-4 flex items-center justify-center rounded-sm cursor-pointer hover:bg-[#2A2C32]"
+        className="w-4 h-4 flex items-center justify-center rounded-sm cursor-pointer hover:bg-helios-line"
       >
         <span className="w-2.5 h-2.5 rounded-sm block" style={{ background: session.color }} />
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-30 bg-[#0E0E10] border border-[#2A2C32] p-1.5 w-[132px]">
+        <div className="absolute left-0 top-full mt-1 z-30 bg-helios-base border border-helios-line p-1.5 w-[132px]">
           <div className="grid grid-cols-4 gap-1">
             {SESSION_PALETTE.map((hex) => (
               <button
@@ -290,8 +290,8 @@ function SessionSwatch({ session, onPick }: {
                 className={
                   "w-6 h-5 rounded-sm cursor-pointer border " +
                   (session.color.toLowerCase() === hex.toLowerCase()
-                    ? "border-[#D8DCE2]"
-                    : "border-transparent hover:border-[#FFC627]")
+                    ? "border-helios-text"
+                    : "border-transparent hover:border-asu-gold")
                 }
                 style={{ background: hex }}
               />
@@ -300,7 +300,7 @@ function SessionSwatch({ session, onPick }: {
           <button
             type="button"
             onClick={() => pick(null)}
-            className="mt-1.5 w-full px-1 py-0.5 text-[10px] text-[#9097A0] border border-[#2A2C32] rounded-sm cursor-pointer hover:border-[#FFC627] hover:text-[#FFC627]"
+            className="mt-1.5 w-full px-1 py-0.5 text-[10px] text-helios-dim border border-helios-line rounded-sm cursor-pointer hover:border-asu-gold hover:text-asu-gold"
             title="Clear the pinned color — back to the automatic color for this slot"
           >auto</button>
         </div>
@@ -345,10 +345,10 @@ function SidebarLapList({ primary, emitter, selection }: {
   }
 
   return (
-    <div className="border-t border-[#2A2C32] flex flex-col min-h-0 max-h-[40%]">
-      <div className="h-7 flex items-center justify-between px-2 border-b border-[#2A2C32] flex-shrink-0">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Laps</span>
-        <span className="text-[9px] text-[#5A5F66]">{trustedTimes.length} trusted</span>
+    <div className="border-t border-helios-line flex flex-col min-h-0 max-h-[40%]">
+      <div className="h-7 flex items-center justify-between px-2 border-b border-helios-line flex-shrink-0">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Laps</span>
+        <span className="text-[9px] text-helios-muted">{trustedTimes.length} trusted</span>
       </div>
       <div className="overflow-y-auto flex-1">
         <table className="w-full text-xs font-mono-num">
@@ -365,20 +365,20 @@ function SidebarLapList({ primary, emitter, selection }: {
                   key={i}
                   onClick={(e) => selectLap(ref, e)}
                   className={
-                    "border-b border-[#16171B] cursor-pointer " +
-                    (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-[#0E0E10] ") +
-                    (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
+                    "border-b border-helios-panel cursor-pointer " +
+                    (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-helios-base ") +
+                    (!lap.trusted ? "text-helios-muted" : "text-helios-text")
                   }
                   title="Row click sets Main. Use the M / R / O buttons on the right for explicit control."
                 >
                   <td className="px-2 py-0.5 w-8">
                     {lap.index}
-                    {isBest && <span className="ml-0.5 text-[#FFC627]">★</span>}
+                    {isBest && <span className="ml-0.5 text-asu-gold">★</span>}
                   </td>
-                  <td className={"text-right px-2 py-0.5 " + (isBest ? "text-[#FFC627] font-bold" : "")}>
+                  <td className={"text-right px-2 py-0.5 " + (isBest ? "text-asu-gold font-bold" : "")}>
                     {formatLapTime(lap.durationS * 1_000_000)}
                   </td>
-                  <td className="text-right px-2 py-0.5 text-[#9097A0] w-12">
+                  <td className="text-right px-2 py-0.5 text-helios-dim w-12">
                     {dt === 0 ? "—" : `+${dt.toFixed(2)}`}
                   </td>
                   <td className="text-right px-1 py-0 w-[64px]">
@@ -434,7 +434,7 @@ function LapToggleBtn({
       aria-pressed={active}
       className={
         "w-[18px] h-[16px] flex items-center justify-center text-[10px] font-mono-num leading-none rounded-sm cursor-pointer transition-colors " +
-        (active ? "text-helios-base font-bold" : "text-helios-dim hover:text-helios-text hover:bg-helios-panel")
+        (active ? "text-helios-on-gold font-bold" : "text-helios-dim hover:text-helios-text hover:bg-helios-panel")
       }
       style={active ? { background: activeColor } : undefined}
     >

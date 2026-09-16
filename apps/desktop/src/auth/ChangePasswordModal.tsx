@@ -164,7 +164,7 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300"
+                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300"
                 >Done</button>
               </div>
             </div>
@@ -191,13 +191,13 @@ export function ChangePasswordModal({ open, client, onClose }: Props) {
                   className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold"
                 />
               </label>
-              <p className="text-[10px] text-[#5A5F66]">At least {MIN_LEN} characters.</p>
+              <p className="text-[10px] text-helios-muted">At least {MIN_LEN} characters.</p>
               {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
               <div className="flex justify-end">
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+                  className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
                 >{busy ? "…" : "Update password"}</button>
               </div>
             </form>

@@ -11,7 +11,7 @@ import {
   type TablerIcon,
 } from "@tabler/icons-react";
 import { useModalA11y } from "../lib/use-modal-a11y";
-import { usePrefs, type LandingPref } from "../lib/prefs";
+import { usePrefs, type LandingPref, type ThemePref } from "../lib/prefs";
 import { osNotify } from "../lib/os-notify";
 import { IS_MAC, IS_WINDOWS, MOD_KEY } from "../lib/platform";
 import { getBreadcrumbs, getLastError } from "../lib/breadcrumbs";
@@ -192,7 +192,7 @@ function Segmented<T extends string>({ value, options, onChange, label }: {
           onClick={() => onChange(o.value)}
           className={
             "rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-            (value === o.value ? "bg-asu-gold text-helios-base" : "text-helios-dim hover:text-helios-text")
+            (value === o.value ? "bg-asu-gold text-helios-on-gold" : "text-helios-dim hover:text-helios-text")
           }
         >
           {o.label}
@@ -247,6 +247,20 @@ function GeneralTab() {
 
   return (
     <>
+      <Section title="Appearance">
+        <Row label="Theme" hint={prefs.theme === "system" ? "Follows your OS setting." : prefs.theme === "light" ? "Light. Telemetry and charts were designed on dark; if something looks off in light, report it." : "Dark, the Helios default."}>
+          <Segmented<ThemePref>
+            label="Theme"
+            value={prefs.theme}
+            onChange={(v) => update({ theme: v })}
+            options={[
+              { value: "system", label: "System" },
+              { value: "dark", label: "Dark" },
+              { value: "light", label: "Light" },
+            ]}
+          />
+        </Row>
+      </Section>
       <Section title="Startup">
         <Row label="Open Helios on" hint="Which module a signed-in launch shows first. Signed out, Helios always opens on Logs.">
           <Segmented<LandingPref>

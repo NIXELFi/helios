@@ -49,6 +49,7 @@ import { CommandPalette, type PaletteAction } from "./components/CommandPalette"
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { HelpModal } from "./help/HelpModal";
 
+import { tc } from "@helios/ui";
 export interface LogsAppProps {
   /** Current app version — used to stamp exported workspace bundles. The
    *  Shell owns the live `getVersion()` call so the wordmark + version in
@@ -1405,7 +1406,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   return (
     // h-full (not h-screen): the Shell's Windows title bar sits above this
     // pane, so the viewport height is no longer ours to claim.
-    <div className="flex flex-col h-full bg-[#0E0E10] text-[#D8DCE2]">
+    <div className="flex flex-col h-full bg-helios-base text-helios-text">
       {/* Header doubles as the macOS drag region under titleBarStyle: Overlay.
           No extra left padding needed here: the 176px-wide ModulePicker rail
           sits to the left of this header in the Shell layout, so the inset
@@ -1415,7 +1416,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           so brand chrome persists across Log / Vault / CFD. */}
       <header
         data-tauri-drag-region
-        className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs"
+        className="h-10 flex items-center px-3 border-b border-helios-line text-xs"
       >
         {/* Primary-session label is the first thing to go when space is tight:
             it's hidden in edit mode so the tab bar and the (wider) edit
@@ -1427,8 +1428,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             fixed-width toolbar to its right never gets squeezed. */}
         {!editMode && (
           <>
-            <span className="text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
-            <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
+            <span className="text-helios-dim truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
+            <div className="ml-3 self-stretch border-l border-helios-line flex-shrink-0" aria-hidden />
           </>
         )}
         <WorkspaceTabBar
@@ -1445,7 +1446,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           onExportAll={handleExportAllWorkspaces}
           onImport={handleImportWorkspaces}
         />
-        <div className="flex items-center gap-2 self-stretch flex-shrink-0 ml-3 pl-3 border-l border-[#2A2C32]">
+        <div className="flex items-center gap-2 self-stretch flex-shrink-0 ml-3 pl-3 border-l border-helios-line">
           <ViewStatePills viewState={viewState} />
           <button
             onClick={() => setPaletteOpen(true)}
@@ -1456,14 +1457,14 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           </button>
           <button
             onClick={() => openHelp()}
-            className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+            className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
             title="Open Help &amp; Wiki"
           >
             Help
           </button>
           <button
             onClick={() => setChannelsOpen(true)}
-            className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+            className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
             title={`Inspect channels in ${primary.label}`}
           >
             Channels
@@ -1473,8 +1474,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             className={
               "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
               (primaryMathErrors.size > 0
-                ? "bg-[#16171B] text-[#EF5350] border-[#EF5350]"
-                : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                ? "bg-helios-panel text-[#EF5350] border-[#EF5350]"
+                : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
             }
             title={primaryMathErrors.size > 0
               ? `${primaryMathErrors.size} math channel(s) failed to compile`
@@ -1488,8 +1489,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             className={
               "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
               (editMode
-                ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
-                : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                ? "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold"
+                : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
             }
             title={editMode ? "Exit edit mode" : "Edit workspace"}
           >
@@ -1499,7 +1500,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             <>
               <button
                 onClick={() => setAddTileOpen(true)}
-                className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+                className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-asu-gold hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
                 title="Add a tile"
               >+ Add tile</button>
               <EditMoreMenu
@@ -1535,8 +1536,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           {editMode && <GridOverlay />}
           {workspace.tiles.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center text-[#9097A0] text-sm max-w-xs px-4">
-                <div className="text-[#D8DCE2] font-medium mb-1">No tiles</div>
+              <div className="text-center text-helios-dim text-sm max-w-xs px-4">
+                <div className="text-helios-text font-medium mb-1">No tiles</div>
                 <div>
                   {editMode
                     ? "Press + Add tile to place a widget."
@@ -1575,14 +1576,14 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         )}
       </div>
 
-      <footer className="h-6 flex items-center px-3 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+      <footer className="h-6 flex items-center px-3 border-t border-helios-line text-[10px] text-helios-dim">
         {visibleSessions.length} session{visibleSessions.length === 1 ? "" : "s"} visible
         {" · "}primary: {primary.store.list().length} channels
         {" · "}range {formatRangeSeconds(ext.endUs - ext.startUs)}
         {" · "}{workspace.tiles.length} tile{workspace.tiles.length === 1 ? "" : "s"}
         <LapCompareSegment sessions={sessions} selection={lapSelection} />
         {" · "}<FpsCounter />
-        {editMode && <span className="ml-2 text-[#FFC627]">· editing</span>}
+        {editMode && <span className="ml-2 text-asu-gold">· editing</span>}
       </footer>
 
       {channelsOpen && (
@@ -1663,14 +1664,14 @@ function LapCompareSegment({ sessions, selection }: { sessions: LoadedSession[];
   const deltaColor =
     delta > 0.005 ? "#EF5350"
     : delta < -0.005 ? "#66BB6A"
-    : "#D8DCE2";
+    : tc("text");
   return (
-    <span className="ml-2 pl-2 border-l border-[#2A2C32] font-mono-num tabular-nums">
-      <span className="text-[#9097A0]">Main</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(mainLap.durationS * 1_000_000)}</span>
-      <span className="text-[#9097A0]"> · Ref</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(refLap.durationS * 1_000_000)}</span>
-      <span className="text-[#9097A0]"> · Δ</span>{" "}
+    <span className="ml-2 pl-2 border-l border-helios-line font-mono-num tabular-nums">
+      <span className="text-helios-dim">Main</span>{" "}
+      <span className="text-helios-text">{formatLapTime(mainLap.durationS * 1_000_000)}</span>
+      <span className="text-helios-dim"> · Ref</span>{" "}
+      <span className="text-helios-text">{formatLapTime(refLap.durationS * 1_000_000)}</span>
+      <span className="text-helios-dim"> · Δ</span>{" "}
       <span style={{ color: deltaColor }}>{delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)}s</span>
     </span>
   );
@@ -1707,7 +1708,7 @@ function FpsCounter() {
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, []);
-  const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-[#FFC627]" : "text-[#EF5350]";
+  const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-asu-gold" : "text-[#EF5350]";
   return (
     <span
       className={`font-mono-num ${color}`}
@@ -1727,7 +1728,7 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
       {state.zoomRange && (
         <button
           onClick={() => viewState.resetZoom()}
-          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-asu-gold text-helios-on-gold border-asu-gold font-semibold hover:brightness-110"
           title="Reset zoom to the full session range (or double-click any chart)"
         >
           Reset zoom
@@ -1736,7 +1737,7 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
       {state.datums.length > 0 && (
         <button
           onClick={() => viewState.clearDatums()}
-          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-asu-gold text-helios-on-gold border-asu-gold font-semibold hover:brightness-110"
           title="Remove all datum markers"
         >
           Clear datums ({state.datums.length})
@@ -1794,15 +1795,15 @@ function ExportMenuButton({ sessions, primary, viewState }: {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="Export"
       >Export ▾</button>
       {open && (
-        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
-          <button type="button" onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
-          <button type="button" onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
-          <button type="button" onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
-          {err && <div role="alert" className="px-2 py-1.5 text-[#EF5350] border-t border-[#2A2C32]">Export failed: {err}</div>}
+        <div className="absolute right-0 mt-1 w-56 bg-helios-base border border-helios-line z-30 text-xs">
+          <button type="button" onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">CSV — primary session, full</button>
+          <button type="button" onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">CSV — primary, zoom range</button>
+          <button type="button" onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">KML — GPS path (primary)</button>
+          {err && <div role="alert" className="px-2 py-1.5 text-[#EF5350] border-t border-helios-line">Export failed: {err}</div>}
         </div>
       )}
     </div>
@@ -1827,19 +1828,19 @@ function EditMoreMenu({ onSnapToGrid, onResetAll }: {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="More edit actions"
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="More actions"
       >⋯</button>
       {open && (
-        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+        <div className="absolute right-0 mt-1 w-56 bg-helios-base border border-helios-line z-30 text-xs">
           <button
             onClick={() => { onSnapToGrid(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            className="w-full text-left px-2 py-1.5 hover:bg-helios-panel"
             title="Snap every tile's position and size to the grid; sizes are preserved"
           >Snap to grid</button>
           <button
             onClick={() => { onResetAll(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 text-[#9097A0] hover:bg-[#16171B] hover:text-[#EF5350]"
+            className="w-full text-left px-2 py-1.5 text-helios-dim hover:bg-helios-panel hover:text-[#EF5350]"
             title="Reset every workspace to its built-in default"
           >Reset all workspaces</button>
         </div>
@@ -1968,8 +1969,8 @@ function PlaybackControls({
         className={
           "w-7 h-6 flex items-center justify-center text-xs border rounded-sm cursor-pointer transition-colors " +
           (playing
-            ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]"
-            : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+            ? "bg-asu-gold text-helios-on-gold border-asu-gold"
+            : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
         }
         title={playing ? "Pause (Space)" : "Play (Space)"}
         aria-label={playing ? "Pause" : "Play"}
@@ -1979,7 +1980,7 @@ function PlaybackControls({
       <select
         value={speed}
         onChange={(e) => setSpeed(Number(e.target.value))}
-        className="bg-[#16171B] text-[#D8DCE2] border border-[#2A2C32] hover:border-[#FFC627] rounded-sm px-1 h-6 text-xs cursor-pointer"
+        className="bg-helios-panel text-helios-text border border-helios-line hover:border-asu-gold rounded-sm px-1 h-6 text-xs cursor-pointer"
         title="Playback speed"
       >
         {PLAYBACK_SPEEDS.map((s) => (

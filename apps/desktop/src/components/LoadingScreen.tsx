@@ -38,7 +38,7 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
               <button
                 type="button"
                 onClick={onOpenFile}
-                className="rounded-sm border border-asu-gold px-5 py-2 text-xs uppercase tracking-wider text-asu-gold transition-colors hover:bg-asu-gold hover:text-helios-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+                className="rounded-sm border border-asu-gold px-5 py-2 text-xs uppercase tracking-wider text-asu-gold transition-colors hover:bg-asu-gold hover:text-helios-on-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
               >
                 Open CSV…
               </button>

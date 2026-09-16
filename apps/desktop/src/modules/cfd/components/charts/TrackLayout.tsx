@@ -15,6 +15,7 @@ import {
   type XY,
 } from "../../lib/performance";
 
+import { tc } from "@helios/ui";
 interface Props {
   track: VisualTrack;
   height?: number;
@@ -84,12 +85,12 @@ export function TrackLayout({ track, height = 280 }: Props) {
 
   return (
     <div ref={hostRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">
           {track.name} · {(len / (track.closed ? 1000 : 1)).toFixed(track.closed ? 2 : 0)}{" "}
           {track.closed ? "km/lap" : "m"}
         </div>
-        <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">
+        <span className="text-[9px] uppercase tracking-wider text-helios-muted">
           {track.closed ? "closed loop" : "point-to-point"}
         </span>
       </div>
@@ -101,13 +102,13 @@ export function TrackLayout({ track, height = 280 }: Props) {
         className="block"
       >
         {/* Traced track surface. */}
-        <polygon points={ribbon} fill="#1B1D22" stroke="#2A2C32" strokeWidth={1} />
+        <polygon points={ribbon} fill="#1B1D22" stroke={tc("line")} strokeWidth={1} />
         {/* Centerline, colored by local corner tightness. */}
         {runs.map((r, i) => (
           <polyline key={i} points={r.pts} fill="none" stroke={r.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         ))}
-        {start && <circle cx={px(start)} cy={py(start)} r={4} fill="#A5D6A7" stroke="#0E0E10" strokeWidth={1} />}
-        {finish && !track.closed && <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke="#0E0E10" strokeWidth={1} />}
+        {start && <circle cx={px(start)} cy={py(start)} r={4} fill="#A5D6A7" stroke={tc("base")} strokeWidth={1} />}
+        {finish && !track.closed && <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke={tc("base")} strokeWidth={1} />}
       </svg>
     </div>
   );

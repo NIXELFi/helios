@@ -106,7 +106,7 @@ export const fitOverlay: OverlayModule<FitConfig, FitArtifact> = {
             const k: FitKind = t === "polynomial" ? { type: "polynomial", degree: 2 } : { type: t } as FitKind;
             onChange({ ...config, kind: k });
           }}
-          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          className="bg-helios-base border border-helios-line px-1 text-[11px]">
           <option value="linear">linear</option>
           <option value="polynomial">polynomial</option>
           <option value="exponential">exponential</option>
@@ -118,7 +118,7 @@ export const fitOverlay: OverlayModule<FitConfig, FitArtifact> = {
         <Row label="degree">
           <input type="number" min={1} max={6} value={config.kind.degree}
             onChange={(e) => onChange({ ...config, kind: { type: "polynomial", degree: Number(e.target.value) } })}
-            className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+            className="w-16 bg-helios-base border border-helios-line px-1" />
         </Row>
       )}
       <Row label="color">
@@ -128,7 +128,7 @@ export const fitOverlay: OverlayModule<FitConfig, FitArtifact> = {
       <Row label="line width">
         <input type="number" min={1} max={5} step={0.5} value={config.lineWidth}
           onChange={(e) => onChange({ ...config, lineWidth: Number(e.target.value) })}
-          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+          className="w-16 bg-helios-base border border-helios-line px-1" />
       </Row>
       <Row label="±σ band">
         <input type="checkbox" checked={config.showBand}
@@ -148,8 +148,8 @@ export const fitOverlay: OverlayModule<FitConfig, FitArtifact> = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

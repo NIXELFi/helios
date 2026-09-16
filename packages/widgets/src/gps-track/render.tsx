@@ -7,6 +7,7 @@ import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { detectTrackLabels, SENSITIVITY_PRESETS, type Sensitivity, type TrackLabel } from "./turns";
 
+import { tc, tca } from "@helios/ui";
 /** maplibre-gl (plus its stylesheet) is ~780 KB minified — bigger than the
  *  rest of the widget package put together — and only the `basemap !== "none"`
  *  modes ever touch it. Loading it statically put all of it in the app's main
@@ -165,7 +166,7 @@ function buildStyle(mode: BasemapMode, customTileUrl: string | undefined): Style
   return {
     version: 8,
     sources: {},
-    layers: [{ id: "bg", type: "background", paint: { "background-color": "#16171B" } }],
+    layers: [{ id: "bg", type: "background", paint: { "background-color": tc("panel") } }],
   };
 }
 
@@ -553,7 +554,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
     }
 
     if (raws.length === 0) {
-      ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no GPS data", w / 2, h / 2);
       return;
@@ -599,7 +600,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
       ctx.beginPath();
       ctx.arc(cur.x, cur.y, r.session.isPrimary ? 5 : 4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = tc("base"); ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 
@@ -617,19 +618,19 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         const boxW = textW + padX * 2, boxH = fontPx + padY * 2;
         const bx = p.x - boxW / 2, by = p.y - boxH / 2;
         // Pill background — slightly darker for turns, dimmer for straights.
-        ctx.fillStyle = isTurn ? "rgba(14,14,16,0.85)" : "rgba(14,14,16,0.65)";
+        ctx.fillStyle = isTurn ? tca("base", 0.85) : tca("base", 0.65);
         ctx.fillRect(bx, by, boxW, boxH);
-        ctx.strokeStyle = isTurn ? "#FFC627" : "#5A5F66";
+        ctx.strokeStyle = isTurn ? "#FFC627" : tc("muted");
         ctx.lineWidth = 1;
         ctx.strokeRect(bx + 0.5, by + 0.5, boxW - 1, boxH - 1);
-        ctx.fillStyle = isTurn ? "#FFC627" : "#D8DCE2";
+        ctx.fillStyle = isTurn ? "#FFC627" : tc("text");
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(label.text, p.x, p.y + 0.5);
       }
     }
 
     // Status label
-    ctx.fillStyle = useMap ? "#D8DCE2" : "#7B8088";
+    ctx.fillStyle = useMap ? tc("text") : tc("dim");
     ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     const totalPts = raws.reduce((s, p) => s + p.n, 0);
@@ -655,7 +656,7 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
   }
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-[#16171B] overflow-hidden">
+    <div ref={containerRef} className="relative w-full h-full bg-helios-panel overflow-hidden">
       {useMap && (
         <div ref={mapDivRef} className="absolute inset-0" />
       )}
@@ -667,17 +668,17 @@ export function GpsTrackRender(props: WidgetRenderProps<GpsTrackConfig>) {
         }
         style={{ background: useMap ? "transparent" : undefined }}
       />
-      <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-[#9097A0] bg-[#0E0E10cc] px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
+      <div className="absolute top-1 right-1 flex gap-1 text-[10px] uppercase tracking-wider text-helios-dim bg-helios-base/80 px-1.5 py-0.5 rounded-sm pointer-events-none select-none">
         <span>basemap</span>
-        <span className="text-[#FFC627]">{basemap}</span>
+        <span className="text-asu-gold">{basemap}</span>
       </div>
       {pickRequest && (
         <>
           {/* Pulsing yellow border to draw the eye to this widget when armed
               — without it, a user with several tiles open might miss which
               one is awaiting the click. */}
-          <div className="absolute inset-0 pointer-events-none border-2 border-[#FFC627] animate-pulse" />
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-[#FFC627] text-[#0E0E10] text-[11px] font-semibold px-3 py-1 rounded-sm pointer-events-none shadow-lg">
+          <div className="absolute inset-0 pointer-events-none border-2 border-asu-gold animate-pulse" />
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-asu-gold text-helios-on-gold text-[11px] font-semibold px-3 py-1 rounded-sm pointer-events-none shadow-lg">
             {pickRequest.prompt} · Esc to cancel
           </div>
         </>

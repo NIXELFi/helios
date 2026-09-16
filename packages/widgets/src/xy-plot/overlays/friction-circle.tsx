@@ -113,19 +113,19 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
     return (
       <>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[#9097A0] text-[11px]">percentile rings (100 = peak)</span>
+          <span className="text-helios-dim text-[11px]">percentile rings (100 = peak)</span>
           {percentiles.map((p, i) => (
             <div key={i} className="flex items-center gap-1 text-[11px]">
               <input type="number" min={0} max={100} step={1} value={p}
                 onChange={(e) => updatePercentile(i, Number(e.target.value))}
-                className="w-20 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+                className="w-20 bg-helios-base border border-helios-line px-1" />
               <button onClick={() => removePercentile(i)}
                 disabled={percentiles.length <= 1}
                 className="px-1 text-[#EF5350] disabled:opacity-30">✕</button>
             </div>
           ))}
           <button onClick={addPercentile}
-            className="self-start px-2 py-0.5 text-[10px] border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer">
+            className="self-start px-2 py-0.5 text-[10px] border border-helios-line bg-helios-panel text-asu-gold hover:border-asu-gold rounded-sm cursor-pointer">
             + Add ring
           </button>
         </div>
@@ -136,7 +136,7 @@ export const frictionCircleOverlay: OverlayModule<FrictionCircleConfig, Friction
         <Row label="line width">
           <input type="number" min={1} max={5} step={0.5} value={config.lineWidth}
             onChange={(e) => onChange({ ...config, lineWidth: Number(e.target.value) })}
-            className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+            className="w-16 bg-helios-base border border-helios-line px-1" />
         </Row>
         <Row label="dashed">
           <input type="checkbox" checked={config.dashed}
@@ -155,8 +155,8 @@ register(frictionCircleOverlay);
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

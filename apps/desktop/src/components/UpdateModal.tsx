@@ -144,33 +144,33 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
         onClick={handleBackdropClick}
       >
         <div
-          className="bg-[#0E0E10] border border-[#2A2C32] w-[560px] max-h-[80vh] flex flex-col"
+          className="bg-helios-base border border-helios-line w-[560px] max-h-[80vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-            <span className="text-xs uppercase tracking-wider text-[#FFC627]">Update installed</span>
+          <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+            <span className="text-xs uppercase tracking-wider text-asu-gold">Update installed</span>
             <button
               type="button"
               aria-label="Close"
               title="Close"
               onClick={onClose}
-              className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >×</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <div role="status" className="text-sm text-[#D8DCE2]">
+            <div role="status" className="text-sm text-helios-text">
               Helios v{state.version} is installed — please restart Helios manually to finish updating.
             </div>
-            <div className="mt-3 text-xs text-[#9097A0]">
+            <div className="mt-3 text-xs text-helios-dim">
               Quit Helios from the tray icon (right-click → Quit Helios), then open it again.
               You can keep using this version until you do.
             </div>
           </div>
-          <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-[#2A2C32]">
+          <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-helios-line">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >Got it</button>
           </div>
         </div>
@@ -193,40 +193,40 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
         onClick={handleBackdropClick}
       >
         <div
-          className="bg-[#0E0E10] border border-[#2A2C32] w-[560px] max-h-[80vh] flex flex-col"
+          className="bg-helios-base border border-helios-line w-[560px] max-h-[80vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
+          <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
             <span className="text-xs uppercase tracking-wider text-[#EF5350]">Update failed</span>
             <button
               type="button"
               aria-label="Close"
               title="Close"
               onClick={onClose}
-              className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >×</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <div className="text-sm text-[#D8DCE2]">
+            <div className="text-sm text-helios-text">
               The update couldn't be installed.
             </div>
-            <pre role="alert" className="mt-3 whitespace-pre-wrap font-sans text-xs text-[#EF5350] bg-[#16171B] border border-[#2A2C32] p-2 rounded-sm overflow-auto max-h-64">
+            <pre role="alert" className="mt-3 whitespace-pre-wrap font-sans text-xs text-[#EF5350] bg-helios-panel border border-helios-line p-2 rounded-sm overflow-auto max-h-64">
 {errorMessage}
             </pre>
-            <div className="mt-3 text-xs text-[#9097A0]">
+            <div className="mt-3 text-xs text-helios-dim">
               Check your connection and try again. You can keep using Helios in the meantime.
             </div>
           </div>
-          <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-[#2A2C32]">
+          <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-helios-line">
             <button
               type="button"
               onClick={onClose}
-              className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-2 py-1 text-xs border border-helios-line bg-helios-panel text-helios-dim hover:border-asu-gold rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >Close</button>
             <button
               type="button"
               onClick={onRetry ?? onInstall}
-              className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >Try again</button>
           </div>
         </div>
@@ -252,29 +252,29 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
       onClick={handleBackdropClick}
     >
       <div
-        className="bg-[#0E0E10] border border-[#2A2C32] w-[560px] max-h-[80vh] flex flex-col"
+        className="bg-helios-base border border-helios-line w-[560px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-          <span className="text-xs uppercase tracking-wider text-[#FFC627]">Update available</span>
+        <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+          <span className="text-xs uppercase tracking-wider text-asu-gold">Update available</span>
           <button
             type="button"
             aria-label="Close"
             title="Close"
             onClick={onClose}
             disabled={inFlight}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
           >×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <div className="text-sm">
-            <span className="text-[#D8DCE2] font-semibold">Helios v{update.version}</span>
-            <span className="text-[#9097A0]"> — you're on v{update.currentVersion}</span>
+            <span className="text-helios-text font-semibold">Helios v{update.version}</span>
+            <span className="text-helios-dim"> — you're on v{update.currentVersion}</span>
           </div>
           {update.date && (
-            <div className="text-xs text-[#5A5F66] mt-0.5">Released {formatReleaseDate(update.date)}</div>
+            <div className="text-xs text-helios-muted mt-0.5">Released {formatReleaseDate(update.date)}</div>
           )}
-          <pre className="mt-4 whitespace-pre-wrap font-sans text-xs text-[#D8DCE2] bg-[#16171B] border border-[#2A2C32] p-2 rounded-sm overflow-auto max-h-64">
+          <pre className="mt-4 whitespace-pre-wrap font-sans text-xs text-helios-text bg-helios-panel border border-helios-line p-2 rounded-sm overflow-auto max-h-64">
 {update.notes || "(no release notes)"}
           </pre>
           {downloading && (
@@ -284,7 +284,7 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
             />
           )}
           {installing && (
-            <div className="mt-3 text-xs text-[#9097A0]">Installing… the app will relaunch automatically.</div>
+            <div className="mt-3 text-xs text-helios-dim">Installing… the app will relaunch automatically.</div>
           )}
           {playbackBlocked && !inFlight && (
             <div className="mt-3 text-xs text-[#FFB800]">
@@ -300,14 +300,14 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
             </div>
           )}
         </div>
-        <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-[#2A2C32]">
+        <div className="h-12 flex items-center justify-end gap-2 px-3 border-t border-helios-line">
           {autoInstallIn !== null ? (
             canDefer && onDefer && (
               <button
                 type="button"
                 onClick={onDefer}
                 disabled={inFlight}
-                className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-2 py-1 text-xs border border-helios-line bg-helios-panel text-helios-dim hover:border-asu-gold rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
               >Postpone 30 min</button>
             )
           ) : (
@@ -315,14 +315,14 @@ export function UpdateModal({ state, playbackBlocked, installAttempted = false, 
               type="button"
               onClick={onClose}
               disabled={inFlight}
-              className="px-2 py-1 text-xs border border-[#2A2C32] bg-[#16171B] text-[#9097A0] hover:border-[#FFC627] rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs border border-helios-line bg-helios-panel text-helios-dim hover:border-asu-gold rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
             >Remind me later</button>
           )}
           <button
             type="button"
             onClick={onInstall}
             disabled={inFlight || playbackBlocked}
-            className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold hover:bg-[#FFD24A] rounded-sm cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 disabled:cursor-not-allowed"
           >Install and restart</button>
         </div>
       </div>
@@ -334,13 +334,13 @@ function DownloadProgressBar({ downloaded, total }: { downloaded: number; total:
   const pct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
   return (
     <div className="mt-3">
-      <div className="h-1.5 bg-[#2A2C32] rounded-sm overflow-hidden">
+      <div className="h-1.5 bg-helios-line rounded-sm overflow-hidden">
         <div
-          className="h-full bg-[#FFC627] transition-all duration-150"
+          className="h-full bg-asu-gold transition-all duration-150"
           style={{ width: pct === null ? "100%" : `${pct}%` }}
         />
       </div>
-      <div className="mt-1 text-[10px] text-[#9097A0] font-mono-num">
+      <div className="mt-1 text-[10px] text-helios-dim font-mono-num">
         {pct === null ? "(unknown size)" : `${pct}% · ${formatBytes(downloaded)}${total ? ` / ${formatBytes(total)}` : ""}`}
       </div>
     </div>

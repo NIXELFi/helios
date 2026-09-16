@@ -11,13 +11,13 @@ export function ZoneStatsConfigEditor({ config, onChange, availableChannels }: W
     onChange({ ...config, channelIds: config.channelIds.filter((c) => c !== id) });
   }
   return (
-    <div className="p-2 text-xs text-[#D8DCE2] flex flex-col gap-2">
-      <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">Channels</div>
+    <div className="p-2 text-xs text-helios-text flex flex-col gap-2">
+      <div className="text-[10px] uppercase tracking-wider text-helios-dim">Channels</div>
       <div className="flex flex-wrap gap-1">
         {config.channelIds.map((id) => (
-          <span key={id} className="px-1.5 py-0.5 bg-[#0E0E10] border border-[#2A2C32] flex items-center gap-1">
+          <span key={id} className="px-1.5 py-0.5 bg-helios-base border border-helios-line flex items-center gap-1">
             <span className="font-mono-num text-[10px]">{id}</span>
-            <button onClick={() => remove(id)} className="text-[#9097A0] hover:text-[#EF5350]">×</button>
+            <button onClick={() => remove(id)} className="text-helios-dim hover:text-[#EF5350]">×</button>
           </span>
         ))}
       </div>

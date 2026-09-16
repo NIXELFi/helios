@@ -41,6 +41,7 @@ import { usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
+import { tc } from "@helios/ui";
 export const createTaskInput = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
   type: taskType,
@@ -406,7 +407,7 @@ export function CreateTaskDialog({
             type="submit"
             form="create-task-form"
             disabled={isSubmitting}
-            className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90 disabled:opacity-60"
+            className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-60"
           >
             Create task
           </button>
@@ -504,7 +505,7 @@ export function CreateTaskDialog({
                   options={subteams.map((s) => ({
                     value: s.id,
                     label: s.name,
-                    swatch: s.color ?? "#6B7280",
+                    swatch: s.color ?? tc("dim"),
                   }))}
                 />
               )}
@@ -524,7 +525,7 @@ export function CreateTaskDialog({
                     <span
                       aria-hidden
                       className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: s.color ?? "#6B7280" }}
+                      style={{ backgroundColor: s.color ?? tc("dim") }}
                     />
                     <span className="font-medium">{s.code}</span>
                     {isPrimary ? (
@@ -597,7 +598,7 @@ export function CreateTaskDialog({
                               <span
                                 aria-hidden
                                 className="size-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: s.color ?? "#6B7280" }}
+                                style={{ backgroundColor: s.color ?? tc("dim") }}
                               />
                               <span className="truncate">{s.name}</span>
                             </button>
@@ -819,7 +820,7 @@ function DependencyPicker({
                 <span
                   aria-hidden
                   className="size-1.5 rounded-full"
-                  style={{ backgroundColor: t.subteam.color ?? "#6B7280" }}
+                  style={{ backgroundColor: t.subteam.color ?? tc("dim") }}
                 />
                 <span className="flex-1 truncate text-helios-text">{t.title}</span>
                 <button

@@ -13,14 +13,14 @@ const numericFields: Array<[keyof RoundGaugeConfig, string]> = [
 
 export function RoundGaugeConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<RoundGaugeConfig>) {
   return (
-    <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-1 p-2 text-xs text-helios-text">
       <label className="flex justify-between items-center gap-2">
         <span>Channel</span>
         <ChannelPicker className="w-40" value={config.channelId} onChange={(v) => onChange({ ...config, channelId: v })} channels={availableChannels} />
       </label>
       <label className="flex justify-between gap-2">
         <span>Units</span>
-        <input className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+        <input className="bg-helios-base border border-helios-line px-1 w-32"
           value={config.units}
           onChange={(e) => onChange({ ...config, units: e.target.value })} />
       </label>
@@ -29,7 +29,7 @@ export function RoundGaugeConfigEditor({ config, onChange, availableChannels }: 
           <span>{label}</span>
           <input
             type="number"
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+            className="bg-helios-base border border-helios-line px-1 w-32"
             value={config[k] === undefined ? "" : String(config[k])}
             onChange={(e) => {
               const raw = e.target.value;

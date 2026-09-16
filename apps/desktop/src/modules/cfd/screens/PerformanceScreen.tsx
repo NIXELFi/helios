@@ -50,6 +50,7 @@ import { distillTir, tirMuLat, tirMuLong, loadTeamData, G, dropoffPctFromSens } 
 import { openTextFile, openDirectory } from "../lib/export/io";
 import { ReportButton } from "../components/ReportButton";
 
+import { tc } from "@helios/ui";
 const GEAR_COLORS = ["#FFC627", "#4FC3F7", "#A5D6A7", "#F48FB1", "#CE93D8", "#FF8A65"];
 
 // The lap sim scores against the real 2026 courses (see lib/performance/tracks).
@@ -155,19 +156,19 @@ export function PerformanceScreen() {
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header */}
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 items-center gap-3 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Performance</div>
-          <p className="text-[10px] text-[#5A5F66]">
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Performance</div>
+          <p className="text-[10px] text-helios-muted">
             {vehicle.name} · FD {vehicle.finalDrive.toFixed(2)} · {vehicle.massKg.toFixed(0)} kg ·{" "}
             {peak ? `peak τ ${peak.torqueNm.toFixed(1)} Nm @ ${peak.rpm.toFixed(0)}` : "no torque curve"}
           </p>
         </div>
-        <label className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#9097A0]">
+        <label className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-helios-dim">
           Source
           <select
             aria-label="Torque-curve source"
-            className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+            className="rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none"
             value={selected?.id ?? ""}
             onChange={(e) => setSelectedId(e.target.value)}
           >
@@ -183,7 +184,7 @@ export function PerformanceScreen() {
           <div
             role="group"
             aria-label="Engine curve source"
-            className="flex overflow-hidden rounded-sm border border-[#2A2C32] text-[10px] uppercase tracking-wider"
+            className="flex overflow-hidden rounded-sm border border-helios-line text-[10px] uppercase tracking-wider"
             title="Run the vehicle model on the simulated curve or on the measured dyno curve attached to this study"
           >
             {(["sim", "dyno"] as const).map((k) => (
@@ -195,8 +196,8 @@ export function PerformanceScreen() {
                 className={
                   "px-2 py-1 " +
                   (engineSource === k
-                    ? "bg-[#FFC627] text-[#0E0E10]"
-                    : "text-[#9097A0] hover:text-[#FFC627]")
+                    ? "bg-asu-gold text-helios-on-gold"
+                    : "text-helios-dim hover:text-asu-gold")
                 }
               >
                 {k === "sim" ? "Simulated" : "Measured dyno"}
@@ -207,7 +208,7 @@ export function PerformanceScreen() {
         <button
           type="button"
           onClick={() => setEditorOpen((v) => !v)}
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           {editorOpen ? "Hide vehicle" : "Vehicle setup"}
         </button>
@@ -216,7 +217,7 @@ export function PerformanceScreen() {
           onClick={() => void exportReport()}
           disabled={!selected || curve.length === 0}
           title="Export a light-theme one-pager (HTML) for a design review — prints to PDF"
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-50"
         >
           Export report
         </button>
@@ -224,7 +225,7 @@ export function PerformanceScreen() {
       </header>
 
       {reportMsg && (
-        <div role="status" className="flex-shrink-0 border-b border-[#FFC627]/40 bg-[#16171B] px-3 py-1 text-[10px] text-[#D8DCE2]">
+        <div role="status" className="flex-shrink-0 border-b border-asu-gold/40 bg-helios-panel px-3 py-1 text-[10px] text-helios-text">
           {reportMsg}
         </div>
       )}
@@ -233,8 +234,8 @@ export function PerformanceScreen() {
           dyno (the finding-0028 calibration bands), so the trust level of the
           numbers below is visible where decisions are made. */}
       {accuracy && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[#2A2C32] bg-[#0B0B0D] px-3 py-1.5 text-[10px]">
-          <span className="uppercase tracking-wider text-[#5A5F66]">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-helios-line bg-helios-deep px-3 py-1.5 text-[10px]">
+          <span className="uppercase tracking-wider text-helios-muted">
             model vs dyno{dynoRef ? ` (${dynoRef.label})` : ""}
           </span>
           {accuracy.map((b) =>
@@ -250,7 +251,7 @@ export function PerformanceScreen() {
             ) : null,
           )}
           {usingDyno && (
-            <span className="ml-auto rounded-sm border border-[#FFC627]/50 px-1.5 py-[1px] uppercase tracking-wider text-[#FFC627]">
+            <span className="ml-auto rounded-sm border border-asu-gold/50 px-1.5 py-[1px] uppercase tracking-wider text-asu-gold">
               scoring on measured curve
             </span>
           )}
@@ -267,13 +268,13 @@ export function PerformanceScreen() {
         )}
 
         {!selected || curve.length === 0 ? (
-          <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
+          <div className="m-4 rounded-sm border border-dashed border-helios-line p-8 text-center text-[11px] text-helios-muted">
             No torque curve available. Run a sweep or an optimization, then come back —
             this screen reads the engine torque curve from a completed study.
             <div className="mt-3">
               <button
                 type="button"
-                className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300"
+                className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
                 onClick={() => navigateTo("studies")}
               >
                 Go to studies
@@ -291,10 +292,10 @@ export function PerformanceScreen() {
             <SensitivitySection curve={curve} vehicle={vehicle} baseline={baseline} fuelMap={fuelMap} />
 
             {/* Track overview — the real 2026 course layouts, side by side. */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Track overview</span>
-                <div className="flex items-center gap-2 text-[8px] uppercase tracking-wider text-[#5A5F66]">
+            <section className="rounded-sm border border-helios-line bg-helios-base">
+              <div className="flex items-center justify-between border-b border-helios-line px-3 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-helios-dim">Track overview</span>
+                <div className="flex items-center gap-2 text-[8px] uppercase tracking-wider text-helios-muted">
                   {(["straight", "open", "medium", "tight", "hairpin"] as const).map((t) => (
                     <span key={t} className="flex items-center gap-1">
                       <span className="inline-block h-1.5 w-2.5 rounded-sm" style={{ background: TIGHTNESS_COLOR[t] }} />
@@ -304,21 +305,21 @@ export function PerformanceScreen() {
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
-                <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D]">
+                <div className="rounded-sm border border-helios-line bg-helios-deep">
                   <TrackLayout track={AUTOCROSS_2026_VISUAL} />
                 </div>
-                <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D]">
+                <div className="rounded-sm border border-helios-line bg-helios-deep">
                   <TrackLayout track={ENDURANCE_2026_VISUAL} />
                 </div>
               </div>
-              <p className="px-3 pb-2 text-[9px] leading-tight text-[#5A5F66]">
+              <p className="px-3 pb-2 text-[9px] leading-tight text-helios-muted">
                 Real traced 2026 layouts (display only — the lap sim integrates the radius profile, not these).
                 Centerline colored by local corner tightness; the surface is the ~3.5 m course width.
               </p>
             </section>
 
             {/* Tractive-effort map */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+            <section className="rounded-sm border border-helios-line bg-helios-base">
               {tractive && (
                 <LinePlot
                   title="tractive effort vs speed"
@@ -332,26 +333,26 @@ export function PerformanceScreen() {
             </section>
 
             {/* Acceleration */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-[#2A2C32] px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Acceleration (75 m)</span>
+            <section className="rounded-sm border border-helios-line bg-helios-base">
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-helios-line px-3 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-helios-dim">Acceleration (75 m)</span>
                 <Stat label="time" value={accel ? `${accel.timeS.toFixed(3)} s` : "—"} highlight />
                 <Stat label="trap" value={accel ? `${(accel.trapSpeedMps * 3.6).toFixed(1)} km/h` : "—"} />
                 <Stat label="finish" value={accel ? `gear ${accel.finishGear}` : "—"} />
               </div>
               {accel && accel.shiftPoints.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-[#2A2C32] px-3 py-1.5 text-[10px]">
-                  <span className="uppercase tracking-wider text-[#5A5F66]">shift points</span>
+                <div className="flex flex-wrap items-center gap-1.5 border-b border-helios-line px-3 py-1.5 text-[10px]">
+                  <span className="uppercase tracking-wider text-helios-muted">shift points</span>
                   {accel.shiftPoints.map((sp, i) => (
                     <span
                       key={i}
-                      className="rounded-sm border border-[#FFC627]/40 px-1.5 py-0.5 font-mono text-[#FFC627]"
+                      className="rounded-sm border border-asu-gold/40 px-1.5 py-0.5 font-mono text-asu-gold"
                       title={`lands at ${sp.landRpm.toFixed(0)} rpm in gear ${sp.toGear}, ${sp.distanceM.toFixed(1)} m`}
                     >
                       {sp.fromGear}→{sp.toGear} @ {(sp.speedMps * 3.6).toFixed(0)} km/h · {sp.shiftRpm.toFixed(0)} rpm
                     </span>
                   ))}
-                  <span className="text-[#5A5F66]">· finish in gear {accel.finishGear}</span>
+                  <span className="text-helios-muted">· finish in gear {accel.finishGear}</span>
                 </div>
               )}
               {accel && (
@@ -376,10 +377,10 @@ export function PerformanceScreen() {
             </section>
 
             {/* Skidpad gear/RPM readout */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-[#2A2C32] px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Skidpad gear / rpm</span>
-                <label className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+            <section className="rounded-sm border border-helios-line bg-helios-base">
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-helios-line px-3 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-helios-dim">Skidpad gear / rpm</span>
+                <label className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-helios-muted">
                   target time (s)
                   <input
                     type="number"
@@ -389,7 +390,7 @@ export function PerformanceScreen() {
                       const n = parseFloat(e.target.value);
                       if (Number.isFinite(n) && n > 0) setSkidpadTime(n);
                     }}
-                    className="w-16 rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1.5 py-0.5 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+                    className="w-16 rounded-sm border border-helios-line bg-helios-deep px-1.5 py-0.5 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none"
                   />
                 </label>
                 <Stat label="radius" value={`${skid.radiusM.toFixed(2)} m`} />
@@ -399,8 +400,8 @@ export function PerformanceScreen() {
                   className="flex items-baseline gap-1"
                   title="Grip-model PREDICTION at the 9.125 m skidpad path — the cleanest grip validation (no aero, no line, no engine). Real anchors: SDM26 5.02 s (comp, stickers), SDM25 4.98 s (scrubbed)."
                 >
-                  <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">model predicts</span>
-                  <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+                  <span className="text-[9px] uppercase tracking-wider text-helios-muted">model predicts</span>
+                  <span className="font-mono text-[13px] tabular-nums text-asu-gold">
                     {predictSkidpad(vehicle).timeS.toFixed(2)} s
                   </span>
                 </span>
@@ -413,12 +414,12 @@ export function PerformanceScreen() {
                       key={g.gear}
                       className={
                         "rounded-sm border px-2 py-1.5 text-center " +
-                        (inBand ? "border-[#FFC627]/50 bg-[#FFC627]/5" : "border-[#2A2C32]")
+                        (inBand ? "border-asu-gold/50 bg-asu-gold/5" : "border-helios-line")
                       }
                     >
-                      <div className="text-[9px] uppercase tracking-wider text-[#5A5F66]">gear {g.gear}</div>
-                      <div className="font-mono text-[13px] text-[#D8DCE2]">{g.rpm.toFixed(0)}</div>
-                      <div className="text-[8px] text-[#5A5F66]">rpm</div>
+                      <div className="text-[9px] uppercase tracking-wider text-helios-muted">gear {g.gear}</div>
+                      <div className="font-mono text-[13px] text-helios-text">{g.rpm.toFixed(0)}</div>
+                      <div className="text-[8px] text-helios-muted">rpm</div>
                     </div>
                   );
                 })}
@@ -449,7 +450,7 @@ function tractiveSeries(tractive: NonNullable<ReturnType<typeof tractiveMap>>): 
       width: 1,
       showPoints: false,
     },
-    { label: "drag + roll", y: tractive.resistance, color: "#5A5F66", width: 1, showPoints: false },
+    { label: "drag + roll", y: tractive.resistance, color: tc("muted"), width: 1, showPoints: false },
   ];
 }
 
@@ -462,10 +463,10 @@ function ptsStr(p: number | null): string {
  *  on throttle, top/avg speed, and a per-gear time-usage bar. */
 function TelemetrySection({ events }: { events: EventScores }) {
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Lap telemetry — model predictions</span>
-        <span className="text-[9px] text-[#5A5F66]">gear-explicit QSS sim</span>
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex items-center justify-between border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">Lap telemetry — model predictions</span>
+        <span className="text-[9px] text-helios-muted">gear-explicit QSS sim</span>
       </div>
       <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
         <TelemetryCard label="Autocross" lapTimeS={events.autocross.lapTimeS} tm={events.autocross.telemetry} />
@@ -484,10 +485,10 @@ function TelemetryCard({
   perLap?: boolean;
 }) {
   return (
-    <div className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-2.5">
+    <div className="rounded-sm border border-helios-line bg-helios-deep p-2.5">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">{label}</span>
-        <span className="font-mono text-[12px] text-[#FFC627]">
+        <span className="text-[11px] uppercase tracking-wider text-helios-text">{label}</span>
+        <span className="font-mono text-[12px] text-asu-gold">
           {lapTimeS.toFixed(2)} s{perLap ? "/lap" : ""}
         </span>
       </div>
@@ -508,8 +509,8 @@ function TelemetryCard({
             className="flex items-baseline gap-1"
             title="Mean axle-capacity margin while corner-limited: how much spare grip the NON-limiting axle holds. loose = rear axle limits (front has spare); push = front limits. Small % = nearly neutral."
           >
-            <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">balance</span>
-            <span className="font-mono text-[13px] tabular-nums text-[#FFC627]">
+            <span className="text-[9px] uppercase tracking-wider text-helios-muted">balance</span>
+            <span className="font-mono text-[13px] tabular-nums text-asu-gold">
               {Math.abs(tm.balanceMargin) < 0.015
                 ? "neutral"
                 : tm.balanceMargin > 0
@@ -529,8 +530,8 @@ function GearUsageBar({ frac }: { frac: number[] }) {
   const total = frac.reduce((a, b) => a + b, 0) || 1;
   return (
     <div className="mt-2.5">
-      <div className="mb-1 text-[8px] uppercase tracking-wider text-[#5A5F66]">time in gear</div>
-      <div className="flex h-3 w-full overflow-hidden rounded-sm border border-[#2A2C32]">
+      <div className="mb-1 text-[8px] uppercase tracking-wider text-helios-muted">time in gear</div>
+      <div className="flex h-3 w-full overflow-hidden rounded-sm border border-helios-line">
         {frac.map((f, i) => {
           const pct = (f / total) * 100;
           if (pct < 0.5) return null;
@@ -561,18 +562,18 @@ function EventsSection({
 }) {
   const set = (patch: Partial<ReferenceBaseline>) => onBaseline({ ...baseline, ...patch });
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">FSAE events — projected</span>
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex items-center justify-between border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">FSAE events — projected</span>
         <button
           type="button"
           onClick={() => onBaseline(REFERENCE_2026)}
-          className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line px-2 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           Load 2026 reference
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2 border-b border-[#2A2C32] p-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 border-b border-helios-line p-3 sm:grid-cols-4">
         <BaselineField label="accel Tmin (s)" value={baseline.accelTMin} onChange={(n) => set({ accelTMin: n })} />
         <BaselineField label="autocross Tmin (s)" value={baseline.autocrossTMin} onChange={(n) => set({ autocrossTMin: n })} />
         <BaselineField label="enduro Tmin/lap (s)" value={baseline.enduranceTMin} onChange={(n) => set({ enduranceTMin: n })} />
@@ -584,52 +585,52 @@ function EventsSection({
       {events ? (
         <>
           <table className="w-full text-left font-mono text-[11px]">
-            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+            <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
               <tr className="[&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
                 <th>event</th>
                 <th>sim metric</th>
                 <th className="text-right">proj. points</th>
               </tr>
             </thead>
-            <tbody className="[&>tr]:border-t [&>tr]:border-[#16171B] [&>tr>td]:px-3 [&>tr>td]:py-1.5">
+            <tbody className="[&>tr]:border-t [&>tr]:border-helios-panel [&>tr>td]:px-3 [&>tr>td]:py-1.5">
               <tr>
-                <td className="text-[#9097A0]">Acceleration</td>
+                <td className="text-helios-dim">Acceleration</td>
                 <td>{events.accel.timeS.toFixed(3)} s</td>
-                <td className="text-right text-[#D8DCE2]">{ptsStr(events.accel.points)} <span className="text-[#5A5F66]">/ 100</span></td>
+                <td className="text-right text-helios-text">{ptsStr(events.accel.points)} <span className="text-helios-muted">/ 100</span></td>
               </tr>
               <tr>
-                <td className="text-[#9097A0]">Autocross</td>
+                <td className="text-helios-dim">Autocross</td>
                 <td>{events.autocross.lapTimeS.toFixed(2)} s/lap</td>
-                <td className="text-right text-[#D8DCE2]">{ptsStr(events.autocross.points)} <span className="text-[#5A5F66]">/ 125</span></td>
+                <td className="text-right text-helios-text">{ptsStr(events.autocross.points)} <span className="text-helios-muted">/ 125</span></td>
               </tr>
               <tr>
-                <td className="text-[#9097A0]">Endurance</td>
+                <td className="text-helios-dim">Endurance</td>
                 <td>
                   {events.endurance.lapTimeS.toFixed(2)} s/lap ·{" "}
                   {(events.endurance.co2KgPerLap * 1000).toFixed(0)} g CO₂/lap
                 </td>
-                <td className="text-right text-[#D8DCE2]">{ptsStr(events.endurance.points)} <span className="text-[#5A5F66]">/ 275</span></td>
+                <td className="text-right text-helios-text">{ptsStr(events.endurance.points)} <span className="text-helios-muted">/ 275</span></td>
               </tr>
               <tr>
-                <td className="text-[#9097A0]">Efficiency</td>
+                <td className="text-helios-dim">Efficiency</td>
                 <td>factor {events.efficiency.factor != null ? events.efficiency.factor.toFixed(3) : "—"}</td>
-                <td className="text-right text-[#D8DCE2]">{ptsStr(events.efficiency.points)} <span className="text-[#5A5F66]">/ 100</span></td>
+                <td className="text-right text-helios-text">{ptsStr(events.efficiency.points)} <span className="text-helios-muted">/ 100</span></td>
               </tr>
-              <tr className="bg-[#16171B]">
-                <td className="text-[#D8DCE2]">Total (modeled)</td>
-                <td className="text-[#5A5F66]">skidpad not modeled</td>
-                <td className="text-right text-[13px] text-[#FFC627]">
+              <tr className="bg-helios-panel">
+                <td className="text-helios-text">Total (modeled)</td>
+                <td className="text-helios-muted">skidpad not modeled</td>
+                <td className="text-right text-[13px] text-asu-gold">
                   {events.totalPoints != null ? events.totalPoints.toFixed(1) : "—"}
                 </td>
               </tr>
             </tbody>
           </table>
-          <p className="px-3 py-2 text-[10px] text-[#5A5F66]">
+          <p className="px-3 py-2 text-[10px] text-helios-muted">
             Autocross 2026 ({AX_LEN_M.toFixed(0)} m, flat-out) and Endurance 2026 ({EN_LEN_KM.toFixed(2)} km/lap, race-paced) — real 2026 layouts. Model calibrated to SDM26's autocross (42.9 s) and the field's endurance/efficiency (Mines CBR600RR/E85). Lap times are estimates; points project against the 2026 field anchors above.
           </p>
         </>
       ) : (
-        <p className="p-4 text-[11px] text-[#5A5F66]">Select a study with a torque curve.</p>
+        <p className="p-4 text-[11px] text-helios-muted">Select a study with a torque curve.</p>
       )}
     </section>
   );
@@ -646,7 +647,7 @@ function BaselineField({
 }) {
   return (
     <label className="flex flex-col gap-0.5">
-      <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">{label}</span>
+      <span className="text-[9px] uppercase tracking-wider text-helios-muted">{label}</span>
       <input
         type="number"
         step={0.01}
@@ -656,7 +657,7 @@ function BaselineField({
           const n = parseFloat(e.target.value);
           onChange(Number.isFinite(n) ? n : null);
         }}
-        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+        className="w-full rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none"
       />
     </label>
   );
@@ -665,8 +666,8 @@ function BaselineField({
 function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <span className="flex items-baseline gap-1">
-      <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">{label}</span>
-      <span className={"font-mono tabular-nums " + (highlight ? "text-[13px] text-[#FFC627]" : "text-[11px] text-[#D8DCE2]")}>
+      <span className="text-[9px] uppercase tracking-wider text-helios-muted">{label}</span>
+      <span className={"font-mono tabular-nums " + (highlight ? "text-[13px] text-asu-gold" : "text-[11px] text-helios-text")}>
         {value}
       </span>
     </span>
@@ -738,20 +739,20 @@ function VehicleEditor({
   const tire = vehicle.tire;
 
   return (
-    <section className="mb-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Vehicle setup — {vehicle.name}</span>
+    <section className="mb-3 rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex items-center justify-between border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Vehicle setup — {vehicle.name}</span>
         <button
           type="button"
           onClick={() => onChange(resetTo)}
-          className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           Reset to {resetTo.name}
         </button>
       </div>
       {/* Measured tire model (.tir) + team data folder. Proprietary data —
           lives only in local app state, never in the repo. */}
-      <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
+      <div className="flex flex-wrap items-end gap-3 border-b border-helios-line px-3 py-2">
         <button
           type="button"
           onClick={() => void importTeamData()}
@@ -759,7 +760,7 @@ function VehicleEditor({
             "Pick the team Simulation Data folder — loads tire/*.tir and aero/<car>-aero-map.csv automatically." +
             (rememberedDir ? `\nRemembered: ${rememberedDir}` : "")
           }
-          className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+          className="rounded-sm border border-asu-gold/50 px-2 py-1 text-[10px] uppercase tracking-wider text-asu-gold hover:bg-asu-gold/10"
         >
           Load team data…
         </button>
@@ -768,7 +769,7 @@ function VehicleEditor({
             type="button"
             onClick={() => void importTeamData(rememberedDir)}
             title={`Re-apply from ${rememberedDir}`}
-            className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+            className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
           >
             ↻ reload
           </button>
@@ -776,7 +777,7 @@ function VehicleEditor({
         <button
           type="button"
           onClick={() => void importTir()}
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           {tire ? "Replace tire model…" : "Import tire model (.tir)…"}
         </button>
@@ -786,7 +787,7 @@ function VehicleEditor({
               {tire.label}
             </span>
             <span
-              className="pb-1 font-mono text-[10px] tabular-nums text-[#D8DCE2]"
+              className="pb-1 font-mono text-[10px] tabular-nums text-helios-text"
               title="Peak friction at static per-tire load, surface scale included. Sanity-check against expectations — a .tir fit is only as good as its data."
             >
               μ_lat {tirMuLat(tire, fzStatic).toFixed(2)} · μ_long {tirMuLong(tire, fzStatic).toFixed(2)} @ static
@@ -810,14 +811,14 @@ function VehicleEditor({
                 const { tire: _drop, ...rest } = vehicle;
                 onChange(rest as VehicleConfig);
               }}
-              className="mb-1 rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+              className="mb-1 rounded-sm border border-helios-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-helios-muted hover:border-[#FF5252] hover:text-[#FF5252]"
             >
               remove
             </button>
           </>
         )}
         {!tire && (
-          <span className="pb-1 text-[9px] text-[#5A5F66]">
+          <span className="pb-1 text-[9px] text-helios-muted">
             no tire model — using μ lat/long + load-sensitivity below
           </span>
         )}
@@ -829,8 +830,8 @@ function VehicleEditor({
           calculators. RSD front is the ARB-setting knob (SDM26 combos span
           ~0.38–0.60). */}
       {vehicle.roll && (
-        <div className="flex flex-wrap items-end gap-3 border-b border-[#2A2C32] px-3 py-2">
-          <span className="pb-1 text-[9px] uppercase tracking-wider text-[#5A5F66]">roll balance</span>
+        <div className="flex flex-wrap items-end gap-3 border-b border-helios-line px-3 py-2">
+          <span className="pb-1 text-[9px] uppercase tracking-wider text-helios-muted">roll balance</span>
           <NumField label="RSD front" value={vehicle.roll.rsdFront} step={0.005}
             onChange={(n) => set({ roll: { ...vehicle.roll!, rsdFront: n } })} />
           <NumField label="roll arm" unit="m" value={vehicle.roll.hRollArmM} step={0.005}
@@ -841,7 +842,7 @@ function VehicleEditor({
             onChange={(n) => set({ roll: { ...vehicle.roll!, rcRearM: n } })} />
           <NumField label="aero front" value={vehicle.roll.aeroFrontFrac} step={0.01}
             onChange={(n) => set({ roll: { ...vehicle.roll!, aeroFrontFrac: n } })} />
-          <span className="pb-1 text-[9px] text-[#5A5F66]" title="Per-axle cornering limit active: the lap sim saturates whichever axle gives up first (see lap telemetry balance readout)">
+          <span className="pb-1 text-[9px] text-helios-muted" title="Per-axle cornering limit active: the lap sim saturates whichever axle gives up first (see lap telemetry balance readout)">
             per-axle limit active
           </span>
         </div>
@@ -861,7 +862,7 @@ function VehicleEditor({
               doubling = (1 − 2^(−sens))·100 (see loadSensitivity.ts). */}
           {!tire && Number.isFinite(vehicle.tireLoadSensitivity) && (
             <span
-              className="mb-1.5 whitespace-nowrap font-mono text-[9px] tabular-nums text-[#9097A0]"
+              className="mb-1.5 whitespace-nowrap font-mono text-[9px] tabular-nums text-helios-dim"
               title="μ drop per load DOUBLING implied by the load-sensitivity exponent — the affordance the lap-sim VD sweep uses"
             >
               ≈ {dropoffPctFromSens(vehicle.tireLoadSensitivity).toFixed(1)}% µ drop/doubling
@@ -878,16 +879,16 @@ function VehicleEditor({
         <NumField label="rev limit" unit="rpm" value={vehicle.revLimitRpm} step={100} onChange={(n) => set({ revLimitRpm: n })} />
         <NumField label="shift time" unit="s" value={vehicle.shiftTimeS} step={0.01} onChange={(n) => set({ shiftTimeS: n })} />
       </div>
-      <div className="border-t border-[#2A2C32] px-3 py-2">
+      <div className="border-t border-helios-line px-3 py-2">
         <div className="mb-2 flex flex-wrap items-end gap-3">
           <NumField label="final drive" value={vehicle.finalDrive} step={0.05} onChange={(n) => set({ finalDrive: n })} />
           <NumField label="primary" value={vehicle.primaryReduction} step={0.001} onChange={(n) => set({ primaryReduction: n })} />
           <NumField label="tire r" unit="m" value={vehicle.tireRadiusM} step={0.005} min={0.01} onChange={(n) => set({ tireRadiusM: n })} />
-          <span className="pb-1.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">
+          <span className="pb-1.5 text-[9px] uppercase tracking-wider text-helios-muted">
             top {(topSpeedMps(vehicle) * 3.6).toFixed(0)} km/h
           </span>
         </div>
-        <div className="mb-1 text-[9px] uppercase tracking-wider text-[#5A5F66]">gearbox ratios (1st → top)</div>
+        <div className="mb-1 text-[9px] uppercase tracking-wider text-helios-muted">gearbox ratios (1st → top)</div>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           {vehicle.gearRatios.map((r, i) => (
             <NumField
@@ -932,7 +933,7 @@ function NumField({
       className={"flex flex-col gap-0.5" + (disabled ? " opacity-40" : "")}
       title={disabled ? disabledHint : undefined}
     >
-      <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">
+      <span className="text-[9px] uppercase tracking-wider text-helios-muted">
         {label}
         {unit ? ` (${unit})` : ""}
       </span>
@@ -946,7 +947,7 @@ function NumField({
           const n = parseFloat(e.target.value);
           if (Number.isFinite(n) && (min === undefined || n >= min)) onChange(n);
         }}
-        className="w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:cursor-not-allowed"
+        className="w-full rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none disabled:cursor-not-allowed"
       />
     </label>
   );
@@ -969,7 +970,7 @@ function TireMuChart({ tire, fzStatic }: { tire: NonNullable<VehicleConfig["tire
     return { xs, lat, long };
   }, [tire]);
   return (
-    <div className="border-b border-[#2A2C32] px-2 pb-1">
+    <div className="border-b border-helios-line px-2 pb-1">
       <LinePlot
         title="tire peak μ vs load (track-scaled)"
         xs={data.xs}
@@ -1014,23 +1015,23 @@ function SensitivitySection({
   const fmtD = (d: number, unit: string, invertGood = false) => {
     const good = invertGood ? d > 0 : d < 0;
     return (
-      <span className={good ? "text-[#A5D6A7]" : d === 0 ? "text-[#5A5F66]" : "text-[#FF8A65]"}>
+      <span className={good ? "text-[#A5D6A7]" : d === 0 ? "text-helios-muted" : "text-[#FF8A65]"}>
         {d >= 0 ? "+" : ""}{d.toFixed(unit === "pts" ? 1 : 3)} {unit}
       </span>
     );
   };
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Design sensitivities</span>
-        <span className="text-[9px] text-[#5A5F66]">
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex flex-wrap items-center gap-2 border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">Design sensitivities</span>
+        <span className="text-[9px] text-helios-muted">
           one realistic step per lever, full scoring chain, ranked by payoff
         </span>
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="ml-auto rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           {open ? "Hide" : "Analyze"}
         </button>
@@ -1039,7 +1040,7 @@ function SensitivitySection({
         <div className="p-2">
           <table className="w-full text-left font-mono text-[10px]">
             <caption className="sr-only">Design levers ranked by projected points gained</caption>
-            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+            <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
               <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
                 <th>change</th>
                 <th className="text-right">Δ autocross</th>
@@ -1050,8 +1051,8 @@ function SensitivitySection({
             </thead>
             <tbody>
               {result.rows.map((r: SensitivityRow) => (
-                <tr key={r.key} className="border-t border-[#16171B] text-[#9097A0]">
-                  <td className="px-2 py-1 text-[#D8DCE2]">{r.label}</td>
+                <tr key={r.key} className="border-t border-helios-panel text-helios-dim">
+                  <td className="px-2 py-1 text-helios-text">{r.label}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dAxS, "s")}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{fmtD(r.dEnS, "s")}</td>
                   <td className="px-2 py-1 text-right tabular-nums">
@@ -1066,7 +1067,7 @@ function SensitivitySection({
               ))}
             </tbody>
           </table>
-          <p className="px-2 pt-1.5 text-[9px] leading-tight text-[#5A5F66]">
+          <p className="px-2 pt-1.5 text-[9px] leading-tight text-helios-muted">
             One lever at a time vs the current setup (no interactions). Green = improvement.
             {!havePts && " Set a reference baseline above to rank in points instead of seconds."}
             {" "}Grip step scales the {vehicle.tire ? "imported tire's surface scales" : "μ constants"} —
@@ -1116,17 +1117,17 @@ function FdOptimizerSection({
     : null;
 
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Final-drive optimizer</span>
-        <span className="text-[9px] text-[#5A5F66]">
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex flex-wrap items-center gap-2 border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">Final-drive optimizer</span>
+        <span className="text-[9px] text-helios-muted">
           sprocket sweep · current FD {vehicle.finalDrive.toFixed(2)} · same scoring chain as the events table
         </span>
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="ml-auto rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           {open ? "Hide" : "Sweep sprockets"}
         </button>
@@ -1148,7 +1149,7 @@ function FdOptimizerSection({
               xLabel="final drive (rear/front)" yLabel="pts" height={260}
             />
           ) : (
-            <p className="px-2 py-3 text-[10px] text-[#5A5F66]">
+            <p className="px-2 py-3 text-[10px] text-helios-muted">
               No reference baseline → no points to rank. Set one in the events table above;
               the table below ranks by endurance lap time meanwhile.
             </p>
@@ -1156,7 +1157,7 @@ function FdOptimizerSection({
 
           <table className="w-full text-left font-mono text-[10px]">
             <caption className="sr-only">Top final-drive options ranked by total FSAE points</caption>
-            <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+            <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
               <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
                 <th>FD</th>
                 <th>teeth (rear/front)</th>
@@ -1180,8 +1181,8 @@ function FdOptimizerSection({
                   <tr
                     key={r.fd}
                     className={
-                      "border-t border-[#16171B] " +
-                      (isBest ? "text-[#FFC627]" : isCurrent ? "text-[#4FC3F7]" : "text-[#9097A0]")
+                      "border-t border-helios-panel " +
+                      (isBest ? "text-asu-gold" : isCurrent ? "text-[#4FC3F7]" : "text-helios-dim")
                     }
                   >
                     <td className="px-2 py-1 tabular-nums">
@@ -1203,7 +1204,7 @@ function FdOptimizerSection({
               })}
             </tbody>
           </table>
-          <p className="px-2 pb-1 text-[9px] leading-tight text-[#5A5F66]">
+          <p className="px-2 pb-1 text-[9px] leading-tight text-helios-muted">
             Ratios cover 520-chain sprockets {FD_RANGE_NOTE}. Identical ratios list every tooth pair that
             produces them. Scores use the vehicle, baseline, and fuel exactly as configured above.
           </p>

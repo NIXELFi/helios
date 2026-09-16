@@ -35,10 +35,10 @@ export function NumericReadoutRender(props: WidgetRenderProps<NumericReadoutConf
   const color = thresholdColor(value, config.warn, config.alarm, config.warnLow, config.alarmLow);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-[#16171B] p-4">
-      <div className="text-xs uppercase tracking-wider text-[#9097A0]">{config.channelId}</div>
+    <div className="flex flex-col items-center justify-center h-full bg-helios-panel p-4">
+      <div className="text-xs uppercase tracking-wider text-helios-dim">{config.channelId}</div>
       <div className="font-mono-num text-5xl mt-1" style={{ color }}>{display}</div>
-      <div className="text-xs text-[#9097A0] mt-1">{config.units}</div>
+      <div className="text-xs text-helios-dim mt-1">{config.units}</div>
     </div>
   );
 }

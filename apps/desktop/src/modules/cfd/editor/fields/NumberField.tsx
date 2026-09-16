@@ -41,10 +41,10 @@ export function NumberField({ meta, value, error, onChange }: Props) {
           inputMode="decimal"
           aria-label={meta.label}
           className={
-            "w-full rounded-sm border bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:outline-none " +
+            "w-full rounded-sm border bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:outline-none " +
             (error
               ? "border-red-500/60 focus:border-red-400"
-              : "border-[#2A2C32] focus:border-[#FFC627]")
+              : "border-helios-line focus:border-asu-gold")
           }
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -56,12 +56,12 @@ export function NumberField({ meta, value, error, onChange }: Props) {
             }
           }}
         />
-        {meta.unit && <span className="text-[10px] text-[#5A5F66]">{meta.unit}</span>}
+        {meta.unit && <span className="text-[10px] text-helios-muted">{meta.unit}</span>}
       </div>
       {error ? (
         <div className="text-[10px] text-red-300">{error}</div>
       ) : rangeHint ? (
-        <div className="text-[10px] text-[#5A5F66]">{rangeHint}</div>
+        <div className="text-[10px] text-helios-muted">{rangeHint}</div>
       ) : null}
     </div>
   );

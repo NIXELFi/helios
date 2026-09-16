@@ -84,7 +84,7 @@ export function TitleBar({ context }: { context: string | null }) {
   return (
     <div
       onMouseDown={handleDragMouseDown}
-      className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-[#15161B] to-[#0E0E10]"
+      className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-helios-panel to-helios-base"
     >
       <div className="flex items-center gap-[9px] pl-[13px]">
         <img

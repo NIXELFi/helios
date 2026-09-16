@@ -6,6 +6,7 @@ import { IconExternalLink } from "@tabler/icons-react";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { useEffect, useRef } from "react";
 
+import { tc } from "@helios/ui";
 const CARD_W = 240;
 
 export interface TaskPeekCardProps {
@@ -53,7 +54,7 @@ export function TaskPeekCard({ task, x, y, onClose, onOpenEditor }: TaskPeekCard
     >
       <div
         className="flex items-start gap-2 border-l-[3px] pl-2"
-        style={{ borderLeftColor: task.subteam.color ?? "#6B7280" }}
+        style={{ borderLeftColor: task.subteam.color ?? tc("dim") }}
       >
         <p className="text-sm font-medium leading-snug text-helios-text">{task.title}</p>
       </div>
@@ -64,7 +65,7 @@ export function TaskPeekCard({ task, x, y, onClose, onOpenEditor }: TaskPeekCard
             <span
               aria-hidden
               className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: task.subteam.color ?? "#6B7280" }}
+              style={{ backgroundColor: task.subteam.color ?? tc("dim") }}
             />
             {task.subteam.name}
           </span>

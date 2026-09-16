@@ -8,6 +8,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 
+import { tc } from "@helios/ui";
 interface Props {
   title: string;
   /** Cell-center positions on the x axis. Each pair (V[i], P[i]) is
@@ -23,10 +24,10 @@ interface Props {
   height?: number;
 }
 
-const AXIS_COLOR = "#5A5F66";
-const GRID_COLOR = "#23252B";
-const LABEL_COLOR = "#9097A0";
-const TICK_COLOR = "#5A5F66";
+const AXIS_COLOR = tc("muted");
+const GRID_COLOR = tc("grid");
+const LABEL_COLOR = tc("dim");
+const TICK_COLOR = tc("muted");
 
 export function PvLoopChart({
   title, V, P, vUnits = "cc", pUnits = "bar",
@@ -170,9 +171,9 @@ export function PvLoopChart({
 
   return (
     <div ref={wrapRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
-        <span className="flex items-center gap-1 text-[10px] text-[#5A5F66]">
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">{title}</div>
+        <span className="flex items-center gap-1 text-[10px] text-helios-muted">
           <span className="inline-block h-[2px] w-3" style={{ background: color }} />
           P-V
         </span>

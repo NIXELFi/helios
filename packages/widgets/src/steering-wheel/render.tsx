@@ -4,6 +4,7 @@ import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import wheelAssetUrl from "./assets/wheel.png";
 
+import { tc } from "@helios/ui";
 // Module-level singleton — every instance reuses the same decoded bitmap.
 const wheelImage: HTMLImageElement = new Image();
 let wheelImageReady = false;
@@ -70,7 +71,7 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
     const r = Math.max(8, Math.min(w, h) * 0.36);
 
     // Limit ring (faint) — shows where ±maxAngle lives, doubles as scale.
-    ctx.strokeStyle = "#23252B";
+    ctx.strokeStyle = tc("grid");
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
@@ -86,7 +87,7 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
       ctx.lineTo(cx + Math.cos(a) * (r + 12), cy + Math.sin(a) * (r + 12));
       ctx.stroke();
     };
-    drawTickAt(0, "#5A5F66");                            // straight ahead
+    drawTickAt(0, tc("muted"));                            // straight ahead
     drawTickAt(-config.maxAngle, "#FFB800");             // left limit
     drawTickAt(config.maxAngle, "#FFB800");              // right limit
 
@@ -104,7 +105,7 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
 
     // Numeric readout below the wheel.
     const overLimit = v !== null && Math.abs(displayAngle) > config.maxAngle;
-    ctx.fillStyle = overLimit ? "#EF5350" : "#D8DCE2";
+    ctx.fillStyle = overLimit ? "#EF5350" : tc("text");
     ctx.font = `${Math.max(14, r * 0.35)}px "JetBrains Mono", ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -113,7 +114,7 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
     ctx.fillText(text, cx, cy + r + 24);
 
     // Title strip (channel id) + L / R labels under the rim
-    ctx.fillStyle = "#7B8088";
+    ctx.fillStyle = tc("dim");
     ctx.font = '10px Inter, system-ui, sans-serif';
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(config.channelId.toUpperCase(), 6, 6);
@@ -134,5 +135,5 @@ export function SteeringWheelRender(props: WidgetRenderProps<SteeringWheelConfig
   // closure (with up-to-date config / channelId / maxAngle / invert).
   drawRef.current = draw;
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }

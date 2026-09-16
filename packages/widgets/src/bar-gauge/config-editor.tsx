@@ -13,7 +13,7 @@ const numericFields: Array<[keyof BarGaugeConfig, string]> = [
 
 export function BarGaugeConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<BarGaugeConfig>) {
   return (
-    <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-1 p-2 text-xs text-helios-text">
       <label className="flex justify-between items-center">
         <span>channelId</span>
         <ChannelPicker
@@ -25,20 +25,20 @@ export function BarGaugeConfigEditor({ config, onChange, availableChannels }: Wi
       </label>
       <label className="flex justify-between">
         <span>units</span>
-        <input className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+        <input className="bg-helios-base border border-helios-line px-1 w-32"
           value={config.units} onChange={(e) => onChange({ ...config, units: e.target.value })} />
       </label>
       {numericFields.map(([k, label]) => (
         <label key={k} className="flex justify-between">
           <span>{label}</span>
-          <input type="number" className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+          <input type="number" className="bg-helios-base border border-helios-line px-1 w-32"
             value={config[k] === undefined ? "" : String(config[k])}
             onChange={(e) => onChange({ ...config, [k]: e.target.value === "" ? undefined : Number(e.target.value) } as BarGaugeConfig)} />
         </label>
       ))}
       <label className="flex justify-between">
         <span>orientation</span>
-        <select className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+        <select className="bg-helios-base border border-helios-line px-1 w-32"
           value={config.orientation}
           onChange={(e) => onChange({ ...config, orientation: e.target.value as BarGaugeConfig["orientation"] })}>
           <option value="vertical">vertical</option>

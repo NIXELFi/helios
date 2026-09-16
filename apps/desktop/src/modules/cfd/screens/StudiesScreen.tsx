@@ -226,18 +226,18 @@ export function StudiesScreen() {
 
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Studies</div>
-          <p className="text-[10px] text-[#5A5F66]">
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Studies</div>
+          <p className="text-[10px] text-helios-muted">
             {state.loadedConfig
-              ? <>Using <span className="text-[#D8DCE2]">{basename(state.loadedConfig.path)}</span></>
+              ? <>Using <span className="text-helios-text">{basename(state.loadedConfig.path)}</span></>
               : <>Open a config first.</>}
           </p>
         </div>
         <button
           type="button"
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-50"
           disabled={importBusy}
           onClick={() => void importJson()}
         >
@@ -246,7 +246,7 @@ export function StudiesScreen() {
         <ReportButton label="Full report (PDF)" />
         <button
           type="button"
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-50"
           disabled={studies.length === 0 || exportAllBusy}
           onClick={() => void exportAllJson()}
         >
@@ -254,7 +254,7 @@ export function StudiesScreen() {
         </button>
         <button
           type="button"
-          className="rounded-sm bg-[#FFC627] px-2 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
           disabled={noConfig}
           onClick={openNewStudy}
         >
@@ -270,13 +270,13 @@ export function StudiesScreen() {
 
       <div className="flex-1 min-h-0 overflow-auto">
         {studies.length === 0 ? (
-          <div className="m-8 rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-8 text-center text-[11px] text-[#5A5F66]">
+          <div className="m-8 rounded-sm border border-helios-line bg-helios-base p-8 text-center text-[11px] text-helios-muted">
             No studies yet. Click "New study…" to start one.
           </div>
         ) : (
           <table className="w-full text-left font-mono text-[11px]">
-            <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
-              <tr className="border-b border-[#2A2C32] [&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
+            <thead className="bg-helios-deep text-[10px] uppercase tracking-wider text-helios-muted">
+              <tr className="border-b border-helios-line [&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
                 <SortHeader label="Kind" sortKey="kind" sort={sort} onSort={onHeaderClick} />
                 <SortHeader label="Name" sortKey="name" sort={sort} onSort={onHeaderClick} />
                 <th>Params</th>
@@ -367,7 +367,7 @@ export function StudiesScreen() {
           className={
             "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border px-4 py-3 text-sm shadow-lg " +
             (toast.ok
-              ? "border-[#FFC627]/40 bg-[#16171B] text-[#D8DCE2]"
+              ? "border-asu-gold/40 bg-helios-panel text-helios-text"
               : "border-red-500/40 bg-red-950/95 text-red-100")
           }
         >
@@ -375,7 +375,7 @@ export function StudiesScreen() {
           <button
             type="button"
             onClick={() => setToast(null)}
-            className="mt-1.5 text-xs text-[#9097A0] underline underline-offset-2 hover:text-[#D8DCE2]"
+            className="mt-1.5 text-xs text-helios-dim underline underline-offset-2 hover:text-helios-text"
           >
             Dismiss
           </button>
@@ -404,8 +404,8 @@ function SortHeader({
         type="button"
         onClick={() => onSort(sortKey)}
         className={
-          "uppercase tracking-wider hover:text-[#D8DCE2] " +
-          (active ? "text-[#FFC627]" : "text-[#5A5F66]")
+          "uppercase tracking-wider hover:text-helios-text " +
+          (active ? "text-asu-gold" : "text-helios-muted")
         }
       >
         {label}
@@ -454,9 +454,9 @@ function StudyRow({
     progressText = `${done} / ${p.nTrials}`;
   }
   return (
-    <tr className={"border-t border-[#16171B] " + (isActive ? "bg-[#16171B] text-[#D8DCE2]" : "text-[#9097A0] hover:bg-[#16171B]/50")}>
-      <td className="px-3 py-1.5 uppercase tracking-wider text-[10px] text-[#D8DCE2]">{kindLabel}</td>
-      <td className="group px-3 py-1.5 text-[#9097A0]" title={study.configPath}>
+    <tr className={"border-t border-helios-panel " + (isActive ? "bg-helios-panel text-helios-text" : "text-helios-dim hover:bg-helios-panel/50")}>
+      <td className="px-3 py-1.5 uppercase tracking-wider text-[10px] text-helios-text">{kindLabel}</td>
+      <td className="group px-3 py-1.5 text-helios-dim" title={study.configPath}>
         <StudyNameEditor
           display={studyName(study)}
           customName={study.name}
@@ -464,24 +464,24 @@ function StudyRow({
           className="max-w-[220px]"
         />
         {study.name && (
-          <span className="ml-1.5 text-[9px] text-[#5A5F66]">{basename(study.configPath)}</span>
+          <span className="ml-1.5 text-[9px] text-helios-muted">{basename(study.configPath)}</span>
         )}
       </td>
-      <td className="px-3 py-1.5 text-[#9097A0]">{paramsText}</td>
+      <td className="px-3 py-1.5 text-helios-dim">{paramsText}</td>
       <td className="px-3 py-1.5">
         <StatusBadge status={study.status} />
       </td>
-      <td className="px-3 py-1.5 tabular-nums text-[#D8DCE2]">{bestPeakText(study)}</td>
+      <td className="px-3 py-1.5 tabular-nums text-helios-text">{bestPeakText(study)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums">{progressText}</td>
-      <td className="px-3 py-1.5 text-[#5A5F66]">{new Date(study.startedAt).toLocaleTimeString()}</td>
+      <td className="px-3 py-1.5 text-helios-muted">{new Date(study.startedAt).toLocaleTimeString()}</td>
       <td className="px-3 py-1.5 text-right text-[10px] uppercase tracking-wider">
         <div className="flex items-center justify-end gap-2">
-          <button type="button" className="px-1 text-[#FFC627] hover:underline" onClick={onView}>View</button>
+          <button type="button" className="px-1 text-asu-gold hover:underline" onClick={onView}>View</button>
           {study.status === "running" && (
             <button type="button" className="px-1 text-red-300 hover:underline" onClick={onCancel}>Cancel</button>
           )}
           {study.status !== "running" && study.status !== "cancelling" && (
-            <button type="button" className="px-1 text-[#5A5F66] hover:text-[#9097A0] hover:underline" onClick={onDelete}>Delete</button>
+            <button type="button" className="px-1 text-helios-muted hover:text-helios-dim hover:underline" onClick={onDelete}>Delete</button>
           )}
           <ExportMenu items={exportItems} align="right" triggerLabel="Export" />
         </div>
@@ -492,11 +492,11 @@ function StudyRow({
 
 function StatusBadge({ status }: { status: Study["status"] }) {
   const styles: Record<Study["status"], string> = {
-    idle:        "border-[#2A2C32] text-[#5A5F66]",
-    running:     "border-[#FFC627]/40 text-[#FFC627]",
+    idle:        "border-helios-line text-helios-muted",
+    running:     "border-asu-gold/40 text-asu-gold",
     cancelling:  "border-amber-500/40 text-amber-300",
     done:        "border-green-500/40 text-green-300",
-    cancelled:   "border-[#2A2C32] text-[#5A5F66]",
+    cancelled:   "border-helios-line text-helios-muted",
     error:       "border-red-500/40 text-red-300",
   };
   return (
@@ -521,28 +521,28 @@ function KindPicker({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-[min(90vw,520px)] rounded-sm border border-[#2A2C32] bg-[#0E0E10] text-[#D8DCE2] shadow-xl">
-        <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-          <div id="cfd-kind-title" className="text-[11px] uppercase tracking-wider text-[#FFC627]">New study</div>
-          <button type="button" onClick={onClose} className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#D8DCE2]">Esc</button>
+      <div className="w-[min(90vw,520px)] rounded-sm border border-helios-line bg-helios-base text-helios-text shadow-xl">
+        <div className="flex items-center justify-between border-b border-helios-line px-3 py-1.5">
+          <div id="cfd-kind-title" className="text-[11px] uppercase tracking-wider text-asu-gold">New study</div>
+          <button type="button" onClick={onClose} className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-helios-text">Esc</button>
         </div>
         <div className="p-3">
-          <p className="text-[11px] text-[#9097A0]">Pick a study kind. More kinds are landing in later phases.</p>
+          <p className="text-[11px] text-helios-dim">Pick a study kind. More kinds are landing in later phases.</p>
           <div className="mt-3 grid grid-cols-1 gap-2">
             <button type="button" onClick={onPickSingleRpm}
-              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-3 text-left transition hover:border-[#FFC627]">
-              <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">Single-RPM run</div>
-              <div className="mt-0.5 text-[10px] text-[#5A5F66]">Run a fixed RPM for N cycles. Phase 1.</div>
+              className="rounded-sm border border-helios-line bg-helios-deep p-3 text-left transition hover:border-asu-gold">
+              <div className="text-[11px] uppercase tracking-wider text-helios-text">Single-RPM run</div>
+              <div className="mt-0.5 text-[10px] text-helios-muted">Run a fixed RPM for N cycles. Phase 1.</div>
             </button>
             <button type="button" onClick={onPickSweep}
-              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-3 text-left transition hover:border-[#FFC627]">
-              <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">RPM sweep</div>
-              <div className="mt-0.5 text-[10px] text-[#5A5F66]">Sweep RPM across a list or range; per-RPM convergence stopping.</div>
+              className="rounded-sm border border-helios-line bg-helios-deep p-3 text-left transition hover:border-asu-gold">
+              <div className="text-[11px] uppercase tracking-wider text-helios-text">RPM sweep</div>
+              <div className="mt-0.5 text-[10px] text-helios-muted">Sweep RPM across a list or range; per-RPM convergence stopping.</div>
             </button>
             <button type="button" onClick={onPickOptimization}
-              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-3 text-left transition hover:border-[#FFC627]">
-              <div className="text-[11px] uppercase tracking-wider text-[#D8DCE2]">Optimization</div>
-              <div className="mt-0.5 text-[10px] text-[#5A5F66]">Search parameter space (LHS / random) to optimize an objective metric across an RPM list.</div>
+              className="rounded-sm border border-helios-line bg-helios-deep p-3 text-left transition hover:border-asu-gold">
+              <div className="text-[11px] uppercase tracking-wider text-helios-text">Optimization</div>
+              <div className="mt-0.5 text-[10px] text-helios-muted">Search parameter space (LHS / random) to optimize an objective metric across an RPM list.</div>
             </button>
           </div>
         </div>
@@ -585,10 +585,10 @@ function SingleRpmParamsModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="w-[min(90vw,520px)] rounded-sm border border-[#2A2C32] bg-[#0E0E10] text-[#D8DCE2] shadow-xl">
-        <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-          <div id="cfd-params-title" className="text-[11px] uppercase tracking-wider text-[#FFC627]">Single-RPM run</div>
-          <span className="text-[10px] text-[#5A5F66]" title={defaultPath}>{basename(defaultPath)}</span>
+      <div className="w-[min(90vw,520px)] rounded-sm border border-helios-line bg-helios-base text-helios-text shadow-xl">
+        <div className="flex items-center justify-between border-b border-helios-line px-3 py-1.5">
+          <div id="cfd-params-title" className="text-[11px] uppercase tracking-wider text-asu-gold">Single-RPM run</div>
+          <span className="text-[10px] text-helios-muted" title={defaultPath}>{basename(defaultPath)}</span>
         </div>
         <div className="p-3">
           <PresetPicker
@@ -596,25 +596,25 @@ function SingleRpmParamsModal({
             onChange={(ov, p) => { setPresetId(p.id); setOverrides(ov); }}
           />
           <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-[11px]">
-            <label htmlFor="cfd-rpm" className="uppercase tracking-wider text-[#5A5F66]">RPM</label>
+            <label htmlFor="cfd-rpm" className="uppercase tracking-wider text-helios-muted">RPM</label>
             <input id="cfd-rpm" type="number" min={500} max={20000} step={100}
               className={INPUT_CLS}
               value={rpm} onChange={(e) => setRpm(Number(e.target.value))} />
-            <label htmlFor="cfd-ncyc" className="uppercase tracking-wider text-[#5A5F66]">Max cycles</label>
+            <label htmlFor="cfd-ncyc" className="uppercase tracking-wider text-helios-muted">Max cycles</label>
             <input id="cfd-ncyc" type="number" min={1} max={200} step={1}
               className={INPUT_CLS}
               value={nCycles} onChange={(e) => setNCycles(Number(e.target.value))} />
-            <label htmlFor="cfd-junc" className="uppercase tracking-wider text-[#5A5F66]">Junction kind</label>
+            <label htmlFor="cfd-junc" className="uppercase tracking-wider text-helios-muted">Junction kind</label>
             <select id="cfd-junc" className={INPUT_CLS}
               value={junction} onChange={(e) => setJunction(e.target.value as JunctionKind)}>
               <option value="stagnation">Stagnation</option>
               <option value="characteristic">Characteristic</option>
             </select>
-            <label htmlFor="cfd-tol" className="uppercase tracking-wider text-[#5A5F66]">Convergence tol (IMEP)</label>
+            <label htmlFor="cfd-tol" className="uppercase tracking-wider text-helios-muted">Convergence tol (IMEP)</label>
             <input id="cfd-tol" type="number" min={0} max={1} step={0.0001}
               className={INPUT_CLS}
               value={tol} onChange={(e) => setTol(Number(e.target.value))} />
-            <label htmlFor="cfd-min" className="uppercase tracking-wider text-[#5A5F66]">Min cycles before conv.</label>
+            <label htmlFor="cfd-min" className="uppercase tracking-wider text-helios-muted">Min cycles before conv.</label>
             <input id="cfd-min" type="number" min={0} max={50} step={1}
               className={INPUT_CLS}
               value={minCycles} onChange={(e) => setMinCycles(Number(e.target.value))} />
@@ -625,11 +625,11 @@ function SingleRpmParamsModal({
           />
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onCancel}
-              className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-3 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]">
+              className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold">
               Cancel
             </button>
             <button type="button"
-              className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
               onClick={() => onStart({
                 rpm,
                 nCyclesMax: nCycles,

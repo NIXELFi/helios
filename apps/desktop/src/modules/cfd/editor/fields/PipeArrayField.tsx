@@ -30,13 +30,13 @@ export function PipeArrayField({
   title, rows, onChange, onAdd, onDuplicate, onRemove, minRows = 1,
 }: Props) {
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
         {title}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full font-mono text-[11px]">
-          <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
+          <thead className="bg-helios-deep text-[10px] uppercase tracking-wider text-helios-muted">
             <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
               <th className="text-right">#</th>
               <th>Name</th>
@@ -65,11 +65,11 @@ export function PipeArrayField({
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between border-t border-[#2A2C32] px-2 py-1">
-        <span className="text-[10px] text-[#5A5F66]">{rows.length} pipe{rows.length === 1 ? "" : "s"}</span>
+      <div className="flex items-center justify-between border-t border-helios-line px-2 py-1">
+        <span className="text-[10px] text-helios-muted">{rows.length} pipe{rows.length === 1 ? "" : "s"}</span>
         <button
           type="button"
-          className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
           onClick={onAdd}
         >
           + Pipe
@@ -80,7 +80,7 @@ export function PipeArrayField({
 }
 
 const cellInput =
-  "w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1.5 py-0.5 text-right font-mono text-[11px] text-[#D8DCE2] focus:outline-none focus:border-[#FFC627]";
+  "w-full rounded-sm border border-helios-line bg-helios-deep px-1.5 py-0.5 text-right font-mono text-[11px] text-helios-text focus:outline-none focus:border-asu-gold";
 const cellInputLeft = cellInput.replace("text-right", "text-left");
 
 function Row({
@@ -121,8 +121,8 @@ function Row({
   }
 
   return (
-    <tr className="border-t border-[#16171B]">
-      <td className="px-2 py-1 text-right text-[#5A5F66]">{index + 1}</td>
+    <tr className="border-t border-helios-panel">
+      <td className="px-2 py-1 text-right text-helios-muted">{index + 1}</td>
       <td className="px-2 py-1">
         <input
           type="text"
@@ -192,7 +192,7 @@ function Row({
       <td className="px-2 py-1 text-right">
         <button
           type="button"
-          className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+          className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-asu-gold"
           aria-label={`Duplicate pipe ${index + 1}`}
           onClick={onDuplicate}
         >
@@ -201,7 +201,7 @@ function Row({
         {onRemove && (
           <button
             type="button"
-            className="ml-2 text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-red-300"
+            className="ml-2 text-[10px] uppercase tracking-wider text-helios-muted hover:text-red-300"
             aria-label={`Remove pipe ${index + 1}`}
             onClick={onRemove}
           >

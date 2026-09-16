@@ -8,6 +8,7 @@ import {
   type ChannelStats,
 } from "./compute";
 
+import { tc } from "@helios/ui";
 export interface ValuesTableConfig {
   /** Channels to show, one row per entry, in this order. */
   channelIds: string[];
@@ -20,14 +21,14 @@ export interface ValuesTableConfig {
  *  positive (session above primary), green for negative, neutral when the
  *  delta rounds to zero at display precision. */
 const TINT_COLOR: Record<ReturnType<typeof deltaTint>, string> = {
-  pos: "#EF5350", neg: "#66BB6A", zero: "#D8DCE2",
+  pos: "#EF5350", neg: "#66BB6A", zero: tc("text"),
 };
 
 // Sticky header cells: with collapsed table borders, a border on a sticky th
 // scrolls away with the rows (Chromium), so the bottom/left edges are drawn
 // with inset shadows instead.
-const TH = "sticky top-0 z-10 bg-[#16171B] px-2 py-1 shadow-[inset_0_-1px_0_#2A2C32]";
-const TH_L = "sticky top-0 z-10 bg-[#16171B] px-2 py-1 shadow-[inset_1px_-1px_0_#2A2C32]";
+const TH = "sticky top-0 z-10 bg-helios-panel px-2 py-1 shadow-[inset_0_-1px_0_#2A2C32]";
+const TH_L = "sticky top-0 z-10 bg-helios-panel px-2 py-1 shadow-[inset_1px_-1px_0_#2A2C32]";
 
 export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
   const { config, slice, cursorEmitter, timeRange, overlays, viewState, availableChannels } = props;
@@ -98,9 +99,9 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
   const showDelta = visible.length >= 2;
 
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
+    <div className="w-full h-full bg-helios-panel overflow-auto text-[11px]">
       <table className="w-full font-mono-num">
-        <thead className="text-[9px] uppercase tracking-wider text-[#9097A0]">
+        <thead className="text-[9px] uppercase tracking-wider text-helios-dim">
           <tr>
             <th className={TH + " text-left"}>Channel</th>
             {visible.map((s) => (
@@ -114,12 +115,12 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
                   {s.label}
                 </th>
                 {showDelta && !s.isPrimary && (
-                  <th className={TH + " text-right text-[#5A5F66]"}>Δ</th>
+                  <th className={TH + " text-right text-helios-muted"}>Δ</th>
                 )}
               </Fragment>
             ))}
             {config.showStats && ["min", "max", "avg"].map((lab, i) => (
-              <th key={lab} className={(i === 0 ? TH_L : TH) + " text-right text-[#5A5F66]"}>{lab}</th>
+              <th key={lab} className={(i === 0 ? TH_L : TH) + " text-right text-helios-muted"}>{lab}</th>
             ))}
           </tr>
         </thead>
@@ -130,11 +131,11 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
             const st = stats.get(id) ?? null;
             const statCells: Array<number | null> = st ? [st.min, st.max, st.avg] : [null, null, null];
             return (
-              <tr key={id} className="border-b border-[#23252B] text-[#D8DCE2]">
+              <tr key={id} className="border-b border-helios-grid text-helios-text">
                 <td className="px-2 py-0.5 whitespace-nowrap">
                   {meta.label}
                   {meta.units !== "" && (
-                    <span className="ml-1 text-[10px] text-[#5A5F66]">{meta.units}</span>
+                    <span className="ml-1 text-[10px] text-helios-muted">{meta.units}</span>
                   )}
                 </td>
                 {visible.map((s) => {
@@ -142,13 +143,13 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
                   const d = !s.isPrimary && v !== null && primaryVal !== null ? v - primaryVal : null;
                   return (
                     <Fragment key={s.id}>
-                      <td className={"text-right px-2 py-0.5 border-l border-[#2A2C32] " + (v === null ? "text-[#5A5F66]" : "")}>
+                      <td className={"text-right px-2 py-0.5 border-l border-helios-line " + (v === null ? "text-helios-muted" : "")}>
                         {formatValue(v, meta.decimals)}
                       </td>
                       {showDelta && !s.isPrimary && (
                         <td
                           className="text-right px-2 py-0.5"
-                          style={{ color: d === null ? "#5A5F66" : TINT_COLOR[deltaTint(d, meta.decimals)] }}
+                          style={{ color: d === null ? tc("muted") : TINT_COLOR[deltaTint(d, meta.decimals)] }}
                         >
                           {formatDelta(d, meta.decimals)}
                         </td>
@@ -161,8 +162,8 @@ export function ValuesTableRender(props: WidgetRenderProps<ValuesTableConfig>) {
                     key={i}
                     className={
                       "text-right px-2 py-0.5 " +
-                      (i === 0 ? "border-l border-[#2A2C32] " : "") +
-                      (v === null ? "text-[#5A5F66]" : "text-[#9AA0A6]")
+                      (i === 0 ? "border-l border-helios-line " : "") +
+                      (v === null ? "text-helios-muted" : "text-[#9AA0A6]")
                     }
                   >
                     {formatValue(v, meta.decimals)}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ModuleTransition } from "../../components/ModuleTransition";
+import { useThemeVersion } from "../../lib/theme";
 import { IconClipboardList } from "@tabler/icons-react";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { useModuleLive } from "../../shell/module-activity";
@@ -687,6 +688,9 @@ export function PmModule() {
     };
   }, [client, userId]);
 
+  // SVG/canvas views read theme colors at render; remount on a theme change.
+  const themeVersion = useThemeVersion();
+
   if (phase === "loading") return <ModuleTransition label="Loading your projects" Icon={IconClipboardList} />;
   if (phase === "error")
     return (
@@ -705,7 +709,7 @@ export function PmModule() {
           <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <ScopeAura />
             <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-              <CurrentView />
+              <CurrentView key={themeVersion} />
             </div>
           </main>
         </SubteamThemeProvider>

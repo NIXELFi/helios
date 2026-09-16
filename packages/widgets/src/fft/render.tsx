@@ -6,6 +6,7 @@ import { channelLabel } from "../lib/display-meta";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import type { WidgetRenderProps, OverlaySession } from "../types";
 
+import { tc } from "@helios/ui";
 export interface FftConfig {
   channelId: string;
   /** When true, restrict the FFT to the current zoom window (or to the
@@ -111,7 +112,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     }
     ctx.clearRect(0, 0, w, h);
     if (spectra.length === 0) {
-      ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(`no data for ${channelName}`, w / 2, h / 2);
       return;
@@ -136,7 +137,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     }
     if (config.scale === "linear") mMin = 0;
     if (!Number.isFinite(mMax) || !Number.isFinite(mMin) || fMax <= 0) {
-      ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no spectral content", w / 2, h / 2); return;
     }
@@ -156,7 +157,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     const yToCanvas = (v: number) => padT + plotH * (1 - (v - mMin) / (mMax - mMin));
 
     // Frame
-    ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
+    ctx.strokeStyle = tc("line"); ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padL + 0.5, padT + plotH + 0.5);
     ctx.lineTo(padL + plotW + 0.5, padT + plotH + 0.5);
@@ -184,7 +185,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     }
 
     // Axis labels
-    ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = tc("dim"); ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textBaseline = "top"; ctx.textAlign = "left";
     ctx.fillText(`${channelName} · fs ≈ ${spectra[0]!.fs.toFixed(0)} Hz · n=${spectra[0]!.n}`, 4, 4);
     ctx.textBaseline = "bottom"; ctx.textAlign = "left";
@@ -200,7 +201,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { drawRef.current(); }, [spectra, config]);
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }
 
 /** Value-equality for zoom ranges, so a view-state emit that only changed the

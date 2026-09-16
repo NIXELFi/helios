@@ -14,7 +14,7 @@ import { DEFAULT_PRESET_ID, findPreset } from "../lib/presets";
 import type { JunctionKind, ParameterOverride, SweepParams } from "../state/types";
 
 export const INPUT_CLS =
-  "rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none";
+  "rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none";
 
 export function CaptureCheckboxes({
   waves, pv, profiles, onWaves, onPv, onProfiles,
@@ -25,19 +25,19 @@ export function CaptureCheckboxes({
   onProfiles: (b: boolean) => void;
 }) {
   return (
-    <div className="mt-3 border-t border-[#2A2C32] pt-3">
-      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-[#5A5F66]">Capture (disk artifacts)</div>
-      <label className="flex items-center gap-2 text-[11px] text-[#D8DCE2]">
+    <div className="mt-3 border-t border-helios-line pt-3">
+      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-helios-muted">Capture (disk artifacts)</div>
+      <label className="flex items-center gap-2 text-[11px] text-helios-text">
         <input type="checkbox" checked={pv} onChange={(e) => onPv(e.target.checked)} />
         <span>P-V loops + crank-angle traces</span>
       </label>
-      <label className="mt-1 flex items-center gap-2 text-[11px] text-[#D8DCE2]">
+      <label className="mt-1 flex items-center gap-2 text-[11px] text-helios-text">
         <input type="checkbox" checked={profiles} onChange={(e) => onProfiles(e.target.checked)} />
         <span>End-of-cycle pipe profiles</span>
       </label>
-      <label className="mt-1 flex items-center gap-2 text-[11px] text-[#D8DCE2]">
+      <label className="mt-1 flex items-center gap-2 text-[11px] text-helios-text">
         <input type="checkbox" checked={waves} onChange={(e) => onWaves(e.target.checked)} />
-        <span>Per-step wave frames <span className="text-[#5A5F66]">(disk-heavy; ~1-2 MB/cycle)</span></span>
+        <span>Per-step wave frames <span className="text-helios-muted">(disk-heavy; ~1-2 MB/cycle)</span></span>
       </label>
     </div>
   );
@@ -90,23 +90,23 @@ export function SweepParamsModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div className="w-[min(90vw,640px)] rounded-sm border border-[#2A2C32] bg-[#0E0E10] text-[#D8DCE2] shadow-xl">
-        <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-          <div id="cfd-sweep-title" className="text-[11px] uppercase tracking-wider text-[#FFC627]">
+      <div className="w-[min(90vw,640px)] rounded-sm border border-helios-line bg-helios-base text-helios-text shadow-xl">
+        <div className="flex items-center justify-between border-b border-helios-line px-3 py-1.5">
+          <div id="cfd-sweep-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
             {seeded ? "Sweep from recipe" : "RPM sweep"}
           </div>
-          <span className="text-[10px] text-[#5A5F66]" title={defaultPath}>{basename(defaultPath)}</span>
+          <span className="text-[10px] text-helios-muted" title={defaultPath}>{basename(defaultPath)}</span>
         </div>
         <div className="p-3">
           {seeded ? (
-            <div className="mb-3 rounded-sm border border-[#FFC627]/40 bg-[#FFC627]/5 px-2 py-1.5 text-[10px]">
-              <span className="uppercase tracking-wider text-[#FFC627]">Recipe</span>
-              <span className="ml-2 text-[#9097A0]">
+            <div className="mb-3 rounded-sm border border-asu-gold/40 bg-asu-gold/5 px-2 py-1.5 text-[10px]">
+              <span className="uppercase tracking-wider text-asu-gold">Recipe</span>
+              <span className="ml-2 text-helios-dim">
                 {seedLabel ? seedLabel + " — " : ""}{overrides.length} parameter override{overrides.length === 1 ? "" : "s"} applied to every RPM
               </span>
-              <div className="mt-1 flex flex-wrap gap-1 font-mono text-[9px] text-[#5A5F66]">
+              <div className="mt-1 flex flex-wrap gap-1 font-mono text-[9px] text-helios-muted">
                 {overrides.map((o) => (
-                  <span key={o.path} className="rounded-sm border border-[#2A2C32] px-1 py-[1px]">
+                  <span key={o.path} className="rounded-sm border border-helios-line px-1 py-[1px]">
                     {o.path}={o.value.toPrecision(4)}
                   </span>
                 ))}
@@ -120,27 +120,27 @@ export function SweepParamsModal({
           )}
           {!useAdvanced && (
             <>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-[#5A5F66]">RPM range</div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-helios-muted">RPM range</div>
               <div className="grid grid-cols-3 gap-2 text-[11px]">
                 <label className="flex flex-col gap-1">
-                  <span className="uppercase tracking-wider text-[#5A5F66]">Start</span>
+                  <span className="uppercase tracking-wider text-helios-muted">Start</span>
                   <input type="number" min={500} max={20000} step={100} className={INPUT_CLS}
                     value={startRpm} onChange={(e) => setStartRpm(Number(e.target.value))} />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="uppercase tracking-wider text-[#5A5F66]">Stop</span>
+                  <span className="uppercase tracking-wider text-helios-muted">Stop</span>
                   <input type="number" min={500} max={20000} step={100} className={INPUT_CLS}
                     value={stopRpm} onChange={(e) => setStopRpm(Number(e.target.value))} />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="uppercase tracking-wider text-[#5A5F66]">Step</span>
+                  <span className="uppercase tracking-wider text-helios-muted">Step</span>
                   <input type="number" min={50} max={5000} step={50} className={INPUT_CLS}
                     value={stepRpm} onChange={(e) => setStepRpm(Number(e.target.value))} />
                 </label>
               </div>
               <div className="mt-1 text-[10px]">
                 {parsed.ok ? (
-                  <span className="text-[#5A5F66]">
+                  <span className="text-helios-muted">
                     {parsed.rpms.length} rpm: {parsed.rpms.slice(0, 8).join(", ")}{parsed.rpms.length > 8 ? "…" : ""}
                   </span>
                 ) : (
@@ -148,7 +148,7 @@ export function SweepParamsModal({
                 )}
               </div>
               <button type="button"
-                className="mt-2 text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+                className="mt-2 text-[10px] uppercase tracking-wider text-helios-muted hover:text-asu-gold"
                 onClick={() => {
                   if (!advancedText) setAdvancedText(`${startRpm}:${stopRpm}:${stepRpm}`);
                   setUseAdvanced(true);
@@ -160,9 +160,9 @@ export function SweepParamsModal({
           {useAdvanced && (
             <>
               <div className="mb-1 flex items-center justify-between">
-                <div className="text-[10px] uppercase tracking-wider text-[#5A5F66]">RPM list (advanced)</div>
+                <div className="text-[10px] uppercase tracking-wider text-helios-muted">RPM list (advanced)</div>
                 <button type="button"
-                  className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+                  className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-asu-gold"
                   onClick={() => setUseAdvanced(false)}>
                   Back to start/stop/step
                 </button>
@@ -174,7 +174,7 @@ export function SweepParamsModal({
               />
               <div className="mt-1 text-[10px]">
                 {parsed.ok ? (
-                  <span className="text-[#5A5F66]">
+                  <span className="text-helios-muted">
                     {parsed.rpms.length} rpm: {parsed.rpms.slice(0, 8).join(", ")}{parsed.rpms.length > 8 ? "…" : ""}
                   </span>
                 ) : (
@@ -185,19 +185,19 @@ export function SweepParamsModal({
           )}
 
           <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-[11px]">
-            <label className="uppercase tracking-wider text-[#5A5F66]">Max cycles per RPM</label>
+            <label className="uppercase tracking-wider text-helios-muted">Max cycles per RPM</label>
             <input type="number" min={1} max={200} step={1} className={INPUT_CLS}
               value={nCycles} onChange={(e) => setNCycles(Number(e.target.value))} />
-            <label className="uppercase tracking-wider text-[#5A5F66]">Junction kind</label>
+            <label className="uppercase tracking-wider text-helios-muted">Junction kind</label>
             <select className={INPUT_CLS}
               value={junction} onChange={(e) => setJunction(e.target.value as JunctionKind)}>
               <option value="stagnation">Stagnation</option>
               <option value="characteristic">Characteristic</option>
             </select>
-            <label className="uppercase tracking-wider text-[#5A5F66]">Convergence tol (IMEP)</label>
+            <label className="uppercase tracking-wider text-helios-muted">Convergence tol (IMEP)</label>
             <input type="number" min={0} max={1} step={0.0001} className={INPUT_CLS}
               value={tol} onChange={(e) => setTol(Number(e.target.value))} />
-            <label className="uppercase tracking-wider text-[#5A5F66]">Min cycles before conv.</label>
+            <label className="uppercase tracking-wider text-helios-muted">Min cycles before conv.</label>
             <input type="number" min={0} max={50} step={1} className={INPUT_CLS}
               value={minCycles} onChange={(e) => setMinCycles(Number(e.target.value))} />
           </div>
@@ -207,11 +207,11 @@ export function SweepParamsModal({
           />
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onCancel}
-              className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-3 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]">
+              className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold">
               Cancel
             </button>
             <button type="button" disabled={!canStart}
-              className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300 disabled:opacity-50"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-50"
               onClick={() => {
                 if (!parsed.ok) return;
                 onStart({

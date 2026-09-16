@@ -185,7 +185,7 @@ export function SettingsScreen() {
             <button
               type="button"
               onClick={handlePickFolder}
-              className="rounded bg-asu-gold px-3 py-1.5 text-xs text-helios-base hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="rounded bg-asu-gold px-3 py-1.5 text-xs text-helios-on-gold hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
               Pick Helios folder
             </button>
@@ -214,7 +214,7 @@ export function SettingsScreen() {
               className={
                 "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 " +
                 (mode === "auto"
-                  ? "bg-asu-gold text-helios-base"
+                  ? "bg-asu-gold text-helios-on-gold"
                   : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
               }
             >
@@ -228,7 +228,7 @@ export function SettingsScreen() {
               className={
                 "rounded px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50 " +
                 (mode === "manual"
-                  ? "bg-asu-gold text-helios-base"
+                  ? "bg-asu-gold text-helios-on-gold"
                   : "border border-helios-line text-helios-dim hover:bg-helios-line hover:text-helios-text")
               }
             >

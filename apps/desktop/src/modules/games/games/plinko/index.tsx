@@ -368,7 +368,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
               className={
                 chipBtn +
                 (stake === v
-                  ? " border-asu-gold bg-asu-gold text-helios-base"
+                  ? " border-asu-gold bg-asu-gold text-helios-on-gold"
                   : " border-helios-line bg-transparent text-helios-text hover:border-asu-gold")
               }
             >
@@ -393,7 +393,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
             type="button"
             disabled={paused || stake <= 0 || stake > maxBet}
             onClick={() => void drop()}
-            className="games-display ml-auto rounded-sm border border-asu-gold bg-asu-gold px-4 py-1.5 text-[10px] tracking-wider text-helios-base transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+            className="games-display ml-auto rounded-sm border border-asu-gold bg-asu-gold px-4 py-1.5 text-[10px] tracking-wider text-helios-on-gold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
           >
             DROP {stake}
           </button>

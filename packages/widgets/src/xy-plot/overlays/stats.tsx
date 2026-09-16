@@ -93,7 +93,7 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
     const posClass = positionClass(artifacts.position);
     return (
       <div
-        className={`absolute ${posClass} m-2 px-2 py-1 text-[10px] font-mono-num leading-tight bg-[#0E0E10cc] text-[#D8DCE2] border border-[#2A2C32] rounded-sm pointer-events-auto select-text`}
+        className={`absolute ${posClass} m-2 px-2 py-1 text-[10px] font-mono-num leading-tight bg-helios-base/80 text-helios-text border border-helios-line rounded-sm pointer-events-auto select-text`}
         style={{ whiteSpace: "pre" }}
       >
         {lines.join("\n")}
@@ -107,7 +107,7 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
         <Row label="position">
           <select value={config.position}
             onChange={(e) => onChange({ ...config, position: e.target.value as typeof config.position })}
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+            className="bg-helios-base border border-helios-line px-1 text-[11px]">
             <option value="top-left">top left</option>
             <option value="top-right">top right</option>
             <option value="bottom-left">bottom left</option>
@@ -123,7 +123,7 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
         <Row label="fit overlay">
           <select value={config.fitOverlayId ?? ""}
             onChange={(e) => onChange({ ...config, fitOverlayId: e.target.value || undefined })}
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+            className="bg-helios-base border border-helios-line px-1 text-[11px]">
             <option value="">(auto: first fit)</option>
             {fitSiblings.map((s, i) => (
               <option key={s.id} value={s.id}>{s.kind} #{i + 1}</option>
@@ -137,8 +137,8 @@ export const statsOverlay: OverlayModule<StatsConfig, StatsArtifact> = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

@@ -54,6 +54,7 @@ import {
 } from "@pm/lib/pmStore";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 
+import { tc } from "@helios/ui";
 type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GanttSort, string> = {
@@ -554,7 +555,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
             <button
               type="button"
               onClick={() => setDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
             >
               <IconPlus size={16} strokeWidth={1.5} />
               New task
@@ -605,7 +606,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: g.subteam.color ?? "#6B7280" }}
+                    style={{ backgroundColor: g.subteam.color ?? tc("dim") }}
                   />
                   {g.subteam.name}
                 </div>
@@ -865,7 +866,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               >
                 <defs>
                   <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#9097A0" />
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={tc("dim")} />
                   </marker>
                 </defs>
                 {showDependencies && deps.map((d) => {
@@ -905,7 +906,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     <path
                       key={`${d.predecessor_id}-${d.successor_id}`}
                       d={path}
-                      stroke="#9097A0"
+                      stroke={tc("dim")}
                       strokeWidth={1}
                       fill="none"
                       markerEnd="url(#arrow)"

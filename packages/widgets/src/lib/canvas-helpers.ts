@@ -1,3 +1,4 @@
+import { tc } from "@helios/ui";
 /** Read the canvas's logical size, preferring getBoundingClientRect but
  *  falling back to clientWidth/Height (and then offsetWidth/Height) when the
  *  rect is 0×0. This matters on first paint: a ResizeObserver may notify with
@@ -61,10 +62,10 @@ export function thresholdColor(
   warnLow?: number,
   alarmLow?: number,
 ): string {
-  if (v === null) return "#7B8088";
+  if (v === null) return tc("dim");
   if (alarm !== undefined && v >= alarm) return "#EF5350";
   if (alarmLow !== undefined && v <= alarmLow) return "#EF5350";
   if (warn !== undefined && v >= warn) return "#FFB800";
   if (warnLow !== undefined && v <= warnLow) return "#FFB800";
-  return "#D8DCE2";
+  return tc("text");
 }

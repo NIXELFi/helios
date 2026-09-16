@@ -11,12 +11,13 @@ import { useMemo, useRef } from "react";
 import { useElementWidth } from "./useElementWidth";
 import type { LimitState } from "../../lib/performance";
 
+import { tc } from "@helios/ui";
 export const LIMIT_COLOR: Record<LimitState, string> = {
   power: "#FFC627", // engine-bound — the engine team's territory
   grip: "#F48FB1", // traction-limited corner exit
   corner: "#4FC3F7", // lateral ceiling
   brake: "#FF5252",
-  coast: "#5A5F66",
+  coast: tc("muted"),
 };
 
 /** Display labels: "grip" reads ambiguously next to "corner" (both are
@@ -89,26 +90,26 @@ export function GGDiagram({ latG, longG, limit, muLat, muLong, height = 280 }: P
             strokeWidth={1}
           />
         ))}
-        <line x1={pad / 2} y1={py(0)} x2={width - pad / 2} y2={py(0)} stroke="#2A2C32" strokeWidth={1} />
-        <line x1={cx} y1={pad / 2} x2={cx} y2={height - pad / 2} stroke="#2A2C32" strokeWidth={1} />
+        <line x1={pad / 2} y1={py(0)} x2={width - pad / 2} y2={py(0)} stroke={tc("line")} strokeWidth={1} />
+        <line x1={cx} y1={pad / 2} x2={cx} y2={height - pad / 2} stroke={tc("line")} strokeWidth={1} />
         {/* Static friction-ellipse reference. */}
-        <polyline points={envelope} fill="none" stroke="#9097A0" strokeWidth={1} strokeDasharray="4 3" />
+        <polyline points={envelope} fill="none" stroke={tc("dim")} strokeWidth={1} strokeDasharray="4 3" />
         {latG.map((la, i) => {
           const lo = longG[i]!;
           if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
           return <circle key={i} cx={px(la)} cy={py(lo)} r={1.8} fill={LIMIT_COLOR[limit[i] ?? "coast"]} fillOpacity={0.8} />;
         })}
         {/* Axis labels. */}
-        <text x={pad / 2} y={py(0) - 5} fill="#5A5F66" fontSize={9}>
+        <text x={pad / 2} y={py(0) - 5} fill={tc("muted")} fontSize={9}>
           ← left
         </text>
-        <text x={width - pad / 2} y={py(0) - 5} textAnchor="end" fill="#5A5F66" fontSize={9}>
+        <text x={width - pad / 2} y={py(0) - 5} textAnchor="end" fill={tc("muted")} fontSize={9}>
           right →
         </text>
-        <text x={cx + 5} y={pad} fill="#5A5F66" fontSize={9}>
+        <text x={cx + 5} y={pad} fill={tc("muted")} fontSize={9}>
           accel g
         </text>
-        <text x={cx + 5} y={height - pad / 2} fill="#5A5F66" fontSize={9}>
+        <text x={cx + 5} y={height - pad / 2} fill={tc("muted")} fontSize={9}>
           brake g
         </text>
       </svg>

@@ -39,7 +39,7 @@ export function SelectCheckbox({
           ? "cursor-not-allowed border-helios-line/60 opacity-40 "
           : "cursor-pointer ") +
         (active && !disabled
-          ? "border-asu-gold bg-asu-gold text-helios-base "
+          ? "border-asu-gold bg-asu-gold text-helios-on-gold "
           : "border-helios-line bg-transparent text-transparent hover:border-helios-text/50")
       }
     >

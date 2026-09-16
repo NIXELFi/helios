@@ -87,22 +87,22 @@ function ConfigScreenBody() {
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header */}
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">
             Engine config
           </div>
           {hasConfig ? (
-            <div className="flex items-center gap-1 text-[10px] text-[#5A5F66]">
+            <div className="flex items-center gap-1 text-[10px] text-helios-muted">
               <FullPathLabel
                 path={state.savedPath ?? "(unsaved)"}
                 maxLen={140}
               />
-              {isDirty && <span className="text-[#FFC627]">*</span>}
-              {state.isExample && <span className="text-[#FFC627]">(example: Save will become Save As)</span>}
+              {isDirty && <span className="text-asu-gold">*</span>}
+              {state.isExample && <span className="text-asu-gold">(example: Save will become Save As)</span>}
             </div>
           ) : (
-            <p className="text-[10px] text-[#5A5F66]">No config loaded.</p>
+            <p className="text-[10px] text-helios-muted">No config loaded.</p>
           )}
         </div>
 
@@ -118,20 +118,20 @@ function ConfigScreenBody() {
             Examples ▾
           </HeaderButton>
           {examplesOpen && examples.length > 0 && (
-            <div role="menu" className="absolute right-0 z-10 mt-1 w-80 rounded-sm border border-[#2A2C32] bg-[#0E0E10] shadow-lg">
+            <div role="menu" className="absolute right-0 z-10 mt-1 w-80 rounded-sm border border-helios-line bg-helios-base shadow-lg">
               {examples.map((ex) => (
                 <button
                   key={ex.id}
                   type="button"
                   role="menuitem"
-                  className="block w-full border-b border-[#16171B] px-3 py-2 text-left last:border-b-0 hover:bg-[#16171B]"
+                  className="block w-full border-b border-helios-panel px-3 py-2 text-left last:border-b-0 hover:bg-helios-panel"
                   onClick={() => {
                     setExamplesOpen(false);
                     void loadFromPath(ex.path);
                   }}
                 >
-                  <div className="text-[11px] text-[#D8DCE2]">{ex.name}</div>
-                  <div className="mt-0.5 text-[10px] text-[#5A5F66]">{ex.description}</div>
+                  <div className="text-[11px] text-helios-text">{ex.name}</div>
+                  <div className="mt-0.5 text-[10px] text-helios-muted">{ex.description}</div>
                 </button>
               ))}
             </div>
@@ -221,8 +221,8 @@ function HeaderButton({
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "gold" }) {
   const cls =
     variant === "gold"
-      ? "rounded-sm bg-[#FFC627] px-2 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300 disabled:opacity-40"
-      : "rounded-sm border border-[#2A2C32] bg-[#16171B] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-40";
+      ? "rounded-sm bg-asu-gold px-2 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300 disabled:opacity-40"
+      : "rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-40";
   return (
     <button type="button" className={cls} onClick={onClick} disabled={disabled} {...rest}>
       {children}
@@ -232,25 +232,25 @@ function HeaderButton({
 
 function EmptyState({ onOpen, onNew }: { onOpen: () => void; onNew: () => void }) {
   return (
-    <div className="mx-auto mt-12 max-w-lg rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-8 text-center">
-      <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">
+    <div className="mx-auto mt-12 max-w-lg rounded-sm border border-helios-line bg-helios-base p-8 text-center">
+      <div className="text-[11px] uppercase tracking-wider text-asu-gold">
         Open a config to get started
       </div>
-      <p className="mt-3 text-[11px] text-[#9097A0]">
+      <p className="mt-3 text-[11px] text-helios-dim">
         Phase 2 supports the V1 SDM JSON schema as an editable form. Open
         an existing file, pick a bundled example, or start from a template.
       </p>
       <div className="mt-5 flex justify-center gap-2">
         <button
           type="button"
-          className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-3 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
           onClick={onNew}
         >
           New from template…
         </button>
         <button
           type="button"
-          className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300"
+          className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-yellow-300"
           onClick={onOpen}
         >
           Open…
@@ -266,8 +266,8 @@ function GroupSection({ title }: { title: string }) {
   const fields = SDM26_SCHEMA.filter((f) => f.group === title);
 
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
         {title}
       </div>
       {title === "Combustion" && <FuelPreset />}
@@ -300,8 +300,8 @@ function FuelPreset() {
     )?.key ?? "custom";
 
   return (
-    <div className="flex items-center gap-2 border-b border-[#16171B] px-2 py-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Fuel preset</span>
+    <div className="flex items-center gap-2 border-b border-helios-panel px-2 py-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-helios-muted">Fuel preset</span>
       <select
         aria-label="Fuel preset"
         value={current}
@@ -312,7 +312,7 @@ function FuelPreset() {
           editor.dispatch({ type: "setField", path: "combustion.afr_stoich", value: f.afrStoich });
           editor.dispatch({ type: "setField", path: "combustion.afr_target", value: f.afrTarget });
         }}
-        className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-0.5 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+        className="rounded-sm border border-helios-line bg-helios-deep px-2 py-0.5 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none"
       >
         {current === "custom" && <option value="custom">Custom</option>}
         {Object.values(FUELS).map((f) => (
@@ -321,7 +321,7 @@ function FuelPreset() {
           </option>
         ))}
       </select>
-      <span className="text-[9px] text-[#5A5F66]">sets q_lhv · afr_stoich · afr_target</span>
+      <span className="text-[9px] text-helios-muted">sets q_lhv · afr_stoich · afr_target</span>
     </div>
   );
 }
@@ -339,7 +339,7 @@ function FieldRow({
     const topology = deriveTopology(draft);
     return (
       <>
-        <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">{meta.label}</span>
+        <span className="text-[10px] uppercase tracking-wider text-helios-muted">{meta.label}</span>
         <SelectField
           meta={meta}
           value={topology}
@@ -354,7 +354,7 @@ function FieldRow({
     const value = (getAt(draft, "firing_order") as number[]) ?? [];
     return (
       <>
-        <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">{meta.label}</span>
+        <span className="text-[10px] uppercase tracking-wider text-helios-muted">{meta.label}</span>
         <FiringOrderField
           value={value}
           nCylinders={nCyl}
@@ -368,7 +368,7 @@ function FieldRow({
   const onChange = (next: unknown) => editor.dispatch({ type: "setField", path: meta.key, value: next });
   return (
     <>
-      <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">{meta.label}</span>
+      <span className="text-[10px] uppercase tracking-wider text-helios-muted">{meta.label}</span>
       <FieldByType meta={meta} value={value} error={error} onChange={onChange} />
     </>
   );
@@ -408,8 +408,8 @@ function ValveCard({
   const cdTable = (getAt(state.draft, cdTablePath) as CdRow[]) ?? [];
 
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10] lg:col-span-2">
-      <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+    <section className="rounded-sm border border-helios-line bg-helios-base lg:col-span-2">
+      <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
         {title}
       </div>
       <div className="grid grid-cols-1 gap-2 p-2 md:grid-cols-2">

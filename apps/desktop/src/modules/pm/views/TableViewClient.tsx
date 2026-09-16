@@ -60,6 +60,7 @@ import {
 } from "@pm/lib/pmStore";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
+import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low", medium: "Medium", high: "High", critical: "Critical",
 };
@@ -307,7 +308,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
       if (cached) return cached;
       const opts: SelectOption<string>[] = [{ value: "", label: "No subsystem" }];
       for (const ss of subsystemsForSubteam(subsystems, task.subteam_id, sharing)) {
-        opts.push({ value: ss.id, label: ss.name, swatch: ss.color ?? task.subteam.color ?? "#6B7280" });
+        opts.push({ value: ss.id, label: ss.name, swatch: ss.color ?? task.subteam.color ?? tc("dim") });
       }
       cache.set(task.subteam_id, opts);
       return opts;
@@ -381,7 +382,7 @@ export function TableViewClient({ teamSlug = null }: TableViewClientProps) {
               setCreateParentId(null);
               setDialogOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+            className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
           >
             <IconPlus size={16} strokeWidth={1.5} />
             New task
@@ -917,7 +918,7 @@ function SubsystemChips({
           <span
             aria-hidden
             className="size-2 rounded-full"
-            style={{ backgroundColor: s.color ?? "#6B7280" }}
+            style={{ backgroundColor: s.color ?? tc("dim") }}
           />
           {s.name}
         </button>

@@ -83,7 +83,8 @@ import {
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { useGcalEvents, type GcalEvent } from "@pm/lib/useGcalEvents";
 
-const FALLBACK_COLOR = "#6B7280";
+import { tc } from "@helios/ui";
+const FALLBACK_COLOR = tc("dim");
 
 // Persisted show/hide for the read-only Google Calendar layer. Default = shown.
 const GCAL_SHOW_KEY = "helios:pm:calendarShowGcal";

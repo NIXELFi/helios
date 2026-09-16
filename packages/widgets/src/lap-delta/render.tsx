@@ -10,6 +10,7 @@ import { AXIS_FONT } from "../lib/fonts";
 import { useResizeObserver } from "../lib/use-resize-observer";
 import { computeLapDelta, formatDelta, type DeltaResult } from "./compute";
 
+import { tc } from "@helios/ui";
 export interface LapDeltaConfig {
   /** Reserved for future per-widget tuning. Today the widget needs nothing
    *  beyond the global Main/Ref lap selection. */
@@ -18,7 +19,7 @@ export interface LapDeltaConfig {
 
 const POSITIVE_COLOR = "#EF5350"; // Main slower → red
 const NEGATIVE_COLOR = "#66BB6A"; // Main faster → green
-const ZERO_COLOR = "#5A5F66";
+const ZERO_COLOR = tc("muted");
 
 function formatDistance(v: number): string {
   if (!Number.isFinite(v)) return "";
@@ -119,15 +120,15 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
     const scales: Scales = { x: { time: false }, y: { range: [dataPack.yMin, dataPack.yMax] } };
     const axes: Axis[] = [
       {
-        stroke: "#5A5F66",
-        grid: { stroke: "#23252B" },
+        stroke: tc("muted"),
+        grid: { stroke: tc("grid") },
         font: AXIS_FONT,
         values: (_u, splits) => splits.map(formatDistance),
         size: 30,
       },
       {
-        stroke: "#5A5F66",
-        grid: { stroke: "#23252B" },
+        stroke: tc("muted"),
+        grid: { stroke: tc("grid") },
         font: AXIS_FONT,
         scale: "y",
         size: 45,
@@ -260,22 +261,22 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
   const finalSign = Number.isFinite(finalDelta) ? (finalDelta > 0 ? "main-slower" : finalDelta < 0 ? "main-faster" : "tie") : "unknown";
   const finalColor = finalSign === "main-slower" ? POSITIVE_COLOR
     : finalSign === "main-faster" ? NEGATIVE_COLOR
-    : "#D8DCE2";
+    : tc("text");
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
+    <div ref={containerRef} className="relative w-full h-full bg-helios-panel">
       {/* Header readout — Main vs Ref labels, live cursor Δ, and total Δ.
           The cursor pill follows the global time cursor projected onto the
           Main lap's distance axis; it tells the user "at this moment in
           time, you were X seconds ahead/behind your reference lap." */}
       <div className="absolute top-1 left-1 z-10 pointer-events-none flex flex-row gap-1 items-center text-[9px]">
-        <span className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num">
+        <span className="bg-helios-base/80 text-helios-dim px-1.5 py-px rounded-sm font-mono-num">
           Δt = Main − Ref
         </span>
         {cursorDeltaRef.current !== null && (
           <span
-            className="bg-[#0E0E10cc] px-1.5 py-px rounded-sm font-mono-num tabular-nums"
-            style={{ color: cursorDeltaRef.current > 0 ? POSITIVE_COLOR : cursorDeltaRef.current < 0 ? NEGATIVE_COLOR : "#D8DCE2" }}
+            className="bg-helios-base/80 px-1.5 py-px rounded-sm font-mono-num tabular-nums"
+            style={{ color: cursorDeltaRef.current > 0 ? POSITIVE_COLOR : cursorDeltaRef.current < 0 ? NEGATIVE_COLOR : tc("text") }}
             data-testid="lap-delta-cursor"
           >
             cursor {formatDelta(cursorDeltaRef.current)}
@@ -285,7 +286,7 @@ export function LapDeltaRender(props: WidgetRenderProps<LapDeltaConfig>) {
           </span>
         )}
         <span
-          className="bg-[#0E0E10cc] px-1.5 py-px rounded-sm font-mono-num tabular-nums"
+          className="bg-helios-base/80 px-1.5 py-px rounded-sm font-mono-num tabular-nums"
           style={{ color: finalColor }}
           data-testid="lap-delta-final"
         >

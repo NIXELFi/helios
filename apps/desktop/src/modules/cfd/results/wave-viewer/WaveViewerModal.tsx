@@ -161,8 +161,8 @@ function WaveViewerModalBody(props: Props) {
 
   const headerInfo = data ? (
     <>
-      RPM <span className="text-[#D8DCE2]">{data.manifest.rpm.toFixed(0)}</span>
-      &nbsp;· cycle <span className="text-[#D8DCE2]">{data.manifest.capturedCycle}</span>
+      RPM <span className="text-helios-text">{data.manifest.rpm.toFixed(0)}</span>
+      &nbsp;· cycle <span className="text-helios-text">{data.manifest.capturedCycle}</span>
       &nbsp;· {data.manifest.frameCount} frames
       &nbsp;· θ {data.manifest.thetaStartDeg.toFixed(0)}°→{data.manifest.thetaEndDeg.toFixed(0)}°
       &nbsp;· stride {data.manifest.stepStride}
@@ -184,7 +184,7 @@ function WaveViewerModalBody(props: Props) {
             <div id="wave-viewer-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
               Wave viewer
             </div>
-            <div className="mt-0.5 text-[10px] text-[#5A5F66]">{headerInfo}</div>
+            <div className="mt-0.5 text-[10px] text-helios-muted">{headerInfo}</div>
           </div>
           <div className="ml-auto" />
           {exportMsg && (
@@ -310,7 +310,7 @@ function WaveViewerModalBody(props: Props) {
               className={
                 "rounded-sm border px-2.5 py-0.5 text-[11px] cursor-pointer transition-colors " +
                 (isPlaying
-                  ? "border-asu-gold bg-asu-gold text-helios-base font-semibold"
+                  ? "border-asu-gold bg-asu-gold text-helios-on-gold font-semibold"
                   : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
               }
               onClick={() => setIsPlaying((p) => !p)}
@@ -381,7 +381,7 @@ function tabClass(active: boolean): string {
   return (
     "rounded-sm border px-2.5 py-0.5 text-[11px] cursor-pointer transition-colors " +
     (active
-      ? "border-asu-gold bg-asu-gold text-helios-base font-semibold"
+      ? "border-asu-gold bg-asu-gold text-helios-on-gold font-semibold"
       : "border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold")
   );
 }

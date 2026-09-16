@@ -36,6 +36,14 @@ describe("readPrefs", () => {
     expect(p.closeToTray).toBe(true);
   });
 
+  it("theme defaults to dark and rejects unknown values", () => {
+    expect(readPrefs().theme).toBe("dark");
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ v: 1, theme: "sepia" }));
+    expect(readPrefs().theme).toBe("dark");
+    usePrefs.getState().update({ theme: "light" });
+    expect(readPrefs().theme).toBe("light");
+  });
+
   it("auto-update defaults on and round-trips", () => {
     expect(readPrefs().autoUpdate).toBe(true);
     usePrefs.getState().update({ autoUpdate: false });

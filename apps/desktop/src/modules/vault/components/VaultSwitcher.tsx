@@ -124,7 +124,7 @@ export function VaultSwitcher() {
                     <button
                       type="submit"
                       disabled={createVault.loading || !name.trim()}
-                      className="rounded bg-asu-gold px-2 py-1 text-xs font-semibold text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
+                      className="rounded bg-asu-gold px-2 py-1 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
                     >
                       Create
                     </button>

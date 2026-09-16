@@ -386,7 +386,7 @@ function NavButton(props: {
             <span
               className={
                 "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
-                (disabled ? "bg-helios-line text-helios-dim" : "bg-asu-gold text-helios-base")
+                (disabled ? "bg-helios-line text-helios-dim" : "bg-asu-gold text-helios-on-gold")
               }
             >
               {badge}
@@ -643,7 +643,7 @@ function UserPill(props: {
             {(subteam || role) && (
               <span className="truncate pl-3 text-[10px] text-helios-dim">
                 {subteam && <span>{subteam}</span>}
-                {subteam && role && <span className="text-[#5A5F66]"> · </span>}
+                {subteam && role && <span className="text-helios-muted"> · </span>}
                 {role && <span className="uppercase tracking-wider text-asu-gold/80">{role}</span>}
               </span>
             )}

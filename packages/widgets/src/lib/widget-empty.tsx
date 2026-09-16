@@ -16,11 +16,11 @@ export function WidgetEmpty({ title, hint, transparent }: {
     <div
       className={
         "w-full h-full flex flex-col items-center justify-center gap-1 px-4 text-center select-none" +
-        (transparent ? "" : " bg-[#16171B]")
+        (transparent ? "" : " bg-helios-panel")
       }
     >
-      <span className="text-[11px] text-[#9097A0]">{title}</span>
-      {hint && <span className="text-[10px] text-[#5A5F66] max-w-[36ch]">{hint}</span>}
+      <span className="text-[11px] text-helios-dim">{title}</span>
+      {hint && <span className="text-[10px] text-helios-muted max-w-[36ch]">{hint}</span>}
     </div>
   );
 }

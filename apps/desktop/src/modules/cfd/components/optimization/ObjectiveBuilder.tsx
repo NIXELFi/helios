@@ -34,7 +34,7 @@ interface Props {
 }
 
 const INPUT_CLS =
-  "block rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none";
+  "block rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none";
 
 export function ObjectiveBuilder({
   value,
@@ -58,7 +58,7 @@ export function ObjectiveBuilder({
   return (
     <div className="space-y-3">
       <label className="block">
-        <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Metric</span>
+        <span className="text-[10px] uppercase tracking-wider text-helios-muted">Metric</span>
         <select
           value={value.metric}
           onChange={(e) => onChange({ ...value, metric: e.target.value })}
@@ -73,7 +73,7 @@ export function ObjectiveBuilder({
       </label>
 
       <label className="block">
-        <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Aggregator</span>
+        <span className="text-[10px] uppercase tracking-wider text-helios-muted">Aggregator</span>
         <select
           value={value.aggregator.kind}
           onChange={(e) =>
@@ -92,7 +92,7 @@ export function ObjectiveBuilder({
 
       {value.aggregator.kind === "at-rpm" && (
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">RPM</span>
+          <span className="text-[10px] uppercase tracking-wider text-helios-muted">RPM</span>
           <input
             type="number"
             value={value.aggregator.rpmInt}
@@ -108,7 +108,7 @@ export function ObjectiveBuilder({
       )}
 
       <label className="block">
-        <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">
+        <span className="text-[10px] uppercase tracking-wider text-helios-muted">
           RPM list (e.g. 4000, 6000:12000:1000)
         </span>
         <input
@@ -120,7 +120,7 @@ export function ObjectiveBuilder({
         {!rpmParse.ok ? (
           <p className="mt-1 text-[10px] text-red-300" role="alert">{rpmParse.error}</p>
         ) : (
-          <p className="mt-1 text-[10px] text-[#5A5F66]">
+          <p className="mt-1 text-[10px] text-helios-muted">
             {rpmParse.rpms.length} rpm: {rpmParse.rpms.slice(0, 6).join(", ")}
             {rpmParse.rpms.length > 6 ? "…" : ""}
           </p>
@@ -128,8 +128,8 @@ export function ObjectiveBuilder({
       </label>
 
       <fieldset className="flex gap-3">
-        <legend className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Direction</legend>
-        <label className="flex items-center gap-1 text-[11px] text-[#D8DCE2]">
+        <legend className="text-[10px] uppercase tracking-wider text-helios-muted">Direction</legend>
+        <label className="flex items-center gap-1 text-[11px] text-helios-text">
           <input
             type="radio"
             checked={value.direction === "maximize"}
@@ -137,7 +137,7 @@ export function ObjectiveBuilder({
           />
           maximize
         </label>
-        <label className="flex items-center gap-1 text-[11px] text-[#D8DCE2]">
+        <label className="flex items-center gap-1 text-[11px] text-helios-text">
           <input
             type="radio"
             checked={value.direction === "minimize"}

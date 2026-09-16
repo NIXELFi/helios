@@ -3,9 +3,9 @@ import type { AlarmPanelConfig } from "./render";
 
 export function AlarmPanelConfigEditor({ config, onChange }: WidgetConfigEditorProps<AlarmPanelConfig>) {
   return (
-    <div className="p-2 text-xs text-[#9097A0]">
-      <div>Static alarms: <span className="text-[#D8DCE2]">{config.alarms.length}</span></div>
-      <button className="mt-2 text-[#FFC627]" onClick={() => onChange({ alarms: [] })}>clear alarms</button>
+    <div className="p-2 text-xs text-helios-dim">
+      <div>Static alarms: <span className="text-helios-text">{config.alarms.length}</span></div>
+      <button className="mt-2 text-asu-gold" onClick={() => onChange({ alarms: [] })}>clear alarms</button>
       <p className="mt-2">Live alarm evaluation arrives in Plan 5.</p>
     </div>
   );

@@ -170,7 +170,7 @@ export function PresencePanel({ users, currentUserId, railCollapsed }: Props) {
                     </span>
                     <span className="truncate text-[10px] text-helios-dim">
                       {MODULE_LABEL[u.module]}
-                      {u.subteam ? <span className="text-[#5A5F66]"> · {u.subteam}</span> : null}
+                      {u.subteam ? <span className="text-helios-muted"> · {u.subteam}</span> : null}
                     </span>
                   </span>
                   <LiveDot size={6} />

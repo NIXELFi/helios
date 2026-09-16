@@ -129,34 +129,34 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
   }
 
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
+    <div className="w-full h-full bg-helios-panel overflow-auto text-[11px]">
       {blocks.map(({ session, rows }) => (
         <div key={session.id} className="mb-2">
           {visible.length > 1 && (
-            <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
+            <div className="px-2 py-1 flex items-center gap-2 bg-helios-base border-b border-helios-line">
               <span className="w-2 h-2 rounded-sm" style={{ background: session.color }} aria-hidden />
-              <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{session.label}</span>
+              <span className="text-[10px] uppercase tracking-wider text-helios-dim">{session.label}</span>
             </div>
           )}
           <table className="w-full font-mono-num">
-            <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
-              <tr className="border-b border-[#2A2C32]">
-                <th className="text-left px-2 py-1 sticky left-0 bg-[#16171B]">Lap</th>
+            <thead className="text-helios-dim text-[9px] uppercase tracking-wider">
+              <tr className="border-b border-helios-line">
+                <th className="text-left px-2 py-1 sticky left-0 bg-helios-panel">Lap</th>
                 <th className="text-right px-2 py-1">Time</th>
                 {config.channelIds.map((id) => (
                   <th key={id} colSpan={config.stats.length}
-                      className="text-center px-2 py-1 border-l border-[#2A2C32]">
+                      className="text-center px-2 py-1 border-l border-helios-line">
                     {id}
                   </th>
                 ))}
               </tr>
-              <tr className="border-b border-[#2A2C32]">
+              <tr className="border-b border-helios-line">
                 <th />
                 <th />
                 {config.channelIds.flatMap((id) =>
                   config.stats.map((s, i) => (
                     <th key={id + s} className={
-                      "text-right px-2 py-0.5 text-[#5A5F66] " + (i === 0 ? "border-l border-[#2A2C32]" : "")
+                      "text-right px-2 py-0.5 text-helios-muted " + (i === 0 ? "border-l border-helios-line" : "")
                     }>{STAT_LABELS[s]}</th>
                   )),
                 )}
@@ -165,16 +165,16 @@ export function ChannelReportRender(props: WidgetRenderProps<ChannelReportConfig
             <tbody>
               {rows.map(({ lap, cells }) => (
                 <tr key={lap.index} className={
-                  "border-b border-[#23252B] " + (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
+                  "border-b border-helios-grid " + (!lap.trusted ? "text-helios-muted" : "text-helios-text")
                 }>
-                  <td className="px-2 py-0.5 sticky left-0 bg-[#16171B]">
-                    {lap.index}{!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
+                  <td className="px-2 py-0.5 sticky left-0 bg-helios-panel">
+                    {lap.index}{!lap.trusted && <span className="ml-1 text-helios-dim">·</span>}
                   </td>
                   <td className="text-right px-2 py-0.5">{formatLapTime(lap.durationS * 1_000_000)}</td>
                   {cells.flatMap((cellStats, ci) =>
                     cellStats.map((v, si) => (
                       <td key={ci + ":" + si} className={
-                        "text-right px-2 py-0.5 " + (si === 0 ? "border-l border-[#2A2C32]" : "")
+                        "text-right px-2 py-0.5 " + (si === 0 ? "border-l border-helios-line" : "")
                       }>{fmt(v)}</td>
                     )),
                   )}

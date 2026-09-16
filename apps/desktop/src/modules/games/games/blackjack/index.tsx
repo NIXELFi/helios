@@ -641,7 +641,7 @@ export function BlackjackGame({ onGameOver, paused, money }: GameProps) {
 
   const actionBtn =
     "games-display rounded-sm border px-3 py-1.5 text-[10px] tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-35";
-  const goldBtn = `${actionBtn} border-asu-gold bg-asu-gold text-helios-base hover:opacity-90 disabled:hover:opacity-35`;
+  const goldBtn = `${actionBtn} border-asu-gold bg-asu-gold text-helios-on-gold hover:opacity-90 disabled:hover:opacity-35`;
   const lineBtn = `${actionBtn} border-helios-line bg-transparent text-helios-text hover:border-asu-gold`;
 
   return (

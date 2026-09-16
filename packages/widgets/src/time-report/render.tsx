@@ -128,19 +128,19 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
   }
 
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
+    <div className="w-full h-full bg-helios-panel overflow-auto text-[11px]">
       {blocks.map(({ session, rows, summary, rollingFullIdx }) => {
         return (
           <div key={session.id} className="mb-2">
             {visible.length > 1 && (
-              <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
+              <div className="px-2 py-1 flex items-center gap-2 bg-helios-base border-b border-helios-line">
                 <span className="w-2 h-2 rounded-sm" style={{ background: session.color }} aria-hidden />
-                <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{session.label}</span>
+                <span className="text-[10px] uppercase tracking-wider text-helios-dim">{session.label}</span>
               </div>
             )}
             <table className="w-full font-mono-num">
-              <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
-                <tr className="border-b border-[#2A2C32]">
+              <thead className="text-helios-dim text-[9px] uppercase tracking-wider">
+                <tr className="border-b border-helios-line">
                   <th className="text-left px-2 py-1">Lap</th>
                   <th className="text-right px-2 py-1">Time</th>
                   <th className="text-right px-2 py-1">Δ best</th>
@@ -156,20 +156,20 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
                   const dAvg = Number.isFinite(summary.mean) && lap.trusted ? lap.durationS - summary.mean : NaN;
                   return (
                     <tr key={lap.index} className={
-                      "border-b border-[#23252B] " +
-                      (!lap.trusted ? "text-[#5A5F66]" :
-                       isBest ? "text-[#FFC627] bg-[#1F1F23]" :
-                       inRolling ? "text-[#D8DCE2] bg-[#16191F]" : "text-[#D8DCE2]")
+                      "border-b border-helios-grid " +
+                      (!lap.trusted ? "text-helios-muted" :
+                       isBest ? "text-asu-gold bg-[#1F1F23]" :
+                       inRolling ? "text-helios-text bg-[#16191F]" : "text-helios-text")
                     }>
                       <td className="px-2 py-0.5">
                         {lap.index}
-                        {!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
-                        {isBest && <span className="ml-1 text-[#FFC627]">★</span>}
+                        {!lap.trusted && <span className="ml-1 text-helios-dim">·</span>}
+                        {isBest && <span className="ml-1 text-asu-gold">★</span>}
                       </td>
                       <td className={"text-right px-2 py-0.5 " + (isBest ? "font-bold" : "")}>{fmtSec(lap.durationS)}</td>
                       <td className="text-right px-2 py-0.5">{fmtDelta(dt)}</td>
                       <td className="text-right px-2 py-0.5">{fmtDelta(dAvg)}</td>
-                      <td className="text-right px-2 py-0.5 text-[#9097A0]">
+                      <td className="text-right px-2 py-0.5 text-helios-dim">
                         {Number.isFinite(lap.distanceM) ? `${(lap.distanceM / 1000).toFixed(2)} km` : "—"}
                       </td>
                     </tr>
@@ -177,7 +177,7 @@ export function TimeReportRender(props: WidgetRenderProps<TimeReportConfig>) {
                 })}
               </tbody>
               <tfoot className="text-[#9AA0A6] text-[10px]">
-                <tr className="border-t border-[#2A2C32]">
+                <tr className="border-t border-helios-line">
                   <td className="px-2 py-1" colSpan={2}>{summary.count} trusted</td>
                   <td className="text-right px-2 py-1">μ {fmtSec(summary.mean)}</td>
                   <td className="text-right px-2 py-1">σ {Number.isFinite(summary.stddev) ? summary.stddev.toFixed(3) : "—"}</td>

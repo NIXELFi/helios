@@ -21,7 +21,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Splash } from "./components/Splash";
 import { ModuleTransition } from "./components/ModuleTransition";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
-import { usePrefs } from "./lib/prefs";
+import { readPrefs, usePrefs } from "./lib/prefs";
+import { applyTheme, useThemeVersion } from "./lib/theme";
 import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
@@ -52,6 +53,10 @@ const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.O
 function ModuleLoading({ id, label }: { id: ModuleId; label: string }) {
   return <ModuleTransition label={label} Icon={MODULE_ICON[id]} />;
 }
+
+// Theme before the first React paint (index.html already set the attribute
+// from localStorage; this wires the live listeners for "system").
+applyTheme(readPrefs().theme);
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -85,6 +90,11 @@ function HeliosShell() {
   const [landed, setLanded] = useState(false);
   const prefs = usePrefs((s) => s.prefs);
   const updatePrefs = usePrefs((s) => s.update);
+  useEffect(() => {
+    applyTheme(prefs.theme);
+  }, [prefs.theme]);
+  // Modules whose charts read colors at draw time remount on a theme change.
+  const themeVersion = useThemeVersion();
   // App Settings dialog (Ctrl/Cmd+, · user pill · rail gear · Vault settings link).
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const updater = useUpdater();
@@ -521,7 +531,7 @@ function HeliosShell() {
             <ErrorBoundary label="CFD" compact>
               <Suspense fallback={<ModuleLoading id="cfd" label="CFD" />}>
                 <ModuleActivityProvider active={active === "cfd"}>
-                  <CfdModule />
+                  <CfdModule key={themeVersion} />
                 </ModuleActivityProvider>
               </Suspense>
             </ErrorBoundary>
@@ -576,7 +586,7 @@ function HeliosShell() {
             <ErrorBoundary label="Org & Access" compact>
               <Suspense fallback={<ModuleLoading id="org" label="Org & Access" />}>
                 <ModuleActivityProvider active={active === "org"}>
-                  <OrgModule />
+                  <OrgModule key={themeVersion} />
                 </ModuleActivityProvider>
               </Suspense>
             </ErrorBoundary>

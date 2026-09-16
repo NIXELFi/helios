@@ -114,40 +114,40 @@ export function ChannelsModal({
     >
       <div
         ref={dialogRef}
-        className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[860px] max-h-[80vh] flex flex-col"
+        className="bg-helios-base border border-helios-line rounded-md helios-elevate helios-modal-in w-[860px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-          <span className="text-xs uppercase tracking-wider text-[#FFC627]">Channels</span>
-          <span className="text-[11px] text-[#9097A0]">{sessionLabel}</span>
+        <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+          <span className="text-xs uppercase tracking-wider text-asu-gold">Channels</span>
+          <span className="text-[11px] text-helios-dim">{sessionLabel}</span>
           <button
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
           >×</button>
         </div>
-        <div className="px-3 py-2 border-b border-[#2A2C32] flex items-center gap-2">
+        <div className="px-3 py-2 border-b border-helios-line flex items-center gap-2">
           <input
             type="text"
             placeholder="filter by id, name, group, or source…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="flex-1 bg-[#16171B] border border-[#2A2C32] rounded-sm px-2 py-1 text-xs text-[#D8DCE2] focus:outline-none focus:border-[#FFC627]"
+            className="flex-1 bg-helios-panel border border-helios-line rounded-sm px-2 py-1 text-xs text-helios-text focus:outline-none focus:border-asu-gold"
           />
-          <span className="text-[10px] text-[#9097A0]">
+          <span className="text-[10px] text-helios-dim">
             {totalShown} / {channels.length}
             {overrideCount > 0 && (
               <>
                 {" · "}
-                <span className="text-[#FFC627]">{overrideCount} overridden</span>
+                <span className="text-asu-gold">{overrideCount} overridden</span>
               </>
             )}
           </span>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-xs text-[#D8DCE2]">
-            <thead className="sticky top-0 bg-[#0E0E10] border-b border-[#2A2C32]">
-              <tr className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+          <table className="w-full text-xs text-helios-text">
+            <thead className="sticky top-0 bg-helios-base border-b border-helios-line">
+              <tr className="text-[10px] uppercase tracking-wider text-helios-dim">
                 <th className="text-left px-2 py-1 w-2"></th>
                 <th className="text-left px-2 py-1">id</th>
                 <th className="text-left px-2 py-1">display name</th>
@@ -161,15 +161,15 @@ export function ChannelsModal({
             <tbody>
               {grouped.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-2 py-6 text-center text-[11px] text-[#9097A0]">
+                  <td colSpan={8} className="px-2 py-6 text-center text-[11px] text-helios-dim">
                     No matching channels.
                   </td>
                 </tr>
               )}
               {grouped.map(([group, list]) => (
                 <Fragment key={group}>
-                  <tr className="bg-[#16171B]">
-                    <td colSpan={8} className="px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">{group}</td>
+                  <tr className="bg-helios-panel">
+                    <td colSpan={8} className="px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">{group}</td>
                   </tr>
                   {list.map((c) => {
                     const overrideTarget = overrides[c.id];
@@ -183,11 +183,11 @@ export function ChannelsModal({
                     const canOverride =
                       c.source_header !== undefined && sourceHeaders.length > 0;
                     return (
-                      <tr key={c.id} className="border-b border-[#16171B] hover:bg-[#16171B]">
+                      <tr key={c.id} className="border-b border-helios-panel hover:bg-helios-panel">
                         <td className="px-2 py-1">
                           <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: c.color }} />
                         </td>
-                        <td className="px-2 py-1 font-mono-num text-[#FFC627]">{c.id}</td>
+                        <td className="px-2 py-1 font-mono-num text-asu-gold">{c.id}</td>
                         <td className="px-2 py-1">{c.display_name}</td>
                         <td className="px-2 py-1 relative">
                           {canOverride ? (
@@ -205,13 +205,13 @@ export function ChannelsModal({
                               }}
                             />
                           ) : (
-                            <span className="text-[#9097A0]">{shownLabel}</span>
+                            <span className="text-helios-dim">{shownLabel}</span>
                           )}
                         </td>
-                        <td className="px-2 py-1 text-[#9097A0]">{c.units || "—"}</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.sample_rate_hz} Hz</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.min ?? "—"}</td>
-                        <td className="px-2 py-1 font-mono-num text-right text-[#9097A0]">{c.max ?? "—"}</td>
+                        <td className="px-2 py-1 text-helios-dim">{c.units || "—"}</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-helios-dim">{c.sample_rate_hz} Hz</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-helios-dim">{c.min ?? "—"}</td>
+                        <td className="px-2 py-1 font-mono-num text-right text-helios-dim">{c.max ?? "—"}</td>
                       </tr>
                     );
                   })}
@@ -220,7 +220,7 @@ export function ChannelsModal({
             </tbody>
           </table>
         </div>
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+        <div className="px-3 py-2 border-t border-helios-line text-[10px] text-helios-dim">
           Click a source cell to rebind the canonical channel to a different CSV column.
           {" "}Overrides are per-session and survive app restart.
         </div>
@@ -274,8 +274,8 @@ function SourcePicker({
         className={
           "text-left px-1.5 py-0.5 rounded-sm border text-[11px] font-mono-num " +
           (isOverridden
-            ? "bg-[#1B1A14] text-[#FFC627] border-[#FFC627]/40 hover:border-[#FFC627]"
-            : "bg-transparent text-[#9097A0] border-transparent hover:border-[#2A2C32] hover:text-[#D8DCE2]")
+            ? "bg-[#1B1A14] text-asu-gold border-asu-gold/40 hover:border-asu-gold"
+            : "bg-transparent text-helios-dim border-transparent hover:border-helios-line hover:text-helios-text")
         }
         title={
           isOverridden
@@ -289,7 +289,7 @@ function SourcePicker({
       {isOpen && (
         <div
           role="listbox"
-          className="absolute z-50 top-full left-0 mt-1 w-[260px] max-h-[280px] overflow-y-auto bg-[#0E0E10] border border-[#2A2C32] shadow-lg"
+          className="absolute z-50 top-full left-0 mt-1 w-[260px] max-h-[280px] overflow-y-auto bg-helios-base border border-helios-line shadow-lg"
         >
           <button
             type="button"
@@ -299,10 +299,10 @@ function SourcePicker({
               e.stopPropagation();
               onPick(null);
             }}
-            className="block w-full text-left px-2 py-1 text-[11px] text-[#D8DCE2] hover:bg-[#16171B] border-b border-[#2A2C32]"
+            className="block w-full text-left px-2 py-1 text-[11px] text-helios-text hover:bg-helios-panel border-b border-helios-line"
           >
-            <span className="text-[#FFC627]">Reset to auto</span>
-            <span className="ml-1 text-[10px] text-[#9097A0]">({autoLabel})</span>
+            <span className="text-asu-gold">Reset to auto</span>
+            <span className="ml-1 text-[10px] text-helios-dim">({autoLabel})</span>
           </button>
           {sourceHeaders.map((h) => (
             <button
@@ -315,14 +315,14 @@ function SourcePicker({
                 onPick(h.sourceHeader);
               }}
               className={
-                "block w-full text-left px-2 py-1 text-[11px] hover:bg-[#16171B] " +
+                "block w-full text-left px-2 py-1 text-[11px] hover:bg-helios-panel " +
                 (currentLabel === h.sourceHeader
-                  ? "text-[#FFC627]"
-                  : "text-[#D8DCE2]")
+                  ? "text-asu-gold"
+                  : "text-helios-text")
               }
             >
               <div className="font-mono-num">{h.sourceHeader}</div>
-              <div className="text-[10px] text-[#9097A0]">→ {h.channelId}</div>
+              <div className="text-[10px] text-helios-dim">→ {h.channelId}</div>
             </button>
           ))}
         </div>

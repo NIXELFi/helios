@@ -5,6 +5,7 @@ import { IconChevronRight, IconEye, IconWorldOff } from "@tabler/icons-react";
 import { useState } from "react";
 import { SubteamIcon } from "@pm/components/SubteamIcon";
 
+import { tc } from "@helios/ui";
 // A collapsible block, mounted BELOW the Subteams section, listing the subteams
 // currently HIDDEN from the sidebar nav (server-wide or per-user). Purely a
 // DISPLAY affordance: revealing a subteam here only adds its shortcut back to the
@@ -73,7 +74,7 @@ export function HiddenSubteamsMenu({
                   glyph={row.subteam.icon}
                   size={17}
                   className="shrink-0 opacity-60"
-                  style={{ color: row.subteam.color ?? "#6B7280" }}
+                  style={{ color: row.subteam.color ?? tc("dim") }}
                 />
                 <span className="truncate">{row.subteam.name}</span>
               </span>
