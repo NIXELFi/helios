@@ -9,6 +9,7 @@ import {
   IconDeviceGamepad2,
   IconDiamond,
   IconPuzzle,
+  IconSettings,
   IconShieldLock,
   IconUserCircle,
   IconWind,
@@ -25,7 +26,7 @@ export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "amethyst" | 
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
-const MODULE_ICON: Record<ModuleId, TablerIcon> = {
+export const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   logs: IconChartLine,
   vault: IconArchive,
   cfd: IconWind,
@@ -60,7 +61,8 @@ function writeRailCollapsed(collapsed: boolean): void {
 const BRAND_HEADER_TOP_PADDING = IS_MAC ? "pt-12" : "pt-3";
 
 interface Props {
-  active: ModuleId;
+  /** null while the shell has not landed yet (boot splash). */
+  active: ModuleId | null;
   onSelect: (id: ModuleId) => void;
   /** Current app version — surfaced under the HELIOS wordmark so the user
    *  can see what build they're on from any module. */
@@ -88,6 +90,7 @@ interface Props {
   onDisconnect: () => void;
   /** Open the self-service change-password modal. */
   onChangePassword: () => void;
+  onOpenSettings: () => void;
   /** True when the user is allowed to enter the Vault module. Pulled up
    *  to a prop so the same gate is shared with click-routing in the
    *  parent Shell. */
@@ -132,6 +135,7 @@ export function ModulePicker(props: Props) {
     onSignOut,
     onDisconnect,
     onChangePassword,
+    onOpenSettings,
     vaultEnabled,
     pmEnabled,
     gamesEnabled,
@@ -217,6 +221,16 @@ export function ModulePicker(props: Props) {
       </div>
 
       <div className="flex flex-col gap-0.5 p-2">
+        {/* PM first: it is the landing module for signed-in members (5.7.4). */}
+        <NavButton
+          label="PM"
+          Icon={MODULE_ICON.pm}
+          collapsed={collapsed}
+          active={active === "pm"}
+          onClick={() => onSelect("pm")}
+          disabled={pmDisabled}
+          disabledTitle="Sign in to use PM"
+        />
         <NavButton
           label="Logs"
           Icon={MODULE_ICON.logs}
@@ -232,15 +246,6 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("vault")}
           disabled={vaultDisabled}
           disabledTitle="Sign in to use Vault"
-        />
-        <NavButton
-          label="PM"
-          Icon={MODULE_ICON.pm}
-          collapsed={collapsed}
-          active={active === "pm"}
-          onClick={() => onSelect("pm")}
-          disabled={pmDisabled}
-          disabledTitle="Sign in to use PM"
         />
         <NavButton
           label="Games"
@@ -298,6 +303,7 @@ export function ModulePicker(props: Props) {
       {/* Report a bug / request a feature — sits directly above the user pill so
           it's one click away from any module, for every signed-in user. */}
       <div className="border-t border-helios-line p-2">
+        <SettingsRailButton collapsed={collapsed} onClick={onOpenSettings} />
         <ReportRailButton
           collapsed={collapsed}
           canViewReports={canViewReports}
@@ -316,6 +322,8 @@ export function ModulePicker(props: Props) {
           onSignOut={onSignOut}
           onDisconnect={onDisconnect}
           onChangePassword={onChangePassword}
+          onOpenSettings={onOpenSettings}
+          authLoading={authLoading}
         />
       </div>
 
@@ -378,7 +386,7 @@ function NavButton(props: {
             <span
               className={
                 "ml-2 rounded-sm px-1.5 py-0.5 text-[10px] font-bold " +
-                (disabled ? "bg-helios-line text-helios-dim" : "bg-asu-gold text-helios-base")
+                (disabled ? "bg-helios-line text-helios-dim" : "bg-asu-gold text-helios-on-gold")
               }
             >
               {badge}
@@ -386,6 +394,33 @@ function NavButton(props: {
           )}
         </>
       )}
+    </button>
+  );
+}
+
+function SettingsRailButton({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label="Settings"
+        title="Settings (Ctrl+,)"
+        className="flex w-full items-center justify-center rounded p-2 text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+      >
+        <IconSettings size={18} strokeWidth={1.5} />
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Settings (Ctrl+,)"
+      className="mb-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-helios-dim transition-colors hover:bg-helios-panel hover:text-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+    >
+      <IconSettings size={16} strokeWidth={1.5} className="shrink-0" />
+      <span className="truncate">Settings</span>
     </button>
   );
 }
@@ -443,8 +478,12 @@ function UserPill(props: {
   onSignOut: () => void;
   onDisconnect: () => void;
   onChangePassword: () => void;
+  onOpenSettings: () => void;
+  /** Boot: session not resolved yet. Show a quiet placeholder instead of
+   *  flashing "Sign in" at a returning user for the first few hundred ms. */
+  authLoading?: boolean;
 }) {
-  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
+  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword, onOpenSettings, authLoading = false } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -513,6 +552,22 @@ function UserPill(props: {
       e.preventDefault();
       items[next]?.focus();
     }
+  }
+
+  if (label === null && authLoading) {
+    return (
+      <div
+        aria-busy
+        aria-label="Signing in"
+        className={
+          "flex w-full items-center rounded-sm border border-helios-line bg-helios-panel text-xs text-helios-dim " +
+          (collapsed ? "justify-center p-2" : "gap-2 px-3 py-1.5")
+        }
+      >
+        <span className="helios-skeleton h-3 w-3 shrink-0 rounded-full" aria-hidden />
+        {!collapsed && <span className="helios-skeleton h-3 w-20" aria-hidden />}
+      </div>
+    );
   }
 
   if (label === null) {
@@ -588,7 +643,7 @@ function UserPill(props: {
             {(subteam || role) && (
               <span className="truncate pl-3 text-[10px] text-helios-dim">
                 {subteam && <span>{subteam}</span>}
-                {subteam && role && <span className="text-[#5A5F66]"> · </span>}
+                {subteam && role && <span className="text-helios-muted"> · </span>}
                 {role && <span className="uppercase tracking-wider text-asu-gold/80">{role}</span>}
               </span>
             )}
@@ -603,6 +658,14 @@ function UserPill(props: {
           onKeyDown={onMenuKeyDown}
           className="absolute bottom-full left-0 mb-1 min-w-[11rem] rounded-sm border border-helios-line bg-helios-base text-xs text-helios-text helios-elevate helios-modal-in"
         >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { closeAndRestore(); onOpenSettings(); }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-helios-panel focus-visible:outline-none focus-visible:bg-helios-panel focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold"
+          >
+            Settings…
+          </button>
           <button
             type="button"
             role="menuitem"

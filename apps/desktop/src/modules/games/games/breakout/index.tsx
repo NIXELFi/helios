@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { tcDark, tcaDark } from "@helios/ui";
 import { useGameLoop } from "../../lib/useGameLoop";
 import type { GameProps } from "../types";
 import {
@@ -129,7 +130,7 @@ function draw(
   if (!ctx) return;
 
   // Flat dark surface (bezel supplies the vignette).
-  ctx.fillStyle = "#101114";
+  ctx.fillStyle = tcDark("deep");
   ctx.fillRect(0, 0, W, H);
 
   // Bricks: row color ramp, rounded with a darker bottom-edge for depth.
@@ -156,7 +157,7 @@ function draw(
   for (let i = 0; i < trail.length; i++) {
     const p = trail[i]!;
     const a = 0.1 + (0.4 * i) / Math.max(1, trail.length - 1);
-    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.fillStyle = tcaDark("text", a);
     ctx.beginPath();
     ctx.arc(p.x, p.y, BALL_R * (0.5 + 0.4 * (i / Math.max(1, trail.length))), 0, Math.PI * 2);
     ctx.fill();
@@ -172,7 +173,7 @@ function draw(
   ctx.restore();
 
   // Ball: white core.
-  ctx.fillStyle = "#FFFFFF";
+  ctx.fillStyle = tcDark("text");
   ctx.beginPath();
   ctx.arc(s.x, s.y, BALL_R, 0, Math.PI * 2);
   ctx.fill();
@@ -181,24 +182,24 @@ function draw(
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
   ctx.font = "700 9px Orbitron, sans-serif";
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tcDark("dim");
   ctx.fillText("SCORE", 10, 18);
   ctx.font = "700 16px Orbitron, sans-serif";
-  ctx.fillStyle = "#D8DCE2";
+  ctx.fillStyle = tcDark("text");
   ctx.fillText(String(s.score), 10, 34);
 
   ctx.textAlign = "right";
   ctx.font = "700 9px Orbitron, sans-serif";
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tcDark("dim");
   ctx.fillText("LVL", W - 10, 18);
   ctx.font = "700 16px Orbitron, sans-serif";
-  ctx.fillStyle = "#D8DCE2";
+  ctx.fillStyle = tcDark("text");
   ctx.fillText(String(s.level), W - 10, 34);
   ctx.textAlign = "left";
 
   // Dim on game over so the overlay pops.
   if (s.gameOver) {
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillStyle = tcaDark("base", 0.55);
     ctx.fillRect(0, 0, W, H);
   }
 }

@@ -257,27 +257,27 @@ export function SweepResults({ study }: Props) {
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       {/* Header */}
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 items-center gap-3 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 text-[11px] uppercase tracking-wider text-[#9097A0]">
-            <span className="text-[#FFC627]">Sweep</span>
+          <div className="flex items-baseline gap-2 text-[11px] uppercase tracking-wider text-helios-dim">
+            <span className="text-asu-gold">Sweep</span>
             <span>·</span>
             <span>{study.params.rpmList.length} rpm</span>
             <span>·</span>
             <span>{study.params.junctionKind}</span>
             <StatusBadge status={study.status} />
             {captureBadge && (
-              <span className="ml-1 rounded-sm border border-[#FFC627]/40 px-1.5 py-[1px] text-[9px] text-[#FFC627]" title="Captures enabled">
+              <span className="ml-1 rounded-sm border border-asu-gold/40 px-1.5 py-[1px] text-[9px] text-asu-gold" title="Captures enabled">
                 capture
               </span>
             )}
           </div>
-          <div className="group mt-0.5 truncate text-[10px] text-[#5A5F66]" title={study.configPath}>
+          <div className="group mt-0.5 truncate text-[10px] text-helios-muted" title={study.configPath}>
             <StudyNameEditor
               display={studyName(study)}
               customName={study.name}
               onRename={(name) => renameStudy(study.id, name)}
-              className="text-[#9097A0]"
+              className="text-helios-dim"
             />
             {study.name && <span className="ml-1">({basename(study.configPath)})</span>}
             {" "}· {points.length}/{study.params.rpmList.length} rpm · {elapsed}s
@@ -304,16 +304,16 @@ export function SweepResults({ study }: Props) {
       </header>
 
       {/* Compare picker — higher-contrast strip so it's actually visible */}
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#16171B] px-3 py-2 text-[11px] text-[#D8DCE2]">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Overlay</span>
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Compare to</span>
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-helios-line bg-helios-panel px-3 py-2 text-[11px] text-helios-text">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">Overlay</span>
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Compare to</span>
         <div
           role="group"
           aria-label="Compare to"
           className="flex flex-wrap items-center gap-x-3 gap-y-1"
         >
           {otherSweeps.length === 0 ? (
-            <span className="text-[10px] text-[#5A5F66]">Run another sweep to enable overlay comparison.</span>
+            <span className="text-[10px] text-helios-muted">Run another sweep to enable overlay comparison.</span>
           ) : (
             otherSweeps.map((s) => {
               const idx = selectedCompareIds.indexOf(s.id);
@@ -325,13 +325,13 @@ export function SweepResults({ study }: Props) {
                   key={s.id}
                   className={
                     "flex items-center gap-1 text-[10px] " +
-                    (atCap ? "text-[#5A5F66]" : "text-[#9097A0] hover:text-[#D8DCE2]")
+                    (atCap ? "text-helios-muted" : "text-helios-dim hover:text-helios-text")
                   }
                   title={`${studyName(s)} · ${s.params.rpmList.length} rpm · ${s.params.junctionKind} · ${new Date(s.startedAt).toLocaleTimeString()}`}
                 >
                   <input
                     type="checkbox"
-                    className="h-3 w-3 accent-[#FFC627]"
+                    className="h-3 w-3 accent-asu-gold"
                     aria-label={studyName(s)}
                     checked={checked}
                     disabled={atCap}
@@ -350,7 +350,7 @@ export function SweepResults({ study }: Props) {
           )}
         </div>
         {otherSweeps.length > 0 && (
-          <span className="text-[10px] text-[#5A5F66]">
+          <span className="text-[10px] text-helios-muted">
             {compares.length > 0
               ? `${compares.length} overlaid (max ${MAX_COMPARES})`
               : `${otherSweeps.length} sweep${otherSweeps.length === 1 ? "" : "s"} available to overlay (max ${MAX_COMPARES})`}
@@ -358,16 +358,16 @@ export function SweepResults({ study }: Props) {
         )}
 
         {/* Dyno reference: import → overlay + RMSE/bias readout (sim − dyno). */}
-        <span className="mx-1 h-4 w-px bg-[#2A2C32]" aria-hidden />
+        <span className="mx-1 h-4 w-px bg-helios-line" aria-hidden />
         <button
           type="button"
           onClick={() => void importDynoCsv()}
-          className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         >
           {dyno ? "Replace dyno CSV…" : "Import dyno CSV…"}
         </button>
         {dyno && (
-          <span className="flex items-center gap-1.5 text-[10px] text-[#9097A0]">
+          <span className="flex items-center gap-1.5 text-[10px] text-helios-dim">
             <span className="inline-block h-[2px] w-3 bg-[#CE93D8]" aria-hidden />
             <span className="text-[#CE93D8]">{dyno.label}</span>
             {dynoCmp ? (
@@ -379,13 +379,13 @@ export function SweepResults({ study }: Props) {
                 {dynoCmp.biasKw.toFixed(2)} kW · {dynoCmp.n} pts {fmtRpm(dynoCmp.rpmMin)}–{fmtRpm(dynoCmp.rpmMax)}
               </span>
             ) : (
-              <span className="text-[#5A5F66]">no overlapping RPM band yet</span>
+              <span className="text-helios-muted">no overlapping RPM band yet</span>
             )}
             <button
               type="button"
               aria-label={`Remove dyno reference ${dyno.label}`}
               onClick={() => setSweepDynoRef(study.id, undefined)}
-              className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+              className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-helios-muted hover:border-[#FF5252] hover:text-[#FF5252]"
             >
               remove
             </button>
@@ -406,7 +406,7 @@ export function SweepResults({ study }: Props) {
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-auto">
         {points.length === 0 ? (
-          <div className="m-6 rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-8 text-center text-[11px] text-[#5A5F66]">
+          <div className="m-6 rounded-sm border border-helios-line bg-helios-base p-8 text-center text-[11px] text-helios-muted">
             {study.status === "running"
               ? "Waiting for the first RPM to finish…"
               : "No RPMs completed."}
@@ -416,7 +416,7 @@ export function SweepResults({ study }: Props) {
             {/* Summary band — peaks + powerband, interpolated rpm marked "~". */}
             {showSummary && (
               <section
-                className="m-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border border-[#2A2C32] bg-[#0E0E10] px-3 py-2 text-[11px] text-[#D8DCE2]"
+                className="m-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border border-helios-line bg-helios-base px-3 py-2 text-[11px] text-helios-text"
                 aria-label="Sweep summary"
               >
                 {summary.peakPower && (
@@ -446,7 +446,7 @@ export function SweepResults({ study }: Props) {
                 )}
                 <button
                   type="button"
-                  className="ml-auto rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+                  className="ml-auto rounded-sm border border-helios-line px-2 py-0.5 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
                   onClick={() => void copySummary()}
                 >
                   Copy
@@ -536,14 +536,14 @@ export function SweepResults({ study }: Props) {
             </div>
 
             {/* Per-RPM table */}
-            <section className="m-2 mt-3 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-                <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">Per-RPM</div>
-                <div className="text-[10px] text-[#5A5F66]">{points.length} rpm</div>
+            <section className="m-2 mt-3 rounded-sm border border-helios-line bg-helios-base">
+              <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-helios-dim">Per-RPM</div>
+                <div className="text-[10px] text-helios-muted">{points.length} rpm</div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1080px] text-left font-mono text-[11px]">
-                  <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
+                  <thead className="bg-helios-deep text-[10px] uppercase tracking-wider text-helios-muted">
                     <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:font-normal">
                       <th>RPM</th>
                       <th className="text-right">conv@</th>
@@ -571,7 +571,7 @@ export function SweepResults({ study }: Props) {
                       // re-render — which broke the charts.
                       return (
                         <Fragment key={p.rpm}>
-                          <tr className={"border-t border-[#16171B] " + (open ? "bg-[#16171B]" : "text-[#9097A0] hover:bg-[#16171B]/50")}>
+                          <tr className={"border-t border-helios-panel " + (open ? "bg-helios-panel" : "text-helios-dim hover:bg-helios-panel/50")}>
                             <td className="px-2 py-1 tabular-nums">{p.rpm.toFixed(0)}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.convergedCycle < 0 ? "—" : p.convergedCycle}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.nCyclesRun}</td>
@@ -587,19 +587,19 @@ export function SweepResults({ study }: Props) {
                             )}
                             <td className="px-2 py-1 text-right tabular-nums">{p.nonconservationMax.toExponential(2)}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{p.wallTimeS.toFixed(2)}s</td>
-                            <td className="px-2 py-1 text-[10px] text-[#5A5F66]">
+                            <td className="px-2 py-1 text-[10px] text-helios-muted">
                               {p.captureDir ? "yes" : "—"}
                             </td>
                             <td className="px-2 py-1 text-right text-[10px] uppercase tracking-wider">
                               <button type="button"
-                                className="px-1 text-[#FFC627] hover:underline"
+                                className="px-1 text-asu-gold hover:underline"
                                 onClick={() => setExpandedRpm(open ? null : p.rpm)}>
                                 {open ? "Hide" : "Open"}
                               </button>
                             </td>
                           </tr>
                           {open && (
-                            <tr className="border-t border-[#16171B] bg-[#0B0B0D]">
+                            <tr className="border-t border-helios-panel bg-helios-deep">
                               <td colSpan={hasKnock ? 13 : 12} className="p-3">
                                 {p.captureDir && study.params.capturePvLoops && (
                                   <PvLoopView jobId={study.id} studyKind="sweep" rpmInt={Math.round(p.rpm)} />
@@ -611,7 +611,7 @@ export function SweepResults({ study }: Props) {
                                   <div className="mt-2">
                                     <button
                                       type="button"
-                                      className="rounded-sm border border-[#2A2C32] px-2 py-0.5 text-[10px] text-[#9097A0] hover:border-[#FFC627]"
+                                      className="rounded-sm border border-helios-line px-2 py-0.5 text-[10px] text-helios-dim hover:border-asu-gold"
                                       onClick={() => setWaveViewerRpm(Math.round(p.rpm))}
                                     >
                                       Open wave viewer ↗
@@ -619,7 +619,7 @@ export function SweepResults({ study }: Props) {
                                   </div>
                                 )}
                                 {!p.captureDir && (
-                                  <div className="text-[11px] text-[#5A5F66]">
+                                  <div className="text-[11px] text-helios-muted">
                                     No captures for this RPM. Re-run sweep with P-V / profile capture enabled to view this view.
                                   </div>
                                 )}
@@ -654,15 +654,15 @@ export function SweepResults({ study }: Props) {
 function SummaryStat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <span className="flex items-baseline gap-1">
-      <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{label}</span>
-      <span className="font-mono tabular-nums text-[#D8DCE2]">{children}</span>
+      <span className="text-[10px] uppercase tracking-wider text-helios-dim">{label}</span>
+      <span className="font-mono tabular-nums text-helios-text">{children}</span>
     </span>
   );
 }
 
 function ChartCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+    <div className="flex flex-col rounded-sm border border-helios-line bg-helios-base">
       {children}
     </div>
   );
@@ -670,11 +670,11 @@ function ChartCard({ children }: { children: React.ReactNode }) {
 
 function StatusBadge({ status }: { status: SweepStudy["status"] }) {
   const styles: Record<SweepStudy["status"], string> = {
-    idle:        "border-[#2A2C32] text-[#5A5F66]",
-    running:     "border-[#FFC627]/40 text-[#FFC627]",
+    idle:        "border-helios-line text-helios-muted",
+    running:     "border-asu-gold/40 text-asu-gold",
     cancelling:  "border-amber-500/40 text-amber-300",
     done:        "border-green-500/40 text-green-300",
-    cancelled:   "border-[#2A2C32] text-[#5A5F66]",
+    cancelled:   "border-helios-line text-helios-muted",
     error:       "border-red-500/40 text-red-300",
   };
   return (

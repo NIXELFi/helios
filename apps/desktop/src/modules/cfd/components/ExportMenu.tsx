@@ -94,7 +94,7 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
     <div ref={rootRef} className="relative inline-block">
       <button
         type="button"
-        className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -108,7 +108,7 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
             ref={menuRef}
             role="menu"
             style={{ position: "fixed", top: menuPos.top, left: menuPos.left, right: menuPos.right }}
-            className="z-50 min-w-[180px] rounded-sm border border-[#2A2C32] bg-[#0E0E10] py-1 shadow-xl"
+            className="z-50 min-w-[180px] rounded-sm border border-helios-line bg-helios-base py-1 shadow-xl"
           >
             {items.map((item) => {
               const busy = busyId === item.id;
@@ -118,7 +118,7 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
                   type="button"
                   role="menuitem"
                   disabled={busyId != null}
-                  className="block w-full px-3 py-1.5 text-left text-[11px] text-[#D8DCE2] hover:bg-[#16171B] hover:text-[#FFC627] disabled:opacity-50"
+                  className="block w-full px-3 py-1.5 text-left text-[11px] text-helios-text hover:bg-helios-panel hover:text-asu-gold disabled:opacity-50"
                   onClick={() => void runItem(item)}
                 >
                   {busy ? `${item.label}…` : item.label}
@@ -136,7 +136,7 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
             className={
               "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border px-4 py-3 text-sm shadow-lg " +
               (toast.ok
-                ? "border-[#FFC627]/40 bg-[#16171B] text-[#D8DCE2]"
+                ? "border-asu-gold/40 bg-helios-panel text-helios-text"
                 : "border-red-500/40 bg-red-950/95 text-red-100")
             }
           >
@@ -144,7 +144,7 @@ export function ExportMenu({ items, align = "right", triggerLabel = "Export" }: 
             <button
               type="button"
               onClick={() => setToast(null)}
-              className="mt-1.5 text-xs text-[#9097A0] underline underline-offset-2 hover:text-[#D8DCE2]"
+              className="mt-1.5 text-xs text-helios-dim underline underline-offset-2 hover:text-helios-text"
             >
               Dismiss
             </button>

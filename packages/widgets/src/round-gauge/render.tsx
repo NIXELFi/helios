@@ -4,6 +4,7 @@ import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize, thresholdColor } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
+import { tc } from "@helios/ui";
 export interface RoundGaugeConfig {
   channelId: string;
   units: string;
@@ -55,7 +56,7 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
     ctx.clearRect(0, 0, w, h);
 
     ctx.lineWidth = 8;
-    ctx.strokeStyle = "#23252B";
+    ctx.strokeStyle = tc("grid");
     ctx.beginPath();
     ctx.arc(cx, cy, r, start, end);
     ctx.stroke();
@@ -94,7 +95,7 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "#5A5F66";
+    ctx.strokeStyle = tc("muted");
     ctx.lineWidth = 1;
     for (let i = 0; i <= 10; i++) {
       const a = start + (i / 10) * sweep;
@@ -116,7 +117,7 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + Math.cos(a) * (r - 6), cy + Math.sin(a) * (r - 6));
       ctx.stroke();
-      ctx.fillStyle = "#D8DCE2";
+      ctx.fillStyle = tc("text");
       ctx.beginPath();
       ctx.arc(cx, cy, 3, 0, Math.PI * 2);
       ctx.fill();
@@ -129,11 +130,11 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
     const text = v === null ? "—" : v.toFixed(config.decimals);
     ctx.fillText(text, cx, cy + r * 0.45);
 
-    ctx.fillStyle = "#7B8088";
+    ctx.fillStyle = tc("dim");
     ctx.font = '10px Inter, system-ui, sans-serif';
     ctx.fillText(config.channelId.toUpperCase(), cx, 14);
     ctx.fillText(config.units, cx, cy + r * 0.85);
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }

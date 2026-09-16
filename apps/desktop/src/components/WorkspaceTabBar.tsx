@@ -74,19 +74,19 @@ function WorkspaceOverflowMenu({ onImport, onExportAll }: {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="More workspace actions"
-        className="w-6 h-6 flex items-center justify-center text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="w-6 h-6 flex items-center justify-center text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="More workspace actions"
       >⋯</button>
       {open && (
-        <div className="absolute left-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+        <div className="absolute left-0 mt-1 w-56 bg-helios-base border border-helios-line z-30 text-xs">
           <button
             onClick={() => { onImport(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            className="w-full text-left px-2 py-1.5 hover:bg-helios-panel"
             title="Import workspaces from a Helios bundle"
           >Import workspaces…</button>
           <button
             onClick={() => { onExportAll(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            className="w-full text-left px-2 py-1.5 hover:bg-helios-panel"
             title="Export every workspace to a single file"
           >Export all workspaces…</button>
         </div>
@@ -264,7 +264,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
             <div key={w.id} className="flex items-center">
               {/* Drop indicator: shown before tab i when dropIndex === i */}
               {dropIndex === i && dragSourceIndex !== null && dragSourceIndex !== i && dragSourceIndex !== i - 1 && (
-                <span className="w-0.5 h-4 bg-[#FFC627] rounded-full mr-0.5 shrink-0" aria-hidden />
+                <span className="w-0.5 h-4 bg-asu-gold rounded-full mr-0.5 shrink-0" aria-hidden />
               )}
             <button
               role="tab"
@@ -286,8 +286,8 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
                 "flex items-center gap-1.5 whitespace-nowrap px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
                 (isDragSource ? "opacity-50 " : "") +
                 (active
-                  ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
-                  : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                  ? "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold"
+                  : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
               }
             >
               <span
@@ -319,7 +319,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
         })}
         {/* Drop indicator after the last tab */}
         {dropIndex === workspaces.length && dragSourceIndex !== null && dragSourceIndex !== workspaces.length - 1 && (
-          <span className="w-0.5 h-4 bg-[#FFC627] rounded-full ml-0.5 shrink-0" aria-hidden />
+          <span className="w-0.5 h-4 bg-asu-gold rounded-full ml-0.5 shrink-0" aria-hidden />
         )}
       </div>
     </div>{/* end scroller */}
@@ -336,7 +336,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
         >
           <div
             onMouseDown={onThumbMouseDown}
-            className="absolute top-0 h-full bg-[#FFC627]/50 hover:bg-[#FFC627] rounded-full pointer-events-auto cursor-grab active:cursor-grabbing transition-colors"
+            className="absolute top-0 h-full bg-asu-gold/50 hover:bg-asu-gold rounded-full pointer-events-auto cursor-grab active:cursor-grabbing transition-colors"
             style={{ left: `${thumb.leftPct * 100}%`, width: `${thumb.widthPct * 100}%` }}
           />
         </div>
@@ -345,7 +345,7 @@ export function WorkspaceTabBar(props: WorkspaceTabBarProps) {
       <button
         onClick={onCreate}
         aria-label="New workspace"
-        className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-xs border border-helios-line bg-helios-panel text-asu-gold hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="Create a new empty workspace"
       >+</button>
       <WorkspaceOverflowMenu onImport={onImport} onExportAll={onExportAll} />

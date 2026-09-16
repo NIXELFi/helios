@@ -4,6 +4,7 @@ import { sampleAt } from "../lib/sample-at";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
+import { tc } from "@helios/ui";
 export interface EngineBarConfig {
   rpmChannelId: string;
   gearChannelId?: string;
@@ -77,9 +78,9 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
     const barX = gearW + 8, barY = 4;
     const barW = w - barX - 4, barH = h - 8;
 
-    ctx.fillStyle = "#0E0E10";
+    ctx.fillStyle = tc("base");
     ctx.fillRect(0, 0, gearW, h);
-    ctx.strokeStyle = "#2A2C32";
+    ctx.strokeStyle = tc("line");
     ctx.strokeRect(0.5, 0.5, gearW - 1, h - 1);
     ctx.fillStyle = "#FFC627";
     ctx.font = `bold ${Math.floor(h * 0.6)}px "JetBrains Mono", ui-monospace, monospace`;
@@ -111,25 +112,25 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
       const inShift = segT >= shiftT;
       ctx.fillStyle = lit
         ? (inShift ? (segT > 0.95 ? "#EF5350" : "#FFB800") : "#4FC3F7")
-        : "#23252B";
+        : tc("grid");
       ctx.fillRect(barX + i * (segW + segGap), barY, segW, barH);
     }
 
     if (peakRef.current !== null) {
       const pt = Math.max(0, Math.min(1, peakRef.current / config.redline));
       const px = barX + barW * pt;
-      ctx.strokeStyle = "#D8DCE2";
+      ctx.strokeStyle = tc("text");
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(px, barY - 2); ctx.lineTo(px, barY + barH + 2);
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#D8DCE2";
+    ctx.fillStyle = tc("text");
     ctx.font = `bold ${Math.floor(h * 0.5)}px "JetBrains Mono", ui-monospace, monospace`;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.fillText(rpm === null ? "—" : String(Math.round(rpm)), barX + barW - 8, h / 2);
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }

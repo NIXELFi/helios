@@ -327,7 +327,9 @@ export function GamesModule({ paused }: GamesModuleProps) {
               </button>
             </div>
             <GameStandings client={client} gameId={active.id} refreshToken={refreshToken}>
-              <div className="relative shrink-0 self-center">
+              {/* games-screen: the dark display of the cabinet — canvas, table AND
+                  overlays share the dark tokens in both themes (games.css). */}
+              <div className="games-screen relative shrink-0 self-center">
                 {(isRated(active.id) && !carried) || (isMoney(active.id) && !budget) ? (
                   /* A rated cabinet can't open until we know what rating the
                    * session is continuing from, and a money cabinet can't open
@@ -395,7 +397,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                       "games-display-heavy text-2xl tracking-[0.22em] transition-colors " +
                       (section === s.id
                         ? "text-asu-gold"
-                        : "text-helios-line hover:text-helios-dim")
+                        : "text-helios-muted hover:text-helios-dim")
                     }
                   >
                     {s.label}

@@ -74,7 +74,8 @@ import {
 } from "@pm/lib/dashboardSettings";
 import { useSharedDashboardLayout, type SharedLayoutStatus } from "@pm/lib/useSharedDashboardLayout";
 
-const FALLBACK_COLOR = "#6B7280";
+import { tc } from "@helios/ui";
+const FALLBACK_COLOR = tc("dim");
 
 function dueText(days: number): string {
   if (days === 0) return "today";

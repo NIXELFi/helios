@@ -58,7 +58,7 @@ export function PvLoopView({ jobId, studyKind, rpmInt }: Props) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-helios-muted">
         <span>cylinder</span>
         {art.cylinders.map((_, i) => (
           <button key={i} type="button"
@@ -66,20 +66,20 @@ export function PvLoopView({ jobId, studyKind, rpmInt }: Props) {
             className={
               "rounded-sm border px-2 py-0.5 " +
               (i === cylIdx
-                ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]"
-                : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                ? "border-asu-gold bg-asu-gold/10 text-asu-gold"
+                : "border-helios-line text-helios-dim hover:border-asu-gold")
             }>
             {i + 1}
           </button>
         ))}
-        <label className="ml-3 flex items-center gap-1 text-[11px] text-[#D8DCE2]">
+        <label className="ml-3 flex items-center gap-1 text-[11px] text-helios-text">
           <input type="checkbox" checked={logP} onChange={(e) => setLogP(e.target.checked)} />
           log P
         </label>
-        <span className="ml-2 text-[10px] text-[#5A5F66]">{cylSamples.length} samples · rpm {rpmInt}</span>
+        <span className="ml-2 text-[10px] text-helios-muted">{cylSamples.length} samples · rpm {rpmInt}</span>
       </div>
       <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-        <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+        <div className="flex flex-col rounded-sm border border-helios-line bg-helios-base">
           <PvLoopChart
             title={`P-V loop · cyl ${cylIdx + 1}`}
             V={V} P={P}
@@ -87,7 +87,7 @@ export function PvLoopView({ jobId, studyKind, rpmInt }: Props) {
             logP={logP} color="#FFC627" height={260}
           />
         </div>
-        <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+        <div className="flex flex-col rounded-sm border border-helios-line bg-helios-base">
           <LinePlot
             title="p(θ) / T(θ) / x_b(θ)"
             xs={theta}
@@ -110,7 +110,7 @@ function Notice({ text, tone }: { text: string; tone: "info" | "error" }) {
     <div className={"rounded-sm border px-3 py-2 text-[11px] " + (
       tone === "error"
         ? "border-red-500/40 bg-red-500/10 text-red-200"
-        : "border-[#2A2C32] bg-[#0E0E10] text-[#9097A0]"
+        : "border-helios-line bg-helios-base text-helios-dim"
     )}>
       {text}
     </div>

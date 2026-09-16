@@ -135,13 +135,13 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
   if (picking) {
     return (
       <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 bg-[#FFC627] text-[#0E0E10] px-4 py-2 rounded-sm shadow-lg flex items-center gap-3 text-xs font-semibold"
+        className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 bg-asu-gold text-helios-on-gold px-4 py-2 rounded-sm shadow-lg flex items-center gap-3 text-xs font-semibold"
       >
         <span>Click the GPS track to set start-finish line</span>
         <button
           type="button"
           onClick={() => { gpsPickerEmitter.cancel(); setPicking(false); }}
-          className="px-2 py-0.5 bg-[#0E0E10] text-[#FFC627] hover:brightness-110 rounded-sm"
+          className="px-2 py-0.5 bg-helios-base text-asu-gold hover:brightness-110 rounded-sm"
         >Cancel</button>
       </div>
     );
@@ -149,17 +149,17 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Lap detection config" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 helios-overlay-in" onClick={onClose}>
-      <div ref={dialogRef} tabIndex={-1} className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[720px] max-h-[80vh] flex flex-col outline-none" onClick={(e) => e.stopPropagation()}>
-        <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-          <span className="text-xs uppercase tracking-wider text-[#FFC627]">Lap detection · {session.label}</span>
+      <div ref={dialogRef} tabIndex={-1} className="bg-helios-base border border-helios-line rounded-md helios-elevate helios-modal-in w-[720px] max-h-[80vh] flex flex-col outline-none" onClick={(e) => e.stopPropagation()}>
+        <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+          <span className="text-xs uppercase tracking-wider text-asu-gold">Lap detection · {session.label}</span>
           <button type="button" aria-label="Close" onClick={onClose}
-                  className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm">×</button>
+                  className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm">×</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs text-[#D8DCE2]">
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs text-helios-text">
           <Field label="Mode">
             <select value={cfg.mode} onChange={(e) => set("mode", e.target.value as LapDetectionMode)}
-                    className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 cursor-pointer">
+                    className="bg-helios-panel border border-helios-line px-2 py-1 cursor-pointer">
               <option value="none">None — single segment, untrusted</option>
               <option value="gps_line">GPS start-finish line</option>
               <option value="beacon">Beacon channel</option>
@@ -186,20 +186,20 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
                            onChange={(v) => set("speedChannelId", v || undefined)} />
           </Field>
 
-          <div className="border-t border-[#2A2C32] pt-3 mt-2">
-            <div className="text-[10px] uppercase tracking-wider text-[#9097A0] mb-2">Preview</div>
+          <div className="border-t border-helios-line pt-3 mt-2">
+            <div className="text-[10px] uppercase tracking-wider text-helios-dim mb-2">Preview</div>
             {preview ? (
               <PreviewTable set={preview} />
             ) : (
-              <div className="text-[#9097A0] text-[11px]">{cfg.mode === "none" ? "no detection — entire session is one untrusted lap" : "(no preview)"}</div>
+              <div className="text-helios-dim text-[11px]">{cfg.mode === "none" ? "no detection — entire session is one untrusted lap" : "(no preview)"}</div>
             )}
           </div>
         </div>
 
-        <div className="px-3 py-2 border-t border-[#2A2C32] flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 py-1 text-xs text-[#9097A0] hover:text-[#D8DCE2]">Cancel</button>
+        <div className="px-3 py-2 border-t border-helios-line flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1 text-xs text-helios-dim hover:text-helios-text">Cancel</button>
           <button type="button" onClick={() => { onSave(cfg); onClose(); }}
-                  className="px-3 py-1 text-xs bg-[#FFC627] text-[#0E0E10] font-semibold hover:brightness-110">
+                  className="px-3 py-1 text-xs bg-asu-gold text-helios-on-gold font-semibold hover:brightness-110">
             Save
           </button>
         </div>
@@ -211,9 +211,9 @@ export function LapConfigDialog({ session, gpsPickerEmitter, onSave, onClose }: 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">{label}</label>
+      <label className="text-[10px] uppercase tracking-wider text-helios-dim">{label}</label>
       {children}
-      {hint && <span className="text-[10px] text-[#5A5F66]">{hint}</span>}
+      {hint && <span className="text-[10px] text-helios-muted">{hint}</span>}
     </div>
   );
 }
@@ -240,29 +240,29 @@ function GpsLineEditor({ cfg, setCfg, channels, onPickFromMap }: {
         <Field label="Center latitude">
           <input type="number" step="0.0000001" value={g.centerLat}
                  onChange={(e) => setG("centerLat", coalesceNum(Number(e.target.value), g.centerLat))}
-                 className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num w-full" />
+                 className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num w-full" />
         </Field>
         <Field label="Center longitude">
           <input type="number" step="0.0000001" value={g.centerLon}
                  onChange={(e) => setG("centerLon", coalesceNum(Number(e.target.value), g.centerLon))}
-                 className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num w-full" />
+                 className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num w-full" />
         </Field>
         <button
           type="button"
           onClick={onPickFromMap}
-          className="h-[30px] px-3 bg-[#16171B] border border-[#FFC627] text-[#FFC627] hover:bg-[#FFC627] hover:text-[#0E0E10] text-[11px] font-semibold whitespace-nowrap"
+          className="h-[30px] px-3 bg-helios-panel border border-asu-gold text-asu-gold hover:bg-asu-gold hover:text-helios-on-gold text-[11px] font-semibold whitespace-nowrap"
           title="Click on the GPS track widget to set the center"
         >Pick from map</button>
       </div>
       <Field label="Radius (m)" hint="half-width of the start-finish line; smaller = stricter">
         <input type="number" min={1} step={1} value={g.radiusM}
                onChange={(e) => setG("radiusM", Math.max(1, coalesceNum(Number(e.target.value), g.radiusM)))}
-               className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
+               className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num" />
       </Field>
       <Field label="Heading (deg, optional)" hint="0=N, 90=E. Filters wrong-direction crossings.">
         <input type="number" min={0} max={360} value={g.headingDeg ?? ""}
                onChange={(e) => setG("headingDeg", e.target.value === "" ? undefined : coalesceNum(Number(e.target.value), g.headingDeg ?? 0))}
-               className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
+               className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num" />
       </Field>
     </div>
   );
@@ -281,7 +281,7 @@ function BeaconEditor({ cfg, setCfg, channels }: { cfg: LapDetectionConfig; setC
       <Field label="Threshold">
         <input type="number" step="0.1" value={b.threshold}
                onChange={(e) => setB("threshold", coalesceNum(Number(e.target.value), b.threshold))}
-               className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num" />
+               className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num" />
       </Field>
     </div>
   );
@@ -295,7 +295,7 @@ function ExpressionEditor({ cfg, setCfg }: { cfg: LapDetectionConfig; setCfg: (f
       <textarea value={e.expression} onChange={(ev) => setE(ev.target.value)} rows={4}
                 spellCheck={false}
                 placeholder="e.g. gps.speed < 5 && previous_sample(gps.speed, 0) >= 5"
-                className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num resize-y" />
+                className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num resize-y" />
     </Field>
   );
 }
@@ -311,7 +311,7 @@ function ManualEditor({ cfg, setCfg }: { cfg: LapDetectionConfig; setCfg: (f: (p
     <Field label="Crossings (seconds, one per line)" hint="Each entry is a timestamp at the start-finish line.">
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6}
                 placeholder="12.45&#10;72.10&#10;131.85" spellCheck={false}
-                className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 font-mono-num resize-y" />
+                className="bg-helios-panel border border-helios-line px-2 py-1 font-mono-num resize-y" />
     </Field>
   );
 }
@@ -326,16 +326,16 @@ function PreviewTable({ set }: { set: LapSet }) {
     <div className="text-[11px]">
       <div className="text-[#9AA0A6] mb-2">
         {trusted.length} trusted lap{trusted.length === 1 ? "" : "s"}
-        {best && <> · best <span className="text-[#FFC627]">{formatLapTime(best.durationS * 1_000_000)}</span></>}
+        {best && <> · best <span className="text-asu-gold">{formatLapTime(best.durationS * 1_000_000)}</span></>}
       </div>
-      <div className="max-h-40 overflow-y-auto border border-[#2A2C32]">
+      <div className="max-h-40 overflow-y-auto border border-helios-line">
         <table className="w-full font-mono-num">
-          <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider sticky top-0 bg-[#0E0E10]">
+          <thead className="text-helios-dim text-[9px] uppercase tracking-wider sticky top-0 bg-helios-base">
             <tr><th className="text-left px-2 py-0.5">#</th><th className="text-right px-2 py-0.5">Time</th><th className="text-right px-2 py-0.5">Distance</th><th className="text-left px-2 py-0.5">Trust</th></tr>
           </thead>
           <tbody>
             {set.laps.map((l, i) => (
-              <tr key={i} className={"border-b border-[#23252B] " + (l.trusted ? "text-[#D8DCE2]" : "text-[#5A5F66]")}>
+              <tr key={i} className={"border-b border-helios-grid " + (l.trusted ? "text-helios-text" : "text-helios-muted")}>
                 <td className="px-2 py-0.5">{l.index}</td>
                 <td className="text-right px-2 py-0.5">{formatLapTime(l.durationS * 1_000_000)}</td>
                 <td className="text-right px-2 py-0.5">{Number.isFinite(l.distanceM) ? `${(l.distanceM / 1000).toFixed(2)} km` : "—"}</td>

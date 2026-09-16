@@ -7,6 +7,7 @@ import "uplot/dist/uPlot.min.css";
 
 import { checkCdMonotonic } from "../validation/client-rules";
 
+import { tc } from "@helios/ui";
 export type CdRow = [number, number]; // [L/D, Cd]
 
 interface Props {
@@ -19,15 +20,15 @@ const MIN_ROWS = 2;
 export function CdTableField({ value, onChange }: Props) {
   const warning = checkCdMonotonic(value);
   return (
-    <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+    <div className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
         Cd table
       </div>
 
       <CdCurvePlot rows={value} />
 
       <table className="w-full font-mono text-[11px]">
-        <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
+        <thead className="bg-helios-deep text-[10px] uppercase tracking-wider text-helios-muted">
           <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
             <th className="text-right">#</th>
             <th className="text-right">L/D</th>
@@ -56,15 +57,15 @@ export function CdTableField({ value, onChange }: Props) {
         </tbody>
       </table>
 
-      <div className="flex items-center justify-between border-t border-[#2A2C32] px-2 py-1">
+      <div className="flex items-center justify-between border-t border-helios-line px-2 py-1">
         {warning ? (
           <span className="text-[10px] text-amber-300">⚠ {warning}</span>
         ) : (
-          <span className="text-[10px] text-[#5A5F66]">{value.length} rows · monotonic</span>
+          <span className="text-[10px] text-helios-muted">{value.length} rows · monotonic</span>
         )}
         <button
           type="button"
-          className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+          className="rounded-sm border border-helios-line bg-helios-panel px-2 py-0.5 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
           onClick={() => {
             const last = value[value.length - 1];
             const newRow: CdRow = last
@@ -100,11 +101,11 @@ function CdRowEditor({
   }
 
   const inputCls =
-    "w-full rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1.5 py-0.5 text-right font-mono text-[11px] text-[#D8DCE2] focus:outline-none focus:border-[#FFC627]";
+    "w-full rounded-sm border border-helios-line bg-helios-deep px-1.5 py-0.5 text-right font-mono text-[11px] text-helios-text focus:outline-none focus:border-asu-gold";
 
   return (
-    <tr className="border-t border-[#16171B] text-[#D8DCE2]">
-      <td className="px-2 py-1 text-right text-[#5A5F66]">{index + 1}</td>
+    <tr className="border-t border-helios-panel text-helios-text">
+      <td className="px-2 py-1 text-right text-helios-muted">{index + 1}</td>
       <td className="px-2 py-1">
         <input
           type="text"
@@ -134,7 +135,7 @@ function CdRowEditor({
           <button
             type="button"
             aria-label={`Remove row ${index + 1}`}
-            className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-red-300"
+            className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-red-300"
             onClick={onRemove}
           >
             ×
@@ -161,8 +162,8 @@ function CdCurvePlot({ rows }: { rows: ReadonlyArray<CdRow> }) {
       pxAlign: 0,
       scales: { x: { time: false }, y: { range: [0, 1] } },
       axes: [
-        { stroke: "#5A5F66", grid: { stroke: "#23252B" }, font: "10px ui-monospace, monospace", size: 22 },
-        { stroke: "#5A5F66", grid: { stroke: "#23252B" }, font: "10px ui-monospace, monospace", size: 30 },
+        { stroke: tc("muted"), grid: { stroke: tc("grid") }, font: "10px ui-monospace, monospace", size: 22 },
+        { stroke: tc("muted"), grid: { stroke: tc("grid") }, font: "10px ui-monospace, monospace", size: 30 },
       ],
       series: [
         { label: "L/D" },

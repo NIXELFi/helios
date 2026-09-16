@@ -12,6 +12,7 @@ import { useMemo, useRef } from "react";
 
 import { useElementWidth } from "./useElementWidth";
 
+import { tc } from "@helios/ui";
 export interface ParallelCoordsTrial {
   trialIdx: number;
   /** length = axes.length - 1 (last axis is the objective) */
@@ -114,7 +115,7 @@ export function ParallelCoordsPlot({
             x={axisX(i)}
             y={padTop - 14}
             fontSize="10"
-            fill="#D8DCE2"
+            fill={tc("text")}
             textAnchor="middle"
           >
             {ax.label}
@@ -123,7 +124,7 @@ export function ParallelCoordsPlot({
             x={axisX(i)}
             y={padTop - 2}
             fontSize="9"
-            fill="#71717a"
+            fill={tc("dim")}
             textAnchor="middle"
           >
             {Number.isFinite(ax.max) ? ax.max.toPrecision(3) : "—"}
@@ -132,7 +133,7 @@ export function ParallelCoordsPlot({
             x={axisX(i)}
             y={padTop + plotH + 12}
             fontSize="9"
-            fill="#71717a"
+            fill={tc("dim")}
             textAnchor="middle"
           >
             {Number.isFinite(ax.min) ? ax.min.toPrecision(3) : "—"}

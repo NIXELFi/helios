@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useThemeVersion } from "../../../lib/theme";
 import type { KbVault } from "../types";
 
+import { tc, tca } from "@helios/ui";
 interface GNode {
   id: string;
   title: string;
@@ -30,6 +32,7 @@ export function GraphView({
   activeId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const themeVersion = useThemeVersion();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const hoverRef = useRef<number | null>(null);
@@ -42,7 +45,7 @@ export function GraphView({
     const subteams = new Set<string>();
     for (const n of vault.notes)
       subteams.add(typeof n.frontmatter.subteam === "string" ? n.frontmatter.subteam : "—");
-    [...subteams].sort().forEach((st, i) => m.set(st, PALETTE[i % PALETTE.length] ?? "#9097A0"));
+    [...subteams].sort().forEach((st, i) => m.set(st, PALETTE[i % PALETTE.length] ?? tc("dim")));
     return m;
   }, [vault.notes]);
 
@@ -173,7 +176,7 @@ export function GraphView({
       const h = 15 / s;
       const bx = x;
       const by = y - h / 2;
-      ctx!.fillStyle = "rgba(14,14,16,0.82)";
+      ctx!.fillStyle = tca("base", 0.82);
       const rr = 4 / s;
       ctx!.beginPath();
       ctx!.moveTo(bx + rr, by);
@@ -208,7 +211,7 @@ export function GraphView({
         const b = nodes[e.b]!;
         const lit = focus !== undefined && (e.a === focus || e.b === focus);
         ctx!.strokeStyle = lit
-          ? `rgba(255,198,39,${0.55 * fade + 0.18})`
+          ? `${tca("gold", 0.55 * fade + 0.18)}`
           : `rgba(130,134,142,${0.16 - 0.1 * fade})`;
         ctx!.beginPath();
         ctx!.moveTo(a.x, a.y);
@@ -224,10 +227,10 @@ export function GraphView({
         const off = focus !== undefined && !isFocus && !isNeighbor;
         ctx!.globalAlpha = reveal * (off ? 1 - 0.78 * fade : 1);
         if (isFocus) {
-          ctx!.shadowColor = "rgba(255,198,39,0.9)";
+          ctx!.shadowColor = tca("gold", 0.9);
           ctx!.shadowBlur = 16;
         }
-        ctx!.fillStyle = colorMap.get(nd.subteam) ?? "#9097A0";
+        ctx!.fillStyle = colorMap.get(nd.subteam) ?? tc("dim");
         ctx!.beginPath();
         ctx!.arc(nd.x, nd.y, isFocus ? rad * 1.35 : rad, 0, Math.PI * 2);
         ctx!.fill();
@@ -345,7 +348,7 @@ export function GraphView({
       window.removeEventListener("mouseup", onUp);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [model, colorMap]);
+  }, [model, colorMap, themeVersion]);
 
   const legend = useMemo(() => {
     const counts = new Map<string, number>();
@@ -363,7 +366,7 @@ export function GraphView({
         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
           {legend.map(([st, c]) => (
             <div key={st} className="flex items-center gap-1.5 text-helios-dim">
-              <span className="inline-block h-2 w-2 rounded-full" style={{ background: colorMap.get(st) ?? "#9097A0" }} />
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: colorMap.get(st) ?? tc("dim") }} />
               <span className="max-w-[8rem] truncate">{st}</span>
               <span className="text-helios-line">{c}</span>
             </div>

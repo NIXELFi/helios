@@ -110,7 +110,7 @@ function WaterfallTile({ packed, pipeIdx, field, onCanvasRef }: TileProps) {
   return (
     <div className="flex min-h-0 flex-col">
       <div className="mb-0.5 font-mono text-[9px] text-helios-dim">
-        {meta.label} <span className="text-[#5A5F66]">[{meta.nCells} cells · {lengthMm} mm]</span>
+        {meta.label} <span className="text-helios-muted">[{meta.nCells} cells · {lengthMm} mm]</span>
       </div>
       <div ref={wrapRef} className="relative min-h-[60px] flex-1 bg-helios-base">
         <canvas ref={setCanvas} className="absolute inset-0" />

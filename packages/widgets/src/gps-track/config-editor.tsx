@@ -26,7 +26,7 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
   const set = (k: keyof GpsTrackConfig, v: unknown) => onChange({ ...config, [k]: v } as GpsTrackConfig);
   const basemap = config.basemap ?? "none";
   return (
-    <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-1 p-2 text-xs text-helios-text">
       <label className="flex justify-between items-center"><span>latChannelId</span>
         <ChannelPicker className="w-40" value={config.latChannelId} onChange={(v) => set("latChannelId", v)} channels={availableChannels} />
       </label>
@@ -36,7 +36,7 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
       <label className="flex justify-between items-center"><span>color</span>
         <input
           type="color"
-          className="w-12 h-7 bg-[#0E0E10] border border-[#2A2C32] cursor-pointer"
+          className="w-12 h-7 bg-helios-base border border-helios-line cursor-pointer"
           value={config.color ?? "#4FC3F7"}
           onChange={(e) => set("color", e.target.value)}
         />
@@ -46,15 +46,15 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
       </label>
       {(["colorMin", "colorMax"] as const).map((k) => (
         <label key={k} className="flex justify-between"><span>{k}</span>
-          <input type="number" className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40"
+          <input type="number" className="bg-helios-base border border-helios-line px-1 w-40"
             value={config[k] === undefined ? "" : config[k]}
             onChange={(e) => set(k, e.target.value === "" ? undefined : Number(e.target.value))} />
         </label>
       ))}
-      <div className="border-t border-[#2A2C32] mt-2 pt-2 flex flex-col gap-1">
+      <div className="border-t border-helios-line mt-2 pt-2 flex flex-col gap-1">
         <label className="flex justify-between items-center"><span>basemap</span>
           <select
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+            className="bg-helios-base border border-helios-line px-1 w-40 text-helios-text"
             value={basemap}
             onChange={(e) => set("basemap", e.target.value as BasemapMode)}
           >
@@ -66,7 +66,7 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
         {basemap === "custom" && (
           <label className="flex justify-between items-center"><span>customTileUrl</span>
             <input
-              className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 font-mono"
+              className="bg-helios-base border border-helios-line px-1 w-40 font-mono"
               placeholder="https://…/{z}/{x}/{y}.png"
               value={config.customTileUrl ?? ""}
               onChange={(e) => set("customTileUrl", e.target.value || undefined)}
@@ -74,10 +74,10 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
           </label>
         )}
       </div>
-      <div className="border-t border-[#2A2C32] mt-2 pt-2 flex flex-col gap-1">
+      <div className="border-t border-helios-line mt-2 pt-2 flex flex-col gap-1">
         <label className="flex justify-between items-center"><span>track labels</span>
           <select
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+            className="bg-helios-base border border-helios-line px-1 w-40 text-helios-text"
             value={config.labels ?? "none"}
             onChange={(e) => set("labels", e.target.value as LabelsMode)}
           >
@@ -89,7 +89,7 @@ export function GpsTrackConfigEditor({ config, onChange, availableChannels }: Wi
         {(config.labels ?? "none") !== "none" && (
           <label className="flex justify-between items-center"><span>sensitivity</span>
             <select
-              className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-40 text-[#D8DCE2]"
+              className="bg-helios-base border border-helios-line px-1 w-40 text-helios-text"
               value={config.labelSensitivity ?? "medium"}
               onChange={(e) => set("labelSensitivity", e.target.value as Sensitivity)}
             >

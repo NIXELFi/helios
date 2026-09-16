@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
+import { avatarStyle, useTheme } from "../lib/theme";
 import type { ModuleId } from "./ModulePicker";
 import type { PresenceUser } from "./useHeliosPresence";
 
@@ -47,15 +48,12 @@ function hueFromId(id: string): number {
 
 function Avatar({ user }: { user: PresenceUser }) {
   const hue = hueFromId(user.userId);
+  const theme = useTheme();
   return (
     <span
       aria-hidden
       className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold tracking-wide font-mono-num"
-      style={{
-        backgroundColor: `hsl(${hue} 42% 20%)`,
-        color: `hsl(${hue} 70% 76%)`,
-        borderColor: `hsl(${hue} 38% 34%)`,
-      }}
+      style={avatarStyle(hue, theme)}
     >
       {initials(user.name)}
     </span>
@@ -170,7 +168,7 @@ export function PresencePanel({ users, currentUserId, railCollapsed }: Props) {
                     </span>
                     <span className="truncate text-[10px] text-helios-dim">
                       {MODULE_LABEL[u.module]}
-                      {u.subteam ? <span className="text-[#5A5F66]"> · {u.subteam}</span> : null}
+                      {u.subteam ? <span className="text-helios-muted"> · {u.subteam}</span> : null}
                     </span>
                   </span>
                   <LiveDot size={6} />

@@ -98,7 +98,7 @@ export function LocalDeleteBanner() {
       {blockedNames.length > 0 && (
         <div className="border-b border-[#FFB800]/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
           <div className="flex items-start gap-3">
-            <span className="flex-1 text-[#FFD24D]">
+            <span className="flex-1 text-asu-gold/90">
               {blockedNames.length === 1 ? (
                 <>
                   <span className="font-mono-num">{blockedNames[0]!}</span>
@@ -113,7 +113,7 @@ export function LocalDeleteBanner() {
             </span>
             <button
               onClick={() => setBlockedNames([])}
-              className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20"
+              className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-asu-gold/90 hover:bg-[#FFB800]/20"
             >
               Dismiss
             </button>
@@ -123,7 +123,7 @@ export function LocalDeleteBanner() {
       {heldBackNames.length > 0 && (
         <div className="border-b border-[#FFB800]/50 bg-[#FFB800]/10 px-4 py-2 text-sm">
           <div className="flex items-start gap-3">
-            <span className="flex-1 text-[#FFD24D]">
+            <span className="flex-1 text-asu-gold/90">
               {heldBackNames.length === 1 ? (
                 <>
                   <span className="font-mono-num">{heldBackNames[0]!}</span>
@@ -138,7 +138,7 @@ export function LocalDeleteBanner() {
             </span>
             <button
               onClick={() => setHeldBackNames([])}
-              className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-[#FFD24D] hover:bg-[#FFB800]/20"
+              className="shrink-0 rounded border border-[#FFB800]/40 px-3 py-1 text-xs text-asu-gold/90 hover:bg-[#FFB800]/20"
             >
               Dismiss
             </button>

@@ -180,7 +180,7 @@ export function MarketplaceModule() {
             <div className="flex items-center gap-2 text-asu-gold">
               <IconPuzzle size={22} strokeWidth={1.5} />
               <h1 className="font-display text-2xl tracking-wide">MARKETPLACE</h1>
-              <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-base">
+              <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-on-gold">
                 BETA
               </span>
             </div>

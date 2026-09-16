@@ -4,11 +4,11 @@ import { ChannelPicker } from "../lib/channel-picker";
 
 export function StripChartConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<StripChartConfig>) {
   return (
-    <div className="flex flex-col gap-2 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-2 p-2 text-xs text-helios-text">
       <div>
-        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">Channels</div>
+        <div className="mb-1 text-helios-dim uppercase text-[10px] tracking-wider">Channels</div>
         {config.channels.map((c, i) => (
-          <div key={i} className="flex flex-col gap-1 mt-1 mb-2 p-1 border border-[#2A2C32] rounded-sm">
+          <div key={i} className="flex flex-col gap-1 mt-1 mb-2 p-1 border border-helios-line rounded-sm">
             <div className="flex gap-1 items-center min-w-0">
               {/* min-w-0 + flex-1 lets long channel names shrink the picker
                   rather than push the trailing color/×-button off the right
@@ -31,7 +31,7 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
                   color was nearly invisible — looked black. The swatch div
                   shows the bound color directly. */}
               <label
-                className="relative w-6 h-6 shrink-0 rounded-sm border border-[#2A2C32] cursor-pointer overflow-hidden"
+                className="relative w-6 h-6 shrink-0 rounded-sm border border-helios-line cursor-pointer overflow-hidden"
                 style={{ background: c.color }}
                 title={`Color: ${c.color}`}
               >
@@ -48,16 +48,16 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
               </label>
               <button
                 aria-label="Remove channel"
-                className="shrink-0 w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm leading-none text-base"
+                className="shrink-0 w-5 h-5 flex items-center justify-center text-helios-dim hover:text-[#EF5350] hover:bg-helios-panel rounded-sm leading-none text-base"
                 onClick={() => onChange({ ...config, channels: config.channels.filter((_, j) => j !== i) })}
               >×</button>
             </div>
-            <div className="flex gap-1 items-center text-[10px] text-[#9097A0]">
+            <div className="flex gap-1 items-center text-[10px] text-helios-dim">
               <span>Y</span>
               <input
                 type="number"
                 placeholder={String(config.yMin)}
-                className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1 text-[#D8DCE2]"
+                className="w-16 bg-helios-base border border-helios-line px-1 text-helios-text"
                 value={c.yMin === undefined ? "" : c.yMin}
                 onChange={(e) => {
                   const next = [...config.channels];
@@ -69,7 +69,7 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
               <input
                 type="number"
                 placeholder={String(config.yMax)}
-                className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1 text-[#D8DCE2]"
+                className="w-16 bg-helios-base border border-helios-line px-1 text-helios-text"
                 value={c.yMax === undefined ? "" : c.yMax}
                 onChange={(e) => {
                   const next = [...config.channels];
@@ -77,44 +77,44 @@ export function StripChartConfigEditor({ config, onChange, availableChannels }: 
                   onChange({ ...config, channels: next });
                 }}
               />
-              <span className="text-[#5A5F66]">(blank = chart default)</span>
+              <span className="text-helios-muted">(blank = chart default)</span>
             </div>
           </div>
         ))}
         <button
-          className="mt-1 text-[#FFC627]"
+          className="mt-1 text-asu-gold"
           onClick={() => onChange({ ...config, channels: [...config.channels, { id: "", color: "#FFB800" }] })}
         >+ add channel</button>
       </div>
-      <div className="border-t border-[#2A2C32] pt-2">
-        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">X axis</div>
+      <div className="border-t border-helios-line pt-2">
+        <div className="mb-1 text-helios-dim uppercase text-[10px] tracking-wider">X axis</div>
         <label className="flex items-center gap-2 text-[11px]">
           <span className="w-10">mode</span>
           <select
             value={config.xMode ?? "time"}
             onChange={(e) => onChange({ ...config, xMode: e.target.value as "time" | "distance" })}
-            className="bg-[#0E0E10] border border-[#2A2C32] px-1 py-0.5"
+            className="bg-helios-base border border-helios-line px-1 py-0.5"
           >
             <option value="time">Time (elapsed)</option>
             <option value="distance">Distance (per-lap)</option>
           </select>
         </label>
-        <div className="text-[10px] text-[#5A5F66] mt-1">
+        <div className="text-[10px] text-helios-muted mt-1">
           Distance mode renders only the laps in the global Main / Ref / Overlays selection. Pick laps in the Lap Panel.
         </div>
       </div>
-      <div className="border-t border-[#2A2C32] pt-2">
-        <div className="mb-1 text-[#9097A0] uppercase text-[10px] tracking-wider">Chart default Y range</div>
-        <div className="text-[10px] text-[#5A5F66] mb-1">Used for any channel that doesn't set its own range above.</div>
+      <div className="border-t border-helios-line pt-2">
+        <div className="mb-1 text-helios-dim uppercase text-[10px] tracking-wider">Chart default Y range</div>
+        <div className="text-[10px] text-helios-muted mb-1">Used for any channel that doesn't set its own range above.</div>
         <label className="flex items-center gap-2">
           <span className="w-10">Y min</span>
-          <input type="number" className="w-20 bg-[#0E0E10] border border-[#2A2C32] px-1"
+          <input type="number" className="w-20 bg-helios-base border border-helios-line px-1"
             value={config.yMin}
             onChange={(e) => onChange({ ...config, yMin: Number(e.target.value) })} />
         </label>
         <label className="flex items-center gap-2 mt-1">
           <span className="w-10">Y max</span>
-          <input type="number" className="w-20 bg-[#0E0E10] border border-[#2A2C32] px-1"
+          <input type="number" className="w-20 bg-helios-base border border-helios-line px-1"
             value={config.yMax}
             onChange={(e) => onChange({ ...config, yMax: Number(e.target.value) })} />
         </label>

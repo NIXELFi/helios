@@ -10,11 +10,11 @@ export function TireGridConfigEditor({ config, onChange, availableChannels }: Wi
   const setPressure = (c: typeof CORNERS[number], v: string) =>
     onChange({ ...config, pressureChannels: { ...config.pressureChannels, [c]: v } });
   return (
-    <div className="flex flex-col gap-1 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-1 p-2 text-xs text-helios-text">
       <div className="grid grid-cols-[auto_1fr_1fr] gap-1 items-center">
-        <span className="text-[10px] uppercase text-[#9097A0]"></span>
-        <span className="text-[10px] uppercase text-[#9097A0]">temp</span>
-        <span className="text-[10px] uppercase text-[#9097A0]">pressure</span>
+        <span className="text-[10px] uppercase text-helios-dim"></span>
+        <span className="text-[10px] uppercase text-helios-dim">temp</span>
+        <span className="text-[10px] uppercase text-helios-dim">pressure</span>
         {CORNERS.map((c) => (
           <div key={c} className="contents">
             <span className="font-mono-num">{c.toUpperCase()}</span>
@@ -25,7 +25,7 @@ export function TireGridConfigEditor({ config, onChange, availableChannels }: Wi
       </div>
       {(["tempMin", "tempMax", "tempCool", "tempHot"] as const).map((k) => (
         <label key={k} className="flex justify-between"><span>{k}</span>
-          <input type="number" className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-20"
+          <input type="number" className="bg-helios-base border border-helios-line px-1 w-20"
             value={config[k]} onChange={(e) => onChange({ ...config, [k]: Number(e.target.value) })} />
         </label>
       ))}

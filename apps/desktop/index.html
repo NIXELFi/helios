@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Helios</title>
+    <script>
+      // Theme before first paint (Settings → General → Appearance). Mirrors
+      // resolveTheme() in packages/ui; the app re-applies it on boot.
+      try {
+        var p = JSON.parse(localStorage.getItem("helios:prefs") || "{}");
+        var t = p.theme === "system"
+          ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+          : (p.theme === "light" ? "light" : "dark");
+        document.documentElement.dataset.theme = t;
+        document.documentElement.style.colorScheme = t;
+      } catch (e) {}
+    </script>
     <!-- Fonts are self-hosted via @fontsource (imported in src/main.tsx) so the
          app needs no runtime network access and renders identically offline. -->
     <style>
@@ -14,6 +26,10 @@
       body {
         margin: 0;
         background: #0e0e10;
+      }
+      html[data-theme="light"],
+      html[data-theme="light"] body {
+        background: #ffffff;
       }
       /* Boot spinner: shown only while #root is empty (i.e. before React
          mounts), and only if loading takes longer than ~250ms — fast starts

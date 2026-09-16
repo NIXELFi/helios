@@ -41,6 +41,7 @@ import { selectCanEditTask, usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
+import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
   medium: "Medium",
@@ -302,9 +303,9 @@ export function TaskDetailSheet() {
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
               <span
                 className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest"
-                style={{ color: task.subteam.color ?? "#9097A0" }}
+                style={{ color: task.subteam.color ?? tc("dim") }}
               >
-                <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: task.subteam.color ?? "#6B7280" }} />
+                <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: task.subteam.color ?? tc("dim") }} />
                 {task.subteam.name}
               </span>
               {task.subsystem ? (
@@ -659,7 +660,7 @@ export function TaskDetailSheet() {
                   });
                   setCommentDraft("");
                 }}
-                className="inline-flex shrink-0 items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-xs font-medium text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
+                className="inline-flex shrink-0 items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-xs font-medium text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
                 aria-label="Add comment"
               >
                 <IconSend size={14} strokeWidth={1.5} />
@@ -735,7 +736,7 @@ export function TaskDetailSheet() {
                       setLinkLabelDraft("");
                       setLinkError(null);
                     }}
-                    className="inline-flex shrink-0 items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-xs font-medium text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-xs font-medium text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
                     aria-label="Add link"
                   >
                     <IconPlus size={14} strokeWidth={1.5} />
@@ -811,7 +812,7 @@ export function TaskDetailSheet() {
                       className="flex flex-1 items-center gap-2 text-left hover:text-asu-gold"
                     >
                       <IconArrowLeft size={11} strokeWidth={1.5} className="text-blue-300" />
-                      <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: pt.subteam.color ?? "#6B7280" }} />
+                      <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: pt.subteam.color ?? tc("dim") }} />
                       <span className="flex-1 text-helios-text">{pt.title}</span>
                       {dep.lag_days > 0 ? (
                         <span className="text-[10px] text-helios-dim">+{dep.lag_days}d</span>
@@ -861,7 +862,7 @@ export function TaskDetailSheet() {
                       className="flex flex-1 items-center gap-2 text-left hover:text-asu-gold"
                     >
                       <IconArrowRight size={11} strokeWidth={1.5} className="text-amber-300" />
-                      <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: st.subteam.color ?? "#6B7280" }} />
+                      <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: st.subteam.color ?? tc("dim") }} />
                       <span className="flex-1 text-helios-text">{st.title}</span>
                       {dep.lag_days > 0 ? (
                         <span className="text-[10px] text-helios-dim">+{dep.lag_days}d</span>

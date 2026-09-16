@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { ContextMenu, type MenuAction } from "@pm/components/ui/ContextMenu";
 import { usePmStore } from "@pm/lib/pmStore";
 
+import { tc } from "@helios/ui";
 export interface TaskSubteamChipsProps {
   task: TaskRow;
   /** When true, chips expose primary/membership controls; otherwise read-only. */
@@ -127,7 +128,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
             <span
               aria-hidden
               className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: s.color ?? "#6B7280" }}
+              style={{ backgroundColor: s.color ?? tc("dim") }}
             />
             <span className="font-medium">{s.code}</span>
             {isPrimary ? (
@@ -202,7 +203,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
                       <span
                         aria-hidden
                         className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: s.color ?? "#6B7280" }}
+                        style={{ backgroundColor: s.color ?? tc("dim") }}
                       />
                       <span className="truncate">{s.name}</span>
                     </button>

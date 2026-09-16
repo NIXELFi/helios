@@ -164,32 +164,32 @@ export function MathChannelsModal({
     >
       <div
         ref={dialogRef}
-        className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[1180px] h-[720px] flex flex-col"
+        className="bg-helios-base border border-helios-line rounded-md helios-elevate helios-modal-in w-[1180px] h-[720px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-          <span className="text-xs uppercase tracking-wider text-[#FFC627]">ƒ Math Channels</span>
+        <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+          <span className="text-xs uppercase tracking-wider text-asu-gold">ƒ Math Channels</span>
           <button
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
           >×</button>
         </div>
 
         <div className="flex-1 flex min-h-0">
           {/* Channel list */}
-          <aside className="w-52 flex-shrink-0 border-r border-[#2A2C32] flex flex-col">
-            <div className="px-2 py-1 border-b border-[#2A2C32] flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">{channels.length} defined</span>
+          <aside className="w-52 flex-shrink-0 border-r border-helios-line flex flex-col">
+            <div className="px-2 py-1 border-b border-helios-line flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-helios-dim">{channels.length} defined</span>
               <button
                 onClick={add}
-                className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#16171B] rounded-sm cursor-pointer"
+                className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-asu-gold hover:bg-helios-panel rounded-sm cursor-pointer"
               >+ add</button>
             </div>
             <div className="flex-1 overflow-y-auto">
               {channels.length === 0 && (
-                <div className="px-3 py-2 text-[11px] text-[#9097A0]">
-                  No math channels yet. Click <span className="text-[#FFC627]">+ add</span>.
+                <div className="px-3 py-2 text-[11px] text-helios-dim">
+                  No math channels yet. Click <span className="text-asu-gold">+ add</span>.
                 </div>
               )}
               {channels.map((c, i) => {
@@ -201,7 +201,7 @@ export function MathChannelsModal({
                     onClick={() => setSelectedIdx(i)}
                     className={
                       "px-2 py-1.5 cursor-pointer flex items-center gap-2 text-xs " +
-                      (isSelected ? "bg-[#16171B]" : "hover:bg-[#16171B]")
+                      (isSelected ? "bg-helios-panel" : "hover:bg-helios-panel")
                     }
                   >
                     <span
@@ -210,9 +210,9 @@ export function MathChannelsModal({
                       aria-hidden
                     />
                     <span className="flex-1 truncate">
-                      <span className="font-mono-num text-[#FFC627]">{c.id}</span>
+                      <span className="font-mono-num text-asu-gold">{c.id}</span>
                       <br />
-                      <span className="text-[10px] text-[#9097A0]">{c.display_name}</span>
+                      <span className="text-[10px] text-helios-dim">{c.display_name}</span>
                     </span>
                     {hasError && (
                       <span title={errors.get(c.id)} className="text-[#EF5350] flex-shrink-0">!</span>
@@ -248,12 +248,12 @@ export function MathChannelsModal({
                   onChange={update}
                   onDelete={() => setPendingDelete(selectedIdx)}
                 />
-              : <div className="p-6 text-xs text-[#9097A0]">Select a math channel from the list, or click + add to create one.</div>
+              : <div className="p-6 text-xs text-helios-dim">Select a math channel from the list, or click + add to create one.</div>
             }
           </main>
         </div>
 
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+        <div className="px-3 py-2 border-t border-helios-line text-[10px] text-helios-dim">
           Drag tokens from the palette into the expression box, or click them to insert at the cursor.
         </div>
       </div>
@@ -299,18 +299,18 @@ function Palette({ channels, disabled, onInsert }: PaletteProps) {
   }, [channels]);
 
   return (
-    <aside className="w-60 flex-shrink-0 border-r border-[#2A2C32] flex flex-col bg-[#0B0B0D]">
-      <div className="px-2 py-1 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Palette</span>
+    <aside className="w-60 flex-shrink-0 border-r border-helios-line flex flex-col bg-helios-deep">
+      <div className="px-2 py-1 border-b border-helios-line">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Palette</span>
       </div>
       <div className="flex-1 overflow-y-auto">
         <Section title="Channels" open={open["Channels"] ?? true} onToggle={() => toggle("Channels")}>
           {channelsByGroup.length === 0 && (
-            <div className="px-3 py-1 text-[10px] text-[#9097A0]">No channels in primary session.</div>
+            <div className="px-3 py-1 text-[10px] text-helios-dim">No channels in primary session.</div>
           )}
           {channelsByGroup.map(([group, list]) => (
             <div key={group} className="mb-1">
-              <div className="px-3 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66]">{group}</div>
+              <div className="px-3 py-0.5 text-[9px] uppercase tracking-wider text-helios-muted">{group}</div>
               {list.map((c) => (
                 <Token
                   key={c.id}
@@ -394,13 +394,13 @@ function Section({ title, open, onToggle, children }: {
   title: string; open: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-[#16171B]">
+    <div className="border-b border-helios-panel">
       <button
         onClick={onToggle}
-        className="w-full px-2 py-1 text-left text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] flex items-center justify-between"
+        className="w-full px-2 py-1 text-left text-[10px] uppercase tracking-wider text-helios-dim hover:text-asu-gold hover:bg-helios-panel flex items-center justify-between"
       >
         <span>{title}</span>
-        <span className="text-[#5A5F66]">{open ? "−" : "+"}</span>
+        <span className="text-helios-muted">{open ? "−" : "+"}</span>
       </button>
       {open && <div className="pb-1">{children}</div>}
     </div>
@@ -426,8 +426,8 @@ function Token({ text, insert, hint, swatch, warning, disabled, onInsert }: Toke
       className={
         "px-3 py-0.5 text-[11px] flex items-center gap-1.5 truncate "
         + (disabled
-          ? "text-[#5A5F66] cursor-not-allowed"
-          : "text-[#D8DCE2] hover:bg-[#16171B] hover:text-[#FFC627] cursor-grab active:cursor-grabbing")
+          ? "text-helios-muted cursor-not-allowed"
+          : "text-helios-text hover:bg-helios-panel hover:text-asu-gold cursor-grab active:cursor-grabbing")
       }
       title={hint}
     >
@@ -435,7 +435,7 @@ function Token({ text, insert, hint, swatch, warning, disabled, onInsert }: Toke
         <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: swatch }} aria-hidden />
       )}
       <span className={"font-mono-num truncate " + (warning ? "text-[#FFB800]" : "")}>{text}</span>
-      {hint && !swatch && <span className="ml-auto text-[9px] text-[#5A5F66] truncate">{hint}</span>}
+      {hint && !swatch && <span className="ml-auto text-[9px] text-helios-muted truncate">{hint}</span>}
     </div>
   );
 }
@@ -448,10 +448,10 @@ function ChipToken({ text, insert, disabled, onInsert }: TokenProps) {
       onClick={() => !disabled && onInsert(insert)}
       disabled={disabled}
       className={
-        "h-6 text-[11px] font-mono-num bg-[#16171B] border border-[#2A2C32] rounded-sm "
+        "h-6 text-[11px] font-mono-num bg-helios-panel border border-helios-line rounded-sm "
         + (disabled
-          ? "text-[#5A5F66] cursor-not-allowed"
-          : "text-[#D8DCE2] hover:border-[#FFC627] hover:text-[#FFC627] cursor-grab active:cursor-grabbing")
+          ? "text-helios-muted cursor-not-allowed"
+          : "text-helios-text hover:border-asu-gold hover:text-asu-gold cursor-grab active:cursor-grabbing")
       }
     >{text}</button>
   );
@@ -555,63 +555,63 @@ function Editor({
   }
 
   return (
-    <div className="p-4 flex flex-col gap-3 text-xs text-[#D8DCE2]">
+    <div className="p-4 flex flex-col gap-3 text-xs text-helios-text">
       <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-2 items-center">
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">id</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">id</label>
         <div className="flex items-center gap-2">
           <input
             value={idDraft}
             onChange={(e) => setId(e.target.value)}
             className={
-              "flex-1 bg-[#16171B] border px-2 py-1 font-mono-num text-[#FFC627] focus:outline-none "
-              + (idError ? "border-[#EF5350]" : "border-[#2A2C32] focus:border-[#FFC627]")
+              "flex-1 bg-helios-panel border px-2 py-1 font-mono-num text-asu-gold focus:outline-none "
+              + (idError ? "border-[#EF5350]" : "border-helios-line focus:border-asu-gold")
             }
           />
           {idError && <span className="text-[10px] text-[#EF5350]">{idError}</span>}
         </div>
 
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">name</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">name</label>
         <input
           value={channel.display_name}
           onChange={(e) => set("display_name", e.target.value)}
-          className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
+          className="bg-helios-panel border border-helios-line px-2 py-1 focus:outline-none focus:border-asu-gold"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">units</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">units</label>
         <input
           value={channel.units}
           onChange={(e) => set("units", e.target.value)}
-          className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
+          className="bg-helios-panel border border-helios-line px-2 py-1 focus:outline-none focus:border-asu-gold"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">decimals</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">decimals</label>
         <input
           type="number" min={0} max={6}
           value={channel.decimals}
           // L11 — clamp/round to [0, 6] so an out-of-range value can never reach
           // toFixed() downstream (which throws RangeError outside 0..100).
           onChange={(e) => set("decimals", Math.max(0, Math.min(6, Math.round(Number(e.target.value) || 0))))}
-          className="w-20 bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
+          className="w-20 bg-helios-panel border border-helios-line px-2 py-1 focus:outline-none focus:border-asu-gold"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">color</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">color</label>
         <input
           type="color"
           value={channel.color}
           onChange={(e) => set("color", e.target.value)}
-          className="w-12 h-7 bg-[#16171B] border border-[#2A2C32] cursor-pointer"
+          className="w-12 h-7 bg-helios-panel border border-helios-line cursor-pointer"
         />
 
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">group</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">group</label>
         <input
           value={channel.group}
           onChange={(e) => set("group", e.target.value)}
-          className="bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
+          className="bg-helios-panel border border-helios-line px-2 py-1 focus:outline-none focus:border-asu-gold"
         />
       </div>
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] uppercase tracking-wider text-[#9097A0]">expression</label>
+        <label className="text-[10px] uppercase tracking-wider text-helios-dim">expression</label>
         <textarea
           ref={textareaRef}
           value={channel.expression}
@@ -619,8 +619,8 @@ function Editor({
           rows={5}
           spellCheck={false}
           className={
-            "bg-[#16171B] border px-2 py-1.5 font-mono-num text-[#D8DCE2] resize-y focus:outline-none "
-            + (check.ok ? "border-[#2A2C32] focus:border-[#FFC627]" : "border-[#EF5350]")
+            "bg-helios-panel border px-2 py-1.5 font-mono-num text-helios-text resize-y focus:outline-none "
+            + (check.ok ? "border-helios-line focus:border-asu-gold" : "border-[#EF5350]")
           }
           placeholder="e.g. derivative(engine.rpm) or smooth(imu.lat_g, 21)"
         />
@@ -637,7 +637,7 @@ function Editor({
           <div className="text-[10px] text-[#EF5350]">Apply error: {errorFromApply}</div>
         )}
         {check.ok && check.refs.length > 0 && unknownRefs.length === 0 && (
-          <div className="text-[10px] text-[#9097A0]">References: {check.refs.map(formatRefForExpr).join(", ")}</div>
+          <div className="text-[10px] text-helios-dim">References: {check.refs.map(formatRefForExpr).join(", ")}</div>
         )}
       </div>
 
@@ -648,12 +648,12 @@ function Editor({
         <NumberField label="alarm" value={channel.alarm} onChange={(v) => set("alarm", v)} />
       </div>
 
-      <div className="flex items-center justify-between pt-2 border-t border-[#2A2C32] mt-2">
+      <div className="flex items-center justify-between pt-2 border-t border-helios-line mt-2">
         <button
           onClick={onDelete}
-          className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm cursor-pointer"
+          className="px-2 py-0.5 text-[10px] uppercase tracking-wider text-helios-dim hover:text-[#EF5350] hover:bg-helios-panel rounded-sm cursor-pointer"
         >Delete</button>
-        <span className="text-[10px] text-[#9097A0]">Edits save automatically.</span>
+        <span className="text-[10px] text-helios-dim">Edits save automatically.</span>
       </div>
     </div>
   );
@@ -666,12 +666,12 @@ function NumberField({ label, value, onChange }: {
 }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="text-[10px] uppercase tracking-wider text-[#9097A0] w-12">{label}</span>
+      <span className="text-[10px] uppercase tracking-wider text-helios-dim w-12">{label}</span>
       <input
         type="number"
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-        className="flex-1 bg-[#16171B] border border-[#2A2C32] px-2 py-1 focus:outline-none focus:border-[#FFC627]"
+        className="flex-1 bg-helios-panel border border-helios-line px-2 py-1 focus:outline-none focus:border-asu-gold"
       />
     </label>
   );

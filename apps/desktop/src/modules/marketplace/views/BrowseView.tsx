@@ -183,7 +183,7 @@ function BrowseCard({
           <button
             type="button"
             onClick={onRequestInstall}
-            className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+            className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
           >
             Install
           </button>
@@ -194,7 +194,7 @@ function BrowseCard({
               <button
                 type="button"
                 onClick={onRequestInstall}
-                className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+                className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
               >
                 Update to v{plugin.version}
               </button>

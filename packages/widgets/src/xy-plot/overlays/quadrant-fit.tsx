@@ -3,6 +3,7 @@ import { fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower, lin
 import type { OverlayModule, QuadrantFitConfig, SessionGroup, FitKind } from "../types";
 import { register } from "./registry";
 
+import { tc } from "@helios/ui";
 interface PerQuadrant {
   label: "Q1" | "Q2" | "Q3" | "Q4";
   xSign: 1 | -1;
@@ -88,7 +89,7 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
       if (cfg.showStatsOverlay) {
         const cornerX = q.xSign > 0 ? layout.padL + layout.plotW - 6 : layout.padL + 6;
         const cornerY = q.ySign > 0 ? layout.padT + 14 : layout.padT + layout.plotH - 6;
-        ctx.fillStyle = "#D8DCE2"; ctx.font = "10px ui-monospace, monospace";
+        ctx.fillStyle = tc("text"); ctx.font = "10px ui-monospace, monospace";
         ctx.textAlign = q.xSign > 0 ? "right" : "left";
         ctx.textBaseline = q.ySign > 0 ? "top" : "bottom";
         ctx.fillText(`${q.label} R²=${q.rSquared.toFixed(3)}`, cornerX, cornerY);
@@ -110,7 +111,7 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
             const k: FitKind = t === "polynomial" ? { type: "polynomial", degree: 2 } : { type: t } as FitKind;
             onChange({ ...config, kind: k });
           }}
-          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          className="bg-helios-base border border-helios-line px-1 text-[11px]">
           <option value="linear">linear</option>
           <option value="polynomial">polynomial</option>
           <option value="exponential">exponential</option>
@@ -122,7 +123,7 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
         <Row label="degree">
           <input type="number" min={1} max={6} value={config.kind.degree}
             onChange={(e) => onChange({ ...config, kind: { type: "polynomial", degree: Number(e.target.value) } })}
-            className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+            className="w-16 bg-helios-base border border-helios-line px-1" />
         </Row>
       )}
       <Row label="color">
@@ -132,7 +133,7 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
       <Row label="line width">
         <input type="number" min={1} max={5} step={0.5} value={config.lineWidth}
           onChange={(e) => onChange({ ...config, lineWidth: Number(e.target.value) })}
-          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+          className="w-16 bg-helios-base border border-helios-line px-1" />
       </Row>
       <Row label="±σ band">
         <input type="checkbox" checked={config.showBand}
@@ -148,8 +149,8 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

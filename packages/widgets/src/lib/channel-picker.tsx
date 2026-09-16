@@ -33,8 +33,8 @@ export function ChannelPicker({ value, onChange, channels, allowEmpty, className
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className={
-        "bg-[#0E0E10] border border-[#2A2C32] px-1 text-xs text-[#D8DCE2] " +
-        "focus:outline-none focus:border-[#FFC627] cursor-pointer " +
+        "bg-helios-base border border-helios-line px-1 text-xs text-helios-text " +
+        "focus:outline-none focus:border-asu-gold cursor-pointer " +
         (className ?? "")
       }
     >

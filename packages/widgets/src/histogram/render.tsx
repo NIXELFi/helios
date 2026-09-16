@@ -4,6 +4,7 @@ import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { channelLabel } from "../lib/display-meta";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
+import { tc } from "@helios/ui";
 export interface HistogramConfig {
   channelId: string;
   bins: number;
@@ -64,7 +65,7 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
       if (iEnd > iStart) datasets.push({ session, data, iStart, iEnd });
     }
     if (datasets.length === 0) {
-      ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no data", w / 2, h / 2);
       return;
@@ -146,9 +147,9 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
     // The grid sits behind the bars so we draw it first, before any fill.
     if (maxCount > 0 && plotH > 30) {
       ctx.save();
-      ctx.strokeStyle = "#23252B";
+      ctx.strokeStyle = tc("grid");
       ctx.lineWidth = 1;
-      ctx.fillStyle = "#5A5F66";
+      ctx.fillStyle = tc("muted");
       ctx.font = "9px Inter, system-ui, sans-serif";
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
@@ -238,13 +239,13 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
       ctx.restore();
     }
 
-    ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
+    ctx.strokeStyle = tc("line"); ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padL, padT + plotH + 0.5);
     ctx.lineTo(padL + plotW, padT + plotH + 0.5);
     ctx.stroke();
 
-    ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = tc("dim"); ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     const totalN = datasets.reduce((s, d) => s + (d.iEnd - d.iStart), 0);
     ctx.fillText(
@@ -282,7 +283,7 @@ export function HistogramRender(props: WidgetRenderProps<HistogramConfig>) {
     }
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }
 
 /** Convert a #RRGGBB hex color into rgba() with the given alpha. */

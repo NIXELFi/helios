@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { DOW_LABELS, niceMax, type Point } from "./pulse-lib";
 
+import { tc, tca } from "@helios/ui";
 // Chart primitives for Admin > Pulse. Hand-rolled SVG like the Vault Insights
 // charts (no library), but with a hover layer: every plotted chart answers
 // "what is this exact value" on pointer-over, and the text always wears the
@@ -13,9 +14,9 @@ export const C = {
   danger: "#EF5350",
   warn: "#F5A623",
   violet: "#B39DDB",
-  line: "#2A2C32",
-  dim: "#9097A0",
-  text: "#D8DCE2",
+  line: tc("line"),
+  dim: tc("dim"),
+  text: tc("text"),
 };
 
 /** Panel wrapper - same border/title treatment as the Insights ChartCard so
@@ -204,7 +205,7 @@ export function AreaChart({
         {hover ? (
           <>
             <line x1={x(hover.i)} x2={x(hover.i)} y1={PAD_T} y2={H - PAD_B} stroke={C.dim} strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-            <circle cx={x(hover.i)} cy={y(points[hover.i]!.value)} r={4} fill={accent} stroke="#16171B" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            <circle cx={x(hover.i)} cy={y(points[hover.i]!.value)} r={4} fill={accent} stroke={tc("panel")} strokeWidth={2} vectorEffect="non-scaling-stroke" />
           </>
         ) : (
           <circle cx={x(n - 1)} cy={y(points[n - 1]!.value)} r={3} fill={accent} vectorEffect="non-scaling-stroke" />
@@ -410,7 +411,7 @@ export function Heatmap({ grid, hourLabel = (h: number) => `${h}:00` }: { grid: 
                   key={h}
                   className="h-[14px] min-w-0"
                   style={{
-                    backgroundColor: `rgba(255,198,39,${alpha.toFixed(3)})`,
+                    backgroundColor: `${tca("gold", alpha)}`,
                     outline: isHover ? `1px solid ${C.text}` : undefined,
                     outlineOffset: -1,
                   }}

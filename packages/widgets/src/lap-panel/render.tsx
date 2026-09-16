@@ -71,20 +71,20 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
   }
 
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto">
+    <div className="w-full h-full bg-helios-panel overflow-auto">
       {blocks.map(({ session, laps, best }, bi) => (
         <div key={session.id}>
           {visible.length > 1 && (
-            <div className="px-2 py-1 flex items-center gap-2 bg-[#0E0E10] border-b border-[#2A2C32]">
+            <div className="px-2 py-1 flex items-center gap-2 bg-helios-base border-b border-helios-line">
               <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: session.color }} aria-hidden />
-              <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-1 truncate">{session.label}</span>
-              <span className="text-[9px] text-[#5A5F66]">{laps.length} laps</span>
+              <span className="text-[10px] uppercase tracking-wider text-helios-dim flex-1 truncate">{session.label}</span>
+              <span className="text-[9px] text-helios-muted">{laps.length} laps</span>
             </div>
           )}
           <table className="w-full text-xs font-mono-num">
             {bi === 0 && (
-              <thead className="text-[#9097A0] uppercase text-[10px]">
-                <tr className="border-b border-[#2A2C32]">
+              <thead className="text-helios-dim uppercase text-[10px]">
+                <tr className="border-b border-helios-line">
                   <th className="text-left px-2 py-1">Lap</th>
                   <th className="text-right px-2 py-1">Time</th>
                   <th className="text-right px-2 py-1">Δ best</th>
@@ -108,25 +108,25 @@ export function LapPanelRender(props: WidgetRenderProps<LapPanelConfig>) {
                     key={`${session.id}-${allIdx}`}
                     onClick={(e) => selectLap(ref, e)}
                     className={
-                      "border-b border-[#23252B] cursor-pointer " +
-                      (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-[#0E0E10] ") +
-                      (!lap.trusted ? "text-[#5A5F66]" : "text-[#D8DCE2]")
+                      "border-b border-helios-grid cursor-pointer " +
+                      (main ? "bg-[#1F1F23] " : refSel ? "bg-[#16191F] " : overlay ? "bg-[#13141A] " : "hover:bg-helios-base ") +
+                      (!lap.trusted ? "text-helios-muted" : "text-helios-text")
                     }
                     title="click = Main · ⌘+click = Ref · shift+click = toggle overlay"
                   >
                     <td className="px-2 py-0.5">
                       {lap.index}
-                      {!lap.trusted && <span className="ml-1 text-[#9097A0]">·</span>}
-                      {isBest && <span className="ml-1 text-[#FFC627]">★</span>}
+                      {!lap.trusted && <span className="ml-1 text-helios-dim">·</span>}
+                      {isBest && <span className="ml-1 text-asu-gold">★</span>}
                     </td>
-                    <td className={"text-right px-2 py-0.5 " + (isBest ? "text-[#FFC627] font-bold" : "")}>
+                    <td className={"text-right px-2 py-0.5 " + (isBest ? "text-asu-gold font-bold" : "")}>
                       {formatLapTime(lap.durationS * 1_000_000)}
                     </td>
-                    <td className="text-right px-2 py-0.5 text-[#9097A0]">
+                    <td className="text-right px-2 py-0.5 text-helios-dim">
                       {dt === 0 ? "—" : `+${dt.toFixed(3)}`}
                     </td>
                     <td className="text-right px-2 py-0.5 text-[10px]">
-                      {main && <span className="text-[#FFC627]">M</span>}
+                      {main && <span className="text-asu-gold">M</span>}
                       {refSel && <span className="text-[#4FC3F7]">R</span>}
                       {overlay && <span className="text-[#9CCC65]">O</span>}
                     </td>
@@ -150,10 +150,10 @@ function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
   }
   const best = laps.reduce((a, b) => (b.time_ms < a.time_ms ? b : a)).time_ms;
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto">
+    <div className="w-full h-full bg-helios-panel overflow-auto">
       <table className="w-full text-xs font-mono-num">
-        <thead className="text-[#9097A0] uppercase text-[10px]">
-          <tr className="border-b border-[#2A2C32]">
+        <thead className="text-helios-dim uppercase text-[10px]">
+          <tr className="border-b border-helios-line">
             <th className="text-left px-2 py-1">Lap</th>
             <th className="text-right px-2 py-1">Time</th>
             <th className="text-right px-2 py-1">Δ best</th>
@@ -164,10 +164,10 @@ function LegacyStaticTable({ laps }: { laps: LapEntry[] }) {
             const isBest = lap.time_ms === best;
             const dt = lap.time_ms - best;
             return (
-              <tr key={lap.number} className={`border-b border-[#23252B] ${isBest ? "bg-[#0E0E10]" : ""}`}>
+              <tr key={lap.number} className={`border-b border-helios-grid ${isBest ? "bg-helios-base" : ""}`}>
                 <td className="px-2 py-1">{lap.number}</td>
-                <td className={`text-right px-2 py-1 ${isBest ? "text-[#FFC627] font-bold" : "text-[#D8DCE2]"}`}>{formatLapTime(lap.time_ms * 1000)}</td>
-                <td className="text-right px-2 py-1 text-[#9097A0]">{dt === 0 ? "—" : `+${(dt / 1000).toFixed(3)}`}</td>
+                <td className={`text-right px-2 py-1 ${isBest ? "text-asu-gold font-bold" : "text-helios-text"}`}>{formatLapTime(lap.time_ms * 1000)}</td>
+                <td className="text-right px-2 py-1 text-helios-dim">{dt === 0 ? "—" : `+${(dt / 1000).toFixed(3)}`}</td>
               </tr>
             );
           })}

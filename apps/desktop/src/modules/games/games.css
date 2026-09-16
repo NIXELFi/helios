@@ -10,16 +10,23 @@
 
 /* ---------------------------------------------------------------- tokens */
 .games-root {
-  --g-gold: #ffc627;
-  --g-gold-dim: rgba(255, 198, 39, 0.55);
-  --g-gold-glow: rgba(255, 198, 39, 0.12);
+  --g-gold: rgb(var(--asu-gold));
+  --g-gold-dim: rgb(var(--asu-gold) / 0.55);
+  --g-gold-glow: rgb(var(--asu-gold) / 0.12);
   --g-silver: #c0c7d1;
   --g-bronze: #b87333;
-  --g-line: #2a2c32;
-  --g-panel: #16171b;
-  --g-base: #0e0e10;
-  --g-text: #d8dce2;
-  --g-dim: #9097a0;
+  --g-line: rgb(var(--helios-line));
+  --g-panel: rgb(var(--helios-panel));
+  --g-base: rgb(var(--helios-base));
+  --g-text: rgb(var(--helios-text));
+  --g-dim: rgb(var(--helios-dim));
+  /* CRT shade (scanlines, vignette, bezel shadow): black on dark; in light a
+     faint ink so the board reads as a frame, not a smudge. */
+  --g-shade: 0 0 0;
+  --g-scan: 0.16;
+  --g-vig: 0.4;
+  --g-ring: 0.6;
+  --g-drop: 0.9;
 }
 
 /* ------------------------------------------------------------ atmosphere */
@@ -30,10 +37,10 @@
   background-color: var(--g-base);
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -10%, var(--g-gold-glow), transparent 70%),
-    linear-gradient(to right, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(42, 44, 50, 0.55) 1px, transparent 1px),
-    linear-gradient(to right, rgba(42, 44, 50, 0.28) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(42, 44, 50, 0.28) 1px, transparent 1px);
+    linear-gradient(to right, rgb(var(--helios-line) / 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--helios-line) / 0.55) 1px, transparent 1px),
+    linear-gradient(to right, rgb(var(--helios-line) / 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--helios-line) / 0.28) 1px, transparent 1px);
   background-size:
     100% 100%,
     120px 120px,
@@ -69,11 +76,11 @@
   position: relative;
   border-radius: 6px;
   padding: 10px;
-  background: linear-gradient(180deg, #1a1b20 0%, #121317 100%);
+  background: linear-gradient(180deg, rgb(var(--helios-panel)) 0%, rgb(var(--helios-deep)) 100%);
   border: 1px solid var(--g-line);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.6),
-    0 18px 50px -18px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgb(var(--g-shade) / var(--g-ring)),
+    0 18px 50px -18px rgb(var(--g-shade) / var(--g-drop)),
     0 0 36px -6px var(--g-gold-glow);
 }
 .games-crt::after {
@@ -86,12 +93,12 @@
   background:
     repeating-linear-gradient(
       to bottom,
-      rgba(0, 0, 0, 0.16) 0px,
-      rgba(0, 0, 0, 0.16) 1px,
+      rgb(var(--g-shade) / var(--g-scan)) 0px,
+      rgb(var(--g-shade) / var(--g-scan)) 1px,
       transparent 1px,
       transparent 3px
     ),
-    radial-gradient(ellipse 105% 105% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.4) 100%);
+    radial-gradient(ellipse 105% 105% at 50% 50%, transparent 62%, rgb(var(--g-shade) / var(--g-vig)) 100%);
 }
 
 /* -------------------------------------------------------------- hazard */
@@ -220,4 +227,28 @@
   .games-deal { animation: none; }
   .games-slide { transition: none; }
   .games-merge { animation: none; }
+}
+
+
+/* The arcade lobby follows the theme, but the SCREEN is a dark display in
+   both themes — an arcade cabinet in a lit room. Everything rendered inside
+   .games-screen (the CRT, the Blackjack table, the game-over overlay) gets
+   the dark tokens; the canvases themselves draw with tcDark() to match. */
+:root[data-theme="light"] .games-screen {
+  color-scheme: dark;
+  --helios-base: 14 14 16;
+  --helios-panel: 22 23 27;
+  --helios-deep: 11 11 13;
+  --helios-line: 42 44 50;
+  --helios-grid: 35 37 43;
+  --helios-text: 216 220 226;
+  --helios-dim: 144 151 160;
+  --helios-muted: 90 95 102;
+  --helios-on-gold: 14 14 16;
+  --asu-gold: 255 198 39;
+  --g-shade: 0 0 0;
+  --g-scan: 0.16;
+  --g-vig: 0.4;
+  --g-ring: 0.35;
+  --g-drop: 0.5;
 }

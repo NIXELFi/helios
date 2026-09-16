@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { tcDark } from "@helios/ui";
 import { useGameLoop } from "../../lib/useGameLoop";
 import type { GameProps } from "../types";
 import {
@@ -203,7 +204,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
     const px = (u: number) => (u + 0.5) * bucketW;
 
     // Pegs
-    ctx.fillStyle = "#5b6070";
+    ctx.fillStyle = tcDark("muted");
     for (const [i, row] of pegRows(rows).entries()) {
       const y = rowH * (i + 1);
       for (const u of row) {
@@ -243,8 +244,8 @@ export function PlinkoGame({ paused, money }: GameProps) {
       const u = b.track[i]! + (b.track[i + 1]! - b.track[i]!) * f;
       const y = rowH * (i + f) + rowH * 0.5 - Math.sin(f * Math.PI) * rowH * 0.28;
       ctx.beginPath();
-      ctx.fillStyle = "#ffc627";
-      ctx.shadowColor = "#ffc627";
+      ctx.fillStyle = tcDark("gold");
+      ctx.shadowColor = tcDark("gold");
       ctx.shadowBlur = 8;
       ctx.arc(px(u), y, rows > 12 ? 3.4 : 4.4, 0, Math.PI * 2);
       ctx.fill();
@@ -368,7 +369,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
               className={
                 chipBtn +
                 (stake === v
-                  ? " border-asu-gold bg-asu-gold text-helios-base"
+                  ? " border-asu-gold bg-asu-gold text-helios-on-gold"
                   : " border-helios-line bg-transparent text-helios-text hover:border-asu-gold")
               }
             >
@@ -393,7 +394,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
             type="button"
             disabled={paused || stake <= 0 || stake > maxBet}
             onClick={() => void drop()}
-            className="games-display ml-auto rounded-sm border border-asu-gold bg-asu-gold px-4 py-1.5 text-[10px] tracking-wider text-helios-base transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+            className="games-display ml-auto rounded-sm border border-asu-gold bg-asu-gold px-4 py-1.5 text-[10px] tracking-wider text-helios-on-gold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
           >
             DROP {stake}
           </button>

@@ -2,7 +2,7 @@
    .kb-prose so it never leaks into the rest of Helios. Dark, calm, readable. */
 
 .kb-prose {
-  color: #D8DCE2;
+  color: rgb(var(--helios-text));
   font-size: 15px;
   line-height: 1.72;
   word-wrap: break-word;
@@ -13,7 +13,7 @@
 .kb-prose h2.kb-h,
 .kb-prose h3.kb-h,
 .kb-prose h4.kb-h {
-  color: #F1F3F6;
+  color: rgb(var(--helios-text));
   font-weight: 700;
   line-height: 1.25;
   scroll-margin-top: 1rem;
@@ -21,32 +21,32 @@
 .kb-prose h1.kb-h { font-size: 1.9rem; margin: 1.6rem 0 0.9rem; letter-spacing: -0.01em; }
 .kb-prose h2.kb-h {
   font-size: 1.4rem; margin: 1.7rem 0 0.7rem; padding-bottom: 0.3rem;
-  border-bottom: 1px solid #2A2C32;
+  border-bottom: 1px solid rgb(var(--helios-line));
 }
-.kb-prose h3.kb-h { font-size: 1.14rem; margin: 1.3rem 0 0.5rem; color: #FFD873; }
-.kb-prose h4.kb-h { font-size: 1rem; margin: 1.1rem 0 0.4rem; color: #C9CDd4; }
+.kb-prose h3.kb-h { font-size: 1.14rem; margin: 1.3rem 0 0.5rem; color: rgb(var(--asu-gold)); }
+.kb-prose h4.kb-h { font-size: 1rem; margin: 1.1rem 0 0.4rem; color: rgb(var(--helios-text)); }
 
 .kb-prose p { margin: 0.7rem 0; }
 .kb-prose ul, .kb-prose ol { margin: 0.6rem 0; padding-left: 1.4rem; }
 .kb-prose li { margin: 0.2rem 0; }
-.kb-prose li::marker { color: #6E7681; }
+.kb-prose li::marker { color: rgb(var(--helios-dim)); }
 
-.kb-prose hr { border: 0; border-top: 1px solid #2A2C32; margin: 1.6rem 0; }
+.kb-prose hr { border: 0; border-top: 1px solid rgb(var(--helios-line)); margin: 1.6rem 0; }
 
-.kb-prose strong { color: #EDEFF2; font-weight: 700; }
-.kb-prose em { color: #E4E7EC; }
+.kb-prose strong { color: rgb(var(--helios-text)); font-weight: 700; }
+.kb-prose em { color: rgb(var(--helios-text)); }
 
 .kb-prose a.kb-extlink { color: #7FB2F0; text-decoration: none; }
 .kb-prose a.kb-extlink:hover { text-decoration: underline; }
 
 /* Wikilinks */
 .kb-prose a.kb-link {
-  color: #FFC627;
+  color: rgb(var(--asu-gold));
   text-decoration: none;
-  border-bottom: 1px solid rgba(255, 198, 39, 0.35);
+  border-bottom: 1px solid rgb(var(--asu-gold) / 0.35);
   cursor: pointer;
 }
-.kb-prose a.kb-link:hover { border-bottom-color: #FFC627; background: rgba(255, 198, 39, 0.08); }
+.kb-prose a.kb-link:hover { border-bottom-color: rgb(var(--asu-gold)); background: rgb(var(--asu-gold) / 0.08); }
 .kb-prose a.kb-link-missing {
   color: #9A6B7E;
   border-bottom: 1px dashed rgba(154, 107, 126, 0.5);
@@ -56,33 +56,33 @@
 .kb-prose code {
   font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.86em;
-  background: #1C1E24;
-  border: 1px solid #2A2C32;
+  background: rgb(var(--helios-panel));
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 4px;
   padding: 0.08em 0.36em;
-  color: #E6C07B;
+  color: rgb(var(--asu-gold));
 }
 .kb-prose pre {
-  background: #121317;
-  border: 1px solid #2A2C32;
+  background: rgb(var(--helios-deep));
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 8px;
   padding: 0.9rem 1rem;
   overflow-x: auto;
   margin: 0.9rem 0;
 }
-.kb-prose pre code { background: none; border: 0; padding: 0; color: #CBD2DA; }
+.kb-prose pre code { background: none; border: 0; padding: 0; color: rgb(var(--helios-text)); }
 
 /* Blockquotes / callouts */
 .kb-prose blockquote {
   margin: 0.9rem 0;
   padding: 0.6rem 1rem;
-  border-left: 3px solid #FFC627;
-  background: rgba(255, 198, 39, 0.05);
+  border-left: 3px solid rgb(var(--asu-gold));
+  background: rgb(var(--asu-gold) / 0.05);
   border-radius: 0 6px 6px 0;
-  color: #C4C9D0;
+  color: rgb(var(--helios-dim));
 }
 .kb-prose blockquote p { margin: 0.3rem 0; }
-.kb-callout-title { display: block; font-weight: 700; color: #FFC627; margin-bottom: 0.15rem; }
+.kb-callout-title { display: block; font-weight: 700; color: rgb(var(--asu-gold)); margin-bottom: 0.15rem; }
 .kb-callout-warning, .kb-callout-caution, .kb-callout-danger { color: #F5A623; }
 .kb-callout-note, .kb-callout-info { color: #42A5F5; }
 .kb-callout-tip, .kb-callout-success { color: #66BB6A; }
@@ -97,7 +97,7 @@
   overflow-x: auto;
 }
 .kb-prose thead th {
-  background: #8C1D40;
+  background: rgb(var(--asu-maroon));
   color: #fff;
   font-weight: 600;
   text-align: left;
@@ -105,11 +105,11 @@
   white-space: nowrap;
 }
 .kb-prose tbody td {
-  border: 1px solid #24262C;
+  border: 1px solid rgb(var(--helios-line));
   padding: 0.45rem 0.7rem;
   vertical-align: top;
 }
-.kb-prose tbody tr:nth-child(even) { background: #14151A; }
+.kb-prose tbody tr:nth-child(even) { background: rgb(var(--helios-deep)); }
 
 /* Embedded figures */
 .kb-prose img.kb-embed {
@@ -117,15 +117,15 @@
   max-width: 100%;
   height: auto;
   margin: 1rem auto;
-  border: 1px solid #2A2C32;
+  border: 1px solid rgb(var(--helios-line));
   border-radius: 8px;
-  background: #0A0A0C;
+  background: rgb(var(--helios-deep));
 }
 .kb-embed-missing, .kb-prose .kb-embed-missing {
   display: inline-block;
-  color: #6E7681;
+  color: rgb(var(--helios-dim));
   font-size: 0.85em;
-  border: 1px dashed #2A2C32;
+  border: 1px dashed rgb(var(--helios-line));
   border-radius: 6px;
   padding: 0.2rem 0.5rem;
 }
@@ -142,34 +142,34 @@
 
 /* Search-hit highlight (jump-to-match from the search pane) */
 .kb-prose mark.kb-search-hit {
-  background: rgba(255, 198, 39, 0.28);
-  color: #FFE08A;
+  background: rgb(var(--asu-gold) / 0.28);
+  color: rgb(var(--asu-gold));
   border-radius: 3px;
   padding: 0 1px;
-  box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.35);
+  box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.35);
 }
 .kb-prose mark.kb-phrase {
-  background: rgba(255, 198, 39, 0.42);
-  color: #FFEFC0;
+  background: rgb(var(--asu-gold) / 0.42);
+  color: rgb(var(--asu-gold));
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.5);
+  box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.5);
 }
 .kb-prose mark.kb-search-current {
-  background: rgba(255, 198, 39, 0.78) !important;
+  background: rgb(var(--asu-gold) / 0.78) !important;
   color: #1a1400 !important;
-  box-shadow: 0 0 0 2px rgba(255, 198, 39, 0.9);
+  box-shadow: 0 0 0 2px rgb(var(--asu-gold) / 0.9);
   scroll-margin: 40vh;
 }
 .kb-prose mark.kb-search-hit.kb-search-first {
   animation: kb-hit-pulse 1.6s ease-out 1;
 }
 @keyframes kb-hit-pulse {
-  0%   { background: rgba(255, 198, 39, 0.75); box-shadow: 0 0 0 4px rgba(255, 198, 39, 0.35); }
-  100% { background: rgba(255, 198, 39, 0.28); box-shadow: 0 0 0 1px rgba(255, 198, 39, 0.35); }
+  0%   { background: rgb(var(--asu-gold) / 0.75); box-shadow: 0 0 0 4px rgb(var(--asu-gold) / 0.35); }
+  100% { background: rgb(var(--asu-gold) / 0.28); box-shadow: 0 0 0 1px rgb(var(--asu-gold) / 0.35); }
 }
 
 /* Thin scrollbars for the KB panes */
-.kb-scroll { scrollbar-width: thin; scrollbar-color: #2A2C32 transparent; }
+.kb-scroll { scrollbar-width: thin; scrollbar-color: rgb(var(--helios-line)) transparent; }
 .kb-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-.kb-scroll::-webkit-scrollbar-thumb { background: #24262C; border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
-.kb-scroll::-webkit-scrollbar-thumb:hover { background: #33363D; background-clip: content-box; }
+.kb-scroll::-webkit-scrollbar-thumb { background: rgb(var(--helios-line)); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+.kb-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--helios-muted)); background-clip: content-box; }

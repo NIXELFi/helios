@@ -39,7 +39,7 @@ export function NavRail(props: {
     // Shared secondary-sidebar language (CFD NavRail + PM sidebar): a grey
     // (bg-helios-panel) rail with borderless icon rows — dim by default, a
     // soft gold-tint fill + gold text when active, gold text on hover.
-    <nav className="flex w-44 flex-col border-r border-helios-line bg-helios-panel">
+    <nav className="flex w-44 flex-col border-r border-helios-line bg-helios-strip">
       <VaultSwitcher />
       <div className="p-2">
         <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-helios-dim">Screens</p>

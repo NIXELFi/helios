@@ -49,6 +49,7 @@ import {
   taskHistoryToCsv,
 } from "@pm/lib/taskHistoryCsv";
 
+import { tc } from "@helios/ui";
 // ---------------------------------------------------------------------------
 // Productivity — task history over time, read from the pm.task_history RPC and
 // folded into charts by the pure productivityMetrics module. Charts are inline
@@ -324,7 +325,7 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
   const subteamOptions = useMemo<SelectOption<string>[]>(
     () => [
       { value: "", label: "All subteams" },
-      ...subteams.map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? "#6B7280" })),
+      ...subteams.map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? tc("dim") })),
     ],
     [subteams],
   );
@@ -597,7 +598,7 @@ function Panel({
 
 // --- panels -----------------------------------------------------------------
 
-const NO_SUBTEAM_COLOR = "#6B7280";
+const NO_SUBTEAM_COLOR = tc("dim");
 
 /** The Monday..Sunday window that contains `now`, as due-date filter bounds. */
 function thisWeekBounds(now: Date): { from: string; to: string } {
@@ -735,7 +736,7 @@ function AttentionPanel({
                           <span
                             aria-hidden
                             className="size-1.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: STATUS_DOT[item.status as TaskStatus] ?? "#9097A0" }}
+                            style={{ backgroundColor: STATUS_DOT[item.status as TaskStatus] ?? tc("dim") }}
                           />
                           <span className="min-w-0 flex-1 truncate text-helios-text">{item.title}</span>
                           {st ? (

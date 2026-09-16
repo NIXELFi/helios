@@ -143,7 +143,7 @@ export function AuthModal({ open, onClose }: Props) {
               {step === "forgot" && "Reset password"}
               {step === "reset" && "Enter reset code"}
             </div>
-            <div className="mt-0.5 text-[10px] text-[#5A5F66]">
+            <div className="mt-0.5 text-[10px] text-helios-muted">
               {step === "connect" && "Paste the URL + anon key from your Supabase project."}
               {step === "forgot" && "We'll email you a 6-digit code."}
               {step === "reset" && "Check your email for the code."}
@@ -182,7 +182,7 @@ export function AuthModal({ open, onClose }: Props) {
                   <button
                     type="button"
                     onClick={() => setStep("connect")}
-                    className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300"
+                    className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90"
                   >
                     Change connection…
                   </button>
@@ -261,14 +261,14 @@ function ConnectStep(props: {
       <Field label="Supabase URL" value={url} onChange={setUrl} placeholder="https://abc123.supabase.co" autoFocus />
       <Field label="Anon key" value={anonKey} onChange={setAnonKey} placeholder="eyJhbGc…" />
       {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
-      <p className="text-[10px] text-[#5A5F66]">
+      <p className="text-[10px] text-helios-muted">
         The anon key is safe to store on this machine — Supabase enforces
         permissions on the server side via Row-Level Security.
       </p>
       <div className="flex justify-end">
         <button
           type="submit"
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90"
         >
           Connect
         </button>
@@ -449,7 +449,7 @@ function CredentialsStep(props: {
         required
       />
       {mode === "signup" && (
-        <p className="-mt-1 text-[10px] text-[#5A5F66]">
+        <p className="-mt-1 text-[10px] text-helios-muted">
           Use a strong password — most Helios vaults require at least 12 characters.
         </p>
       )}
@@ -508,7 +508,7 @@ function CredentialsStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : mode === "signin" ? "Sign in" : "Create account"}
         </button>
@@ -517,7 +517,7 @@ function CredentialsStep(props: {
         <button
           type="button"
           onClick={onChangeConnection}
-          className="text-[10px] text-[#5A5F66] hover:text-asu-gold"
+          className="text-[10px] text-helios-muted hover:text-asu-gold"
         >
           Change Supabase connection…
         </button>
@@ -614,7 +614,7 @@ function ForgotStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : "Send code"}
         </button>
@@ -714,7 +714,7 @@ function ResetStep(props: {
       <Field label="6-digit code" value={code} onChange={setCode} placeholder="123456" autoFocus />
       <Field label="New password" value={password} onChange={setPassword} type="password" autoComplete="new-password" />
       <Field label="Confirm new password" value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
-      <p className="-mt-1 text-[10px] text-[#5A5F66]">At least {MIN_PASSWORD_LEN} characters.</p>
+      <p className="-mt-1 text-[10px] text-helios-muted">At least {MIN_PASSWORD_LEN} characters.</p>
       {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
       {info && <p className="text-xs text-asu-gold">{info}</p>}
       <div className="flex items-center justify-between gap-2">
@@ -729,7 +729,7 @@ function ResetStep(props: {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-base hover:bg-yellow-300 disabled:opacity-50"
+          className="rounded-sm bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
         >
           {busy ? "…" : "Reset password"}
         </button>

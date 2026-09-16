@@ -28,7 +28,7 @@ interface Props {
 }
 
 const INPUT_CLS =
-  "rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none";
+  "rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none";
 
 export function OptimizationParamsModal({
   configPath,
@@ -133,15 +133,15 @@ export function OptimizationParamsModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[90vh] w-[min(95vw,1100px)] flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10] text-[#D8DCE2] shadow-xl">
-        <header className="flex flex-shrink-0 items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-          <div id="cfd-opt-title" className="text-[11px] uppercase tracking-wider text-[#FFC627]">
+      <div className="flex max-h-[90vh] w-[min(95vw,1100px)] flex-col rounded-sm border border-helios-line bg-helios-base text-helios-text shadow-xl">
+        <header className="flex flex-shrink-0 items-center justify-between border-b border-helios-line px-3 py-1.5">
+          <div id="cfd-opt-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
             New optimization
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#D8DCE2]"
+            className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-helios-text"
           >
             Esc
           </button>
@@ -149,11 +149,11 @@ export function OptimizationParamsModal({
 
         <div className="flex-1 overflow-y-auto p-3">
           <section className="mb-5">
-            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-helios-muted">
               1. Parameters
             </h3>
             {loading && (
-              <p className="text-[11px] text-[#5A5F66]">Loading schema…</p>
+              <p className="text-[11px] text-helios-muted">Loading schema…</p>
             )}
             {error && (
               <p className="text-[11px] text-red-300" role="alert">{error}</p>
@@ -164,7 +164,7 @@ export function OptimizationParamsModal({
           </section>
 
           <section className="mb-5">
-            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-helios-muted">
               2. Objective
             </h3>
             <ObjectiveBuilder
@@ -174,7 +174,7 @@ export function OptimizationParamsModal({
               onChange={setObjective}
             />
             <label className="mt-3 block">
-              <span className="text-[10px] uppercase tracking-wider text-[#5A5F66]">
+              <span className="text-[10px] uppercase tracking-wider text-helios-muted">
                 Rank results by
               </span>
               <select
@@ -190,7 +190,7 @@ export function OptimizationParamsModal({
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-[#5A5F66]">
+              <p className="mt-1 text-[10px] text-helios-muted">
                 The objective is what the sampler explores; ranking by an FSAE
                 event scores each trial&apos;s curve through the vehicle model
                 (set baselines on the Performance tab for points). Switchable
@@ -200,11 +200,11 @@ export function OptimizationParamsModal({
           </section>
 
           <section className="mb-2">
-            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-helios-muted">
               3. Sampling
             </h3>
             <div className="grid grid-cols-[auto_1fr_auto_1fr] items-center gap-x-3 gap-y-2 text-[11px]">
-              <label htmlFor="opt-ntrials" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-ntrials" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Trials
               </label>
               <input
@@ -217,7 +217,7 @@ export function OptimizationParamsModal({
                 onChange={(e) => setNTrials(Number(e.target.value))}
                 className={INPUT_CLS + " w-24"}
               />
-              <label htmlFor="opt-sampler" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-sampler" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Sampler
               </label>
               <select
@@ -230,7 +230,7 @@ export function OptimizationParamsModal({
                 <option value="random">Uniform random</option>
               </select>
 
-              <label htmlFor="opt-seed" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-seed" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Seed
               </label>
               <input
@@ -241,7 +241,7 @@ export function OptimizationParamsModal({
                 onChange={(e) => setSeedText(e.target.value)}
                 className={INPUT_CLS + " w-24"}
               />
-              <label htmlFor="opt-ncyc" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-ncyc" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Max cycles per RPM
               </label>
               <input
@@ -255,7 +255,7 @@ export function OptimizationParamsModal({
                 className={INPUT_CLS + " w-24"}
               />
 
-              <label htmlFor="opt-junc" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-junc" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Junction kind
               </label>
               <select
@@ -267,7 +267,7 @@ export function OptimizationParamsModal({
                 <option value="stagnation">Stagnation</option>
                 <option value="characteristic">Characteristic</option>
               </select>
-              <label htmlFor="opt-tol" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-tol" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Convergence tol (IMEP)
               </label>
               <input
@@ -281,7 +281,7 @@ export function OptimizationParamsModal({
                 className={INPUT_CLS + " w-24"}
               />
 
-              <label htmlFor="opt-minc" className="uppercase tracking-wider text-[10px] text-[#5A5F66]">
+              <label htmlFor="opt-minc" className="uppercase tracking-wider text-[10px] text-helios-muted">
                 Min cycles before conv.
               </label>
               <input
@@ -300,7 +300,7 @@ export function OptimizationParamsModal({
           </section>
         </div>
 
-        <footer className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-[#2A2C32] px-3 py-2">
+        <footer className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-helios-line px-3 py-2">
           <ul className="ml-3 list-disc text-[10px] text-red-300">
             {validationErrors.slice(0, 3).map((e, i) => (
               <li key={i}>{e}</li>
@@ -310,7 +310,7 @@ export function OptimizationParamsModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-3 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+              className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
             >
               Cancel
             </button>
@@ -318,7 +318,7 @@ export function OptimizationParamsModal({
               type="button"
               onClick={submit}
               disabled={validationErrors.length > 0}
-              className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start optimization
               {rpmParse.ok &&

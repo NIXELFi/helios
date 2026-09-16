@@ -27,6 +27,54 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Settings.** An app-wide Settings dialog (Ctrl/⌘+, · the gear in the rail
+  · the account menu) with General, Notifications, Data, Shortcuts and About
+  tabs: which module Helios opens on, launch at login, what the close button
+  does (keep in tray / quit), desktop-notification switches per source with
+  quiet hours and a test button, the CFD team data folder, a one-click clear
+  of the PM workspace cache, a link to the app-data folder, the full
+  shortcut list, updater status with a manual check, and "Copy diagnostics"
+  for bug reports. Launch-at-login moved here from Vault → Settings.
+- **Automatic updates.** On by default: when a new version is found Helios
+  downloads it and restarts after a 20-second countdown shown in the update
+  dialog (it waits while Logs playback is running). You can postpone once
+  for 30 minutes; after that it installs. Turn it off in Settings → General
+  to go back to being asked.
+- Desktop notification when an update is ready (Settings → Notifications).
+- **Light mode.** Settings → General → Appearance: System, Dark or Light.
+  Every module, dialog, chart and canvas widget follows the choice. In light
+  the accent is ASU maroon instead of gold (buttons, active states, the
+  wordmark), the page and cards are white with light-grey side strips, status
+  and role chips use darker text so they read on white, avatars go pastel,
+  the arcade lobby follows the theme while each game screen stays a dark
+  display like a real cabinet, and switching themes
+  crossfades the whole window instead of snapping. Dark stays the default.
+  Under the hood the whole
+  palette moved to design tokens (CSS variables + a runtime lookup for canvas
+  and SVG), replacing ~2,300 hardcoded colours.
+
+### Fixed
+- **macOS: the post-update restart now actually brings the new Helios up.**
+  The old build launched the new copy while it was still running, so the
+  single-instance guard swallowed the launch and the app just vanished.
+  The relaunch is now handed to a detached shell that waits for the old
+  process to exit first.
+
+### Changed
+- **Helios now opens on PM.** A signed-in member lands on the PM tab (the
+  project's last-used view) instead of Logs; PM moved to the top of the
+  module rail to match. Signed-out launches still land on Logs, which works
+  offline. Logs is no longer booted in the background on every launch, so a
+  PM-bound start does less work.
+- **One branded boot screen.** The HELIOS splash covers sign-in at launch;
+  opening a module for the first time shows a light placeholder (the module's
+  glyph, its name, a thin gold line along the top) that only appears if the
+  open takes longer than a blink, and the module then fades in. Replaces the
+  bare "Loading…" / "Checking access…" panes.
+- The rail's user pill shows a quiet placeholder while your session is
+  restored instead of flashing "Sign in" at a returning user.
+
 ## [5.7.3] - 2026-09-15
 
 ### Added

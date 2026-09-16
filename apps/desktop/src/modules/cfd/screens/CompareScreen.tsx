@@ -81,10 +81,10 @@ export function CompareScreen() {
 
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
-      <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Compare</div>
-          <p className="text-[10px] text-[#5A5F66]">
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Compare</div>
+          <p className="text-[10px] text-helios-muted">
             pin designs · overlay curves · attribute the gap (engine vs mass vs gearing vs chassis)
           </p>
         </div>
@@ -93,11 +93,11 @@ export function CompareScreen() {
           label={pinnedIds.length > 0 ? "Report — pinned (PDF)" : "Full report (PDF)"}
           title={pinnedIds.length > 0 ? "Helios CFD — Design Comparison Report" : undefined}
         />
-        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[#9097A0]">
+        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-helios-dim">
           Pin design
           <select
             aria-label="Pin a design"
-            className="max-w-[260px] rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+            className="max-w-[260px] rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[10px] text-helios-text focus:border-asu-gold focus:outline-none"
             value=""
             disabled={pinnedIds.length >= MAX_PINS}
             onChange={(e) => {
@@ -115,13 +115,13 @@ export function CompareScreen() {
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {pinned.length === 0 ? (
-          <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
+          <div className="m-4 rounded-sm border border-dashed border-helios-line p-8 text-center text-[11px] text-helios-muted">
             Pin two or more designs (sweeps or optimization bests) to compare them.
             {sources.length === 0 && (
               <div className="mt-3">
                 <button
                   type="button"
-                  className="rounded-sm bg-[#FFC627] px-3 py-1 text-[10px] uppercase tracking-wider text-[#0E0E10] hover:bg-yellow-300"
+                  className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90"
                   onClick={() => navigateTo("studies")}
                 >
                   Go to studies
@@ -132,12 +132,12 @@ export function CompareScreen() {
         ) : (
           <div className="flex flex-col gap-3">
             {/* Scoreboard */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="border-b border-[#2A2C32] px-3 py-2 text-[10px] uppercase tracking-wider text-[#9097A0]">
-                Scoreboard {pinned.length > 1 && <span className="text-[#5A5F66]">— Δ vs first pin</span>}
+            <section className="rounded-sm border border-helios-line bg-helios-base">
+              <div className="border-b border-helios-line px-3 py-2 text-[10px] uppercase tracking-wider text-helios-dim">
+                Scoreboard {pinned.length > 1 && <span className="text-helios-muted">— Δ vs first pin</span>}
               </div>
               <table className="w-full text-left font-mono text-[11px]">
-                <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+                <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
                   <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:font-normal">
                     <th>design</th>
                     <th className="text-right">peak τ</th>
@@ -149,7 +149,7 @@ export function CompareScreen() {
                     <th />
                   </tr>
                 </thead>
-                <tbody className="[&>tr]:border-t [&>tr]:border-[#16171B] [&>tr>td]:px-2 [&>tr>td]:py-1.5">
+                <tbody className="[&>tr]:border-t [&>tr]:border-helios-panel [&>tr>td]:px-2 [&>tr>td]:py-1.5">
                   {pinned.map((p, i) => {
                     const pk = peakTorque(p.curve);
                     const ref = pinned[0]!;
@@ -160,15 +160,15 @@ export function CompareScreen() {
                       <tr key={p.source.id}>
                         <td>
                           <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: p.color }} />
-                          <span className="text-[#D8DCE2]">{p.source.label}</span>
-                          <span className="ml-1.5 text-[9px] text-[#5A5F66]">{p.vehicle.name} · {p.vehicle.massKg.toFixed(0)} kg · FD {p.vehicle.finalDrive.toFixed(2)}</span>
+                          <span className="text-helios-text">{p.source.label}</span>
+                          <span className="ml-1.5 text-[9px] text-helios-muted">{p.vehicle.name} · {p.vehicle.massKg.toFixed(0)} kg · FD {p.vehicle.finalDrive.toFixed(2)}</span>
                         </td>
-                        <td className="text-right text-[#9097A0]">{pk ? `${pk.torqueNm.toFixed(1)} Nm` : "—"}</td>
+                        <td className="text-right text-helios-dim">{pk ? `${pk.torqueNm.toFixed(1)} Nm` : "—"}</td>
                         <td className="text-right">{p.events.accel.timeS.toFixed(3)} s</td>
                         <td className="text-right">{p.events.autocross.lapTimeS.toFixed(2)} s</td>
                         <td className="text-right">{p.events.endurance.lapTimeS.toFixed(2)} s</td>
                         <td className="text-right">{p.events.efficiency.points?.toFixed(1) ?? "—"}</td>
-                        <td className="text-right text-[13px] text-[#FFC627]">
+                        <td className="text-right text-[13px] text-asu-gold">
                           {p.events.totalPoints?.toFixed(1) ?? "—"}
                           {dTotal != null && (
                             <span className={"ml-1 text-[10px] " + (dTotal >= 0 ? "text-[#A5D6A7]" : "text-[#FF8A65]")}>
@@ -181,7 +181,7 @@ export function CompareScreen() {
                             type="button"
                             aria-label={`Unpin ${p.source.label}`}
                             onClick={() => setPinnedIds((ids) => ids.filter((id) => id !== p.source.id))}
-                            className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#5A5F66] hover:border-[#FF5252] hover:text-[#FF5252]"
+                            className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-helios-muted hover:border-[#FF5252] hover:text-[#FF5252]"
                           >
                             unpin
                           </button>
@@ -194,7 +194,7 @@ export function CompareScreen() {
             </section>
 
             {/* Torque overlay */}
-            <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+            <section className="rounded-sm border border-helios-line bg-helios-base">
               <LinePlot
                 title="torque curves"
                 series={pinned.map((p) => ({
@@ -245,21 +245,21 @@ function GapPanel({
   onPick: (aId: string, bId: string) => void;
 }) {
   return (
-    <section className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#2A2C32] px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">Gap attribution</span>
+    <section className="rounded-sm border border-helios-line bg-helios-base">
+      <div className="flex flex-wrap items-center gap-2 border-b border-helios-line px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-asu-gold">Gap attribution</span>
         <select
           aria-label="Attribution baseline (A)"
-          className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-0.5 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+          className="rounded-sm border border-helios-line bg-helios-deep px-2 py-0.5 font-mono text-[10px] text-helios-text focus:border-asu-gold focus:outline-none"
           value={a.source.id}
           onChange={(e) => onPick(e.target.value, b.source.id)}
         >
           {pinned.map((p) => <option key={p.source.id} value={p.source.id}>A: {p.source.configName}</option>)}
         </select>
-        <span className="text-[10px] text-[#5A5F66]">→</span>
+        <span className="text-[10px] text-helios-muted">→</span>
         <select
           aria-label="Attribution target (B)"
-          className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-0.5 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+          className="rounded-sm border border-helios-line bg-helios-deep px-2 py-0.5 font-mono text-[10px] text-helios-text focus:border-asu-gold focus:outline-none"
           value={b.source.id}
           onChange={(e) => onPick(a.source.id, e.target.value)}
         >
@@ -267,21 +267,21 @@ function GapPanel({
             <option key={p.source.id} value={p.source.id}>B: {p.source.configName}</option>
           ))}
         </select>
-        <span className="text-[9px] text-[#5A5F66]">
+        <span className="text-[9px] text-helios-muted">
           morph A→B one factor at a time; steps sum exactly to B − A
         </span>
       </div>
       <table className="w-full text-left font-mono text-[11px]">
-        <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
+        <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
           <tr className="[&>th]:px-3 [&>th]:py-1.5 [&>th]:font-normal">
             <th>step</th>
             {GAP_METRICS.map((m) => <th key={m.label} className="text-right">{m.label} ({m.unit})</th>)}
           </tr>
         </thead>
-        <tbody className="[&>tr]:border-t [&>tr]:border-[#16171B] [&>tr>td]:px-3 [&>tr>td]:py-1.5">
+        <tbody className="[&>tr]:border-t [&>tr]:border-helios-panel [&>tr>td]:px-3 [&>tr>td]:py-1.5">
           {steps.map((s, i) => (
-            <tr key={s.key} className={i === 0 ? "text-[#9097A0]" : ""}>
-              <td className={i === 0 ? "" : "text-[#D8DCE2]"}>
+            <tr key={s.key} className={i === 0 ? "text-helios-dim" : ""}>
+              <td className={i === 0 ? "" : "text-helios-text"}>
                 {i === 0 ? `A = ${a.source.configName}` : `+ ${s.label}`}
               </td>
               {GAP_METRICS.map((m) => {
@@ -294,7 +294,7 @@ function GapPanel({
                 return (
                   <td key={m.label} className="text-right">
                     {d == null ? "—" : (
-                      <span className={Math.abs(d) < 5e-3 ? "text-[#5A5F66]" : good ? "text-[#A5D6A7]" : "text-[#FF8A65]"}>
+                      <span className={Math.abs(d) < 5e-3 ? "text-helios-muted" : good ? "text-[#A5D6A7]" : "text-[#FF8A65]"}>
                         {d >= 0 ? "+" : ""}{m.fmt(Math.abs(d) < 5e-3 ? 0 : d)}
                       </span>
                     )}
@@ -303,8 +303,8 @@ function GapPanel({
               })}
             </tr>
           ))}
-          <tr className="bg-[#16171B]">
-            <td className="text-[#D8DCE2]">B = {b.source.configName} (total Δ)</td>
+          <tr className="bg-helios-panel">
+            <td className="text-helios-text">B = {b.source.configName} (total Δ)</td>
             {GAP_METRICS.map((m) => {
               const va = m.get(steps[0]!.events);
               const vb = m.get(steps[steps.length - 1]!.events);
@@ -319,7 +319,7 @@ function GapPanel({
           </tr>
         </tbody>
       </table>
-      <p className="px-3 py-2 text-[9px] leading-tight text-[#5A5F66]">
+      <p className="px-3 py-2 text-[9px] leading-tight text-helios-muted">
         Order matters: interactions land on the later step (engine first, then mass, gearing, and the rest of the
         chassis). Green = the step helps B; orange = it hurts. Known cars use their preset identity (mass, final
         drive, gearing) automatically.

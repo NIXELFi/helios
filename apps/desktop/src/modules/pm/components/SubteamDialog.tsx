@@ -196,7 +196,7 @@ export function SubteamDialog({
           </button>
           <button
             type="submit"
-            className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+            className="rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
           >
             {isEdit ? "Save changes" : "Create subteam"}
           </button>

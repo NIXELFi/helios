@@ -33,16 +33,16 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
   }
 
   return (
-    <aside className="helios-config w-72 flex-shrink-0 border-l border-[#2A2C32] bg-[#0E0E10] flex flex-col">
-      <div className="h-8 flex items-center justify-between px-2 border-b border-[#2A2C32]">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">Configure</span>
+    <aside className="helios-config w-72 flex-shrink-0 border-l border-helios-line bg-helios-base flex flex-col">
+      <div className="h-8 flex items-center justify-between px-2 border-b border-helios-line">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">Configure</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
             aria-label="Duplicate tile"
             onClick={onDuplicate}
             title="Duplicate this tile"
-            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
           >
             duplicate
           </button>
@@ -51,7 +51,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             aria-label="Delete tile"
             onClick={onDelete}
             title="Delete this tile"
-            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-[#9097A0] hover:text-[#EF5350] hover:bg-[#16171B] rounded-sm"
+            className="px-1.5 h-5 text-[10px] uppercase tracking-wider text-helios-dim hover:text-[#EF5350] hover:bg-helios-panel rounded-sm"
           >
             delete
           </button>
@@ -59,15 +59,15 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             type="button"
             aria-label="Close config"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
             title="Close"
           >
             ×
           </button>
         </div>
       </div>
-      <div className="px-2 py-1.5 border-b border-[#2A2C32] flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-shrink-0">type</span>
+      <div className="px-2 py-1.5 border-b border-helios-line flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim flex-shrink-0">type</span>
         <select
           value={tile.widgetType}
           onChange={(e) => {
@@ -75,15 +75,15 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
             if (nextType === tile.widgetType) return;
             setPendingType(nextType);
           }}
-          className="flex-1 text-[#FFC627] text-xs py-0.5"
+          className="flex-1 text-asu-gold text-xs py-0.5"
         >
           {WIDGET_TYPES.map((t) => (
             <option key={t} value={t}>{widgetRegistry.get(t).label}</option>
           ))}
         </select>
       </div>
-      <div className="px-2 py-1.5 border-b border-[#2A2C32] flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0] flex-shrink-0">title</span>
+      <div className="px-2 py-1.5 border-b border-helios-line flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim flex-shrink-0">title</span>
         <input
           type="text"
           value={tile.title ?? ""}
@@ -105,7 +105,7 @@ export function ConfigPanel({ tile, onChange, onClose, onDuplicate, onDelete, av
           availableChannels={availableChannels}
         />
       </div>
-      <div className="px-2 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+      <div className="px-2 py-2 border-t border-helios-line text-[10px] text-helios-dim">
         Changes save automatically.
       </div>
       {pendingType && (

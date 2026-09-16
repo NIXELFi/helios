@@ -258,7 +258,7 @@ export function SegmentedTabs({
             "transition-colors " +
             (idx > 0 ? "border-l border-helios-line " : "") +
             (tab === id
-              ? "bg-asu-gold font-semibold text-helios-base"
+              ? "bg-asu-gold font-semibold text-helios-on-gold"
               : "bg-helios-panel text-helios-text hover:bg-helios-line/40")
           }
         >

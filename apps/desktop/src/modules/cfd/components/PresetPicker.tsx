@@ -16,13 +16,13 @@ export function PresetPicker({ selectedId, onChange }: Props) {
   const selected = useMemo(() => findPreset(selectedId), [selectedId]);
 
   return (
-    <div className="mb-3 rounded-sm border border-[#2A2C32] bg-[#16171B]">
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-        <div className="text-[10px] uppercase tracking-wider text-[#FFC627]">
+    <div className="mb-3 rounded-sm border border-helios-line bg-helios-panel">
+      <div className="flex items-center justify-between border-b border-helios-line px-3 py-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-asu-gold">
           Physics preset
         </div>
         <a
-          className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+          className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-asu-gold"
           href="https://github.com/anthropics/claude-code"
           onClick={(e) => e.preventDefault()}
           title="See physics_findings/SESSION_HANDOFF.md §2 in the repo"
@@ -40,26 +40,26 @@ export function PresetPicker({ selectedId, onChange }: Props) {
             const p = findPreset(e.target.value);
             onChange(p.overrides, p);
           }}
-          className="w-full rounded-sm border border-[#2A2C32] bg-[#0E0E10] px-2 py-1 text-[11px] text-[#D8DCE2] hover:border-[#FFC627] focus:border-[#FFC627] focus:outline-none"
+          className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[11px] text-helios-text hover:border-asu-gold focus:border-asu-gold focus:outline-none"
         >
           {PRESETS.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
         </select>
-        <p className="mt-2 text-[10px] text-[#9097A0]">{selected.tagline}</p>
+        <p className="mt-2 text-[10px] text-helios-dim">{selected.tagline}</p>
 
         {selected.overrides.length > 0 && (
           <details className="mt-2 text-[10px]">
-            <summary className="cursor-pointer text-[#5A5F66] hover:text-[#FFC627]">
+            <summary className="cursor-pointer text-helios-muted hover:text-asu-gold">
               {selected.overrides.length} override{selected.overrides.length > 1 ? "s" : ""} applied
               {selected.findings.length > 0 && (
-                <span className="ml-2 text-[#5A5F66]">
+                <span className="ml-2 text-helios-muted">
                   (findings: {selected.findings.join(", ")})
                 </span>
               )}
             </summary>
             <table className="mt-2 w-full font-mono text-[10px]">
-              <thead className="text-[#5A5F66]">
+              <thead className="text-helios-muted">
                 <tr>
                   <th className="pb-1 text-left font-normal">Path</th>
                   <th className="pb-1 text-right font-normal">Value</th>
@@ -67,16 +67,16 @@ export function PresetPicker({ selectedId, onChange }: Props) {
               </thead>
               <tbody>
                 {selected.overrides.map((o) => (
-                  <tr key={o.path} className="border-t border-[#2A2C32]/40">
-                    <td className="py-0.5 pr-2 text-[#D8DCE2]">{o.path}</td>
-                    <td className="py-0.5 text-right text-[#FFC627]">
+                  <tr key={o.path} className="border-t border-helios-line/40">
+                    <td className="py-0.5 pr-2 text-helios-text">{o.path}</td>
+                    <td className="py-0.5 text-right text-asu-gold">
                       {Number.isInteger(o.value) ? o.value.toFixed(1) : o.value.toString()}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-[10px] text-[#5A5F66]">{selected.description}</p>
+            <p className="mt-2 text-[10px] text-helios-muted">{selected.description}</p>
           </details>
         )}
       </div>

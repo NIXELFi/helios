@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Select } from "@pm/components/ui/Select";
 
+import { tc } from "@helios/ui";
 // Only the actions the app currently emits get filter chips. (The DB trigger now
 // logs 'deleted', so it joins created / status_changed / completed here.)
 export const FILTERABLE_ACTIONS = [
@@ -175,7 +176,7 @@ export function ActivityFilterBar({
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: s.color ?? "#6B7280" }}
+                    style={{ backgroundColor: s.color ?? tc("dim") }}
                   />
                   {s.code}
                 </button>

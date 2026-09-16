@@ -220,7 +220,7 @@ export function BoardViewClient({ teamSlug = null }: BoardViewClientProps) {
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+            className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
           >
             <IconPlus size={16} strokeWidth={1.5} />
             New task

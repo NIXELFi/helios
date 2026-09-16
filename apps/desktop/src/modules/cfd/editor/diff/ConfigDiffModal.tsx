@@ -71,14 +71,14 @@ export function ConfigDiffModal({ onClose }: Props) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="flex h-[min(92vh,800px)] w-[min(96vw,1100px)] flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10] text-[#D8DCE2] shadow-xl">
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-[#2A2C32] px-3 py-1.5">
-          <div id="cfd-diff-title" className="text-[11px] uppercase tracking-wider text-[#FFC627]">
+      <div className="flex h-[min(92vh,800px)] w-[min(96vw,1100px)] flex-col rounded-sm border border-helios-line bg-helios-base text-helios-text shadow-xl">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-helios-line px-3 py-1.5">
+          <div id="cfd-diff-title" className="text-[11px] uppercase tracking-wider text-asu-gold">
             Compare configs
           </div>
           <button
             type="button"
-            className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#D8DCE2]"
+            className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-helios-text"
             onClick={onClose}
           >
             Esc
@@ -86,8 +86,8 @@ export function ConfigDiffModal({ onClose }: Props) {
         </div>
 
         {/* Source picker strip */}
-        <div className="flex flex-shrink-0 items-center gap-3 border-b border-[#2A2C32] bg-[#0B0B0D] px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wider text-[#5A5F66]">
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-helios-line bg-helios-deep px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wider text-helios-muted">
             Left side
           </div>
           {editor.isDirty ? (
@@ -96,18 +96,18 @@ export function ConfigDiffModal({ onClose }: Props) {
               <RadioButton checked={side === "draft"} onChange={() => setSide("draft")} label="Current draft (unsaved)" />
             </div>
           ) : (
-            <span className="text-[11px] text-[#9097A0]">{basename(state.savedPath ?? "(unsaved)")}</span>
+            <span className="text-[11px] text-helios-dim">{basename(state.savedPath ?? "(unsaved)")}</span>
           )}
 
-          <div className="mx-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">vs</div>
+          <div className="mx-2 text-[10px] uppercase tracking-wider text-helios-muted">vs</div>
 
-          <div className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Right side</div>
+          <div className="text-[10px] uppercase tracking-wider text-helios-muted">Right side</div>
           {otherCfg ? (
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-[#9097A0]" title={otherCfg.path}>{basename(otherCfg.path)}</span>
+              <span className="text-[11px] text-helios-dim" title={otherCfg.path}>{basename(otherCfg.path)}</span>
               <button
                 type="button"
-                className="text-[10px] uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+                className="text-[10px] uppercase tracking-wider text-helios-muted hover:text-asu-gold"
                 onClick={() => setOtherCfg(null)}
               >
                 change
@@ -117,7 +117,7 @@ export function ConfigDiffModal({ onClose }: Props) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+                className="rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
                 onClick={handleOpen}
                 disabled={loading}
               >
@@ -126,25 +126,25 @@ export function ConfigDiffModal({ onClose }: Props) {
               <div className="relative">
                 <button
                   type="button"
-                  className="rounded-sm border border-[#2A2C32] bg-[#16171B] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627] disabled:opacity-50"
+                  className="rounded-sm border border-helios-line bg-helios-panel px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold disabled:opacity-50"
                   disabled={loading || examples.length === 0}
                   onClick={() => setExamplesOpen((v) => !v)}
                 >
                   Bundled ▾
                 </button>
                 {examplesOpen && (
-                  <div role="menu" className="absolute right-0 z-10 mt-1 w-72 rounded-sm border border-[#2A2C32] bg-[#0E0E10] shadow-lg">
+                  <div role="menu" className="absolute right-0 z-10 mt-1 w-72 rounded-sm border border-helios-line bg-helios-base shadow-lg">
                     {examples.map((ex) => (
                       <button
                         key={ex.id}
                         type="button"
-                        className="block w-full border-b border-[#16171B] px-3 py-2 text-left last:border-b-0 hover:bg-[#16171B]"
+                        className="block w-full border-b border-helios-panel px-3 py-2 text-left last:border-b-0 hover:bg-helios-panel"
                         onClick={() => {
                           setExamplesOpen(false);
                           void loadOther(ex.path);
                         }}
                       >
-                        <div className="text-[11px] text-[#D8DCE2]">{ex.name}</div>
+                        <div className="text-[11px] text-helios-text">{ex.name}</div>
                       </button>
                     ))}
                   </div>
@@ -170,7 +170,7 @@ export function ConfigDiffModal({ onClose }: Props) {
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-auto p-2">
           {!otherCfg ? (
-            <div className="m-8 rounded-sm border border-[#2A2C32] bg-[#0B0B0D] p-8 text-center text-[11px] text-[#5A5F66]">
+            <div className="m-8 rounded-sm border border-helios-line bg-helios-deep p-8 text-center text-[11px] text-helios-muted">
               Pick a config to compare against.
             </div>
           ) : (
@@ -184,8 +184,8 @@ export function ConfigDiffModal({ onClose }: Props) {
 
 function RadioButton({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
   return (
-    <label className="flex cursor-pointer items-center gap-1 text-[11px] text-[#D8DCE2]">
-      <input type="radio" checked={checked} onChange={onChange} className="accent-[#FFC627]" />
+    <label className="flex cursor-pointer items-center gap-1 text-[11px] text-helios-text">
+      <input type="radio" checked={checked} onChange={onChange} className="accent-asu-gold" />
       {label}
     </label>
   );
@@ -196,22 +196,22 @@ function DiffSection({ group, entries }: { group: string; entries: ReadonlyArray
   const [expanded, setExpanded] = useState(changed.length > 0);
 
   return (
-    <section className="mb-2 rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+    <section className="mb-2 rounded-sm border border-helios-line bg-helios-base">
       <button
         type="button"
-        className="flex w-full items-center justify-between border-b border-[#2A2C32] px-2 py-1 text-left"
+        className="flex w-full items-center justify-between border-b border-helios-line px-2 py-1 text-left"
         onClick={() => setExpanded((v) => !v)}
       >
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">
           {expanded ? "▼" : "▶"} {group}
         </span>
-        <span className="text-[10px] text-[#5A5F66]">
+        <span className="text-[10px] text-helios-muted">
           {changed.length === 0 ? "no changes" : `${changed.length} change${changed.length === 1 ? "" : "s"}`}
         </span>
       </button>
       {expanded && (
         <table className="w-full font-mono text-[11px]">
-          <thead className="bg-[#0B0B0D] text-[10px] uppercase tracking-wider text-[#5A5F66]">
+          <thead className="bg-helios-deep text-[10px] uppercase tracking-wider text-helios-muted">
             <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
               <th className="text-left">Field</th>
               <th className="text-right">Left</th>
@@ -223,18 +223,18 @@ function DiffSection({ group, entries }: { group: string; entries: ReadonlyArray
               <tr
                 key={e.key}
                 className={
-                  "border-t border-[#16171B] " +
+                  "border-t border-helios-panel " +
                   (e.kind === "same"
-                    ? "text-[#5A5F66]"
+                    ? "text-helios-muted"
                     : e.kind === "changed"
-                      ? "bg-[#FFC627]/5 text-[#D8DCE2]"
+                      ? "bg-asu-gold/5 text-helios-text"
                       : e.kind === "added"
                         ? "bg-green-500/5 text-green-200"
                         : "bg-red-500/5 text-red-200")
                 }
               >
-                <td className="px-2 py-1 text-[#9097A0]">
-                  {e.label}{e.unit ? <span className="ml-1 text-[#5A5F66]">{e.unit}</span> : null}
+                <td className="px-2 py-1 text-helios-dim">
+                  {e.label}{e.unit ? <span className="ml-1 text-helios-muted">{e.unit}</span> : null}
                 </td>
                 <td className="px-2 py-1 text-right tabular-nums">{e.formatted.left}</td>
                 <td className="px-2 py-1 text-right tabular-nums">{e.formatted.right}</td>

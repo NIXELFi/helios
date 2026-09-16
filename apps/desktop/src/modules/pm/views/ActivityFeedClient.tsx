@@ -26,6 +26,7 @@ import {
   type ActivityFilters,
 } from "@pm/components/ActivityFilterBar";
 
+import { tc } from "@helios/ui";
 const ACTION_ICON: Record<ActivityAction, TablerIcon> = {
   created: IconPlus,
   updated: IconPencil,
@@ -165,11 +166,11 @@ function ActivityRow({
               key={t.id}
               className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] font-medium uppercase tracking-widest"
               style={{
-                color: t.color ?? "#9097A0",
-                borderColor: (t.color ?? "#9097A0") + "55",
+                color: t.color ?? tc("dim"),
+                borderColor: (t.color ?? tc("dim")) + "55",
               }}
             >
-              <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: t.color ?? "#6B7280" }} />
+              <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: t.color ?? tc("dim") }} />
               {t.name}
             </span>
           ))}

@@ -21,10 +21,10 @@ const sevColor = (s: AlarmSeverity) =>
 export function AlarmPanelRender(props: WidgetRenderProps<AlarmPanelConfig>) {
   const { config } = props;
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto">
+    <div className="w-full h-full bg-helios-panel overflow-auto">
       <table className="w-full text-xs">
-        <thead className="text-[#9097A0] uppercase text-[10px]">
-          <tr className="border-b border-[#2A2C32]">
+        <thead className="text-helios-dim uppercase text-[10px]">
+          <tr className="border-b border-helios-line">
             <th className="text-left px-2 py-1">When</th>
             <th className="text-left px-2 py-1">Channel</th>
             <th className="text-right px-2 py-1">Value</th>
@@ -33,14 +33,14 @@ export function AlarmPanelRender(props: WidgetRenderProps<AlarmPanelConfig>) {
         </thead>
         <tbody>
           {config.alarms.length === 0 && (
-            <tr><td colSpan={4} className="text-center text-[#9097A0] py-4">no alarms</td></tr>
+            <tr><td colSpan={4} className="text-center text-helios-dim py-4">no alarms</td></tr>
           )}
           {config.alarms.map((a) => (
-            <tr key={a.id} className="border-b border-[#23252B]">
-              <td className="px-2 py-1 font-mono-num text-[#9097A0]">{formatClock(a.t_us)}</td>
+            <tr key={a.id} className="border-b border-helios-grid">
+              <td className="px-2 py-1 font-mono-num text-helios-dim">{formatClock(a.t_us)}</td>
               <td className="px-2 py-1" style={{ color: sevColor(a.severity) }}>● {a.channel}</td>
               <td className="text-right px-2 py-1 font-mono-num">{a.value.toFixed(2)}</td>
-              <td className="px-2 py-1 text-[#D8DCE2]">{a.message}</td>
+              <td className="px-2 py-1 text-helios-text">{a.message}</td>
             </tr>
           ))}
         </tbody>

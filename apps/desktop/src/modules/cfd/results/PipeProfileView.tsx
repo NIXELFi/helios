@@ -53,7 +53,7 @@ export function PipeProfileView({ jobId, studyKind, rpmInt }: Props) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#5A5F66]">
+      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-helios-muted">
         <span>field</span>
         {(Object.keys(FIELD_META) as Field[]).map((f) => (
           <button key={f} type="button"
@@ -61,13 +61,13 @@ export function PipeProfileView({ jobId, studyKind, rpmInt }: Props) {
             className={
               "rounded-sm border px-2 py-0.5 " +
               (f === field
-                ? "border-[#FFC627] bg-[#FFC627]/10 text-[#FFC627]"
-                : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]")
+                ? "border-asu-gold bg-asu-gold/10 text-asu-gold"
+                : "border-helios-line text-helios-dim hover:border-asu-gold")
             }>
             {FIELD_META[f].label}
           </button>
         ))}
-        <span className="ml-3 text-[10px] text-[#5A5F66]">{profiles.length} pipes · rpm {rpmInt}</span>
+        <span className="ml-3 text-[10px] text-helios-muted">{profiles.length} pipes · rpm {rpmInt}</span>
       </div>
       <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
         {profiles.map((pr) => {
@@ -75,7 +75,7 @@ export function PipeProfileView({ jobId, studyKind, rpmInt }: Props) {
           const ys = meta.pick(pr);
           const color = ROLE_COLOR[pr.role];
           return (
-            <div key={pr.label} className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+            <div key={pr.label} className="flex flex-col rounded-sm border border-helios-line bg-helios-base">
               <LinePlot
                 title={`${pr.label} · ${pr.role} · L=${(pr.lengthM * 1000).toFixed(0)} mm`}
                 xs={xs_mm}
@@ -96,7 +96,7 @@ function Notice({ text, tone }: { text: string; tone: "info" | "error" }) {
     <div className={"rounded-sm border px-3 py-2 text-[11px] " + (
       tone === "error"
         ? "border-red-500/40 bg-red-500/10 text-red-200"
-        : "border-[#2A2C32] bg-[#0E0E10] text-[#9097A0]"
+        : "border-helios-line bg-helios-base text-helios-dim"
     )}>
       {text}
     </div>

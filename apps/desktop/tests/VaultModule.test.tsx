@@ -20,7 +20,9 @@ describe("<VaultModule>", () => {
         <VaultModule />
       </SupabaseAuthProvider>,
     );
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    // The placeholder is the shared ModuleTransition (glyph + "Vault"); its
+    // accessible name carries the loading semantics.
+    expect(screen.getByRole("status", { name: /loading vault/i })).toBeInTheDocument();
   });
 
   it("shows the Vault sub-navigation when authenticated AND granted a role", async () => {
