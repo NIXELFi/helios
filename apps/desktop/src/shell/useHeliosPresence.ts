@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
 import { MODULE_ICON, type ModuleId } from "./ModulePicker";
 import { createPresenceStore, type PresenceStore } from "./presenceStore";
+import { publishConnectionState } from "../lib/connection-status";
 
 /** One signed-in person currently connected to Helios, collapsed across all of
  *  their open windows/tabs. */
@@ -213,9 +214,13 @@ export function useHeliosPresence(input: {
       // means a reconnect re-announces us automatically.
       if (status === "SUBSCRIBED") {
         subscribedRef.current = true;
+        publishConnectionState("up");
         announce();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
         subscribedRef.current = false;
+        // This channel is the app's one always-on socket, so its health
+        // stands in for "is Helios live" (see lib/connection-status).
+        publishConnectionState("down");
       }
     });
 
@@ -225,6 +230,8 @@ export function useHeliosPresence(input: {
       channelRef.current = null;
       announceRef.current = null;
       if (trailing !== undefined) clearTimeout(trailing);
+      // A deliberate teardown (sign-out, client swap) is not an outage.
+      publishConnectionState("unknown");
       try {
         void channel.untrack();
       } catch {
