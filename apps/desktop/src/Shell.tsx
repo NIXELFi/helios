@@ -17,6 +17,7 @@ import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
 import { useOrgAccess } from "./shell/useOrgAccess";
 import { NoAccessScreen } from "./shell/NoAccessScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Splash } from "./components/Splash";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
@@ -43,12 +44,8 @@ const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.O
 
 // Shown while a module's chunk is in flight — normally a few hundred ms on
 // first open, instant afterwards (the chunk is cached).
-function ModuleLoading() {
-  return (
-    <div className="flex h-full w-full items-center justify-center bg-helios-panel text-helios-dim">
-      Loading…
-    </div>
-  );
+function ModuleLoading({ label }: { label: string }) {
+  return <Splash stage={`Loading ${label}…`} animate={false} />;
 }
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
@@ -72,8 +69,15 @@ export default function ShellRoot() {
 // all live inside the ModulePicker rail; the UpdateModal and AuthModal are
 // mounted at the shell level so they can fire over any module.
 function HeliosShell() {
+  // Landing module. Nothing is mounted until auth resolves (see the landing
+  // effect below): a signed-in member lands on PM, everyone else on Logs.
+  // Mounting Logs eagerly here used to cost every PM-bound launch a full Logs
+  // boot (session reopen, uPlot canvases) behind a pane they never looked at.
   const [active, setActive] = useState<ModuleId>("logs");
-  const [visited, setVisited] = useState<Set<ModuleId>>(() => new Set(["logs"]));
+  const [visited, setVisited] = useState<Set<ModuleId>>(() => new Set());
+  // Flips once we have chosen the landing module (or the user picked one
+  // first). Keeps the landing effect from yanking someone who already clicked.
+  const [landed, setLanded] = useState(false);
   const updater = useUpdater();
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("dev");
@@ -155,6 +159,18 @@ function HeliosShell() {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
+  // LANDING: pick the first module once auth has resolved. PM is the team's
+  // home screen (5.7.4) — it needs a signed-in session, so a signed-out launch
+  // (or one where the org gate is still unknown/denied) lands on Logs, which
+  // works offline. Runs exactly once; a rail click before auth resolves wins.
+  useEffect(() => {
+    if (landed || authLoading) return;
+    const home: ModuleId = pmEnabled && !noOrgAccess ? "pm" : "logs";
+    setLanded(true);
+    setActive(home);
+    setVisited((prev) => (prev.has(home) ? prev : new Set(prev).add(home)));
+  }, [landed, authLoading, pmEnabled, noOrgAccess]);
+
   // Record module navigation as a breadcrumb so a bug report shows where the
   // user had been just before filing it.
   useEffect(() => {
@@ -194,13 +210,15 @@ function HeliosShell() {
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
     if (vaultEnabled && pmEnabled && gamesEnabled) return;
-    if (active === "vault" || active === "pm" || active === "games") setActive("logs");
+    const bounced = active === "vault" || active === "pm" || active === "games";
+    if (bounced) setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("vault") && !prev.has("pm") && !prev.has("games")) return prev;
+      if (!prev.has("vault") && !prev.has("pm") && !prev.has("games") && (!bounced || prev.has("logs"))) return prev;
       const next = new Set(prev);
       next.delete("vault");
       next.delete("pm");
       next.delete("games");
+      if (bounced) next.add("logs");
       return next;
     });
   }, [active, vaultEnabled, pmEnabled, gamesEnabled, authLoading]);
@@ -210,11 +228,13 @@ function HeliosShell() {
   useEffect(() => {
     if (authLoading) return;
     if (orgEnabled) return;
-    if (active === "org") setActive("logs");
+    const bounced = active === "org";
+    if (bounced) setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("org")) return prev;
+      if (!prev.has("org") && (!bounced || prev.has("logs"))) return prev;
       const next = new Set(prev);
       next.delete("org");
+      if (bounced) next.add("logs");
       return next;
     });
   }, [active, orgEnabled, authLoading]);
@@ -237,6 +257,7 @@ function HeliosShell() {
       setAuthModalOpen(true);
       return;
     }
+    setLanded(true);
     setActive(id);
     setVisited((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   }
@@ -300,10 +321,10 @@ function HeliosShell() {
       {/* Windows runs frameless (decorations:false in tauri.windows.conf.json)
           and gets the custom in-app title bar; macOS keeps its native overlay
           traffic lights and skips it. */}
-      {IS_WINDOWS && <TitleBar context={MODULE_LABEL[active]} />}
+      {IS_WINDOWS && <TitleBar context={landed ? MODULE_LABEL[active] : null} />}
       <div className="flex min-h-0 w-full flex-1">
       <ModulePicker
-        active={active}
+        active={landed ? active : null}
         onSelect={activate}
         appVersion={appVersion}
         updaterState={updater.state}
@@ -328,6 +349,10 @@ function HeliosShell() {
         onOpenReports={() => setReportsOpen(true)}
       />
       <main className="relative min-w-0 flex-1">
+        {/* Boot: auth is still resolving, so the landing module is unknown.
+            One branded splash here hands off to the module's own loader with
+            the wordmark in the same place, so boot reads as one screen. */}
+        {!landed && <Splash stage="Signing in…" version={appVersion} />}
         {/* Each module gets its own boundary so a crash in one (an unexpected
             data shape, a render bug) shows a contained error in that pane while
             the rail + sibling modules stay usable. Each also gets its OWN
@@ -367,7 +392,7 @@ function HeliosShell() {
         {visited.has("vault") && vaultEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
             <ErrorBoundary label="Vault" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="Vault" />}>
                 <ModuleActivityProvider active={active === "vault"}>
                   <VaultModule />
                 </ModuleActivityProvider>
@@ -378,7 +403,7 @@ function HeliosShell() {
         {visited.has("cfd") && (
           <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
             <ErrorBoundary label="CFD" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="CFD" />}>
                 <ModuleActivityProvider active={active === "cfd"}>
                   <CfdModule />
                 </ModuleActivityProvider>
@@ -389,7 +414,7 @@ function HeliosShell() {
         {visited.has("pm") && pmEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
             <ErrorBoundary label="PM" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="PM" />}>
                 <ModuleActivityProvider active={active === "pm"}>
                   <PmModule />
                 </ModuleActivityProvider>
@@ -400,7 +425,7 @@ function HeliosShell() {
         {visited.has("games") && gamesEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
             <ErrorBoundary label="Games" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="Games" />}>
                 <ModuleActivityProvider active={active === "games"}>
                   <GamesModule paused={active !== "games"} />
                 </ModuleActivityProvider>
@@ -411,7 +436,7 @@ function HeliosShell() {
         {visited.has("amethyst") && (
           <div className={"absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
             <ErrorBoundary label="Amethyst" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="Amethyst" />}>
                 <ModuleActivityProvider active={active === "amethyst"}>
                   <AmethystModule />
                 </ModuleActivityProvider>
@@ -422,7 +447,7 @@ function HeliosShell() {
         {visited.has("marketplace") && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
             <ErrorBoundary label="Marketplace" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="Marketplace" />}>
                 <ModuleActivityProvider active={active === "marketplace"}>
                   <MarketplaceModule />
                 </ModuleActivityProvider>
@@ -433,7 +458,7 @@ function HeliosShell() {
         {visited.has("org") && orgEnabled && !noOrgAccess && (
           <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
             <ErrorBoundary label="Org & Access" compact>
-              <Suspense fallback={<ModuleLoading />}>
+              <Suspense fallback={<ModuleLoading label="Org & Access" />}>
                 <ModuleActivityProvider active={active === "org"}>
                   <OrgModule />
                 </ModuleActivityProvider>

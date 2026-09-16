@@ -4,7 +4,7 @@ export const theme = {
     panel:  "#16171B",
     line:   "#2A2C32",
     text:   "#D8DCE2",
-    dim:    "#7B8088",
+    dim:    "#9097A0", // matches tailwind helios-dim (was #7B8088; the two had drifted)
     maroon: "#8C1D40",
     gold:   "#FFC627",
     chartGrid: "#23252B",

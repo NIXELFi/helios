@@ -27,6 +27,18 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Helios now opens on PM.** A signed-in member lands on the PM tab (the
+  project's last-used view) instead of Logs; PM moved to the top of the
+  module rail to match. Signed-out launches still land on Logs, which works
+  offline. Logs is no longer booted in the background on every launch, so a
+  PM-bound start does less work.
+- **One branded boot screen.** The HELIOS splash now carries the app from
+  sign-in through the first PM load (and any module's first open) with the
+  wordmark held in place, replacing the bare "Loading…" panes.
+- The rail's user pill shows a quiet placeholder while your session is
+  restored instead of flashing "Sign in" at a returning user.
+
 ## [5.7.3] - 2026-09-15
 
 ### Added

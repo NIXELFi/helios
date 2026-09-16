@@ -60,7 +60,8 @@ function writeRailCollapsed(collapsed: boolean): void {
 const BRAND_HEADER_TOP_PADDING = IS_MAC ? "pt-12" : "pt-3";
 
 interface Props {
-  active: ModuleId;
+  /** null while the shell has not landed yet (boot splash). */
+  active: ModuleId | null;
   onSelect: (id: ModuleId) => void;
   /** Current app version — surfaced under the HELIOS wordmark so the user
    *  can see what build they're on from any module. */
@@ -217,6 +218,16 @@ export function ModulePicker(props: Props) {
       </div>
 
       <div className="flex flex-col gap-0.5 p-2">
+        {/* PM first: it is the landing module for signed-in members (5.7.4). */}
+        <NavButton
+          label="PM"
+          Icon={MODULE_ICON.pm}
+          collapsed={collapsed}
+          active={active === "pm"}
+          onClick={() => onSelect("pm")}
+          disabled={pmDisabled}
+          disabledTitle="Sign in to use PM"
+        />
         <NavButton
           label="Logs"
           Icon={MODULE_ICON.logs}
@@ -232,15 +243,6 @@ export function ModulePicker(props: Props) {
           onClick={() => onSelect("vault")}
           disabled={vaultDisabled}
           disabledTitle="Sign in to use Vault"
-        />
-        <NavButton
-          label="PM"
-          Icon={MODULE_ICON.pm}
-          collapsed={collapsed}
-          active={active === "pm"}
-          onClick={() => onSelect("pm")}
-          disabled={pmDisabled}
-          disabledTitle="Sign in to use PM"
         />
         <NavButton
           label="Games"
@@ -316,6 +318,7 @@ export function ModulePicker(props: Props) {
           onSignOut={onSignOut}
           onDisconnect={onDisconnect}
           onChangePassword={onChangePassword}
+          authLoading={authLoading}
         />
       </div>
 
@@ -443,8 +446,11 @@ function UserPill(props: {
   onSignOut: () => void;
   onDisconnect: () => void;
   onChangePassword: () => void;
+  /** Boot: session not resolved yet. Show a quiet placeholder instead of
+   *  flashing "Sign in" at a returning user for the first few hundred ms. */
+  authLoading?: boolean;
 }) {
-  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword } = props;
+  const { label, subteam, role, collapsed, onOpenAuth, onSignOut, onDisconnect, onChangePassword, authLoading = false } = props;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -513,6 +519,22 @@ function UserPill(props: {
       e.preventDefault();
       items[next]?.focus();
     }
+  }
+
+  if (label === null && authLoading) {
+    return (
+      <div
+        aria-busy
+        aria-label="Signing in"
+        className={
+          "flex w-full items-center rounded-sm border border-helios-line bg-helios-panel text-xs text-helios-dim " +
+          (collapsed ? "justify-center p-2" : "gap-2 px-3 py-1.5")
+        }
+      >
+        <span className="helios-skeleton h-3 w-3 shrink-0 rounded-full" aria-hidden />
+        {!collapsed && <span className="helios-skeleton h-3 w-20" aria-hidden />}
+      </div>
+    );
   }
 
   if (label === null) {

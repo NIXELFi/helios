@@ -1,3 +1,5 @@
+import { Wordmark } from "./Splash";
+
 interface Props {
   /** 0..1 progress fraction. */
   progress: number;
@@ -24,23 +26,7 @@ export function LoadingScreen({ progress, stage, error, version, onOpenFile }: P
     // viewport — so when the Logs tab has no data the module rail stays visible
     // and the user can switch to Vault / CFD (which don't need a CSV).
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-helios-base text-helios-text">
-      <div className="helios-splash-in relative flex flex-col items-center gap-3">
-        {/* Soft gold halo behind the wordmark for depth. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{ background: "radial-gradient(circle, rgba(255,198,39,0.12) 0%, transparent 70%)" }}
-        />
-        <h1
-          className="font-helios text-[5rem] leading-none text-asu-gold md:text-[7rem]"
-          style={{ textShadow: "0 0 48px rgba(255,198,39,0.25)" }}
-        >
-          HELIOS
-        </h1>
-        <div className="text-[10px] uppercase tracking-[0.4em] text-helios-dim md:text-xs">
-          Sun Devil Motorsports · Ground Station
-        </div>
-      </div>
+      <Wordmark />
 
       <div className="mt-12 flex w-[520px] max-w-[80%] flex-col gap-2">
         {error ? (

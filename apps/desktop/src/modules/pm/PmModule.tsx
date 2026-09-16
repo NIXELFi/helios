@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Splash } from "../../components/Splash";
 import { useSupabaseClientOrNull, useUser } from "@helios/auth";
 import { useModuleLive } from "../../shell/module-activity";
 import { useThrottledFocus } from "../../lib/use-throttled-focus";
@@ -685,7 +686,7 @@ export function PmModule() {
     };
   }, [client, userId]);
 
-  if (phase === "loading") return <Centered>Loading your projects…</Centered>;
+  if (phase === "loading") return <Splash stage="Loading your projects…" animate={false} />;
   if (phase === "error")
     return (
       <Centered>
