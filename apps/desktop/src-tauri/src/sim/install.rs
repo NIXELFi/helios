@@ -359,6 +359,15 @@ fn fetch_verified(
     // Only now does it become the executable.
     let _ = fs::remove_file(&dest);
     fs::rename(&tmp, &dest).map_err(|e| format!("install to {}: {e}", dest.display()))?;
+    // ...and on a Unix it is not one until it is marked as one. Downloads
+    // arrive 0644; a simulator that cannot be executed is not installed.
+    // Lives here, beside the rename, rather than in the caller: "becomes the
+    // executable" is one step and splitting it is how the step goes missing.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+    }
     Ok((dest, total))
 }
 
@@ -495,6 +504,16 @@ mod tests {
         assert_eq!(total, body.len() as u64);
         assert_eq!(fs::read(&dest).expect("read back"), body);
         assert!(dest.file_name().unwrap().to_string_lossy().starts_with("fsae-sim"));
+        // A download arrives 0644. A simulator nobody can execute is not
+        // installed -- and this vanished once already in a refactor, on
+        // Windows, where `#[cfg(unix)]` compiles to nothing and no test on
+        // this machine could have noticed.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&dest).expect("stat").permissions().mode();
+            assert!(mode & 0o111 != 0, "installed without the execute bit: {mode:o}");
+        }
         // And nothing half-written left beside it.
         let leftovers: Vec<_> = fs::read_dir(&dir)
             .expect("list")
