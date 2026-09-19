@@ -28,6 +28,10 @@ export interface SimLap {
   off: number;
   /** Lap time with this lap's penalties added — the scored time. */
   total: number;
+  /** Did this lap score a time? False when it left the course, which does not
+   *  score here. Absent on a manifest written before the rule, where every
+   *  completed lap scored — so read it as `!== false`, never as truthy. */
+  valid?: boolean;
   sectors: number[];
   startedAtS: number;
 }
@@ -151,6 +155,14 @@ export interface SimRun {
   startedAt: string | null;
   finishedReason: string | null;
   profile: string | null;
+  /**
+   * What the simulator OBSERVED steering the car: "wheel", "controller" or
+   * "keyboard". `profile` beside it is the dropdown the driver picked. See
+   * `deviceClass`, which prefers this one and says why.
+   *
+   * Null on a run recorded before the simulator measured it.
+   */
+  detectedInput: string | null;
   device: string | null;
   physics: string | null;
   simVersion: string | null;
@@ -411,6 +423,60 @@ export const PROFILES: { id: string; name: string }[] = [
   { id: "gamepad-xbox", name: "Xbox controller" },
   { id: "gamepad-ps", name: "PlayStation controller" },
   { id: "keyboard", name: "Keyboard and mouse" },
+];
+
+/**
+ * What was used to drive it.
+ *
+ * Three classes, not four: an Xbox pad and a PlayStation pad are the same
+ * instrument. Boards are compared within a class because they are not
+ * comparable across one -- a wheel has a real stop at a real angle and
+ * two hundred times the resolution, and a keyboard is a switch that software
+ * ramps into a steering command. Putting them on one list does not rank
+ * drivers, it ranks hardware.
+ *
+ * `unknown` for a run whose manifest predates the field, or one recorded with
+ * a profile this build has never heard of. It is a class of its own rather
+ * than being quietly folded into one of the others.
+ */
+export type DeviceClass = "wheel" | "controller" | "keyboard" | "unknown";
+
+/**
+ * Which board a run belongs on.
+ *
+ * `detectedInput` FIRST, and `profile` only as a fallback, because the profile
+ * is a dropdown. The controller profile reads an axis and a wheel base has
+ * axes, so "pick Controller, steer the wheel anyway" would have handed the
+ * controller record to whoever owned a wheel and thought about it for a
+ * minute. `detectedInput` is written by the branch of the simulator's input
+ * loop that actually produced the steering command each frame, and it asks the
+ * device -- a base the rig opened for force feedback, or a vendor string that
+ * names a wheel -- rather than the profile.
+ *
+ * That is not tamper proof. The manifest is a JSON file on the driver's own
+ * machine and a determined person can edit it; a leaderboard for a student
+ * team is not worth cryptography. It closes the free cheat, which is the one
+ * that would actually get used.
+ *
+ * Runs recorded before the simulator measured this still fall back to the
+ * profile, which is all anybody ever had for them.
+ */
+export function deviceClass(run: Pick<SimRun, "profile" | "detectedInput">): DeviceClass {
+  const d = (run.detectedInput ?? "").toLowerCase();
+  if (d === "wheel" || d === "controller" || d === "keyboard") return d;
+  const p = (run.profile ?? "").toLowerCase();
+  if (!p) return "unknown";
+  if (p === "wheel" || p.includes("wheel")) return "wheel";
+  if (p.startsWith("gamepad") || p.includes("controller") || p.includes("pad")) return "controller";
+  if (p === "keyboard" || p.includes("keyboard") || p.includes("mouse")) return "keyboard";
+  return "unknown";
+}
+
+export const DEVICE_CLASSES: { id: DeviceClass; name: string; short: string }[] = [
+  { id: "wheel", name: "Wheel and pedals", short: "Wheel" },
+  { id: "controller", name: "Controller", short: "Pad" },
+  { id: "keyboard", name: "Keyboard and mouse", short: "M&K" },
+  { id: "unknown", name: "Unrecorded device", short: "?" },
 ];
 
 export function trackName(id: string): string {

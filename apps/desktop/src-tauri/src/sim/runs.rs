@@ -129,6 +129,12 @@ struct Manifest {
     profile: Option<String>,
     #[serde(default, rename = "profileName")]
     profile_name: Option<String>,
+    /// What actually steered, as the simulator observed it frame by frame --
+    /// "wheel", "controller" or "keyboard". `profile` is the dropdown the
+    /// driver picked; this is the device the car was steered by, and the
+    /// leaderboards prefer it. Absent on runs recorded before it existed.
+    #[serde(default, rename = "detectedInput")]
+    detected_input: Option<String>,
     #[serde(default)]
     device: Option<String>,
     #[serde(default)]
@@ -169,11 +175,27 @@ pub struct Lap {
     pub off: u32,
     #[serde(default)]
     pub total: f64,
+    /// Did this lap score a time?
+    ///
+    /// False when it left the course, which does not score here -- see the
+    /// note in the simulator's `timing.js`, which is stricter than FSAE and
+    /// says why. Defaults TRUE so a manifest written before the field existed
+    /// keeps the meaning it had: back then every completed lap scored.
+    ///
+    /// It has to be in this struct even though nothing in Rust reads it,
+    /// because this is where a manifest is parsed on its way to the renderer
+    /// and anything absent here is silently dropped -- which is how a lap
+    /// reached the team's shared archive with its `off` count intact and no
+    /// record of having been invalidated.
+    #[serde(default = "yes")]
+    pub valid: bool,
     #[serde(default)]
     pub sectors: Vec<f64>,
     #[serde(default, rename = "startedAtS")]
     pub started_at_s: f64,
 }
+
+fn yes() -> bool { true }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -257,6 +279,8 @@ pub struct RunRow {
     pub started_at: Option<String>,
     pub finished_reason: Option<String>,
     pub profile: Option<String>,
+    /// See `Manifest::detected_input`. Observed, not declared.
+    pub detected_input: Option<String>,
     pub device: Option<String>,
     pub physics: Option<String>,
     pub sim_version: Option<String>,
@@ -287,6 +311,7 @@ fn row_from(id: &str, dir: &Path, m: Manifest) -> RunRow {
         started_at: m.started_at,
         finished_reason: m.finished_reason,
         profile: m.profile_name.or(m.profile),
+        detected_input: m.detected_input,
         device: m.device,
         physics: m.physics,
         sim_version: m.sim_version,

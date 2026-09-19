@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { IconMovie, IconTrendingUp, IconTrophy } from "@tabler/icons-react";
 import { fmtGap, fmtTime, fmtWhen, type SimRun } from "../api";
 import { buildActivity, buildBoards, buildImprovements } from "../lib/leaderboard";
+import { DEVICE_CLASSES, deviceClass, type DeviceClass } from "../api";
 
 interface Props {
   runs: SimRun[];
@@ -10,10 +11,43 @@ interface Props {
   onReplayRun: (runId: string) => void;
 }
 
+/** Which boards are worth offering, given what has actually been driven. */
+function classesPresent(runs: SimRun[]): DeviceClass[] {
+  const seen = new Set(runs.map(deviceClass));
+  return DEVICE_CLASSES.filter((c) => seen.has(c.id)).map((c) => c.id);
+}
+
 export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) {
-  const boards = useMemo(() => buildBoards(runs), [runs]);
-  const improvements = useMemo(() => buildImprovements(runs), [runs]);
-  const activity = useMemo(() => buildActivity(runs), [runs]);
+  /**
+   * One board per device class.
+   *
+   * A wheel, a controller and a keyboard are not comparable and a single list
+   * of all three does not rank drivers, it ranks hardware: a wheel has a real
+   * stop at a real angle and two hundred times the resolution of a stick, and
+   * a keyboard is a switch that software ramps into a steering command.
+   *
+   * Defaults to whichever class has the most runs rather than to "everything",
+   * because "everything" is the one view that is actively misleading -- and
+   * the tab bar only offers classes somebody has actually driven, so a team
+   * that is all on wheels never sees the question.
+   */
+  const present = useMemo(() => classesPresent(runs), [runs]);
+  const [cls, setCls] = useState<DeviceClass | null>(null);
+  const active: DeviceClass | null = cls && present.includes(cls)
+    ? cls
+    : present.length
+      ? (present
+          .map((c) => [c, runs.filter((r) => deviceClass(r) === c).length] as const)
+          .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null)
+      : null;
+
+  const shown = useMemo(
+    () => (active ? runs.filter((r) => deviceClass(r) === active) : runs),
+    [runs, active],
+  );
+  const boards = useMemo(() => buildBoards(shown), [shown]);
+  const improvements = useMemo(() => buildImprovements(shown), [shown]);
+  const activity = useMemo(() => buildActivity(shown), [shown]);
 
   if (runs.length === 0) {
     return (
@@ -25,6 +59,38 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+      {/* Only when there is a choice to make. A team all on wheels never sees
+          this, and the one view deliberately not offered is "all three at
+          once" -- see the note on `active`. */}
+      {present.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {present.map((id) => {
+            const meta = DEVICE_CLASSES.find((c) => c.id === id)!;
+            const n = runs.filter((r) => deviceClass(r) === id).length;
+            const on = id === active;
+            return (
+              <button
+                key={id}
+                onClick={() => setCls(id)}
+                aria-pressed={on}
+                className={
+                  "rounded border px-2.5 py-1 text-xs transition " +
+                  (on
+                    ? "border-asu-gold bg-asu-gold/15 text-helios-text"
+                    : "border-helios-line text-helios-dim hover:border-asu-gold hover:text-helios-text")
+                }
+              >
+                {meta.name}
+                <span className="ml-1.5 text-helios-muted">{n}</span>
+              </button>
+            );
+          })}
+          <span className="ml-auto text-[11px] text-helios-muted">
+            Separate boards: a wheel, a pad and a keyboard are not the same instrument.
+          </span>
+        </div>
+      )}
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Runs" value={activity.runs.toLocaleString()} />
         <Stat label="Drivers" value={String(activity.drivers)} />

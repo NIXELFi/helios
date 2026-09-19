@@ -23,7 +23,7 @@
 
 import type { SupabaseClient } from "@helios/auth";
 
-import { isRankable, runBest, type SimRun } from "../api";
+import { deviceClass, isRankable, runBest, type SimRun } from "../api";
 
 const TABLE = "runs";
 const SCHEMA = "sim";
@@ -45,6 +45,8 @@ interface RunRow {
   assists: { traction?: boolean; abs?: boolean; autoShift?: boolean } | null;
   synthetic: boolean;
   format_version: number;
+  profile: string | null;
+  detected_input: string | null;
   stats: Record<string, unknown> | null;
   laps_detail: unknown[] | null;
   telemetry_object: string | null;
@@ -81,7 +83,12 @@ export function rowToRun(row: RunRow): SimRun {
     trackName: row.track_name || row.track,
     startedAt: row.started_at,
     finishedReason: null,
-    profile: null,
+    // What it was driven with. The boards are separated by device class and
+    // cannot be without this; a shared run used to arrive with it stripped.
+    profile: row.profile ?? null,
+    // And what it was ACTUALLY driven with. `deviceClass` prefers this; the
+    // profile beside it is a dropdown and a board cannot be separated by one.
+    detectedInput: row.detected_input ?? null,
     device: null,
     physics: null,
     simVersion: null,
@@ -115,6 +122,8 @@ function runToRow(run: SimRun): Omit<RunRow, "user_id" | "display_name" | "subte
     assists: run.assists,
     synthetic: run.synthetic,
     format_version: run.formatVersion ?? 1,
+    profile: run.profile,
+    detected_input: run.detectedInput,
     stats: { ...run.stats, sampleRateHz: run.sampleRateHz },
     laps_detail: run.laps ?? [],
     telemetry_object: null,
@@ -134,44 +143,134 @@ export async function fetchSharedRuns(client: SupabaseClient, limit = 2000): Pro
   return (res.data as RunRow[]).map(rowToRun);
 }
 
-/** Which of this user's runs are already up there. Ids only; it is a diff. */
-async function sharedIdsFor(client: SupabaseClient, userId: string): Promise<Set<string>> {
+/** Which of this user's runs are already up there, and what each carries. */
+async function sharedIdsFor(
+  client: SupabaseClient,
+  userId: string,
+): Promise<Map<string, string | null>> {
   const res = await client
     .schema(SCHEMA)
     .from(TABLE)
     .select("run_id,telemetry_object")
     .eq("user_id", userId);
   if (res.error) throw new Error(`read shared run ids: ${res.error.message}`);
-  const out = new Set<string>();
+  const out = new Map<string, string | null>();
   for (const r of res.data as { run_id: string; telemetry_object: string | null }[]) {
-    out.add(r.telemetry_object ? `${r.run_id}+tel` : r.run_id);
+    out.set(r.run_id, r.telemetry_object);
   }
   return out;
 }
 
 /**
- * The runs of this driver's that deserve their telemetry shared.
+ * Squeeze the telemetry on its way up.
  *
- * Their best ranked lap on each course, and only that. A personal best is the
- * lap somebody else would actually want to watch; the twelve attempts around
- * it are not, and uploading them turns a practice session into a bill.
+ * About 3x on this data -- a CSV of floats does not compress like prose, and
+ * an earlier estimate of 10x was wishful. Still the difference between 11 MB
+ * and 3.7 MB for an endurance run, for a few lines and no loss.
+ *
+ * `CompressionStream` is in every Chromium, which is what the webview is.
+ * Where it somehow is not, the plain bytes go up instead and the `.gz` suffix
+ * is what tells the reader which it got.
  */
-export function telemetryWorthSharing(runs: SimRun[], userId: string): Set<string> {
-  const best = new Map<string, SimRun>();
-  for (const r of runs) {
-    if (r.driverId !== userId || r.remote) continue;
-    if (!isRankable(r)) continue;
-    const t = runBest(r);
-    if (t == null) continue;
-    const cur = best.get(r.track);
-    if (!cur || t < (runBest(cur) as number)) best.set(r.track, r);
+/** Shared telemetry from a non-wheel run is thinned to this. */
+export const NON_WHEEL_SHARE_HZ = 10;
+
+/**
+ * Thin a telemetry CSV to roughly `hz`, keeping the header and the shape.
+ *
+ * Only for runs not driven on a wheel. The reasoning is proportionate rather
+ * than dismissive: a pad or a keyboard lap is worth having on the board and
+ * worth glancing at, but nobody is going to study its steering trace at 100 Hz
+ * -- the input is a stick or a switch that software has already smoothed, so
+ * the detail those rows carry was never in the driving. A tenth of the rows is
+ * still plenty to see the line and the pedal work, and an endurance run stops
+ * being eleven megabytes.
+ *
+ * Row-count based, not time based, so it needs nothing from the header beyond
+ * knowing which column is time. Helios measures a group's real rate from the
+ * rows it finds (see `measured_rate_hz`), so a thinned file describes itself
+ * correctly with no extra bookkeeping.
+ */
+export function thinCsv(text: string, fromHz: number, toHz: number): string {
+  if (!(fromHz > toHz) || toHz <= 0) return text;
+  const step = Math.max(1, Math.round(fromHz / toHz));
+  if (step <= 1) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let kept = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (i === 0) { out.push(line); continue; }      // header
+    if (line === "") continue;                       // trailing newline
+    if (kept++ % step === 0) out.push(line);
   }
-  return new Set([...best.values()].map((r) => r.runId));
+  return out.join("\n") + "\n";
+}
+
+async function gzip(body: Uint8Array): Promise<{ body: Uint8Array; gz: boolean }> {
+  if (typeof CompressionStream !== "function") return { body, gz: false };
+  try {
+    const stream = new Blob([body as BlobPart]).stream().pipeThrough(new CompressionStream("gzip"));
+    const packed = new Uint8Array(await new Response(stream).arrayBuffer());
+    return { body: packed, gz: true };
+  } catch {
+    return { body, gz: false };
+  }
+}
+
+/** Telemetry kept per course: the quickest this many ranked runs... */
+export const KEEP_BEST = 2;
+/** ...and the last this many, whether they were quick or not. */
+export const KEEP_RECENT = 3;
+
+/**
+ * Which of this driver's runs keep their telemetry shared.
+ *
+ * Per COURSE: the best `KEEP_BEST` ranked runs, plus the most recent
+ * `KEEP_RECENT`, as a union -- so a new personal best usually occupies a slot
+ * in both and the real total sits under five.
+ *
+ * It is a RETENTION rule, not a selection one, and that distinction is the
+ * whole point. Sharing "the best lap on each course" sounds bounded and is
+ * not: the object path carries the run id, so every new personal best added a
+ * file and the one it beat stayed for ever. Storage grew with how much the
+ * team practised, which is exactly the thing you do not want to charge people
+ * for. Bounding the set means `pushRuns` can delete what falls out of it.
+ *
+ * Best is drawn from RANKED runs only -- an assisted or off-course lap is not
+ * a benchmark. Recent is drawn from anything that completed a lap, including
+ * the ones that went off: a lap you just threw away is often the one worth
+ * watching, and it ages out on its own in three more runs.
+ */
+export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
+  const mine = runs.filter((r) => r.driverId === userId && !r.remote && !r.synthetic);
+  const byCourse = new Map<string, SimRun[]>();
+  for (const r of mine) {
+    const list = byCourse.get(r.track);
+    if (list) list.push(r);
+    else byCourse.set(r.track, [r]);
+  }
+
+  const keep = new Set<string>();
+  for (const list of byCourse.values()) {
+    const ranked = list
+      .filter((r) => isRankable(r) && runBest(r) != null)
+      .sort((a, b) => (runBest(a) as number) - (runBest(b) as number));
+    for (const r of ranked.slice(0, KEEP_BEST)) keep.add(r.runId);
+
+    const withALap = list
+      .filter((r) => (r.stats.laps ?? 0) > 0)
+      .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+    for (const r of withALap.slice(0, KEEP_RECENT)) keep.add(r.runId);
+  }
+  return keep;
 }
 
 export interface SyncResult {
   pushed: number;
   telemetryPushed: number;
+  /** Telemetry removed because the run fell out of `telemetryToKeep`. */
+  telemetryPruned: number;
   skippedNotMine: number;
   error: string | null;
 }
@@ -190,7 +289,9 @@ export async function pushRuns(
   local: SimRun[],
   readTelemetry: (run: SimRun) => Promise<Uint8Array | null>,
 ): Promise<SyncResult> {
-  const out: SyncResult = { pushed: 0, telemetryPushed: 0, skippedNotMine: 0, error: null };
+  const out: SyncResult = {
+    pushed: 0, telemetryPushed: 0, telemetryPruned: 0, skippedNotMine: 0, error: null,
+  };
   const mine = local.filter((r) => {
     if (r.remote) return false;
     if (r.driverId !== userId) { out.skippedNotMine++; return false; }
@@ -198,7 +299,7 @@ export async function pushRuns(
   });
   if (!mine.length) return out;
 
-  let already: Set<string>;
+  let already: Map<string, string | null>;
   try {
     already = await sharedIdsFor(client, userId);
   } catch (e) {
@@ -206,11 +307,11 @@ export async function pushRuns(
     return out;
   }
 
-  const wantTelemetry = telemetryWorthSharing(local, userId);
+  const wantTelemetry = telemetryToKeep(local, userId);
 
   // Metadata first, in one round trip. Upsert, because a run that was pushed
   // and then re-read with a newer manifest should update rather than collide.
-  const missing = mine.filter((r) => !already.has(r.runId) && !already.has(`${r.runId}+tel`));
+  const missing = mine.filter((r) => !already.has(r.runId));
   if (missing.length) {
     const res = await client
       .schema(SCHEMA)
@@ -227,14 +328,24 @@ export async function pushRuns(
   // megabytes and a failure on one must not lose the others.
   for (const run of mine) {
     if (!wantTelemetry.has(run.runId)) continue;
-    if (already.has(`${run.runId}+tel`)) continue;
+    if (already.get(run.runId)) continue;
     try {
-      const body = await readTelemetry(run);
-      if (!body || !body.length) continue;
-      const object = `${userId}/${run.runId}.csv`;
+      const raw = await readTelemetry(run);
+      if (!raw || !raw.length) continue;
+      // A wheel run shares every row; anything else is thinned. See `thinCsv`.
+      const thinned = deviceClass(run) === "wheel"
+        ? raw
+        : new TextEncoder().encode(
+            thinCsv(new TextDecoder().decode(raw), run.sampleRateHz ?? 100, NON_WHEEL_SHARE_HZ),
+          );
+      const { body, gz } = await gzip(thinned);
+      const object = `${userId}/${run.runId}.csv${gz ? ".gz" : ""}`;
       const up = await client.storage
         .from(BUCKET)
-        .upload(object, body, { contentType: "text/csv", upsert: true });
+        .upload(object, body as BlobPart, {
+          contentType: gz ? "application/gzip" : "text/csv",
+          upsert: true,
+        });
       if (up.error) throw new Error(up.error.message);
       const mark = await client
         .schema(SCHEMA)
@@ -246,6 +357,29 @@ export async function pushRuns(
     } catch (e) {
       // One lap's telemetry failing is not a reason to stop: the times are
       // already shared and that is the part the board needs.
+      out.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // And drop what has fallen out of the rule. This is the half that makes it
+  // a bound rather than a preference: without it the bucket only ever grows,
+  // one file per personal best, for as long as the team practises.
+  //
+  // Only ever this user's own objects -- storage RLS enforces the same thing,
+  // and the run row belongs to them too.
+  for (const [runId, object] of already) {
+    if (!object || wantTelemetry.has(runId)) continue;
+    try {
+      const rm = await client.storage.from(BUCKET).remove([object]);
+      if (rm.error) throw new Error(rm.error.message);
+      const clear = await client
+        .schema(SCHEMA)
+        .from(TABLE)
+        .update({ telemetry_object: null, telemetry_bytes: null })
+        .eq("run_id", runId);
+      if (clear.error) throw new Error(clear.error.message);
+      out.telemetryPruned++;
+    } catch (e) {
       out.error = e instanceof Error ? e.message : String(e);
     }
   }
@@ -262,5 +396,9 @@ export async function fetchSharedTelemetry(
   }
   const res = await client.storage.from(BUCKET).download(run.telemetryObject);
   if (res.error) throw new Error(`download telemetry: ${res.error.message}`);
-  return await res.data.text();
+  // The suffix says which it is. Objects uploaded before compression, and
+  // any written where `CompressionStream` was missing, are plain.
+  if (!run.telemetryObject.endsWith(".gz")) return await res.data.text();
+  const stream = res.data.stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).text();
 }

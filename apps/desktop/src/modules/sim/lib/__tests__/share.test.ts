@@ -4,11 +4,12 @@
  * teammate's run is the same shape as one of your own, which is what lets the
  * runs table, the leaderboard and `isRankable` treat it identically -- and
  * getting a field wrong there produces a run that looks fine and ranks wrong.
- * `telemetryWorthSharing` decides what gets uploaded, which is the difference
- * between a few hundred kilobytes a session and a few hundred megabytes. */
+ * `telemetryToKeep` decides what KEEPS its telemetry, which is the difference
+ * between a bucket that is bounded and one that grows for as long as the team
+ * practises. */
 import { describe, it, expect } from "vitest";
 
-import { rowToRun, telemetryWorthSharing } from "../share";
+import { KEEP_BEST, KEEP_RECENT, rowToRun, telemetryToKeep, thinCsv } from "../share";
 import { isRankable, runBest, type SimRun } from "../../api";
 
 function localRun(over: Partial<SimRun> & { runId: string }): SimRun {
@@ -26,6 +27,7 @@ function localRun(over: Partial<SimRun> & { runId: string }): SimRun {
     startedAt: "2026-09-19T10:00:00Z",
     finishedReason: "finished",
     profile: "wheel",
+    detectedInput: "wheel",
     device: null,
     physics: "native",
     simVersion: "0.2.0",
@@ -61,6 +63,8 @@ function row(over: Record<string, unknown> = {}) {
     assists: { traction: false, abs: false, autoShift: false },
     synthetic: false,
     format_version: 2,
+    profile: "wheel",
+    detected_input: "wheel",
     stats: { peakLatG: 1.55, theoreticalBestS: 40.1, bestSectors: [13.2, 14.0, 13.7] },
     laps_detail: [{ lap: 1, raw: 40.9, cones: 0, off: 0, total: 40.9, sectors: [], startedAtS: 0 }],
     telemetry_object: "u-ralf/20260919-100000-autocross-ab12.csv",
@@ -113,47 +117,107 @@ describe("a shared row becomes a run", () => {
   });
 });
 
-describe("what is worth uploading", () => {
-  it("is the best ranked lap on each course, and nothing else", () => {
+describe("what keeps its telemetry", () => {
+  const at = (h: number) => `2026-09-19T${String(h).padStart(2, "0")}:00:00Z`;
+  const r = (id: string, best: number | null, hour: number, over: Partial<SimRun> = {}) =>
+    localRun({
+      runId: id, startedAt: at(hour),
+      stats: { ...localRun({ runId: "x" }).stats, bestLapS: best, laps: best == null ? 1 : 1 },
+      ...over,
+    });
+
+  it("keeps the best two and the most recent three, per course", () => {
     const runs = [
-      localRun({ runId: "ax-slow", stats: { ...localRun({ runId: "x" }).stats, bestLapS: 44 } }),
-      localRun({ runId: "ax-best", stats: { ...localRun({ runId: "x" }).stats, bestLapS: 41 } }),
-      localRun({ runId: "ax-mid", stats: { ...localRun({ runId: "x" }).stats, bestLapS: 42 } }),
-      localRun({ runId: "end-best", track: "endurance",
-        stats: { ...localRun({ runId: "x" }).stats, bestLapS: 60 } }),
+      r("a", 44, 1), r("b", 41, 2), r("c", 43, 3), r("d", 42, 4), r("e", 45, 5),
     ];
-    expect(telemetryWorthSharing(runs, "me")).toEqual(new Set(["ax-best", "end-best"]));
+    // best 2 by time: b (41), d (42). recent 3 by clock: e, d, c.
+    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["b", "d", "e", "c"]));
   });
 
-  it("ignores runs that cannot rank", () => {
-    // A quicker lap with traction control on must not become the lap the team
-    // watches, because it is not a lap the team can be compared against.
-    const runs = [
-      localRun({ runId: "assisted", assists: { traction: true, abs: false, autoShift: false },
-        stats: { ...localRun({ runId: "x" }).stats, bestLapS: 38 } }),
-      localRun({ runId: "clean", stats: { ...localRun({ runId: "x" }).stats, bestLapS: 41 } }),
-      localRun({ runId: "robot", synthetic: true,
-        stats: { ...localRun({ runId: "x" }).stats, bestLapS: 37 } }),
-      localRun({ runId: "nolap", stats: { ...localRun({ runId: "x" }).stats, bestLapS: null } }),
-    ];
-    expect(telemetryWorthSharing(runs, "me")).toEqual(new Set(["clean"]));
+  it("is a union, so a new personal best does not cost two slots", () => {
+    // The newest run is also the quickest -- it is in both lists and counts once.
+    const runs = [r("old", 44, 1), r("mid", 43, 2), r("pb", 40, 3)];
+    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["old", "mid", "pb"]));
   });
 
-  it("ignores other people's runs, and ones already shared", () => {
-    // A shared rig holds everybody's drives. Uploading somebody else's would
-    // file their lap under your name -- the database would let you.
+  it("counts each course separately", () => {
     const runs = [
-      localRun({ runId: "theirs", driverId: "someone-else",
-        stats: { ...localRun({ runId: "x" }).stats, bestLapS: 39 } }),
-      localRun({ runId: "already-shared", remote: true,
-        stats: { ...localRun({ runId: "x" }).stats, bestLapS: 38 } }),
-      localRun({ runId: "mine", stats: { ...localRun({ runId: "x" }).stats, bestLapS: 41 } }),
+      r("ax1", 41, 1), r("ax2", 42, 2),
+      r("en1", 130, 3, { track: "endurance" }), r("en2", 131, 4, { track: "endurance" }),
     ];
-    expect(telemetryWorthSharing(runs, "me")).toEqual(new Set(["mine"]));
+    const keep = telemetryToKeep(runs, "me");
+    expect(keep).toEqual(new Set(["ax1", "ax2", "en1", "en2"]));
   });
 
-  it("has nothing to say when nothing ranks", () => {
-    const runs = [localRun({ runId: "nolap", stats: { ...localRun({ runId: "x" }).stats, bestLapS: null } })];
-    expect(telemetryWorthSharing(runs, "me").size).toBe(0);
+  it("will not let an unranked lap be a BEST, but will let it be recent", () => {
+    // A lap with traction control on is not a benchmark. It is still the last
+    // thing you drove, and the lap you threw away is often the one to watch.
+    const runs = [
+      r("clean", 44, 1),
+      r("assisted", 38, 2, { assists: { traction: true, abs: false, autoShift: false } }),
+    ];
+    const keep = telemetryToKeep(runs, "me");
+    expect(keep.has("clean")).toBe(true);
+    expect(keep.has("assisted")).toBe(true);
+    // ...and it did not take the best slot: ordering is by ranked time, and
+    // only `clean` is ranked at all.
+    const onlyBest = telemetryToKeep([r("clean", 44, 1), r("a2", 38, 2, {
+      assists: { traction: true, abs: false, autoShift: false },
+    }), r("a3", 39, 3, { assists: { traction: true, abs: false, autoShift: false } }),
+      r("a4", 39.5, 4, { assists: { traction: true, abs: false, autoShift: false } })], "me");
+    // recent 3 = a4, a3, a2; best 2 (ranked only) = clean. So clean survives
+    // despite being the oldest and slowest, because it is the only real time.
+    expect(onlyBest.has("clean")).toBe(true);
+  });
+
+  it("ignores the robot, other people, and runs with no lap", () => {
+    const runs = [
+      r("mine", 41, 5),
+      r("robot", 37, 6, { synthetic: true }),
+      r("theirs", 38, 7, { driverId: "someone-else" }),
+      r("shared", 39, 8, { remote: true }),
+      localRun({ runId: "nolap", startedAt: at(9),
+        stats: { ...localRun({ runId: "x" }).stats, bestLapS: null, laps: 0 } }),
+    ];
+    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["mine"]));
+  });
+
+  it("has nothing to say about an empty archive", () => {
+    expect(telemetryToKeep([], "me").size).toBe(0);
+  });
+
+  it("is bounded by the two constants, whatever the driver does", () => {
+    const many = Array.from({ length: 40 }, (_, i) => r(`r${i}`, 40 + i, i % 24));
+    expect(telemetryToKeep(many, "me").size).toBeLessThanOrEqual(KEEP_BEST + KEEP_RECENT);
+  });
+});
+
+describe("thinning a non-wheel run", () => {
+  const csv = (rows: number) =>
+    ["time_s,a,b", ...Array.from({ length: rows }, (_, i) => `${(i / 100).toFixed(3)},${i},${i * 2}`)]
+      .join("\n") + "\n";
+
+  it("keeps one row in ten going 100 Hz to 10 Hz", () => {
+    const out = thinCsv(csv(100), 100, 10);
+    const lines = out.trimEnd().split("\n");
+    expect(lines[0]).toBe("time_s,a,b");          // header survives
+    expect(lines.length - 1).toBe(10);
+  });
+
+  it("keeps the shape, not just the count", () => {
+    const lines = thinCsv(csv(50), 100, 10).trimEnd().split("\n");
+    // Every kept row is a whole row, and the first sample is still the first.
+    expect(lines[1]).toBe("0.000,0,0");
+    expect(lines.every((l) => l.split(",").length === 3)).toBe(true);
+  });
+
+  it("does nothing when the file is already at or below the target", () => {
+    const at10 = csv(20);
+    expect(thinCsv(at10, 10, 10)).toBe(at10);
+    expect(thinCsv(at10, 5, 10)).toBe(at10);
+  });
+
+  it("survives a file with nothing in it but a header", () => {
+    expect(thinCsv("time_s,a\n", 100, 10)).toBe("time_s,a\n");
   });
 });
