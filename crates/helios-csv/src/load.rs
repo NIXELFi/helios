@@ -275,11 +275,61 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
             }
             rg_cols.push((meta, data));
         }
-        rate_groups.push(RateGroup::build(format!("{rate}hz"), rate as f32, rg_times, rg_cols)?);
+        // The registry's rate is a HINT used to decide which channels belong
+        // together. Once they are together, the rows themselves are the
+        // authority on how fast they were sampled, and the group's nominal
+        // rate is what `lowpass`/`highpass` math channels use to place a
+        // filter cutoff -- so a group that says 10 Hz while holding 100 Hz
+        // rows puts every cutoff out by a factor of ten.
+        //
+        // That is not hypothetical: the driver-in-loop simulator logs GPS on
+        // every row of a 100 Hz file, while the registry calls `gps.*` 10 Hz
+        // because that is what the car's receiver does. A real logger writes
+        // its 10 Hz GPS into one row in ten, so the measured rate agrees with
+        // the registry and nothing changes for it.
+        let measured = measured_rate_hz(&rg_times);
+        let nominal = match measured {
+            // Within a fifth of the registry's figure, keep the registry's:
+            // it is a round number and jitter should not turn 100 into 98.4.
+            Some(m) if (m - rate as f32).abs() <= rate as f32 * 0.2 => rate as f32,
+            Some(m) => {
+                warnings.push(format!(
+                    "rate group `{rate}hz` actually carries {m:.0} Hz of samples; using the measured rate"
+                ));
+                m
+            }
+            None => rate as f32,
+        };
+        rate_groups.push(RateGroup::build(format!("{rate}hz"), nominal, rg_times, rg_cols)?);
     }
 
     let duration_us = *times_us.last().unwrap() - times_us[0];
     Ok(LoadResult { rate_groups, warnings, duration_us })
+}
+
+/// Samples per second actually present in a group, or None when there are too
+/// few rows or no elapsed time to measure across.
+///
+/// The MEDIAN interval between rows, not rows-over-span. Span divides by the
+/// whole elapsed time including any gap, so a log with a dropout -- a receiver
+/// that stopped for ten seconds while the car sat still, an out-lap logged
+/// before the session proper -- measures far below its real rate. That matters
+/// because the caller compares this against the registry and re-labels the
+/// group when they disagree by a fifth, so a dropout could rewrite the nominal
+/// rate of a perfectly ordinary log and put every filter cutoff with it.
+/// The median ignores the gap and answers the question actually being asked:
+/// how fast is this thing sampled when it is sampling.
+fn measured_rate_hz(times_us: &[i64]) -> Option<f32> {
+    if times_us.len() < 3 {
+        return None;
+    }
+    let mut gaps: Vec<i64> = times_us.windows(2).map(|w| w[1] - w[0]).filter(|&d| d > 0).collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    gaps.sort_unstable();
+    let dt_us = gaps[gaps.len() / 2];
+    Some((1_000_000.0 / dt_us as f64) as f32)
 }
 
 /// Output of the preamble-stripping pass: the cleaned text the CSV reader
@@ -704,6 +754,48 @@ channels:
         }
     }
 
+    /// A group's nominal rate has to describe the rows in it, because that
+    /// is the rate `lowpass`/`highpass` math channels place their cutoff
+    /// against. The simulator logs GPS on every row of a 100 Hz file while
+    /// the registry calls `gps.*` 10 Hz, and believing the registry there put
+    /// every filter cutoff out by a factor of ten.
+    #[test]
+    fn a_groups_rate_follows_its_rows_not_the_registry() {
+        let mut csv = String::from("time_s,gps.speed
+");
+        for i in 0..200 {
+            csv.push_str(&format!("{:.2},{}
+", i as f64 * 0.01, i));
+        }
+        let r = load_csv_bytes(csv.as_bytes(), &registry()).expect("load");
+        let g = r.rate_groups.iter().find(|g| g.meta("gps.speed").is_some()).expect("gps group");
+        assert!(
+            (g.nominal_rate_hz - 100.0).abs() < 2.0,
+            "a column sampled every 10 ms is 100 Hz, not {}",
+            g.nominal_rate_hz,
+        );
+        assert!(r.warnings.iter().any(|w| w.contains("measured rate")),
+                "the correction should be reported: {:?}", r.warnings);
+    }
+
+    /// The other side of it: a real logger writing 10 Hz GPS into one row in
+    /// ten of a 100 Hz file must be left alone, round number and all.
+    #[test]
+    fn a_genuinely_sparse_channel_keeps_its_registry_rate() {
+        let mut csv = String::from("time_s,engine.rpm,gps.speed
+");
+        for i in 0..200 {
+            let gps = if i % 10 == 0 { i.to_string() } else { String::new() };
+            csv.push_str(&format!("{:.2},{},{}
+", i as f64 * 0.01, 5000 + i, gps));
+        }
+        let r = load_csv_bytes(csv.as_bytes(), &registry()).expect("load");
+        let g = r.rate_groups.iter().find(|g| g.meta("gps.speed").is_some()).expect("gps group");
+        assert_eq!(g.nominal_rate_hz, 10.0, "one row in ten of a 100 Hz file is 10 Hz");
+        let rpm = r.rate_groups.iter().find(|g| g.meta("engine.rpm").is_some()).expect("rpm group");
+        assert_eq!(rpm.nominal_rate_hz, 100.0);
+    }
+
     /// A column dominated by non-numeric values (e.g. an "on"/"off" enum)
     /// silently became all-nulls. The loader now surfaces a warning so the
     /// user can tell the column wasn't usefully ingested.
@@ -917,6 +1009,28 @@ channels:
             }
         }
         assert_eq!(rpm_first, Some(1000.0), "engine.rpm not loaded from tab Link export");
+    }
+
+    /// A group's nominal rate is measured from the rows, and a DROPOUT must
+    /// not change the answer.
+    ///
+    /// The rate decides where `lowpass`/`highpass` math channels put a cutoff,
+    /// so measuring rows-over-span -- which divides by the gap as well as by
+    /// the driving -- would re-label an ordinary 100 Hz log and move every
+    /// filter with it.
+    #[test]
+    fn a_dropout_does_not_change_the_measured_rate() {
+        // 100 Hz throughout, with ten seconds missing in the middle.
+        let mut t: Vec<i64> = (0..50).map(|i| i * 10_000).collect();
+        let after = t[t.len() - 1] + 10_000_000;
+        t.extend((0..50).map(|i| after + i * 10_000));
+        let hz = measured_rate_hz(&t).expect("enough rows to measure");
+        assert!((hz - 100.0).abs() < 1.0, "measured {hz} Hz across a dropout");
+
+        // And a genuinely slow group still measures slow.
+        let slow: Vec<i64> = (0..30).map(|i| i * 100_000).collect();
+        let hz = measured_rate_hz(&slow).unwrap();
+        assert!((hz - 10.0).abs() < 0.5, "measured {hz} Hz for a 10 Hz group");
     }
 
     // NB: a `sample_session_loads` test used to load the bundled

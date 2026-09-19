@@ -33,6 +33,7 @@ import {
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
 import { useFileOpener, processBundlePaths } from "./lib/use-file-opener";
+import { useOpenInLogs } from "./lib/open-in-logs";
 import { formatFileOpenSummary } from "./lib/file-open-summary";
 import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
@@ -154,6 +155,33 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   mathChannelsRef.current = mathChannels;
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
   useFileOpener({ onPending: handleFileOpenPending });
+  // Another module handing a data file over -- the Sim module's "Open in
+  // Logs" on a recorded run. It is the same ingest as a drag-and-drop, which
+  // is the point: a simulator run is an ordinary Helios-canonical CSV, and
+  // it lands beside the real car's logs on the same axes with no special
+  // case anywhere in the pipeline. The Shell switches to this module; this
+  // loads the files.
+  useOpenInLogs(useCallback((detail) => {
+    // Name it after where it came from. Every simulator run's telemetry file
+    // is called `telemetry.csv`, so without this two overlaid runs are two
+    // sessions both called "telemetry". A rename the user has already made
+    // wins -- this fills the blank, it does not overwrite a decision.
+    if (detail.label) {
+      for (const p of detail.paths) {
+        const id = userSessionIdFor(p);
+        if (!loadSessionMeta(id)?.label) saveSessionMeta(id, { label: detail.label });
+      }
+    }
+    void handleAddSessionFiles(detail.paths);
+    // Empty deps on purpose, and it is load-bearing: `handleAddSessionFiles`
+    // is re-created every render but reads everything it needs through refs
+    // (`sessionsRef`, `mathChannelsRef`) and functional setters, so the stale
+    // closure captured here still acts on current state. If that function is
+    // ever changed to read state directly, this array has to change with it --
+    // there is no ESLint in this repo to notice.
+    // This is also the consumer that actually loads the files, so it is the
+    // one that drains a request made before this module existed.
+  }, []), { drainsPending: true });
   // OS-level drag-drop of data files (CSV) onto the app window. .helios
   // workspace bundles are routed away from this hook (they belong to the
   // useFileOpener path above). Fires for any drop over the webview, so the

@@ -27,6 +27,68 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Sim.** A new module, last of the everyday modules in the rail: the
+  launcher, the archive and the leaderboards for the driver-in-loop simulator.
+  It installs the simulator on demand from Supabase storage rather than
+  shipping inside Helios, so anyone who does not want a driving simulator does
+  not download one. Launching a drive needs you signed in — a lap time is a
+  claim about a person — and Helios then decides what the run *is*: who is
+  driving, which course, which driver aids, whether it is logged, and which
+  lap to chase. The simulator decides what the rig is. `docs/SIM_SETTINGS.md`
+  states the rule and where every setting lives.
+- **Every run is archived and replayable.** The simulator writes
+  Helios-canonical telemetry at 100 Hz — 78 channels, the names in
+  `docs/channels.yaml`, loadable by the Logs module with no conversion — plus
+  a manifest with the lap and sector times, the penalties, the vehicle setup
+  the run was driven on and the course it was driven at. Runs are files under
+  `%LOCALAPPDATA%\Helios\sim-runs`, so a rig with no network still works. The
+  Runs table groups them by day, filters to yours, and opens any of them
+  either in the simulator's replay or straight into Logs.
+- **Per-course leaderboards.** Scored the way the event is: raw time plus two
+  seconds a cone plus ten an off-course. A run is ranked only if it completed
+  a lap, was launched from Helios by a signed-in driver, and was driven with
+  **traction control, ABS and the automatic gearbox all off** — the real car
+  has none of them. Runs that miss any of that still list and still replay,
+  with the reason on the row.
+- **Session summary.** Closing the simulator brings Helios to the Runs tab
+  with what you just did: runs, laps, your best, cones, and whether anything
+  was a personal best.
+- **`system.beacon` in the channel registry**, alongside the 55 new `sim.*`
+  channels. It was simply missing.
+
+### Changed
+- **The Runs table opens with every day rolled up.** It is the whole team's
+  archive, so on a shared machine the newest day is somebody else's session as
+  often as it is yours; a screen of day headers says what is there — how many
+  runs, how many laps, the day's best — and you open the one you came for.
+  "Expand all" is one click, and a run opened from a leaderboard or from the
+  session summary opens its own day.
+- **A run with no completed lap is not saved at all.** A drive that never
+  crossed the finish line has no time to rank and nothing to compare, and
+  keeping them filled the archive and people's disks with runs nobody would
+  open. The simulator says why rather than letting the run vanish quietly.
+  Note that free roam at MIS has no finish line, so it never files a run; the
+  launcher now says so before you drive it.
+- **A log's rate groups are measured from the log, not looked up.** When a
+  group's real sample rate differs from the channel registry's nominal by more
+  than 20%, Helios now uses the measured rate and says so. This affects every
+  log, not only simulator runs: filter cutoffs on `lowpass`/`highpass` math
+  channels are computed from it, and a 100 Hz file read as 10 Hz filters at a
+  tenth of the frequency you asked for.
+
+### Fixed
+- **The whole window scrolled.** Anything that outgrew the viewport scrolled
+  the document rather than its own pane, which slid the title bar off the top
+  of a window with no way to get it back. The shell is one screen tall and
+  every scrolling region inside it is now its own — the module rail included,
+  which is where this actually came from.
+- **Presence put people in the wrong module.** The "who's on Helios" roster
+  kept its own hand-written list of module names, and anyone sitting in Org,
+  Sim or Amethyst was reported to everyone else as being in Logs — a wrong
+  answer that looks exactly like a right one. It is now derived from the
+  rail's own table, which the compiler will not let go stale.
+
 ## [5.7.4] - 2026-09-16
 
 ### Added

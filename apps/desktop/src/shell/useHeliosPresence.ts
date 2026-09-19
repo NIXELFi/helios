@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import type { ModuleId } from "./ModulePicker";
+import { MODULE_ICON, type ModuleId } from "./ModulePicker";
 
 /** One signed-in person currently connected to Helios, collapsed across all of
  *  their open windows/tabs. */
@@ -25,15 +25,17 @@ interface TrackedMeta {
   online_at: number;
 }
 
-const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set<ModuleId>([
-  "logs",
-  "vault",
-  "cfd",
-  "pm",
-  "games",
-  "marketplace",
-  "org",
-]);
+/**
+ * Every module the rail can show, taken from the rail's own icon table.
+ *
+ * This list used to be written out by hand, and it fell behind three times:
+ * "org", then "sim" and "amethyst". Each time, everyone sitting in that module
+ * showed up in everyone else's presence panel as being in Logs -- a wrong
+ * answer that looks exactly like a right one. `MODULE_ICON` is typed
+ * `Record<ModuleId, ...>`, so the compiler will not let it be incomplete;
+ * deriving from it means the drift cannot happen again.
+ */
+const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set(Object.keys(MODULE_ICON) as ModuleId[]);
 
 /** Coerce an off-the-wire module string to a known ModuleId (a newer/renamed
  *  client could send something we don't recognize); default to "logs" so the

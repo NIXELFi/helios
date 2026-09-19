@@ -11,6 +11,7 @@ import {
   IconPuzzle,
   IconSettings,
   IconShieldLock,
+  IconSteeringWheel,
   IconUserCircle,
   IconWind,
   type TablerIcon,
@@ -22,7 +23,7 @@ import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
 
-export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "games" | "amethyst" | "marketplace" | "org";
+export type ModuleId = "logs" | "vault" | "cfd" | "pm" | "sim" | "games" | "amethyst" | "marketplace" | "org";
 
 // Per-module glyphs for the rail — shown beside the label, and the only thing
 // shown when the rail is collapsed to an icon strip.
@@ -31,6 +32,7 @@ export const MODULE_ICON: Record<ModuleId, TablerIcon> = {
   vault: IconArchive,
   cfd: IconWind,
   pm: IconClipboardList,
+  sim: IconSteeringWheel,
   games: IconDeviceGamepad2,
   amethyst: IconDiamond,
   marketplace: IconPuzzle,
@@ -169,7 +171,10 @@ export function ModulePicker(props: Props) {
     // module) so they persist across Log / Vault / CFD.
     <nav
       className={
-        "flex flex-col border-r border-helios-line bg-helios-base " +
+        // `min-h-0` so this can be shorter than its content, and the module
+        // list below takes the scrolling. A short window used to push the
+        // rail's natural 817px straight through the bottom of the screen.
+        "flex min-h-0 flex-col border-r border-helios-line bg-helios-base " +
         (collapsed ? "w-14" : "w-44")
       }
     >
@@ -220,6 +225,12 @@ export function ModulePicker(props: Props) {
         </button>
       </div>
 
+      {/* Everything between the brand header and the pinned footer scrolls
+          together: the module list and, when it is there, the presence roster.
+          Nine modules and a roomy roster do not fit a laptop screen, and the
+          right answer is a scrollbar in the rail rather than the whole app
+          sliding upward. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-0.5 p-2">
         {/* PM first: it is the landing module for signed-in members (5.7.4). */}
         <NavButton
@@ -275,6 +286,20 @@ export function ModulePicker(props: Props) {
           active={active === "marketplace"}
           onClick={() => onSelect("marketplace")}
         />
+        {/* Driver-in-loop simulator: the launcher, the run archive and the
+            per-course leaderboards. No auth gate -- runs are files on this
+            machine, so a rig with no network still works.
+
+            Last of the everyday modules, directly above Admin: it is the one
+            you go to for a session rather than one you pass through, so it
+            sits at the bottom of the rail where a destination belongs. */}
+        <NavButton
+          label="Sim"
+          Icon={MODULE_ICON.sim}
+          collapsed={collapsed}
+          active={active === "sim"}
+          onClick={() => onSelect("sim")}
+        />
         {/* Org & Access is admin-only tooling — hide the entry entirely for
             everyone else rather than show a disabled control. */}
         {orgEnabled && (
@@ -299,6 +324,7 @@ export function ModulePicker(props: Props) {
           railCollapsed={collapsed}
         />
       )}
+      </div>
 
       {/* Report a bug / request a feature — sits directly above the user pill so
           it's one click away from any module, for every signed-in user. */}
