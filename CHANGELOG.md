@@ -27,7 +27,7 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
-## [5.9.0] - 2026-09-19
+## [5.8.2] - 2026-09-19
 
 ### Added
 - **A leaderboard per device, and Helios works out which one you were on.**
