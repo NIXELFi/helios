@@ -6,6 +6,7 @@ import {
 import {
   TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, unrankedReason, type SimRun,
 } from "../api";
+import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
 
 type SortKey = "when" | "best" | "driver" | "track";
 
@@ -465,6 +466,14 @@ export function RunsTable({
           the robot driver set it, or no lap was completed. Hover a time for the reason.
         </p>
       )}
+      {/* What the team gets and what it does not. Asked often enough to be
+          printed once, where the runs are. */}
+      <p className="border-t border-helios-line px-3 py-1.5 text-[11px] text-helios-muted">
+        Every run&rsquo;s time is shared with the team as soon as it is driven. The lap
+        itself is uploaded only for your best {KEEP_BEST} and latest {KEEP_RECENT} on each
+        course; older laps leave the team&rsquo;s copy as new ones take their place, and
+        never leave this machine.
+      </p>
     </div>
   );
 }

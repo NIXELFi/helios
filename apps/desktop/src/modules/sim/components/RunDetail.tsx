@@ -8,6 +8,7 @@ import {
   unrankedReason, type SimManifest, type SimRun,
 } from "../api";
 import { ghostCandidates } from "../lib/leaderboard";
+import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
 
 interface Props {
   run: SimRun;
@@ -18,6 +19,13 @@ interface Props {
    *  is not; the id itself says whether this run is the viewer's own, which
    *  is what decides whether it can be taken off the team's board. */
   driverId: string | null;
+  /**
+   * Whether this run's lap is in the team's copy right now, for a run of
+   * the signed-in driver's own; null for anybody else's, where the row says.
+   * The team keeps the lap for a driver's best `KEEP_BEST` and latest
+   * `KEEP_RECENT` runs per course; the rest share their time only.
+   */
+  lapShared?: boolean | null;
   onClose: () => void;
   onReplay: (run: SimRun, ghostId: string | null) => void;
   onOpenInLogs: (run: SimRun) => void;
@@ -26,7 +34,7 @@ interface Props {
 }
 
 export function RunDetail({
-  run, allRuns, canReplay, driverId, onClose, onReplay, onOpenInLogs, onChase, onDeleted,
+  run, allRuns, canReplay, driverId, lapShared = null, onClose, onReplay, onOpenInLogs, onChase, onDeleted,
 }: Props) {
   const canDrive = !!driverId;
   const mine = !!driverId && run.driverId === driverId;
@@ -215,6 +223,23 @@ export function RunDetail({
                 : fmtBytes(run.telemetryBytes)
             }
           />
+          {/* A run of your own says whether the team has the lap or only the
+              time, and why: the rule is the driver's best few and latest few
+              per course, and "why is my lap not up there" should not need a
+              trip to the source. */}
+          {!run.remote && lapShared != null && (
+            <Row
+              label="Shared"
+              value={
+                lapShared
+                  ? `time and lap — one of your best ${KEEP_BEST} or latest ${KEEP_RECENT} on this course`
+                  : `time only — the lap is kept here; only your best ${KEEP_BEST} and latest ${KEEP_RECENT} per course go up`
+              }
+              title={
+                `Every run's time is shared with the team. The lap itself is uploaded for your best ${KEEP_BEST} and latest ${KEEP_RECENT} runs on each course, and removed from the team's copy as newer or quicker ones replace it. Nothing is removed from this machine.`
+              }
+            />
+          )}
           {manifest?.channels && <Row label="Channels" value={String(manifest.channels.length)} />}
           {manifest?.events && <Row label="Events" value={String(manifest.events.length)} />}
           {manifest?.truncated && (

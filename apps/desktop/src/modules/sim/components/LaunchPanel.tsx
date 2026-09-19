@@ -16,6 +16,11 @@ import {
   simStatus,
   type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
 } from "../api";
+import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
+
+// Kept here as well: the tests and older callers import it from this module.
+export { installedVersion };
 
 const PREFS_KEY = "helios:sim:launch";
 
@@ -81,9 +86,11 @@ interface Props {
   driver: { id: string; name: string } | null;
   onStatusChange: (s: SimStatus) => void;
   onLaunched: () => void;
+  /** The automatic update, owned by SimHome so it runs whichever tab is up. */
+  update: AutoUpdateState;
 }
 
-export function LaunchPanel({ status, driver, onStatusChange, onLaunched }: Props) {
+export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update }: Props) {
   const [prefs, setPrefs] = useState<LaunchPrefs>(readPrefs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,13 +162,16 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched }: Prop
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 p-6">
       {!ready && <NotFound status={status} onPick={pickExe} onStatusChange={onStatusChange} />}
-      {ready && <UpdateBanner status={status} onStatusChange={onStatusChange} />}
+      {ready && <UpdateBanner status={status} update={update} />}
 
       <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
         <h3 className="mb-1 text-sm font-semibold">Start a run</h3>
         <p className="mb-4 text-xs text-helios-dim">
-          The simulator records everything at 100&nbsp;Hz and files it here. Put a name on
-          it and the time goes on the board.
+          The simulator records everything at 100&nbsp;Hz and files it here. Every run&rsquo;s
+          time goes on the team board. The lap itself is uploaded only for your best{" "}
+          {KEEP_BEST} and latest {KEEP_RECENT} on each course &mdash; older laps are removed
+          from the team&rsquo;s copy as new ones take their place, and always stay on this
+          machine.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -292,12 +302,16 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched }: Prop
         <div className="mt-5 flex items-center gap-3">
           <button
             className="inline-flex items-center gap-2 rounded bg-asu-gold px-4 py-2 text-sm font-semibold text-helios-on-gold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!ready || busy || !driver}
-            title={driver ? undefined : "Sign in to Helios to start a run"}
+            disabled={!ready || busy || !driver || update.installing}
+            title={
+              !driver ? "Sign in to Helios to start a run"
+                : update.installing ? "The simulator is being updated; it launches when that is done"
+                : undefined
+            }
             onClick={() => void launch()}
           >
             <IconPlayerPlayFilled size={15} />
-            {busy ? "Starting…" : "Launch simulator"}
+            {busy ? "Starting…" : update.installing ? "Updating…" : "Launch simulator"}
           </button>
           {sent && <span className="text-xs text-helios-success">Running — {sent}</span>}
           {error && <span className="text-xs text-helios-danger">{error}</span>}
@@ -389,61 +403,74 @@ function useInstaller(onStatusChange: (s: SimStatus) => void, onError: (m: strin
   return { install, installing, label, pct };
 }
 
-/** What `fsae-sim --version` prints, reduced to the version itself. */
-export function installedVersion(status: SimStatus | null): string | null {
-  const raw = status?.version?.trim();
-  if (!raw) return null;
-  return raw.split(/\s+/).pop() ?? null;
-}
-
 /**
- * The feed has something other than what is installed.
+ * What the automatic update is doing.
  *
- * Not "newer": this compares for DIFFERENCE, not order. Rolling back to a
- * build that is known to work at an event is a real thing to want, and a
- * version comparison that refused to offer it would be wrong in the moment it
- * mattered most. The banner says both versions and lets the driver decide.
+ * The update itself runs in `useSimAutoUpdate`, owned by SimHome so it goes
+ * on whichever tab is open; this only says so. Three states are worth a
+ * line: it is downloading (with how far), it failed (with a retry), and it
+ * just installed (so a driver who saw the version change knows why). When
+ * the feed matches what is installed there is nothing to say.
  */
-function UpdateBanner({
-  status, onStatusChange,
-}: { status: SimStatus | null; onStatusChange: (s: SimStatus) => void }) {
-  const { build, feedError, setFeedError } = useAvailableBuild(true);
-  const { install, installing, label, pct } = useInstaller(onStatusChange, setFeedError);
+function UpdateBanner({ status, update }: { status: SimStatus | null; update: AutoUpdateState }) {
+  const { build, installing, got, error, installed, retry } = update;
   const have = installedVersion(status);
 
-  if (!build || !have || build.version === have) return null;
-  const p = pct(build);
-  return (
-    <section className="rounded-lg border border-asu-gold/40 bg-asu-gold/10 p-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <IconDownload size={18} className="shrink-0 text-asu-gold" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold">
-            Simulator {build.version} is available
-          </h3>
-          <p className="mt-0.5 text-xs text-helios-dim">
-            You have {have}
-            {build.bytes ? ` · ${fmtBytes(build.bytes)} to download` : ""}
-            {status?.exeConfigured ? "" : " · currently using a copy found on this machine"}
-            {build.notes ? ` — ${build.notes}` : ""}
-          </p>
-          {feedError && <p className="mt-1 text-xs text-helios-danger">{feedError}</p>}
+  if (installing && build) {
+    const pct = build.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+    return (
+      <section className="rounded-lg border border-asu-gold/40 bg-asu-gold/10 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <IconDownload size={18} className="shrink-0 text-asu-gold" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">Updating the simulator to {build.version}</h3>
+            <p className="mt-0.5 text-xs text-helios-dim">
+              {have ? `Replacing ${have}` : "Installing"}
+              {pct != null ? ` · ${pct.toFixed(0)}%` : got ? ` · ${fmtBytes(got)}` : ""}
+              {build.notes ? ` — ${build.notes}` : ""}
+              . Launching waits for it.
+            </p>
+          </div>
+          {pct != null && (
+            <span className="h-1 w-24 overflow-hidden rounded bg-helios-line" aria-hidden>
+              <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${pct}%` }} />
+            </span>
+          )}
         </div>
-        {p != null && (
-          <span className="h-1 w-24 overflow-hidden rounded bg-helios-line" aria-hidden>
-            <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${p}%` }} />
-          </span>
-        )}
-        <button
-          className="shrink-0 rounded bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:opacity-50"
-          disabled={installing}
-          onClick={() => void install(build)}
-        >
-          {label(build, `Update to ${build.version}`)}
-        </button>
-      </div>
-    </section>
-  );
+      </section>
+    );
+  }
+  if (error && build) {
+    return (
+      <section className="rounded-lg border border-helios-danger/40 bg-helios-danger/10 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <IconAlertTriangle size={18} className="shrink-0 text-helios-danger" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">Could not update the simulator to {build.version}</h3>
+            <p className="mt-0.5 text-xs text-helios-dim">
+              {error}
+              {have ? ` · still on ${have}` : ""}
+            </p>
+          </div>
+          <button
+            className="shrink-0 rounded bg-helios-danger/80 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+            onClick={retry}
+          >
+            Try again
+          </button>
+        </div>
+      </section>
+    );
+  }
+  if (installed && have === installed) {
+    return (
+      <p className="flex items-center gap-2 text-xs text-helios-success">
+        <IconDownload size={14} className="shrink-0" />
+        Simulator {installed} installed just now.
+      </p>
+    );
+  }
+  return null;
 }
 
 function NotFound({

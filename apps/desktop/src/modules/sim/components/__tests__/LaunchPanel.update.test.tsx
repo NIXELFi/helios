@@ -1,24 +1,20 @@
-/* The simulator's update path.
+/* The simulator's update path, as the Launch tab shows it.
  *
- * Helios used to consult the build feed only when it could not find a
- * simulator at all, so once you had one it never looked again -- a fix
- * published to the feed could not reach anybody who had already installed.
- * These cover the two halves of the banner that fixes that: reading the
- * installed version out of what the executable prints, and deciding that the
- * feed has something else. */
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+ * The update itself is automatic and lives in `useSimAutoUpdate` (tested
+ * beside it). The panel's job is to say what is happening and to keep the
+ * launch button out of the way while the executable is being replaced. */
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 
-import { installedVersion } from "../LaunchPanel";
+import { LaunchPanel, installedVersion } from "../LaunchPanel";
+import type { AutoUpdateState } from "../useSimAutoUpdate";
 import type { SimStatus, SimBuild } from "../../api";
-
-const available = vi.fn<() => Promise<SimBuild | null>>();
 
 vi.mock("../../api", async () => {
   const actual = await vi.importActual<typeof import("../../api")>("../../api");
   return {
     ...actual,
-    simAvailableBuild: () => available(),
+    simAvailableBuild: vi.fn().mockResolvedValue(null),
     simInstall: vi.fn(),
     simStatus: vi.fn(),
     simLaunch: vi.fn(),
@@ -52,6 +48,25 @@ function build(over: Partial<SimBuild> = {}): SimBuild {
   };
 }
 
+function idle(over: Partial<AutoUpdateState> = {}): AutoUpdateState {
+  return {
+    build: null, installing: false, got: 0, error: null, feedError: null,
+    installed: null, retry: vi.fn(), ...over,
+  };
+}
+
+function show(st: SimStatus | null, update: AutoUpdateState) {
+  render(
+    <LaunchPanel
+      status={st}
+      driver={{ id: "d-1", name: "Nick" }}
+      onStatusChange={vi.fn()}
+      onLaunched={vi.fn()}
+      update={update}
+    />,
+  );
+}
+
 describe("installedVersion", () => {
   it("reads the version out of what the executable prints", () => {
     expect(installedVersion(status())).toBe("0.1.0");
@@ -65,67 +80,45 @@ describe("installedVersion", () => {
   });
 });
 
-describe("the update banner", () => {
-  beforeEach(() => {
-    available.mockReset();
+describe("the launch tab while the simulator updates itself", () => {
+  it("says what is being installed and holds the launch button", () => {
+    show(status(), idle({ build: build(), installing: true, got: 3_622_144 }));
+    expect(screen.getByText(/Updating the simulator to 0\.2\.0/)).toBeTruthy();
+    expect(screen.getByText(/Replacing 0\.1\.0 · 50%/)).toBeTruthy();
+    const launch = screen.getByRole("button", { name: /Updating…/ }) as HTMLButtonElement;
+    expect(launch.disabled).toBe(true);
   });
 
-  /** The banner lives inside LaunchPanel; render it the way the app does. */
-  async function show(st: SimStatus | null, offered: SimBuild | null) {
-    available.mockResolvedValue(offered);
-    const { LaunchPanel } = await import("../LaunchPanel");
-    render(
-      <LaunchPanel
-        status={st}
-        driver={{ id: "d-1", name: "Nick" }}
-        onStatusChange={vi.fn()}
-        onLaunched={vi.fn()}
-      />,
-    );
-  }
-
-  it("offers a build the feed has and this machine does not", async () => {
-    await show(status(), build());
-    await waitFor(() => {
-      expect(screen.getByText(/Simulator 0\.2\.0 is available/)).toBeTruthy();
-    });
-    expect(screen.getByRole("button", { name: /Update to 0\.2\.0/ })).toBeTruthy();
-    // Says what you have, so the choice is informed.
-    expect(screen.getByText(/You have 0\.1\.0/)).toBeTruthy();
+  it("offers a retry when the install failed, and the launch button works on what is there", () => {
+    const retry = vi.fn();
+    show(status(), idle({ build: build(), error: "sha256 mismatch", retry }));
+    expect(screen.getByText(/Could not update the simulator to 0\.2\.0/)).toBeTruthy();
+    expect(screen.getByText(/sha256 mismatch · still on 0\.1\.0/)).toBeTruthy();
+    screen.getByRole("button", { name: /Try again/ }).click();
+    expect(retry).toHaveBeenCalled();
+    const launch = screen.getByRole("button", { name: /Launch simulator/ }) as HTMLButtonElement;
+    expect(launch.disabled).toBe(false);
   });
 
-  it("says nothing when the feed matches what is installed", async () => {
-    await show(status(), build({ version: "0.1.0" }));
-    await waitFor(() => expect(available).toHaveBeenCalled());
-    expect(screen.queryByText(/is available/)).toBeNull();
+  it("says when it has just installed one", () => {
+    show(status({ version: "fsae-sim 0.2.0" }), idle({ build: build(), installed: "0.2.0" }));
+    expect(screen.getByText(/Simulator 0\.2\.0 installed just now/)).toBeTruthy();
   });
 
-  it("offers an OLDER build too", async () => {
-    // Difference, not order. Rolling back to a build known to work at an
-    // event is a real thing to want, and a version comparison that refused
-    // would be wrong in the moment it mattered most.
-    await show(status({ version: "fsae-sim 0.9.0" }), build({ version: "0.2.0" }));
-    await waitFor(() => {
-      expect(screen.getByText(/Simulator 0\.2\.0 is available/)).toBeTruthy();
-    });
-    expect(screen.getByText(/You have 0\.9\.0/)).toBeTruthy();
+  it("says nothing when the feed matches what is installed", () => {
+    show(status({ version: "fsae-sim 0.2.0" }), idle({ build: build() }));
+    expect(screen.queryByText(/Updating the simulator/)).toBeNull();
+    expect(screen.queryByText(/installed just now/)).toBeNull();
   });
 
-  it("says nothing when the feed is unreachable", async () => {
-    available.mockRejectedValue(new Error("offline"));
-    const { LaunchPanel } = await import("../LaunchPanel");
-    render(
-      <LaunchPanel status={status()} driver={null} onStatusChange={vi.fn()} onLaunched={vi.fn()} />,
-    );
-    await waitFor(() => expect(available).toHaveBeenCalled());
-    // A rig at a test day is offline as a matter of course; that is not an error.
-    expect(screen.queryByText(/is available/)).toBeNull();
-  });
-
-  it("says nothing when no simulator is installed — that is the other panel's job", async () => {
-    await show(status({ exePath: null, version: null }), build());
-    await waitFor(() => expect(available).toHaveBeenCalled());
-    expect(screen.queryByText(/Update to/)).toBeNull();
+  it("says nothing when no simulator is installed — that is the other panel's job", () => {
+    show(status({ exePath: null, version: null }), idle({ build: build() }));
+    expect(screen.queryByText(/Updating the simulator/)).toBeNull();
     expect(screen.getByText(/not installed here/i)).toBeTruthy();
+  });
+
+  it("prints the sharing rule where the run is started", () => {
+    show(status(), idle());
+    expect(screen.getByText(/best 3 and latest 3 on each course/)).toBeTruthy();
   });
 });
