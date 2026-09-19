@@ -27,6 +27,11 @@ vi.mock("../api", async () => {
     readRunTelemetry: vi.fn(async () => null),
     simLaunch: vi.fn(),
     simImportRun: vi.fn(),
+    // The module keeps the simulator current on its own; here the feed has
+    // nothing to say.
+    simAvailableBuild: vi.fn(async () => null),
+    simInstall: vi.fn(),
+    onSimInstallProgress: () => () => {},
   };
 });
 
@@ -40,6 +45,9 @@ vi.mock("../lib/share", () => ({
   pushRuns: () => push(),
   fetchSharedTelemetry: vi.fn(),
   deleteSharedRun: (client: unknown, id: string) => deleteShared(client, id),
+  telemetryToKeep: () => new Set<string>(),
+  KEEP_BEST: 3,
+  KEEP_RECENT: 3,
 }));
 
 vi.mock("../../../auth/AuthShell", () => {

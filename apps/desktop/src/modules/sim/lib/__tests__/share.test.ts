@@ -133,12 +133,14 @@ describe("what keeps its telemetry", () => {
       ...over,
     });
 
-  it("keeps the best two and the most recent three, per course", () => {
+  it("keeps the best three and the most recent three, per course", () => {
     const runs = [
-      r("a", 44, 1), r("b", 41, 2), r("c", 43, 3), r("d", 42, 4), r("e", 45, 5),
+      r("a", 44, 1), r("b", 41, 2), r("c", 43, 3), r("d", 42, 4), r("e", 45, 5), r("f", 46, 6),
     ];
-    // best 2 by time: b (41), d (42). recent 3 by clock: e, d, c.
-    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["b", "d", "e", "c"]));
+    // best 3 by time: b (41), d (42), c (43). recent 3 by clock: f, e, d.
+    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["b", "d", "c", "f", "e"]));
+    expect(KEEP_BEST).toBe(3);
+    expect(KEEP_RECENT).toBe(3);
   });
 
   it("is a union, so a new personal best does not cost two slots", () => {
@@ -172,7 +174,7 @@ describe("what keeps its telemetry", () => {
       assists: { traction: true, abs: false, autoShift: false },
     }), r("a3", 39, 3, { assists: { traction: true, abs: false, autoShift: false } }),
       r("a4", 39.5, 4, { assists: { traction: true, abs: false, autoShift: false } })], "me");
-    // recent 3 = a4, a3, a2; best 2 (ranked only) = clean. So clean survives
+    // recent 3 = a4, a3, a2; best 3 (ranked only) = clean. So clean survives
     // despite being the oldest and slowest, because it is the only real time.
     expect(onlyBest.has("clean")).toBe(true);
   });

@@ -5,12 +5,13 @@ import {
 import { useHeliosAuth, userDisplayName } from "../../auth/AuthShell";
 import { requestOpenInLogs } from "../../lib/open-in-logs";
 import { LaunchPanel, readLaunchPrefs } from "./components/LaunchPanel";
+import { useSimAutoUpdate } from "./components/useSimAutoUpdate";
 import { Leaderboard } from "./components/Leaderboard";
 import { RunDetail } from "./components/RunDetail";
 import { RunsTable } from "./components/RunsTable";
 import { SessionSummary, runsInSession, type SessionWindow } from "./components/SessionSummary";
 import { listen } from "@tauri-apps/api/event";
-import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns } from "./lib/share";
+import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns, telemetryToKeep } from "./lib/share";
 import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus,
   type SimManifest, type SimRun, type SimStatus,
   TRACKS, type TrackId,
@@ -49,6 +50,13 @@ export function SimHome({ active }: { active: boolean }) {
     }
   });
   const [status, setStatus] = useState<SimStatus | null>(null);
+  /**
+   * The simulator is kept on the feed's build without anybody asking. Owned
+   * here rather than by the Launch tab, because the default tab is Runs and
+   * an update that only happened on a tab nobody opened is an update that
+   * never happened.
+   */
+  const update = useSimAutoUpdate(status, setStatus);
   /** What is on this machine's disk. */
   const [runs, setRuns] = useState<SimRun[]>([]);
   /** What the rest of the team has shared. Empty when signed out. */
@@ -208,7 +216,18 @@ export function SimHome({ active }: { active: boolean }) {
     () => allRuns.find((r) => r.runId === selectedId) ?? null,
     [allRuns, selectedId],
   );
-  const canReplay = !!status?.exePath;
+  // Nothing launches while the executable is being replaced.
+  const canReplay = !!status?.exePath && !update.installing;
+
+  /**
+   * Which of the signed-in driver's runs currently have their lap (the
+   * telemetry) in the team's copy, so a run can say whether it is one of
+   * them. The same rule `pushRuns` prunes by, evaluated on the same list.
+   */
+  const sharedLapIds = useMemo(
+    () => (driver ? telemetryToKeep(allRuns, driver.id) : new Set<string>()),
+    [allRuns, driver],
+  );
 
   /**
    * Bring a shared run onto this machine so it can be opened.
@@ -286,6 +305,7 @@ export function SimHome({ active }: { active: boolean }) {
    */
   const chase = useCallback((run: SimRun) => {
     if (!driver) { setError("Sign in to Helios to start a run."); return; }
+    if (update.installing) { setError("The simulator is being updated; try again in a moment."); return; }
     // The launcher's own reader, not a second copy of it here.
     const prefs = readLaunchPrefs();
     // `run.track` comes off a manifest and can be anything -- a run whose
@@ -318,7 +338,7 @@ export function SimHome({ active }: { active: boolean }) {
       return;
     }
     void go();
-  }, [driver, materialise]);
+  }, [driver, materialise, update.installing]);
 
   /**
    * The simulator Helios started has closed.
@@ -373,6 +393,14 @@ export function SimHome({ active }: { active: boolean }) {
         </TabBtn>
 
         <div className="ml-auto flex items-center gap-3">
+          {/* Visible from every tab: a driver on Runs should know the
+              executable is changing under them before they press Replay. */}
+          {update.installing && update.build && (
+            <span className="rounded-full bg-asu-gold/15 px-2 py-0.5 text-[11px] text-asu-gold">
+              Updating simulator to {update.build.version}
+              {update.build.bytes ? ` · ${Math.min(100, (update.got / update.build.bytes) * 100).toFixed(0)}%` : ""}
+            </span>
+          )}
           {error && <span className="max-w-[420px] truncate text-xs text-helios-danger">{error}</span>}
           <button
             className="rounded p-1 text-helios-dim transition hover:text-helios-text"
@@ -394,6 +422,7 @@ export function SimHome({ active }: { active: boolean }) {
               driver={driver}
               onStatusChange={setStatus}
               onLaunched={() => { void refresh(); }}
+              update={update}
             />
           ) : tab === "board" ? (
             <Leaderboard
@@ -433,6 +462,7 @@ export function SimHome({ active }: { active: boolean }) {
             allRuns={allRuns}
             canReplay={canReplay}
             driverId={driver?.id ?? null}
+            lapShared={driver && selected.driverId === driver.id ? sharedLapIds.has(selected.runId) : null}
             onClose={() => setSelectedId(null)}
             onReplay={(r, ghostId) => replay(r.runId, ghostId)}
             onOpenInLogs={openInLogs}

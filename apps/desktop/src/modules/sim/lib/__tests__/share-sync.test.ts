@@ -219,15 +219,25 @@ describe("the same driver on a second machine", () => {
     const cObject = s.objectOf("c") as string;
 
     const r = await s.sync(ME, laptop);
-    // Best two are still b and d; recent three are now laptop-1, e and d.
-    // c falls out. That is the rule working, and it is ONE lap, not four.
-    expect(r.telemetryPruned).toBe(1);
-    expect(s.removed).toEqual([cObject]);
-    expect(s.objectOf("c")).toBeNull();
-    for (const id of ["b", "d", "e", "laptop-1"]) {
+    // Best three are still b, d and c; recent three are now laptop-1, e and
+    // d. Nothing falls out -- c is a best -- and the laptop's lap goes up.
+    // That is the rule working over the driver's five-plus-one, not over the
+    // one run this disk holds: judged on this disk alone, four would go.
+    expect(r.telemetryPruned).toBe(0);
+    expect(s.removed).toEqual([]);
+    expect(s.objectOf("c")).toBe(cObject);
+    for (const id of ["b", "c", "d", "e", "laptop-1"]) {
       expect(s.objectOf(id)).not.toBeNull();
       expect(s.bucket.has(s.objectOf(id) as string)).toBe(true);
     }
+    // Three newer runs later the recent three are all the laptop's, and e --
+    // recent only, never a best -- is the one lap that falls out. ONE, not
+    // four.
+    const eObject = s.objectOf("e") as string;
+    const r2 = await s.sync(ME, [run("laptop-1", 60, 9), run("laptop-2", 61, 10), run("laptop-3", 62, 11)]);
+    expect(r2.telemetryPruned).toBe(1);
+    expect(s.removed).toEqual([eObject]);
+    expect(s.objectOf("e")).toBeNull();
   });
 
   it("converges rather than ping-ponging", async () => {

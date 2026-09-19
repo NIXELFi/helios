@@ -327,8 +327,14 @@ async function gzip(body: Uint8Array): Promise<{ body: Uint8Array; gz: boolean }
   }
 }
 
-/** Telemetry kept per course: the quickest this many ranked runs... */
-export const KEEP_BEST = 2;
+/**
+ * Telemetry kept per course: the quickest this many ranked runs...
+ *
+ * "Best three and latest three" is the rule the team was told, and the copy
+ * on the Launch tab, the runs table and every run's panel prints these two
+ * numbers, so they and the rule cannot drift apart.
+ */
+export const KEEP_BEST = 3;
 /** ...and the last this many, whether they were quick or not. */
 export const KEEP_RECENT = 3;
 

@@ -27,6 +27,26 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **The simulator keeps itself current.** Helios used to offer a newer
+  simulator build as a banner with a button, which at a test day nobody
+  pressed, so a fix published to the feed reached only the rigs whose driver
+  happened to notice. Now whenever the Sim module is open it reads the build
+  feed and, if the feed names a build other than the one installed, fetches
+  it, verifies it and installs it on its own — with a progress line on the
+  Launch tab and in the module header, and the launch button held until it
+  is done. Difference, not order: rolling the feed back rolls every rig
+  back with it. A machine that never had the simulator is still asked first.
+- **Every run says whether its lap went up.** The team's copy keeps a
+  driver's lap (the telemetry) for their best 3 and latest 3 runs on each
+  course; every run's time is shared regardless. That rule is now printed
+  where runs are started, at the foot of the runs table, and on each run of
+  your own — "time and lap" or "time only", with why.
+
+### Changed
+- **Best three, not best two.** The telemetry kept per course per driver is
+  now the best 3 plus the latest 3, as the team was told; it was 2 and 3.
+
 ## [5.8.2] - 2026-09-19
 
 ### Added
