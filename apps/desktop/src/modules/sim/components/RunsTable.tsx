@@ -82,6 +82,13 @@ export function RunsTable({
   /** Days the user has opened. Every day starts rolled up -- see `groups`. */
   const [opened, setOpened] = useState<Set<string>>(() => new Set(view.opened));
 
+  // Signing out takes the "Just mine" control away with it, so the filter has
+  // to go too: leaving it set means a table that is silently filtered by a
+  // checkbox that is no longer on screen.
+  useEffect(() => {
+    if (!driverId && mineOnly) setMineOnly(false);
+  }, [driverId, mineOnly]);
+
   // Write it back on every change, so the next mount picks up where this left
   // off. See `view`.
   useEffect(() => {
@@ -215,80 +222,80 @@ export function RunsTable({
 
   /** One run's row. Shared by the grouped and the flat renderings. */
   const renderRow = (r: SimRun) => {
-                const reason = unrankedReason(r);
-                const selected = r.runId === selectedId;
-                return (
-                  <tr
-                    key={r.runId}
-                    ref={selected ? selectedRow : undefined}
-                    className={
-                      "cursor-pointer border-b border-helios-line/60 transition " +
-                      (selected ? "bg-asu-gold/10" : "hover:bg-helios-line/25")
-                    }
-                    onClick={() => onSelect(r)}
-                  >
-                    <Td>
-                      <span className="flex items-center gap-1.5">
-                        {r.synthetic && (
-                          <IconRobot size={13} className="shrink-0 text-helios-muted" title="Robot driver" />
-                        )}
-                        <span className="font-medium">{r.driver}</span>
-                      </span>
-                      {r.session && (
-                        <span className="block truncate text-[11px] text-helios-muted">{r.session}</span>
-                      )}
-                    </Td>
-                    <Td>{r.trackName}</Td>
-                    <Td className="text-right font-mono">
-                      <span className={reason ? "text-helios-dim" : "text-asu-gold"} title={reason ?? undefined}>
-                        {fmtTime(runBest(r))}
-                      </span>
-                      {reason && <span className="ml-1 text-[10px] text-helios-muted">*</span>}
-                    </Td>
-                    <Td className="text-right font-mono text-helios-dim">
-                      {fmtTime(r.stats.theoreticalBestS)}
-                    </Td>
-                    <Td className="text-right font-mono">{r.stats.laps}</Td>
-                    <Td className="text-right font-mono">
-                      <span className={r.stats.totalCones ? "text-helios-warn" : "text-helios-muted"}>
-                        {r.stats.totalCones}
-                      </span>
-                    </Td>
-                    <Td className="text-right font-mono text-helios-dim">
-                      {r.stats.peakLatG ? `${r.stats.peakLatG.toFixed(2)} g` : "—"}
-                    </Td>
-                    <Td className="whitespace-nowrap text-helios-dim">{fmtWhen(r.startedAt)}</Td>
-                    <Td className="text-right">
-                      <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <IconBtn
-                          title={canReplay ? "Watch the replay" : "The simulator is not installed here"}
-                          disabled={!canReplay}
-                          onClick={() => onReplay(r)}
-                        >
-                          <IconMovie size={14} />
-                        </IconBtn>
-                        {/* A run whose telemetry never landed -- a rig that lost
-                            power between the two writes -- has a path and zero
-                            bytes. Offering it throws the whole app across to
-                            Logs, fails there, and leaves the user in a
-                            different module with an error and no way back to
-                            what they were looking at. */}
-                        <IconBtn
-                          title={
-                            r.telemetryBytes > 0
-                              ? "Open the telemetry in Logs"
-                              : "This run has no telemetry file"
-                          }
-                          disabled={r.telemetryBytes === 0}
-                          onClick={() => onOpenInLogs(r)}
-                        >
-                          <IconChartLine size={14} />
-                        </IconBtn>
-                      </span>
-                    </Td>
-                  </tr>
-                );
-              };
+    const reason = unrankedReason(r);
+    const selected = r.runId === selectedId;
+    return (
+      <tr
+        key={r.runId}
+        ref={selected ? selectedRow : undefined}
+        className={
+          "cursor-pointer border-b border-helios-line/60 transition " +
+          (selected ? "bg-asu-gold/10" : "hover:bg-helios-line/25")
+        }
+        onClick={() => onSelect(r)}
+      >
+        <Td>
+          <span className="flex items-center gap-1.5">
+            {r.synthetic && (
+              <IconRobot size={13} className="shrink-0 text-helios-muted" title="Robot driver" />
+            )}
+            <span className="font-medium">{r.driver}</span>
+          </span>
+          {r.session && (
+            <span className="block truncate text-[11px] text-helios-muted">{r.session}</span>
+          )}
+        </Td>
+        <Td>{r.trackName}</Td>
+        <Td className="text-right font-mono">
+          <span className={reason ? "text-helios-dim" : "text-asu-gold"} title={reason ?? undefined}>
+            {fmtTime(runBest(r))}
+          </span>
+          {reason && <span className="ml-1 text-[10px] text-helios-muted">*</span>}
+        </Td>
+        <Td className="text-right font-mono text-helios-dim">
+          {fmtTime(r.stats.theoreticalBestS)}
+        </Td>
+        <Td className="text-right font-mono">{r.stats.laps}</Td>
+        <Td className="text-right font-mono">
+          <span className={r.stats.totalCones ? "text-helios-warn" : "text-helios-muted"}>
+            {r.stats.totalCones}
+          </span>
+        </Td>
+        <Td className="text-right font-mono text-helios-dim">
+          {r.stats.peakLatG ? `${r.stats.peakLatG.toFixed(2)} g` : "—"}
+        </Td>
+        <Td className="whitespace-nowrap text-helios-dim">{fmtWhen(r.startedAt)}</Td>
+        <Td className="text-right">
+          <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()}>
+            <IconBtn
+              title={canReplay ? "Watch the replay" : "The simulator is not installed here"}
+              disabled={!canReplay}
+              onClick={() => onReplay(r)}
+            >
+              <IconMovie size={14} />
+            </IconBtn>
+            {/* A run whose telemetry never landed -- a rig that lost
+                power between the two writes -- has a path and zero
+                bytes. Offering it throws the whole app across to
+                Logs, fails there, and leaves the user in a
+                different module with an error and no way back to
+                what they were looking at. */}
+            <IconBtn
+              title={
+                r.telemetryBytes > 0
+                  ? "Open the telemetry in Logs"
+                  : "This run has no telemetry file"
+              }
+              disabled={r.telemetryBytes === 0}
+              onClick={() => onOpenInLogs(r)}
+            >
+              <IconChartLine size={14} />
+            </IconBtn>
+          </span>
+        </Td>
+      </tr>
+    );
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
