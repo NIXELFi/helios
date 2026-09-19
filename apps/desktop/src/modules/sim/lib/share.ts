@@ -143,35 +143,75 @@ export async function fetchSharedRuns(client: SupabaseClient, limit = 2000): Pro
   return (res.data as RunRow[]).map(rowToRun);
 }
 
-/** Which of this user's runs are already up there, and what each carries. */
+/**
+ * What this user already has up there: the telemetry object, and enough of
+ * the row to tell a current one from a stale one.
+ *
+ * The second part is the whole reason this reads more than `run_id`. A run is
+ * pushed once and then never looked at again, so a column added later -- or a
+ * manifest re-read after a simulator update -- would never reach the server:
+ * `profile` and `detected_input` went in and all 54 existing rows stayed null,
+ * which put every run the team had already driven on the "Unrecorded device"
+ * board and left the wheel board empty.
+ */
 async function sharedIdsFor(
   client: SupabaseClient,
   userId: string,
-): Promise<Map<string, string | null>> {
+): Promise<Map<string, SharedState>> {
   const res = await client
     .schema(SCHEMA)
     .from(TABLE)
-    .select("run_id,telemetry_object")
+    .select("run_id,telemetry_object,profile,detected_input,format_version,best_lap_s")
     .eq("user_id", userId);
   if (res.error) throw new Error(`read shared run ids: ${res.error.message}`);
-  const out = new Map<string, string | null>();
-  for (const r of res.data as { run_id: string; telemetry_object: string | null }[]) {
-    out.set(r.run_id, r.telemetry_object);
+  const out = new Map<string, SharedState>();
+  for (const r of res.data as SharedRowState[]) {
+    out.set(r.run_id, {
+      telemetryObject: r.telemetry_object,
+      stamp: rowStamp(r),
+    });
   }
   return out;
 }
 
+interface SharedRowState {
+  run_id: string;
+  telemetry_object: string | null;
+  profile: string | null;
+  detected_input: string | null;
+  format_version: number | null;
+  best_lap_s: number | null;
+}
+
+interface SharedState {
+  telemetryObject: string | null;
+  /** See `rowStamp`. */
+  stamp: string;
+}
+
 /**
- * Squeeze the telemetry on its way up.
+ * The fields worth re-pushing for, as one comparable string.
  *
- * About 3x on this data -- a CSV of floats does not compress like prose, and
- * an earlier estimate of 10x was wishful. Still the difference between 11 MB
- * and 3.7 MB for an endurance run, for a few lines and no loss.
+ * Deliberately not every column. Re-pushing all of a driver's runs on every
+ * sign-in would rewrite hundreds of rows to change nothing, and `updated_at`
+ * with them; comparing nothing re-pushes none of them and lets the table rot.
+ * These four are the ones that have actually changed under an existing run:
+ * what it was driven with, what the simulator observed steering it, which
+ * manifest format wrote it, and the time itself -- which moves when a rule
+ * changes, as it did the day an off-course lap stopped scoring.
  *
- * `CompressionStream` is in every Chromium, which is what the webview is.
- * Where it somehow is not, the plain bytes go up instead and the `.gz` suffix
- * is what tells the reader which it got.
+ * It converges: one sign-in after a change brings every row current, and the
+ * next one writes nothing.
  */
+export function rowStamp(r: {
+  profile: string | null;
+  detected_input: string | null;
+  format_version: number | null;
+  best_lap_s: number | null;
+}): string {
+  return [r.profile ?? "", r.detected_input ?? "", r.format_version ?? 0, r.best_lap_s ?? ""].join("|");
+}
+
 /** Shared telemetry from a non-wheel run is thinned to this. */
 export const NON_WHEEL_SHARE_HZ = 10;
 
@@ -207,6 +247,17 @@ export function thinCsv(text: string, fromHz: number, toHz: number): string {
   return out.join("\n") + "\n";
 }
 
+/**
+ * Squeeze the telemetry on its way up.
+ *
+ * About 3x on this data -- a CSV of floats does not compress like prose, and
+ * an earlier estimate of 10x was wishful. Still the difference between 11 MB
+ * and 3.7 MB for an endurance run, for a few lines and no loss.
+ *
+ * `CompressionStream` is in every Chromium, which is what the webview is.
+ * Where it somehow is not, the plain bytes go up instead and the `.gz` suffix
+ * is what tells the reader which it got.
+ */
 async function gzip(body: Uint8Array): Promise<{ body: Uint8Array; gz: boolean }> {
   if (typeof CompressionStream !== "function") return { body, gz: false };
   try {
@@ -299,7 +350,7 @@ export async function pushRuns(
   });
   if (!mine.length) return out;
 
-  let already: Map<string, string | null>;
+  let already: Map<string, SharedState>;
   try {
     already = await sharedIdsFor(client, userId);
   } catch (e) {
@@ -309,26 +360,33 @@ export async function pushRuns(
 
   const wantTelemetry = telemetryToKeep(local, userId);
 
-  // Metadata first, in one round trip. Upsert, because a run that was pushed
-  // and then re-read with a newer manifest should update rather than collide.
-  const missing = mine.filter((r) => !already.has(r.runId));
-  if (missing.length) {
+  // Metadata first, in one round trip. Upsert rather than insert, because a
+  // run that is already up there and no longer matches what this machine has
+  // should be corrected rather than collide -- which is the case `already.has`
+  // alone used to skip, so a column added after a run was pushed never reached
+  // it. `rowStamp` says what counts as no longer matching.
+  const rows = mine.map((r) => [r, runToRow(r)] as const);
+  const stale = rows.filter(([r, row]) => {
+    const there = already.get(r.runId);
+    return !there || there.stamp !== rowStamp(row);
+  });
+  if (stale.length) {
     const res = await client
       .schema(SCHEMA)
       .from(TABLE)
-      .upsert(missing.map(runToRow), { onConflict: "run_id" });
+      .upsert(stale.map(([, row]) => row), { onConflict: "run_id" });
     if (res.error) {
       out.error = `share runs: ${res.error.message}`;
       return out;
     }
-    out.pushed = missing.length;
+    out.pushed = stale.length;
   }
 
   // Then the telemetry for the laps worth watching, one at a time: they are
   // megabytes and a failure on one must not lose the others.
   for (const run of mine) {
     if (!wantTelemetry.has(run.runId)) continue;
-    if (already.get(run.runId)) continue;
+    if (already.get(run.runId)?.telemetryObject) continue;
     try {
       const raw = await readTelemetry(run);
       if (!raw || !raw.length) continue;
@@ -367,7 +425,7 @@ export async function pushRuns(
   //
   // Only ever this user's own objects -- storage RLS enforces the same thing,
   // and the run row belongs to them too.
-  for (const [runId, object] of already) {
+  for (const [runId, { telemetryObject: object }] of already) {
     if (!object || wantTelemetry.has(runId)) continue;
     try {
       const rm = await client.storage.from(BUCKET).remove([object]);

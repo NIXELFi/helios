@@ -9,7 +9,7 @@
  * practises. */
 import { describe, it, expect } from "vitest";
 
-import { KEEP_BEST, KEEP_RECENT, rowToRun, telemetryToKeep, thinCsv } from "../share";
+import { KEEP_BEST, KEEP_RECENT, rowStamp, rowToRun, telemetryToKeep, thinCsv } from "../share";
 import { isRankable, runBest, type SimRun } from "../../api";
 
 function localRun(over: Partial<SimRun> & { runId: string }): SimRun {
@@ -219,5 +219,56 @@ describe("thinning a non-wheel run", () => {
 
   it("survives a file with nothing in it but a header", () => {
     expect(thinCsv("time_s,a\n", 100, 10)).toBe("time_s,a\n");
+  });
+});
+
+// A run is pushed once and then, for the rest of its life, only ever read
+// back. That was fine until a column was added: `profile` and
+// `detected_input` went into the table and every run the team had already
+// driven stayed null, which put all of them on the "Unrecorded device" board
+// and left the wheel board -- the one everybody was on -- empty.
+//
+// `rowStamp` is what decides a row is out of date and has to go up again. It
+// has to notice a real change and, just as importantly, not notice anything
+// else: re-pushing every run on every sign-in would rewrite hundreds of rows
+// to change nothing, which is how the previous version of this ended up
+// skipping them all.
+describe("noticing that a shared row has gone stale", () => {
+  const server = (over: Record<string, unknown> = {}) => ({
+    profile: null, detected_input: null, format_version: 2, best_lap_s: 41.2, ...over,
+  } as Parameters<typeof rowStamp>[0]);
+
+  it("says nothing changed when nothing changed", () => {
+    expect(rowStamp(server())).toBe(rowStamp(server()));
+  });
+
+  it("notices a column that was added after the run was pushed", () => {
+    expect(rowStamp(server())).not.toBe(rowStamp(server({ profile: "wheel" })));
+    expect(rowStamp(server())).not.toBe(rowStamp(server({ detected_input: "wheel" })));
+  });
+
+  it("notices a manifest re-read under a newer format", () => {
+    // Format 3 is where an off-course lap stopped scoring, so a run re-read
+    // under it can have a different best lap than the one on the server.
+    expect(rowStamp(server())).not.toBe(rowStamp(server({ format_version: 3 })));
+  });
+
+  it("notices the time itself moving", () => {
+    expect(rowStamp(server())).not.toBe(rowStamp(server({ best_lap_s: 40.9 })));
+    // A run whose only valid lap was thrown out has no time at all any more.
+    expect(rowStamp(server())).not.toBe(rowStamp(server({ best_lap_s: null })));
+  });
+
+  it("does not confuse an absent field with an empty one", () => {
+    // "" and null both mean "nothing here", and treating them as different
+    // would re-push every row forever without changing anything.
+    expect(rowStamp(server({ profile: null }))).toBe(rowStamp(server({ profile: "" })));
+  });
+
+  it("does not run two fields together", () => {
+    // A separator that can appear inside a value makes ("a|b", "") and
+    // ("a", "b|") the same row, which is a stale row that never updates.
+    expect(rowStamp(server({ profile: "wheel", detected_input: "" })))
+      .not.toBe(rowStamp(server({ profile: "wheel|", detected_input: "" })));
   });
 });
