@@ -1283,3 +1283,684 @@ channels:
     source: ecu
     sample_rate_hz: 10
     aliases: ["Brake Fluid", "Brake Fluid Level"]
+
+  # ---------------------------------------------------------------------
+  # Driver-in-loop simulator channels (`sim.*`)
+  #
+  # Written by fsae-sim's run recorder at 100 Hz. Everything the real car
+  # also measures is logged under its canonical id above -- engine.rpm,
+  # imu.lat_g, gps.lat and the rest -- so a simulator run and a test-day
+  # log overlay on the same axes without a single override. These are the
+  # channels only a model has: the tyre's slip angles and how much of its
+  # grip is spent, where the car was on the course, what the steering was
+  # putting into the driver's hands, and the state of the driver aids.
+  #
+  # No `match_keywords`: these must never be resolved from a real logger's
+  # headers by accident. An exact id, or nothing.
+  # ---------------------------------------------------------------------
+
+  - id: sim.steer_input
+    display_name: Steer Input
+    units: ""
+    group: Sim Driver
+    color: "#4FC3F7"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.road_wheel_deg
+    display_name: Road Wheel Angle
+    units: "deg"
+    group: Sim Driver
+    color: "#29B6F6"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -50
+    max: 50
+    aliases: ["Road Wheel Angle"]
+
+  - id: sim.rim_torque_nm
+    display_name: Rim Torque
+    units: "N.m"
+    group: Sim Steering
+    color: "#FFC627"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -20
+    max: 20
+    aliases: ["Rim Torque"]
+
+  - id: sim.kingpin_torque_nm
+    display_name: Kingpin Torque
+    units: "N.m"
+    group: Sim Steering
+    color: "#FFA000"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -120
+    max: 120
+
+  - id: sim.ffb_command
+    display_name: FFB Command
+    units: ""
+    group: Sim Steering
+    color: "#FF7043"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.ffb_clipped
+    display_name: FFB Clipped
+    units: ""
+    group: Sim Steering
+    color: "#E53935"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.pos_x
+    display_name: Position X
+    units: "m"
+    group: Sim Pose
+    color: "#9CCC65"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.pos_y
+    display_name: Position Y
+    units: "m"
+    group: Sim Pose
+    color: "#7CB342"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.yaw_deg
+    display_name: Yaw
+    units: "deg"
+    group: Sim Pose
+    color: "#66BB6A"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -180
+    max: 180
+
+  - id: sim.vel_long
+    display_name: Velocity Long
+    units: "m/s"
+    group: Sim Pose
+    color: "#26A69A"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.vel_lat
+    display_name: Velocity Lat
+    units: "m/s"
+    group: Sim Pose
+    color: "#00897B"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.body_slip_deg
+    display_name: Body Slip
+    units: "deg"
+    group: Sim Chassis
+    color: "#BA68C8"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -40
+    max: 40
+    aliases: ["Body Slip"]
+
+  - id: sim.roll_deg
+    display_name: Roll
+    units: "deg"
+    group: Sim Chassis
+    color: "#AB47BC"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -8
+    max: 8
+
+  - id: sim.pitch_deg
+    display_name: Pitch
+    units: "deg"
+    group: Sim Chassis
+    color: "#8E24AA"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -6
+    max: 6
+
+  - id: sim.wheel_angle_f
+    display_name: Wheel Angle F
+    units: "rad"
+    group: Sim Pose
+    color: "#607D8B"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.wheel_angle_r
+    display_name: Wheel Angle R
+    units: "rad"
+    group: Sim Pose
+    color: "#546E7A"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  - id: sim.slip_front_deg
+    display_name: Slip Angle F
+    units: "deg"
+    group: Sim Tyres
+    color: "#4FC3F7"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -25
+    max: 25
+    aliases: ["Slip Angle F"]
+
+  - id: sim.slip_rear_deg
+    display_name: Slip Angle R
+    units: "deg"
+    group: Sim Tyres
+    color: "#0288D1"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -25
+    max: 25
+    aliases: ["Slip Angle R"]
+
+  - id: sim.kappa_front
+    display_name: Slip Ratio F
+    units: ""
+    group: Sim Tyres
+    color: "#81D4FA"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.kappa_rear
+    display_name: Slip Ratio R
+    units: ""
+    group: Sim Tyres
+    color: "#039BE5"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.kappa_rl
+    display_name: Slip Ratio RL
+    units: ""
+    group: Sim Tyres
+    color: "#4DD0E1"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.kappa_rr
+    display_name: Slip Ratio RR
+    units: ""
+    group: Sim Tyres
+    color: "#00ACC1"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.util_front
+    display_name: Grip Used F
+    units: ""
+    group: Sim Tyres
+    color: "#FFEE58"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1.2
+
+  - id: sim.util_rear
+    display_name: Grip Used R
+    units: ""
+    group: Sim Tyres
+    color: "#FDD835"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1.2
+
+  - id: sim.util_rl
+    display_name: Grip Used RL
+    units: ""
+    group: Sim Tyres
+    color: "#FFF176"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1.2
+
+  - id: sim.util_rr
+    display_name: Grip Used RR
+    units: ""
+    group: Sim Tyres
+    color: "#FBC02D"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1.2
+
+  - id: sim.balance
+    display_name: Balance
+    units: ""
+    group: Sim Tyres
+    color: "#EF5350"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1
+    max: 1
+
+  - id: sim.trail_front_m
+    display_name: Pneumatic Trail F
+    units: "m"
+    group: Sim Steering
+    color: "#A1887F"
+    decimals: 4
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 0.1
+
+  - id: sim.fz_front_n
+    display_name: Vertical Load F
+    units: "N"
+    group: Sim Loads
+    color: "#90A4AE"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 3000
+
+  - id: sim.fz_rear_n
+    display_name: Vertical Load R
+    units: "N"
+    group: Sim Loads
+    color: "#78909C"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 3000
+
+  - id: sim.dfz_lat_front_n
+    display_name: Lateral Transfer F
+    units: "N"
+    group: Sim Loads
+    color: "#B0BEC5"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1500
+    max: 1500
+
+  - id: sim.dfz_lat_rear_n
+    display_name: Lateral Transfer R
+    units: "N"
+    group: Sim Loads
+    color: "#CFD8DC"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -1500
+    max: 1500
+
+  - id: sim.downforce_n
+    display_name: Downforce
+    units: "N"
+    group: Sim Loads
+    color: "#4DB6AC"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1500
+
+  - id: sim.drag_n
+    display_name: Drag
+    units: "N"
+    group: Sim Loads
+    color: "#26C6DA"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1500
+
+  - id: sim.drive_force_n
+    display_name: Drive Force
+    units: "N"
+    group: Sim Loads
+    color: "#66BB6A"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -6000
+    max: 6000
+
+  - id: sim.diff_locked_nm
+    display_name: Diff Locking Torque
+    units: "N.m"
+    group: Sim Loads
+    color: "#FF8A65"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 200
+
+  - id: sim.track_s_m
+    display_name: Course Distance
+    units: "m"
+    group: Sim Course
+    color: "#FFC627"
+    decimals: 1
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    aliases: ["Course Distance"]
+
+  - id: sim.lateral_error_m
+    display_name: Lateral Error
+    units: "m"
+    group: Sim Course
+    color: "#FF7043"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -10
+    max: 10
+
+  - id: sim.heading_error_deg
+    display_name: Heading Error
+    units: "deg"
+    group: Sim Course
+    color: "#FF5722"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -180
+    max: 180
+
+  - id: sim.curvature
+    display_name: Curvature
+    units: "1/m"
+    group: Sim Course
+    color: "#8D6E63"
+    decimals: 4
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: -0.5
+    max: 0.5
+
+  - id: sim.on_track
+    display_name: On Course
+    units: ""
+    group: Sim Course
+    color: "#66BB6A"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.lap
+    display_name: Lap
+    units: ""
+    group: Sim Timing
+    color: "#FFFFFF"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.lap_time_s
+    display_name: Lap Time
+    units: "s"
+    group: Sim Timing
+    color: "#FFC627"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.sector
+    display_name: Sector
+    units: ""
+    group: Sim Timing
+    color: "#E0E0E0"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.cones_lap
+    display_name: Cones This Lap
+    units: ""
+    group: Sim Timing
+    color: "#FF8F4A"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.off_course_lap
+    display_name: Off Course This Lap
+    units: ""
+    group: Sim Timing
+    color: "#FF5D52"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.penalty_s
+    display_name: Penalty
+    units: "s"
+    group: Sim Timing
+    color: "#EF5350"
+    decimals: 2
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+
+  - id: sim.delta_s
+    display_name: Delta
+    units: "s"
+    group: Sim Timing
+    color: "#FFCA28"
+    decimals: 3
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+
+  # Not decoration. A delta of exactly 0.000 means level with the reference,
+  # which is indistinguishable from "there was no reference" without this.
+  # Staging, an out lap and the first lap of any session are all genuinely
+  # blank, and a plot that draws them as zero is asserting something false.
+  - id: sim.delta_valid
+    display_name: Delta Valid
+    units: ""
+    group: Sim Timing
+    color: "#FFE082"
+    decimals: 0
+    data_type: u16
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.traction_control
+    display_name: Traction Control
+    units: ""
+    group: Sim Assists
+    color: "#4FC3F7"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.abs
+    display_name: ABS
+    units: ""
+    group: Sim Assists
+    color: "#29B6F6"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.auto_shift
+    display_name: Auto Gearbox
+    units: ""
+    group: Sim Assists
+    color: "#03A9F4"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.launch_held
+    display_name: Launch Control
+    units: ""
+    group: Sim Assists
+    color: "#FFCA28"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  - id: sim.clutch_slip_rpm
+    display_name: Clutch Slip
+    units: "rpm"
+    group: Sim Powertrain
+    color: "#FFB800"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 6000
+
+  - id: sim.shifting
+    display_name: Shifting
+    units: ""
+    group: Sim Powertrain
+    color: "#FF7043"
+    decimals: 0
+    data_type: f32
+    source: fsae_sim
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+
+  # Lap beacon. A real car gets this from a transponder at the line; the
+  # driver-in-loop simulator writes the same channel because it knows exactly
+  # where the line is and exactly when the car crossed it. Helios's lap
+  # detection prefers a beacon over inferring a start/finish line from the GPS
+  # trace, so a simulator run's lap table here is the one the driver saw.
+  - id: system.beacon
+    display_name: Lap Beacon
+    units: ""
+    group: System
+    color: "#FFFFFF"
+    decimals: 0
+    data_type: u16
+    source: beacon
+    sample_rate_hz: 100
+    min: 0
+    max: 1
+    aliases: ["Beacon", "Lap Beacon", "Lap Trigger"]

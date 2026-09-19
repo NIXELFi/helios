@@ -53,9 +53,24 @@ html, body, #root { height: 100%; margin: 0; }
    set an explicit `top-*` without `inset-0` (see TaskDetailSheet). */
 .fixed.inset-0 { top: var(--helios-titlebar-h); }
 /* Kill horizontal rubber-band / overscroll on macOS WKWebView so two-finger
-   swipes on the trackpad don't translate the whole page sideways. Vertical
-   overscroll is still allowed where needed. */
-html, body { overscroll-behavior-x: none; overflow-x: hidden; }
+   swipes on the trackpad don't translate the whole page sideways. */
+html, body { overscroll-behavior: none; }
+/* THE DOCUMENT ITSELF NEVER SCROLLS.
+
+   Helios is a desktop window, not a web page: it is exactly one screen tall,
+   the title bar is drawn by the app (frameless on Windows), and every
+   scrollable region inside it owns its own scrollbar. When the document was
+   allowed to scroll, anything that outgrew the viewport by a pixel -- the
+   module rail on a short window, a tall panel, a zoom level -- scrolled the
+   WHOLE app and slid the title bar, with its min/max/close buttons, off the
+   top of a window that then had no ordinary way to get them back.
+
+   Stated here rather than relying on a component: the Shell's root is
+   `h-screen overflow-hidden`, but that only holds while that element is
+   exactly viewport height and nothing escapes it. Pinning html and body makes
+   it structural, so a future layout mistake shows up as a clipped panel --
+   visible, local, obviously wrong -- instead of a moving title bar. */
+html, body { overflow: hidden; }
 body { background: rgb(var(--helios-base)); color: rgb(var(--helios-text)); font-family: "Inter Variable", Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 .font-mono-num { font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 

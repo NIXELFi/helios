@@ -6,6 +6,8 @@ mod bridge;
 mod cfd;
 mod commands;
 mod plugins;
+// The driver-in-loop simulator: launching it, and reading the runs it files.
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
@@ -337,6 +339,17 @@ pub fn run() {
             cfd::commands::cfd_clear_data,
             plugins::commands::install_plugin_bundle,
             plugins::commands::remove_plugin_bundle,
+            sim::launch::sim_status,
+            sim::launch::sim_locate_exe,
+            sim::launch::sim_set_exe_path,
+            sim::launch::sim_launch,
+            sim::runs::sim_runs_dir,
+            sim::runs::sim_list_runs,
+            sim::runs::sim_read_run,
+            sim::runs::sim_run_telemetry_path,
+            sim::runs::sim_delete_run,
+            sim::install::sim_available_build,
+            sim::install::sim_install,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Helios")

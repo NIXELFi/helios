@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
@@ -22,6 +22,7 @@ import { Splash } from "./components/Splash";
 import { ModuleTransition } from "./components/ModuleTransition";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
 import { readPrefs, usePrefs } from "./lib/prefs";
+import { useOpenInLogs } from "./lib/open-in-logs";
 import { applyTheme, useThemeVersion } from "./lib/theme";
 import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
@@ -40,6 +41,7 @@ const VaultModule = lazy(() => import("./modules/vault").then((m) => ({ default:
 const CfdModule = lazy(() => import("./modules/cfd").then((m) => ({ default: m.CfdModule })));
 const PmModule = lazy(() => import("./modules/pm").then((m) => ({ default: m.PmModule })));
 const GamesModule = lazy(() => import("./modules/games").then((m) => ({ default: m.GamesModule })));
+const SimModule = lazy(() => import("./modules/sim").then((m) => ({ default: m.SimModule })));
 const AmethystModule = lazy(() =>
   import("./modules/amethyst").then((m) => ({ default: m.AmethystModule })),
 );
@@ -189,13 +191,23 @@ function HeliosShell() {
       // Settings → General → "Open Helios on". "Last used" falls back to PM
       // when the remembered module is gated (org-only) or unknown.
       const wanted = prefs.landing === "last" ? prefs.lastModule : prefs.landing;
-      const openable = new Set<ModuleId>(["pm", "logs", "vault", "cfd", "games", "amethyst", "marketplace"]);
+      const openable = new Set<ModuleId>(["pm", "logs", "vault", "cfd", "sim", "games", "amethyst", "marketplace"]);
       home = wanted && openable.has(wanted as ModuleId) ? (wanted as ModuleId) : "pm";
     }
     setLanded(true);
     setActive(home);
     setVisited((prev) => (prev.has(home) ? prev : new Set(prev).add(home)));
   }, [landed, authLoading, pmEnabled, noOrgAccess, prefs.landing, prefs.lastModule]);
+
+  // Another module asked for a data file to be opened in Logs (the Sim
+  // module's "Open in Logs" on a recorded run). Bring Logs to the front; the
+  // Logs app itself is listening for the same event and does the loading.
+  useOpenInLogs(
+    useCallback(() => {
+      setActive("logs");
+      setVisited((prev) => (prev.has("logs") ? prev : new Set(prev).add("logs")));
+    }, []),
+  );
 
   // Remember where the user is for landing: "last".
   useEffect(() => {
@@ -435,6 +447,7 @@ function HeliosShell() {
     vault: "Vault",
     cfd: "CFD",
     pm: "PM",
+    sim: "Sim",
     games: "Games",
     amethyst: "Amethyst",
     marketplace: "Market",
@@ -442,7 +455,12 @@ function HeliosShell() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col">
+    // `overflow-hidden` is not decoration. The app is exactly one screen tall
+    // and every scrollable region inside it is supposed to be its own; without
+    // this, anything that outgrows the viewport scrolls the DOCUMENT instead,
+    // which slides the title bar off the top of a window that has no other way
+    // to get it back.
+    <div className="flex h-screen w-screen flex-col overflow-hidden">
       {/* Windows runs frameless (decorations:false in tauri.windows.conf.json)
           and gets the custom in-app title bar; macOS keeps its native overlay
           traffic lights and skips it. */}
@@ -543,6 +561,20 @@ function HeliosShell() {
               <Suspense fallback={<ModuleLoading id="pm" label="PM" />}>
                 <ModuleActivityProvider active={active === "pm"}>
                   <PmModule />
+                </ModuleActivityProvider>
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+        {/* Sim: the driver-in-loop simulator's launcher and run archive.
+            Ungated like Amethyst -- it reads run files this machine already
+            has, and a rig at a test day may have no network at all. */}
+        {visited.has("sim") && (
+          <div className={"helios-pane-in absolute inset-0 " + (active === "sim" ? "" : "hidden")}>
+            <ErrorBoundary label="Sim" compact>
+              <Suspense fallback={<ModuleLoading id="sim" label="Sim" />}>
+                <ModuleActivityProvider active={active === "sim"}>
+                  <SimModule active={active === "sim"} />
                 </ModuleActivityProvider>
               </Suspense>
             </ErrorBoundary>

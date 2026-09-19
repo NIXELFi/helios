@@ -1,0 +1,562 @@
+//! Reading the simulator's run archive.
+//!
+//! Every run is a directory holding a manifest and a telemetry CSV. Listing is
+//! manifest-only and deliberately cheap: a season of runs is a few thousand
+//! small JSON files, and the Runs table, the per-course leaderboards and the
+//! driver comparison are all built from what is in them. Nothing reads a
+//! telemetry file until somebody asks to open or replay one.
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const RUNS_SUBDIR: &str = "sim-runs";
+const MANIFEST: &str = "run.json";
+const TELEMETRY: &str = "telemetry.csv";
+
+/// Where the simulator files its runs. Two environment overrides, because the
+/// simulator reads `FSAE_SIM_RUNS_DIR` and a machine that has set that has
+/// meant it for both halves.
+pub fn runs_root() -> PathBuf {
+    for key in ["HELIOS_SIM_RUNS_DIR", "FSAE_SIM_RUNS_DIR"] {
+        if let Some(v) = std::env::var_os(key) {
+            let p = PathBuf::from(v);
+            if !p.as_os_str().is_empty() {
+                return p;
+            }
+        }
+    }
+    helios_data_dir().join(RUNS_SUBDIR)
+}
+
+/// `%LOCALAPPDATA%\Helios`, or the platform equivalent.
+///
+/// Per-MACHINE state lives under here. Deliberately not derived from
+/// `runs_root()`: that one honours `HELIOS_SIM_RUNS_DIR`, which is meant to
+/// point a whole team's runs at a shared drive, and anything hung off its
+/// parent then becomes shared too -- which is wrong for an installed
+/// executable and actively broken for "where is my copy of the simulator".
+pub(crate) fn helios_data_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let p = PathBuf::from(local);
+            if !p.as_os_str().is_empty() {
+                return p.join("Helios");
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            let p = PathBuf::from(home);
+            if !p.as_os_str().is_empty() {
+                return p.join("Library").join("Application Support").join("Helios");
+            }
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
+            let p = PathBuf::from(xdg);
+            if !p.as_os_str().is_empty() {
+                return p.join("Helios");
+            }
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            let p = PathBuf::from(home);
+            if !p.as_os_str().is_empty() {
+                return p.join(".local").join("share").join("Helios");
+            }
+        }
+    }
+    std::env::temp_dir().join("Helios")
+}
+
+/// A run id is a directory name and arrives from the renderer, so it must not
+/// be able to climb out of the runs directory.
+fn is_safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !id.starts_with('.')
+}
+
+fn run_dir(id: &str) -> Result<PathBuf, String> {
+    if !is_safe_id(id) {
+        return Err(format!("not a run id: {id}"));
+    }
+    Ok(runs_root().join(id))
+}
+
+// ---------------------------------------------------------------- manifest --
+
+/// The parts of a run manifest a listing needs. Everything else in the file is
+/// passed through untouched by `sim_read_run`; this is only what the table,
+/// the leaderboard and the sorting are built from.
+///
+/// Every field is optional or defaulted. A manifest written by a newer
+/// simulator than this build must still list, because the alternative is a
+/// Runs table that empties itself the day somebody updates one rig.
+#[derive(Debug, Clone, Deserialize)]
+struct Manifest {
+    /// Which shape the derived numbers are in. See `RunRow::format_version`.
+    #[serde(default, rename = "formatVersion")]
+    format_version: Option<u32>,
+    /// The rate the log was ACTUALLY written at. `sampleRateHz` is the target;
+    /// a machine rendering below it logs at the frame rate instead.
+    #[serde(default, rename = "sampleRateActualHz")]
+    sample_rate_actual_hz: Option<f64>,
+    #[serde(default, rename = "sampleRateHz")]
+    sample_rate_hz: Option<f64>,
+    #[serde(default)]
+    driver: Option<String>,
+    #[serde(default, rename = "driverId")]
+    driver_id: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    track: Option<String>,
+    #[serde(default, rename = "trackName")]
+    track_name: Option<String>,
+    #[serde(default, rename = "startedAt")]
+    started_at: Option<String>,
+    #[serde(default, rename = "finishedReason")]
+    finished_reason: Option<String>,
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default, rename = "profileName")]
+    profile_name: Option<String>,
+    #[serde(default)]
+    device: Option<String>,
+    #[serde(default)]
+    physics: Option<String>,
+    #[serde(default, rename = "simVersion")]
+    sim_version: Option<String>,
+    #[serde(default)]
+    synthetic: bool,
+    #[serde(default)]
+    samples: u64,
+    #[serde(default)]
+    assists: Option<Assists>,
+    #[serde(default)]
+    laps: Vec<Lap>,
+    #[serde(default)]
+    stats: Option<Stats>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Assists {
+    #[serde(default)]
+    pub traction: bool,
+    #[serde(default)]
+    pub abs: bool,
+    #[serde(default, rename = "autoShift")]
+    pub auto_shift: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Lap {
+    #[serde(default)]
+    pub lap: u32,
+    #[serde(default)]
+    pub raw: f64,
+    #[serde(default)]
+    pub cones: u32,
+    #[serde(default)]
+    pub off: u32,
+    #[serde(default)]
+    pub total: f64,
+    #[serde(default)]
+    pub sectors: Vec<f64>,
+    #[serde(default, rename = "startedAtS")]
+    pub started_at_s: f64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stats {
+    #[serde(default)]
+    pub duration_s: f64,
+    #[serde(default)]
+    pub distance_m: f64,
+    #[serde(default)]
+    pub laps: u32,
+    #[serde(default)]
+    pub best_lap_s: Option<f64>,
+    /// The raw time of the BEST SCORED lap, not the quickest raw lap in the
+    /// run. Those are different laps whenever the quick one had cones on it.
+    #[serde(default)]
+    pub best_lap_raw_s: Option<f64>,
+    #[serde(default)]
+    pub best_lap_number: Option<u32>,
+    #[serde(default)]
+    pub best_lap_cones: Option<u32>,
+    #[serde(default)]
+    pub fastest_raw_lap_s: Option<f64>,
+    #[serde(default)]
+    pub fastest_raw_lap_number: Option<u32>,
+    #[serde(default)]
+    pub best_sectors: Vec<Option<f64>>,
+    #[serde(default)]
+    pub theoretical_best_s: Option<f64>,
+    #[serde(default)]
+    pub total_cones: u32,
+    #[serde(default)]
+    pub total_off_course: u32,
+    #[serde(default)]
+    pub peak_speed_kph: f64,
+    #[serde(default)]
+    pub peak_rpm: f64,
+    #[serde(default)]
+    pub peak_lat_g: f64,
+    #[serde(default)]
+    pub peak_brake_g: f64,
+    #[serde(default)]
+    pub peak_accel_g: f64,
+    #[serde(default)]
+    pub avg_speed_mps: f64,
+    #[serde(default)]
+    pub full_throttle_frac: f64,
+    #[serde(default)]
+    pub braking_frac: f64,
+    #[serde(default)]
+    pub off_track_s: f64,
+    #[serde(default)]
+    pub ffb_clipped_frac: f64,
+}
+
+/// One row of the Runs table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRow {
+    /// The manifest format this run was written in.
+    ///
+    /// It matters because two derived numbers changed meaning at version 2.
+    /// In version 1, `laps[].sectors` were CUMULATIVE splits with the final
+    /// sector missing -- so `theoretical_best_s` is a sum of running totals,
+    /// which on a real run came out half as fast again as a lap anybody
+    /// drove -- and `best_lap_raw_s` was the quickest RAW lap, which is often
+    /// a different lap from the best scored one. Both still parse, both still
+    /// look like times, and both are wrong. `None` means a manifest so old it
+    /// predates the field, which is treated as version 1.
+    pub format_version: u32,
+    /// The rate the log was actually achieved at, where the run recorded it.
+    pub sample_rate_hz: Option<f64>,
+    pub run_id: String,
+    pub dir: String,
+    pub telemetry_path: String,
+    pub telemetry_bytes: u64,
+    pub driver: String,
+    pub driver_id: Option<String>,
+    pub session: Option<String>,
+    pub track: String,
+    pub track_name: String,
+    pub started_at: Option<String>,
+    pub finished_reason: Option<String>,
+    pub profile: Option<String>,
+    pub device: Option<String>,
+    pub physics: Option<String>,
+    pub sim_version: Option<String>,
+    pub synthetic: bool,
+    pub samples: u64,
+    pub assists: Assists,
+    pub laps: Vec<Lap>,
+    pub stats: Stats,
+}
+
+fn row_from(id: &str, dir: &Path, m: Manifest) -> RunRow {
+    let telemetry = dir.join(TELEMETRY);
+    let bytes = fs::metadata(&telemetry).map(|md| md.len()).unwrap_or(0);
+    let track = m.track.unwrap_or_else(|| "unknown".into());
+    let track_name = m.track_name.unwrap_or_else(|| track.clone());
+    RunRow {
+        format_version: m.format_version.unwrap_or(1),
+        sample_rate_hz: m.sample_rate_actual_hz.or(m.sample_rate_hz),
+        run_id: id.to_string(),
+        dir: dir.display().to_string(),
+        telemetry_path: telemetry.display().to_string(),
+        telemetry_bytes: bytes,
+        driver: m.driver.unwrap_or_else(|| "Unknown".into()),
+        driver_id: m.driver_id,
+        session: m.session,
+        track,
+        track_name,
+        started_at: m.started_at,
+        finished_reason: m.finished_reason,
+        profile: m.profile_name.or(m.profile),
+        device: m.device,
+        physics: m.physics,
+        sim_version: m.sim_version,
+        synthetic: m.synthetic,
+        samples: m.samples,
+        assists: m.assists.unwrap_or_default(),
+        laps: m.laps,
+        stats: m.stats.unwrap_or_default(),
+    }
+}
+
+// ---------------------------------------------------------------- commands --
+
+/// Where runs are being read from, so the UI can show it and a user can go
+/// and look.
+#[tauri::command]
+pub fn sim_runs_dir() -> String {
+    runs_root().display().to_string()
+}
+
+/// How many runs are on disk.
+///
+/// Counts directories rather than calling `sim_list_runs(None).len()`, which
+/// reads and parses every manifest in the archive -- a season of them, on the
+/// six-second poll the Sim tab runs while it is open.
+pub fn run_count() -> usize {
+    let Ok(entries) = fs::read_dir(runs_root()) else { return 0 };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter(|e| e.file_name().to_str().map(is_safe_id).unwrap_or(false))
+        .count()
+}
+
+/// Every run, newest first.
+///
+/// A directory that will not parse is skipped rather than failing the listing:
+/// one half-written manifest from a rig that lost power must not take the
+/// whole season's archive off the screen.
+// `async`: this reads and parses every manifest in the archive, and a bare
+// `#[tauri::command]` on a sync fn runs on the IPC thread.
+#[tauri::command(async)]
+pub fn sim_list_runs(limit: Option<usize>) -> Result<Vec<RunRow>, String> {
+    let root = runs_root();
+    let Ok(entries) = fs::read_dir(&root) else {
+        // Nothing recorded yet is the normal state of a fresh machine.
+        return Ok(Vec::new());
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| is_safe_id(n))
+        .collect();
+    // Run ids lead with a sortable timestamp, so newest-first is a reverse
+    // lexical sort and costs no filesystem metadata calls.
+    ids.sort_unstable_by(|a, b| b.cmp(a));
+    ids.truncate(limit.unwrap_or(2000));
+
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let dir = root.join(&id);
+        let Ok(text) = fs::read_to_string(dir.join(MANIFEST)) else { continue };
+        match serde_json::from_str::<Manifest>(&text) {
+            Ok(m) => out.push(row_from(&id, &dir, m)),
+            Err(_) => continue,
+        }
+    }
+    Ok(out)
+}
+
+/// One run's whole manifest, verbatim, plus the paths.
+///
+/// Verbatim matters: the manifest carries the full vehicle setup the run was
+/// driven with and every discrete event, and those are the fields that will
+/// grow. Reserializing through the structs above would quietly drop whatever
+/// this build does not yet know about.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDetail {
+    pub run_id: String,
+    pub dir: String,
+    pub telemetry_path: String,
+    pub telemetry_bytes: u64,
+    /// The raw `run.json` text, parsed on the other side.
+    pub manifest: String,
+}
+
+#[tauri::command]
+pub fn sim_read_run(run_id: String) -> Result<RunDetail, String> {
+    let dir = run_dir(&run_id)?;
+    let manifest = fs::read_to_string(dir.join(MANIFEST))
+        .map_err(|e| format!("read {}: {e}", dir.join(MANIFEST).display()))?;
+    let telemetry = dir.join(TELEMETRY);
+    let bytes = fs::metadata(&telemetry).map(|m| m.len()).unwrap_or(0);
+    Ok(RunDetail {
+        run_id,
+        dir: dir.display().to_string(),
+        telemetry_path: telemetry.display().to_string(),
+        telemetry_bytes: bytes,
+        manifest,
+    })
+}
+
+/// The telemetry file for a run, for handing to the Logs module's CSV loader.
+#[tauri::command]
+pub fn sim_run_telemetry_path(run_id: String) -> Result<String, String> {
+    let path = run_dir(&run_id)?.join(TELEMETRY);
+    if !path.is_file() {
+        return Err(format!("no telemetry in run {run_id}"));
+    }
+    Ok(path.display().to_string())
+}
+
+/// Delete a run. Removes the whole directory, which is only ever the two files
+/// the simulator wrote plus any stray `.tmp` from an interrupted save.
+#[tauri::command]
+pub fn sim_delete_run(run_id: String) -> Result<(), String> {
+    let dir = run_dir(&run_id)?;
+    // Refuse anything that is not recognisably a run: this is the one command
+    // here that destroys something, and a caller that has somehow been handed
+    // a wrong path should not be able to take a directory tree with it.
+    if !dir.join(MANIFEST).is_file() {
+        return Err(format!("{} is not a run directory", dir.display()));
+    }
+    fs::remove_dir_all(&dir).map_err(|e| format!("delete {}: {e}", dir.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    fn write_run(root: &Path, id: &str, json: &str) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(MANIFEST), json).unwrap();
+        fs::write(dir.join(TELEMETRY), "time_s,engine.rpm\n0,1000\n0.01,1100\n").unwrap();
+    }
+
+    fn manifest(driver: &str, track: &str, best: f64) -> String {
+        format!(
+            r#"{{"driver":"{driver}","track":"{track}","trackName":"T","startedAt":"2026-09-18T10:00:00Z",
+                 "samples":100,"assists":{{"traction":true,"abs":false,"autoShift":false}},
+                 "laps":[{{"lap":1,"raw":{best},"cones":1,"off":0,"total":{best},"sectors":[1.0,2.0],"startedAtS":0}}],
+                 "stats":{{"durationS":10.0,"laps":1,"bestLapS":{best},"totalCones":1,"peakLatG":1.5}}}}"#
+        )
+    }
+
+    /// Point the runs root at a scratch directory for the life of one test.
+    ///
+    /// The override is an environment variable, which is process-global, and
+    /// Rust runs tests in parallel threads of one process -- so these tests
+    /// have to take a lock or they overwrite each other's root and fail in
+    /// whatever order the scheduler picks. The lock is held for the whole
+    /// life of the guard, which is the whole life of the test.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct TempRoot {
+        dir: PathBuf,
+        _guard: MutexGuard<'static, ()>,
+    }
+    impl TempRoot {
+        fn new(tag: &str) -> Self {
+            // A panicking test poisons the lock; the root is replaced on the
+            // way in regardless, so a poisoned lock is safe to take.
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = std::env::temp_dir().join(format!("helios-sim-{tag}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("HELIOS_SIM_RUNS_DIR", &dir);
+            TempRoot { dir, _guard: guard }
+        }
+        fn path(&self) -> &Path { &self.dir }
+    }
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            std::env::remove_var("HELIOS_SIM_RUNS_DIR");
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn ids_cannot_climb_out_of_the_runs_directory() {
+        assert!(!is_safe_id(".."));
+        assert!(!is_safe_id("../../Windows"));
+        assert!(!is_safe_id("a/b"));
+        assert!(!is_safe_id("a\\b"));
+        assert!(!is_safe_id(".hidden"));
+        assert!(!is_safe_id(""));
+        assert!(is_safe_id("20260918-142233-autocross-9f3a"));
+        assert!(run_dir("..").is_err());
+        assert!(run_dir("x/y").is_err());
+    }
+
+    #[test]
+    fn lists_newest_first_and_parses_the_manifest() {
+        let root = TempRoot::new("list");
+        write_run(root.path(), "20260101-100000-autocross-aaaa", &manifest("Alice", "autocross", 44.5));
+        write_run(root.path(), "20260618-100000-endurance-bbbb", &manifest("Bob", "endurance", 90.0));
+        let rows = sim_list_runs(None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].driver, "Bob", "newest run must come first");
+        assert_eq!(rows[1].driver, "Alice");
+        assert_eq!(rows[1].track, "autocross");
+        assert_eq!(rows[1].stats.best_lap_s, Some(44.5));
+        assert_eq!(rows[1].laps[0].sectors, vec![1.0, 2.0]);
+        assert!(rows[1].assists.traction);
+        assert!(!rows[1].assists.abs);
+        assert!(rows[1].telemetry_bytes > 0);
+    }
+
+    #[test]
+    fn a_broken_manifest_is_skipped_not_fatal() {
+        let root = TempRoot::new("broken");
+        write_run(root.path(), "20260101-100000-autocross-aaaa", &manifest("Alice", "autocross", 44.5));
+        write_run(root.path(), "20260102-100000-autocross-bbbb", "{ this is not json");
+        // A directory with no manifest at all, as an interrupted save leaves.
+        fs::create_dir_all(root.path().join("20260103-100000-autocross-cccc")).unwrap();
+        let rows = sim_list_runs(None).unwrap();
+        assert_eq!(rows.len(), 1, "one good run must still list");
+        assert_eq!(rows[0].driver, "Alice");
+    }
+
+    #[test]
+    fn a_manifest_from_a_newer_sim_still_lists() {
+        let root = TempRoot::new("newer");
+        write_run(
+            root.path(),
+            "20260101-100000-autocross-aaaa",
+            r#"{"driver":"Zoe","track":"autocross","somethingNew":{"a":[1,2,3]},
+                "stats":{"bestLapS":40.0,"aBrandNewStat":7},"laps":[]}"#,
+        );
+        let rows = sim_list_runs(None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].driver, "Zoe");
+        assert_eq!(rows[0].stats.best_lap_s, Some(40.0));
+    }
+
+    #[test]
+    fn read_run_hands_back_the_manifest_verbatim() {
+        let root = TempRoot::new("read");
+        let json = manifest("Alice", "autocross", 44.5);
+        write_run(root.path(), "20260101-100000-autocross-aaaa", &json);
+        let d = sim_read_run("20260101-100000-autocross-aaaa".into()).unwrap();
+        assert_eq!(d.manifest, json);
+        assert!(d.telemetry_path.ends_with("telemetry.csv"));
+        assert!(sim_read_run("nope".into()).is_err());
+    }
+
+    #[test]
+    fn delete_only_removes_something_that_is_a_run() {
+        let root = TempRoot::new("delete");
+        write_run(root.path(), "20260101-100000-autocross-aaaa", &manifest("A", "autocross", 1.0));
+        let stray = root.path().join("not-a-run");
+        fs::create_dir_all(&stray).unwrap();
+        fs::write(stray.join("important.txt"), "keep me").unwrap();
+
+        assert!(sim_delete_run("not-a-run".into()).is_err());
+        assert!(stray.join("important.txt").is_file(), "must not delete a non-run directory");
+
+        sim_delete_run("20260101-100000-autocross-aaaa".into()).unwrap();
+        assert!(sim_list_runs(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_archive_is_not_an_error() {
+        let root = TempRoot::new("none");
+        // A directory that does not exist at all, which is a fresh machine.
+        let _ = fs::remove_dir_all(root.path());
+        assert!(sim_list_runs(None).unwrap().is_empty());
+    }
+}

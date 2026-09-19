@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { dedupePresence } from "../useHeliosPresence";
+import { MODULE_ICON } from "../ModulePicker";
 
 describe("dedupePresence", () => {
   it("collapses multiple connections of one user into a single row", () => {
@@ -61,13 +62,15 @@ describe("dedupePresence", () => {
     expect(dedupePresence({})).toEqual([]);
   });
 
-  it("recognizes 'org' as a valid module (regression: was coerced to 'logs')", () => {
-    // Before the fix, 'org' was absent from KNOWN_MODULES so any user on the
-    // Org tab would show as "Logs" in everyone else's presence panel.
-    const state = {
-      c: [{ user_id: "u1", name: "Nick", module: "org", online_at: 1 }],
-    };
+  // Every module the rail can show must survive the round trip. This started
+  // as a regression test for 'org' alone, which was missing from the known
+  // list and so reported as "Logs" in everyone else's presence panel; 'sim'
+  // and 'amethyst' were added later and went the same way. The list is now
+  // derived from the rail's icon table, and this asserts over the whole table
+  // so a tenth module cannot quietly repeat it.
+  it.each(Object.keys(MODULE_ICON))("recognizes '%s' as a valid module", (module) => {
+    const state = { c: [{ user_id: "u1", name: "Nick", module, online_at: 1 }] };
     const out = dedupePresence(state as any);
-    expect(out[0]!.module).toBe("org");
+    expect(out[0]!.module).toBe(module);
   });
 });
