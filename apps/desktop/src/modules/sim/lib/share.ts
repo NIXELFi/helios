@@ -155,16 +155,51 @@ function runToRow(
   };
 }
 
-/** Every run the team has shared, newest first. */
-export async function fetchSharedRuns(client: SupabaseClient, limit = 2000): Promise<SimRun[]> {
-  const res = await client
-    .schema(SCHEMA)
-    .from(TABLE)
-    .select("*")
-    .order("started_at", { ascending: false })
-    .limit(limit);
-  if (res.error) throw new Error(`read shared runs: ${res.error.message}`);
-  return (res.data as RunRow[]).map(rowToRun);
+/**
+ * How many rows to ask for at a time.
+ *
+ * PostgREST caps a response at its own `max-rows`, which this project sets to
+ * 1000, and it does so SILENTLY -- there is no error and no flag, the reply is
+ * simply a thousand rows long. Asking for 2000 in one request therefore did
+ * not fetch 2000; it fetched the newest thousand and dropped the rest on the
+ * floor, and because the order is newest first, the rows it dropped were the
+ * oldest. A team a season into practice would have watched October's personal
+ * bests quietly leave the board in March.
+ *
+ * Matching the server's cap is what makes the paging below terminate on the
+ * right signal: a short page is the end of the table, and a full page never
+ * is.
+ */
+const PAGE = 1000;
+
+/**
+ * Every run the team has shared, newest first.
+ *
+ * Paged, because the server will not send more than `PAGE` at once however
+ * many are asked for. `limit` is still a real ceiling -- a board is a screen,
+ * not an archive -- but it is now a number this function honours rather than
+ * one it hands to something that ignores it.
+ */
+export async function fetchSharedRuns(client: SupabaseClient, limit = 5000): Promise<SimRun[]> {
+  const rows: RunRow[] = [];
+  for (let from = 0; from < limit; from += PAGE) {
+    const to = Math.min(from + PAGE, limit) - 1;
+    const res = await client
+      .schema(SCHEMA)
+      .from(TABLE)
+      .select("*")
+      // Ties broken by run_id: `started_at` is not unique (two rigs can file a
+      // run in the same second), and a page boundary that falls inside a tie
+      // with no tiebreak can repeat a row on one page and skip another.
+      .order("started_at", { ascending: false })
+      .order("run_id", { ascending: false })
+      .range(from, to);
+    if (res.error) throw new Error(`read shared runs: ${res.error.message}`);
+    const page = res.data as RunRow[];
+    rows.push(...page);
+    if (page.length < to - from + 1) break;
+  }
+  return rows.map(rowToRun);
 }
 
 /**

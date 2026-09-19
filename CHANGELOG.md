@@ -107,6 +107,13 @@ follow [semver](https://semver.org/).
   confirmation says how far the delete reaches — this machine, the board, or
   both — before you press it. A machine of yours that still holds the files
   will share the run again the next time it syncs; delete it there too.
+- **The team's board stopped growing at a thousand runs, silently.** Helios
+  asked Supabase for two thousand shared runs in one request; the server sends
+  at most a thousand and says nothing about the rest, so past that point the
+  board kept the newest thousand and dropped the oldest without a word. Newest
+  first meant the ones it dropped were the season's earliest — where a
+  driver's first time on a course lives, and the whole of "time found". It now
+  reads the board a page at a time and gets all of it.
 - **Helios no longer talks to the server every six seconds while the Sim tab
   is open.** It synced the whole archive with Supabase on every re-read of
   the disk whether or not anything had changed, and one run the server would

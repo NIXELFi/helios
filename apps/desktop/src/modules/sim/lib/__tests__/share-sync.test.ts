@@ -9,7 +9,7 @@
  * them pointing at nineteen megabytes of laps. */
 import { describe, it, expect } from "vitest";
 
-import { deleteSharedRun, pushRuns, telemetryToKeep } from "../share";
+import { deleteSharedRun, fetchSharedRuns, pushRuns, telemetryToKeep } from "../share";
 import type { SimRun } from "../../api";
 
 const ME = "5c438ca3-9dee-45a7-bf15-4be3b98b5712";
@@ -43,10 +43,15 @@ function server() {
     const query = () => {
       let filter = (_r: Record<string, unknown>) => true;
       let deleting = false;
+      // PostgREST's own row cap, which is the whole point of the paging test
+      // below: the server truncates at `max-rows` and says nothing about it.
+      const MAX_ROWS = 1000;
+      let range: { from: number; to: number } | null = null;
       const chain = {
         select() { return chain; },
         order() { return chain; },
         limit() { return chain; },
+        range(from: number, to: number) { range = { from, to }; return chain; },
         delete() { deleting = true; return chain; },
         eq(col: string, v: unknown) {
           const prev = filter;
@@ -54,9 +59,16 @@ function server() {
           return chain;
         },
         then(resolve: (v: unknown) => unknown) {
-          const rows = [...table.values()].filter(filter);
+          let rows = [...table.values()].filter(filter);
           // `delete().select()` hands back what it removed, as PostgREST does.
           if (deleting) for (const r of rows) table.delete(r.run_id as string);
+          if (range) {
+            // Newest first, the order `fetchSharedRuns` asks for.
+            rows.sort((a, b) =>
+              String(b.started_at).localeCompare(String(a.started_at)) ||
+              String(b.run_id).localeCompare(String(a.run_id)));
+            rows = rows.slice(range.from, range.from + Math.min(range.to - range.from + 1, MAX_ROWS));
+          }
           return resolve({ data: rows, error: null });
         },
         upsert(payload: Record<string, unknown>[]) {
@@ -103,7 +115,9 @@ function server() {
   const sync = (userId: string, local: SimRun[]) =>
     pushRuns(client(userId), userId, local, async () => csv);
   const objectOf = (id: string) => table.get(id)?.telemetry_object ?? null;
-  return { table, bucket, removed, sync, objectOf, client };
+  /** Put a row on the server without going through a push. */
+  const seed = (row: Record<string, unknown>) => table.set(row.run_id as string, row);
+  return { table, bucket, removed, sync, objectOf, client, seed };
 }
 
 const csv = new TextEncoder().encode(
@@ -268,5 +282,60 @@ describe("taking a run off the board", () => {
     await deleteSharedRun(s.client(ME), "a");
     expect(s.table.has("a")).toBe(false);
     expect(s.removed).toEqual([]);
+  });
+});
+
+// PostgREST truncates a response at its own `max-rows` -- 1000 on this
+// project -- and does it silently: no error, no flag, just a thousand rows.
+// `fetchSharedRuns` asked for 2000 in one request and believed it had them,
+// so past a thousand shared runs the board kept the newest thousand and
+// dropped the oldest without saying so. Ordered newest first, the rows it
+// dropped were the season's earliest, which is where a driver's first
+// personal best lives.
+describe("reading a board bigger than the server will send at once", () => {
+  it("collects past the cap instead of stopping at it", async () => {
+    const s = server();
+    for (let i = 0; i < 2300; i++) {
+      s.seed({
+        run_id: `r${String(i).padStart(4, "0")}`,
+        user_id: ME,
+        driver: "Nick",
+        track: "autocross",
+        track_name: "Autocross",
+        // Ascending time with the index, so run 0 is the OLDEST -- the one
+        // the truncation used to throw away.
+        started_at: `2026-09-${String(1 + (i % 28)).padStart(2, "0")}T00:00:${String(i % 60).padStart(2, "0")}Z`,
+        best_lap_s: 40 + (i % 10),
+        laps: 1,
+        total_cones: 0,
+        assists: null,
+        synthetic: false,
+        format_version: 3,
+        stats: {},
+        laps_detail: [],
+        telemetry_object: null,
+        telemetry_bytes: null,
+      });
+    }
+    const got = await fetchSharedRuns(s.client(ME));
+    expect(got).toHaveLength(2300);
+    // No row fetched twice: a page boundary landing inside a tie on
+    // `started_at` repeats a row unless something breaks the tie.
+    expect(new Set(got.map((r) => r.runId)).size).toBe(2300);
+  });
+
+  it("stops at the ceiling it was given", async () => {
+    const s = server();
+    for (let i = 0; i < 2300; i++) {
+      s.seed({
+        run_id: `r${String(i).padStart(4, "0")}`, user_id: ME, driver: "Nick",
+        track: "autocross", track_name: "Autocross",
+        started_at: `2026-09-19T00:00:${String(i % 60).padStart(2, "0")}Z`,
+        best_lap_s: 40, laps: 1, total_cones: 0, assists: null, synthetic: false,
+        format_version: 3, stats: {}, laps_detail: [], telemetry_object: null,
+        telemetry_bytes: null,
+      });
+    }
+    expect(await fetchSharedRuns(s.client(ME), 2000)).toHaveLength(2000);
   });
 });
