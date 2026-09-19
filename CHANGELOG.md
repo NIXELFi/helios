@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-09-19
+
 ### Added
 - **A leaderboard per device, and Helios works out which one you were on.**
   A wheel, a controller and a keyboard are not the same instrument — a wheel
