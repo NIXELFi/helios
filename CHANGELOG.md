@@ -54,6 +54,17 @@ follow [semver](https://semver.org/).
   download size and the release notes. It offers an OLDER build too: rolling
   back to something known to work at an event is a real thing to want.
 
+### Changed
+- **A lap that left the course does not go on the leaderboard.** It is
+  recorded in full — telemetry, excursion count, raw time — and it is not a
+  time: not a best, not a reference, not a sector best. This is deliberately
+  stricter than FSAE, which scores an off course at +20 s and keeps the time.
+  At a competition an off course is seen, marshalled and re-run; a board
+  people practise against with nobody watching is a different problem, and a
+  penalty smaller than the time a driver can save by cutting rewards the thing
+  it is meant to punish. Runs already in the archive were scored under the old
+  rule, so Helios checks the lap itself and unranks the ones that went off.
+
 ### Fixed
 - **A downloaded simulator is marked executable again** on macOS and Linux.
   Broken after 5.8.0 by a refactor that inserted the `chmod` at a new call

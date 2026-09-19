@@ -47,9 +47,56 @@ export interface SimLap {
  */
 export const SECTOR_FORMAT_VERSION = 2;
 
-/** Can this run's theoretical best and raw-lap columns be believed? */
-export function hasTrustworthySectors(run: Pick<SimRun, "formatVersion">): boolean {
-  return (run.formatVersion ?? 1) >= SECTOR_FORMAT_VERSION;
+/**
+ * The version at which a lap that left the course stopped having a time.
+ *
+ * Before version 3 an off course was scored as +10 s and the lap stood, so a
+ * version 2 run's best lap and sector bests may both be times that went off.
+ * They look like ordinary times with a plausible number added, which is
+ * exactly why the version has to be consulted rather than the numbers.
+ */
+export const OFF_COURSE_FORMAT_VERSION = 3;
+
+/**
+ * Can this run's theoretical best and raw-lap columns be believed?
+ *
+ * Two separate ways they can be wrong. Version 1 wrote cumulative splits with
+ * the last one missing, so nothing about its sectors is a sector time.
+ * Version 2 wrote real sector times but folded in sectors from laps that left
+ * the course, so a theoretical best can be made of pieces nobody drove
+ * legally -- only a problem for a run that actually went off, which is why
+ * this asks rather than refusing every version 2 run outright.
+ */
+export function hasTrustworthySectors(
+  run: Pick<SimRun, "formatVersion"> & { stats?: Pick<SimStats, "totalOffCourse"> },
+): boolean {
+  const v = run.formatVersion ?? 1;
+  if (v >= OFF_COURSE_FORMAT_VERSION) return true;
+  if (v < SECTOR_FORMAT_VERSION) return false;
+  return (run.stats?.totalOffCourse ?? 0) === 0;
+}
+
+/**
+ * Did the lap this run would rank on leave the course?
+ *
+ * An off course does not score a time here -- stricter than FSAE, which adds
+ * 20 s and keeps it, and deliberately so: this is a board people practise
+ * against with nobody marshalling it, and a lap that cut the course is not
+ * comparable with one that did not.
+ *
+ * The simulator stopped filing such laps as times at version 3, so for a new
+ * run this is already true by construction and this is the backstop for the
+ * archive recorded before it. Per lap rather than per run, because on
+ * endurance one excursion should not throw away the clean laps around it.
+ */
+export function bestLapWentOffCourse(run: SimRun): boolean {
+  const n = run.stats.bestLapNumber;
+  const lap = n != null ? run.laps?.find((l) => l.lap === n) : undefined;
+  if (lap) return (lap.off ?? 0) > 0;
+  // No per-lap detail to consult: an older manifest, or a shared row that
+  // carried none. Fall back to the run, which is exact on autocross -- one
+  // lap -- and cautious on endurance, which is the right way to be wrong.
+  return (run.stats.totalOffCourse ?? 0) > 0;
 }
 
 export interface SimStats {
@@ -392,6 +439,8 @@ export function isRankable(run: SimRun): boolean {
     // typing a name, which is not the same thing and does not go on a board.
     !!run.driverId &&
     runBest(run) != null &&
+    // Stricter than FSAE, on purpose. See `bestLapWentOffCourse`.
+    !bestLapWentOffCourse(run) &&
     !run.assists.traction &&
     !run.assists.abs &&
     !run.assists.autoShift
@@ -404,6 +453,7 @@ export function unrankedReason(run: SimRun): string | null {
   if (run.synthetic) return "driven by the robot driver, not a person";
   if (!run.driverId) return "not launched from Helios, so the driver is unverified";
   if (runBest(run) == null) return "no completed lap";
+  if (bestLapWentOffCourse(run)) return "that lap left the course";
   const on: string[] = [];
   if (run.assists.traction) on.push("traction control");
   if (run.assists.abs) on.push("ABS");
