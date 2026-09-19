@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.8.1] - 2026-09-19
+
 ### Added
 - **The simulator's runs are the team's, not your machine's.** Until now the
   archive was local files and nothing else, so the Runs table and the
