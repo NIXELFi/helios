@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.8.3] - 2026-09-19
+
 ### Added
 - **The simulator keeps itself current.** Helios used to offer a newer
   simulator build as a banner with a button, which at a test day nobody
