@@ -86,9 +86,18 @@ jobs:
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          # "latest" tracks the CLI the team runs locally; the stack version
-          # itself is pinned by infra/pdm-supabase/supabase/config.toml.
-          version: latest
+          # PINNED, and not for reproducibility -- the stack version is already
+          # pinned by infra/pdm-supabase/supabase/config.toml, and this is only
+          # the client that starts it.
+          #
+          # "latest" makes the action ask the GitHub API which release that is,
+          # unauthenticated, and that call is rate limited per runner IP. It
+          # failed on a release push -- "Failed to resolve latest Supabase CLI
+          # release: rate limit exceeded", nineteen seconds in, before a single
+          # migration ran -- which turns the security suite into a coin flip
+          # that lands on red at the least convenient moment. A version number
+          # is not looked up.
+          version: 2.117.0
 
       - name: Start local Supabase stack (applies all migrations)
         run: supabase start
