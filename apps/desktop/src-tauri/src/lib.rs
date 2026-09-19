@@ -348,6 +348,8 @@ pub fn run() {
             sim::runs::sim_read_run,
             sim::runs::sim_run_telemetry_path,
             sim::runs::sim_delete_run,
+            sim::runs::sim_read_telemetry,
+            sim::runs::sim_import_run,
             sim::install::sim_available_build,
             sim::install::sim_install,
         ])

@@ -113,6 +113,20 @@ export interface SimRun {
   assists: SimAssists;
   laps: SimLap[];
   stats: SimStats;
+
+  // ---- shared runs ----
+  // A run from the team's archive rather than this machine's disk. It has no
+  // files here, so `dir` and `telemetryPath` are empty and anything that
+  // wants to open one locally has to say so. See `lib/share.ts`.
+  /** True when this came from `sim.runs` rather than from a directory. */
+  remote?: boolean;
+  /** The Helios account that shared it, as Helios knows them. */
+  sharedBy?: string | null;
+  subteam?: string | null;
+  /** Key in the `sim-telemetry` bucket, when the driver shared the lap
+   *  itself and not only its time. Null for most runs by design. */
+  telemetryObject?: string | null;
+  telemetrySharedBytes?: number;
 }
 
 export interface SimStatus {
@@ -209,6 +223,30 @@ export function simTelemetryPath(runId: string): Promise<string> {
 
 export function simDeleteRun(runId: string): Promise<void> {
   return invoke<void>("sim_delete_run", { runId });
+}
+
+/** One local run's telemetry as text, for sharing it. */
+export function readRunTelemetry(runId: string): Promise<string | null> {
+  return invoke<string>("sim_read_telemetry", { runId }).catch(() => null);
+}
+
+/**
+ * Write a teammate's run into this machine's archive.
+ *
+ * A shared run is a row and a storage object; the simulator can only replay a
+ * directory. After this it is an ordinary local run -- replayable, openable
+ * in Logs, indistinguishable from one driven here.
+ */
+export function simImportRun(
+  runId: string,
+  manifest: SimManifest,
+  telemetry: string,
+): Promise<string> {
+  return invoke<string>("sim_import_run", {
+    runId,
+    manifest: JSON.stringify(manifest),
+    telemetry,
+  });
 }
 
 export function simLaunch(request: LaunchRequest): Promise<LaunchResult> {

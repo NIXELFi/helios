@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconChartLine, IconChevronDown, IconChevronRight, IconMovie, IconSearch, IconRobot,
+  IconChartLine, IconChevronDown, IconChevronRight, IconCloud, IconMovie, IconSearch,
+  IconRobot,
 } from "@tabler/icons-react";
 import {
   TRACKS, fmtTime, fmtWhen, isRankable, runBest, unrankedReason, type SimRun,
@@ -55,6 +56,18 @@ interface Props {
  * Local time on purpose: a session that ran past midnight UTC is still one
  * evening's driving to the person who drove it.
  */
+/**
+ * Is there telemetry to open, wherever it lives?
+ *
+ * Locally that is a file with bytes in it -- a run whose telemetry never
+ * landed has a path and zero bytes. For a shared run it is whether the driver
+ * uploaded the lap at all, which only happens for a personal best: everything
+ * else shares its time and nothing more.
+ */
+function hasTelemetry(run: SimRun): boolean {
+  return run.remote ? !!run.telemetryObject : run.telemetryBytes > 0;
+}
+
 function dayOf(run: SimRun): { key: string; label: string } {
   const t = run.startedAt ? new Date(run.startedAt) : null;
   if (!t || Number.isNaN(t.getTime())) return { key: "unknown", label: "Undated" };
@@ -240,6 +253,13 @@ export function RunsTable({
               <IconRobot size={13} className="shrink-0 text-helios-muted" title="Robot driver" />
             )}
             <span className="font-medium">{r.driver}</span>
+            {r.remote && (
+              <IconCloud
+                size={12}
+                className="shrink-0 text-helios-muted"
+                title="Shared by the team; not on this machine"
+              />
+            )}
           </span>
           {r.session && (
             <span className="block truncate text-[11px] text-helios-muted">{r.session}</span>
@@ -267,9 +287,21 @@ export function RunsTable({
         <Td className="whitespace-nowrap text-helios-dim">{fmtWhen(r.startedAt)}</Td>
         <Td className="text-right">
           <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()}>
+            {/* A shared run has no files here yet. It can still be opened --
+                clicking fetches it first -- but only if the driver shared the
+                lap and not just its time, which is the usual case for
+                anything that was not a personal best. */}
             <IconBtn
-              title={canReplay ? "Watch the replay" : "The simulator is not installed here"}
-              disabled={!canReplay}
+              title={
+                !canReplay
+                  ? "The simulator is not installed here"
+                  : !hasTelemetry(r)
+                    ? `${r.driver} shared this run's time, not the lap itself`
+                    : r.remote
+                      ? `Fetch ${r.driver}'s lap and watch it`
+                      : "Watch the replay"
+              }
+              disabled={!canReplay || !hasTelemetry(r)}
               onClick={() => onReplay(r)}
             >
               <IconMovie size={14} />
@@ -282,11 +314,13 @@ export function RunsTable({
                 what they were looking at. */}
             <IconBtn
               title={
-                r.telemetryBytes > 0
-                  ? "Open the telemetry in Logs"
+                hasTelemetry(r)
+                  ? r.remote
+                    ? `Fetch ${r.driver}'s lap and open it in Logs`
+                    : "Open the telemetry in Logs"
                   : "This run has no telemetry file"
               }
-              disabled={r.telemetryBytes === 0}
+              disabled={!hasTelemetry(r)}
               onClick={() => onOpenInLogs(r)}
             >
               <IconChartLine size={14} />

@@ -10,7 +10,9 @@ import { RunDetail } from "./components/RunDetail";
 import { RunsTable } from "./components/RunsTable";
 import { SessionSummary, runsInSession, type SessionWindow } from "./components/SessionSummary";
 import { listen } from "@tauri-apps/api/event";
-import { simLaunch, simListRuns, simStatus, type SimRun, type SimStatus,
+import { fetchSharedRuns, fetchSharedTelemetry, pushRuns } from "./lib/share";
+import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus,
+  type SimManifest, type SimRun, type SimStatus,
   TRACKS, type TrackId,
 } from "./api";
 
@@ -30,7 +32,7 @@ const TAB_KEY = "helios:sim:tab";
  * without anyone pressing anything.
  */
 export function SimHome({ active }: { active: boolean }) {
-  const { user } = useHeliosAuth();
+  const { user, client } = useHeliosAuth();
   // The one identity the whole module trusts. Null means signed out, and
   // signed out means no run can be started at all: a lap time has to be
   // attributable to a person before it can go on a board.
@@ -47,7 +49,11 @@ export function SimHome({ active }: { active: boolean }) {
     }
   });
   const [status, setStatus] = useState<SimStatus | null>(null);
+  /** What is on this machine's disk. */
   const [runs, setRuns] = useState<SimRun[]>([]);
+  /** What the rest of the team has shared. Empty when signed out. */
+  const [shared, setShared] = useState<SimRun[]>([]);
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +86,63 @@ export function SimHome({ active }: { active: boolean }) {
     }
   }, []);
 
+  /**
+   * Read the team's runs, and push the ones this machine has that it has not.
+   *
+   * Deliberately separate from `refresh`, which reads a directory and must
+   * stay instant and never fail because a rig is offline. This half is the
+   * network, and everything it does is optional: signed out, or with no
+   * connection, the module carries on showing what is on this disk.
+   */
+  const syncShared = useCallback(async (local: SimRun[]) => {
+    if (!client || !driver) { setShared([]); return; }
+    try {
+      const theirs = await fetchSharedRuns(client);
+      setShared(theirs);
+      setShareNote(null);
+      const res = await pushRuns(client, driver.id, local, async (run) => {
+        // Read straight off disk. The telemetry never passes through the
+        // simulator or a temp copy; it is the file that was recorded.
+        const text = await readRunTelemetry(run.runId);
+        return text == null ? null : new TextEncoder().encode(text);
+      });
+      if (res.pushed || res.telemetryPushed) {
+        const again = await fetchSharedRuns(client);
+        setShared(again);
+      }
+      if (res.error) setShareNote(res.error);
+    } catch (e) {
+      // Offline at a test day is the normal state of a rig, not an error.
+      setShareNote(e instanceof Error ? e.message : String(e));
+    }
+  }, [client, driver]);
+
+  // Follows the local read rather than running on its own clock: pushing runs
+  // that have not been listed yet would be pushing nothing.
+  useEffect(() => {
+    if (loading) return;
+    void syncShared(runs);
+  }, [loading, runs, syncShared]);
+
+  /**
+   * Everything, local and shared, with the local copy winning.
+   *
+   * By run id, and local first on purpose: the same run is on this disk AND
+   * in the team archive once it has been pushed, and the local one is the one
+   * with files behind it -- it can be replayed and opened in Logs, and its
+   * shared twin cannot.
+   */
+  /** The merged list, for callbacks that must not close over a stale copy. */
+  const allRunsRef = useRef<SimRun[]>([]);
+  const allRuns = useMemo(() => {
+    const byId = new Map<string, SimRun>();
+    for (const r of shared) byId.set(r.runId, r);
+    for (const r of runs) byId.set(r.runId, r);
+    const merged = [...byId.values()];
+    allRunsRef.current = merged;
+    return merged;
+  }, [runs, shared]);
+
   useEffect(() => { void refresh(); }, [refresh]);
 
   // Poll only while this module is on screen. A run finishing in the
@@ -92,19 +155,76 @@ export function SimHome({ active }: { active: boolean }) {
   }, [active, refresh]);
 
   const selected = useMemo(
-    () => runs.find((r) => r.runId === selectedId) ?? null,
-    [runs, selectedId],
+    () => allRuns.find((r) => r.runId === selectedId) ?? null,
+    [allRuns, selectedId],
   );
   const canReplay = !!status?.exePath;
 
+  /**
+   * Bring a shared run onto this machine so it can be opened.
+   *
+   * The simulator replays a DIRECTORY and Logs reads a FILE; a teammate's run
+   * is a row and a storage object. Rather than teach either of them about the
+   * network, the run is written into the local archive once and is then an
+   * ordinary run -- replayable, openable, deletable, indistinguishable from
+   * one driven here. Returns false when there is nothing to fetch, which is
+   * most runs: only a personal best carries its telemetry.
+   */
+  const materialise = useCallback(async (run: SimRun): Promise<boolean> => {
+    if (!run.remote) return true;
+    if (!client) { setError("Sign in to Helios to open a shared run."); return false; }
+    if (!run.telemetryObject) {
+      setError(`${run.driver} shared that run's time but not the lap itself.`);
+      return false;
+    }
+    try {
+      setShareNote(`Fetching ${run.driver}'s lap…`);
+      const csv = await fetchSharedTelemetry(client, run);
+      // The manifest the simulator will read back. Rebuilt from the row
+      // rather than shared as a blob: the row IS the manifest's fields, and
+      // storing it twice is how the two come to disagree.
+      await simImportRun(run.runId, {
+        ...run,
+        dir: undefined,
+        telemetryPath: undefined,
+        telemetryBytes: undefined,
+        remote: undefined,
+      } as unknown as SimManifest, csv);
+      setShareNote(null);
+      await refresh();
+      return true;
+    } catch (e) {
+      setShareNote(null);
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }, [client, refresh]);
+
   const replay = useCallback((runId: string, ghostId: string | null) => {
-    simLaunch({ replay: runId, ghost: ghostId ?? undefined })
+    // A shared run has no files here yet; fetch it first, then it is a run
+    // like any other.
+    const run = allRunsRef.current.find((r) => r.runId === runId);
+    const go = () => simLaunch({ replay: runId, ghost: ghostId ?? undefined })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
+    if (run?.remote) {
+      void materialise(run).then((ok) => { if (ok) go(); });
+      return;
+    }
+    void go();
+  }, [materialise]);
 
   const openInLogs = useCallback((run: SimRun) => {
-    requestOpenInLogs([run.telemetryPath], `${run.driver} — ${run.trackName}`);
-  }, []);
+    const go = (path: string) => requestOpenInLogs([path], `${run.driver} — ${run.trackName}`);
+    if (run.remote) {
+      void materialise(run).then((ok) => {
+        if (!ok) return;
+        const local = allRunsRef.current.find((r) => r.runId === run.runId && !r.remote);
+        if (local?.telemetryPath) go(local.telemetryPath);
+      });
+      return;
+    }
+    go(run.telemetryPath);
+  }, [materialise]);
 
   /**
    * Start a drive with this run's best lap as the live delta's reference.
@@ -219,14 +339,14 @@ export function SimHome({ active }: { active: boolean }) {
             />
           ) : tab === "board" ? (
             <Leaderboard
-              runs={runs}
+              runs={allRuns}
               canReplay={canReplay}
               onOpenRun={(id) => { setSelectedId(id); selectTab("runs"); }}
               onReplayRun={(id) => replay(id, null)}
             />
           ) : (
             <RunsTable
-              runs={runs}
+              runs={allRuns}
               selectedId={selectedId}
               canReplay={canReplay}
               driverId={driver?.id ?? null}
@@ -241,7 +361,7 @@ export function SimHome({ active }: { active: boolean }) {
           <SessionSummary
             runs={sessionRuns}
             session={session}
-            allRuns={runs}
+            allRuns={allRuns}
             canReplay={canReplay}
             onClose={() => setSession(null)}
             onOpenRun={(id) => { setSelectedId(id); setSession(null); }}
@@ -252,7 +372,7 @@ export function SimHome({ active }: { active: boolean }) {
         {tab === "runs" && selected && (
           <RunDetail
             run={selected}
-            allRuns={runs}
+            allRuns={allRuns}
             canReplay={canReplay}
             canDrive={!!driver}
             onClose={() => setSelectedId(null)}

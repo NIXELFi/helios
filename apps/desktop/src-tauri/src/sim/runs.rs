@@ -401,6 +401,62 @@ pub fn sim_run_telemetry_path(run_id: String) -> Result<String, String> {
     Ok(path.display().to_string())
 }
 
+/// Nothing a simulator writes is this big. The cap is a guard against reading
+/// a file somebody has put here by hand, not a real limit: a seven-minute
+/// endurance run at 100 Hz is about 12 MB.
+const MAX_TELEMETRY_BYTES: u64 = 256 * 1024 * 1024;
+
+/// One run's telemetry, as text, for sharing it with the team.
+///
+/// The path alone is no use to the renderer -- it has no filesystem -- and
+/// the sharing code needs the bytes to upload. Read here rather than handed
+/// out as a path and opened by something else, so the same run-id guard
+/// covers it as covers every other command in this file.
+#[tauri::command(async)]
+pub fn sim_read_telemetry(run_id: String) -> Result<String, String> {
+    let path = run_dir(&run_id)?.join(TELEMETRY);
+    let meta = fs::metadata(&path).map_err(|_| format!("no telemetry in run {run_id}"))?;
+    if meta.len() > MAX_TELEMETRY_BYTES {
+        return Err(format!("that telemetry is {} bytes, which is not a run", meta.len()));
+    }
+    fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+/// Write a run that came from somebody else into this machine's archive.
+///
+/// A shared run is a row in a table and an object in a bucket; the simulator
+/// can only replay a DIRECTORY. This is the bridge: bring a teammate's lap
+/// down and it becomes an ordinary run here, indistinguishable from one
+/// driven at this rig, replayable and openable in Logs with no special case
+/// anywhere downstream.
+///
+/// Refuses to overwrite. A run id is unique to the drive that made it, so an
+/// id that already exists locally is either the same run -- nothing to do --
+/// or a collision that should be looked at rather than silently resolved.
+#[tauri::command(async)]
+pub fn sim_import_run(run_id: String, manifest: String, telemetry: String) -> Result<String, String> {
+    let dir = run_dir(&run_id)?;
+    if dir.join(MANIFEST).is_file() {
+        return Ok(dir.display().to_string());
+    }
+    // Parsed before anything is written: a manifest that will not load is a
+    // run that would list as broken forever.
+    serde_json::from_str::<Manifest>(&manifest)
+        .map_err(|e| format!("that run's manifest will not parse: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+
+    // Same write-then-rename as the simulator's own save, for the same
+    // reason: a half-written run.json read by the six-second poll is a run
+    // that vanishes from the list on the next refresh.
+    for (name, body) in [(MANIFEST, manifest.as_str()), (TELEMETRY, telemetry.as_str())] {
+        let tmp = dir.join(format!("{name}.tmp"));
+        fs::write(&tmp, body).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        fs::rename(&tmp, dir.join(name))
+            .map_err(|e| format!("install {}: {e}", dir.join(name).display()))?;
+    }
+    Ok(dir.display().to_string())
+}
+
 /// Delete a run. Removes the whole directory, which is only ever the two files
 /// the simulator wrote plus any stray `.tmp` from an interrupted save.
 #[tauri::command]

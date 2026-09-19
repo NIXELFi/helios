@@ -28,6 +28,24 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **The simulator's runs are the team's, not your machine's.** Until now the
+  archive was local files and nothing else, so the Runs table and the
+  leaderboard only ever showed drives made at the rig you were sitting at —
+  and looked exactly like a team board while doing it. Every run's times,
+  penalties and stats now sync to Supabase and everybody sees everybody's.
+  A run that sets its driver's best on a course also shares its telemetry, so
+  you can watch that lap and race its ghost; clicking watch on a teammate's
+  run fetches it onto your machine first, after which it behaves like any
+  other run. Practice laps share their time only, which is what keeps a
+  season of them from being a season of megabytes.
+
+  Identity is stamped server-side from your session and the client's is
+  ignored, so a time can only ever be posted as yourself, and you can read
+  everyone's rows but write only your own. On a shared rig Helios pushes only
+  the runs recorded against the account that is signed in — the rest belong to
+  whoever else drove there, and they will share their own.
+
+  Local files stay the source of truth and a rig with no network is unchanged.
 - **An update button for the simulator.** Helios only ever asked the build
   feed what it had when it could not find a simulator at all — so once you
   had one it never looked again, and a fix published to the feed could not
