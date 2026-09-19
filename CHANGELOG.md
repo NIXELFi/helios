@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-09-19
+
 ### Added
 - **Sim.** A new module, last of the everyday modules in the rail: the
   launcher, the archive and the leaderboards for the driver-in-loop simulator.
