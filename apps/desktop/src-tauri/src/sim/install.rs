@@ -587,6 +587,59 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The real thing, against the real feed, over the real network.
+    ///
+    /// `#[ignore]` because it needs the internet and because it genuinely
+    /// INSTALLS: it downloads the published simulator into
+    /// `%LOCALAPPDATA%\Helios\sim\<version>\` and points this machine's
+    /// launcher at it, exactly as clicking the button does. That is the
+    /// point -- everything else in this file is a loopback server, and the
+    /// combination of "the feed is where we said", "the build is same-origin
+    /// with it", "Supabase serves it without a redirect" and "the hash the
+    /// feed published is the hash of the bytes that arrive" can only be
+    /// checked against the live thing.
+    ///
+    /// Run it by hand after publishing a build:
+    ///
+    ///     cargo test -p helios-desktop --lib sim::install::tests::live_feed -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the network and installs for real; run by hand after publishing"]
+    fn live_feed_installs_end_to_end() {
+        let build = available_build()
+            .expect("reach the feed")
+            .expect("the feed offers something for this platform");
+        println!("feed offers {} ({} bytes)", build.version, build.bytes);
+
+        let seen = std::sync::Mutex::new(0u64);
+        let installed = install(build.version.clone(), &|p| {
+            *seen.lock().unwrap() = p.bytes;
+        })
+        .expect("install");
+
+        println!("installed {} -> {}", installed.version, installed.exe_path);
+        assert_eq!(installed.version, build.version);
+        assert_eq!(installed.bytes, build.bytes, "installed a different number of bytes");
+        let on_disk = std::path::Path::new(&installed.exe_path);
+        assert!(on_disk.is_file(), "nothing at {}", installed.exe_path);
+        assert_eq!(
+            fs::metadata(on_disk).expect("stat").len(),
+            build.bytes,
+            "the file on disk is not the size the feed declared"
+        );
+        assert!(*seen.lock().unwrap() > 0, "no progress was reported for a multi-MB download");
+
+        // And the launcher now finds exactly that copy, which is what makes
+        // this an install rather than a download.
+        let status = crate::sim::launch::sim_status();
+        assert_eq!(
+            status.exe_path.as_deref(),
+            Some(installed.exe_path.as_str()),
+            "the launcher is not pointed at what was just installed"
+        );
+        assert!(status.exe_configured, "the installed path was not remembered");
+        println!("launcher reports version {:?}", status.version);
+    }
+
     #[test]
     fn the_feed_url_can_be_pointed_somewhere_else() {
         let _guard = lock_env();
