@@ -27,6 +27,46 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **A leaderboard per device, and Helios works out which one you were on.**
+  A wheel, a controller and a keyboard are not the same instrument — a wheel
+  has a real stop at a real angle and two hundred times the resolution of a
+  thumbstick, and a keyboard is a switch that software ramps into a steering
+  command — so one list of all three ranked hardware rather than drivers.
+  The leaderboard now has a tab per class, and only for classes somebody has
+  actually driven, so a team all on wheels never sees the question.
+
+  Which board a run lands on is measured, not asked. The simulator records
+  what actually steered the car, frame by frame, and decides from the device
+  itself: a base the rig opened for force feedback, or a wheel that says so
+  by name. The control profile in the settings screen is a dropdown, and
+  ranking by a dropdown ranks what people say — pick "Controller", steer the
+  wheel anyway, and the controller record was yours for free. Runs recorded
+  before this still fall back to the profile, which is all anybody had for
+  them.
+
+### Fixed
+- **A run already shared with the team could never be corrected.** Runs were
+  uploaded once and then only ever read back, so anything learned about a run
+  afterwards never reached the server. That showed the moment the leaderboard
+  started separating boards by device: every run the team had already driven
+  sat under "Unrecorded device" and the wheel board, the one everybody is
+  actually on, was empty — and nothing would have fixed it, because those
+  runs were already up there. Helios now compares what it has against what
+  the server holds and sends up anything that no longer matches. It settles
+  after one sign-in and writes nothing on the next.
+- **A jittery log read as a faster one.** Helios measures a telemetry group's
+  real sample rate from the rows it finds, and re-labels the group when that
+  disagrees with the nominal rate by a fifth — which moves every filter cutoff
+  derived from it. A 100 Hz log recorded on a 144 Hz display has gaps that
+  alternate between one frame and two, and the old estimate landed on one of
+  the two rather than between them: a real 45-second run measured 141 Hz
+  against an actual 99.3. It now reads 102, and a log with a ten-second
+  dropout in the middle still reads 100 rather than collapsing.
+- Telemetry shared from a run that was not driven on a wheel now goes up at
+  10 Hz rather than 100. Nobody studies a thumbstick's steering trace sample
+  by sample, and an endurance run stops being eleven megabytes.
+
 ## [5.8.1] - 2026-09-19
 
 ### Added
