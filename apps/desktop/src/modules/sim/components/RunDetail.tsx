@@ -4,8 +4,8 @@ import {
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  fmtBytes, fmtGap, fmtTime, fmtWhen, runBest, simDeleteRun, simReadRun, unrankedReason,
-  type SimManifest, type SimRun,
+  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, runBest, simDeleteRun, simReadRun,
+  unrankedReason, type SimManifest, type SimRun,
 } from "../api";
 import { ghostCandidates } from "../lib/leaderboard";
 
@@ -14,8 +14,10 @@ interface Props {
   /** Every run, so the ghost picker can offer the ones on this course. */
   allRuns: SimRun[];
   canReplay: boolean;
-  /** False when nobody is signed in: replays are fine, driving is not. */
-  canDrive: boolean;
+  /** The signed-in account, or null. Null means replays are fine and driving
+   *  is not; the id itself says whether this run is the viewer's own, which
+   *  is what decides whether it can be taken off the team's board. */
+  driverId: string | null;
   onClose: () => void;
   onReplay: (run: SimRun, ghostId: string | null) => void;
   onOpenInLogs: (run: SimRun) => void;
@@ -24,8 +26,10 @@ interface Props {
 }
 
 export function RunDetail({
-  run, allRuns, canReplay, canDrive, onClose, onReplay, onOpenInLogs, onChase, onDeleted,
+  run, allRuns, canReplay, driverId, onClose, onReplay, onOpenInLogs, onChase, onDeleted,
 }: Props) {
+  const canDrive = !!driverId;
+  const mine = !!driverId && run.driverId === driverId;
   const [manifest, setManifest] = useState<SimManifest | null>(null);
   const [ghostId, setGhostId] = useState<string>("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -42,11 +46,15 @@ export function RunDetail({
     // its red line pinned under every healthy run opened afterwards, which
     // reads as "this run is broken too".
     setError(null);
+    // A shared run has no `run.json` here to read. Asking anyway put "cannot
+    // find the file specified" in red under every teammate's run, which
+    // reads as the run being broken rather than as it being elsewhere.
+    if (run.remote) return () => { cancelled = true; };
     simReadRun(run.runId)
       .then((d) => { if (!cancelled) setManifest(d.manifest); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
-  }, [run.runId]);
+  }, [run.runId, run.remote]);
 
   const ghosts = useMemo(() => ghostCandidates(allRuns, run), [allRuns, run]);
   const best = runBest(run);
@@ -179,9 +187,13 @@ export function RunDetail({
           <Row
             label="Samples"
             value={
-              run.sampleRateHz != null
-                ? `${run.samples.toLocaleString()} at ${run.sampleRateHz.toFixed(run.sampleRateHz >= 99 ? 0 : 1)} Hz`
-                : run.samples.toLocaleString()
+              // A shared row pushed before the count travelled has none, and
+              // "0 at 99 Hz" is a wrong number, not a missing one.
+              run.samples === 0
+                ? "—"
+                : run.sampleRateHz != null
+                  ? `${run.samples.toLocaleString()} at ${run.sampleRateHz.toFixed(run.sampleRateHz >= 99 ? 0 : 1)} Hz`
+                  : run.samples.toLocaleString()
             }
             warn={run.sampleRateHz != null && run.sampleRateHz < 90}
             title={
@@ -190,7 +202,19 @@ export function RunDetail({
                 : undefined
             }
           />
-          <Row label="Telemetry" value={fmtBytes(run.telemetryBytes)} />
+          {/* The local byte count is zero for every shared run, because it
+              is not here. What the panel can honestly say about one is whether
+              the driver shared the lap or only its time. */}
+          <Row
+            label="Telemetry"
+            value={
+              run.remote
+                ? run.telemetryObject
+                  ? `${fmtBytes(run.telemetrySharedBytes ?? 0)} shared`
+                  : "time only — the lap was not shared"
+                : fmtBytes(run.telemetryBytes)
+            }
+          />
           {manifest?.channels && <Row label="Channels" value={String(manifest.channels.length)} />}
           {manifest?.events && <Row label="Events" value={String(manifest.events.length)} />}
           {manifest?.truncated && (
@@ -223,19 +247,45 @@ export function RunDetail({
             </select>
           </label>
         )}
+        {/* Every "can this run be opened" decision below goes through
+            `hasTelemetry`, the same rule the runs table uses, so the two
+            cannot disagree about one run on one screen. The replay and the
+            reference lap both need the telemetry -- the simulator builds its
+            time-at-distance table from it -- so a shared run whose driver
+            shared the time and not the lap can be neither watched nor chased,
+            and a shared run whose lap IS up can be both: clicking fetches it
+            first. */}
         <div className="flex gap-2">
           <button
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded bg-asu-gold px-3 py-2 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!canReplay}
-            title={canReplay ? undefined : "The simulator is not installed here"}
+            disabled={!canReplay || !hasTelemetry(run)}
+            title={
+              !canReplay
+                ? "The simulator is not installed here"
+                : !hasTelemetry(run)
+                  ? run.remote
+                    ? `${run.driver} shared this run's time, not the lap itself`
+                    : "This run has no telemetry file to replay"
+                  : run.remote
+                    ? `Fetch ${run.driver}'s lap and watch it`
+                    : undefined
+            }
             onClick={() => onReplay(run, ghostId || null)}
           >
             <IconMovie size={14} /> Watch replay
           </button>
           <button
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-2 text-xs transition hover:border-asu-gold disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={run.telemetryBytes === 0}
-            title={run.telemetryBytes === 0 ? "This run has no telemetry file" : undefined}
+            disabled={!hasTelemetry(run)}
+            title={
+              !hasTelemetry(run)
+                ? run.remote
+                  ? `${run.driver} shared this run's time, not the lap itself`
+                  : "This run has no telemetry file"
+                : run.remote
+                  ? `Fetch ${run.driver}'s lap and open it in Logs`
+                  : undefined
+            }
             onClick={() => onOpenInLogs(run)}
           >
             <IconChartLine size={14} /> Open in Logs
@@ -243,28 +293,48 @@ export function RunDetail({
         </div>
         <button
           className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded border border-asu-gold/50 bg-asu-gold/10 px-3 py-2 text-xs font-medium text-asu-gold transition hover:bg-asu-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canReplay || !canDrive || best == null}
+          disabled={!canReplay || !canDrive || best == null || !hasTelemetry(run)}
           title={
             best == null
-              ? "this run has no completed lap to chase"
-              : !canDrive
-                ? "Sign in to Helios to start a run"
-                : canReplay
-                  ? "Start a drive with this lap as the live delta's reference"
-                  : "The simulator is not installed here"
+              ? "this run has no time to chase"
+              : !hasTelemetry(run)
+                ? run.remote
+                  ? `${run.driver} shared this run's time, not the lap itself`
+                  : "This run has no telemetry file to chase"
+                : !canDrive
+                  ? "Sign in to Helios to start a run"
+                  : canReplay
+                    ? run.remote
+                      ? `Fetch ${run.driver}'s lap and drive against it`
+                      : "Start a drive with this lap as the live delta's reference"
+                    : "The simulator is not installed here"
           }
           onClick={() => onChase(run)}
         >
           <IconStopwatch size={14} /> Drive against this lap
         </button>
+        {/* What "delete" will actually do, said before it is done. The button
+            reads "for good" and for a while meant "from this disk": the row
+            stayed, the run came straight back with a cloud icon, and its time
+            stayed ranked. Now it means what it says where it can, and says
+            exactly how far it reaches where it cannot. */}
+        {confirmDelete && (
+          <p className="mt-2 text-[11px] text-helios-dim">{deleteReach()}</p>
+        )}
         <div className="mt-2 flex gap-2">
-          <button
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-1.5 text-[11px] text-helios-dim transition hover:border-asu-gold hover:text-helios-text"
-            onClick={() => void invoke("reveal_in_explorer", { path: run.dir }).catch(() => {})}
-          >
-            <IconFolderOpen size={13} /> Show the files
-          </button>
-          {confirmDelete ? (
+          {/* No files to show for a run that is not here. */}
+          {!run.remote && (
+            <button
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-1.5 text-[11px] text-helios-dim transition hover:border-asu-gold hover:text-helios-text"
+              onClick={() => void invoke("reveal_in_explorer", { path: run.dir }).catch(() => {})}
+            >
+              <IconFolderOpen size={13} /> Show the files
+            </button>
+          )}
+          {/* A local run can always be deleted from this disk. A run that is
+              only on the board can be deleted only by its driver -- the
+              server would refuse anybody else, so nobody else is offered it. */}
+          {(!run.remote || mine) && (confirmDelete ? (
             <span className="inline-flex flex-1 items-center gap-1">
               <button
                 className="flex-1 rounded bg-helios-danger px-2 py-1.5 text-[11px] font-semibold text-white"
@@ -286,15 +356,29 @@ export function RunDetail({
             >
               <IconTrash size={13} /> Delete run
             </button>
-          )}
+          ))}
         </div>
       </footer>
     </aside>
   );
 
+  /** How far the delete reaches, in one sentence, for the confirm. */
+  function deleteReach(): string {
+    if (run.remote) return "This removes it from the team's board. There is no copy on this machine.";
+    if (mine) return "This removes it from this machine and from the team's board.";
+    // Never launched from Helios: never shared, nothing else to reach.
+    if (!run.driverId) return "This removes it from this machine.";
+    if (!driverId) {
+      return "This removes it from this machine. Its time stays on the team's board; sign in as its driver to take it down.";
+    }
+    return "This removes it from this machine. Its time stays on the team's board, where only its driver can take it down.";
+  }
+
   async function handleDelete() {
     try {
-      await simDeleteRun(run.runId);
+      // The directory only exists for a local run; `sim_delete_run` refuses a
+      // path that is not a run, which for a shared one is every path.
+      if (!run.remote) await simDeleteRun(run.runId);
       onDeleted(run.runId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

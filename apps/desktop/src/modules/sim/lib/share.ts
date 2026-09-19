@@ -93,7 +93,10 @@ export function rowToRun(row: RunRow): SimRun {
     physics: null,
     simVersion: null,
     synthetic: row.synthetic,
-    samples: 0,
+    // Carried in `stats` rather than promoted to a column: nothing sorts on
+    // it. Zero on a row pushed before it travelled, which the panel shows as
+    // unknown rather than as a count.
+    samples: (stats as { samples?: number }).samples ?? 0,
     assists: {
       traction: !!row.assists?.traction,
       abs: !!row.assists?.abs,
@@ -144,7 +147,10 @@ function runToRow(
     format_version: run.formatVersion ?? 1,
     profile: run.profile,
     detected_input: run.detectedInput,
-    stats: { ...run.stats, sampleRateHz: run.sampleRateHz },
+    // The sample count rides in `stats` beside the rate. It was left out, so
+    // every shared run reported "0 samples at 99 Hz" -- and importing one
+    // wrote that zero into the local manifest, where it stayed.
+    stats: { ...run.stats, sampleRateHz: run.sampleRateHz, samples: run.samples },
     laps_detail: run.laps ?? [],
   };
 }
@@ -530,6 +536,39 @@ export async function pushRuns(
     }
   }
   return out;
+}
+
+/**
+ * Take one of your own runs off the team's board, lap and all.
+ *
+ * There was no way to do this. Deleting a run removed the directory and left
+ * the row, so the run came straight back with a cloud icon, still ranked; the
+ * button said "for good" and meant "from this disk". The row goes first and
+ * says what it pointed at, so the object can follow. If that second step
+ * fails, the sweep in `pushRuns` collects it on the next sync -- an object
+ * with no row is exactly what the sweep is for. Table and storage RLS both
+ * refuse anybody else's, so this cannot take down a teammate's run however it
+ * is called.
+ *
+ * Another machine of yours that still holds the files will share the run
+ * again the next time it syncs: from where it stands the run is simply one
+ * the server has not seen. That is the honest limit of a delete with no
+ * tombstone, and it costs a second delete rather than anything lost.
+ */
+export async function deleteSharedRun(client: SupabaseClient, runId: string): Promise<void> {
+  const res = await client
+    .schema(SCHEMA)
+    .from(TABLE)
+    .delete()
+    .eq("run_id", runId)
+    .select("telemetry_object");
+  if (res.error) throw new Error(`delete shared run: ${res.error.message}`);
+  const objects = ((res.data ?? []) as { telemetry_object: string | null }[])
+    .map((r) => r.telemetry_object)
+    .filter((o): o is string => !!o);
+  if (!objects.length) return;
+  const rm = await client.storage.from(BUCKET).remove(objects);
+  if (rm.error) throw new Error(`delete shared telemetry: ${rm.error.message}`);
 }
 
 /** A shared run's telemetry, for bringing it onto this machine. */

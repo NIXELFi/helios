@@ -104,7 +104,7 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
           <div className="min-w-0 flex-1">
             <div
               className="text-[10px] uppercase tracking-wider text-helios-dim"
-              title="The best SCORED lap: raw time plus two seconds a cone and ten an excursion, which is what an event scores"
+              title="The best SCORED lap: raw time plus two seconds a cone. A lap that went off course has no time here — stricter than FSAE's +20 s, on purpose."
             >
               Best lap anyone has scored
             </div>
@@ -138,9 +138,9 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
           {b.entries.length === 0 ? (
             <p className="px-5 py-6 text-center text-xs text-helios-dim">
               Nothing ranked here yet. Every run on this course was either started
-              outside Helios (so nobody can say who drove it), had driver aids on, was
-              set by the robot driver, or never completed a lap. Launch from the
-              Launch tab while signed in and the time counts.
+              outside Helios (so nobody can say who drove it), went off course, had
+              driver aids on, was set by the robot driver, or never completed a lap.
+              Launch from the Launch tab while signed in and the time counts.
             </p>
           ) : (
             <table className="w-full border-collapse text-xs">

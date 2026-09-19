@@ -10,7 +10,7 @@ import { RunDetail } from "./components/RunDetail";
 import { RunsTable } from "./components/RunsTable";
 import { SessionSummary, runsInSession, type SessionWindow } from "./components/SessionSummary";
 import { listen } from "@tauri-apps/api/event";
-import { fetchSharedRuns, fetchSharedTelemetry, pushRuns } from "./lib/share";
+import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns } from "./lib/share";
 import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus,
   type SimManifest, type SimRun, type SimStatus,
   TRACKS, type TrackId,
@@ -117,12 +117,62 @@ export function SimHome({ active }: { active: boolean }) {
     }
   }, [client, driver]);
 
-  // Follows the local read rather than running on its own clock: pushing runs
-  // that have not been listed yet would be pushing nothing.
+  /**
+   * WHEN to sync.
+   *
+   * Not on every listing. `refresh` hands back a fresh array every six
+   * seconds whether or not anything changed, and syncing on the array's
+   * identity meant a whole-table read, a per-user read and possibly a
+   * fifty-row upsert every six seconds per open client -- two hundred
+   * whole-table selects a minute across twenty of them. Worse, one row the
+   * server will not take (a manifest whose `startedAt` does not parse as a
+   * timestamp, say) failed the whole batch every six seconds, and nothing
+   * ever pushed for anyone.
+   *
+   * So: on sign-in, and when the SET of local run ids changes. A run being
+   * written or deleted is what changes the listing, and the ids are what say
+   * so; the simulator exiting lands here through the run it wrote, and an
+   * exit that wrote nothing has nothing to push.
+   */
+  const localIds = useMemo(() => runs.map((r) => r.runId).sort().join("\n"), [runs]);
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  // One at a time. Two syncs overlapping would both read the same rows and
+  // both decide to push them; a request that lands mid-sync runs once more
+  // afterwards rather than alongside.
+  const syncing = useRef(false);
+  const syncAgain = useRef(false);
+  const requestSync = useCallback(() => {
+    if (syncing.current) { syncAgain.current = true; return; }
+    syncing.current = true;
+    void (async () => {
+      do {
+        syncAgain.current = false;
+        await syncShared(runsRef.current);
+      } while (syncAgain.current);
+      syncing.current = false;
+    })();
+  }, [syncShared]);
+
+  // `requestSync` changes identity with `syncShared`, which changes with the
+  // signed-in account: that is the sign-in trigger. Waits for the first
+  // listing, because pushing runs that have not been listed yet would be
+  // pushing nothing.
   useEffect(() => {
     if (loading) return;
-    void syncShared(runs);
-  }, [loading, runs, syncShared]);
+    requestSync();
+  }, [loading, localIds, requestSync]);
+
+  // The board stays live for somebody only watching it, without the write
+  // half: a teammate's new time is a row they pushed, and reading the table
+  // once a minute is cheap where syncing it every six seconds was not.
+  useEffect(() => {
+    if (!active || !client || !driver) return;
+    const id = window.setInterval(() => {
+      fetchSharedRuns(client).then(setShared).catch(() => { /* offline is normal */ });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [active, client, driver]);
 
   /**
    * Everything, local and shared, with the local copy winning.
@@ -246,7 +296,7 @@ export function SimHome({ active }: { active: boolean }) {
     const track = TRACKS.some((t) => t.id === run.track)
       ? (run.track as TrackId)
       : TRACKS[0]!.id;
-    simLaunch({
+    const go = () => simLaunch({
       track,
       profile: prefs.profile || undefined,
       driver: driver.name,
@@ -260,7 +310,15 @@ export function SimHome({ active }: { active: boolean }) {
       noRecord: !prefs.record,
       reference: run.runId,
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [driver]);
+    // The simulator reads the reference out of the runs directory -- it
+    // builds its time-at-distance table from the lap's telemetry -- so a
+    // shared run has to be brought here first, exactly as a replay does.
+    if (run.remote) {
+      void materialise(run).then((ok) => { if (ok) go(); });
+      return;
+    }
+    void go();
+  }, [driver, materialise]);
 
   /**
    * The simulator Helios started has closed.
@@ -318,8 +376,8 @@ export function SimHome({ active }: { active: boolean }) {
           {error && <span className="max-w-[420px] truncate text-xs text-helios-danger">{error}</span>}
           <button
             className="rounded p-1 text-helios-dim transition hover:text-helios-text"
-            title="Re-read the run archive"
-            onClick={() => void refresh()}
+            title="Re-read the run archive and sync with the team"
+            onClick={() => { void refresh(); requestSync(); }}
           >
             <IconRefresh size={15} />
           </button>
@@ -374,7 +432,7 @@ export function SimHome({ active }: { active: boolean }) {
             run={selected}
             allRuns={allRuns}
             canReplay={canReplay}
-            canDrive={!!driver}
+            driverId={driver?.id ?? null}
             onClose={() => setSelectedId(null)}
             onReplay={(r, ghostId) => replay(r.runId, ghostId)}
             onOpenInLogs={openInLogs}
@@ -384,7 +442,19 @@ export function SimHome({ active }: { active: boolean }) {
               // Invalidate any refresh already in flight, so its older listing
               // cannot put this row back.
               seq.current += 1;
+              const run = allRunsRef.current.find((r) => r.runId === id);
               setRuns((prev) => prev.filter((r) => r.runId !== id));
+              // And from the team's copy. Filtering only the local list left
+              // the shared row in the merge, so the run came straight back
+              // with a cloud icon, still ranked -- "Delete for good" had
+              // meant "from this disk". A run of your own goes off the board
+              // as well; anybody else's was never yours to take down.
+              setShared((prev) => prev.filter((r) => r.runId !== id));
+              if (client && driver && run?.driverId === driver.id) {
+                deleteSharedRun(client, id).catch((e) => {
+                  setShareNote(`could not remove it from the board: ${e instanceof Error ? e.message : String(e)}`);
+                });
+              }
             }}
           />
         )}

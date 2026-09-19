@@ -85,6 +85,13 @@ describe("a shared row becomes a run", () => {
     expect(r.laps).toHaveLength(1);
   });
 
+  it("carries the sample count, and admits when a row has none", () => {
+    // The detail panel used to show "Samples 0 at 99 Hz" for every shared
+    // run, and importing one wrote that zero into the local manifest.
+    expect(rowToRun(row({ stats: { samples: 3963 } })).samples).toBe(3963);
+    expect(rowToRun(row({ stats: {} })).samples).toBe(0);
+  });
+
   it("is marked as not being on this machine", () => {
     const r = rowToRun(row());
     expect(r.remote).toBe(true);

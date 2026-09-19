@@ -14,7 +14,8 @@
 import { useEffect, useMemo } from "react";
 import { IconX, IconTrophy, IconFlag, IconAlertTriangle } from "@tabler/icons-react";
 import {
-  fmtTime, hasTrustworthySectors, isRankable, runBest, trackName, unrankedReason, type SimRun,
+  bestLapWentOffCourse, fmtTime, hasTrustworthySectors, isRankable, runBest, trackName,
+  unrankedReason, type SimRun,
 } from "../api";
 
 export interface SessionWindow {
@@ -218,8 +219,10 @@ export function SessionSummary({
                             })
                           : "—"}
                       </span>
+                      {/* A lap thrown out for going off course has no time
+                          either, and "no lap" is not what happened to it. */}
                       <span className={"w-20 shrink-0 font-mono " + (isBest ? "text-asu-gold" : "")}>
-                        {t != null ? fmtTime(t) : "no lap"}
+                        {t != null ? fmtTime(t) : bestLapWentOffCourse(r) ? "off course" : "no lap"}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-helios-dim">
                         {trackName(r.track)}

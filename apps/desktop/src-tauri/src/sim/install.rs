@@ -376,8 +376,38 @@ fn fetch_verified(
     }
 
     // Only now does it become the executable.
-    let _ = fs::remove_file(&dest);
-    fs::rename(&tmp, &dest).map_err(|e| format!("install to {}: {e}", dest.display()))?;
+    publish(&tmp, &dest)?;
+    Ok((dest, total))
+}
+
+/// Make the verified download the executable, or leave nothing behind.
+///
+/// Split from `fetch_verified` so the one way this fails on a real machine
+/// can be tested without a network: the destination is the simulator that is
+/// RUNNING. Windows will neither delete nor replace a mapped image, and the
+/// banner deliberately offers a rollback -- A to B and back to A while A is
+/// still open -- so a user can walk into this from a button. The rename used
+/// to fail straight out of the function with `?`, which left the `.part`
+/// beside the executable and broke the contract above that every early
+/// return scrubs it; a rig that tried twice had two.
+fn publish(tmp: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    let scrub = |e: String| -> String {
+        let _ = fs::remove_file(tmp);
+        e
+    };
+    // Say which of the two steps refused, because the fix is different: a
+    // destination that will not go is almost always the simulator running.
+    match fs::remove_file(dest) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(scrub(format!(
+                "could not replace {}: {e}. If the simulator is running, close it and try again",
+                dest.display()
+            )));
+        }
+    }
+    fs::rename(tmp, dest).map_err(|e| scrub(format!("install to {}: {e}", dest.display())))?;
     // ...and on a Unix it is not one until it is marked as one. Downloads
     // arrive 0644; a simulator that cannot be executed is not installed.
     // Lives here, beside the rename, rather than in the caller: "becomes the
@@ -385,9 +415,9 @@ fn fetch_verified(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+        let _ = fs::set_permissions(dest, fs::Permissions::from_mode(0o755));
     }
-    Ok((dest, total))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -400,6 +430,48 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
     fn lock_env() -> MutexGuard<'static, ()> {
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The contract: whichever step refuses, the `.part` file does not stay.
+    /// A destination that cannot be removed stands in for the running
+    /// simulator, which Windows will neither delete nor replace; a
+    /// destination whose directory does not exist makes the rename itself
+    /// refuse.
+    #[test]
+    fn a_publish_that_fails_leaves_no_part_file() {
+        let dir = scratch("refused");
+        fs::create_dir_all(&dir).unwrap();
+        let tmp = dir.join("fsae-sim.exe.1.part");
+        fs::write(&tmp, b"new build").unwrap();
+        let dest = dir.join("fsae-sim.exe");
+        fs::create_dir(&dest).unwrap();
+        fs::write(dest.join("held"), b"x").unwrap();
+        let err = publish(&tmp, &dest).unwrap_err();
+        assert!(err.contains("close it and try again"), "{err}");
+        assert!(!tmp.exists(), "the .part file was left behind");
+        assert!(dest.join("held").is_file(), "the destination was touched");
+
+        let tmp = dir.join("fsae-sim.exe.2.part");
+        fs::write(&tmp, b"new build").unwrap();
+        let missing = dir.join("no-such-dir").join("fsae-sim.exe");
+        let err = publish(&tmp, &missing).unwrap_err();
+        assert!(err.contains("install to"), "{err}");
+        assert!(!tmp.exists(), "the .part file was left behind after the rename refused");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_publish_replaces_what_is_there() {
+        let dir = scratch("replaced");
+        fs::create_dir_all(&dir).unwrap();
+        let tmp = dir.join("fsae-sim.exe.3.part");
+        let dest = dir.join("fsae-sim.exe");
+        fs::write(&tmp, b"new build").unwrap();
+        fs::write(&dest, b"old build").unwrap();
+        publish(&tmp, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"new build");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

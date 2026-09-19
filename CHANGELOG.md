@@ -73,11 +73,59 @@ follow [semver](https://semver.org/).
   derived from it. A 100 Hz log recorded on a 144 Hz display has gaps that
   alternate between one frame and two, and the old estimate landed on one of
   the two rather than between them: a real 45-second run measured 141 Hz
-  against an actual 99.3. It now reads 102, and a log with a ten-second
-  dropout in the middle still reads 100 rather than collapsing.
+  against an actual 99.3. It now reads 99.3 — the rate the simulator itself
+  recorded — and a log with a ten-second dropout in the middle still reads
+  100 rather than collapsing.
 - Telemetry shared from a run that was not driven on a wheel now goes up at
   10 Hz rather than 100. Nobody studies a thumbstick's steering trace sample
   by sample, and an endurance run stops being eleven megabytes.
+- **The leaderboard's tooltip described a scoring rule nobody uses.** It said
+  an excursion costs ten seconds, "which is what an event scores". FSAE scores
+  an off course at twenty seconds, and this board — since 5.8.1 — gives such
+  a lap no time at all. The tooltip now says exactly that, and the footnote
+  under the runs table and the empty-board message list going off course
+  among the reasons a run is not ranked, which until now they did not.
+- **A run whose only lap went off course was described as having "no
+  completed lap".** The lap was completed and then thrown out, which is a
+  different thing from never finishing one, and the reason is what you hover
+  a time for. The runs table, the detail panel and the end-of-session card
+  now say the lap went off course.
+- **A teammate's shared run opened with a red error and the wrong numbers.**
+  The detail panel read a manifest it does not have and put "cannot find the
+  file specified" at the bottom, reported "0 samples at 99 Hz" and no
+  telemetry, offered "Watch replay" for a run whose lap was never shared and
+  refused "Open in Logs" for one whose lap was — the opposite of what the runs
+  table beside it said about the same run. It now knows the run is not on
+  this machine: it shows the size of the shared lap, the real sample count
+  where the row carries one, offers replay, Logs and "Drive against this lap"
+  exactly when the lap was shared (fetching it first, as the table does), and
+  drops "Show the files" for a run that has none here.
+- **Deleting a run did not delete it from the team.** "Delete for good"
+  removed the directory and left the row on the server, so the run came
+  straight back with a cloud icon, still ranked. Deleting one of your own
+  runs now takes it off the team's board as well, lap included, and the
+  confirmation says how far the delete reaches — this machine, the board, or
+  both — before you press it. A machine of yours that still holds the files
+  will share the run again the next time it syncs; delete it there too.
+- **Helios no longer talks to the server every six seconds while the Sim tab
+  is open.** It synced the whole archive with Supabase on every re-read of
+  the disk whether or not anything had changed, and one run the server would
+  not accept blocked every other run from being shared, ten times a minute.
+  It now pushes on sign-in and when a run is written or deleted, re-reads the
+  team's board once a minute, and the refresh button does both at once.
+- **Driving against a lap you were just watching no longer ends the session
+  before it starts.** "Watch that lap" and then "Drive against this lap" put
+  the session summary over an empty simulator window with the driver still on
+  the grid, and when that window really closed nothing happened. The
+  simulator is single-instance, so the drive had been handed to the replay's
+  window and its own process had exited at once; Helios now watches the
+  window whatever it was opened for, and speaks when that closes.
+- **A simulator update that could not replace the running simulator left a
+  `.part` file behind.** Rolling back to the build you are currently running,
+  which the update banner offers, fails on Windows because a running
+  executable cannot be replaced — and the half-installed download stayed
+  beside it. The download is now removed whichever step refuses, and the
+  error says to close the simulator and try again.
 
 ## [5.8.1] - 2026-09-19
 

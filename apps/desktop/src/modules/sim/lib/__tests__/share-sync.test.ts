@@ -9,7 +9,7 @@
  * them pointing at nineteen megabytes of laps. */
 import { describe, it, expect } from "vitest";
 
-import { pushRuns, telemetryToKeep } from "../share";
+import { deleteSharedRun, pushRuns, telemetryToKeep } from "../share";
 import type { SimRun } from "../../api";
 
 const ME = "5c438ca3-9dee-45a7-bf15-4be3b98b5712";
@@ -42,17 +42,22 @@ function server() {
   const client = (userId: string) => {
     const query = () => {
       let filter = (_r: Record<string, unknown>) => true;
+      let deleting = false;
       const chain = {
         select() { return chain; },
         order() { return chain; },
         limit() { return chain; },
+        delete() { deleting = true; return chain; },
         eq(col: string, v: unknown) {
           const prev = filter;
           filter = (r) => prev(r) && r[col] === v;
           return chain;
         },
         then(resolve: (v: unknown) => unknown) {
-          return resolve({ data: [...table.values()].filter(filter), error: null });
+          const rows = [...table.values()].filter(filter);
+          // `delete().select()` hands back what it removed, as PostgREST does.
+          if (deleting) for (const r of rows) table.delete(r.run_id as string);
+          return resolve({ data: rows, error: null });
         },
         upsert(payload: Record<string, unknown>[]) {
           for (const p of payload) {
@@ -98,7 +103,7 @@ function server() {
   const sync = (userId: string, local: SimRun[]) =>
     pushRuns(client(userId), userId, local, async () => csv);
   const objectOf = (id: string) => table.get(id)?.telemetry_object ?? null;
-  return { table, bucket, removed, sync, objectOf };
+  return { table, bucket, removed, sync, objectOf, client };
 }
 
 const csv = new TextEncoder().encode(
@@ -227,11 +232,41 @@ describe("the same driver on a second machine", () => {
     expect([...s.bucket.keys()].sort()).toEqual(objects);
   });
 
+  it("carries the sample count up with the row", async () => {
+    // It was left out, so every shared run read "0 samples at 99 Hz".
+    const s = server();
+    await s.sync(ME, RIG);
+    expect((s.table.get("a")?.stats as { samples?: number }).samples).toBe(4000);
+  });
+
   it("counts a run only the server holds when deciding what to keep", () => {
     // The row, dressed as a run. It is a run of mine and it is not on this
     // disk; the rule has to see it or the two machines disagree.
     const theirs = run("on-the-rig", 40, 2, { remote: true, dir: "", telemetryPath: "" });
     const keep = telemetryToKeep([run("here", 45, 9), theirs], ME);
     expect(keep.has("on-the-rig")).toBe(true);
+  });
+});
+
+describe("taking a run off the board", () => {
+  it("removes the row and the lap it pointed at", async () => {
+    // There was no way to do this: "Delete for good" removed the directory
+    // and the run came straight back from the server, still ranked.
+    const s = server();
+    await s.sync(ME, RIG);
+    const object = s.objectOf("b") as string;
+    await deleteSharedRun(s.client(ME), "b");
+    expect(s.table.has("b")).toBe(false);
+    expect(s.bucket.has(object)).toBe(false);
+    expect(s.removed).toEqual([object]);
+  });
+
+  it("is content with a run that shared its time only", async () => {
+    const s = server();
+    await s.sync(ME, RIG);
+    expect(s.objectOf("a")).toBeNull();
+    await deleteSharedRun(s.client(ME), "a");
+    expect(s.table.has("a")).toBe(false);
+    expect(s.removed).toEqual([]);
   });
 });

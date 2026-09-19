@@ -109,6 +109,22 @@ describe("RunsTable", () => {
     expect(screen.getByRole("button", { name: /expand all/i })).toBeTruthy();
   });
 
+  it("names going off course among the reasons a run is not ranked", () => {
+    // The footnote listed every reason but this one, which under format 3 is
+    // the most common. A footnote that explains the asterisk with a list that
+    // omits the usual cause is worse than none.
+    const off = run({
+      runId: "off", startedAt: ago(0, 14), driver: "Kim", formatVersion: 3,
+      laps: [{ lap: 1, raw: 43, cones: 0, off: 1, total: 43, valid: false, sectors: [], startedAtS: 0 }],
+      stats: { ...RUNS[0]!.stats, laps: 1, bestLapS: null, bestLapNumber: null, totalOffCourse: 1 },
+    });
+    const { container } = render(<RunsTable {...PROPS} runs={[off, ...RUNS]} />);
+    fireEvent.click(dayHeadings(container)[0]!);
+    expect(screen.getByText("Kim")).toBeTruthy();
+    const note = screen.getByText(/not ranked —/);
+    expect(note.textContent).toMatch(/went off course/);
+  });
+
   it("reveals a run selected from somewhere else", () => {
     // The leaderboard and the end-of-session summary both do this: set the
     // selection and switch to this tab. Landing on a table where the selected

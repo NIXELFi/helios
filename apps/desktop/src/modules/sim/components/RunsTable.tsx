@@ -4,7 +4,7 @@ import {
   IconRobot,
 } from "@tabler/icons-react";
 import {
-  TRACKS, fmtTime, fmtWhen, isRankable, runBest, unrankedReason, type SimRun,
+  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, unrankedReason, type SimRun,
 } from "../api";
 
 type SortKey = "when" | "best" | "driver" | "track";
@@ -56,18 +56,6 @@ interface Props {
  * Local time on purpose: a session that ran past midnight UTC is still one
  * evening's driving to the person who drove it.
  */
-/**
- * Is there telemetry to open, wherever it lives?
- *
- * Locally that is a file with bytes in it -- a run whose telemetry never
- * landed has a path and zero bytes. For a shared run it is whether the driver
- * uploaded the lap at all, which only happens for a personal best: everything
- * else shares its time and nothing more.
- */
-function hasTelemetry(run: SimRun): boolean {
-  return run.remote ? !!run.telemetryObject : run.telemetryBytes > 0;
-}
-
 function dayOf(run: SimRun): { key: string; label: string } {
   const t = run.startedAt ? new Date(run.startedAt) : null;
   if (!t || Number.isNaN(t.getTime())) return { key: "unknown", label: "Undated" };
@@ -473,8 +461,8 @@ export function RunsTable({
           this used to explain an asterisk that was nowhere on the page. */}
       {visible.some((r) => unrankedReason(r)) && (
         <p className="border-t border-helios-line px-3 py-1.5 text-[11px] text-helios-muted">
-          * not ranked — started outside Helios, driver aids were on, the robot driver set
-          it, or no lap was completed. Hover a time for the reason.
+          * not ranked — started outside Helios, went off course, driver aids were on,
+          the robot driver set it, or no lap was completed. Hover a time for the reason.
         </p>
       )}
     </div>

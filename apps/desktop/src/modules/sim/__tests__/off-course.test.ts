@@ -52,7 +52,23 @@ describe("a lap that left the course", () => {
     });
     expect(bestLapWentOffCourse(off)).toBe(true);
     expect(isRankable(off)).toBe(false);
-    expect(unrankedReason(off)).toBe("that lap left the course");
+    expect(unrankedReason(off)).toBe("that lap went off course");
+  });
+
+  it("is why a run whose ONLY lap went off is unranked -- not 'no completed lap'", () => {
+    // Exactly the shape the simulator writes since format 3, and three real
+    // runs in the archive have it: one completed lap, thrown out, so no best
+    // lap number and no time. Testing for the time first reported the one
+    // thing definitely not true of it.
+    const thrownOut = run({
+      laps: [lap({ lap: 1, off: 1, raw: 43.329, cones: 8, total: 59.329, valid: false })],
+      stats: { ...run().stats, laps: 1, bestLapS: null, bestLapRawS: null, bestLapNumber: null, totalOffCourse: 1 },
+    });
+    expect(isRankable(thrownOut)).toBe(false);
+    expect(unrankedReason(thrownOut)).toBe("that lap went off course");
+    // ...and a run that genuinely never finished a lap still says so.
+    const never = run({ laps: [], stats: { ...run().stats, laps: 0, bestLapS: null, bestLapNumber: null } });
+    expect(unrankedReason(never)).toBe("no completed lap");
   });
 
   it("does not stop the CLEAN laps of the same run ranking", () => {

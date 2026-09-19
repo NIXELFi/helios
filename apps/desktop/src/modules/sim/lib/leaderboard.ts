@@ -4,11 +4,13 @@
  * without a filesystem, a simulator or a window.
  *
  * The thing worth being careful about is which time counts. A lap has a raw
- * time and a scored total (raw plus two seconds a cone and ten an excursion),
- * and the scored total is the one that matters — it is what the event scores.
- * `stats.bestLapS` is already the scored total, so that is what ranks. Raw is
- * carried alongside because it is what tells a driver whether they were quick
- * and untidy or just slow.
+ * time and a scored total -- raw plus two seconds a cone -- and the scored
+ * total is the one that matters. A lap that went off course has no scored
+ * total at all: FSAE would add twenty seconds and keep the time, and this
+ * board deliberately does not, because nobody is marshalling it (see
+ * `bestLapWentOffCourse`). `stats.bestLapS` is already the scored total, so
+ * that is what ranks. Raw is carried alongside because it is what tells a
+ * driver whether they were quick and untidy or just slow.
  */
 
 import { hasTrustworthySectors, isRankable, runBest, type SimRun } from "../api";

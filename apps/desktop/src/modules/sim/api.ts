@@ -489,6 +489,24 @@ export function runBest(run: SimRun): number | null {
 }
 
 /**
+ * Is there telemetry to open, wherever it lives?
+ *
+ * Locally that is a file with bytes in it -- a run whose telemetry never
+ * landed has a path and zero bytes. For a shared run it is whether the driver
+ * uploaded the lap at all, which only happens for a personal best: everything
+ * else shares its time and nothing more.
+ *
+ * One definition, for the runs table and the detail panel both. They used to
+ * disagree about the same run on the same screen: the table offered to fetch
+ * and open a teammate's lap while the panel beside it said the run had no
+ * telemetry file, because the panel was reading the local byte count of a run
+ * that has no local file.
+ */
+export function hasTelemetry(run: SimRun): boolean {
+  return run.remote ? !!run.telemetryObject : run.telemetryBytes > 0;
+}
+
+/**
  * A run counts toward a leaderboard only if a person drove it clean of the
  * things that make a time meaningless to compare: the driver aids, and the
  * robot driver that the sample generator uses.
@@ -518,8 +536,15 @@ export function unrankedReason(run: SimRun): string | null {
   if (isRankable(run)) return null;
   if (run.synthetic) return "driven by the robot driver, not a person";
   if (!run.driverId) return "not launched from Helios, so the driver is unverified";
+  if ((run.stats.laps ?? 0) === 0) return "no completed lap";
+  // Before the time is looked at, not after. A run whose only lap went off
+  // has had no time BY CONSTRUCTION since format 3, so asking "is there a
+  // time" first answered "no completed lap" -- the one thing definitely not
+  // true of it: the lap was completed, and thrown out. Three real runs sat
+  // in the archive saying that. "Off course" is the simulator's own word for
+  // it, on its finish card and in its lap list, so it is the word here.
+  if (bestLapWentOffCourse(run)) return "that lap went off course";
   if (runBest(run) == null) return "no completed lap";
-  if (bestLapWentOffCourse(run)) return "that lap left the course";
   const on: string[] = [];
   if (run.assists.traction) on.push("traction control");
   if (run.assists.abs) on.push("ABS");

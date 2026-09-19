@@ -517,25 +517,80 @@ pub fn sim_launch(app: tauri::AppHandle, request: LaunchRequest) -> Result<Launc
 /// The event name both sides agree on.
 pub const SIM_EXITED_EVENT: &str = "sim://exited";
 
-/// The pid of the process whose exit ends a session, if one is running.
-static WATCHED: Mutex<Option<u32>> = Mutex::new(None);
+/// The process that owns the simulator's window, while one is open.
+///
+/// The simulator is single-instance: the first process to start is the
+/// window, and every launch after it is a messenger that hands its arguments
+/// to that window and exits within about a hundred milliseconds. So the
+/// process to wait on is the WINDOW, whatever it was opened for -- which is
+/// what this used to get wrong. A replay was never registered here, so a
+/// drive sent into a window a replay had opened found nothing watched,
+/// registered itself, and announced its own exit a hundred milliseconds later:
+/// the session-summary card came up over an empty window with the driver
+/// still on the grid, and when the real window finally closed, nothing said
+/// so. Reachable from "Watch that lap" followed by "Drive against this lap".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Watched {
+    pid: u32,
+    /// Whether this window's exit ends a session worth announcing. A window
+    /// opened for a replay starts false -- announcing one put "the simulator
+    /// closed without filing a run" over a replay that had just opened -- and
+    /// turns true the moment a drive is sent into it.
+    announce: bool,
+    /// When the session began: the first DRIVE, which for a window a replay
+    /// opened is later than the window.
+    started_at_ms: u64,
+}
 
-/// Wait for a spawned simulator and, if it was the one running the session,
-/// say so when it goes.
+static WATCHED: Mutex<Option<Watched>> = Mutex::new(None);
+
+/// What a freshly spawned child is, given what is already being watched.
+#[derive(Debug, PartialEq, Eq)]
+enum Role {
+    /// This child is the window. Its exit is the one that matters.
+    Window,
+    /// The window is already open; this child only carried a message to it
+    /// and will exit at once, which means nothing.
+    Messenger,
+}
+
+/// Register a spawned child. Pure, so the policy can be tested without a
+/// process or an `AppHandle` -- the latter cannot be reached from a unit test
+/// on Windows without linking the whole GUI stack.
+fn claim(watched: &mut Option<Watched>, pid: u32, started_at_ms: u64, is_replay: bool) -> Role {
+    match watched {
+        None => {
+            *watched = Some(Watched { pid, announce: !is_replay, started_at_ms });
+            Role::Window
+        }
+        Some(w) => {
+            // A drive into a window that a replay opened makes that window a
+            // session: its exit now matters, and the session began now.
+            if !is_replay && !w.announce {
+                w.announce = true;
+                w.started_at_ms = started_at_ms;
+            }
+            Role::Messenger
+        }
+    }
+}
+
+/// A child has exited. If it was the window, hand back what was being watched
+/// so the caller can decide whether to announce; anything else says nothing.
+fn release(watched: &mut Option<Watched>, pid: u32) -> Option<Watched> {
+    match watched {
+        Some(w) if w.pid == pid => watched.take(),
+        _ => None,
+    }
+}
+
+/// Wait for a spawned simulator and, if it was the window and a drive went
+/// into it, say so when it goes.
 ///
 /// Every child is waited on -- that is what reaps it on Unix, and without it
-/// the process lingers as a zombie. Only one of them is allowed to ANNOUNCE
-/// anything, and for two reasons:
-///
-///   * the simulator is single-instance, so every launch after the first is a
-///     messenger process that forwards its arguments and exits immediately. It
-///     is not the session ending; it is the session being told something.
-///   * a replay is not a session at all. Watching one put "the simulator
-///     closed without filing a run" over a replay that had just opened.
-///
-/// So the first drive to start owns the event until it ends. A later drive
-/// only takes over if nothing is being watched -- which is the case when the
-/// driver closed the window and started again.
+/// the process lingers as a zombie. Only the window is allowed to ANNOUNCE
+/// anything, and only if a drive happened in it; see `Watched` for the two
+/// reasons and the bug they were learned from.
 fn watch_child(
     app: tauri::AppHandle,
     mut child: std::process::Child,
@@ -543,29 +598,17 @@ fn watch_child(
     started_at_ms: u64,
     is_replay: bool,
 ) {
-    let announces = if is_replay {
-        false
-    } else {
-        let mut watched = WATCHED.lock().unwrap();
-        if watched.is_none() {
-            *watched = Some(pid);
-            true
-        } else {
-            false
-        }
-    };
+    let role = claim(&mut WATCHED.lock().unwrap(), pid, started_at_ms, is_replay);
     std::thread::spawn(move || {
         let code = child.wait().ok().and_then(|st| st.code());
-        if !announces {
+        if role != Role::Window {
             return;
         }
-        {
-            let mut watched = WATCHED.lock().unwrap();
-            if *watched == Some(pid) {
-                *watched = None;
-            }
+        let Some(w) = release(&mut WATCHED.lock().unwrap(), pid) else { return };
+        if !w.announce {
+            return;
         }
-        let payload = SimExited { pid, started_at_ms, ended_at_ms: now_ms(), code };
+        let payload = SimExited { pid, started_at_ms: w.started_at_ms, ended_at_ms: now_ms(), code };
         // A failure here is not worth surfacing: the window may simply have
         // gone before the simulator did.
         let _ = tauri::Emitter::emit(&app, SIM_EXITED_EVENT, payload);
@@ -585,6 +628,46 @@ mod tests {
     /// The minimum a drive needs: a signed-in driver.
     fn drive() -> LaunchRequest {
         LaunchRequest { driver: Some("Nick".into()), driver_id: Some(ID.into()), ..req() }
+    }
+
+    /// The window's exit is the session's end, whatever the window was opened
+    /// for. "Watch that lap" then "Drive against this lap" is a replay window
+    /// receiving a drive: the drive's own process is a messenger that exits at
+    /// once, and announcing THAT put the session summary over a driver still
+    /// sitting on the grid.
+    #[test]
+    fn a_drive_sent_into_a_replays_window_is_announced_when_that_window_closes() {
+        let mut w = None;
+        assert_eq!(claim(&mut w, 10, 1_000, true), Role::Window);
+        assert_eq!(claim(&mut w, 11, 2_000, false), Role::Messenger);
+        // The messenger's exit says nothing...
+        assert_eq!(release(&mut w, 11), None);
+        assert!(w.is_some(), "the window is still being watched");
+        // ...and the window's exit says a session ended, timed from the drive.
+        let ended = release(&mut w, 10).expect("the window's exit is the session's end");
+        assert!(ended.announce);
+        assert_eq!(ended.started_at_ms, 2_000, "the session began with the drive, not the replay");
+        assert!(w.is_none(), "nothing left watched once the window has gone");
+    }
+
+    #[test]
+    fn a_replay_on_its_own_is_never_announced() {
+        let mut w = None;
+        assert_eq!(claim(&mut w, 10, 1_000, true), Role::Window);
+        let ended = release(&mut w, 10).unwrap();
+        assert!(!ended.announce, "a replay is not a session");
+    }
+
+    #[test]
+    fn a_second_drive_is_a_messenger_and_the_session_keeps_its_start() {
+        let mut w = None;
+        assert_eq!(claim(&mut w, 10, 1_000, false), Role::Window);
+        assert_eq!(claim(&mut w, 11, 5_000, false), Role::Messenger);
+        let ended = release(&mut w, 10).unwrap();
+        assert_eq!(ended.started_at_ms, 1_000);
+        // And once the window has gone, the next drive owns a new session.
+        assert_eq!(claim(&mut w, 12, 9_000, false), Role::Window);
+        assert_eq!(release(&mut w, 12).unwrap().started_at_ms, 9_000);
     }
 
     #[test]

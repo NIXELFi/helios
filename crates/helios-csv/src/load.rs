@@ -307,12 +307,18 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
     Ok(LoadResult { rate_groups, warnings, duration_us })
 }
 
+/// A gap this many times the median gap is a dropout, not a sample interval.
+/// See `measured_rate_hz` for where the number comes from.
+const DROPOUT_MEDIANS: i64 = 20;
+
 /// Samples per second actually present in a group, or None when there are too
 /// few rows or no elapsed time to measure across.
 ///
-/// A TRIMMED MEAN of the interval between rows.
+/// The MEAN interval between rows, leaving out dropouts -- and a dropout is a
+/// gap longer than `DROPOUT_MEDIANS` times the median gap.
 ///
-/// Neither of the two obvious statistics works here, and both were tried.
+/// Neither of the two obvious statistics works here, and both were tried;
+/// then a third, and it was biased.
 ///
 /// Rows-over-span divides by the whole elapsed time including any gap, so a
 /// log with a dropout -- a receiver that stopped while the car sat still, an
@@ -325,14 +331,31 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
 /// The median survives dropouts and is wrong about JITTER, which is the
 /// common case rather than the exotic one. A 100 Hz sampler on a 144 Hz
 /// display fires on the first frame past each interval, so its gaps are
-/// bimodal -- one frame (6.9 ms) or two (13.9 ms), averaging 10 -- and the
-/// median lands inside one of the two modes. A real 45-second run measured
-/// 141 Hz that way against an actual 99.3.
+/// bimodal -- one frame (6.9 ms) or two (13.9 ms) -- and the median lands
+/// inside one of the two modes. Over seventy real runs it read 120 to 143 Hz
+/// against a true 98.4 to 100.0.
 ///
-/// So: drop the longest few percent, which is where a dropout lives, and take
-/// the mean of the rest, which is what a period actually is. The real file
-/// above comes out at 102 Hz and a 100 Hz log with ten seconds missing out of
-/// the middle comes out at 100.
+/// A trimmed mean that dropped the longest 5% of gaps was the third attempt,
+/// and it is biased by construction: the longest 5% of a bimodal distribution
+/// are not outliers, they are real two-frame gaps, and throwing them away
+/// shortens the mean whether or not anything dropped out. Over the same
+/// seventy runs it read 101.5 to 103.6 Hz where the simulator's own record of
+/// what it achieved says 98.7 to 99.8. It also always dropped the longest
+/// gap on a log under twenty gaps, whatever that gap was, and on exactly
+/// three rows it kept only the shorter of the two.
+///
+/// So the cut is relative to the median rather than a fixed share of the
+/// gaps. A hitch is a few frames long -- the longest gap in any of those
+/// seventy dropout-free logs was 8.1 medians -- and a pause that could move
+/// the answer is tens of medians at least: half a second on a 100 Hz log is
+/// seventy. Twenty sits between with room on both sides, and a gap of twenty
+/// medians wrongly kept costs under half a percent on a forty-second log.
+/// With nothing to drop this is exactly rows-over-span, which is what a period
+/// is, and every one of those seventy logs now measures within a hundredth of
+/// a hertz of its manifest. A 100 Hz log with ten seconds missing from the
+/// middle still reads 100.
+///
+/// The lower median, so three rows with a dropout between them still see it.
 fn measured_rate_hz(times_us: &[i64]) -> Option<f32> {
     if times_us.len() < 3 {
         return None;
@@ -342,13 +365,15 @@ fn measured_rate_hz(times_us: &[i64]) -> Option<f32> {
         return None;
     }
     gaps.sort_unstable();
-    // At least one gap survives the trim however short the log is.
-    let keep = ((gaps.len() as f64 * 0.95) as usize).max(1);
-    let total: i64 = gaps[..keep].iter().sum();
+    let median = gaps[(gaps.len() - 1) / 2];
+    let limit = median.saturating_mul(DROPOUT_MEDIANS);
+    // Sorted, so everything up to the first dropout is everything that counts.
+    let kept = gaps.iter().take_while(|&&g| g <= limit).count().max(1);
+    let total: i64 = gaps[..kept].iter().sum();
     if total <= 0 {
         return None;
     }
-    let mean_us = total as f64 / keep as f64;
+    let mean_us = total as f64 / kept as f64;
     Some((1_000_000.0 / mean_us) as f32)
 }
 
@@ -1038,9 +1063,12 @@ channels:
     /// so measuring rows-over-span -- which divides by the gap as well as by
     /// the driving -- would re-label an ordinary 100 Hz log and move every
     /// filter with it.
-    /// A 100 Hz sampler on a 144 Hz display: gaps alternate one frame and two,
-    /// averaging 10 ms. The median falls inside one of the two modes and reads
-    /// 141 Hz, which is how a real run got its rate group relabelled.
+    /// A 100 Hz sampler on a 144 Hz display: gaps alternate one frame and two.
+    /// Two of 6.9 ms to one of 13.9 ms averages 9.23 ms, which is 108.3 Hz --
+    /// not 10 ms and 100 Hz, which this test used to claim, with a tolerance
+    /// of ten hertz that hid both the arithmetic and the 5% trim quietly
+    /// shortening the mean. The median falls inside one of the two modes and
+    /// reads 145 Hz, which is how a real run got its rate group relabelled.
     #[test]
     fn jitter_does_not_change_the_measured_rate() {
         let mut t = Vec::new();
@@ -1050,7 +1078,28 @@ channels:
             now += if i % 3 == 2 { 13_900 } else { 6_900 };
         }
         let hz = measured_rate_hz(&t).expect("enough rows");
-        assert!((hz - 105.0).abs() < 10.0, "measured {hz} Hz on a jittery 100 Hz log");
+        let expect = 1_000_000.0 / ((2.0 * 6_900.0 + 13_900.0) / 3.0);
+        assert!((hz - expect).abs() < 0.05, "measured {hz} Hz on a jittery 100 Hz log, expected {expect:.2}");
+    }
+
+    /// The trimmed mean this replaced always dropped the longest gap on a log
+    /// under twenty gaps, whatever that gap was -- a real two-frame gap, every
+    /// time -- and on exactly three rows it kept only the shorter of the two.
+    #[test]
+    fn a_short_log_is_not_shortened() {
+        // Ten rows of ordinary jitter and no dropout: the answer is rows over
+        // span, to the hundredth.
+        let t: Vec<i64> = vec![0, 6_900, 20_800, 27_700, 34_600, 48_500, 55_400, 62_300, 76_200, 83_100];
+        let expect = (t.len() - 1) as f64 / ((t[t.len() - 1] - t[0]) as f64 / 1e6);
+        let hz = measured_rate_hz(&t).unwrap();
+        assert!((f64::from(hz) - expect).abs() < 0.01, "measured {hz} Hz on ten rows, expected {expect:.2}");
+
+        // Three rows, both gaps ordinary: both count.
+        let hz = measured_rate_hz(&[0, 10_000, 20_000]).unwrap();
+        assert!((hz - 100.0).abs() < 0.01, "measured {hz} Hz on three rows");
+        // Three rows with a dropout between them: it is still a dropout.
+        let hz = measured_rate_hz(&[0, 10_000, 5_010_000]).unwrap();
+        assert!((hz - 100.0).abs() < 0.01, "measured {hz} Hz on three rows across a dropout");
     }
 
     #[test]
