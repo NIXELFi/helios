@@ -310,15 +310,29 @@ pub fn load_csv_bytes(bytes: &[u8], registry: &ChannelRegistry) -> Result<LoadRe
 /// Samples per second actually present in a group, or None when there are too
 /// few rows or no elapsed time to measure across.
 ///
-/// The MEDIAN interval between rows, not rows-over-span. Span divides by the
-/// whole elapsed time including any gap, so a log with a dropout -- a receiver
-/// that stopped for ten seconds while the car sat still, an out-lap logged
-/// before the session proper -- measures far below its real rate. That matters
-/// because the caller compares this against the registry and re-labels the
-/// group when they disagree by a fifth, so a dropout could rewrite the nominal
-/// rate of a perfectly ordinary log and put every filter cutoff with it.
-/// The median ignores the gap and answers the question actually being asked:
-/// how fast is this thing sampled when it is sampling.
+/// A TRIMMED MEAN of the interval between rows.
+///
+/// Neither of the two obvious statistics works here, and both were tried.
+///
+/// Rows-over-span divides by the whole elapsed time including any gap, so a
+/// log with a dropout -- a receiver that stopped while the car sat still, an
+/// out-lap logged before the session proper -- measures far below its real
+/// rate. That matters because the caller compares this against the registry
+/// and re-labels the group when they disagree by a fifth, so one dropout
+/// could rewrite the nominal rate of an ordinary log and move every filter
+/// cutoff with it.
+///
+/// The median survives dropouts and is wrong about JITTER, which is the
+/// common case rather than the exotic one. A 100 Hz sampler on a 144 Hz
+/// display fires on the first frame past each interval, so its gaps are
+/// bimodal -- one frame (6.9 ms) or two (13.9 ms), averaging 10 -- and the
+/// median lands inside one of the two modes. A real 45-second run measured
+/// 141 Hz that way against an actual 99.3.
+///
+/// So: drop the longest few percent, which is where a dropout lives, and take
+/// the mean of the rest, which is what a period actually is. The real file
+/// above comes out at 102 Hz and a 100 Hz log with ten seconds missing out of
+/// the middle comes out at 100.
 fn measured_rate_hz(times_us: &[i64]) -> Option<f32> {
     if times_us.len() < 3 {
         return None;
@@ -328,8 +342,14 @@ fn measured_rate_hz(times_us: &[i64]) -> Option<f32> {
         return None;
     }
     gaps.sort_unstable();
-    let dt_us = gaps[gaps.len() / 2];
-    Some((1_000_000.0 / dt_us as f64) as f32)
+    // At least one gap survives the trim however short the log is.
+    let keep = ((gaps.len() as f64 * 0.95) as usize).max(1);
+    let total: i64 = gaps[..keep].iter().sum();
+    if total <= 0 {
+        return None;
+    }
+    let mean_us = total as f64 / keep as f64;
+    Some((1_000_000.0 / mean_us) as f32)
 }
 
 /// Output of the preamble-stripping pass: the cleaned text the CSV reader
@@ -1018,6 +1038,21 @@ channels:
     /// so measuring rows-over-span -- which divides by the gap as well as by
     /// the driving -- would re-label an ordinary 100 Hz log and move every
     /// filter with it.
+    /// A 100 Hz sampler on a 144 Hz display: gaps alternate one frame and two,
+    /// averaging 10 ms. The median falls inside one of the two modes and reads
+    /// 141 Hz, which is how a real run got its rate group relabelled.
+    #[test]
+    fn jitter_does_not_change_the_measured_rate() {
+        let mut t = Vec::new();
+        let mut now = 0i64;
+        for i in 0..400 {
+            t.push(now);
+            now += if i % 3 == 2 { 13_900 } else { 6_900 };
+        }
+        let hz = measured_rate_hz(&t).expect("enough rows");
+        assert!((hz - 105.0).abs() < 10.0, "measured {hz} Hz on a jittery 100 Hz log");
+    }
+
     #[test]
     fn a_dropout_does_not_change_the_measured_rate() {
         // 100 Hz throughout, with ten seconds missing in the middle.
