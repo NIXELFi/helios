@@ -236,8 +236,49 @@ fn install(version: String, progress: &dyn Fn(InstallProgress)) -> Result<Instal
         return Err("the feed did not give a SHA-256 for this build".into());
     }
 
+    let dir = install_root().join(&build.version);
+    let (dest, total) = fetch_verified(
+        &build.url,
+        &expect,
+        build.bytes,
+        &dir,
+        &|bytes| progress(InstallProgress {
+            version: build.version.clone(),
+            bytes,
+            total: build.bytes,
+        }),
+    )?;
+    // Point the launcher at it explicitly, so a stale copy elsewhere on the
+    // machine cannot win the search afterwards.
+    super::launch::sim_set_exe_path(Some(dest.display().to_string()))?;
+
+    Ok(Installed {
+        version: build.version,
+        exe_path: dest.display().to_string(),
+        bytes: total,
+    })
+}
+
+/// Download one file, verify its SHA-256, and only then let it be an executable.
+///
+/// Split out from `install` so it can be tested. `install` is where the
+/// POLICY lives -- the feed is re-fetched there, the version is matched there,
+/// and the build's url is checked to be same-origin with the feed there. This
+/// function is the mechanism: given a url and the hash it must have, put it on
+/// disk under that name or put nothing there at all. Every early return scrubs
+/// the partial file, because a rig that loses its connection twice should not
+/// quietly accumulate `.part` files.
+///
+/// Returns the installed path and the byte count.
+fn fetch_verified(
+    url: &str,
+    expect: &str,
+    declared_bytes: u64,
+    dir: &std::path::Path,
+    progress: &dyn Fn(u64),
+) -> Result<(PathBuf, u64), String> {
     let mut res = client()
-        .get(&build.url)
+        .get(url)
         .send()
         .map_err(|e| format!("download failed: {e}"))?;
     if !res.status().is_success() {
@@ -247,16 +288,14 @@ fn install(version: String, progress: &dyn Fn(InstallProgress)) -> Result<Instal
         if len > MAX_BYTES {
             return Err(format!("that build is {len} bytes, which is not a simulator"));
         }
-        if build.bytes > 0 && len != build.bytes {
+        if declared_bytes > 0 && len != declared_bytes {
             return Err(format!(
-                "the feed says {} bytes and the server is sending {len}",
-                build.bytes
+                "the feed says {declared_bytes} bytes and the server is sending {len}"
             ));
         }
     }
 
-    let dir = install_root().join(&build.version);
-    fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let exe_name = if cfg!(windows) { "fsae-sim.exe" } else { "fsae-sim" };
     // Named for this process as well as guarded by `INSTALLING`: the mutex
     // covers this Helios, the pid covers a second one started by hand.
@@ -265,8 +304,6 @@ fn install(version: String, progress: &dyn Fn(InstallProgress)) -> Result<Instal
 
     let mut hasher = Sha256::new();
     let mut total: u64 = 0;
-    // Anything that goes wrong below leaves a `.part` behind otherwise, and a
-    // rig that loses its connection twice accumulates them silently.
     let scrub = |e: String| -> String {
         let _ = fs::remove_file(&tmp);
         e
@@ -294,23 +331,20 @@ fn install(version: String, progress: &dyn Fn(InstallProgress)) -> Result<Instal
             // connection is a long time to look at a button that says
             // "Downloading" and nothing else.
             if total % (256 * 1024) < n as u64 {
-                progress(InstallProgress {
-                    version: build.version.clone(),
-                    bytes: total,
-                    total: build.bytes,
-                });
+                progress(total);
             }
         }
-        // The rename below has to publish bytes that are actually on the
-        // disk, not bytes that are still in a buffer.
+        // The rename below has to publish bytes that are actually on the disk,
+        // not bytes that are still in a buffer.
         let _ = out.sync_all();
     }
 
-    if build.bytes > 0 && total != build.bytes {
+    // A server that closed early looks exactly like a short file, and the hash
+    // would catch it -- but saying which went wrong is worth a line.
+    if declared_bytes > 0 && total != declared_bytes {
         let _ = fs::remove_file(&tmp);
         return Err(format!(
-            "the feed says {} bytes and {total} arrived; nothing was installed",
-            build.bytes
+            "the feed says {declared_bytes} bytes and {total} arrived; nothing was installed"
         ));
     }
 
@@ -325,21 +359,7 @@ fn install(version: String, progress: &dyn Fn(InstallProgress)) -> Result<Instal
     // Only now does it become the executable.
     let _ = fs::remove_file(&dest);
     fs::rename(&tmp, &dest).map_err(|e| format!("install to {}: {e}", dest.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
-    }
-
-    // Point the launcher at it explicitly, so a stale copy elsewhere on the
-    // machine cannot win the search afterwards.
-    super::launch::sim_set_exe_path(Some(dest.display().to_string()))?;
-
-    Ok(Installed {
-        version: build.version,
-        exe_path: dest.display().to_string(),
-        bytes: total,
-    })
+    Ok((dest, total))
 }
 
 #[cfg(test)]
@@ -396,6 +416,175 @@ mod tests {
             err.contains("could not reach the build feed"),
             "should have gone to the feed first, got: {err}"
         );
+    }
+
+    // ---- the download itself ----
+    //
+    // `install` is policy (re-fetch the feed, match the version, require the
+    // build to be same-origin with it) and `fetch_verified` is mechanism (put
+    // these bytes on disk under that name, or put nothing there). The policy
+    // half has tests above. This half never had any: the one install test
+    // asserts it FAILS at the fetch, so the code that writes an executable to
+    // a real disk had never been run by anything but a person.
+    //
+    // Plain HTTP on loopback, which is why this tests `fetch_verified` rather
+    // than `install`: `same_origin` requires https, correctly, and weakening
+    // it to make a test easier would be the wrong trade.
+
+    use std::io::Write as _;
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+
+    fn scratch(tag: &str) -> PathBuf {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let d = std::env::temp_dir()
+            .join(format!("helios-sim-install-{tag}-{}-{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    /// Serve `body` once at any path, then stop. Returns its base url.
+    ///
+    /// `truncate` sends a Content-Length that promises more than it delivers
+    /// and then hangs up, which is what a dropped connection looks like.
+    fn serve_once(body: Vec<u8>, declared: Option<usize>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            let Ok((mut sock, _)) = listener.accept() else { return };
+            // Read the request head so the client is not writing into a void.
+            {
+                use std::io::BufRead;
+                let mut r = std::io::BufReader::new(sock.try_clone().expect("clone"));
+                let mut line = String::new();
+                while r.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    line.clear();
+                }
+            }
+            let len = declared.unwrap_or(body.len());
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+            );
+            let _ = sock.write_all(head.as_bytes());
+            let _ = sock.write_all(&body);
+            let _ = sock.flush();
+        });
+        format!("http://{addr}")
+    }
+
+    fn sha_of(bytes: &[u8]) -> String {
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+
+    /// The happy path, on a real disk: bytes in, an executable out.
+    #[test]
+    fn a_verified_download_becomes_the_executable() {
+        let body = b"#!/not-really-an-exe\nbut the bytes are the bytes\n".to_vec();
+        let url = serve_once(body.clone(), None);
+        let dir = scratch("ok");
+        let (dest, total) =
+            fetch_verified(&url, &sha_of(&body), body.len() as u64, &dir, &|_| {})
+                .expect("install");
+        assert_eq!(total, body.len() as u64);
+        assert_eq!(fs::read(&dest).expect("read back"), body);
+        assert!(dest.file_name().unwrap().to_string_lossy().starts_with("fsae-sim"));
+        // And nothing half-written left beside it.
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".part"))
+            .collect();
+        assert!(leftovers.is_empty(), "left a partial file behind: {leftovers:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The whole point of the hash: a build that is not the build the feed
+    /// named must leave NOTHING runnable behind.
+    #[test]
+    fn a_download_that_fails_its_checksum_installs_nothing() {
+        let body = b"this is not the simulator".to_vec();
+        let url = serve_once(body.clone(), None);
+        let dir = scratch("badhash");
+        let wrong = sha_of(b"something else entirely");
+        let err = fetch_verified(&url, &wrong, body.len() as u64, &dir, &|_| {})
+            .expect_err("must refuse");
+        assert!(err.contains("checksum"), "unhelpful error: {err}");
+        assert!(err.contains("nothing was installed"), "did not say so: {err}");
+        // Not merely "the exe is wrong" -- there must be no exe and no part.
+        let left: Vec<_> = fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(left.is_empty(), "something survived a failed verify: {left:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A connection that drops mid-transfer is reported as a short file, not
+    /// as a checksum mystery.
+    #[test]
+    fn a_truncated_download_installs_nothing() {
+        let body = b"half a simulator".to_vec();
+        // Promise twice what we send, then hang up.
+        let url = serve_once(body.clone(), Some(body.len() * 2));
+        let dir = scratch("short");
+        let err = fetch_verified(&url, &sha_of(&body), (body.len() * 2) as u64, &dir, &|_| {})
+            .expect_err("must refuse");
+        assert!(
+            err.contains("bytes and") || err.contains("download failed"),
+            "unhelpful error: {err}"
+        );
+        let left: Vec<_> = fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(left.is_empty(), "something survived a truncated download: {left:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A server sending a different length than the feed declared is refused
+    /// before a byte is written.
+    #[test]
+    fn a_length_the_feed_did_not_declare_is_refused() {
+        let body = b"a simulator of unexpected size".to_vec();
+        let url = serve_once(body.clone(), None);
+        let dir = scratch("len");
+        let err = fetch_verified(&url, &sha_of(&body), 999_999, &dir, &|_| {})
+            .expect_err("must refuse");
+        assert!(err.contains("999999"), "did not name the declared size: {err}");
+        assert!(!dir.exists(), "made a directory for a download it refused");
+    }
+
+    /// Progress is reported, so the button is not a frozen "Downloading...".
+    #[test]
+    fn progress_is_reported_while_it_downloads() {
+        // Over the 256 KB reporting step, so at least one lands.
+        let body = vec![7u8; 700 * 1024];
+        let url = serve_once(body.clone(), None);
+        let dir = scratch("progress");
+        let seen = std::sync::Mutex::new(Vec::new());
+        let (_, total) = fetch_verified(
+            &url,
+            &sha_of(&body),
+            body.len() as u64,
+            &dir,
+            &|b| seen.lock().unwrap().push(b),
+        )
+        .expect("install");
+        let seen = seen.into_inner().unwrap();
+        assert!(!seen.is_empty(), "no progress at all for a 700 KB download");
+        assert!(seen.windows(2).all(|w| w[1] >= w[0]), "progress went backwards: {seen:?}");
+        assert!(*seen.last().unwrap() <= total, "progress overran the total");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
