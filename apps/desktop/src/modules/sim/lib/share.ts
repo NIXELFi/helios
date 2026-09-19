@@ -109,7 +109,27 @@ export function rowToRun(row: RunRow): SimRun {
   };
 }
 
-function runToRow(run: SimRun): Omit<RunRow, "user_id" | "display_name" | "subteam"> {
+/**
+ * The columns a push writes: everything the boards read, and NOT the two
+ * telemetry columns.
+ *
+ * PostgREST's upsert is `insert ... on conflict do update set col =
+ * excluded.col` for every key in the payload, so a key that is present is
+ * written whether or not this side meant anything by it. These two used to be
+ * sent as null, which was true of a new run and false of every run that had
+ * its lap up. A re-push -- and a re-push is now routine, because `rowStamp`
+ * exists to correct rows that have gone stale -- nulled the pointer to an
+ * object that was still in the bucket. The upload loop did not replace it,
+ * because it had read the row before the upsert and still believed the object
+ * was there; the prune loop could never remove it, because nothing pointed at
+ * it any more. Every lap the team had shared would have gone that way on the
+ * next sign-in, and nineteen megabytes with it. Left out of the payload, the
+ * server keeps whatever it has: the pointer is written only by the code that
+ * uploaded the object and cleared only by the code that removed it.
+ */
+function runToRow(
+  run: SimRun,
+): Omit<RunRow, "user_id" | "display_name" | "subteam" | "telemetry_object" | "telemetry_bytes"> {
   return {
     run_id: run.runId,
     driver: run.driver,
@@ -126,8 +146,6 @@ function runToRow(run: SimRun): Omit<RunRow, "user_id" | "display_name" | "subte
     detected_input: run.detectedInput,
     stats: { ...run.stats, sampleRateHz: run.sampleRateHz },
     laps_detail: run.laps ?? [],
-    telemetry_object: null,
-    telemetry_bytes: null,
   };
 }
 
@@ -144,49 +162,48 @@ export async function fetchSharedRuns(client: SupabaseClient, limit = 2000): Pro
 }
 
 /**
- * What this user already has up there: the telemetry object, and enough of
- * the row to tell a current one from a stale one.
+ * What this user already has up there: every row of theirs, whole.
  *
- * The second part is the whole reason this reads more than `run_id`. A run is
- * pushed once and then never looked at again, so a column added later -- or a
- * manifest re-read after a simulator update -- would never reach the server:
- * `profile` and `detected_input` went in and all 54 existing rows stayed null,
- * which put every run the team had already driven on the "Unrecorded device"
- * board and left the wheel board empty.
+ * Whole rows rather than `run_id` alone, for two reasons that arrived one
+ * after the other. First the stamp: a run is pushed once and then never
+ * looked at again, so a column added later -- or a manifest re-read after a
+ * simulator update -- would never reach the server: `profile` and
+ * `detected_input` went in and all 54 existing rows stayed null, which put
+ * every run the team had already driven on the "Unrecorded device" board and
+ * left the wheel board empty. Then the retention rule: it is a rule about a
+ * DRIVER's runs, and a driver has more than one machine. Judged from this
+ * machine's archive alone, a laptop holding one run pruned the four laps the
+ * rig had shared, and the rig put them back and pruned the laptop's -- see
+ * `pushRuns`. Judging every run the driver has means holding every run the
+ * driver has, and the row carries all of what the rule reads.
  */
-async function sharedIdsFor(
+async function sharedRowsFor(
   client: SupabaseClient,
   userId: string,
 ): Promise<Map<string, SharedState>> {
   const res = await client
     .schema(SCHEMA)
     .from(TABLE)
-    .select("run_id,telemetry_object,profile,detected_input,format_version,best_lap_s")
+    .select("*")
     .eq("user_id", userId);
-  if (res.error) throw new Error(`read shared run ids: ${res.error.message}`);
+  if (res.error) throw new Error(`read shared runs: ${res.error.message}`);
   const out = new Map<string, SharedState>();
-  for (const r of res.data as SharedRowState[]) {
+  for (const r of res.data as RunRow[]) {
     out.set(r.run_id, {
       telemetryObject: r.telemetry_object,
       stamp: rowStamp(r),
+      run: rowToRun(r),
     });
   }
   return out;
-}
-
-interface SharedRowState {
-  run_id: string;
-  telemetry_object: string | null;
-  profile: string | null;
-  detected_input: string | null;
-  format_version: number | null;
-  best_lap_s: number | null;
 }
 
 interface SharedState {
   telemetryObject: string | null;
   /** See `rowStamp`. */
   stamp: string;
+  /** The row as a run, for the retention rule. */
+  run: SimRun;
 }
 
 /**
@@ -281,6 +298,13 @@ export const KEEP_RECENT = 3;
  * `KEEP_RECENT`, as a union -- so a new personal best usually occupies a slot
  * in both and the real total sits under five.
  *
+ * Over every run the driver has, wherever it is: a row the server holds and
+ * this disk does not counts exactly as a local run does. The rule is about a
+ * driver, and a driver with two machines has to get the same answer from
+ * both, or each machine deletes what the other keeps. It used to skip runs
+ * marked `remote`, which made the rule a rule about a machine -- and made a
+ * laptop with one run prune everything the rig had shared.
+ *
  * It is a RETENTION rule, not a selection one, and that distinction is the
  * whole point. Sharing "the best lap on each course" sounds bounded and is
  * not: the object path carries the run id, so every new personal best added a
@@ -294,7 +318,7 @@ export const KEEP_RECENT = 3;
  * watching, and it ages out on its own in three more runs.
  */
 export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
-  const mine = runs.filter((r) => r.driverId === userId && !r.remote && !r.synthetic);
+  const mine = runs.filter((r) => r.driverId === userId && !r.synthetic);
   const byCourse = new Map<string, SimRun[]>();
   for (const r of mine) {
     const list = byCourse.get(r.track);
@@ -322,6 +346,9 @@ export interface SyncResult {
   telemetryPushed: number;
   /** Telemetry removed because the run fell out of `telemetryToKeep`. */
   telemetryPruned: number;
+  /** Objects removed because no row pointed at them -- unreachable by any
+   *  code path, and invisible to `telemetryPruned`, which reads the rows. */
+  telemetrySwept: number;
   skippedNotMine: number;
   error: string | null;
 }
@@ -341,7 +368,8 @@ export async function pushRuns(
   readTelemetry: (run: SimRun) => Promise<Uint8Array | null>,
 ): Promise<SyncResult> {
   const out: SyncResult = {
-    pushed: 0, telemetryPushed: 0, telemetryPruned: 0, skippedNotMine: 0, error: null,
+    pushed: 0, telemetryPushed: 0, telemetryPruned: 0, telemetrySwept: 0,
+    skippedNotMine: 0, error: null,
   };
   const mine = local.filter((r) => {
     if (r.remote) return false;
@@ -352,13 +380,26 @@ export async function pushRuns(
 
   let already: Map<string, SharedState>;
   try {
-    already = await sharedIdsFor(client, userId);
+    already = await sharedRowsFor(client, userId);
   } catch (e) {
     out.error = e instanceof Error ? e.message : String(e);
     return out;
   }
 
-  const wantTelemetry = telemetryToKeep(local, userId);
+  // The retention rule is judged over everything this driver has, not over
+  // what happens to be on this disk. It used to be the local archive alone,
+  // and a driver with two machines then had two different rules: a laptop
+  // holding one run looked at the five the rig had shared, found none of them
+  // in ITS keep set, and deleted all four of the rig's laps -- and the rig's
+  // next sync put them back and deleted the laptop's, indefinitely. Local
+  // runs first, so a manifest re-read on this machine wins over the copy of
+  // it up there; the rest come from the rows, which carry all the rule reads.
+  const localIds = new Set(mine.map((r) => r.runId));
+  const everything = [
+    ...mine,
+    ...[...already.values()].map((s) => s.run).filter((r) => !localIds.has(r.runId)),
+  ];
+  const wantTelemetry = telemetryToKeep(everything, userId);
 
   // Metadata first, in one round trip. Upsert rather than insert, because a
   // run that is already up there and no longer matches what this machine has
@@ -382,11 +423,18 @@ export async function pushRuns(
     out.pushed = stale.length;
   }
 
+  // Which object each row points at, kept current through the uploads and
+  // prunes below. The sweep at the end judges the state this call leaves
+  // behind, not the one it found; read once at the top, it would collect the
+  // object uploaded a moment ago.
+  const objectOf = new Map<string, string | null>();
+  for (const [runId, s] of already) objectOf.set(runId, s.telemetryObject);
+
   // Then the telemetry for the laps worth watching, one at a time: they are
   // megabytes and a failure on one must not lose the others.
   for (const run of mine) {
     if (!wantTelemetry.has(run.runId)) continue;
-    if (already.get(run.runId)?.telemetryObject) continue;
+    if (objectOf.get(run.runId)) continue;
     try {
       const raw = await readTelemetry(run);
       if (!raw || !raw.length) continue;
@@ -411,6 +459,7 @@ export async function pushRuns(
         .update({ telemetry_object: object, telemetry_bytes: body.length })
         .eq("run_id", run.runId);
       if (mark.error) throw new Error(mark.error.message);
+      objectOf.set(run.runId, object);
       out.telemetryPushed++;
     } catch (e) {
       // One lap's telemetry failing is not a reason to stop: the times are
@@ -425,7 +474,7 @@ export async function pushRuns(
   //
   // Only ever this user's own objects -- storage RLS enforces the same thing,
   // and the run row belongs to them too.
-  for (const [runId, { telemetryObject: object }] of already) {
+  for (const [runId, object] of objectOf) {
     if (!object || wantTelemetry.has(runId)) continue;
     try {
       const rm = await client.storage.from(BUCKET).remove([object]);
@@ -436,7 +485,46 @@ export async function pushRuns(
         .update({ telemetry_object: null, telemetry_bytes: null })
         .eq("run_id", runId);
       if (clear.error) throw new Error(clear.error.message);
+      objectOf.set(runId, null);
       out.telemetryPruned++;
+    } catch (e) {
+      out.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // And anything in this user's folder that no row points at. The rows are
+  // the only record of what is up there, and for a while they were wrong: a
+  // re-push nulled the pointer while the object stayed, and from then on
+  // nothing could reach it -- the download reads the pointer, the prune above
+  // reads the pointer. Listing the folder is the one view that does not
+  // depend on the pointer having been right, and it is what makes the bound a
+  // bound on the bucket rather than on the table. Only the names this module
+  // writes are judged; anything else under the folder is not its to delete.
+  //
+  // One shape is left alone: an object whose run is in the keep set and whose
+  // row has no pointer yet. That is what another machine's upload looks like
+  // between its two round trips -- the object lands, then the row is marked
+  // -- and collecting it would leave that row pointing at nothing. Had this
+  // machine held the file, the loop above would already have uploaded and
+  // marked it, so anything still in that state is somebody else's, in
+  // progress.
+  const listed = await client.storage.from(BUCKET).list(userId, { limit: 1000 });
+  if (listed.error) {
+    out.error = `list shared telemetry: ${listed.error.message}`;
+    return out;
+  }
+  const pointed = new Set([...objectOf.values()].filter((o): o is string => !!o));
+  for (const f of listed.data ?? []) {
+    // A folder lists with no id; there should be none, and it is not a file.
+    if (f.id == null || !/\.csv(\.gz)?$/.test(f.name)) continue;
+    const object = `${userId}/${f.name}`;
+    if (pointed.has(object)) continue;
+    const runId = f.name.replace(/\.csv(\.gz)?$/, "");
+    if (wantTelemetry.has(runId) && objectOf.has(runId) && objectOf.get(runId) == null) continue;
+    try {
+      const rm = await client.storage.from(BUCKET).remove([object]);
+      if (rm.error) throw new Error(rm.error.message);
+      out.telemetrySwept++;
     } catch (e) {
       out.error = e instanceof Error ? e.message : String(e);
     }

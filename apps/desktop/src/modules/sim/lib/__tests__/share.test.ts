@@ -171,11 +171,15 @@ describe("what keeps its telemetry", () => {
   });
 
   it("ignores the robot, other people, and runs with no lap", () => {
+    // Not, any more, a run of yours that is only on the server: the rule is
+    // about a driver, not a machine, and skipping those is how a laptop with
+    // one run came to delete everything the rig had shared. See
+    // `share-sync.test.ts`.
     const runs = [
       r("mine", 41, 5),
       r("robot", 37, 6, { synthetic: true }),
       r("theirs", 38, 7, { driverId: "someone-else" }),
-      r("shared", 39, 8, { remote: true }),
+      r("theirs-shared", 39, 8, { driverId: "someone-else", remote: true }),
       localRun({ runId: "nolap", startedAt: at(9),
         stats: { ...localRun({ runId: "x" }).stats, bestLapS: null, laps: 0 } }),
     ];

@@ -54,7 +54,19 @@ follow [semver](https://semver.org/).
   actually on, was empty — and nothing would have fixed it, because those
   runs were already up there. Helios now compares what it has against what
   the server holds and sends up anything that no longer matches. It settles
-  after one sign-in and writes nothing on the next.
+  after one sign-in and writes nothing on the next. Sending a run up again
+  leaves the lap it shared exactly where it was; and anything in your storage
+  folder that no run points at any more is cleared out, so a shared lap can
+  neither be lost by a correction nor left behind by one.
+- **Signing in on a second machine no longer deletes the laps you shared from
+  the first.** Helios decided which of your laps to keep shared by looking
+  only at the runs on the machine it was running on. A laptop holding one of
+  your runs therefore judged the five the rig had shared, found none of them
+  on its own list, and removed all four of their laps — and the rig, on its
+  next sync, put them back and removed the laptop's, and the two went on
+  trading megabytes for as long as both stayed open. The rule is now judged
+  over every run you have, wherever it was driven, so every machine reaches
+  the same answer and nothing changes hands twice.
 - **A jittery log read as a faster one.** Helios measures a telemetry group's
   real sample rate from the rows it finds, and re-labels the group when that
   disagrees with the nominal rate by a fifth — which moves every filter cutoff
