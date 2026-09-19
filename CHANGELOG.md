@@ -27,6 +27,25 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **An update button for the simulator.** Helios only ever asked the build
+  feed what it had when it could not find a simulator at all — so once you
+  had one it never looked again, and a fix published to the feed could not
+  reach anybody who had already installed. The Launch tab now offers a build
+  the feed has and this machine does not, with the version you have, the
+  download size and the release notes. It offers an OLDER build too: rolling
+  back to something known to work at an event is a real thing to want.
+
+### Fixed
+- **A downloaded simulator is marked executable again** on macOS and Linux.
+  Broken after 5.8.0 by a refactor that inserted the `chmod` at a new call
+  site and then removed it by a pattern that matched the one just inserted.
+  Windows was unaffected.
+- **The simulator's build feed is no longer read from a stale cache.**
+  Supabase serves public storage through a CDN, and publishing a second build
+  left the edge handing out the previous feed — the upload fine, the origin
+  correct, and Helios blind to it.
+
 ## [5.8.0] - 2026-09-19
 
 ### Added

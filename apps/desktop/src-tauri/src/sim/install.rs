@@ -125,8 +125,27 @@ pub async fn sim_available_build() -> Result<Option<Build>, String> {
 
 fn available_build() -> Result<Option<Build>, String> {
     let url = feed_url();
+    // Past the CDN, deliberately.
+    //
+    // Supabase serves public storage through Cloudflare, and the feed is the
+    // one object here that is MEANT to change. Publishing a second build and
+    // then reading this url plainly gave back the previous feed from the edge
+    // -- upload fine, origin correct, Helios blind to it. A published fix that
+    // reaches nobody is the worst kind, because everybody believes it shipped.
+    // The `Cache-Control` on the object asks for revalidation; this makes sure
+    // of it, and costs one query parameter on a 300-byte file.
+    let bust = format!(
+        "{}{}_={}",
+        url,
+        if url.contains('?') { "&" } else { "?" },
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
     let res = client()
-        .get(&url)
+        .get(&bust)
+        .header("cache-control", "no-cache")
         .timeout(Duration::from_secs(20))
         .send()
         .map_err(|e| format!("could not reach the build feed at {url}: {e}"))?;

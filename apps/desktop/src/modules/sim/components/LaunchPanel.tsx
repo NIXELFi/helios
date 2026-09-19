@@ -155,6 +155,7 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched }: Prop
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 p-6">
       {!ready && <NotFound status={status} onPick={pickExe} onStatusChange={onStatusChange} />}
+      {ready && <UpdateBanner status={status} onStatusChange={onStatusChange} />}
 
       <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
         <h3 className="mb-1 text-sm font-semibold">Start a run</h3>
@@ -324,46 +325,135 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched }: Prop
   );
 }
 
-function NotFound({
-  status, onPick, onStatusChange,
-}: { status: SimStatus | null; onPick: () => void; onStatusChange: (s: SimStatus) => void }) {
-  const [showPaths, setShowPaths] = useState(false);
+/**
+ * Ask the feed what it has, once.
+ *
+ * Shared by the not-installed panel and the update banner, because they used
+ * NOT to be: the feed was only ever consulted when no simulator could be
+ * found, so once you had one Helios never looked again and there was no way
+ * to get a newer build except deleting the one you had. A fix published to
+ * the feed could not reach anybody who had already installed.
+ */
+function useAvailableBuild(enabled: boolean) {
   const [build, setBuild] = useState<SimBuild | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [installing, setInstalling] = useState(false);
-  /** Bytes in so far, while a download is running. */
-  const [got, setGot] = useState(0);
+  const [checking, setChecking] = useState(enabled);
   const [feedError, setFeedError] = useState<string | null>(null);
-
-  // Ask the feed once, on mount. Being offline is a normal state for a rig at
-  // a test day, so a failure here is a quiet note rather than an error banner.
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
+    setChecking(true);
     simAvailableBuild()
       .then((b) => { if (!cancelled) setBuild(b); })
       .catch((e) => { if (!cancelled) setFeedError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setChecking(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [enabled]);
+  return { build, checking, feedError, setFeedError };
+}
 
-  async function install() {
-    if (!build) return;
+/**
+ * Download and install one build, with progress.
+ *
+ * Returns the click handler and what to put on the button, so the first-run
+ * panel and the update banner behave identically -- including the progress,
+ * which is the whole reason a 7 MB download does not look like a hang.
+ */
+function useInstaller(onStatusChange: (s: SimStatus) => void, onError: (m: string | null) => void) {
+  const [installing, setInstalling] = useState(false);
+  const [got, setGot] = useState(0);
+
+  async function install(build: SimBuild) {
     setInstalling(true);
     setGot(0);
-    setFeedError(null);
+    onError(null);
     const off = onSimInstallProgress((p) => setGot(p.bytes));
     try {
       await simInstall(build.version);
       onStatusChange(await simStatus());
     } catch (e) {
-      setFeedError(e instanceof Error ? e.message : String(e));
+      onError(e instanceof Error ? e.message : String(e));
     } finally {
       off();
       setInstalling(false);
     }
   }
 
-  const pct = installing && build?.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+  const label = (build: SimBuild | null, idle: string) => {
+    if (!installing) return idle;
+    const pct = build?.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+    return pct != null ? `Downloading… ${pct.toFixed(0)}%` : `Downloading… ${fmtBytes(got)}`;
+  };
+  const pct = (build: SimBuild | null) =>
+    installing && build?.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+
+  return { install, installing, label, pct };
+}
+
+/** What `fsae-sim --version` prints, reduced to the version itself. */
+export function installedVersion(status: SimStatus | null): string | null {
+  const raw = status?.version?.trim();
+  if (!raw) return null;
+  return raw.split(/\s+/).pop() ?? null;
+}
+
+/**
+ * The feed has something other than what is installed.
+ *
+ * Not "newer": this compares for DIFFERENCE, not order. Rolling back to a
+ * build that is known to work at an event is a real thing to want, and a
+ * version comparison that refused to offer it would be wrong in the moment it
+ * mattered most. The banner says both versions and lets the driver decide.
+ */
+function UpdateBanner({
+  status, onStatusChange,
+}: { status: SimStatus | null; onStatusChange: (s: SimStatus) => void }) {
+  const { build, feedError, setFeedError } = useAvailableBuild(true);
+  const { install, installing, label, pct } = useInstaller(onStatusChange, setFeedError);
+  const have = installedVersion(status);
+
+  if (!build || !have || build.version === have) return null;
+  const p = pct(build);
+  return (
+    <section className="rounded-lg border border-asu-gold/40 bg-asu-gold/10 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <IconDownload size={18} className="shrink-0 text-asu-gold" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold">
+            Simulator {build.version} is available
+          </h3>
+          <p className="mt-0.5 text-xs text-helios-dim">
+            You have {have}
+            {build.bytes ? ` · ${fmtBytes(build.bytes)} to download` : ""}
+            {status?.exeConfigured ? "" : " · currently using a copy found on this machine"}
+            {build.notes ? ` — ${build.notes}` : ""}
+          </p>
+          {feedError && <p className="mt-1 text-xs text-helios-danger">{feedError}</p>}
+        </div>
+        {p != null && (
+          <span className="h-1 w-24 overflow-hidden rounded bg-helios-line" aria-hidden>
+            <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${p}%` }} />
+          </span>
+        )}
+        <button
+          className="shrink-0 rounded bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:opacity-50"
+          disabled={installing}
+          onClick={() => void install(build)}
+        >
+          {label(build, `Update to ${build.version}`)}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function NotFound({
+  status, onPick, onStatusChange,
+}: { status: SimStatus | null; onPick: () => void; onStatusChange: (s: SimStatus) => void }) {
+  const [showPaths, setShowPaths] = useState(false);
+  const { build, checking, feedError, setFeedError } = useAvailableBuild(true);
+  const { install: doInstall, installing, label, pct } = useInstaller(onStatusChange, setFeedError);
+
+  const shown = pct(build);
 
   return (
     <section className="rounded-lg border border-helios-warn/40 bg-helios-warn/10 p-5">
@@ -390,19 +480,15 @@ function NotFound({
               <button
                 className="inline-flex items-center gap-2 rounded bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:opacity-50"
                 disabled={installing}
-                onClick={() => void install()}
+                onClick={() => void doInstall(build)}
               >
                 <IconDownload size={14} />
-                {installing
-                  ? pct != null
-                    ? `Downloading… ${pct.toFixed(0)}%`
-                    : `Downloading… ${fmtBytes(got)}`
-                  : "Install the simulator"}
+                {label(build, "Install the simulator")}
               </button>
             )}
-            {installing && pct != null && (
+            {shown != null && (
               <span className="h-1 w-32 overflow-hidden rounded bg-helios-line" aria-hidden>
-                <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${pct}%` }} />
+                <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${shown}%` }} />
               </span>
             )}
             {checking && <span className="text-xs text-helios-muted">Checking for a build…</span>}
