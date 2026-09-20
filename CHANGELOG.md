@@ -27,6 +27,15 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Sim leaderboard: rank by average, not only by the one good lap.** An
+  "Average of last 15" switch beside "Fastest lap" ranks each driver by the
+  mean of their newest fifteen clean runs on the course, with the spread, the
+  best lap inside that window and how many runs the average covers. Three
+  clean runs to rank; drivers short of that are listed as pending. Off-course
+  and aided runs stay out of the average instead of dragging it down.
+
 ## [5.8.3] - 2026-09-19
 
 ### Added

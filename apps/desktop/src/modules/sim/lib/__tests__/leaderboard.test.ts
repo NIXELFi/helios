@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildActivity, buildBoards, buildImprovements, ghostCandidates } from "../leaderboard";
+import {
+  buildActivity, buildBoards, buildConsistencyBoards, buildImprovements, ghostCandidates,
+  CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
+} from "../leaderboard";
 import { fmtGap, fmtTime, isRankable, unrankedReason, type SimRun } from "../../api";
 
 /** A run with sensible defaults; every test overrides only what it is about. */
@@ -364,5 +367,79 @@ describe("the raw column is the best lap's own raw time", () => {
   it("is null when the run never recorded one", () => {
     const board = buildBoards([run({ runId: "a", stats: { bestLapS: 47 } as never })]);
     expect(board[0]!.entries[0]!.bestRaw).toBeNull();
+  });
+});
+
+describe("buildConsistencyBoards", () => {
+  /** `times.length` clean runs for one driver, oldest first. */
+  function series(driver: string, times: number[], from = "2026-09-01T00:00:00Z"): SimRun[] {
+    return times.map((t, i) =>
+      run({
+        runId: `${driver}-${i}`,
+        driver,
+        startedAt: new Date(Date.parse(from) + i * 3_600_000).toISOString(),
+        stats: { bestLapS: t, bestLapRawS: t } as SimRun["stats"],
+      }),
+    );
+  }
+
+  it("ranks by the mean of the newest window, not the whole history", () => {
+    // Nick: 10 slow learning runs then WINDOW quick ones. Only the quick ones count.
+    const nick = series("Nick", [...Array(10).fill(50), ...Array(CONSISTENCY_WINDOW).fill(40)]);
+    // Ralf: WINDOW runs at 41 every time.
+    const ralf = series("Ralf", Array(CONSISTENCY_WINDOW).fill(41));
+    const [board] = buildConsistencyBoards([...ralf, ...nick]);
+    expect(board?.entries.map((e) => e.driver)).toEqual(["Nick", "Ralf"]);
+    expect(board?.entries[0]?.average).toBeCloseTo(40, 6);
+    expect(board?.entries[0]?.counted).toBe(CONSISTENCY_WINDOW);
+    expect(board?.entries[1]?.gap).toBeCloseTo(1, 6);
+  });
+
+  it("a faster single lap does not beat a better average", () => {
+    const steady = series("Steady", [40, 40, 40, 40]);
+    const hero = series("Hero", [38, 44, 44, 44]);
+    const [board] = buildConsistencyBoards([...hero, ...steady]);
+    expect(board?.entries[0]?.driver).toBe("Steady");
+    expect(board?.entries[1]?.best).toBe(38);
+    expect(board?.entries[1]?.spread).toBeGreaterThan(2);
+    expect(board?.entries[0]?.spread).toBe(0);
+  });
+
+  it("does not depend on the order the listing arrived in", () => {
+    const runs = series("Nick", [50, 50, 50, 40, 40, 40]);
+    const a = buildConsistencyBoards(runs, 3)[0]!.entries[0]!;
+    const b = buildConsistencyBoards([...runs].reverse(), 3)[0]!.entries[0]!;
+    expect(a.average).toBeCloseTo(40, 6);
+    expect(b.average).toBeCloseTo(a.average, 6);
+  });
+
+  it("needs a minimum of clean runs before it ranks, and says who is short", () => {
+    const short = series("New", Array(CONSISTENCY_MIN_RUNS - 1).fill(42));
+    const enough = series("Old", Array(CONSISTENCY_MIN_RUNS).fill(43));
+    const [board] = buildConsistencyBoards([...short, ...enough]);
+    expect(board?.entries.map((e) => e.driver)).toEqual(["Old"]);
+    expect(board?.pending).toEqual([{ driverId: "id-New", driver: "New", counted: CONSISTENCY_MIN_RUNS - 1 }]);
+  });
+
+  it("off-course and aided runs stay out of the average instead of dragging it", () => {
+    const clean = series("Nick", [40, 40, 40]);
+    const off = run({
+      runId: "off", driver: "Nick", startedAt: "2026-09-02T00:00:00Z",
+      laps: [{ lap: 1, raw: 60, cones: 0, off: 1, total: 60, valid: false, sectors: [], startedAtS: 0 } as never],
+      stats: { bestLapS: null, bestLapRawS: null, totalOffCourse: 1 } as SimRun["stats"],
+    });
+    const aided = run({ runId: "tc", driver: "Nick", startedAt: "2026-09-02T01:00:00Z",
+      assists: { traction: true, abs: false, autoShift: false }, stats: { bestLapS: 30 } as SimRun["stats"] });
+    const [board] = buildConsistencyBoards([...clean, off, aided]);
+    expect(board?.entries[0]?.average).toBeCloseTo(40, 6);
+    expect(board?.entries[0]?.counted).toBe(3);
+  });
+
+  it("points at the quickest run inside the window", () => {
+    const nick = series("Nick", [45, 41, 43, 42]);
+    const [board] = buildConsistencyBoards(nick);
+    expect(board?.entries[0]?.runId).toBe("Nick-1");
+    expect(board?.entries[0]?.best).toBe(41);
+    expect(board?.entries[0]?.latest).toBe(nick[3]!.startedAt);
   });
 });

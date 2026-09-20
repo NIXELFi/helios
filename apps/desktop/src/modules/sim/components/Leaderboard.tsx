@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { IconMovie, IconTrendingUp, IconTrophy } from "@tabler/icons-react";
 import { fmtGap, fmtTime, fmtWhen, type SimRun } from "../api";
-import { buildActivity, buildBoards, buildImprovements } from "../lib/leaderboard";
+import {
+  buildActivity, buildBoards, buildConsistencyBoards, buildImprovements,
+  CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
+} from "../lib/leaderboard";
 import { DEVICE_CLASSES, deviceClass, type DeviceClass } from "../api";
 
 interface Props {
@@ -46,6 +49,15 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
     [runs, active],
   );
   const boards = useMemo(() => buildBoards(shown), [shown]);
+  /**
+   * Two ways to rank the same runs. "Fastest" is the lap where everything
+   * came together; "Average" is each driver's mean over their last
+   * `CONSISTENCY_WINDOW` clean runs, which is the number an autocross with two
+   * runs a driver actually pays for. The choice is per page, not per course:
+   * a person comparing two courses wants the same rule on both.
+   */
+  const [mode, setMode] = useState<"fastest" | "average">("fastest");
+  const consistency = useMemo(() => buildConsistencyBoards(shown), [shown]);
   const improvements = useMemo(() => buildImprovements(shown), [shown]);
   const activity = useMemo(() => buildActivity(shown), [shown]);
 
@@ -91,6 +103,33 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Ranking">
+        {([
+          ["fastest", "Fastest lap", "Each driver's single best scored lap"],
+          ["average", `Average of last ${CONSISTENCY_WINDOW}`, `Each driver's mean scored lap over their most recent ${CONSISTENCY_WINDOW} clean runs on the course`],
+        ] as const).map(([id, label, tip]) => (
+          <button
+            key={id}
+            onClick={() => setMode(id)}
+            aria-pressed={mode === id}
+            title={tip}
+            className={
+              "rounded border px-2.5 py-1 text-xs transition " +
+              (mode === id
+                ? "border-asu-gold bg-asu-gold/15 text-helios-text"
+                : "border-helios-line text-helios-dim hover:border-asu-gold hover:text-helios-text")
+            }
+          >
+            {label}
+          </button>
+        ))}
+        <span className="ml-auto text-[11px] text-helios-muted">
+          {mode === "fastest"
+            ? "The one lap where everything came together."
+            : `Doing it every time: the mean of a driver's newest ${CONSISTENCY_WINDOW} clean runs, at least ${CONSISTENCY_MIN_RUNS} to rank.`}
+        </span>
+      </div>
+
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Runs" value={activity.runs.toLocaleString()} />
         <Stat label="Drivers" value={String(activity.drivers)} />
@@ -125,7 +164,95 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
         </section>
       )}
 
-      {boards.map((b) => (
+      {mode === "average" && consistency.map((b) => (
+        <section key={b.track} className="rounded-lg border border-helios-line bg-helios-panel">
+          <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
+            <h3 className="text-sm font-semibold">{b.trackName}</h3>
+            <span className="text-[11px] text-helios-muted">
+              {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
+              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
+            </span>
+          </header>
+
+          {b.entries.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-helios-dim">
+              Nobody has {CONSISTENCY_MIN_RUNS} clean ranked runs on this course yet, so there is no
+              average to rank. Drive it a few more times and this fills in.
+            </p>
+          ) : (
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-helios-muted">
+                  <th className="px-5 py-2 font-medium">#</th>
+                  <th className="py-2 font-medium">Driver</th>
+                  <th className="py-2 text-right font-medium" title={`Mean scored lap over the newest ${CONSISTENCY_WINDOW} clean runs`}>
+                    Average
+                  </th>
+                  <th className="py-2 text-right font-medium">Gap</th>
+                  <th className="py-2 text-right font-medium" title="Standard deviation of those laps: how far a typical run sits from the average">
+                    Spread
+                  </th>
+                  <th className="py-2 text-right font-medium" title="The quickest lap inside the window">
+                    Best
+                  </th>
+                  <th className="py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
+                    Runs
+                  </th>
+                  <th className="py-2 pl-3 font-medium">Latest</th>
+                  <th className="px-5 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {b.entries.map((e) => (
+                  <tr
+                    key={e.driverId}
+                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    onClick={() => onOpenRun(e.runId)}
+                  >
+                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
+                    <td className="py-2 font-medium">{e.driver}</td>
+                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
+                      {fmtTime(e.average)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">
+                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">±{e.spread.toFixed(3)}</td>
+                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.best)}</td>
+                    <td className="py-2 text-right font-mono text-helios-dim" data-testid="counted">
+                      {e.counted}<span className="text-helios-muted">/{CONSISTENCY_WINDOW}</span>
+                    </td>
+                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.latest)}</td>
+                    <td className="px-5 py-2 text-right">
+                      <button
+                        title={canReplay ? "Watch their best lap in the window" : "The simulator is not installed here"}
+                        disabled={!canReplay}
+                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
+                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <IconMovie size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {b.pending.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px] text-helios-muted">
+              <span>Not enough clean runs yet</span>
+              {b.pending.map((p) => (
+                <span key={p.driverId}>
+                  {p.driver} <span className="font-mono">{p.counted}/{CONSISTENCY_MIN_RUNS}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      ))}
+
+      {mode === "fastest" && boards.map((b) => (
         <section key={b.track} className="rounded-lg border border-helios-line bg-helios-panel">
           <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
             <h3 className="text-sm font-semibold">{b.trackName}</h3>
