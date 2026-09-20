@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.8.4] - 2026-09-20
+
 ### Added
 
 - **Sim leaderboard: rank by average, not only by the one good lap.** An
