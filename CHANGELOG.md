@@ -36,6 +36,15 @@ follow [semver](https://semver.org/).
   clean runs to rank; drivers short of that are listed as pending. Off-course
   and aided runs stay out of the average instead of dragging it down.
 
+### Fixed
+
+- **Sim on macOS: "not installed" was the wrong diagnosis.** The build feed
+  had only ever carried a Windows build, so a Mac found nothing for itself and
+  the panel implied the driver had missed a step, with no install button to
+  press. The panel now says what is true — no macOS build has been published
+  yet, and which platforms the feed does have — and a macOS build is published
+  alongside the Windows one from this release on.
+
 ## [5.8.3] - 2026-09-19
 
 ### Added

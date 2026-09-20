@@ -15,6 +15,8 @@ vi.mock("../../api", async () => {
   return {
     ...actual,
     simAvailableBuild: vi.fn().mockResolvedValue(null),
+    simFeedPlatforms: vi.fn().mockResolvedValue(["windows"]),
+    thisPlatform: () => "macos",
     simInstall: vi.fn(),
     simStatus: vi.fn(),
     simLaunch: vi.fn(),
@@ -120,5 +122,24 @@ describe("the launch tab while the simulator updates itself", () => {
   it("prints the sharing rule where the run is started", () => {
     show(status(), idle());
     expect(screen.getByText(/best 3 and latest 3 on each course/)).toBeTruthy();
+  });
+
+  it("says which platforms the feed has when there is nothing for this one", async () => {
+    // A Mac reading a feed that only ever carried a Windows build used to be
+    // told the simulator was "not installed", as if the driver had skipped a
+    // step. The truth is that nothing has been published for macOS.
+    render(
+      <LaunchPanel
+        status={status({ exePath: null, exeConfigured: false, version: null })}
+        driver={null}
+        onStatusChange={vi.fn()}
+        onLaunched={vi.fn()}
+        update={{ build: null, installing: false, got: 0, error: null } as AutoUpdateState}
+      />,
+    );
+    const note = await screen.findByTestId("no-build-here");
+    expect(note.textContent).toMatch(/No macOS build has been published yet/);
+    expect(note.textContent).toMatch(/Windows only/);
+    expect(screen.queryByText(/Install the simulator/)).toBeNull();
   });
 });

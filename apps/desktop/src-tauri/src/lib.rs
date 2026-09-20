@@ -351,6 +351,7 @@ pub fn run() {
             sim::runs::sim_read_telemetry,
             sim::runs::sim_import_run,
             sim::install::sim_available_build,
+            sim::install::sim_feed_platforms,
             sim::install::sim_install,
         ])
         .build(tauri::generate_context!())

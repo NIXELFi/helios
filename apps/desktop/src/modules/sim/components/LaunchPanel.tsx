@@ -11,7 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  PROFILES, TRACKS, fmtBytes, onSimInstallProgress, simAvailableBuild, simInstall, simLaunch,
+  PLATFORM_NAMES, PROFILES, TRACKS, fmtBytes, onSimInstallProgress, simAvailableBuild, simFeedPlatforms, simInstall, simLaunch, thisPlatform,
   simSetExePath,
   simStatus,
   type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
@@ -366,6 +366,24 @@ function useAvailableBuild(enabled: boolean) {
 }
 
 /**
+ * Which platforms the feed offers -- asked only once it is known there is
+ * nothing for this one, because that is the only time the answer changes
+ * what the panel says.
+ */
+function useFeedPlatforms(enabled: boolean) {
+  const [offered, setOffered] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!enabled) { setOffered(null); return; }
+    let cancelled = false;
+    simFeedPlatforms()
+      .then((p) => { if (!cancelled) setOffered(p); })
+      .catch(() => { if (!cancelled) setOffered(null); });
+    return () => { cancelled = true; };
+  }, [enabled]);
+  return offered;
+}
+
+/**
  * Download and install one build, with progress.
  *
  * Returns the click handler and what to put on the button, so the first-run
@@ -479,8 +497,10 @@ function NotFound({
   const [showPaths, setShowPaths] = useState(false);
   const { build, checking, feedError, setFeedError } = useAvailableBuild(true);
   const { install: doInstall, installing, label, pct } = useInstaller(onStatusChange, setFeedError);
+  const offered = useFeedPlatforms(!checking && !feedError && build == null);
 
   const shown = pct(build);
+  const here = thisPlatform();
 
   return (
     <section className="rounded-lg border border-helios-warn/40 bg-helios-warn/10 p-5">
@@ -494,6 +514,16 @@ function NotFound({
             compare runs that are already recorded; launching and replaying need the
             executable.
           </p>
+          {!build && !checking && !feedError && offered && (
+            <p className="mt-2 text-xs text-helios-warn" data-testid="no-build-here">
+              {offered.length === 0
+                ? "The build feed is empty: nothing has been published for any platform yet."
+                : `No ${PLATFORM_NAMES[here] ?? here} build has been published yet; the feed has ` +
+                  offered.map((p) => PLATFORM_NAMES[p] ?? p).join(" and ") +
+                  " only. That is a request to whoever publishes the simulator, not something to fix on this machine." +
+                  " If you have a copy already, point Helios at it below."}
+            </p>
+          )}
           {build && (
             <p className="mt-2 text-xs text-helios-dim">
               Version <span className="font-mono">{build.version}</span> is available

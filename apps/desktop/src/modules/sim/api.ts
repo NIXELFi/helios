@@ -339,6 +339,23 @@ export function simAvailableBuild(): Promise<SimBuild | null> {
   return invoke<SimBuild | null>("sim_available_build");
 }
 
+/** Every platform the feed has a build for, sorted, so a machine the feed has
+ *  nothing for can be told that rather than "not installed". */
+export function simFeedPlatforms(): Promise<string[]> {
+  return invoke<string[]>("sim_feed_platforms");
+}
+
+/** The platform Helios is running on, in the feed's own words. */
+export function thisPlatform(): "windows" | "macos" | "linux" {
+  const p = typeof navigator === "undefined" ? "" : navigator.platform ?? "";
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent ?? "";
+  if (/^Win/i.test(p) || /Windows/i.test(ua)) return "windows";
+  if (/^Mac/i.test(p) || /Mac OS|Macintosh/i.test(ua)) return "macos";
+  return "linux";
+}
+
+export const PLATFORM_NAMES: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
 /**
  * Download, verify and install the build the feed names.
  *
