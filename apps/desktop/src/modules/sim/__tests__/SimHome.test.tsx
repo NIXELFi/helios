@@ -30,6 +30,7 @@ vi.mock("../api", async () => {
     // The module keeps the simulator current on its own; here the feed has
     // nothing to say.
     simAvailableBuild: vi.fn(async () => null),
+    simFeedPlatforms: vi.fn(async () => []),
     simInstall: vi.fn(),
     onSimInstallProgress: () => () => {},
   };

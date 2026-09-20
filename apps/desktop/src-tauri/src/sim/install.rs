@@ -124,6 +124,30 @@ pub async fn sim_available_build() -> Result<Option<Build>, String> {
 }
 
 fn available_build() -> Result<Option<Build>, String> {
+    let want = this_platform();
+    Ok(fetch_feed()?.builds.into_iter().find(|b| b.platform == want))
+}
+
+/// Which platforms the feed has a build for, whatever this machine is.
+///
+/// The answer to "why is there no install button": a Mac reading a feed that
+/// has only ever carried a Windows build was told the simulator was "not
+/// installed", which put the problem on the driver. With this the panel can
+/// say what is actually true -- nothing has been published for macOS yet --
+/// which is a request to a maintainer, not a fault on the rig.
+#[tauri::command]
+pub async fn sim_feed_platforms() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut out: Vec<String> = fetch_feed()?.builds.into_iter().map(|b| b.platform).collect();
+        out.sort();
+        out.dedup();
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("sim_feed_platforms: {e}"))?
+}
+
+fn fetch_feed() -> Result<Feed, String> {
     let url = feed_url();
     // Past the CDN, deliberately.
     //
@@ -152,9 +176,7 @@ fn available_build() -> Result<Option<Build>, String> {
     if !res.status().is_success() {
         return Err(format!("build feed returned {} for {url}", res.status()));
     }
-    let feed: Feed = res.json().map_err(|e| format!("build feed is not valid JSON: {e}"))?;
-    let want = this_platform();
-    Ok(feed.builds.into_iter().find(|b| b.platform == want))
+    res.json().map_err(|e| format!("build feed is not valid JSON: {e}"))
 }
 
 #[derive(Debug, Serialize)]

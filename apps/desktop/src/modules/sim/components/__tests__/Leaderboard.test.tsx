@@ -5,7 +5,7 @@
  * old number, as "what an event scores". It was neither what an event scores
  * (FSAE adds twenty seconds, not ten, and keeps the time) nor what this board
  * does. A tooltip explaining the wrong rule is worse than no tooltip. */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import { Leaderboard } from "../Leaderboard";
@@ -51,5 +51,20 @@ describe("Leaderboard", () => {
     });
     render(<Leaderboard {...props} runs={[off]} />);
     expect(screen.getByText(/Nothing ranked here yet/).textContent).toMatch(/went off course/);
+  });
+
+  it("offers an average-of-recent-runs ranking beside the fastest lap", () => {
+    const runs = [40, 42, 44].map((t, i) =>
+      run({ runId: `r${i}`, startedAt: `2026-09-1${i}T10:00:00Z`, stats: { ...run({ runId: "x" }).stats, bestLapS: t, bestLapRawS: t } }),
+    );
+    render(<Leaderboard {...props} runs={runs} />);
+    // Fastest by default: the driver's best lap is what shows.
+    expect(screen.getByRole("button", { name: /Fastest lap/ }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /Average of last 15/ }));
+    expect(screen.getByRole("button", { name: /Average of last 15/ }).getAttribute("aria-pressed")).toBe("true");
+    // (40 + 42 + 44) / 3 = 42.000, three runs counted of the fifteen the window holds.
+    expect(screen.getByText("42.000")).toBeTruthy();
+    expect(screen.getByTestId("counted").textContent).toBe("3/15");
+    expect(screen.getByText("Average").getAttribute("title")).toMatch(/newest 15 clean runs/);
   });
 });
