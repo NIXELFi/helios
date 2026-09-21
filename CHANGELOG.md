@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-09-21
+
 ### Changed
 - **Helios keeps looking for its own updates.** It used to check once, a few
   seconds after it opened, so a copy left open for days never saw a release
