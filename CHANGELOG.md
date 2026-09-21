@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-09-21
+
 ### Added
 - Sim: the Launch tab can start a **generated course** — "Generated autocross" or
   "Generated endurance" plus a seed. The simulator (0.6.0+) lays out a course
