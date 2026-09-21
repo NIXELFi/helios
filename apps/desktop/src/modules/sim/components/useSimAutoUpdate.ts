@@ -1,22 +1,21 @@
-/* Keeping the simulator current without anybody asking.
+/* The Sim module's view of the simulator updater.
  *
- * The build feed used to be consulted only when no simulator could be found,
- * then only offered as a banner with a button. Both left rigs behind: a fix
- * published to the feed reached the machines whose drivers noticed the
- * banner and pressed it, which at a test day is none of them. Now the feed
- * is read whenever the module is up, and a build that is not the one
- * installed is fetched, verified and installed on its own. The driver sees a
- * progress line, and the launch waits for it.
- *
- * Difference, not order. Rolling the feed back to a build known to work at an
- * event has to roll every rig back with it, and a comparison that only moved
- * forward would leave them on the build being rolled away from.
+ * The updater itself is app-wide and lives in `lib/simUpdater.ts`: it checks
+ * the feed when Helios starts, when a release is broadcast, and when a
+ * realtime connection comes back, whether or not this module was ever opened.
+ * This hook adds what the module needs on top: a check when the module comes
+ * up (with the status it already holds), and a fresh status once something
+ * has been installed, so the version on screen changes with it.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import type { SimBuild, SimStatus } from "../api";
 import {
-  onSimInstallProgress, simAvailableBuild, simInstall, simStatus,
-  type SimBuild, type SimStatus,
-} from "../api";
+  getSimUpdaterState, installedVersion, requestSimUpdateCheck, resetSimUpdater, retrySimUpdate,
+  subscribeSimUpdater,
+} from "../lib/simUpdater";
+import { simStatus } from "../api";
+
+export { installedVersion };
 
 export interface AutoUpdateState {
   /** What the feed offers for this machine, once it has answered. */
@@ -36,28 +35,9 @@ export interface AutoUpdateState {
   retry: () => void;
 }
 
-/** What `fsae-sim --version` prints, reduced to the version itself. */
-export function installedVersion(status: SimStatus | null): string | null {
-  const raw = status?.version?.trim();
-  if (!raw) return null;
-  return raw.split(/\s+/).pop() ?? null;
-}
-
-/**
- * Versions this process has already tried to install. One attempt per
- * version per app session, or a feed that names a build the installer
- * refuses (a hash that does not match, say) would be retried every time
- * the module re-rendered. `retry` clears the entry.
- */
-const attempted = new Set<string>();
-
-/** For tests: forget what has been attempted. */
+/** For tests: forget what has been attempted, and everything else. */
 export function resetAutoUpdateAttempts(): void {
-  attempted.clear();
-}
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  resetSimUpdater();
 }
 
 export function useSimAutoUpdate(
@@ -65,60 +45,35 @@ export function useSimAutoUpdate(
   onStatusChange: (s: SimStatus) => void,
   enabled = true,
 ): AutoUpdateState {
-  const [build, setBuild] = useState<SimBuild | null>(null);
-  const [installing, setInstalling] = useState(false);
-  const [got, setGot] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [feedError, setFeedError] = useState<string | null>(null);
-  const [installed, setInstalled] = useState<string | null>(null);
-  const [pass, setPass] = useState(0);
-
+  const s = useSyncExternalStore(subscribeSimUpdater, getSimUpdaterState);
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const have = installedVersion(status);
   const hasExe = !!status?.exePath;
 
-  // Read the feed once per mount, and again on retry.
+  // Check when the module comes up, and again when what is installed comes
+  // into view (the module's first status read lands after its first render).
+  // A re-render alone is not a check, and so is never a retry.
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
-    simAvailableBuild()
-      .then((b) => { if (!cancelled) { setBuild(b); setFeedError(null); } })
-      .catch((e) => { if (!cancelled) setFeedError(message(e)); });
-    return () => { cancelled = true; };
-  }, [enabled, pass]);
+    void requestSimUpdateCheck("module", statusRef.current);
+  }, [enabled, have, hasExe]);
 
-  // Install when what the feed names is not what is installed. Only when
-  // something IS installed: the first install is the not-installed panel's
-  // opt-in, because a machine that never wanted the simulator should not be
-  // handed one by opening the tab.
-  const busy = useRef(false);
+  // Something was installed -- here or by the background updater while this
+  // module sat on another tab: re-read the status so the module shows it.
+  const seen = useRef(s.installSeq);
+  const onStatusRef = useRef(onStatusChange);
+  onStatusRef.current = onStatusChange;
   useEffect(() => {
-    if (!enabled || !build || !hasExe || !have || build.version === have) return;
-    if (busy.current || attempted.has(build.version)) return;
-    attempted.add(build.version);
-    busy.current = true;
-    setInstalling(true);
-    setGot(0);
-    setError(null);
-    const off = onSimInstallProgress((p) => setGot(p.bytes));
-    const version = build.version;
-    simInstall(version)
-      .then(async () => {
-        setInstalled(version);
-        onStatusChange(await simStatus());
-      })
-      .catch((e) => setError(message(e)))
-      .finally(() => {
-        off();
-        busy.current = false;
-        setInstalling(false);
-      });
-  }, [enabled, build, hasExe, have, onStatusChange, pass]);
+    if (s.installSeq === seen.current) return;
+    seen.current = s.installSeq;
+    simStatus().then((st) => onStatusRef.current(st)).catch(() => {});
+  }, [s.installSeq]);
 
-  const retry = useCallback(() => {
-    if (build) attempted.delete(build.version);
-    setError(null);
-    setPass((p) => p + 1);
-  }, [build]);
+  const retry = useCallback(() => { void retrySimUpdate(statusRef.current); }, []);
 
-  return { build, installing, got, error, feedError, installed, retry };
+  return {
+    build: s.build, installing: s.installing, got: s.got, error: s.error,
+    feedError: s.feedError, installed: s.installed, retry,
+  };
 }

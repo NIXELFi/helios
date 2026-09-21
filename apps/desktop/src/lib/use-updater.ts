@@ -29,9 +29,30 @@ export interface UpdaterApi {
   state: UpdaterState;
   /** Re-run the manifest check; transitions through `checking`. */
   recheck: () => void;
+  /**
+   * Check without the pill saying so. For the timer, the release broadcast
+   * and the network coming back: only a found update changes what is shown,
+   * and a failure leaves the last answer standing rather than flipping the
+   * pill to "offline" on one dropped request. Does nothing unless the last
+   * answer was "up to date" or "offline" -- never in the middle of an update.
+   */
+  backgroundCheck: () => void;
   /** Download + install + relaunch. Only valid when state.kind === 'available'. */
   installAndRelaunch: () => Promise<void>;
 }
+
+/**
+ * How often a running Helios looks for a release on its own.
+ *
+ * It used to look once, three seconds after launch. A copy left open on a
+ * rig or a shop PC for a week never looked again, so the team ended up on
+ * releases from several versions ago with the auto-install sitting idle,
+ * because it only ever acts on an update the check has found. The manifest
+ * is one small static file on GitHub's release CDN, so every five minutes
+ * costs nothing; the realtime broadcast at publish time (see
+ * `useHeliosReleaseSignal`) makes it near-instant when that is connected.
+ */
+export const BACKGROUND_CHECK_MS = 5 * 60 * 1000;
 
 export function useUpdater(): UpdaterApi {
   const [state, setState] = useState<UpdaterState>({ kind: "checking" });
@@ -39,11 +60,16 @@ export function useUpdater(): UpdaterApi {
   // initial check don't fire twice. Refs (not state) so toggling doesn't
   // re-render the consumer.
   const checkingRef = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
-  const runCheck = async () => {
+  const runCheck = async (quiet = false) => {
     if (checkingRef.current) return;
+    // Background checks never interrupt: an update found, downloading or
+    // installing has the stage, and so does a check the user asked for.
+    if (quiet && stateRef.current.kind !== "up_to_date" && stateRef.current.kind !== "offline") return;
     checkingRef.current = true;
-    setState({ kind: "checking" });
+    if (!quiet) setState({ kind: "checking" });
     try {
       const update = await check();
       if (update) {
@@ -57,14 +83,14 @@ export function useUpdater(): UpdaterApi {
             _handle: update,
           },
         });
-      } else {
+      } else if (!quiet || stateRef.current.kind === "offline") {
         // `check()` returns null when the app is already on the latest version.
         // We still want to surface the current version in the UI.
         const currentVersion = await getCurrentVersionSafe();
         setState({ kind: "up_to_date", current: currentVersion });
       }
     } catch (e) {
-      setState({ kind: "offline", error: String(e) });
+      if (!quiet) setState({ kind: "offline", error: String(e) });
     } finally {
       checkingRef.current = false;
     }
@@ -72,8 +98,21 @@ export function useUpdater(): UpdaterApi {
 
   // Auto-check ~3s after mount so the splash isn't blocked on a network call.
   useEffect(() => {
-    const handle = setTimeout(runCheck, 3000);
+    const handle = setTimeout(() => void runCheck(), 3000);
     return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // And then keep looking: on a timer, and the moment the network comes back
+  // (a laptop that slept through a release checks as soon as it wakes up).
+  useEffect(() => {
+    const tick = setInterval(() => void runCheck(true), BACKGROUND_CHECK_MS);
+    const online = () => void runCheck(true);
+    window.addEventListener("online", online);
+    return () => {
+      clearInterval(tick);
+      window.removeEventListener("online", online);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -118,7 +157,12 @@ export function useUpdater(): UpdaterApi {
     }
   };
 
-  return { state, recheck: runCheck, installAndRelaunch };
+  return {
+    state,
+    recheck: () => void runCheck(),
+    backgroundCheck: () => void runCheck(true),
+    installAndRelaunch,
+  };
 }
 
 async function getCurrentVersionSafe(): Promise<string> {

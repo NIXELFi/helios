@@ -342,6 +342,33 @@ jobs:
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
         run: gh release edit "${RELEASE_TAG}" --draft=false
 
+      # Tell every running Helios to look now. Each one checks GitHub every five
+      # minutes on its own (apps/desktop/src/lib/use-updater.ts); this realtime
+      # broadcast makes it seconds. It runs only AFTER the promote above, when
+      # latest.json is live, and it carries nothing an app trusts: Helios runs
+      # its ordinary updater check, which reads the signed manifest. Public key
+      # on purpose -- the anon key ships in every client anyway. Skips cleanly
+      # when the secrets are unset, like the Slack step below.
+      - name: Announce to running Helios apps
+        if: ${{ !contains(needs.build.outputs.tag, '-') }}
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          REALTIME_URL: ${{ secrets.HELIOS_REALTIME_URL }}
+          REALTIME_KEY: ${{ secrets.HELIOS_REALTIME_ANON_KEY }}
+        shell: bash
+        run: |
+          if [ -z "$REALTIME_URL" ] || [ -z "$REALTIME_KEY" ]; then
+            echo "HELIOS_REALTIME_URL / HELIOS_REALTIME_ANON_KEY not set; apps find the release at their next five-minute check."
+            exit 0
+          fi
+          jq -n --arg v "$RELEASE_TAG" \
+            '{messages: [{topic: "helios-releases", event: "published", payload: {version: $v}}]}' \
+            | curl -sf -X POST "${REALTIME_URL%/}/realtime/v1/api/broadcast" \
+                -H "apikey: $REALTIME_KEY" -H "Authorization: Bearer $REALTIME_KEY" \
+                -H 'Content-Type: application/json' -d @- \
+            && echo "announced $RELEASE_TAG on helios-releases" \
+            || echo "::warning::could not announce $RELEASE_TAG; apps find it at their next five-minute check"
+
       # Announce stable releases in the team Slack channel. The webhook is a
       # Slack Workflow Builder trigger that expects a single string variable
       # named "text". The URL lives ONLY in the SLACK_RELEASE_WEBHOOK repo secret
