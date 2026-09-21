@@ -27,6 +27,24 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Sim: laps driven before the 2026 courses gained their slaloms no longer rank.
+  Every run the simulator recorded before 19 September stamped itself `1.0.0` —
+  a version that never shipped — and because that sorts above every real
+  version, those runs were read as *newer* than the course change and survived
+  the clear-out meant to remove them. One of them, a lap through open road
+  where the current course has cones, had been sitting on top of the autocross
+  board. Twenty-five such times have been removed from the team's boards; the
+  runs themselves stay on the machines that recorded them.
+
+### Changed
+- Sim: a generated course now keeps your best 2 laps and your latest 1, rather
+  than the best 3 and latest 3 a fixed course keeps. Seeds are effectively
+  unlimited, so the old rule gave every new one its own six-lap allowance and
+  storage grew with how much the team practised. Times are unaffected — every
+  run's time is still shared and kept for good; this is only about which laps
+  are stored for replay.
+
 ## [5.9.1] - 2026-09-21
 
 ### Changed
