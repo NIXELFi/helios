@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.9.2] - 2026-09-21
+
 ### Fixed
 - Sim: laps driven before the 2026 courses gained their slaloms no longer rank.
   Every run the simulator recorded before 19 September stamped itself `1.0.0` —
