@@ -4,7 +4,7 @@ import {
   IconRobot,
 } from "@tabler/icons-react";
 import {
-  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, unrankedReason, type SimRun,
+  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, trackName, unrankedReason, type SimRun,
 } from "../api";
 import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
 
@@ -101,6 +101,20 @@ export function RunsTable({
     view.mineOnly = mineOnly;
     view.opened = opened;
   }, [query, track, sort, rankedOnly, mineOnly, opened]);
+
+  // The courses on offer are the fixed three and then whatever else the
+  // archive holds -- a generated course exists only once somebody has driven
+  // it, so the list has to come from the runs.
+  const courses = useMemo(() => {
+    const out: { id: string; name: string }[] = TRACKS.map((t) => ({ id: t.id, name: t.name }));
+    const seen = new Set(out.map((c) => c.id));
+    for (const r of runs) {
+      if (seen.has(r.track)) continue;
+      seen.add(r.track);
+      out.push({ id: r.track, name: trackName(r.track) });
+    }
+    return out;
+  }, [runs]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -338,7 +352,7 @@ export function RunsTable({
           onChange={(e) => setTrack(e.target.value)}
         >
           <option value="all">Every course</option>
-          {TRACKS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <select
           className="rounded border border-helios-line bg-helios-deep px-2 py-1.5 text-xs outline-none focus:border-asu-gold"

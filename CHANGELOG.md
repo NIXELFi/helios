@@ -27,6 +27,28 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Sim: the Launch tab can start a **generated course** — "Generated autocross" or
+  "Generated endurance" plus a seed. The simulator (0.6.0+) lays out a course
+  nobody has driven from the seed, to the FSAE course rules, and the same seed
+  gives the same course on every rig, so a seed is something to put in the
+  group chat. "New seed" picks one; the course id is `gen-ax-SEED` /
+  `gen-en-SEED` and shows up on the board and in the runs table under its own
+  name. Chasing a run on a generated course relaunches that course.
+
+### Changed
+- Sim: the 2026 autocross and endurance courses gained their slaloms (from the
+  published course maps) in simulator 0.6.0, and slalom gates that score a
+  cone passed on the wrong side as an off course. Times set before that were
+  driven on a different course, so **runs on those courses from before
+  2026-09-20 18:10 (or from a simulator older than 0.6.0; for endurance, which
+  gained a third slalom in 0.6.1, before 18:28 or older than 0.6.1) no longer
+  rank**, are not pushed to the team's board, and say why in the runs table.
+  The team's board was cleared of them. Every slalom cone now has a pointer
+  cone lying beside it showing which side to pass.
+- Sim: the runs table's course filter lists every course in the archive, not
+  only the fixed three.
+
 ## [5.8.4] - 2026-09-20
 
 ### Added

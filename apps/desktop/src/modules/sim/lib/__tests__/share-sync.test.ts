@@ -20,7 +20,10 @@ function run(id: string, best: number | null, hour: number, over: Partial<SimRun
     telemetryPath: `C:/x/${id}/telemetry.csv`, telemetryBytes: 1000, driver: "Nick",
     driverId: ME, session: null, track: "autocross", trackName: "Autocross",
     startedAt: `2026-09-19T${String(hour).padStart(2, "0")}:00:00Z`, finishedReason: "finished",
-    profile: "wheel", detectedInput: "wheel", device: null, physics: null, simVersion: null,
+    // On the course as it is now: see `predatesCourse`. A run with no
+    // version from before the courses changed shape is stale by rule, and
+    // that case has its own test at the bottom.
+    profile: "wheel", detectedInput: "wheel", device: null, physics: null, simVersion: "0.6.0",
     synthetic: false, samples: 4000, assists: { traction: false, abs: false, autoShift: false },
     laps: [],
     stats: {
@@ -347,5 +350,28 @@ describe("reading a board bigger than the server will send at once", () => {
       });
     }
     expect(await fetchSharedRuns(s.client(ME), 2000)).toHaveLength(2000);
+  });
+});
+
+describe("a run from before the course changed shape", () => {
+  it("stays on this disk and is not pushed", async () => {
+    const S = server();
+    // Autocross, driven 2026-09-19 on simulator 0.5.7: the course had no
+    // slaloms then. The board was cleared of these on purpose, and a rig that
+    // still holds one must not put it back.
+    const stale = run("old", 40, 3, { simVersion: "0.5.7" });
+    const undated = run("nover", 40, 3, { simVersion: null });
+    const fresh = run("new", 41, 3, { startedAt: "2026-09-22T10:00:00Z" });
+    const res = await S.sync(ME, [stale, undated, fresh]);
+    expect(res.skippedStale).toBe(2);
+    expect(res.pushed).toBe(1);
+    expect([...S.table.keys()]).toEqual(["new"]);
+  });
+
+  it("carries the simulator version up with the row, so the rule can be applied to a shared run", async () => {
+    const S = server();
+    await S.sync(ME, [run("v", 41, 3)]);
+    const rows = await fetchSharedRuns(S.client(ME));
+    expect(rows[0]?.simVersion).toBe("0.6.0");
   });
 });

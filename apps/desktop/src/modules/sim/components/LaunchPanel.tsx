@@ -11,10 +11,11 @@ import {
 } from "@tabler/icons-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  PLATFORM_NAMES, PROFILES, TRACKS, fmtBytes, onSimInstallProgress, simAvailableBuild, simFeedPlatforms, simInstall, simLaunch, thisPlatform,
+  GENERATED_EVENTS, PLATFORM_NAMES, PROFILES, TRACKS, fmtBytes, generatedTrackId, normaliseSeed, onSimInstallProgress,
+  randomSeed, simAvailableBuild, simFeedPlatforms, simInstall, simLaunch, thisPlatform, trackName,
   simSetExePath,
   simStatus,
-  type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
+  type GeneratedEvent, type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
 } from "../api";
 import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
 import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
@@ -24,8 +25,31 @@ export { installedVersion };
 
 const PREFS_KEY = "helios:sim:launch";
 
+/**
+ * What the course selector offers: a fixed course by id, or a generated one
+ * by event -- `gen:autocross` -- whose seed lives in `seed` beside it. The
+ * course id the simulator is launched with is put together at launch time,
+ * so a driver who types a seed and changes their mind has changed nothing.
+ */
+type CourseChoice = TrackId | `gen:${GeneratedEvent}`;
+
+const generatedChoice = (event: GeneratedEvent): CourseChoice => `gen:${event}`;
+function generatedEventOf(choice: string): GeneratedEvent | null {
+  const ev = GENERATED_EVENTS.find((e) => generatedChoice(e.event) === choice);
+  return ev ? ev.event : null;
+}
+
+/** The course id a launch would ask for. */
+export function courseFor(prefs: Pick<LaunchPrefs, "track" | "seed">): TrackId {
+  const event = generatedEventOf(prefs.track);
+  return event ? generatedTrackId(event, prefs.seed) : (prefs.track as TrackId);
+}
+
 interface LaunchPrefs {
-  track: TrackId;
+  track: CourseChoice;
+  /** The seed for a generated course. Kept even while a fixed course is
+   *  chosen, so switching back and forth does not lose it. */
+  seed: string;
   profile: string;
   session: string;
   traction: boolean;
@@ -38,6 +62,7 @@ interface LaunchPrefs {
 
 const DEFAULTS: LaunchPrefs = {
   track: "autocross",
+  seed: "",
   profile: "wheel",
   session: "",
   // Off by default because the real car has none of them, and a time set with
@@ -109,8 +134,9 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
     setBusy(true);
     setError(null);
     setSent(null);
+    const track = courseFor(prefs);
     const req: LaunchRequest = {
-      track: prefs.track,
+      track,
       profile: prefs.profile,
       driver: driver.name,
       driverId: driver.id,
@@ -124,7 +150,7 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
     };
     try {
       const res = await simLaunch(req);
-      setSent(`${TRACKS.find((t) => t.id === prefs.track)?.name ?? prefs.track} · pid ${res.pid}`);
+      setSent(`${trackName(track)} · pid ${res.pid}`);
       onLaunched();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -210,13 +236,50 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
             <select
               className={inputCls}
               value={prefs.track}
-              onChange={(e) => set("track", e.target.value as TrackId)}
+              onChange={(e) => {
+                const choice = e.target.value as CourseChoice;
+                set("track", choice);
+                // A generated course needs a seed; hand the driver one
+                // rather than an empty box and the simulator's default.
+                if (generatedEventOf(choice) && !normaliseSeed(prefs.seed)) set("seed", randomSeed());
+              }}
             >
               {TRACKS.map((t) => (
                 <option key={t.id} value={t.id}>{t.name} — {t.detail}</option>
               ))}
+              {GENERATED_EVENTS.map((g) => (
+                <option key={g.event} value={generatedChoice(g.event)}>Generated {g.name.toLowerCase()} — {g.detail}</option>
+              ))}
             </select>
           </Field>
+          {generatedEventOf(prefs.track) && (
+            <Field label="Seed" hint="same seed, same course, on every rig">
+              <div className="flex gap-2">
+                <input
+                  className={inputCls + " font-mono uppercase tracking-widest"}
+                  value={prefs.seed}
+                  placeholder="e.g. K7Q2"
+                  maxLength={12}
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-label="Seed"
+                  onChange={(e) => set("seed", e.target.value)}
+                  onBlur={(e) => set("seed", normaliseSeed(e.target.value) || randomSeed())}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-helios-line px-3 py-1.5 text-xs transition hover:border-asu-gold"
+                  onClick={() => set("seed", randomSeed())}
+                >
+                  New seed
+                </button>
+              </div>
+              <span className="mt-1 block text-[11px] text-helios-muted">
+                Course id <span className="font-mono">{courseFor(prefs)}</span>. Built to the FSAE
+                course rules by the simulator (0.6.0 or newer); times rank on their own board.
+              </span>
+            </Field>
+          )}
           <Field label="Controls">
             <select
               className={inputCls}

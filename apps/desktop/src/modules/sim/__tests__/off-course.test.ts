@@ -29,7 +29,7 @@ function run(over: Partial<SimRun> = {}): SimRun {
     driver: "Nick", driverId: "u1", session: null,
     track: "autocross", trackName: "Autocross 2026",
     startedAt: "2026-09-19T10:00:00Z", finishedReason: "finished",
-    profile: "wheel", device: null, physics: "native", simVersion: "0.2.0",
+    profile: "wheel", device: null, physics: "native", simVersion: "0.6.0",
     synthetic: false, samples: 4100,
     assists: { traction: false, abs: false, autoShift: false },
     laps: [lap({ lap: 1 })],

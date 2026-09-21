@@ -306,7 +306,21 @@ pub struct LaunchResult {
 /// does not understand, but a value from the renderer should not reach a
 /// command line unvalidated in the first place.
 fn valid_track(t: &str) -> bool {
-    matches!(t, "autocross" | "endurance" | "mis")
+    matches!(t, "autocross" | "endurance" | "mis") || valid_generated_track(t)
+}
+
+/// A procedural course: `gen-ax-SEED` or `gen-en-SEED`, the seed being the
+/// simulator's canonical form -- letters, digits and dashes, at most twelve.
+/// The simulator normalises what it is given, but a value that reaches its
+/// command line should already be one it would accept.
+fn valid_generated_track(t: &str) -> bool {
+    let seed = match t.strip_prefix("gen-ax-").or_else(|| t.strip_prefix("gen-en-")) {
+        Some(s) => s,
+        None => return false,
+    };
+    !seed.is_empty()
+        && seed.len() <= 12
+        && seed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn valid_profile(p: &str) -> bool {
@@ -744,6 +758,19 @@ mod tests {
     fn rejects_a_course_that_does_not_exist() {
         let r = LaunchRequest { track: Some("nurburgring".into()), ..drive() };
         assert!(build_args(&r).is_err());
+    }
+
+    #[test]
+    fn accepts_a_generated_course_by_seed() {
+        for ok in ["gen-ax-K7Q2", "gen-en-SDM26", "gen-ax-A-B-1", "gen-en-abcdefghjkmn"] {
+            let r = LaunchRequest { track: Some(ok.into()), ..drive() };
+            let args = build_args(&r).expect(ok);
+            assert!(args.windows(2).any(|w| w[0] == "--track" && w[1] == ok), "{ok}");
+        }
+        for bad in ["gen-ax-", "gen-xx-K7Q2", "gen-ax-abcdefghjkmnp", "gen-ax-K7 Q2", "gen-ax-../x"] {
+            let r = LaunchRequest { track: Some(bad.into()), ..drive() };
+            assert!(build_args(&r).is_err(), "{bad}");
+        }
     }
 
     #[test]

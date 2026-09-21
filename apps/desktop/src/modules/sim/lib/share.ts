@@ -23,7 +23,7 @@
 
 import type { SupabaseClient } from "@helios/auth";
 
-import { deviceClass, isRankable, runBest, type SimRun } from "../api";
+import { deviceClass, isRankable, predatesCourse, runBest, type SimRun } from "../api";
 
 const TABLE = "runs";
 const SCHEMA = "sim";
@@ -91,7 +91,8 @@ export function rowToRun(row: RunRow): SimRun {
     detectedInput: row.detected_input ?? null,
     device: null,
     physics: null,
-    simVersion: null,
+    simVersion: typeof (stats as unknown as { simVersion?: unknown }).simVersion === "string"
+      ? (stats as unknown as { simVersion: string }).simVersion : null,
     synthetic: row.synthetic,
     // Carried in `stats` rather than promoted to a column: nothing sorts on
     // it. Zero on a row pushed before it travelled, which the panel shows as
@@ -150,7 +151,10 @@ function runToRow(
     // The sample count rides in `stats` beside the rate. It was left out, so
     // every shared run reported "0 samples at 99 Hz" -- and importing one
     // wrote that zero into the local manifest, where it stayed.
-    stats: { ...run.stats, sampleRateHz: run.sampleRateHz, samples: run.samples },
+    // The simulator version rides along too: a course can change shape
+    // between versions, and the board needs to know which one a time was
+    // driven on (see `predatesCourse`).
+    stats: { ...run.stats, sampleRateHz: run.sampleRateHz, samples: run.samples, simVersion: run.simVersion },
     laps_detail: run.laps ?? [],
   };
 }
@@ -397,6 +401,8 @@ export interface SyncResult {
    *  code path, and invisible to `telemetryPruned`, which reads the rows. */
   telemetrySwept: number;
   skippedNotMine: number;
+  /** Runs on a course that has changed shape since they were driven; kept local. */
+  skippedStale: number;
   error: string | null;
 }
 
@@ -416,11 +422,15 @@ export async function pushRuns(
 ): Promise<SyncResult> {
   const out: SyncResult = {
     pushed: 0, telemetryPushed: 0, telemetryPruned: 0, telemetrySwept: 0,
-    skippedNotMine: 0, error: null,
+    skippedNotMine: 0, skippedStale: 0, error: null,
   };
   const mine = local.filter((r) => {
     if (r.remote) return false;
     if (r.driverId !== userId) { out.skippedNotMine++; return false; }
+    // A run on a course that has since changed shape stays on this disk and
+    // goes nowhere: the team's board was cleared of those times on purpose,
+    // and every rig that still holds them would otherwise put them back.
+    if (predatesCourse(r)) { out.skippedStale++; return false; }
     return true;
   });
   if (!mine.length) return out;

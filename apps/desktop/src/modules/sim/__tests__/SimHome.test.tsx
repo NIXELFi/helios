@@ -38,7 +38,7 @@ vi.mock("../api", async () => {
 
 const fetchShared = vi.fn<() => Promise<SimRun[]>>();
 const push = vi.fn(async () => ({
-  pushed: 0, telemetryPushed: 0, telemetryPruned: 0, telemetrySwept: 0, skippedNotMine: 0, error: null,
+  pushed: 0, telemetryPushed: 0, telemetryPruned: 0, telemetrySwept: 0, skippedNotMine: 0, skippedStale: 0, error: null,
 }));
 const deleteShared = vi.fn<(client: unknown, id: string) => Promise<void>>();
 vi.mock("../lib/share", () => ({

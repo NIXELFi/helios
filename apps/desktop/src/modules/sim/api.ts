@@ -12,7 +12,99 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type TrackId = "autocross" | "endurance" | "mis";
+/**
+ * A course the simulator knows: one of the three fixed ones, or a
+ * procedural course named by its event and seed -- `gen-ax-K7Q2`,
+ * `gen-en-K7Q2`. The simulator builds the same course from the same seed on
+ * every machine, so the id is the course.
+ */
+export type TrackId = "autocross" | "endurance" | "mis" | `gen-ax-${string}` | `gen-en-${string}`;
+
+/** The two events a course can be generated for, as the simulator names them. */
+export const GENERATED_EVENTS = [
+  { event: "autocross", short: "ax", name: "Autocross", detail: "a new 0.8 km run from a seed" },
+  { event: "endurance", short: "en", name: "Endurance", detail: "a new lapped course from a seed" },
+] as const;
+export type GeneratedEvent = (typeof GENERATED_EVENTS)[number]["event"];
+
+// The seed rules are the simulator's (sim/src/track/generate.js) and have to
+// stay so: a seed typed here must build the same course as one typed there.
+const SEED_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
+
+/** Canonical seed: upper case, letters/digits/dashes only, at most 12. */
+export function normaliseSeed(s: string): string {
+  return String(s ?? "").toUpperCase().replace(/[^A-Z0-9-]/g, "").replace(/^-+|-+$/g, "").slice(0, 12);
+}
+
+/** A fresh four-character seed. */
+export function randomSeed(rand: () => number = Math.random): string {
+  let s = "";
+  for (let i = 0; i < 4; i++) s += SEED_ALPHABET[Math.floor(rand() * SEED_ALPHABET.length)];
+  return s;
+}
+
+/** `gen-ax-K7Q2` for an event and seed; an empty seed gets the simulator's default. */
+export function generatedTrackId(event: GeneratedEvent, seed: string): TrackId {
+  const ev = GENERATED_EVENTS.find((e) => e.event === event)!;
+  return `gen-${ev.short}-${normaliseSeed(seed) || "SDM26"}` as TrackId;
+}
+
+/** `gen-en-abc` -> { event: "endurance", seed: "ABC" }; null for anything else. */
+export function parseGeneratedId(id: string): { event: GeneratedEvent; seed: string } | null {
+  const m = /^gen-(ax|en)-([A-Z0-9-]{1,12})$/i.exec(String(id ?? ""));
+  if (!m) return null;
+  return { event: m[1]!.toLowerCase() === "ax" ? "autocross" : "endurance", seed: normaliseSeed(m[2]!) };
+}
+
+/** Is this something the simulator can be asked to load? */
+export function isTrackId(id: string): id is TrackId {
+  return TRACKS.some((t) => t.id === id) || parseGeneratedId(id) !== null;
+}
+
+/**
+ * When each fixed course last changed shape, as an instant.
+ *
+ * A lap time only means something against the course it was driven on. The
+ * 2026 autocross and endurance courses gained their slaloms -- from the
+ * published course maps -- in simulator 0.6.0, published 2026-09-20 at
+ * 18:10 Arizona time (endurance: its third slalom in 0.6.1, 18:28); every
+ * time set before that was driven without them,
+ * and a board that mixed the two would rank a shortcut over a lap. So a run
+ * on one of these courses that started before this instant is not ranked,
+ * is not pushed to the team, and says why. The same goes for a run driven
+ * later on a simulator older than 0.6.0, which is still the old course.
+ */
+export const COURSE_REVISED_AT: Record<string, { at: string; simVersion: string; why: string }> = {
+  autocross: { at: "2026-09-21T01:10:00Z", simVersion: "0.6.0", why: "the course gained its slaloms" },
+  // Endurance gained its third slalom in 0.6.1, published 18:28 the same day.
+  endurance: { at: "2026-09-21T01:28:00Z", simVersion: "0.6.1", why: "the course gained its slaloms" },
+};
+
+/** `a` < `b` for dotted versions; a version that does not parse compares low. */
+function versionLess(a: string, b: string): boolean {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0), pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/**
+ * Was this run driven on a course that has since changed shape? See
+ * `COURSE_REVISED_AT`. Judged by the simulator version when the run recorded
+ * one, and by when it started otherwise -- a shared row from before the
+ * version travelled carries only its start time.
+ */
+export function predatesCourse(run: Pick<SimRun, "track" | "startedAt" | "simVersion">): boolean {
+  const rev = COURSE_REVISED_AT[run.track];
+  if (!rev) return false;
+  const v = run.simVersion?.replace(/^fsae-sim\s+/, "").trim();
+  if (v && /^\d+\.\d+/.test(v)) return versionLess(v, rev.simVersion);
+  if (!run.startedAt) return true; // no date at all: it cannot be placed after the change
+  const t = Date.parse(run.startedAt);
+  return Number.isNaN(t) || t < Date.parse(rev.at);
+}
 
 export interface SimAssists {
   traction: boolean;
@@ -497,7 +589,11 @@ export const DEVICE_CLASSES: { id: DeviceClass; name: string; short: string }[] 
 ];
 
 export function trackName(id: string): string {
-  return TRACKS.find((t) => t.id === id)?.name ?? id;
+  const fixed = TRACKS.find((t) => t.id === id);
+  if (fixed) return fixed.name;
+  const g = parseGeneratedId(id);
+  if (g) return `${GENERATED_EVENTS.find((e) => e.event === g.event)!.name} ${g.seed}`;
+  return id;
 }
 
 /** The scored time for a run: its best lap, or nothing if it never set one. */
@@ -542,6 +638,8 @@ export function isRankable(run: SimRun): boolean {
     runBest(run) != null &&
     // Stricter than FSAE, on purpose. See `bestLapWentOffCourse`.
     !bestLapWentOffCourse(run) &&
+    // A time on a course that has since changed shape. See `COURSE_REVISED_AT`.
+    !predatesCourse(run) &&
     !run.assists.traction &&
     !run.assists.abs &&
     !run.assists.autoShift
@@ -562,6 +660,10 @@ export function unrankedReason(run: SimRun): string | null {
   // it, on its finish card and in its lap list, so it is the word here.
   if (bestLapWentOffCourse(run)) return "that lap went off course";
   if (runBest(run) == null) return "no completed lap";
+  if (predatesCourse(run)) {
+    const rev = COURSE_REVISED_AT[run.track]!;
+    return `driven before ${rev.why} (simulator ${rev.simVersion}), so it does not compare`;
+  }
   const on: string[] = [];
   if (run.assists.traction) on.push("traction control");
   if (run.assists.abs) on.push("ABS");

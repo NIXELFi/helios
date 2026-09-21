@@ -14,7 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns, telemetryToKeep } from "./lib/share";
 import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus,
   type SimManifest, type SimRun, type SimStatus,
-  TRACKS, type TrackId,
+  TRACKS, isTrackId,
 } from "./api";
 
 type Tab = "launch" | "runs" | "board";
@@ -313,9 +313,7 @@ export function SimHome({ active }: { active: boolean }) {
     // walked that straight into `sim_launch`, which rejects it with an error
     // about a course nobody asked for. Fall back to the course the launcher
     // defaults to and let the driver pick.
-    const track = TRACKS.some((t) => t.id === run.track)
-      ? (run.track as TrackId)
-      : TRACKS[0]!.id;
+    const track = isTrackId(run.track) ? run.track : TRACKS[0]!.id;
     const go = () => simLaunch({
       track,
       profile: prefs.profile || undefined,

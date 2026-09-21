@@ -17,7 +17,7 @@ function run(over: Partial<SimRun> & { runId: string }): SimRun {
     telemetryPath: `C:/runs/${over.runId}/telemetry.csv`, telemetryBytes: 1024,
     driver: "Nick", driverId: "d-1", session: null, track: "autocross", trackName: "Autocross 2026",
     startedAt: "2026-09-19T10:00:00Z", finishedReason: "finished", profile: "wheel",
-    detectedInput: "wheel", device: null, physics: "native", simVersion: "0.3.0",
+    detectedInput: "wheel", device: null, physics: "native", simVersion: "0.6.0",
     synthetic: false, samples: 4100, assists: { traction: false, abs: false, autoShift: false },
     laps: [],
     stats: {
