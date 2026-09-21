@@ -119,9 +119,13 @@ describe("the launch tab while the simulator updates itself", () => {
     expect(screen.getByText(/not installed here/i)).toBeTruthy();
   });
 
-  it("prints the sharing rule where the run is started", () => {
+  it("prints the sharing rule, both halves of it, where the run is started", () => {
     show(status(), idle());
-    expect(screen.getByText(/best 3 and latest 3 on each course/)).toBeTruthy();
+    // Two rules since generated courses became unbounded in number: a driver
+    // reading only the fixed numbers on the Launch tab would be told the wrong
+    // thing about every seed they drive.
+    expect(screen.getByText(/best 3 and latest 3 on each fixed course/)).toBeTruthy();
+    expect(screen.getByText(/on a generated one/)).toBeTruthy();
   });
 
   it("says which platforms the feed has when there is nothing for this one", async () => {

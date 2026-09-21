@@ -4,11 +4,25 @@ import {
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, runBest, simDeleteRun, simReadRun,
-  unrankedReason, type SimManifest, type SimRun,
+  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, parseGeneratedId, runBest,
+  simDeleteRun, simReadRun, unrankedReason, type SimManifest, type SimRun,
 } from "../api";
 import { ghostCandidates } from "../lib/leaderboard";
-import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
+
+/**
+ * What this run's course costs to keep.
+ *
+ * The rule is two rules -- a generated course is bounded more tightly than a
+ * fixed one -- and this panel is where a driver asks "why is my lap not up
+ * there". Printing the fixed numbers on a generated run would answer the
+ * question wrongly, which is worse than not answering it.
+ */
+function limitsFor(track: string): { best: number; recent: number; kind: string } {
+  return parseGeneratedId(track) !== null
+    ? { best: GEN_KEEP_BEST, recent: GEN_KEEP_RECENT, kind: "generated course" }
+    : { best: KEEP_BEST, recent: KEEP_RECENT, kind: "course" };
+}
 
 interface Props {
   run: SimRun;
@@ -23,7 +37,8 @@ interface Props {
    * Whether this run's lap is in the team's copy right now, for a run of
    * the signed-in driver's own; null for anybody else's, where the row says.
    * The team keeps the lap for a driver's best `KEEP_BEST` and latest
-   * `KEEP_RECENT` runs per course; the rest share their time only.
+   * `KEEP_RECENT` runs per fixed course, and `GEN_KEEP_BEST` / `GEN_KEEP_RECENT`
+   * per generated one; the rest share their time only.
    */
   lapShared?: boolean | null;
   onClose: () => void;
@@ -66,6 +81,8 @@ export function RunDetail({
 
   const ghosts = useMemo(() => ghostCandidates(allRuns, run), [allRuns, run]);
   const best = runBest(run);
+  // How many laps this run's course keeps. See `limitsFor`.
+  const lim = limitsFor(run.track);
   const reason = unrankedReason(run);
   const st = run.stats;
 
@@ -232,11 +249,11 @@ export function RunDetail({
               label="Shared"
               value={
                 lapShared
-                  ? `time and lap — one of your best ${KEEP_BEST} or latest ${KEEP_RECENT} on this course`
-                  : `time only — the lap is kept here; only your best ${KEEP_BEST} and latest ${KEEP_RECENT} per course go up`
+                  ? `time and lap — one of your best ${lim.best} or latest ${lim.recent} on this ${lim.kind}`
+                  : `time only — the lap is kept here; only your best ${lim.best} and latest ${lim.recent} per ${lim.kind} go up`
               }
               title={
-                `Every run's time is shared with the team. The lap itself is uploaded for your best ${KEEP_BEST} and latest ${KEEP_RECENT} runs on each course, and removed from the team's copy as newer or quicker ones replace it. Nothing is removed from this machine.`
+                `Every run's time is shared with the team. The lap itself is uploaded for your best ${lim.best} and latest ${lim.recent} runs on this ${lim.kind}, and removed from the team's copy as newer or quicker ones replace it. Nothing is removed from this machine.`
               }
             />
           )}

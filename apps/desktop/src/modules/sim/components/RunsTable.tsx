@@ -6,7 +6,7 @@ import {
 import {
   TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, trackName, unrankedReason, type SimRun,
 } from "../api";
-import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
 
 type SortKey = "when" | "best" | "driver" | "track";
 
@@ -485,7 +485,8 @@ export function RunsTable({
       <p className="border-t border-helios-line px-3 py-1.5 text-[11px] text-helios-muted">
         Every run&rsquo;s time is shared with the team as soon as it is driven. The lap
         itself is uploaded only for your best {KEEP_BEST} and latest {KEEP_RECENT} on each
-        course; older laps leave the team&rsquo;s copy as new ones take their place, and
+        fixed course, and your best {GEN_KEEP_BEST} and latest {GEN_KEEP_RECENT} on a
+        generated one; older laps leave the team&rsquo;s copy as new ones take their place, and
         never leave this machine.
       </p>
     </div>

@@ -375,3 +375,61 @@ describe("a run from before the course changed shape", () => {
     expect(rows[0]?.simVersion).toBe("0.6.0");
   });
 });
+
+describe("a lap the budget job took away", () => {
+  /** What `sim.enforce_telemetry_budget` does to one run, server-side. */
+  const evict = (s: ReturnType<typeof server>, id: string) => {
+    const row = s.table.get(id)!;
+    s.bucket.delete(row.telemetry_object as string);
+    s.table.set(id, {
+      ...row, telemetry_object: null, telemetry_bytes: null,
+      evicted_at: "2026-09-21T03:00:00Z",
+    });
+  };
+
+  it("is not put straight back on the next sync", async () => {
+    // Without the tombstone this is an oscillation, not an edge case: the
+    // retention rule still wants the lap, the object is gone, so every
+    // sign-in re-uploads what the job deleted at three in the morning and the
+    // bucket sits at the cap for ever.
+    const s = server();
+    expect((await s.sync(ME, RIG)).telemetryPushed).toBe(4);
+    evict(s, "b");
+
+    const again = await s.sync(ME, RIG);
+    expect(again.telemetryPushed).toBe(0);
+    expect(s.objectOf("b")).toBeNull();
+    expect(again.error).toBeNull();
+  });
+
+  it("does not stop the other laps going up", async () => {
+    // One evicted run must not look like "telemetry is done" for the rest.
+    const s = server();
+    await s.sync(ME, [run("a", 44, 1)]);
+    s.seed({
+      run_id: "b", user_id: ME, track: "autocross", started_at: "2026-09-19T02:00:00Z",
+      best_lap_s: 41, laps: 1, total_cones: 0, assists: {}, synthetic: false,
+      format_version: 3, profile: "wheel", detected_input: "wheel", stats: {}, laps_detail: [],
+      telemetry_object: null, telemetry_bytes: null, evicted_at: "2026-09-21T03:00:00Z",
+    });
+
+    const res = await s.sync(ME, [run("a", 44, 1), run("b", 41, 2), run("c", 43, 3)]);
+    expect(s.objectOf("b")).toBeNull();
+    expect(s.objectOf("c")).toBeTruthy();
+    expect(res.telemetryPushed).toBe(1);
+  });
+
+  it("goes up again once the tombstone is cleared", async () => {
+    // Clearing the column is a deliberate act -- the run panel's doing, or a
+    // maintainer's. The rule is "do not put back what was removed on purpose",
+    // not "never again".
+    const s = server();
+    await s.sync(ME, RIG);
+    evict(s, "b");
+    expect((await s.sync(ME, RIG)).telemetryPushed).toBe(0);
+
+    s.table.set("b", { ...s.table.get("b")!, evicted_at: null });
+    expect((await s.sync(ME, RIG)).telemetryPushed).toBe(1);
+    expect(s.objectOf("b")).toBeTruthy();
+  });
+});

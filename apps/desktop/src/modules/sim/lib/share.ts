@@ -23,7 +23,9 @@
 
 import type { SupabaseClient } from "@helios/auth";
 
-import { deviceClass, isRankable, predatesCourse, runBest, type SimRun } from "../api";
+import {
+  deviceClass, isRankable, parseGeneratedId, predatesCourse, runBest, type SimRun,
+} from "../api";
 
 const TABLE = "runs";
 const SCHEMA = "sim";
@@ -51,6 +53,9 @@ interface RunRow {
   laps_detail: unknown[] | null;
   telemetry_object: string | null;
   telemetry_bytes: number | null;
+  /** When the nightly budget job removed this run's lap, or null. See
+   *  `SharedState.evictedAt`. */
+  evicted_at: string | null;
 }
 
 /**
@@ -130,10 +135,18 @@ export function rowToRun(row: RunRow): SimRun {
  * next sign-in, and nineteen megabytes with it. Left out of the payload, the
  * server keeps whatever it has: the pointer is written only by the code that
  * uploaded the object and cleared only by the code that removed it.
+ *
+ * `evicted_at` is left out for the same reason and a sharper one. It is the
+ * server's word that it removed a lap deliberately, and sending it from here
+ * would let a routine re-push clear it -- which is precisely the oscillation
+ * it exists to stop, arriving by the back door.
  */
 function runToRow(
   run: SimRun,
-): Omit<RunRow, "user_id" | "display_name" | "subteam" | "telemetry_object" | "telemetry_bytes"> {
+): Omit<
+  RunRow,
+  "user_id" | "display_name" | "subteam" | "telemetry_object" | "telemetry_bytes" | "evicted_at"
+> {
   return {
     run_id: run.runId,
     driver: run.driver,
@@ -236,6 +249,7 @@ async function sharedRowsFor(
   for (const r of res.data as RunRow[]) {
     out.set(r.run_id, {
       telemetryObject: r.telemetry_object,
+      evictedAt: r.evicted_at ?? null,
       stamp: rowStamp(r),
       run: rowToRun(r),
     });
@@ -245,6 +259,22 @@ async function sharedRowsFor(
 
 interface SharedState {
   telemetryObject: string | null;
+  /**
+   * When the server took this run's lap away to stay under budget.
+   *
+   * `telemetryToKeep` is a rule about what a DRIVER should keep and knows
+   * nothing about what the bucket costs; the budget job is a rule about the
+   * bucket and cares nothing for whose lap it is. Left to themselves the two
+   * fight: the job deletes the object at three in the morning, the rule still
+   * wants it, and the next sign-in uploads it again -- for ever, at whatever
+   * the cap is, with the job deleting and the rig replacing the same
+   * megabytes every night.
+   *
+   * So the server says it meant it, and the client believes it. Not
+   * permanent: clearing the column shares the lap again. The rule is "do not
+   * put back what was removed on purpose", not "never again".
+   */
+  evictedAt: string | null;
   /** See `rowStamp`. */
   stamp: string;
   /** The row as a run, for the retention rule. */
@@ -336,18 +366,41 @@ async function gzip(body: Uint8Array): Promise<{ body: Uint8Array; gz: boolean }
  *
  * "Best three and latest three" is the rule the team was told, and the copy
  * on the Launch tab, the runs table and every run's panel prints these two
- * numbers, so they and the rule cannot drift apart.
+ * numbers, so they and the rule cannot drift apart. A generated course is
+ * cheaper still -- see `GEN_KEEP_BEST`, which the same copy prints beside
+ * these.
  */
 export const KEEP_BEST = 3;
 /** ...and the last this many, whether they were quick or not. */
 export const KEEP_RECENT = 3;
 
 /**
+ * The same two numbers for a PROCEDURAL course, which is a different kind of
+ * thing and has to be paid for differently.
+ *
+ * A generated course is named by its seed -- four characters, so 1.7M of them
+ * -- and the rule above is per course. That made the bound a bound on courses
+ * rather than on storage: every fresh seed opened a new six-slot allowance,
+ * and because the first run on a course nobody has driven is always a personal
+ * best, every one of those runs uploaded its lap. The shared table showed it
+ * plainly -- the fixed courses uploading 40% of runs, the generated ones 100%.
+ *
+ * Two and one rather than three and three. A seed is somewhere you went once:
+ * worth a ghost to race and a look at the last lap you threw away, not worth a
+ * history. The two sets usually overlap, so it is nearer two objects than
+ * three.
+ */
+export const GEN_KEEP_BEST = 2;
+export const GEN_KEEP_RECENT = 1;
+
+/**
  * Which of this driver's runs keep their telemetry shared.
  *
  * Per COURSE: the best `KEEP_BEST` ranked runs, plus the most recent
  * `KEEP_RECENT`, as a union -- so a new personal best usually occupies a slot
- * in both and the real total sits under five.
+ * in both and the real total sits under five. On a generated course it is
+ * `GEN_KEEP_BEST` and `GEN_KEEP_RECENT` instead, which is the difference
+ * between a rule that bounds storage and one that only bounds a course.
  *
  * Over every run the driver has, wherever it is: a row the server holds and
  * this disk does not counts exactly as a local run does. The rule is about a
@@ -378,16 +431,22 @@ export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
   }
 
   const keep = new Set<string>();
-  for (const list of byCourse.values()) {
+  for (const [track, list] of byCourse) {
+    // A procedural course is bounded more tightly than a fixed one, because
+    // there is no bound on how many of them there are. See `GEN_KEEP_BEST`.
+    const generated = parseGeneratedId(track) !== null;
+    const nBest = generated ? GEN_KEEP_BEST : KEEP_BEST;
+    const nRecent = generated ? GEN_KEEP_RECENT : KEEP_RECENT;
+
     const ranked = list
       .filter((r) => isRankable(r) && runBest(r) != null)
       .sort((a, b) => (runBest(a) as number) - (runBest(b) as number));
-    for (const r of ranked.slice(0, KEEP_BEST)) keep.add(r.runId);
+    for (const r of ranked.slice(0, nBest)) keep.add(r.runId);
 
     const withALap = list
       .filter((r) => (r.stats.laps ?? 0) > 0)
       .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-    for (const r of withALap.slice(0, KEEP_RECENT)) keep.add(r.runId);
+    for (const r of withALap.slice(0, nRecent)) keep.add(r.runId);
   }
   return keep;
 }
@@ -487,10 +546,16 @@ export async function pushRuns(
   const objectOf = new Map<string, string | null>();
   for (const [runId, s] of already) objectOf.set(runId, s.telemetryObject);
 
+  // And the runs whose lap the budget job removed on purpose. See
+  // `SharedState.evictedAt` -- without this the cap is not a cap.
+  const evicted = new Set<string>();
+  for (const [runId, s] of already) if (s.evictedAt) evicted.add(runId);
+
   // Then the telemetry for the laps worth watching, one at a time: they are
   // megabytes and a failure on one must not lose the others.
   for (const run of mine) {
     if (!wantTelemetry.has(run.runId)) continue;
+    if (evicted.has(run.runId)) continue;
     if (objectOf.get(run.runId)) continue;
     try {
       const raw = await readTelemetry(run);

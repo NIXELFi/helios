@@ -91,16 +91,57 @@ function versionLess(a: string, b: string): boolean {
 }
 
 /**
+ * The newest simulator version that is known to have been released.
+ *
+ * Here to let `predatesCourse` ask whether a version string names a build that
+ * has actually existed, because one of them did not: every run recorded before
+ * 2026-09-19 09:55 UTC claims 1.0.0, a hand-written literal that never matched
+ * the shipping build (0.2.0 at the time). See the simulator's commit "Every
+ * run ever recorded claims a version that has never existed".
+ *
+ * Going stale is SAFE and needs no discipline to maintain. A run claiming a
+ * version newer than this is simply judged on its date instead, and a genuinely
+ * newer build's runs are dated after every revision, so they rank either way.
+ * What the constant buys is the other direction: an impossibly HIGH version on
+ * an old run stops being taken at its word.
+ */
+export const NEWEST_KNOWN_SIM_VERSION = "0.6.6";
+
+/**
  * Was this run driven on a course that has since changed shape? See
- * `COURSE_REVISED_AT`. Judged by the simulator version when the run recorded
- * one, and by when it started otherwise -- a shared row from before the
- * version travelled carries only its start time.
+ * `COURSE_REVISED_AT`.
+ *
+ * The simulator version decides it, when the version can be believed. That
+ * qualification is the whole of this function's history: the rule used to
+ * trust the field unconditionally, which made it exactly as trustworthy as the
+ * field, and the field was a lie. Twenty-five runs driven two days before the
+ * autocross slaloms existed carry `1.0.0` -- above the 0.6.0 revision, so they
+ * were waved through -- and the quickest, a 38.9 through open road where the
+ * board's real times run 42+, sat on top of the leaderboard.
+ *
+ * So a version is believed only if it names a build that has plausibly shipped
+ * (see `NEWEST_KNOWN_SIM_VERSION`). Otherwise the run is judged on when it was
+ * driven, which is what the rule already did for rows carrying no version.
+ *
+ * NOT a blacklist of "1.0.0". The simulator will reach 1.0.0 honestly and
+ * those runs must rank; they will, because their dates fall after every
+ * revision. What condemns these is the date, not the string.
+ *
+ * And deliberately NOT "an old date is enough on its own". A build is often
+ * driven before it is published -- the 0.6.2 runs on the board were set
+ * 47 minutes after 0.6.0 went up -- so a date-first rule would condemn a
+ * maintainer's own laps on a build that had the current course all along.
  */
 export function predatesCourse(run: Pick<SimRun, "track" | "startedAt" | "simVersion">): boolean {
   const rev = COURSE_REVISED_AT[run.track];
   if (!rev) return false;
+
   const v = run.simVersion?.replace(/^fsae-sim\s+/, "").trim();
-  if (v && /^\d+\.\d+/.test(v)) return versionLess(v, rev.simVersion);
+  // `versionLess(NEWEST, v)` rather than `!versionLess(v, NEWEST)`: a version
+  // EQUAL to the newest known one is believable, and is the common case.
+  const believable = !!v && /^\d+\.\d+/.test(v) && !versionLess(NEWEST_KNOWN_SIM_VERSION, v);
+  if (believable) return versionLess(v!, rev.simVersion);
+
   if (!run.startedAt) return true; // no date at all: it cannot be placed after the change
   const t = Date.parse(run.startedAt);
   return Number.isNaN(t) || t < Date.parse(rev.at);

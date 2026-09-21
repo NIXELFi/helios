@@ -9,7 +9,10 @@
  * practises. */
 import { describe, it, expect } from "vitest";
 
-import { KEEP_BEST, KEEP_RECENT, rowStamp, rowToRun, telemetryToKeep, thinCsv } from "../share";
+import {
+  GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT,
+  rowStamp, rowToRun, telemetryToKeep, thinCsv,
+} from "../share";
 import { isRankable, runBest, type SimRun } from "../../api";
 
 function localRun(over: Partial<SimRun> & { runId: string }): SimRun {
@@ -69,6 +72,7 @@ function row(over: Record<string, unknown> = {}) {
     laps_detail: [{ lap: 1, raw: 40.9, cones: 0, off: 0, total: 40.9, sectors: [], startedAtS: 0 }],
     telemetry_object: "u-ralf/20260919-100000-autocross-ab12.csv",
     telemetry_bytes: 1_100_000,
+    evicted_at: null,
     ...over,
   } as Parameters<typeof rowToRun>[0];
 }
@@ -202,6 +206,39 @@ describe("what keeps its telemetry", () => {
   it("is bounded by the two constants, whatever the driver does", () => {
     const many = Array.from({ length: 40 }, (_, i) => r(`r${i}`, 40 + i, i % 24));
     expect(telemetryToKeep(many, "me").size).toBeLessThanOrEqual(KEEP_BEST + KEEP_RECENT);
+  });
+
+  it("keeps only the best two and the latest one on a generated course", () => {
+    const g = (id: string, best: number, hour: number) =>
+      r(id, best, hour, { track: "gen-ax-K7Q2", trackName: "Generated autocross K7Q2" });
+    const runs = [g("a", 44, 1), g("b", 41, 2), g("c", 43, 3), g("d", 42, 4), g("e", 45, 5)];
+    // best 2 by time: b (41), d (42). recent 1 by clock: e.
+    expect(telemetryToKeep(runs, "me")).toEqual(new Set(["b", "d", "e"]));
+    expect(GEN_KEEP_BEST).toBe(2);
+    expect(GEN_KEEP_RECENT).toBe(1);
+  });
+
+  it("applies the fixed rule and the generated rule side by side", () => {
+    const runs = [
+      r("ax1", 41, 1), r("ax2", 42, 2), r("ax3", 43, 3), r("ax4", 44, 4),
+      r("g1", 51, 5, { track: "gen-en-QYUQ" }), r("g2", 52, 6, { track: "gen-en-QYUQ" }),
+      r("g3", 53, 7, { track: "gen-en-QYUQ" }), r("g4", 54, 8, { track: "gen-en-QYUQ" }),
+    ];
+    const keep = telemetryToKeep(runs, "me");
+    // autocross: best 3 = ax1, ax2, ax3; recent 3 = ax4, ax3, ax2 -- all four.
+    expect(keep.has("ax1")).toBe(true);
+    expect(keep.has("ax4")).toBe(true);
+    // generated: best 2 = g1, g2; recent 1 = g4. g3 is in neither.
+    expect(keep.has("g1")).toBe(true);
+    expect(keep.has("g2")).toBe(true);
+    expect(keep.has("g4")).toBe(true);
+    expect(keep.has("g3")).toBe(false);
+  });
+
+  it("is bounded by the generated constants on a generated course", () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      r(`r${i}`, 40 + i, i % 24, { track: "gen-ax-ZZZZ" }));
+    expect(telemetryToKeep(many, "me").size).toBeLessThanOrEqual(GEN_KEEP_BEST + GEN_KEEP_RECENT);
   });
 });
 

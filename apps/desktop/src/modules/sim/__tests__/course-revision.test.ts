@@ -48,6 +48,31 @@ describe("predatesCourse", () => {
     expect(predatesCourse(run({ simVersion: "0.5.7", startedAt: "2026-10-01T00:00:00Z" }))).toBe(true);
   });
 
+  it("catches a run whose version is newer than the revision but whose DATE is older", () => {
+    // Every run recorded before 2026-09-19 09:55 UTC claims simVersion 1.0.0:
+    // the literal was hand-written and never matched the shipping build (see
+    // the simulator's commit "Every run ever recorded claims a version that
+    // has never existed"). 1.0.0 sorts above 0.6.0, so a version-only rule
+    // waves those runs through -- and one of them, driven two days before the
+    // slaloms existed, sat on top of the autocross board.
+    expect(predatesCourse(run({ simVersion: "1.0.0", startedAt: "2026-09-19T07:06:19Z" }))).toBe(true);
+    expect(isRankable(run({ simVersion: "1.0.0", startedAt: "2026-09-19T07:06:19Z" }))).toBe(false);
+  });
+
+  it("does not blacklist 1.0.0 -- the simulator will reach it honestly one day", () => {
+    // The fix is that an old DATE is its own proof, not that this one version
+    // string is cursed. A genuine 1.0.0 driven after the cutoff must rank, or
+    // this quietly breaks on the day the simulator ships its first major.
+    expect(predatesCourse(run({ simVersion: "1.0.0", startedAt: "2026-12-01T00:00:00Z" }))).toBe(false);
+    expect(isRankable(run({ simVersion: "1.0.0", startedAt: "2026-12-01T00:00:00Z" }))).toBe(true);
+  });
+
+  it("still lets the version condemn a run the date would have allowed", () => {
+    // The case the version check exists for, unchanged: an un-updated rig
+    // driving today is still driving the old course.
+    expect(predatesCourse(run({ simVersion: "0.5.7", startedAt: "2026-10-01T00:00:00Z" }))).toBe(true);
+  });
+
   it("goes by the start time when the run carries no version -- a shared row", () => {
     expect(predatesCourse(run({ simVersion: null, startedAt: "2026-09-19T20:00:00Z" }))).toBe(true);
     expect(predatesCourse(run({ simVersion: null, startedAt: cutoff }))).toBe(false);

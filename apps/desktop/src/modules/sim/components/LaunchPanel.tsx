@@ -17,7 +17,7 @@ import {
   simStatus,
   type GeneratedEvent, type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
 } from "../api";
-import { KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
 import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
 
 // Kept here as well: the tests and older callers import it from this module.
@@ -195,7 +195,8 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
         <p className="mb-4 text-xs text-helios-dim">
           The simulator records everything at 100&nbsp;Hz and files it here. Every run&rsquo;s
           time goes on the team board. The lap itself is uploaded only for your best{" "}
-          {KEEP_BEST} and latest {KEEP_RECENT} on each course &mdash; older laps are removed
+          {KEEP_BEST} and latest {KEEP_RECENT} on each fixed course ({GEN_KEEP_BEST} and{" "}
+          {GEN_KEEP_RECENT} on a generated one) &mdash; older laps are removed
           from the team&rsquo;s copy as new ones take their place, and always stay on this
           machine.
         </p>
