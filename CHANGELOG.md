@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.9.1] - 2026-09-21
+
 ### Changed
 - Sim: the leaderboard keeps generated courses on their own tab. The
   competition board shows the 2026 Michigan courses only; a "Generated
