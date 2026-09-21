@@ -49,6 +49,8 @@ vi.mock("../lib/share", () => ({
   telemetryToKeep: () => new Set<string>(),
   KEEP_BEST: 3,
   KEEP_RECENT: 3,
+  GEN_KEEP_BEST: 2,
+  GEN_KEEP_RECENT: 1,
 }));
 
 vi.mock("../../../auth/AuthShell", () => {
