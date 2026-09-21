@@ -13,7 +13,158 @@
  * driver whether they were quick and untidy or just slow.
  */
 
-import { hasTrustworthySectors, isRankable, runBest, type SimRun } from "../api";
+import {
+  CONE_PENALTY_S, deviceClass, hasTelemetry, hasTrustworthySectors, isRankable, runBest,
+  type SimLap, type SimRun,
+} from "../api";
+
+/**
+ * One sector time, and exactly where it was driven.
+ *
+ * The time is the SCORED one: the sector as driven plus two seconds for every
+ * cone struck inside it. A sector record is a claim that this piece of the
+ * course can be driven this quickly, and a run that ploughed through the
+ * slalom has not made that claim -- it has made a much slower one. Raw is
+ * carried beside it for the same reason the lap board carries it: it is what
+ * tells a driver whether they were quick and untidy or just slow.
+ *
+ * The source is kept so the time can be watched, not only read: which run,
+ * which lap, and whether the lap itself is still anywhere to be watched.
+ */
+export interface SectorTime {
+  /** Scored: `rawTime + CONE_PENALTY_S * cones`. What ranks. */
+  time: number;
+  rawTime: number;
+  cones: number;
+  runId: string;
+  /** Display name on that run. */
+  driver: string;
+  /** The Helios account. Ranked runs always have one. */
+  driverId: string;
+  /** The lap number in that run (`laps[].lap`, 1-based), or null when the
+   *  time came from the run's summary rather than from a lap. */
+  lap: number | null;
+  /** When the run started; the older of two equal times holds the record. */
+  startedAt: string | null;
+  /** A teammate's shared run rather than one on this disk. */
+  remote: boolean;
+  /** Whether that lap can still be watched. See `hasTelemetry`. */
+  hasTelemetry: boolean;
+  /** The team's storage budget removed that lap on purpose. */
+  evicted: boolean;
+}
+
+/** A sector as one lap drove it, before it knows whose it is. */
+interface SectorPiece { time: number; rawTime: number; cones: number }
+
+/**
+ * The sector times one lap can put forward, index for index; null where a
+ * sector cannot count.
+ *
+ * Every exclusion here is one the simulator's own fold already makes or one
+ * the cones force:
+ * - a lap that did not score (left the course) contributes nothing;
+ * - a sector never timed is null, and so is the one after it, whose clock
+ *   started at the last boundary crossed and so spans two sectors;
+ * - from format 4 each sector carries its own cones and is penalised by
+ *   them; an unknown count for a sector means that sector cannot count;
+ * - before format 4 a lap's cones cannot be placed, so a lap with ANY cone
+ *   contributes nothing at all -- the alternative is guessing which sector
+ *   the two seconds belong to, and the guess that flatters is always "none".
+ */
+export function lapSectorPieces(lap: SimLap): (SectorPiece | null)[] {
+  if (lap.valid === false || (lap.off ?? 0) > 0) return [];
+  const sectors = Array.isArray(lap.sectors) ? lap.sectors : [];
+  const perSector = Array.isArray(lap.sectorCones) && lap.sectorCones.length >= sectors.length
+    ? lap.sectorCones
+    : null;
+  // No per-sector cones: the whole lap is clean or it is nothing.
+  if (!perSector && (lap.cones ?? 0) !== 0) return [];
+  const out: (SectorPiece | null)[] = [];
+  for (let i = 0; i < sectors.length; i++) {
+    const raw = sectors[i];
+    const prevUntimed = i > 0 && (sectors[i - 1] == null || !Number.isFinite(sectors[i - 1]!));
+    const cones = perSector ? perSector[i] : 0;
+    if (raw == null || !Number.isFinite(raw) || prevUntimed || cones == null || !Number.isFinite(cones) || cones < 0) {
+      out.push(null);
+      continue;
+    }
+    out.push({ time: raw + CONE_PENALTY_S * cones, rawTime: raw, cones });
+  }
+  return out;
+}
+
+/** Stamp a piece with the run and lap it came from. */
+function sourced(run: SimRun, lap: number | null, p: SectorPiece): SectorTime {
+  return {
+    ...p,
+    runId: run.runId,
+    driver: run.driver,
+    driverId: run.driverId ?? "",
+    lap,
+    startedAt: run.startedAt,
+    remote: !!run.remote,
+    hasTelemetry: hasTelemetry(run),
+    evicted: !!run.telemetryEvictedAt,
+  };
+}
+
+/**
+ * Does `a` beat `b`? Lower scored time; on a dead heat the one set FIRST
+ * holds it, as a record does; then run id and lap, which are arbitrary but
+ * fixed, so the answer never depends on the order the listing arrived in.
+ */
+export function sectorBeats(a: SectorTime, b: SectorTime | null | undefined): boolean {
+  if (!b) return true;
+  if (a.time !== b.time) return a.time < b.time;
+  const sa = a.startedAt ?? "￿", sb = b.startedAt ?? "￿";
+  if (sa !== sb) return sa < sb;
+  if (a.runId !== b.runId) return a.runId < b.runId;
+  return (a.lap ?? Infinity) < (b.lap ?? Infinity);
+}
+
+/**
+ * The best time this run drove each sector, and on which lap.
+ *
+ * From the laps, not from `stats.bestSectors`: the summary was folded by the
+ * simulator without penalties, so on any run older than format 4 it can hold
+ * a sector somebody drove straight through a cone. Only when the run carries
+ * no laps at all is the summary used, and then only if the run struck no
+ * cones anywhere -- the one case where it cannot be flattering.
+ */
+export function runBestSectors(run: SimRun): (SectorTime | null)[] {
+  if (!hasTrustworthySectors(run)) return [];
+  const out: (SectorTime | null)[] = [];
+  const laps = Array.isArray(run.laps) ? run.laps : [];
+  if (laps.length) {
+    for (const lap of laps) {
+      const pieces = lapSectorPieces(lap);
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i];
+        if (!p) { if (out[i] === undefined) out[i] = null; continue; }
+        const t = sourced(run, lap.lap ?? null, p);
+        if (sectorBeats(t, out[i])) out[i] = t;
+      }
+    }
+    return out;
+  }
+  if ((run.stats.totalCones ?? 0) !== 0) return [];
+  const summary = run.stats.bestSectors ?? [];
+  for (let i = 0; i < summary.length; i++) {
+    const s = summary[i];
+    out.push(s == null || !Number.isFinite(s) ? null : sourced(run, null, { time: s, rawTime: s, cones: 0 }));
+  }
+  return out;
+}
+
+/** Fold `next` into `into`, index by index, keeping the better of each. */
+function foldSectors(into: (SectorTime | null)[], next: (SectorTime | null)[]): void {
+  for (let i = 0; i < next.length; i++) {
+    const n = next[i] ?? null;
+    if (n && sectorBeats(n, into[i])) into[i] = n;
+    else if (into[i] === undefined) into[i] = null;
+  }
+}
 
 export interface DriverEntry {
   /** The Helios account. `isRankable` guarantees it exists. */
@@ -45,8 +196,11 @@ export interface DriverEntry {
   /** Gap to the leader, 0 for the leader. */
   gap: number;
   rank: number;
-  /** Their own best each sector, across every ranked run on the course. */
-  bestSectors: (number | null)[];
+  /** Their own best each sector, across every ranked run on the course,
+   *  penalised for its cones, with the run and lap it came from. */
+  bestSectors: (SectorTime | null)[];
+  /** The lap number of their best lap within `runId`, when the run says. */
+  bestLap: number | null;
   /** Those sectors added up: the lap they have already driven in pieces. */
   theoretical: number | null;
 }
@@ -55,8 +209,9 @@ export interface TrackBoard {
   track: string;
   trackName: string;
   entries: DriverEntry[];
-  /** The quickest each sector has been driven by anyone. */
-  sectorRecords: (number | null)[];
+  /** The quickest each sector has been driven by anyone, cones included,
+   *  and where. */
+  sectorRecords: (SectorTime | null)[];
   /** Those added up: the lap the team has driven in pieces but never in one. */
   teamTheoretical: number | null;
   /** Ranked runs on this course. */
@@ -95,7 +250,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
     // every sector best and every second of improvement across the rename.
     const byDriver = new Map<string, DriverEntry>();
     // Every sector time anyone drove on this course, for the team record.
-    let sectorRecords: (number | null)[] = [];
+    let sectorRecords: (SectorTime | null)[] = [];
 
     for (const run of ranked) {
       const best = runBest(run);
@@ -117,6 +272,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
           gap: 0,
           rank: 0,
           bestSectors: [],
+          bestLap: run.stats.bestLapNumber ?? null,
           theoretical: null,
         };
       if (!existing) byDriver.set(key, entry);
@@ -136,23 +292,25 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
         // reads as a penalty that was never applied. Better blank than wrong.
         entry.bestRaw = hasTrustworthySectors(run) ? run.stats.bestLapRawS ?? null : null;
         entry.runId = run.runId;
+        entry.bestLap = run.stats.bestLapNumber ?? null;
         entry.when = run.startedAt;
         entry.cones = run.stats.totalCones;
       }
 
-      // Sector bests: the run's own per-sector bests, folded into the
-      // driver's and the team's.
+      // Sector bests: the run's own per-sector bests, cones included, folded
+      // into the driver's and the team's with their source attached.
       //
       // Version 1 sectors are cumulative splits missing their final entry, so
       // folding them in would poison both theoretical bests with numbers that
       // are not sector times at all -- and the result LOOKS like a lap time,
       // which is how it went unnoticed. Those runs still rank on their lap
-      // time, which is measured, and simply contribute no sectors.
-      const sectors = hasTrustworthySectors(run) ? run.stats.bestSectors ?? [] : [];
-      for (let i = 0; i < sectors.length; i++) {
-        entry.bestSectors[i] = minDefined(entry.bestSectors[i] ?? null, sectors[i]);
-        sectorRecords[i] = minDefined(sectorRecords[i] ?? null, sectors[i]);
-      }
+      // time, which is measured, and simply contribute no sectors. That rule,
+      // and the cone rules, live in `runBestSectors`. Only RANKED runs get
+      // here, so a run on a course that has since changed shape
+      // (`predatesCourse`) supplies no sector record either.
+      const sectors = runBestSectors(run);
+      foldSectors(entry.bestSectors, sectors);
+      foldSectors(sectorRecords, sectors);
     }
 
     const entries = [...byDriver.values()].sort((a, b) => a.best - b.best);
@@ -160,7 +318,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
     entries.forEach((e, i) => {
       e.rank = i + 1;
       e.gap = e.best - leader;
-      e.theoretical = sumSectors(e.bestSectors);
+      e.theoretical = sumSectors(e.bestSectors.map((s) => s?.time ?? null));
     });
 
     // A course with no sectors at all should not report an empty record row.
@@ -171,7 +329,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
       trackName: all[0]?.trackName ?? track,
       entries,
       sectorRecords,
-      teamTheoretical: sumSectors(sectorRecords),
+      teamTheoretical: sumSectors(sectorRecords.map((s) => s?.time ?? null)),
       runCount: ranked.length,
       unrankedCount: all.length - ranked.length,
     });
@@ -409,10 +567,183 @@ export function buildActivity(runs: SimRun[]): Activity {
 
 /**
  * The runs a given run should be offered as a ghost against: the same course,
- * quickest first, excluding itself.
+ * quickest first, excluding itself -- and only runs whose lap is actually
+ * somewhere. A shared run whose telemetry was never uploaded, or was pruned,
+ * is a time and nothing else: offered as a ghost, the simulator opened the
+ * replay and drew "GHOST NOT LOADED" where the car should have been.
  */
 export function ghostCandidates(runs: SimRun[], run: SimRun): SimRun[] {
   return runs
-    .filter((r) => r.runId !== run.runId && r.track === run.track && runBest(r) != null)
+    .filter((r) => r.runId !== run.runId && r.track === run.track && runBest(r) != null && hasTelemetry(r))
     .sort((a, b) => (runBest(a) ?? Infinity) - (runBest(b) ?? Infinity));
+}
+
+// ------------------------------------------------------- sector comparison --
+
+/** A lap to open: which run, and which lap of it (null: the run's own pick). */
+export interface LapPick {
+  runId: string;
+  lap: number | null;
+}
+
+/**
+ * What the sector card shows and what its two buttons do.
+ *
+ * `target` is the time being looked at -- a team record, or one of the
+ * driver's own best sectors. `mine` is the number it is compared with.
+ * `against` is the driver's own lap that goes beside it in the replay (as the
+ * ghost) and in Logs (as the reference): a lap with telemetry, or null when
+ * the driver has none on the course.
+ */
+export interface SectorComparison {
+  /** 0-based. */
+  sector: number;
+  target: SectorTime;
+  mine: SectorTime | null;
+  /** What `mine` is, for the card: "Your best S2", "Your best lap's S2". */
+  mineLabel: string;
+  against: (LapPick & { label: string }) | null;
+}
+
+/** The time a given lap of a run drove sector `i`, penalised; null if it cannot count. */
+export function lapSectorTime(run: SimRun, lapNo: number | null, i: number): SectorTime | null {
+  if (lapNo == null || !hasTrustworthySectors(run)) return null;
+  const lap = run.laps?.find((l) => l.lap === lapNo);
+  if (!lap) return null;
+  const p = lapSectorPieces(lap)[i];
+  return p ? sourced(run, lapNo, p) : null;
+}
+
+/**
+ * Compare team sector record `i` with the signed-in driver.
+ *
+ * `runs` must be the SAME runs the board was built from (the same device
+ * class), so "your best" means best on the board being looked at.
+ *
+ * The lap put beside the record is the driver's own best time in that sector
+ * among the laps they can still watch, falling back to their best lap. Never
+ * the record lap itself: when the record is theirs, it is their best LAP that
+ * goes beside it, which is the question "where does my perfect lap beat my
+ * real one" in the only form a replay can answer it.
+ */
+export function compareRecord(
+  runs: SimRun[],
+  board: TrackBoard,
+  i: number,
+  driverId: string | null,
+): SectorComparison | null {
+  const target = board.sectorRecords[i];
+  if (!target) return null;
+  const entry = driverId ? board.entries.find((e) => e.driverId === driverId) : undefined;
+  const mine = entry?.bestSectors[i] ?? null;
+  return {
+    sector: i,
+    target,
+    mine,
+    mineLabel: `Your best S${i + 1}`,
+    against: driverId ? ownLapFor(runs, board, i, driverId, target) : null,
+  };
+}
+
+/**
+ * Compare the signed-in driver's own best sector `i` with the same sector of
+ * their best lap: where the perfect lap beats the real one.
+ */
+export function compareOwnSector(
+  runs: SimRun[],
+  board: TrackBoard,
+  i: number,
+  driverId: string,
+): SectorComparison | null {
+  const entry = board.entries.find((e) => e.driverId === driverId);
+  const target = entry?.bestSectors[i];
+  if (!entry || !target) return null;
+  const bestRun = runs.find((r) => r.runId === entry.runId);
+  const onBestLap = bestRun ? lapSectorTime(bestRun, entry.bestLap, i) : null;
+  const same = target.runId === entry.runId && target.lap === entry.bestLap;
+  return {
+    sector: i,
+    target,
+    mine: onBestLap,
+    mineLabel: `Your best lap's S${i + 1}`,
+    against: !same && bestRun && hasTelemetry(bestRun)
+      ? { runId: entry.runId, lap: entry.bestLap, label: "your best lap" }
+      : null,
+  };
+}
+
+/** The driver's own lap to put beside `target` in sector `i`. See `compareRecord`. */
+function ownLapFor(
+  runs: SimRun[],
+  board: TrackBoard,
+  i: number,
+  driverId: string,
+  target: SectorTime,
+): (LapPick & { label: string }) | null {
+  const isTarget = (runId: string, lap: number | null) => runId === target.runId && lap === target.lap;
+  // Only runs that could be on this board: ranked, this course. An old-course
+  // run is a different shape, and its "S2" is a different piece of road.
+  const mine = runs.filter((r) => r.track === board.track && r.driverId === driverId && isRankable(r) && hasTelemetry(r));
+  let best: SectorTime | null = null;
+  for (const r of mine) {
+    for (const lap of r.laps ?? []) {
+      if (isTarget(r.runId, lap.lap)) continue;
+      const t = lapSectorTime(r, lap.lap, i);
+      if (t && sectorBeats(t, best)) best = t;
+    }
+  }
+  if (best) return { runId: best.runId, lap: best.lap, label: `your best S${i + 1}` };
+  // No lap of theirs with a clean time in that sector: their best lap will do.
+  const byLap = [...mine].sort((a, b) => (runBest(a) ?? Infinity) - (runBest(b) ?? Infinity) || a.runId.localeCompare(b.runId));
+  for (const r of byLap) {
+    const lap = r.stats.bestLapNumber ?? null;
+    if (!isTarget(r.runId, lap)) return { runId: r.runId, lap, label: "your best lap" };
+  }
+  return null;
+}
+
+/**
+ * Where sector `i` of a lap lies on the run's own clock, in seconds -- the
+ * clock the telemetry's `time_s` column is written in, so `* 1e6` is the
+ * microsecond timebase Logs loads it into. Null when it cannot be placed: an
+ * unknown lap, or an untimed sector at or before `i`.
+ */
+export function sectorWindowS(run: SimRun, lapNo: number | null, i: number): { startS: number; endS: number } | null {
+  if (lapNo == null) return null;
+  const lap = run.laps?.find((l) => l.lap === lapNo);
+  if (!lap || !Number.isFinite(lap.startedAtS)) return null;
+  let start = lap.startedAtS;
+  for (let k = 0; k < i; k++) {
+    const s = lap.sectors?.[k];
+    if (s == null || !Number.isFinite(s)) return null;
+    start += s;
+  }
+  const len = lap.sectors?.[i];
+  if (len == null || !Number.isFinite(len)) return null;
+  return { startS: start, endS: start + len };
+}
+
+/**
+ * Every run that holds something on a team board: a course's best lap, or a
+ * sector record. Judged per device class, as the boards are drawn.
+ *
+ * For the retention rule, which keeps these laps watchable: a record that can
+ * only be read, never watched, answers "how much quicker" and not "where".
+ */
+export function recordHolders(runs: SimRun[]): Set<string> {
+  const byClass = new Map<string, SimRun[]>();
+  for (const r of runs) {
+    const c = deviceClass(r);
+    const list = byClass.get(c);
+    if (list) list.push(r);
+    else byClass.set(c, [r]);
+  }
+  const out = new Set<string>();
+  for (const list of byClass.values()) {
+    for (const b of buildBoards(list)) {
+      if (b.entries[0]) out.add(b.entries[0].runId);
+      for (const s of b.sectorRecords) if (s) out.add(s.runId);
+    }
+  }
+  return out;
 }

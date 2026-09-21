@@ -171,7 +171,7 @@ export function RunDetail({
                         {isBest || best == null ? "—" : fmtGap(l.total - best)}
                       </td>
                       <td className="py-1 pl-2 text-helios-dim">
-                        {l.sectors.length ? l.sectors.map((s) => s.toFixed(2)).join(" / ") : "—"}
+                        {l.sectors.length ? l.sectors.map((s) => (s == null ? "—" : s.toFixed(2))).join(" / ") : "—"}
                         {(l.cones > 0 || l.off > 0) && (
                           <span className="ml-1 font-sans text-helios-warn">
                             {l.cones > 0 && `${l.cones}c`}{l.off > 0 && ` ${l.off}off`}

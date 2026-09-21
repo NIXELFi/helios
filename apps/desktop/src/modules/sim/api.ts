@@ -165,9 +165,28 @@ export interface SimLap {
    *  score here. Absent on a manifest written before the rule, where every
    *  completed lap scored — so read it as `!== false`, never as truthy. */
   valid?: boolean;
-  sectors: number[];
+  /** Sector durations. `null` for a sector that was never timed -- the car's
+   *  course distance jumped over the boundary -- and the split after such a
+   *  gap spans two sectors, so it is not a sector time either. */
+  sectors: (number | null)[];
+  /**
+   * Cones struck in each sector, same length and index as `sectors`. Written
+   * from manifest format 4 (`SECTOR_CONES_FORMAT_VERSION`); absent before it,
+   * when a lap's cones cannot be attributed to a sector at all.
+   */
+  sectorCones?: (number | null)[];
   startedAtS: number;
 }
+
+/**
+ * The manifest format at which each lap says which sector its cones were in
+ * (`laps[].sectorCones`). Before it, a lap with any cone on it cannot hold a
+ * sector record: the two seconds belong to some sector and nobody can say which.
+ */
+export const SECTOR_CONES_FORMAT_VERSION = 4;
+
+/** Seconds a struck cone adds, as FSAE scores it. */
+export const CONE_PENALTY_S = 2;
 
 /**
  * The manifest format at which the derived lap numbers became trustworthy.
@@ -319,6 +338,9 @@ export interface SimRun {
    *  itself and not only its time. Null for most runs by design. */
   telemetryObject?: string | null;
   telemetrySharedBytes?: number;
+  /** When the team's storage budget removed this run's lap on purpose; null
+   *  when it did not. Such a lap is not put back by any client. */
+  telemetryEvictedAt?: string | null;
 }
 
 export interface SimStatus {
@@ -382,6 +404,13 @@ export interface LaunchRequest {
   ghost?: string;
   /** A recorded run whose best lap the live delta counts against. */
   reference?: string;
+  /** Replay only, 1-based: the lap of the `replay` run to open on. */
+  replayLap?: number;
+  /** Replay only, 1-based: the lap of the `ghost` run to line up against. */
+  ghostLap?: number;
+  /** Replay only, 1-based: start at this sector's entry on `replayLap`, with
+   *  a short lead-in, the ghost synced at the same sector entry. */
+  sector?: number;
 }
 
 export interface LaunchResult {

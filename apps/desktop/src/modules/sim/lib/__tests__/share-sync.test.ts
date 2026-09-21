@@ -433,3 +433,61 @@ describe("a lap the budget job took away", () => {
     expect(s.objectOf("b")).toBeTruthy();
   });
 });
+
+describe("a lap that holds a team record", () => {
+  // `a` is the slowest and oldest of the rig's five -- outside both the best
+  // and the recent slots -- but its middle sector is the quickest anybody has
+  // driven. A record that cannot be watched only says "how much", not "where".
+  const lapOf = (total: number, sectors: number[]) =>
+    [{ lap: 1, raw: total, cones: 0, off: 0, total, valid: true, sectors, startedAtS: 1 }];
+  const recordRig = () => [
+    run("a", 44, 1, { laps: lapOf(44, [14, 11, 19]) }),
+    ...RIG.slice(1),
+  ];
+  const teammate = (s2: number) => run("t1", 43, 6, {
+    driverId: "someone-else", driver: "Jordan", remote: true, dir: "", telemetryPath: "",
+    telemetryBytes: 0, telemetryObject: "someone-else/t1.csv.gz", laps: lapOf(43, [13.5, s2, 18]),
+  });
+
+  it("keeps its telemetry when the record stands against the team", async () => {
+    const s = server();
+    await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(11.5)]);
+    expect(s.objectOf("a")).toBeTruthy();
+  });
+
+  it("does not, once a teammate has driven that sector quicker", async () => {
+    const s = server();
+    await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(10.5)]);
+    expect(s.objectOf("a")).toBeNull();
+    // And the rule's own five are exactly as before.
+    for (const id of ["b", "c", "d", "e"]) expect(s.objectOf(id)).toBeTruthy();
+  });
+
+  it("is let go when the record falls, like any lap out of the rule", async () => {
+    const s = server();
+    await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(11.5)]);
+    expect(s.objectOf("a")).toBeTruthy();
+    const res = await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(10.5)]);
+    expect(res.telemetryPruned).toBe(1);
+    expect(s.objectOf("a")).toBeNull();
+  });
+
+  it("is still not put back after the budget took it", async () => {
+    // The budget job does not know about records: under pressure it treats
+    // this lap as one the client should have pruned. Its word stands.
+    const s = server();
+    await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(11.5)]);
+    const row = s.table.get("a")!;
+    s.bucket.delete(row.telemetry_object as string);
+    s.table.set("a", { ...row, telemetry_object: null, telemetry_bytes: null, evicted_at: "2026-09-21T03:00:00Z" });
+    const again = await pushRuns(s.client(ME), ME, recordRig(), async () => csv, [teammate(11.5)]);
+    expect(again.telemetryPushed).toBe(0);
+    expect(s.objectOf("a")).toBeNull();
+  });
+
+  it("never keeps less than the per-driver rule does", () => {
+    const withTeam = telemetryToKeep([...recordRig(), teammate(11.5)], ME);
+    const alone = telemetryToKeep(RIG, ME);
+    for (const id of alone) expect(withTeam.has(id)).toBe(true);
+  });
+});

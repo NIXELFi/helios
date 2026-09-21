@@ -12,10 +12,11 @@ import { RunsTable } from "./components/RunsTable";
 import { SessionSummary, runsInSession, type SessionWindow } from "./components/SessionSummary";
 import { listen } from "@tauri-apps/api/event";
 import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns, telemetryToKeep } from "./lib/share";
-import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus,
+import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus, simTelemetryPath,
   type SimManifest, type SimRun, type SimStatus,
   TRACKS, isTrackId,
 } from "./api";
+import { sectorWindowS, type SectorComparison } from "./lib/leaderboard";
 
 type Tab = "launch" | "runs" | "board";
 
@@ -113,7 +114,7 @@ export function SimHome({ active }: { active: boolean }) {
         // simulator or a temp copy; it is the file that was recorded.
         const text = await readRunTelemetry(run.runId);
         return text == null ? null : new TextEncoder().encode(text);
-      });
+      }, theirs);
       if (res.pushed || res.telemetryPushed) {
         const again = await fetchSharedRuns(client);
         setShared(again);
@@ -269,17 +270,100 @@ export function SimHome({ active }: { active: boolean }) {
     }
   }, [client, refresh]);
 
-  const replay = useCallback((runId: string, ghostId: string | null) => {
-    // A shared run has no files here yet; fetch it first, then it is a run
-    // like any other.
-    const run = allRunsRef.current.find((r) => r.runId === runId);
-    const go = () => simLaunch({ replay: runId, ghost: ghostId ?? undefined })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-    if (run?.remote) {
-      void materialise(run).then((ok) => { if (ok) go(); });
-      return;
+  /**
+   * Open a replay, and its ghost, bringing BOTH onto this machine first.
+   *
+   * The simulator reads the ghost out of the runs directory exactly as it
+   * reads the replay. Only the replay used to be fetched, so a teammate's lap
+   * offered as a ghost launched into "GHOST NOT LOADED": the id was on the
+   * command line and nothing was on disk behind it. A ghost that cannot be
+   * fetched now drops out and the replay opens without it -- the reason is
+   * already on screen from `materialise`.
+   */
+  const launchReplay = useCallback(async (req: {
+    replay: string; ghost?: string | null; replayLap?: number | null; ghostLap?: number | null; sector?: number | null;
+  }) => {
+    const find = (id: string) => allRunsRef.current.find((r) => r.runId === id);
+    const run = find(req.replay);
+    if (run && !(await materialise(run))) return;
+    let ghost = req.ghost ?? null;
+    const g = ghost ? find(ghost) : undefined;
+    if (ghost && g && !(await materialise(g))) ghost = null;
+    try {
+      await simLaunch({
+        replay: req.replay,
+        ghost: ghost ?? undefined,
+        replayLap: req.replayLap ?? undefined,
+        ghostLap: ghost ? req.ghostLap ?? undefined : undefined,
+        sector: req.replayLap != null ? req.sector ?? undefined : undefined,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
-    void go();
+  }, [materialise]);
+
+  const replay = useCallback((runId: string, ghostId: string | null) => {
+    void launchReplay({ replay: runId, ghost: ghostId });
+  }, [launchReplay]);
+
+  /** Watch a sector: its lap, starting at the sector, the driver's own lap as the ghost. */
+  const watchSector = useCallback((c: SectorComparison) => {
+    void launchReplay({
+      replay: c.target.runId,
+      replayLap: c.target.lap,
+      ghost: c.against?.runId ?? null,
+      ghostLap: c.against?.lap ?? null,
+      sector: c.sector + 1,
+    });
+  }, [launchReplay]);
+
+  /**
+   * Put a sector's lap and the driver's own side by side in Logs: the sector's
+   * as Main, theirs as Ref, zoomed to the sector.
+   *
+   * Paths are asked of the backend rather than read off the listing, which a
+   * fetch has only just changed and this render has not yet seen.
+   */
+  const compareSector = useCallback((c: SectorComparison) => {
+    if (!c.against) return;
+    const against = c.against;
+    void (async () => {
+      const find = (id: string) => allRunsRef.current.find((r) => r.runId === id);
+      const target = find(c.target.runId);
+      const mine = find(against.runId);
+      if (!target || !mine) return;
+      if (!(await materialise(target)) || !(await materialise(mine))) return;
+      let targetPath: string, minePath: string;
+      try {
+        [targetPath, minePath] = await Promise.all([
+          target.remote ? simTelemetryPath(target.runId) : Promise.resolve(target.telemetryPath),
+          mine.remote ? simTelemetryPath(mine.runId) : Promise.resolve(mine.telemetryPath),
+        ]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
+      const s = `S${c.sector + 1}`;
+      const lapTag = (lap: number | null) => (lap != null ? ` L${lap}` : "");
+      const sameRun = targetPath === minePath;
+      const paths = sameRun ? [targetPath] : [targetPath, minePath];
+      const labels = sameRun
+        ? [`${target.driver} — ${target.trackName}`]
+        : [
+            `${target.driver}${lapTag(c.target.lap)} — ${target.trackName} (${s})`,
+            `${mine.driver}${lapTag(against.lap)} — ${mine.trackName} (mine)`,
+          ];
+      const win = sectorWindowS(target, c.target.lap, c.sector);
+      requestOpenInLogs(paths, undefined, {
+        labels,
+        selection: {
+          main: c.target.lap != null ? { path: targetPath, lap: c.target.lap } : undefined,
+          ref: against.lap != null ? { path: minePath, lap: against.lap } : undefined,
+          zoom: win ? { path: targetPath, startS: win.startS, endS: win.endS } : undefined,
+          workspace: "lap-analysis",
+        },
+      });
+    })();
   }, [materialise]);
 
   const openInLogs = useCallback((run: SimRun) => {
@@ -428,6 +512,9 @@ export function SimHome({ active }: { active: boolean }) {
               canReplay={canReplay}
               onOpenRun={(id) => { setSelectedId(id); selectTab("runs"); }}
               onReplayRun={(id) => replay(id, null)}
+              driverId={driver?.id ?? null}
+              onWatchSector={watchSector}
+              onCompareSector={compareSector}
             />
           ) : (
             <RunsTable

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildActivity, buildBoards, buildConsistencyBoards, buildImprovements, ghostCandidates,
-  CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
+  compareOwnSector, compareRecord, lapSectorPieces, recordHolders, sectorWindowS,
+  CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW, type SectorTime,
 } from "../leaderboard";
-import { fmtGap, fmtTime, isRankable, unrankedReason, type SimRun } from "../../api";
+import { fmtGap, fmtTime, isRankable, unrankedReason, type SimLap, type SimRun } from "../../api";
+
+/** The scored times of a sector list, for tests that are only about the numbers. */
+const times = (xs: (SectorTime | null)[]) => xs.map((s) => s?.time ?? null);
 
 /** A run with sensible defaults; every test overrides only what it is about. */
 function run(over: Partial<SimRun> & { runId: string }): SimRun {
@@ -130,7 +134,7 @@ describe("isRankable", () => {
     expect(nick.runs).toBe(2);
     expect(nick.best).toBe(38.4);
     expect(nick.driver).toBe("Nick M.");        // the name from the latest run
-    expect(nick.bestSectors).toEqual([12.8, 12.9, 12.7]);
+    expect(times(nick.bestSectors)).toEqual([12.8, 12.9, 12.7]);
     expect(nick.rank).toBe(1);
     // And the improvement across the rename is still found.
     const im = buildImprovements(runs);
@@ -166,7 +170,7 @@ describe("buildBoards", () => {
       run({ runId: "b", driver: "Nick", stats: { bestLapS: 38.4, bestSectors: [13.0, 13.2, 12.7] } as never }),
     ]);
     const e = boards[0]!.entries[0]!;
-    expect(e.bestSectors).toEqual([12.5, 13.2, 12.7]);
+    expect(times(e.bestSectors)).toEqual([12.5, 13.2, 12.7]);
     expect(e.theoretical).toBeCloseTo(38.4, 6);
     // And it is genuinely under the best lap actually driven.
     expect(e.theoretical!).toBeLessThanOrEqual(e.best);
@@ -177,7 +181,7 @@ describe("buildBoards", () => {
       run({ runId: "a", driver: "Nick", stats: { bestLapS: 40, bestSectors: [12.5, 14.0, 13.5] } as never }),
       run({ runId: "b", driver: "Aidan", stats: { bestLapS: 41, bestSectors: [13.0, 13.2, 14.8] } as never }),
     ]);
-    expect(boards[0]!.sectorRecords).toEqual([12.5, 13.2, 13.5]);
+    expect(times(boards[0]!.sectorRecords)).toEqual([12.5, 13.2, 13.5]);
     expect(boards[0]!.teamTheoretical).toBeCloseTo(39.2, 6);
   });
 
@@ -350,9 +354,9 @@ describe("the older manifest format", () => {
       run({ runId: "new", driver: "New", stats: { bestLapS: 42, bestLapRawS: 42, bestSectors: [13, 14, 15] } as never }),
     ]);
     const fresh = board[0]!.entries.find((e) => e.driver === "New")!;
-    expect(fresh.bestSectors).toEqual([13, 14, 15]);
+    expect(times(fresh.bestSectors)).toEqual([13, 14, 15]);
     expect(fresh.theoretical).toBeCloseTo(42, 6);
-    expect(board[0]!.sectorRecords).toEqual([13, 14, 15]);
+    expect(times(board[0]!.sectorRecords)).toEqual([13, 14, 15]);
   });
 });
 
@@ -446,5 +450,221 @@ describe("buildConsistencyBoards", () => {
     expect(board?.entries[0]?.runId).toBe("Nick-1");
     expect(board?.entries[0]?.best).toBe(41);
     expect(board?.entries[0]?.latest).toBe(nick[3]!.startedAt);
+  });
+});
+
+// ------------------------------------------------------------ sector records --
+
+/** A lap with sensible defaults: clean, scored, sectors as given. */
+function lap(n: number, sectors: (number | null)[], over: Partial<SimLap> = {}): SimLap {
+  const raw = sectors.reduce<number>((a, s) => a + (s ?? 0), 0);
+  return { lap: n, raw, cones: 0, off: 0, total: raw, valid: true, sectors, startedAtS: 2 + (n - 1) * 50, ...over };
+}
+
+/** A format 4 run whose sectors come from its laps. */
+function lapped(over: Partial<SimRun> & { runId: string; laps: SimLap[] }): SimRun {
+  const best = Math.min(...over.laps.filter((l) => l.valid !== false).map((l) => l.total));
+  return run({ formatVersion: 4, ...over, stats: { bestLapS: best, bestLapNumber: 1, ...over.stats } as never });
+}
+
+describe("sector records include cone penalties", () => {
+  it("adds two seconds per cone to the sector the cone was in", () => {
+    const board = buildBoards([
+      lapped({ runId: "coned", driver: "Jordan", laps: [
+        lap(1, [12, 10, 13], { cones: 1, sectorCones: [0, 1, 0], total: 37 }),
+      ] }),
+      lapped({ runId: "clean", driver: "Nick", laps: [lap(1, [12.5, 11.0, 13.5])] }),
+    ])[0]!;
+    // S2 driven in 10.0 through a cone is 12.0 scored: the clean 11.0 holds it.
+    expect(times(board.sectorRecords)).toEqual([12, 11, 13]);
+    expect(board.sectorRecords[1]!.runId).toBe("clean");
+    expect(board.sectorRecords[0]!.cones).toBe(0);
+    // And a coned sector that is STILL quickest holds it, cones and all.
+    const b2 = buildBoards([
+      lapped({ runId: "coned", driver: "Jordan", laps: [
+        lap(1, [12, 8, 13], { cones: 1, sectorCones: [0, 1, 0] }),
+      ] }),
+      lapped({ runId: "clean", driver: "Nick", laps: [lap(1, [12.5, 11.0, 13.5])] }),
+    ])[0]!;
+    expect(b2.sectorRecords[1]).toMatchObject({ time: 10, rawTime: 8, cones: 1, runId: "coned" });
+    expect(b2.teamTheoretical).toBeCloseTo(12 + 10 + 13, 6);
+  });
+
+  it("penalises a driver's own sector bests and theoretical the same way", () => {
+    const board = buildBoards([
+      lapped({ runId: "a", laps: [
+        lap(1, [12, 10, 13], { cones: 2, sectorCones: [0, 2, 0] }),
+        lap(2, [12.4, 11, 13.2]),
+      ] }),
+    ])[0]!;
+    const e = board.entries[0]!;
+    expect(times(e.bestSectors)).toEqual([12, 11, 13]);
+    expect(e.bestSectors[1]!.lap).toBe(2);
+    expect(e.theoretical).toBeCloseTo(36, 6);
+  });
+
+  it("excludes an old-format lap with any cone, since its cones cannot be placed", () => {
+    const board = buildBoards([
+      lapped({ runId: "old", driver: "Jordan", formatVersion: 3, laps: [
+        lap(1, [11, 10, 12], { cones: 1, total: 35 }),   // no sectorCones: whole lap out
+        lap(2, [12.2, 11.2, 13.2]),                       // clean: counts
+      ] }),
+      lapped({ runId: "mine", driver: "Nick", laps: [lap(1, [12.5, 11.5, 13.1])] }),
+    ])[0]!;
+    expect(times(board.sectorRecords)).toEqual([12.2, 11.2, 13.1]);
+    expect(board.sectorRecords[0]).toMatchObject({ runId: "old", lap: 2 });
+  });
+
+  it("uses the laps, not the unpenalised summary, when the run has laps", () => {
+    const board = buildBoards([
+      lapped({ runId: "a", formatVersion: 3, laps: [lap(1, [11, 10, 12], { cones: 1 })],
+        stats: { bestSectors: [11, 10, 12], totalCones: 1 } as never }),
+    ])[0]!;
+    expect(board.sectorRecords).toEqual([]);
+    expect(board.teamTheoretical).toBeNull();
+  });
+
+  it("falls back to the summary only for a run with no laps and no cones", () => {
+    const clean = run({ runId: "c", formatVersion: 3, stats: { bestLapS: 40, bestSectors: [13, 14, 13], totalCones: 0 } as never });
+    const coned = run({ runId: "d", driver: "Aidan", formatVersion: 3, stats: { bestLapS: 41, bestSectors: [12, 13, 12], totalCones: 1 } as never });
+    const board = buildBoards([clean, coned])[0]!;
+    expect(times(board.sectorRecords)).toEqual([13, 14, 13]);
+    expect(board.sectorRecords[0]!.lap).toBeNull();
+  });
+
+  it("skips invalid and off-course laps, and a split after an untimed sector", () => {
+    const board = buildBoards([
+      lapped({ runId: "a", laps: [
+        lap(1, [10, 10, 10, 10], { valid: false, off: 1 }),
+        lap(2, [12, null, 9, 13]),     // S3 after an untimed S2 spans two sectors
+        lap(3, [12.5, 11, 12, 13.5]),
+      ], stats: { bestLapNumber: 3 } as never }),
+    ])[0]!;
+    expect(times(board.sectorRecords)).toEqual([12, 11, 12, 13]);
+    expect(board.sectorRecords[2]!.lap).toBe(3);
+  });
+
+  it("treats an unknown per-sector cone count as a sector that cannot count", () => {
+    const pieces = lapSectorPieces(lap(1, [12, 11, 13], { cones: 1, sectorCones: [0, null, 1] }));
+    expect(pieces[0]).toMatchObject({ time: 12 });
+    expect(pieces[1]).toBeNull();
+    expect(pieces[2]).toMatchObject({ time: 15, cones: 1 });
+  });
+
+  it("keeps where each record came from", () => {
+    const board = buildBoards([
+      lapped({ runId: "r1", driver: "Jordan", driverId: "id-j", remote: true, telemetryObject: null,
+        telemetryBytes: 0, laps: [lap(1, [13, 13, 13]), lap(3, [12.43, 13.1, 13.2], { cones: 1, sectorCones: [0, 0, 1] })] }),
+    ])[0]!;
+    expect(board.sectorRecords[0]).toMatchObject({
+      time: 12.43, rawTime: 12.43, cones: 0, runId: "r1", driver: "Jordan", driverId: "id-j",
+      lap: 3, remote: true, hasTelemetry: false,
+    });
+    // S3 on lap 3 was 13.2 + 2.0 = 15.2; lap 1's clean 13.0 holds it.
+    expect(board.sectorRecords[2]).toMatchObject({ time: 13, lap: 1 });
+  });
+
+  it("breaks a dead heat the same way whatever order the runs arrive in", () => {
+    const a = lapped({ runId: "b-later", driver: "Late", startedAt: "2026-09-21T12:00:00Z", laps: [lap(1, [12, 12, 12])] });
+    const b = lapped({ runId: "a-first", driver: "Early", startedAt: "2026-09-21T10:00:00Z", laps: [lap(1, [12, 12.5, 12])] });
+    const c = lapped({ runId: "c-same", driver: "Same", startedAt: "2026-09-21T10:00:00Z", laps: [lap(1, [12, 13, 13])] });
+    for (const order of [[a, b, c], [c, b, a], [b, c, a]]) {
+      const recs = buildBoards(order)[0]!.sectorRecords;
+      // S1: all 12.0 -- set first holds it; two set at the same instant fall to run id.
+      expect(recs[0]!.runId).toBe("a-first");
+      expect(recs[1]!.runId).toBe("b-later");
+    }
+  });
+
+  it("a run on a course that has since changed shape supplies no record", () => {
+    const stale = lapped({ runId: "stale", driver: "Old", startedAt: "2026-09-18T10:00:00Z", simVersion: "0.5.0",
+      laps: [lap(1, [9, 9, 9])] });
+    const fresh = lapped({ runId: "fresh", driver: "New", startedAt: "2026-09-21T10:00:00Z", laps: [lap(1, [12, 12, 12])] });
+    const board = buildBoards([stale, fresh])[0]!;
+    expect(times(board.sectorRecords)).toEqual([12, 12, 12]);
+  });
+});
+
+describe("comparing a sector with your own laps", () => {
+  const record = lapped({ runId: "rec", driver: "Jordan", driverId: "id-j", startedAt: "2026-09-21T10:00:00Z",
+    laps: [lap(1, [13, 13, 13]), lap(2, [12, 12.43, 13], { cones: 1, sectorCones: [0, 0, 1] })] });
+  const myFast = lapped({ runId: "my-fast", driver: "Nick", driverId: "id-n", startedAt: "2026-09-21T11:00:00Z",
+    laps: [lap(1, [12.3, 13, 12.9])] });
+  const mySector = lapped({ runId: "my-sector", driver: "Nick", driverId: "id-n", startedAt: "2026-09-21T12:00:00Z",
+    laps: [lap(1, [12.9, 13.5, 13.4]), lap(2, [12.9, 12.81, 13.4])] });
+
+  it("puts your best lap in that sector beside the record, with the gap", () => {
+    const runs = [record, myFast, mySector];
+    const board = buildBoards(runs)[0]!;
+    const c = compareRecord(runs, board, 1, "id-n")!;
+    expect(c.target).toMatchObject({ runId: "rec", lap: 2, time: 12.43 });
+    expect(c.mine).toMatchObject({ runId: "my-sector", lap: 2, time: 12.81 });
+    expect(c.against).toMatchObject({ runId: "my-sector", lap: 2 });
+  });
+
+  it("only offers a lap of yours that can still be watched", () => {
+    const gone = { ...mySector, remote: true, telemetryObject: null, telemetryBytes: 0 };
+    const runs = [record, myFast, gone];
+    const board = buildBoards(runs)[0]!;
+    const c = compareRecord(runs, board, 1, "id-n")!;
+    // Your best S2 is still reported -- it is a time -- but the lap beside the
+    // record is the best one you can actually watch.
+    expect(c.mine!.runId).toBe("my-sector");
+    expect(c.against).toMatchObject({ runId: "my-fast", lap: 1 });
+  });
+
+  it("has nothing to put beside it when you have no lap with telemetry", () => {
+    const runs = [record, { ...myFast, remote: true, telemetryObject: null, telemetryBytes: 0 }];
+    const board = buildBoards(runs)[0]!;
+    expect(compareRecord(runs, board, 1, "id-n")!.against).toBeNull();
+  });
+
+  it("when the record is yours, compares it with another lap of yours, never itself", () => {
+    const runs = [record, myFast];
+    const board = buildBoards(runs)[0]!;
+    const c = compareRecord(runs, board, 1, "id-j")!;
+    expect(c.target).toMatchObject({ runId: "rec", lap: 2 });
+    expect(c.against).toMatchObject({ runId: "rec", lap: 1 });
+  });
+
+  it("your own sectors are compared with your best lap", () => {
+    const runs = [myFast, mySector];
+    const board = buildBoards(runs)[0]!;
+    const c = compareOwnSector(runs, board, 1, "id-n")!;
+    expect(c.target).toMatchObject({ runId: "my-sector", lap: 2, time: 12.81 });
+    expect(c.mine).toMatchObject({ runId: "my-fast", lap: 1, time: 13 });
+    expect(c.against).toMatchObject({ runId: "my-fast", lap: 1 });
+  });
+
+  it("places a sector on the run's own clock", () => {
+    // lap 2 started at 52 s; S1 12.0 then S2 12.43.
+    expect(sectorWindowS(record, 2, 1)).toEqual({ startS: 64, endS: 64 + 12.43 });
+    expect(sectorWindowS(record, 2, 0)).toEqual({ startS: 52, endS: 64 });
+    expect(sectorWindowS(record, 9, 0)).toBeNull();
+    expect(sectorWindowS(lapped({ runId: "x", laps: [lap(1, [12, null, 13])] }), 1, 2)).toBeNull();
+  });
+});
+
+describe("recordHolders", () => {
+  it("names each course's best lap and every sector record, per device class", () => {
+    const fast = lapped({ runId: "fast", driver: "A", laps: [lap(1, [12, 13, 12])] });
+    const s2 = lapped({ runId: "s2", driver: "B", laps: [lap(1, [13, 12, 14])] });
+    const slow = lapped({ runId: "slow", driver: "C", laps: [lap(1, [14, 14, 14])] });
+    const pad = lapped({ runId: "pad", driver: "D", profile: "gamepad-xbox", detectedInput: "controller",
+      laps: [lap(1, [20, 20, 20])] });
+    expect([...recordHolders([fast, s2, slow, pad])].sort()).toEqual(["fast", "pad", "s2"]);
+  });
+});
+
+describe("ghostCandidates only offers laps that can be loaded", () => {
+  it("drops a shared run whose telemetry is not up there", () => {
+    const mine = run({ runId: "mine", stats: { bestLapS: 41 } as never });
+    const list = [
+      mine,
+      run({ runId: "shared-lap", remote: true, telemetryObject: "u/x.csv.gz", telemetryBytes: 0, stats: { bestLapS: 39 } as never }),
+      run({ runId: "time-only", remote: true, telemetryObject: null, telemetryBytes: 0, stats: { bestLapS: 38 } as never }),
+      run({ runId: "empty-local", telemetryBytes: 0, stats: { bestLapS: 37 } as never }),
+    ];
+    expect(ghostCandidates(list, mine).map((r) => r.runId)).toEqual(["shared-lap"]);
   });
 });
