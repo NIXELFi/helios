@@ -20,7 +20,12 @@ function run(over: Partial<SimRun> & { runId: string }): SimRun {
     profile: "wheel",
     device: null,
     physics: "native-1khz",
-    simVersion: "1.0.0",
+    // A believable version, deliberately. This fixture used to say "1.0.0",
+    // copied from real manifests -- which is exactly the string the simulator
+    // stamped on every run before 2026-09-19 and which named a build that had
+    // never shipped. `predatesCourse` no longer takes it at its word, so a
+    // fixture carrying it describes a stale run and ranks nowhere.
+    simVersion: "0.6.6",
     synthetic: false,
     samples: 4000,
     assists: { traction: false, abs: false, autoShift: false },
