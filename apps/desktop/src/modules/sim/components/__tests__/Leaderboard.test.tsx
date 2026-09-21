@@ -68,3 +68,24 @@ describe("Leaderboard", () => {
     expect(screen.getByText("Average").getAttribute("title")).toMatch(/newest 15 clean runs/);
   });
 });
+
+describe("generated courses have their own tab", () => {
+  it("keeps them off the competition board and shows them under their own", () => {
+    const runs = [
+      run({ runId: "a", track: "autocross", trackName: "Autocross 2026" }),
+      run({ runId: "g", track: "gen-ax-K7Q2", trackName: "Autocross K7Q2", stats: { ...run({ runId: "x" }).stats, bestLapS: 39, bestLapRawS: 39 } }),
+    ];
+    render(<Leaderboard {...props} runs={runs} />);
+    // Competition by default: the real course only.
+    expect(screen.getByText("Autocross 2026")).toBeTruthy();
+    expect(screen.queryByText("Autocross K7Q2")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Generated courses/ }));
+    expect(screen.getByText("Autocross K7Q2")).toBeTruthy();
+    expect(screen.queryByText("Autocross 2026")).toBeNull();
+  });
+
+  it("does not offer the tab when nothing generated has been driven", () => {
+    render(<Leaderboard {...props} runs={[run({ runId: "a" })]} />);
+    expect(screen.queryByRole("tab", { name: /Generated courses/ })).toBeNull();
+  });
+});

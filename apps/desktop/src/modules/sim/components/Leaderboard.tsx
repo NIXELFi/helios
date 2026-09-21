@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { IconMovie, IconTrendingUp, IconTrophy } from "@tabler/icons-react";
-import { fmtGap, fmtTime, fmtWhen, type SimRun } from "../api";
+import { fmtGap, fmtTime, fmtWhen, parseGeneratedId, type SimRun } from "../api";
 import {
   buildActivity, buildBoards, buildConsistencyBoards, buildImprovements,
   CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
@@ -20,7 +20,25 @@ function classesPresent(runs: SimRun[]): DeviceClass[] {
   return DEVICE_CLASSES.filter((c) => seen.has(c.id)).map((c) => c.id);
 }
 
-export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) {
+/**
+ * The competition courses and the generated ones are different boards.
+ *
+ * A generated course is named by its seed and exists once somebody has
+ * driven it, so a single board of everything would fill with one-run
+ * "courses" and bury the two that the team actually competes on. The
+ * competition tab is the default and never shows a generated course; the
+ * generated tab appears only once there is something on it.
+ */
+export type BoardScope = "competition" | "generated";
+export const isGeneratedRun = (r: Pick<SimRun, "track">): boolean => parseGeneratedId(r.track) !== null;
+
+export function Leaderboard({ runs: allRuns, canReplay, onOpenRun, onReplayRun }: Props) {
+  const [scope, setScope] = useState<BoardScope>("competition");
+  const generatedCount = useMemo(() => allRuns.filter(isGeneratedRun).length, [allRuns]);
+  const runs = useMemo(
+    () => allRuns.filter((r) => isGeneratedRun(r) === (scope === "generated")),
+    [allRuns, scope],
+  );
   /**
    * One board per device class.
    *
@@ -61,16 +79,50 @@ export function Leaderboard({ runs, canReplay, onOpenRun, onReplayRun }: Props) 
   const improvements = useMemo(() => buildImprovements(shown), [shown]);
   const activity = useMemo(() => buildActivity(shown), [shown]);
 
+  const scopeTabs = generatedCount > 0 && (
+    <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Courses">
+      {([
+        ["competition", "Competition courses", allRuns.length - generatedCount],
+        ["generated", "Generated courses", generatedCount],
+      ] as const).map(([id, label, n]) => (
+        <button
+          key={id}
+          role="tab"
+          onClick={() => setScope(id)}
+          aria-selected={scope === id}
+          className={
+            "rounded border px-2.5 py-1 text-xs transition " +
+            (scope === id
+              ? "border-asu-gold bg-asu-gold/15 text-helios-text"
+              : "border-helios-line text-helios-dim hover:border-asu-gold hover:text-helios-text")
+          }
+        >
+          {label}
+          <span className="ml-1.5 text-helios-muted">{n}</span>
+        </button>
+      ))}
+      <span className="ml-auto text-[11px] text-helios-muted">
+        {scope === "generated"
+          ? "One board per seed. A seed is a course; share it and race it."
+          : "The 2026 Michigan courses. Generated courses keep their own tab."}
+      </span>
+    </div>
+  );
+
   if (runs.length === 0) {
     return (
-      <p className="p-8 text-center text-sm text-helios-dim">
-        No runs yet. The board fills itself the first time somebody drives.
-      </p>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+        {scopeTabs}
+        <p className="p-8 text-center text-sm text-helios-dim">
+          No runs yet. The board fills itself the first time somebody drives.
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+      {scopeTabs}
       {/* Only when there is a choice to make. A team all on wheels never sees
           this, and the one view deliberately not offered is "all three at
           once" -- see the note on `active`. */}
