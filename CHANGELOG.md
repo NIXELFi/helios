@@ -27,6 +27,22 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Helios keeps looking for its own updates.** It used to check once, a few
+  seconds after it opened, so a copy left open for days never saw a release
+  and its auto-install never had anything to act on. It now also checks every
+  five minutes, whenever the network comes back, and within seconds of a
+  release being published (announced over realtime). Background checks are
+  quiet: the update pill only changes when one is found, and never in the
+  middle of an update.
+- Sim: **the simulator updates itself from anywhere in Helios.** A new build
+  used to be picked up only when somebody opened the Sim module. Now Helios
+  checks the build feed when it starts, every five minutes, and within seconds
+  of a build being published, whichever module is open. As before, only a
+  machine that already has the simulator is updated, and only with the build
+  the feed names, verified by its SHA-256 before it is installed; the
+  announcement itself is never trusted.
+
 ## [5.9.3] - 2026-09-21
 
 ### Added

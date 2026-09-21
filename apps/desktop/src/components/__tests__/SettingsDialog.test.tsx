@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 const updater: UpdaterApi = {
   state: { kind: "up_to_date", current: "5.7.3" },
   recheck: vi.fn(),
+  backgroundCheck: vi.fn(),
   installAndRelaunch: vi.fn(() => Promise.resolve()),
 };
 

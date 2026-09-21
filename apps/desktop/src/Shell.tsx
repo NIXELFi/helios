@@ -11,6 +11,8 @@ import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
 import { useMyDisplayRole } from "./auth/useMyDisplayRole";
 import { useHeliosPresence } from "./shell/useHeliosPresence";
+import { useSimReleaseSignal } from "./modules/sim/lib/useSimReleaseSignal";
+import { useHeliosReleaseSignal } from "./shell/useHeliosReleaseSignal";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
@@ -429,6 +431,13 @@ function HeliosShell() {
   // just PM/Vault) via one shared realtime channel. The roster is only
   // surfaced to admins/owners — but we always TRACK (so an admin sees everyone,
   // including non-admins) and only gate the VIEW.
+  // The simulator keeps itself current from here, in every module: a check at
+  // startup, and another the moment a release is broadcast. See simUpdater.ts.
+  useSimReleaseSignal(client);
+  // Helios itself: checks every five minutes on its own (use-updater.ts), and
+  // straight away when a release is announced.
+  useHeliosReleaseSignal(client, updater.backgroundCheck);
+
   const presenceRoster = useHeliosPresence({
     client,
     userId: user?.id ?? null,
