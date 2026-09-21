@@ -23,7 +23,9 @@
 
 import type { SupabaseClient } from "@helios/auth";
 
-import { deviceClass, isRankable, predatesCourse, runBest, type SimRun } from "../api";
+import {
+  deviceClass, isRankable, parseGeneratedId, predatesCourse, runBest, type SimRun,
+} from "../api";
 
 const TABLE = "runs";
 const SCHEMA = "sim";
@@ -336,18 +338,41 @@ async function gzip(body: Uint8Array): Promise<{ body: Uint8Array; gz: boolean }
  *
  * "Best three and latest three" is the rule the team was told, and the copy
  * on the Launch tab, the runs table and every run's panel prints these two
- * numbers, so they and the rule cannot drift apart.
+ * numbers, so they and the rule cannot drift apart. A generated course is
+ * cheaper still -- see `GEN_KEEP_BEST`, which the same copy prints beside
+ * these.
  */
 export const KEEP_BEST = 3;
 /** ...and the last this many, whether they were quick or not. */
 export const KEEP_RECENT = 3;
 
 /**
+ * The same two numbers for a PROCEDURAL course, which is a different kind of
+ * thing and has to be paid for differently.
+ *
+ * A generated course is named by its seed -- four characters, so 1.7M of them
+ * -- and the rule above is per course. That made the bound a bound on courses
+ * rather than on storage: every fresh seed opened a new six-slot allowance,
+ * and because the first run on a course nobody has driven is always a personal
+ * best, every one of those runs uploaded its lap. The shared table showed it
+ * plainly -- the fixed courses uploading 40% of runs, the generated ones 100%.
+ *
+ * Two and one rather than three and three. A seed is somewhere you went once:
+ * worth a ghost to race and a look at the last lap you threw away, not worth a
+ * history. The two sets usually overlap, so it is nearer two objects than
+ * three.
+ */
+export const GEN_KEEP_BEST = 2;
+export const GEN_KEEP_RECENT = 1;
+
+/**
  * Which of this driver's runs keep their telemetry shared.
  *
  * Per COURSE: the best `KEEP_BEST` ranked runs, plus the most recent
  * `KEEP_RECENT`, as a union -- so a new personal best usually occupies a slot
- * in both and the real total sits under five.
+ * in both and the real total sits under five. On a generated course it is
+ * `GEN_KEEP_BEST` and `GEN_KEEP_RECENT` instead, which is the difference
+ * between a rule that bounds storage and one that only bounds a course.
  *
  * Over every run the driver has, wherever it is: a row the server holds and
  * this disk does not counts exactly as a local run does. The rule is about a
@@ -378,16 +403,22 @@ export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
   }
 
   const keep = new Set<string>();
-  for (const list of byCourse.values()) {
+  for (const [track, list] of byCourse) {
+    // A procedural course is bounded more tightly than a fixed one, because
+    // there is no bound on how many of them there are. See `GEN_KEEP_BEST`.
+    const generated = parseGeneratedId(track) !== null;
+    const nBest = generated ? GEN_KEEP_BEST : KEEP_BEST;
+    const nRecent = generated ? GEN_KEEP_RECENT : KEEP_RECENT;
+
     const ranked = list
       .filter((r) => isRankable(r) && runBest(r) != null)
       .sort((a, b) => (runBest(a) as number) - (runBest(b) as number));
-    for (const r of ranked.slice(0, KEEP_BEST)) keep.add(r.runId);
+    for (const r of ranked.slice(0, nBest)) keep.add(r.runId);
 
     const withALap = list
       .filter((r) => (r.stats.laps ?? 0) > 0)
       .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
-    for (const r of withALap.slice(0, KEEP_RECENT)) keep.add(r.runId);
+    for (const r of withALap.slice(0, nRecent)) keep.add(r.runId);
   }
   return keep;
 }
