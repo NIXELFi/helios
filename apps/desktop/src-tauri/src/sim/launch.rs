@@ -292,6 +292,17 @@ pub struct LaunchRequest {
     /// driver is chasing a real lap from the first corner instead of from
     /// lap two.
     pub reference: Option<String>,
+    /// Replay only, 1-based: the lap of the replay run to open on
+    /// (`--replay-lap`).
+    pub replay_lap: Option<u32>,
+    /// Replay only, 1-based: the ghost run's lap to line up against
+    /// (`--ghost-lap`). Meaningless without a ghost, so not sent without one.
+    pub ghost_lap: Option<u32>,
+    /// Replay only, 1-based: start at this sector's entry on `replay_lap`,
+    /// with the ghost synced at the same sector entry (`--sector`). Sent only
+    /// with a `replay_lap`, because "sector 2" of no particular lap is not a
+    /// place on the course's clock.
+    pub sector: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -321,6 +332,17 @@ fn valid_generated_track(t: &str) -> bool {
     !seed.is_empty()
         && seed.len() <= 12
         && seed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// The most laps a replay can be asked to open on. An endurance run is 22
+/// laps; this is a sanity bound, not a rule about the event.
+const MAX_LAP: u32 = 999;
+/// The most sectors a course can be asked to start at.
+const MAX_SECTOR: u32 = 64;
+
+/// A 1-based lap or sector number going onto a command line.
+fn valid_index(n: u32, max: u32) -> bool {
+    n >= 1 && n <= max
 }
 
 fn valid_profile(p: &str) -> bool {
@@ -379,6 +401,29 @@ pub(crate) fn build_args(req: &LaunchRequest) -> Result<Vec<String>, String> {
             }
             args.push("--ghost".into());
             args.push(g.clone());
+        }
+        // Where to start. Older simulators ignore flags they do not know, so
+        // these cost nothing on a build that cannot honour them.
+        if let Some(n) = req.replay_lap {
+            if !valid_index(n, MAX_LAP) {
+                return Err(format!("not a lap number: {n}"));
+            }
+            args.push("--replay-lap".into());
+            args.push(n.to_string());
+        }
+        if let (Some(_), Some(m)) = (&req.ghost, req.ghost_lap) {
+            if !valid_index(m, MAX_LAP) {
+                return Err(format!("not a lap number: {m}"));
+            }
+            args.push("--ghost-lap".into());
+            args.push(m.to_string());
+        }
+        if let (Some(_), Some(i)) = (req.replay_lap, req.sector) {
+            if !valid_index(i, MAX_SECTOR) {
+                return Err(format!("not a sector number: {i}"));
+            }
+            args.push("--sector".into());
+            args.push(i.to_string());
         }
         // A replay is not a drive: none of the session flags mean anything,
         // and `--autostart` would put the driver on the grid instead.
@@ -729,6 +774,58 @@ mod tests {
                 "--ghost", "20260918-150000-autocross-bbbb",
             ]
         );
+    }
+
+    #[test]
+    fn a_sector_replay_names_its_laps_and_sector() {
+        let r = LaunchRequest {
+            replay: Some("20260918-142233-autocross-9f3a".into()),
+            ghost: Some("20260918-150000-autocross-bbbb".into()),
+            replay_lap: Some(3),
+            ghost_lap: Some(1),
+            sector: Some(2),
+            ..req()
+        };
+        assert_eq!(
+            build_args(&r).unwrap(),
+            vec![
+                "--replay", "20260918-142233-autocross-9f3a",
+                "--ghost", "20260918-150000-autocross-bbbb",
+                "--replay-lap", "3", "--ghost-lap", "1", "--sector", "2",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_ghost_lap_without_a_ghost_or_a_sector_without_a_lap_is_not_sent() {
+        let r = LaunchRequest {
+            replay: Some("20260918-142233-autocross-9f3a".into()),
+            ghost_lap: Some(2),
+            sector: Some(2),
+            ..req()
+        };
+        assert_eq!(build_args(&r).unwrap(), vec!["--replay", "20260918-142233-autocross-9f3a"]);
+    }
+
+    #[test]
+    fn lap_and_sector_numbers_are_bounded() {
+        let base = || LaunchRequest {
+            replay: Some("20260918-142233-autocross-9f3a".into()),
+            ghost: Some("20260918-150000-autocross-bbbb".into()),
+            ..req()
+        };
+        assert!(build_args(&LaunchRequest { replay_lap: Some(0), ..base() }).is_err());
+        assert!(build_args(&LaunchRequest { replay_lap: Some(1000), ..base() }).is_err());
+        assert!(build_args(&LaunchRequest { ghost_lap: Some(0), ..base() }).is_err());
+        assert!(build_args(&LaunchRequest { replay_lap: Some(1), sector: Some(0), ..base() }).is_err());
+        assert!(build_args(&LaunchRequest { replay_lap: Some(1), sector: Some(65), ..base() }).is_err());
+    }
+
+    #[test]
+    fn a_drive_never_carries_the_replay_positioning_flags() {
+        let r = LaunchRequest { replay_lap: Some(2), ghost_lap: Some(1), sector: Some(3), ..drive() };
+        let args = build_args(&r).unwrap();
+        assert!(!args.iter().any(|a| a == "--replay-lap" || a == "--ghost-lap" || a == "--sector"));
     }
 
     #[test]

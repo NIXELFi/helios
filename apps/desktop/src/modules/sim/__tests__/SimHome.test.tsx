@@ -27,6 +27,7 @@ vi.mock("../api", async () => {
     readRunTelemetry: vi.fn(async () => null),
     simLaunch: vi.fn(),
     simImportRun: vi.fn(),
+    simTelemetryPath: vi.fn(async (id: string) => `C:/runs/${id}/telemetry.csv`),
     // The module keeps the simulator current on its own; here the feed has
     // nothing to say.
     simAvailableBuild: vi.fn(async () => null),
@@ -66,6 +67,8 @@ vi.mock("../../../auth/AuthShell", () => {
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import { SimHome } from "../SimHome";
+import * as api from "../api";
+import * as share from "../lib/share";
 
 // Today, so the runs table has one day to open. See RunsTable.test.tsx.
 const today = (hour: number) => {
@@ -149,5 +152,121 @@ describe("SimHome", () => {
     // Gone from the table now -- not re-merged from the shared copy with a
     // cloud icon while the server catches up.
     expect(screen.queryByText("Sam")).toBeNull();
+  });
+});
+
+describe("watching a sector record", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("helios:sim:tab", "board");
+    listRuns.mockReset();
+    fetchShared.mockReset();
+    vi.mocked(api.simLaunch).mockReset();
+    vi.mocked(api.simLaunch).mockResolvedValue({ exePath: "x", args: [], pid: 1 });
+    vi.mocked(api.simImportRun).mockReset();
+    vi.mocked(api.simImportRun).mockResolvedValue("C:/runs/x");
+    vi.mocked(share.fetchSharedTelemetry).mockReset();
+    vi.mocked(share.fetchSharedTelemetry).mockResolvedValue("time_s\n0\n");
+  });
+
+  const lapOf = (n: number, sectors: number[]) => ({
+    lap: n, raw: sectors.reduce((a, b) => a + b, 0), cones: 0, off: 0,
+    total: sectors.reduce((a, b) => a + b, 0), valid: true, sectors, startedAtS: 2,
+  });
+
+  it("fetches the record's lap AND the ghost, then opens at that lap and sector", async () => {
+    // Mine is on this disk; Jordan's record and my other lap are only on the
+    // server. The ghost used to be launched by id without ever being fetched,
+    // and the simulator said "GHOST NOT LOADED".
+    const mineLocal = run({ runId: "mine-local", simVersion: "0.6.6", laps: [lapOf(1, [13, 13, 13])],
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39, bestLapRawS: 39 } });
+    const mineShared = run({ runId: "mine-shared", simVersion: "0.6.6", remote: true, dir: "", telemetryPath: "",
+      telemetryBytes: 0, telemetryObject: "u1/mine-shared.csv.gz",
+      laps: [lapOf(1, [13.5, 12.5, 13.5])], stats: { ...run({ runId: "x" }).stats, bestLapS: 39.5, bestLapRawS: 39.5 } });
+    const record = run({ runId: "jordan", driver: "Jordan", driverId: "u2", simVersion: "0.6.6", remote: true,
+      dir: "", telemetryPath: "", telemetryBytes: 0, telemetryObject: "u2/jordan.csv.gz",
+      laps: [lapOf(1, [14, 14, 14]), { ...lapOf(2, [13.2, 12.0, 13.9]), startedAtS: 44 }],
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39.1, bestLapRawS: 39.1, bestLapNumber: 2 } });
+    listRuns.mockImplementation(async () => [mineLocal]);
+    fetchShared.mockResolvedValue([mineShared, record]);
+
+    render(<SimHome active />);
+    const chip = await screen.findByRole("button", { name: /Sector 2 record 12\.000 seconds by Jordan/ });
+    fireEvent.click(chip);
+    expect(screen.getByTestId("sector-card-target").textContent).toMatch(/S2 record.*12\.000 s.*Jordan, lap 2/);
+    // My best S2 is 12.5 on the shared run, and it has telemetry, so it is the ghost.
+    expect(screen.getByTestId("sector-card-mine").textContent).toMatch(/Your best S2.*12\.500 s.*\+0\.500/);
+    fireEvent.click(screen.getByRole("button", { name: /Watch in sim/ }));
+
+    await waitFor(() => expect(api.simLaunch).toHaveBeenCalled());
+    const fetched = vi.mocked(share.fetchSharedTelemetry).mock.calls.map((c) => (c[1] as SimRun).runId);
+    expect(fetched).toEqual(["jordan", "mine-shared"]);
+    expect(api.simLaunch).toHaveBeenCalledWith({
+      replay: "jordan", replayLap: 2, ghost: "mine-shared", ghostLap: 1, sector: 2,
+    });
+  });
+
+  it("will not offer to watch a record whose lap is gone, and says why", async () => {
+    const mineLocal = run({ runId: "mine-local", simVersion: "0.6.6", laps: [lapOf(1, [13, 13, 13])],
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39, bestLapRawS: 39 } });
+    const record = run({ runId: "jordan", driver: "Jordan", driverId: "u2", simVersion: "0.6.6", remote: true,
+      dir: "", telemetryPath: "", telemetryBytes: 0, telemetryObject: null,
+      laps: [lapOf(1, [13.2, 12.0, 13.9])], stats: { ...run({ runId: "x" }).stats, bestLapS: 39.1, bestLapRawS: 39.1 } });
+    listRuns.mockImplementation(async () => [mineLocal]);
+    fetchShared.mockResolvedValue([record]);
+
+    render(<SimHome active />);
+    fireEvent.click(await screen.findByRole("button", { name: /Sector 2 record/ }));
+    expect((screen.getByRole("button", { name: /Watch in sim/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Compare in Logs/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("sector-card-why").textContent).toMatch(/Jordan's lap is no longer stored/);
+  });
+
+  it("compares in Logs: both runs, their own labels, Main/Ref laps and the sector's window", async () => {
+    const mineLocal = run({ runId: "mine-local", simVersion: "0.6.6", laps: [lapOf(1, [13, 13, 13])],
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39, bestLapRawS: 39 } });
+    const record = run({ runId: "jordan", driver: "Jordan", driverId: "u2", simVersion: "0.6.6", remote: true,
+      dir: "", telemetryPath: "", telemetryBytes: 0, telemetryObject: "u2/jordan.csv.gz",
+      laps: [{ ...lapOf(1, [13.2, 12.0, 13.9]), startedAtS: 2.5 }],
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39.1, bestLapRawS: 39.1 } });
+    listRuns.mockImplementation(async () => [mineLocal]);
+    fetchShared.mockResolvedValue([record]);
+    const seen: unknown[] = [];
+    const h = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("helios:open-in-logs", h);
+    try {
+      render(<SimHome active />);
+      fireEvent.click(await screen.findByRole("button", { name: /Sector 2 record/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Compare in Logs/ }));
+      await waitFor(() => expect(seen).toHaveLength(1));
+    } finally {
+      window.removeEventListener("helios:open-in-logs", h);
+    }
+    expect(seen[0]).toMatchObject({
+      paths: ["C:/runs/jordan/telemetry.csv", "C:/runs/mine-local/telemetry.csv"],
+      labels: ["Jordan L1 — Autocross 2026 (S2)", "Sam L1 — Autocross 2026 (mine)"],
+      selection: {
+        main: { path: "C:/runs/jordan/telemetry.csv", lap: 1 },
+        ref: { path: "C:/runs/mine-local/telemetry.csv", lap: 1 },
+        // Lap 1 started at 2.5 s on the run's clock; S1 took 13.2.
+        zoom: { path: "C:/runs/jordan/telemetry.csv", startS: 15.7, endS: 27.7 },
+        workspace: "lap-analysis",
+      },
+    });
+  });
+
+  it("an ordinary replay carries no positioning flags", async () => {
+    const mineLocal = run({ runId: "mine-local", simVersion: "0.6.6",
+      stats: { ...run({ runId: "x" }).stats, bestLapS: 39, bestLapRawS: 39 } });
+    listRuns.mockImplementation(async () => [mineLocal]);
+    fetchShared.mockResolvedValue([]);
+    render(<SimHome active />);
+    // Straight through the leaderboard's movie button: no ghost there, and the
+    // launch carries no positioning flags.
+    const movie = await screen.findByTitle("Watch that lap");
+    fireEvent.click(movie);
+    await waitFor(() => expect(api.simLaunch).toHaveBeenCalledWith({
+      replay: "mine-local", ghost: undefined, replayLap: undefined, ghostLap: undefined, sector: undefined,
+    }));
   });
 });

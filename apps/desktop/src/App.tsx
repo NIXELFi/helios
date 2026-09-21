@@ -33,7 +33,7 @@ import {
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
 import { useFileOpener, processBundlePaths } from "./lib/use-file-opener";
-import { useOpenInLogs } from "./lib/open-in-logs";
+import { labelForPath, resolveOpenSelection, useOpenInLogs } from "./lib/open-in-logs";
 import { formatFileOpenSummary } from "./lib/file-open-summary";
 import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
@@ -88,6 +88,10 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     bootRef.current = { workspaces: list, activeId };
   }
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => bootRef.current!.workspaces);
+  // For the open-in-Logs handler, which is subscribed once and must not
+  // close over a stale list.
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
   const [workspaceId, setWorkspaceIdRaw] = useState(() => bootRef.current!.activeId);
   // Wrap setWorkspaceId to persist the choice. Every call site (tab click,
   // import, duplicate, new) flows through this so we never miss a write.
@@ -166,13 +170,31 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     // is called `telemetry.csv`, so without this two overlaid runs are two
     // sessions both called "telemetry". A rename the user has already made
     // wins -- this fills the blank, it does not overwrite a decision.
-    if (detail.label) {
-      for (const p of detail.paths) {
-        const id = userSessionIdFor(p);
-        if (!loadSessionMeta(id)?.label) saveSessionMeta(id, { label: detail.label });
+    // Per path: a sector comparison opens two runs at once, and two sessions
+    // both called "Nick -- Autocross 2026" are no better than two called
+    // "telemetry".
+    detail.paths.forEach((p, i) => {
+      const label = labelForPath(detail, i);
+      if (!label) return;
+      const id = userSessionIdFor(p);
+      if (!loadSessionMeta(id)?.label) saveSessionMeta(id, { label });
+    });
+    const selection = detail.selection;
+    void handleAddSessionFiles(detail.paths).then((opened) => {
+      if (!selection) return;
+      // Resolved against the sessions that actually loaded -- a file that
+      // failed, or a lap its table does not have, is skipped, never guessed.
+      const r = resolveOpenSelection(selection, opened);
+      if (selection.workspace && workspacesRef.current.some((w) => w.id === selection.workspace)) {
+        setWorkspaceId(selection.workspace);
       }
-    }
-    void handleAddSessionFiles(detail.paths);
+      if (r.primaryId) setPrimaryId(r.primaryId);
+      if (r.main || r.ref) {
+        const cur = lapSelectionEmitter.get();
+        lapSelectionEmitter.set({ ...cur, main: r.main ?? cur.main, ref: r.ref ?? cur.ref });
+      }
+      if (r.zoom) viewState.setZoom(r.zoom);
+    });
     // Empty deps on purpose, and it is load-bearing: `handleAddSessionFiles`
     // is re-created every render but reads everything it needs through refs
     // (`sessionsRef`, `mathChannelsRef`) and functional setters, so the stale
@@ -1221,7 +1243,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
    *  becomes its own LoadedSession with auto-detected laps and the same
    *  math channels applied. Failures surface in a single ConfirmDialog
    *  rather than per-file dialogs so a 5-file drop doesn't queue 5 modals. */
-  async function handleAddSessionFiles(paths: string[]) {
+  async function handleAddSessionFiles(paths: string[]): Promise<LoadedSession[]> {
     // NB: do NOT bail when sessionsRef.current is null — that's the zero-session
     // boot state (no bundled samples + no recents), and opening a file is the
     // ONLY way out of the empty Logs tab. Treat null as an empty list below.
@@ -1291,6 +1313,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         onConfirm: () => setConfirmState(null),
       });
     }
+    return newSessions;
   }
 
   function handleRemoveSession(sessionId: string) {

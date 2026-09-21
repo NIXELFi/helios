@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
-import { IconMovie, IconTrendingUp, IconTrophy } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { IconChartLine, IconMovie, IconTrendingUp, IconTrophy, IconX } from "@tabler/icons-react";
 import { fmtGap, fmtTime, fmtWhen, parseGeneratedId, type SimRun } from "../api";
 import {
   buildActivity, buildBoards, buildConsistencyBoards, buildImprovements,
+  compareOwnSector, compareRecord,
   CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
+  type SectorComparison, type SectorTime, type TrackBoard,
 } from "../lib/leaderboard";
 import { DEVICE_CLASSES, deviceClass, type DeviceClass } from "../api";
 
@@ -12,7 +14,16 @@ interface Props {
   canReplay: boolean;
   onOpenRun: (runId: string) => void;
   onReplayRun: (runId: string) => void;
+  /** The signed-in driver, whose laps a sector is compared with. */
+  driverId?: string | null;
+  /** Watch a sector in the simulator, the driver's own lap as the ghost. */
+  onWatchSector?: (c: SectorComparison) => void;
+  /** Open the sector's lap and the driver's own in Logs, side by side. */
+  onCompareSector?: (c: SectorComparison) => void;
 }
+
+/** Which sector card is open: a team record, or the driver's own sectors. */
+type OpenCard = { track: string; mode: "record" | "own"; sector: number } | null;
 
 /** Which boards are worth offering, given what has actually been driven. */
 function classesPresent(runs: SimRun[]): DeviceClass[] {
@@ -32,8 +43,19 @@ function classesPresent(runs: SimRun[]): DeviceClass[] {
 export type BoardScope = "competition" | "generated";
 export const isGeneratedRun = (r: Pick<SimRun, "track">): boolean => parseGeneratedId(r.track) !== null;
 
-export function Leaderboard({ runs: allRuns, canReplay, onOpenRun, onReplayRun }: Props) {
+export function Leaderboard({
+  runs: allRuns, canReplay, onOpenRun, onReplayRun,
+  driverId = null, onWatchSector, onCompareSector,
+}: Props) {
   const [scope, setScope] = useState<BoardScope>("competition");
+  const [card, setCard] = useState<OpenCard>(null);
+  // Escape closes the card, wherever focus is.
+  useEffect(() => {
+    if (!card) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setCard(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [card]);
   const generatedCount = useMemo(() => allRuns.filter(isGeneratedRun).length, [allRuns]);
   const runs = useMemo(
     () => allRuns.filter((r) => isGeneratedRun(r) === (scope === "generated")),
@@ -360,7 +382,23 @@ export function Leaderboard({ runs: allRuns, canReplay, onOpenRun, onReplayRun }
                     </td>
                     <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.bestRaw)}</td>
                     <td className="py-2 text-right font-mono text-helios-dim">
-                      {fmtTime(e.theoretical)}
+                      {/* Your own row only: where your perfect lap beats your
+                          real one, sector by sector. */}
+                      {driverId && e.driverId === driverId && e.theoretical != null ? (
+                        <button
+                          type="button"
+                          aria-expanded={card?.track === b.track && card.mode === "own"}
+                          title="Your best sectors against your best lap: where the perfect lap beats the real one"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            const open = card?.track === b.track && card.mode === "own";
+                            setCard(open ? null : { track: b.track, mode: "own", sector: biggestGain(b, e.driverId, shown) });
+                          }}
+                          className="rounded px-1 underline decoration-dotted underline-offset-2 transition hover:text-helios-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
+                        >
+                          {fmtTime(e.theoretical)}
+                        </button>
+                      ) : fmtTime(e.theoretical)}
                     </td>
                     <td className="py-2 text-right font-mono text-helios-dim">{e.runs}</td>
                     <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.when)}</td>
@@ -382,19 +420,62 @@ export function Leaderboard({ runs: allRuns, canReplay, onOpenRun, onReplayRun }
 
           {b.sectorRecords.length > 0 && (
             <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px]">
-              <span className="text-helios-muted">Team sector records</span>
-              {b.sectorRecords.map((s, i) => (
-                <span key={i} className="font-mono">
-                  <span className="text-helios-muted">S{i + 1}</span>{" "}
-                  {s == null ? "—" : s.toFixed(3)}
-                </span>
-              ))}
+              <span
+                className="text-helios-muted"
+                title="The quickest each sector has been driven, two seconds added for every cone struck in it. Click one to watch it against your own lap."
+              >
+                Team sector records
+              </span>
+              {b.sectorRecords.map((s, i) => {
+                if (s == null) {
+                  return (
+                    <span key={i} className="font-mono">
+                      <span className="text-helios-muted">S{i + 1}</span> —
+                    </span>
+                  );
+                }
+                const open = card?.track === b.track && card.mode === "record" && card.sector === i;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-expanded={open}
+                    aria-label={`Sector ${i + 1} record ${s.time.toFixed(3)} seconds by ${s.driver}`}
+                    title={`${s.driver}${s.lap != null ? `, lap ${s.lap}` : ""}${s.cones ? ` · incl. ${coneText(s.cones)}` : ""}`}
+                    onClick={() => setCard(open ? null : { track: b.track, mode: "record", sector: i })}
+                    className={
+                      "-mx-1 rounded px-1 font-mono transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold " +
+                      (open ? "bg-asu-gold/15 text-helios-text" : "hover:bg-helios-line/40")
+                    }
+                  >
+                    <span className="text-helios-muted">S{i + 1}</span>{" "}
+                    {s.time.toFixed(3)}
+                    {s.cones > 0 && <span className="ml-0.5 text-helios-warn" aria-hidden>•</span>}
+                  </button>
+                );
+              })}
               {b.teamTheoretical != null && (
                 <span className="ml-auto font-mono text-asu-gold" title="Every sector at its record, added up">
                   Perfect lap {fmtTime(b.teamTheoretical)}
                 </span>
               )}
             </div>
+          )}
+
+          {card?.track === b.track && (
+            <SectorCard
+              key={`${card.mode}-${card.sector}`}
+              board={b}
+              runs={shown}
+              mode={card.mode}
+              sector={card.sector}
+              driverId={driverId}
+              canReplay={canReplay}
+              onPickSector={(i) => setCard({ ...card, sector: i })}
+              onClose={() => setCard(null)}
+              onWatch={onWatchSector}
+              onCompare={onCompareSector}
+            />
           )}
         </section>
       ))}
@@ -426,6 +507,232 @@ export function Leaderboard({ runs: allRuns, canReplay, onOpenRun, onReplayRun }
           </table>
         </section>
       )}
+    </div>
+  );
+}
+
+function coneText(n: number): string {
+  return `${n} cone${n === 1 ? "" : "s"}`;
+}
+
+/** "12.430 s (incl. 1 cone)" -- the penalty is part of the time, and says so. */
+function sectorText(s: SectorTime): string {
+  return `${s.time.toFixed(3)} s${s.cones > 0 ? ` (incl. ${coneText(s.cones)})` : ""}`;
+}
+
+/** The sector where the driver's perfect lap gains most on their real one. */
+function biggestGain(board: TrackBoard, driverId: string, runs: SimRun[]): number {
+  let best = 0;
+  let gain = -Infinity;
+  const n = board.entries.find((e) => e.driverId === driverId)?.bestSectors.length ?? 0;
+  for (let i = 0; i < n; i++) {
+    const c = compareOwnSector(runs, board, i, driverId);
+    const g = c?.mine ? c.mine.time - c.target.time : -Infinity;
+    if (g > gain) { gain = g; best = i; }
+  }
+  return best;
+}
+
+/**
+ * Why a sector's buttons are off, or null for each that is on.
+ *
+ * The record's own lap has to be somewhere -- retention deletes most laps --
+ * and, for anybody else's record, so does one of yours to put beside it.
+ */
+function blockedReasons(
+  c: SectorComparison,
+  mode: "record" | "own",
+  driverId: string | null,
+  canReplay: boolean,
+): { watch: string | null; compare: string | null } {
+  const t = c.target;
+  const yours = !!driverId && t.driverId === driverId;
+  if (!t.hasTelemetry) {
+    const why = t.evicted
+      ? "This lap was removed by the team's storage budget, so it can be read but not watched."
+      : `${yours ? "Your" : `${t.driver}'s`} lap is no longer stored, so it can be read but not watched. Only a few laps per driver per course keep their telemetry.`;
+    return { watch: why, compare: why };
+  }
+  if (!driverId) {
+    const why = "Sign in to compare it with your own laps.";
+    return { watch: why, compare: why };
+  }
+  let watch: string | null = null;
+  let compare: string | null = null;
+  if (!c.against) {
+    compare = mode === "own"
+      ? "Your best lap has no telemetry to compare it with."
+      : yours
+        ? "You have no other lap with telemetry on this course to compare it with."
+        : "You have no lap with telemetry on this course to compare it with.";
+    // Your own time can still be watched on its own; anybody else's is only
+    // worth watching against something of yours.
+    if (!yours) watch = compare;
+  }
+  if (!watch && !canReplay) watch = "The simulator is not installed here.";
+  return { watch, compare };
+}
+
+/**
+ * The card a sector opens: what the time is, where it came from, how far off
+ * it you are, and the two ways to see why.
+ *
+ * Inline beneath the records rather than floating: it has buttons in it, and a
+ * popover that has to be chased with the mouse is one a keyboard cannot reach.
+ * Escape or the cross closes it.
+ */
+function SectorCard({
+  board, runs, mode, sector, driverId, canReplay, onPickSector, onClose, onWatch, onCompare,
+}: {
+  board: TrackBoard;
+  runs: SimRun[];
+  mode: "record" | "own";
+  sector: number;
+  driverId: string | null;
+  canReplay: boolean;
+  onPickSector: (i: number) => void;
+  onClose: () => void;
+  onWatch?: (c: SectorComparison) => void;
+  onCompare?: (c: SectorComparison) => void;
+}) {
+  const c = mode === "record"
+    ? compareRecord(runs, board, sector, driverId)
+    : driverId ? compareOwnSector(runs, board, sector, driverId) : null;
+  const n = mode === "record"
+    ? board.sectorRecords.length
+    : board.entries.find((e) => e.driverId === driverId)?.bestSectors.length ?? 0;
+  const label = `S${sector + 1}`;
+  const why = c
+    ? blockedReasons(c, mode, driverId, canReplay)
+    : { watch: "Nothing to show", compare: "Nothing to show" };
+  const watchBlocked = why.watch ?? (onWatch ? null : "Not available here");
+  const compareBlocked = why.compare ?? (onCompare ? null : "Not available here");
+
+  const t = c?.target;
+  const yours = !!t && !!driverId && t.driverId === driverId;
+  const gap = c?.mine && t ? c.mine.time - t.time : null;
+  const where = (s: SectorTime) =>
+    `${s.lap != null ? `lap ${s.lap}` : "an unnumbered lap"}${s.startedAt ? ` · ${fmtWhen(s.startedAt)}` : ""}`;
+
+  const btn =
+    "inline-flex items-center gap-1.5 rounded border border-helios-line bg-helios-panel px-2.5 py-1 text-xs transition " +
+    "hover:border-asu-gold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold " +
+    "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-helios-line";
+
+  return (
+    <div
+      role="region"
+      aria-label={mode === "record" ? `${label} record` : `Your ${label}`}
+      data-testid="sector-card"
+      className="border-t border-helios-line bg-helios-line/15 px-5 py-3 text-xs"
+    >
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          {mode === "own" && n > 1 && (
+            <div className="mb-2 flex flex-wrap gap-1" role="group" aria-label="Sector">
+              {Array.from({ length: n }, (_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  aria-pressed={i === sector}
+                  onClick={() => onPickSector(i)}
+                  className={
+                    "rounded border px-2 py-0.5 font-mono text-[11px] transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold " +
+                    (i === sector
+                      ? "border-asu-gold bg-asu-gold/15 text-helios-text"
+                      : "border-helios-line text-helios-dim hover:border-asu-gold hover:text-helios-text")
+                  }
+                >
+                  S{i + 1}
+                </button>
+              ))}
+            </div>
+          )}
+          {!c || !t ? (
+            <p className="text-helios-dim">No clean time in {label} yet.</p>
+          ) : (
+            <>
+              <p data-testid="sector-card-target">
+                <span className="font-medium">{mode === "record" ? `${label} record` : `Your best ${label}`}</span>{" "}
+                <span className="font-mono text-asu-gold">{sectorText(t)}</span>
+                <span className="text-helios-dim">
+                  {" — "}
+                  {mode === "record" ? `${yours ? "you" : t.driver}, ` : ""}
+                  {where(t)}
+                </span>
+              </p>
+              <p className="mt-0.5" data-testid="sector-card-mine">
+                {c.mine ? (
+                  <>
+                    <span className="text-helios-dim">{c.mineLabel}</span>{" "}
+                    <span className="font-mono">{sectorText(c.mine)}</span>
+                    {gap != null && gap > 0.0005 && (
+                      <span className="ml-1 font-mono text-helios-danger">({fmtGap(gap)})</span>
+                    )}
+                    {gap != null && gap <= 0.0005 && (
+                      <span className="ml-1 text-helios-success">
+                        {mode === "record" ? "— the record is yours" : "— driven on your best lap"}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-helios-dim">
+                    {!driverId
+                      ? "Sign in to compare it with your own laps."
+                      : mode === "record"
+                        ? `You have no clean ${label} on this course yet.`
+                        : `Your best lap has no clean ${label} to compare.`}
+                  </span>
+                )}
+              </p>
+              {c.against && (
+                <p className="mt-1 text-[11px] text-helios-muted">
+                  Beside {c.against.label}{c.against.lap != null ? `, lap ${c.against.lap}` : ""}.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="rounded p-0.5 text-helios-dim transition hover:text-helios-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
+        >
+          <IconX size={14} />
+        </button>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {/* The reason sits on a wrapper too: a disabled button fires no
+            pointer events, so its own title would never show. */}
+        <span title={watchBlocked ?? `Watch ${label} in the simulator${c?.against ? ", your lap as the ghost" : ""}`}>
+          <button
+            type="button"
+            className={btn}
+            disabled={!!watchBlocked}
+            aria-describedby={watchBlocked ? "sector-card-why" : undefined}
+            onClick={() => c && onWatch?.(c)}
+          >
+            <IconMovie size={14} /> Watch in sim
+          </button>
+        </span>
+        <span title={compareBlocked ?? `Open both laps in Logs, zoomed to ${label}`}>
+          <button
+            type="button"
+            className={btn}
+            disabled={!!compareBlocked}
+            aria-describedby={compareBlocked ? "sector-card-why" : undefined}
+            onClick={() => c && onCompare?.(c)}
+          >
+            <IconChartLine size={14} /> Compare in Logs
+          </button>
+        </span>
+        {c && (watchBlocked || compareBlocked) && (
+          <span id="sector-card-why" data-testid="sector-card-why" className="text-[11px] text-helios-muted">
+            {compareBlocked ?? watchBlocked}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

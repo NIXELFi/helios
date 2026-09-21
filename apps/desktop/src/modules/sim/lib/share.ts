@@ -26,6 +26,7 @@ import type { SupabaseClient } from "@helios/auth";
 import {
   deviceClass, isRankable, parseGeneratedId, predatesCourse, runBest, type SimRun,
 } from "../api";
+import { recordHolders } from "./leaderboard";
 
 const TABLE = "runs";
 const SCHEMA = "sim";
@@ -115,6 +116,7 @@ export function rowToRun(row: RunRow): SimRun {
     subteam: row.subteam,
     telemetryObject: row.telemetry_object,
     telemetrySharedBytes: row.telemetry_bytes ?? 0,
+    telemetryEvictedAt: row.evicted_at ?? null,
   };
 }
 
@@ -420,6 +422,20 @@ export const GEN_KEEP_RECENT = 1;
  * a benchmark. Recent is drawn from anything that completed a lap, including
  * the ones that went off: a lap you just threw away is often the one worth
  * watching, and it ages out on its own in three more runs.
+ *
+ * And one more reason to keep a lap, on top of those and never instead of
+ * them: it holds something on a TEAM board -- a course's best lap or a sector
+ * record (`recordHolders`). The whole point of a sector record is to be
+ * watched against your own lap, and a record whose lap was pruned the day its
+ * driver set three quicker ones can only be read. Judged over every run in
+ * `runs`, so the caller passes the team's runs as well as this driver's; the
+ * set only ever grows by it, so nothing is deleted that was kept before.
+ *
+ * Within the budget, not around it: a lap the server's budget job removed
+ * (`evicted_at`) is still not put back -- `pushRuns` checks that after this --
+ * and the job itself does not know about records, so under pressure it takes
+ * a record lap outside the best/recent slots first. The board then says the
+ * record's lap is gone rather than pretending it can be watched.
  */
 export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
   const mine = runs.filter((r) => r.driverId === userId && !r.synthetic);
@@ -447,6 +463,11 @@ export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
       .filter((r) => (r.stats.laps ?? 0) > 0)
       .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
     for (const r of withALap.slice(0, nRecent)) keep.add(r.runId);
+  }
+
+  if (mine.length) {
+    const ownIds = new Set(mine.map((r) => r.runId));
+    for (const id of recordHolders(runs)) if (ownIds.has(id)) keep.add(id);
   }
   return keep;
 }
@@ -478,6 +499,10 @@ export async function pushRuns(
   userId: string,
   local: SimRun[],
   readTelemetry: (run: SimRun) => Promise<Uint8Array | null>,
+  /** The team's shared runs, as last read. Only used to find which of this
+   *  driver's runs hold a team record (see `telemetryToKeep`); empty is safe
+   *  and simply keeps what the per-driver rule keeps. */
+  team: SimRun[] = [],
 ): Promise<SyncResult> {
   const out: SyncResult = {
     pushed: 0, telemetryPushed: 0, telemetryPruned: 0, telemetrySwept: 0,
@@ -515,7 +540,10 @@ export async function pushRuns(
     ...mine,
     ...[...already.values()].map((s) => s.run).filter((r) => !localIds.has(r.runId)),
   ];
-  const wantTelemetry = telemetryToKeep(everything, userId);
+  // Teammates' runs ride along only so the rule can see the team's records;
+  // this driver's own come from `everything`, which is the authority on them.
+  const others = team.filter((r) => r.driverId !== userId);
+  const wantTelemetry = telemetryToKeep([...everything, ...others], userId);
 
   // Metadata first, in one round trip. Upsert rather than insert, because a
   // run that is already up there and no longer matches what this machine has

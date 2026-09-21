@@ -27,6 +27,35 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Sim: **team sector records can be watched and compared.** Click a sector
+  record on the leaderboard and a card says whose it is, which lap, how many
+  cones are in it, and how far off it your own best in that sector is. "Watch
+  in sim" opens the record lap at that sector with your own lap as the ghost;
+  "Compare in Logs" opens both laps with the record as Main and yours as Ref,
+  in Lap Analysis, zoomed to the sector. Your own Theoretical time is clickable
+  too, and shows where your best sectors beat your best lap. When a lap is no
+  longer stored, the buttons are off and the card says why. Positioning at a
+  lap and sector needs a simulator that understands `--replay-lap`,
+  `--ghost-lap` and `--sector`; older ones open the replay from the start.
+- Sim: a lap that holds a team sector record or a course's best lap keeps its
+  telemetry, on top of the best-three / latest-three rule, so records stay
+  watchable. The storage budget still has the last word: a lap it removed is
+  not put back.
+
+### Changed
+- Sim: **sector records now include cone penalties.** A sector counts two
+  seconds for every cone struck in it, so a run that went through the slalom
+  can no longer hold that sector's record. Records and theoretical bests are
+  worked out from each lap rather than from a run's summary. Runs from
+  simulators that do not record which sector a cone was in only count laps
+  with no cones at all.
+
+### Fixed
+- Sim: replaying a run against a teammate's ghost no longer shows "GHOST NOT
+  LOADED". The ghost's lap is now downloaded along with the replay, and runs
+  whose lap was never shared are no longer offered as ghosts.
+
 ## [5.9.2] - 2026-09-21
 
 ### Fixed
