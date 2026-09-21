@@ -53,6 +53,9 @@ interface RunRow {
   laps_detail: unknown[] | null;
   telemetry_object: string | null;
   telemetry_bytes: number | null;
+  /** When the nightly budget job removed this run's lap, or null. See
+   *  `SharedState.evictedAt`. */
+  evicted_at: string | null;
 }
 
 /**
@@ -132,10 +135,18 @@ export function rowToRun(row: RunRow): SimRun {
  * next sign-in, and nineteen megabytes with it. Left out of the payload, the
  * server keeps whatever it has: the pointer is written only by the code that
  * uploaded the object and cleared only by the code that removed it.
+ *
+ * `evicted_at` is left out for the same reason and a sharper one. It is the
+ * server's word that it removed a lap deliberately, and sending it from here
+ * would let a routine re-push clear it -- which is precisely the oscillation
+ * it exists to stop, arriving by the back door.
  */
 function runToRow(
   run: SimRun,
-): Omit<RunRow, "user_id" | "display_name" | "subteam" | "telemetry_object" | "telemetry_bytes"> {
+): Omit<
+  RunRow,
+  "user_id" | "display_name" | "subteam" | "telemetry_object" | "telemetry_bytes" | "evicted_at"
+> {
   return {
     run_id: run.runId,
     driver: run.driver,
@@ -238,6 +249,7 @@ async function sharedRowsFor(
   for (const r of res.data as RunRow[]) {
     out.set(r.run_id, {
       telemetryObject: r.telemetry_object,
+      evictedAt: r.evicted_at ?? null,
       stamp: rowStamp(r),
       run: rowToRun(r),
     });
@@ -247,6 +259,22 @@ async function sharedRowsFor(
 
 interface SharedState {
   telemetryObject: string | null;
+  /**
+   * When the server took this run's lap away to stay under budget.
+   *
+   * `telemetryToKeep` is a rule about what a DRIVER should keep and knows
+   * nothing about what the bucket costs; the budget job is a rule about the
+   * bucket and cares nothing for whose lap it is. Left to themselves the two
+   * fight: the job deletes the object at three in the morning, the rule still
+   * wants it, and the next sign-in uploads it again -- for ever, at whatever
+   * the cap is, with the job deleting and the rig replacing the same
+   * megabytes every night.
+   *
+   * So the server says it meant it, and the client believes it. Not
+   * permanent: clearing the column shares the lap again. The rule is "do not
+   * put back what was removed on purpose", not "never again".
+   */
+  evictedAt: string | null;
   /** See `rowStamp`. */
   stamp: string;
   /** The row as a run, for the retention rule. */
@@ -518,10 +546,16 @@ export async function pushRuns(
   const objectOf = new Map<string, string | null>();
   for (const [runId, s] of already) objectOf.set(runId, s.telemetryObject);
 
+  // And the runs whose lap the budget job removed on purpose. See
+  // `SharedState.evictedAt` -- without this the cap is not a cap.
+  const evicted = new Set<string>();
+  for (const [runId, s] of already) if (s.evictedAt) evicted.add(runId);
+
   // Then the telemetry for the laps worth watching, one at a time: they are
   // megabytes and a failure on one must not lose the others.
   for (const run of mine) {
     if (!wantTelemetry.has(run.runId)) continue;
+    if (evicted.has(run.runId)) continue;
     if (objectOf.get(run.runId)) continue;
     try {
       const raw = await readTelemetry(run);

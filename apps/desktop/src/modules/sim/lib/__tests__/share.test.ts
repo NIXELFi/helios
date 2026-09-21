@@ -72,6 +72,7 @@ function row(over: Record<string, unknown> = {}) {
     laps_detail: [{ lap: 1, raw: 40.9, cones: 0, off: 0, total: 40.9, sectors: [], startedAtS: 0 }],
     telemetry_object: "u-ralf/20260919-100000-autocross-ab12.csv",
     telemetry_bytes: 1_100_000,
+    evicted_at: null,
     ...over,
   } as Parameters<typeof rowToRun>[0];
 }
