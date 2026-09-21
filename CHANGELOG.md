@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.9.3] - 2026-09-21
+
 ### Added
 - Sim: **team sector records can be watched and compared.** Click a sector
   record on the leaderboard and a card says whose it is, which lap, how many
