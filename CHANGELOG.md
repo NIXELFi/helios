@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.12.3] - 2026-09-23
+
 ### Fixed
 - Sim leaderboard: runs shared before 5.12.2 are re-shared once with their per-sector cones, so sector records and perfect laps fill in; until then a theoretical slower than a lap actually driven shows as a dash instead of a wrong number.
 - Sim leaderboard: tables no longer spill out of their card on a 1280-wide window (the date column shows from 1536 px up).
