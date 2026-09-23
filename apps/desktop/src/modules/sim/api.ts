@@ -107,7 +107,7 @@ function versionLess(a: string, b: string): boolean {
  * What the constant buys is the other direction: an impossibly HIGH version on
  * an old run stops being taken at its word.
  */
-export const NEWEST_KNOWN_SIM_VERSION = "0.6.6";
+export const NEWEST_KNOWN_SIM_VERSION = "0.7.4";
 
 /**
  * Was this run driven on a course that has since changed shape? See
@@ -296,6 +296,9 @@ export interface SimStats {
   /** The run-to-run setup the best lap was set on, by parameter path
    *  (`roll.rsdFront`, `diff.preloadNm`, `dt.toeInRearDeg`, ...). */
   setup?: Record<string, number> | null;
+  /** The physics revision of that model, i.e. the leaderboard era (simulator
+   *  0.7.4+). See `physicsEraOf` for runs from before it was recorded. */
+  physicsRev?: number | null;
 }
 
 /** The two vehicle models the simulator drives, each with its own boards. */
@@ -309,6 +312,31 @@ export type VehicleModel = (typeof VEHICLE_MODELS)[number]["id"];
  *  say, and those builds only counted the bicycle. */
 export function vehicleModelOf(run: Pick<SimRun, "stats">): VehicleModel {
   return run.stats.vehicleModel === 3 ? 3 : 2;
+}
+
+/**
+ * Which physics era a run belongs to on its model's board.
+ *
+ * A physics change that moves lap times bumps that model's revision in the
+ * simulator (its tests refuse a change to the physics without that decision),
+ * and every run records it. Each course x model x era is its own board;
+ * the newest era is shown by default and the older ones stay browsable,
+ * so a physics update starts a fresh board instead of wiping the old one.
+ *
+ * Runs from before the revision was recorded are placed by version: the
+ * 4-wheel beta was rev 1 until simulator 0.7.3 recalibrated its grip (rev 2);
+ * the bicycle has been rev 1 throughout.
+ */
+export function physicsEraOf(run: Pick<SimRun, "stats" | "simVersion" | "startedAt">): number {
+  const rev = run.stats.physicsRev;
+  if (typeof rev === "number" && rev >= 1) return rev;
+  if (vehicleModelOf(run) !== 3) return 1;
+  const v = run.simVersion?.replace(/^fsae-sim\s+/, "").trim();
+  const believable = !!v && /^\d+\.\d+/.test(v) && !versionLess(NEWEST_KNOWN_SIM_VERSION, v);
+  if (believable) return versionLess(v!, "0.7.3") ? 1 : 2;
+  // No usable version: place it by date against 0.7.3's release.
+  const t = run.startedAt ? Date.parse(run.startedAt) : NaN;
+  return !Number.isNaN(t) && t >= Date.parse("2026-09-23T07:45:00Z") ? 2 : 1;
 }
 
 /**
