@@ -206,7 +206,7 @@ export function Leaderboard({
               average to rank. Drive it a few more times and this fills in.
             </p>
           ) : (
-            <table className="w-full border-collapse text-xs">
+            <div className="overflow-x-auto"><table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="text-left text-helios-muted">
                   <th className="px-5 py-2 font-medium">#</th>
@@ -224,7 +224,7 @@ export function Leaderboard({
                   <th className="px-2 py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
                     Runs
                   </th>
-                  <th className="py-2 pl-3 font-medium">Latest</th>
+                  <th className="hidden py-2 pl-3 font-medium 2xl:table-cell">Latest</th>
                   <th className="px-5 py-2" />
                 </tr>
               </thead>
@@ -248,7 +248,7 @@ export function Leaderboard({
                     <td className="px-2 py-2 text-right font-mono text-helios-dim" data-testid="counted">
                       {e.counted}<span className="text-helios-muted">/{CONSISTENCY_WINDOW}</span>
                     </td>
-                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.latest)}</td>
+                    <td className="hidden whitespace-nowrap py-2 pl-3 text-helios-dim 2xl:table-cell">{fmtWhen(e.latest)}</td>
                     <td className="px-5 py-2 text-right">
                       <button
                         title={canReplay ? "Watch their best lap in the window" : "The simulator is not installed here"}
@@ -262,7 +262,7 @@ export function Leaderboard({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
 
           {b.pending.length > 0 && (
@@ -299,7 +299,7 @@ export function Leaderboard({
               Launch tab while signed in, on an unmodified car, and the time counts.
             </p>
           ) : (
-            <table className="w-full border-collapse text-xs">
+            <div className="overflow-x-auto"><table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="text-left text-helios-muted">
                   <th className="px-5 py-2 font-medium">#</th>
@@ -316,7 +316,7 @@ export function Leaderboard({
                     Theoretical
                   </th>
                   <th className="px-2 py-2 text-right font-medium">Runs</th>
-                  <th className="py-2 pl-2 font-medium">Set</th>
+                  <th className="hidden py-2 pl-2 font-medium 2xl:table-cell">Set</th>
                   <th className="px-5 py-2" />
                 </tr>
               </thead>
@@ -341,7 +341,7 @@ export function Leaderboard({
                     <td className="px-2 py-2 text-right font-mono text-helios-dim">
                       {/* Your own row only: where your perfect lap beats your
                           real one, sector by sector. */}
-                      {driverId && e.driverId === driverId && e.theoretical != null ? (
+                      {driverId && e.driverId === driverId && honest(e.theoretical, e.best) != null ? (
                         <button
                           type="button"
                           aria-expanded={card?.track === b.track && card.model === model && card.mode === "own"}
@@ -355,10 +355,10 @@ export function Leaderboard({
                         >
                           {fmtTime(e.theoretical)}
                         </button>
-                      ) : fmtTime(e.theoretical)}
+                      ) : fmtTime(honest(e.theoretical, e.best))}
                     </td>
                     <td className="px-2 py-2 text-right font-mono text-helios-dim">{e.runs}</td>
-                    <td className="whitespace-nowrap py-2 pl-2 text-helios-dim">{fmtWhen(e.when)}</td>
+                    <td className="hidden whitespace-nowrap py-2 pl-2 text-helios-dim 2xl:table-cell">{fmtWhen(e.when)}</td>
                     <td className="px-5 py-2 text-right">
                       <button
                         title={canReplay ? "Watch that lap" : "The simulator is not installed here"}
@@ -382,7 +382,7 @@ export function Leaderboard({
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
 
           {b.sectorRecords.length > 0 && (
@@ -421,7 +421,7 @@ export function Leaderboard({
                   </button>
                 );
               })}
-              {b.teamTheoretical != null && (
+              {honest(b.teamTheoretical, b.entries[0]?.best ?? null) != null && (
                 <span className="ml-auto font-mono text-asu-gold" title="Every sector at its record, added up">
                   Perfect lap {fmtTime(b.teamTheoretical)}
                 </span>
@@ -962,7 +962,7 @@ interface BoardCell {
   whyNot: string;
 }
 
-/** "14 modified car, 2 off course": why a board's runs are not ranked. */
+/** "14 runs: the car was modified ...; 2 runs: ...": why a board's runs are not ranked. */
 function whyNotRanked(runs: SimRun[]): string {
   const tally = new Map<string, number>();
   for (const r of runs) {
@@ -971,6 +971,16 @@ function whyNotRanked(runs: SimRun[]): string {
   }
   return [...tally.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([why, n]) => `${n} ${why}`)
+    .map(([why, n]) => `${n} run${n === 1 ? "" : "s"}: ${why}`)
     .join("; ");
+}
+
+/**
+ * A theoretical best slower than a lap actually driven is missing sectors,
+ * not a perfect lap: a shared lap whose per-sector cones were lost (Helios
+ * before 5.12.2) gives up all its sectors. Shown as a dash until the run is
+ * re-shared with them.
+ */
+function honest(theoretical: number | null, best: number | null): number | null {
+  return theoretical != null && best != null && theoretical > best + 0.002 ? null : theoretical;
 }

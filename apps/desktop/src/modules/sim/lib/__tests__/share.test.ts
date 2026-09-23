@@ -335,3 +335,13 @@ describe("telemetryToKeep per model (5.12.2)", () => {
     expect(telemetryToKeep(runs, "me").has("b1")).toBe(true);
   });
 });
+
+describe("rowStamp and sector cones (5.12.3)", () => {
+  it("a row shared without its per-sector cones is re-shared once they are there", () => {
+    const base = { profile: "wheel", detected_input: "wheel", format_version: 4, best_lap_s: 40, stats: { vehicleModel: 2, counted: true } };
+    const server = rowStamp({ ...base, laps_detail: [{ lap: 1, sectors: [20, 20] }] });
+    const local = rowStamp({ ...base, laps_detail: [{ lap: 1, sectors: [20, 20], sectorCones: [0, 1] }] });
+    expect(local).not.toBe(server);
+    expect(rowStamp({ ...base, laps_detail: [{ lap: 1, sectors: [20, 20], sectorCones: [0, 1] }] })).toBe(local);
+  });
+});

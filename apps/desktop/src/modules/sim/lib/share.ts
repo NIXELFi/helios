@@ -303,14 +303,19 @@ export function rowStamp(r: {
   format_version: number | null;
   best_lap_s: number | null;
   stats?: Record<string, unknown> | null;
+  laps_detail?: unknown[] | null;
 }): string {
   // The model and the verdict ride in `stats`, and they decide which board a
   // time is on -- a run pushed before Helios could read them (a 4-wheel lap
   // ranked as a bicycle time) has to be re-pushed when they appear.
   const st = (r.stats ?? {}) as { vehicleModel?: unknown; counted?: unknown };
+  // And whether the laps carry their per-sector cones: Helios before 5.12.2
+  // dropped them, so every shared lap with a cone lost its sectors, and the
+  // perfect lap came out slower than laps actually driven.
+  const withCones = (r.laps_detail ?? []).filter((l) => (l as { sectorCones?: unknown })?.sectorCones != null).length;
   return [
     r.profile ?? "", r.detected_input ?? "", r.format_version ?? 0, r.best_lap_s ?? "",
-    st.vehicleModel ?? "", st.counted ?? "",
+    st.vehicleModel ?? "", st.counted ?? "", withCones,
   ].join("|");
 }
 
