@@ -203,6 +203,9 @@ export interface DriverEntry {
   bestLap: number | null;
   /** Those sectors added up: the lap they have already driven in pieces. */
   theoretical: number | null;
+  /** The run-to-run setup their best lap was set on (simulator 0.7.2+);
+   *  null for older runs, which did not record it. */
+  setup: Record<string, number> | null;
 }
 
 export interface TrackBoard {
@@ -274,6 +277,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
           bestSectors: [],
           bestLap: run.stats.bestLapNumber ?? null,
           theoretical: null,
+          setup: run.stats.setup ?? null,
         };
       if (!existing) byDriver.set(key, entry);
 
@@ -293,6 +297,7 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
         entry.bestRaw = hasTrustworthySectors(run) ? run.stats.bestLapRawS ?? null : null;
         entry.runId = run.runId;
         entry.bestLap = run.stats.bestLapNumber ?? null;
+        entry.setup = run.stats.setup ?? null;
         entry.when = run.startedAt;
         entry.cones = run.stats.totalCones;
       }

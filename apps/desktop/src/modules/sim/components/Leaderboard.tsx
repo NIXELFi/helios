@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { IconChartLine, IconMovie, IconTrendingUp, IconTrophy, IconX } from "@tabler/icons-react";
-import { fmtGap, fmtTime, fmtWhen, parseGeneratedId, type SimRun } from "../api";
+import {
+  fmtGap, fmtTime, fmtWhen, parseGeneratedId, setupItems, vehicleModelOf,
+  VEHICLE_MODELS, type SimRun, type VehicleModel,
+} from "../api";
 import {
   buildActivity, buildBoards, buildConsistencyBoards, buildImprovements,
   compareOwnSector, compareRecord,
   CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
-  type SectorComparison, type SectorTime, type TrackBoard,
+  type ConsistencyBoard, type SectorComparison, type SectorTime, type TrackBoard,
 } from "../lib/leaderboard";
 import { DEVICE_CLASSES, deviceClass, type DeviceClass } from "../api";
 
@@ -23,7 +26,7 @@ interface Props {
 }
 
 /** Which sector card is open: a team record, or the driver's own sectors. */
-type OpenCard = { track: string; mode: "record" | "own"; sector: number } | null;
+type OpenCard = { track: string; model: VehicleModel; mode: "record" | "own"; sector: number } | null;
 
 /** Which boards are worth offering, given what has actually been driven. */
 function classesPresent(runs: SimRun[]): DeviceClass[] {
@@ -88,7 +91,31 @@ export function Leaderboard({
     () => (active ? runs.filter((r) => deviceClass(r) === active) : runs),
     [runs, active],
   );
-  const boards = useMemo(() => buildBoards(shown), [shown]);
+  /**
+   * The bicycle and the 4-wheel beta are different cars, so each has its own
+   * board on every course -- side by side, not a tab away, because the point
+   * of having both is to look across at the other one. Built per model from
+   * the same filtered runs; a run from before simulator 0.7.2 is a bicycle
+   * run (`vehicleModelOf`).
+   */
+  const perModel = useMemo(() => VEHICLE_MODELS.map((m) => {
+    const mruns = shown.filter((r) => vehicleModelOf(r) === m.id);
+    return { model: m, runs: mruns, boards: buildBoards(mruns), consistency: buildConsistencyBoards(mruns) };
+  }), [shown]);
+  /** Courses in activity order across both models. */
+  const courseOrder = useMemo(() => {
+    const score = new Map<string, { name: string; runs: number }>();
+    for (const pm of perModel) {
+      for (const b of pm.boards) {
+        const cur = score.get(b.track) ?? { name: b.trackName, runs: 0 };
+        cur.runs += b.runCount + b.unrankedCount;
+        score.set(b.track, cur);
+      }
+    }
+    return [...score.entries()]
+      .sort((a, b) => b[1].runs - a[1].runs || a[1].name.localeCompare(b[1].name))
+      .map(([track, v]) => ({ track, trackName: v.name }));
+  }, [perModel]);
   /**
    * Two ways to rank the same runs. "Fastest" is the lap where everything
    * came together; "Average" is each driver's mean over their last
@@ -97,7 +124,6 @@ export function Leaderboard({
    * a person comparing two courses wants the same rule on both.
    */
   const [mode, setMode] = useState<"fastest" | "average">("fastest");
-  const consistency = useMemo(() => buildConsistencyBoards(shown), [shown]);
   const improvements = useMemo(() => buildImprovements(shown), [shown]);
   const activity = useMemo(() => buildActivity(shown), [shown]);
 
@@ -131,9 +157,256 @@ export function Leaderboard({
     </div>
   );
 
+  const renderAverage = (b: ConsistencyBoard, modelName: string) => (
+        <section className="rounded-lg border border-helios-line bg-helios-panel">
+          <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
+            <h3 className="text-sm font-semibold">{modelName}</h3>
+            <span className="text-[11px] text-helios-muted">
+              {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
+              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
+            </span>
+          </header>
+
+          {b.entries.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-helios-dim">
+              Nobody has {CONSISTENCY_MIN_RUNS} clean ranked runs on this course yet, so there is no
+              average to rank. Drive it a few more times and this fills in.
+            </p>
+          ) : (
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-helios-muted">
+                  <th className="px-5 py-2 font-medium">#</th>
+                  <th className="py-2 font-medium">Driver</th>
+                  <th className="py-2 text-right font-medium" title={`Mean scored lap over the newest ${CONSISTENCY_WINDOW} clean runs`}>
+                    Average
+                  </th>
+                  <th className="py-2 text-right font-medium">Gap</th>
+                  <th className="py-2 text-right font-medium" title="Standard deviation of those laps: how far a typical run sits from the average">
+                    Spread
+                  </th>
+                  <th className="py-2 text-right font-medium" title="The quickest lap inside the window">
+                    Best
+                  </th>
+                  <th className="py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
+                    Runs
+                  </th>
+                  <th className="py-2 pl-3 font-medium">Latest</th>
+                  <th className="px-5 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {b.entries.map((e) => (
+                  <tr
+                    key={e.driverId}
+                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    onClick={() => onOpenRun(e.runId)}
+                  >
+                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
+                    <td className="py-2 font-medium">{e.driver}</td>
+                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
+                      {fmtTime(e.average)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">
+                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">±{e.spread.toFixed(3)}</td>
+                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.best)}</td>
+                    <td className="py-2 text-right font-mono text-helios-dim" data-testid="counted">
+                      {e.counted}<span className="text-helios-muted">/{CONSISTENCY_WINDOW}</span>
+                    </td>
+                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.latest)}</td>
+                    <td className="px-5 py-2 text-right">
+                      <button
+                        title={canReplay ? "Watch their best lap in the window" : "The simulator is not installed here"}
+                        disabled={!canReplay}
+                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
+                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <IconMovie size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {b.pending.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px] text-helios-muted">
+              <span>Not enough clean runs yet</span>
+              {b.pending.map((p) => (
+                <span key={p.driverId}>
+                  {p.driver} <span className="font-mono">{p.counted}/{CONSISTENCY_MIN_RUNS}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      
+  );
+
+  const renderFastest = (b: TrackBoard, model: VehicleModel, modelName: string, mruns: SimRun[]) => (
+        <section className="rounded-lg border border-helios-line bg-helios-panel">
+          <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
+            <h3 className="text-sm font-semibold">{modelName}</h3>
+            <span className="text-[11px] text-helios-muted">
+              {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
+              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
+            </span>
+          </header>
+
+          {b.entries.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-helios-dim">
+              Nothing ranked here yet. Every run on this course was either started
+              outside Helios (so nobody can say who drove it), went off course, had
+              driver aids on, was set by the robot driver, or never completed a lap.
+              Launch from the Launch tab while signed in and the time counts.
+            </p>
+          ) : (
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-helios-muted">
+                  <th className="px-5 py-2 font-medium">#</th>
+                  <th className="py-2 font-medium">Driver</th>
+                  <th className="py-2 text-right font-medium">Best</th>
+                  <th className="py-2 text-right font-medium">Gap</th>
+                  <th
+                    className="py-2 text-right font-medium"
+                    title="That same lap before penalties — the gap to Best is what the cones cost"
+                  >
+                    Raw
+                  </th>
+                  <th className="py-2 text-right font-medium" title="Their own quickest sectors added up">
+                    Theoretical
+                  </th>
+                  <th className="py-2 text-right font-medium">Runs</th>
+                  <th className="py-2 pl-3 font-medium">Set</th>
+                  <th className="px-5 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {b.entries.map((e) => (
+                  <tr
+                    key={e.driverId}
+                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    onClick={() => onOpenRun(e.runId)}
+                  >
+                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
+                    <td className="py-2 font-medium">
+                      {e.driver}
+                      <SetupLine setup={e.setup} model={model} />
+                    </td>
+                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
+                      {fmtTime(e.best)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">
+                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.bestRaw)}</td>
+                    <td className="py-2 text-right font-mono text-helios-dim">
+                      {/* Your own row only: where your perfect lap beats your
+                          real one, sector by sector. */}
+                      {driverId && e.driverId === driverId && e.theoretical != null ? (
+                        <button
+                          type="button"
+                          aria-expanded={card?.track === b.track && card.model === model && card.mode === "own"}
+                          title="Your best sectors against your best lap: where the perfect lap beats the real one"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            const open = card?.track === b.track && card.model === model && card.mode === "own";
+                            setCard(open ? null : { track: b.track, model, mode: "own", sector: biggestGain(b, e.driverId, mruns) });
+                          }}
+                          className="rounded px-1 underline decoration-dotted underline-offset-2 transition hover:text-helios-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
+                        >
+                          {fmtTime(e.theoretical)}
+                        </button>
+                      ) : fmtTime(e.theoretical)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-helios-dim">{e.runs}</td>
+                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.when)}</td>
+                    <td className="px-5 py-2 text-right">
+                      <button
+                        title={canReplay ? "Watch that lap" : "The simulator is not installed here"}
+                        disabled={!canReplay}
+                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
+                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <IconMovie size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {b.sectorRecords.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px]">
+              <span
+                className="text-helios-muted"
+                title="The quickest each sector has been driven, two seconds added for every cone struck in it. Click one to watch it against your own lap."
+              >
+                Team sector records
+              </span>
+              {b.sectorRecords.map((s, i) => {
+                if (s == null) {
+                  return (
+                    <span key={i} className="font-mono">
+                      <span className="text-helios-muted">S{i + 1}</span> —
+                    </span>
+                  );
+                }
+                const open = card?.track === b.track && card.model === model && card.mode === "record" && card.sector === i;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-expanded={open}
+                    aria-label={`Sector ${i + 1} record ${s.time.toFixed(3)} seconds by ${s.driver}`}
+                    title={`${s.driver}${s.lap != null ? `, lap ${s.lap}` : ""}${s.cones ? ` · incl. ${coneText(s.cones)}` : ""}`}
+                    onClick={() => setCard(open ? null : { track: b.track, model, mode: "record", sector: i })}
+                    className={
+                      "-mx-1 rounded px-1 font-mono transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold " +
+                      (open ? "bg-asu-gold/15 text-helios-text" : "hover:bg-helios-line/40")
+                    }
+                  >
+                    <span className="text-helios-muted">S{i + 1}</span>{" "}
+                    {s.time.toFixed(3)}
+                    {s.cones > 0 && <span className="ml-0.5 text-helios-warn" aria-hidden>•</span>}
+                  </button>
+                );
+              })}
+              {b.teamTheoretical != null && (
+                <span className="ml-auto font-mono text-asu-gold" title="Every sector at its record, added up">
+                  Perfect lap {fmtTime(b.teamTheoretical)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {card?.track === b.track && card.model === model && (
+            <SectorCard
+              key={`${card.mode}-${card.sector}`}
+              board={b}
+              runs={mruns}
+              mode={card.mode}
+              sector={card.sector}
+              driverId={driverId}
+              canReplay={canReplay}
+              onPickSector={(i) => setCard({ ...card, sector: i })}
+              onClose={() => setCard(null)}
+              onWatch={onWatchSector}
+              onCompare={onCompareSector}
+            />
+          )}
+        </section>
+      
+  );
+
   if (runs.length === 0) {
     return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6">
         {scopeTabs}
         <p className="p-8 text-center text-sm text-helios-dim">
           No runs yet. The board fills itself the first time somebody drives.
@@ -143,7 +416,7 @@ export function Leaderboard({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6">
       {scopeTabs}
       {/* Only when there is a choice to make. A team all on wheels never sees
           this, and the one view deliberately not offered is "all three at
@@ -238,246 +511,26 @@ export function Leaderboard({
         </section>
       )}
 
-      {mode === "average" && consistency.map((b) => (
-        <section key={b.track} className="rounded-lg border border-helios-line bg-helios-panel">
-          <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
-            <h3 className="text-sm font-semibold">{b.trackName}</h3>
-            <span className="text-[11px] text-helios-muted">
-              {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
-              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
-            </span>
-          </header>
-
-          {b.entries.length === 0 ? (
-            <p className="px-5 py-6 text-center text-xs text-helios-dim">
-              Nobody has {CONSISTENCY_MIN_RUNS} clean ranked runs on this course yet, so there is no
-              average to rank. Drive it a few more times and this fills in.
-            </p>
-          ) : (
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-helios-muted">
-                  <th className="px-5 py-2 font-medium">#</th>
-                  <th className="py-2 font-medium">Driver</th>
-                  <th className="py-2 text-right font-medium" title={`Mean scored lap over the newest ${CONSISTENCY_WINDOW} clean runs`}>
-                    Average
-                  </th>
-                  <th className="py-2 text-right font-medium">Gap</th>
-                  <th className="py-2 text-right font-medium" title="Standard deviation of those laps: how far a typical run sits from the average">
-                    Spread
-                  </th>
-                  <th className="py-2 text-right font-medium" title="The quickest lap inside the window">
-                    Best
-                  </th>
-                  <th className="py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
-                    Runs
-                  </th>
-                  <th className="py-2 pl-3 font-medium">Latest</th>
-                  <th className="px-5 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {b.entries.map((e) => (
-                  <tr
-                    key={e.driverId}
-                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
-                    onClick={() => onOpenRun(e.runId)}
-                  >
-                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
-                    <td className="py-2 font-medium">{e.driver}</td>
-                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
-                      {fmtTime(e.average)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
-                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">±{e.spread.toFixed(3)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.best)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim" data-testid="counted">
-                      {e.counted}<span className="text-helios-muted">/{CONSISTENCY_WINDOW}</span>
-                    </td>
-                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.latest)}</td>
-                    <td className="px-5 py-2 text-right">
-                      <button
-                        title={canReplay ? "Watch their best lap in the window" : "The simulator is not installed here"}
-                        disabled={!canReplay}
-                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
-                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
-                      >
-                        <IconMovie size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {b.pending.length > 0 && (
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px] text-helios-muted">
-              <span>Not enough clean runs yet</span>
-              {b.pending.map((p) => (
-                <span key={p.driverId}>
-                  {p.driver} <span className="font-mono">{p.counted}/{CONSISTENCY_MIN_RUNS}</span>
-                </span>
-              ))}
-            </div>
-          )}
-        </section>
-      ))}
-
-      {mode === "fastest" && boards.map((b) => (
-        <section key={b.track} className="rounded-lg border border-helios-line bg-helios-panel">
-          <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
-            <h3 className="text-sm font-semibold">{b.trackName}</h3>
-            <span className="text-[11px] text-helios-muted">
-              {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
-              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
-            </span>
-          </header>
-
-          {b.entries.length === 0 ? (
-            <p className="px-5 py-6 text-center text-xs text-helios-dim">
-              Nothing ranked here yet. Every run on this course was either started
-              outside Helios (so nobody can say who drove it), went off course, had
-              driver aids on, was set by the robot driver, or never completed a lap.
-              Launch from the Launch tab while signed in and the time counts.
-            </p>
-          ) : (
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-helios-muted">
-                  <th className="px-5 py-2 font-medium">#</th>
-                  <th className="py-2 font-medium">Driver</th>
-                  <th className="py-2 text-right font-medium">Best</th>
-                  <th className="py-2 text-right font-medium">Gap</th>
-                  <th
-                    className="py-2 text-right font-medium"
-                    title="That same lap before penalties — the gap to Best is what the cones cost"
-                  >
-                    Raw
-                  </th>
-                  <th className="py-2 text-right font-medium" title="Their own quickest sectors added up">
-                    Theoretical
-                  </th>
-                  <th className="py-2 text-right font-medium">Runs</th>
-                  <th className="py-2 pl-3 font-medium">Set</th>
-                  <th className="px-5 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {b.entries.map((e) => (
-                  <tr
-                    key={e.driverId}
-                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
-                    onClick={() => onOpenRun(e.runId)}
-                  >
-                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
-                    <td className="py-2 font-medium">{e.driver}</td>
-                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
-                      {fmtTime(e.best)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
-                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.bestRaw)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
-                      {/* Your own row only: where your perfect lap beats your
-                          real one, sector by sector. */}
-                      {driverId && e.driverId === driverId && e.theoretical != null ? (
-                        <button
-                          type="button"
-                          aria-expanded={card?.track === b.track && card.mode === "own"}
-                          title="Your best sectors against your best lap: where the perfect lap beats the real one"
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            const open = card?.track === b.track && card.mode === "own";
-                            setCard(open ? null : { track: b.track, mode: "own", sector: biggestGain(b, e.driverId, shown) });
-                          }}
-                          className="rounded px-1 underline decoration-dotted underline-offset-2 transition hover:text-helios-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
-                        >
-                          {fmtTime(e.theoretical)}
-                        </button>
-                      ) : fmtTime(e.theoretical)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{e.runs}</td>
-                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.when)}</td>
-                    <td className="px-5 py-2 text-right">
-                      <button
-                        title={canReplay ? "Watch that lap" : "The simulator is not installed here"}
-                        disabled={!canReplay}
-                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
-                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
-                      >
-                        <IconMovie size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {b.sectorRecords.length > 0 && (
-            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-helios-line px-5 py-2.5 text-[11px]">
-              <span
-                className="text-helios-muted"
-                title="The quickest each sector has been driven, two seconds added for every cone struck in it. Click one to watch it against your own lap."
-              >
-                Team sector records
-              </span>
-              {b.sectorRecords.map((s, i) => {
-                if (s == null) {
-                  return (
-                    <span key={i} className="font-mono">
-                      <span className="text-helios-muted">S{i + 1}</span> —
-                    </span>
-                  );
-                }
-                const open = card?.track === b.track && card.mode === "record" && card.sector === i;
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    aria-expanded={open}
-                    aria-label={`Sector ${i + 1} record ${s.time.toFixed(3)} seconds by ${s.driver}`}
-                    title={`${s.driver}${s.lap != null ? `, lap ${s.lap}` : ""}${s.cones ? ` · incl. ${coneText(s.cones)}` : ""}`}
-                    onClick={() => setCard(open ? null : { track: b.track, mode: "record", sector: i })}
-                    className={
-                      "-mx-1 rounded px-1 font-mono transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold " +
-                      (open ? "bg-asu-gold/15 text-helios-text" : "hover:bg-helios-line/40")
-                    }
-                  >
-                    <span className="text-helios-muted">S{i + 1}</span>{" "}
-                    {s.time.toFixed(3)}
-                    {s.cones > 0 && <span className="ml-0.5 text-helios-warn" aria-hidden>•</span>}
-                  </button>
-                );
-              })}
-              {b.teamTheoretical != null && (
-                <span className="ml-auto font-mono text-asu-gold" title="Every sector at its record, added up">
-                  Perfect lap {fmtTime(b.teamTheoretical)}
-                </span>
-              )}
-            </div>
-          )}
-
-          {card?.track === b.track && (
-            <SectorCard
-              key={`${card.mode}-${card.sector}`}
-              board={b}
-              runs={shown}
-              mode={card.mode}
-              sector={card.sector}
-              driverId={driverId}
-              canReplay={canReplay}
-              onPickSector={(i) => setCard({ ...card, sector: i })}
-              onClose={() => setCard(null)}
-              onWatch={onWatchSector}
-              onCompare={onCompareSector}
-            />
-          )}
-        </section>
+      {courseOrder.map(({ track, trackName }) => (
+        <div key={`${mode}-${track}`} className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-helios-text">{trackName}</h2>
+          <div className="grid items-start gap-3 xl:grid-cols-2">
+            {perModel.map(({ model: m, runs: mruns, boards: mb, consistency: mc }) => {
+              const model = m.id;
+              const modelName = m.name;
+              if (mode === "average") {
+                const b = mc.find((x) => x.track === track);
+                return b
+                  ? <div key={model}>{renderAverage(b, modelName)}</div>
+                  : <EmptyBoard key={model} modelName={modelName} detail={m.detail} />;
+              }
+              const b = mb.find((x) => x.track === track);
+              return b
+                ? <div key={model}>{renderFastest(b, model, modelName, mruns)}</div>
+                : <EmptyBoard key={model} modelName={modelName} detail={m.detail} />;
+            })}
+          </div>
+        </div>
       ))}
 
       {improvements.length > 0 && (
@@ -751,4 +804,38 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+/** The setup a time was set on, one short line under the driver's name. */
+function SetupLine({ setup, model }: { setup: Record<string, number> | null; model: VehicleModel }) {
+  const items = setupItems(setup, model);
+  if (items.length === 0) return null;
+  return (
+    <div
+      className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[10px] font-normal text-helios-muted"
+      data-testid="setup-line"
+    >
+      {items.map((it) => (
+        <span key={it.label} title={it.title}>
+          <span className="text-helios-dim">{it.label}</span> {it.value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A model with no ranked time on this course yet, so the pair still lines up. */
+function EmptyBoard({ modelName, detail }: { modelName: string; detail: string }) {
+  return (
+    <section className="rounded-lg border border-dashed border-helios-line bg-helios-panel/50">
+      <header className="flex items-baseline justify-between border-b border-helios-line/60 px-5 py-3">
+        <h3 className="text-sm font-semibold text-helios-dim">{modelName}</h3>
+        <span className="text-[11px] text-helios-muted">{detail}</span>
+      </header>
+      <p className="px-5 py-6 text-center text-xs text-helios-dim">
+        No times on this model here yet. Pick it on the simulator's staging card
+        (simulator 0.7.2 or newer) and the board fills itself.
+      </p>
+    </section>
+  );
 }

@@ -302,8 +302,16 @@ export function rowStamp(r: {
   detected_input: string | null;
   format_version: number | null;
   best_lap_s: number | null;
+  stats?: Record<string, unknown> | null;
 }): string {
-  return [r.profile ?? "", r.detected_input ?? "", r.format_version ?? 0, r.best_lap_s ?? ""].join("|");
+  // The model and the verdict ride in `stats`, and they decide which board a
+  // time is on -- a run pushed before Helios could read them (a 4-wheel lap
+  // ranked as a bicycle time) has to be re-pushed when they appear.
+  const st = (r.stats ?? {}) as { vehicleModel?: unknown; counted?: unknown };
+  return [
+    r.profile ?? "", r.detected_input ?? "", r.format_version ?? 0, r.best_lap_s ?? "",
+    st.vehicleModel ?? "", st.counted ?? "",
+  ].join("|");
 }
 
 /** Shared telemetry from a non-wheel run is thinned to this. */
