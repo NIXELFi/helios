@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.12.0] - 2026-09-23
+
 ### Added
 - **Simulator leaderboards: the bicycle and the 4-wheel model side by side.** Every course now shows two boards next to each other, one per vehicle model, so a 4-wheel beta time never ranks against a bicycle time. Each row shows the setup its best lap was set on (roll stiffness split, brake bias, diff, launch rpm, final drive, and on the 4-wheel model its toe, camber and Ackermann). Needs simulator 0.7.2 to record the model and setup; older runs sit on the bicycle board.
 
