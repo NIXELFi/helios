@@ -303,6 +303,10 @@ pub struct LaunchRequest {
     /// with a `replay_lap`, because "sector 2" of no particular lap is not a
     /// place on the course's clock.
     pub sector: Option<u32>,
+    /// Which vehicle model drives: 2 the bicycle, 3 the 4-wheel beta
+    /// (`--model bicycle|4wheel`, simulator 0.7.5+; an older simulator
+    /// reports the flag as unknown and drives its saved model).
+    pub vehicle_model: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -433,6 +437,15 @@ pub(crate) fn build_args(req: &LaunchRequest) -> Result<Vec<String>, String> {
         return Ok(args);
     }
 
+    if let Some(m) = req.vehicle_model {
+        let v = match m {
+            2 => "bicycle",
+            3 => "4wheel",
+            _ => return Err(format!("unknown vehicle model {m}")),
+        };
+        args.push("--model".into());
+        args.push(v.into());
+    }
     if let Some(t) = &req.track {
         if !valid_track(t) {
             return Err(format!("no course called {t}"));
@@ -855,6 +868,19 @@ mod tests {
     fn rejects_a_course_that_does_not_exist() {
         let r = LaunchRequest { track: Some("nurburgring".into()), ..drive() };
         assert!(build_args(&r).is_err());
+    }
+
+    #[test]
+    fn launches_the_chosen_vehicle_model() {
+        let r = LaunchRequest { track: Some("skidpad".into()), vehicle_model: Some(3), ..drive() };
+        let args = build_args(&r).unwrap();
+        assert!(args.windows(2).any(|w| w[0] == "--model" && w[1] == "4wheel"), "{args:?}");
+        let r = LaunchRequest { vehicle_model: Some(2), ..drive() };
+        assert!(build_args(&r).unwrap().windows(2).any(|w| w[0] == "--model" && w[1] == "bicycle"));
+        let r = LaunchRequest { vehicle_model: Some(7), ..drive() };
+        assert!(build_args(&r).is_err());
+        let r = drive();
+        assert!(!build_args(&r).unwrap().iter().any(|a| a == "--model"), "no model asked for, none sent");
     }
 
     #[test]

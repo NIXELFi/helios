@@ -27,6 +27,23 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Sim: launch the 4-wheel model from the Launch tab (new "Car model" choice) and straight from its leaderboard with a "Launch 4-wheel" button on each course. Needs simulator 0.7.5.
+- Sim: "N not ranked" on a board now says why when you hover it (e.g. "14 the car was modified").
+
+### Changed
+- Sim leaderboard: physics eras are picked per course, not per model, so looking back at one course's older board leaves the others alone. A course nobody has driven on the current physics says so.
+- Sim leaderboard: roomier tables. The setup sits on its own line under the driver, numbers have space between them, and the page uses more of a wide screen.
+- Sim: the "best lap anyone has scored" banner only counts lapped courses; a skidpad score or accel time no longer takes it.
+- Sim: "Time found" compares a driver's runs on the same car model and physics only.
+
+### Fixed
+- Sim: a run with a single off-course lap was taken off the board as if the car had been modified (simulators 0.7.2–0.7.4). Runs already on disk are corrected and re-shared.
+- Sim: a shared run from simulator 0.7.x whose car model was lost in sharing no longer ranks as a bicycle time by default.
+- Sim: skidpad no longer shows a ~24 s "Theoretical" or "Perfect lap" beside a ~4.9 s best.
+- Sim: a run with an untimed sector no longer disappears from the Runs list and the board, and per-sector cone counts now reach the shared board, so sector records and theoretical bests fill in for laps with cones.
+- Sim: keeping lap telemetry is judged per car model, so a driver's 4-wheel laps can no longer push out their bicycle bests.
+
 ## [5.12.1] - 2026-09-23
 
 ### Added

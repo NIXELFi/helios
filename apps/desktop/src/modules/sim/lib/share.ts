@@ -24,7 +24,7 @@
 import type { SupabaseClient } from "@helios/auth";
 
 import {
-  deviceClass, isRankable, parseGeneratedId, predatesCourse, runBest, type SimRun,
+  deviceClass, isRankable, modelEraKey, parseGeneratedId, predatesCourse, runBest, type SimRun,
 } from "../api";
 import { recordHolders } from "./leaderboard";
 
@@ -448,14 +448,19 @@ export const GEN_KEEP_RECENT = 1;
 export function telemetryToKeep(runs: SimRun[], userId: string): Set<string> {
   const mine = runs.filter((r) => r.driverId === userId && !r.synthetic);
   const byCourse = new Map<string, SimRun[]>();
+  // Per course AND per model and physics era: each is its own board, so each
+  // keeps its own best laps. Per course alone, a driver's 4-wheel laps took
+  // every "best" slot and their bicycle personal bests were deleted.
   for (const r of mine) {
-    const list = byCourse.get(r.track);
+    const k = `${r.track}|${modelEraKey(r)}`;
+    const list = byCourse.get(k);
     if (list) list.push(r);
-    else byCourse.set(r.track, [r]);
+    else byCourse.set(k, [r]);
   }
 
   const keep = new Set<string>();
-  for (const [track, list] of byCourse) {
+  for (const list of byCourse.values()) {
+    const track = list[0]!.track;
     // A procedural course is bounded more tightly than a fixed one, because
     // there is no bound on how many of them there are. See `GEN_KEEP_BEST`.
     const generated = parseGeneratedId(track) !== null;

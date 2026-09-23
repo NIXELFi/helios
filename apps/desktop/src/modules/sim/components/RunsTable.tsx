@@ -4,7 +4,7 @@ import {
   IconRobot,
 } from "@tabler/icons-react";
 import {
-  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, trackName, unrankedReason, type SimRun,
+  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, runTheoretical, trackName, unrankedReason, type SimRun,
 } from "../api";
 import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
 
@@ -276,7 +276,7 @@ export function RunsTable({
           {reason && <span className="ml-1 text-[10px] text-helios-muted">*</span>}
         </Td>
         <Td className="text-right font-mono text-helios-dim">
-          {fmtTime(r.stats.theoreticalBestS)}
+          {fmtTime(runTheoretical(r))}
         </Td>
         <Td className="text-right font-mono">{r.stats.laps}</Td>
         <Td className="text-right font-mono">

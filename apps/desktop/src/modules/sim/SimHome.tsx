@@ -13,8 +13,8 @@ import { SessionSummary, runsInSession, type SessionWindow } from "./components/
 import { listen } from "@tauri-apps/api/event";
 import { deleteSharedRun, fetchSharedRuns, fetchSharedTelemetry, pushRuns, telemetryToKeep } from "./lib/share";
 import { readRunTelemetry, simImportRun, simLaunch, simListRuns, simStatus, simTelemetryPath,
-  type SimManifest, type SimRun, type SimStatus,
-  TRACKS, isTrackId,
+  type SimManifest, type SimRun, type SimStatus, type VehicleModel,
+  TRACKS, isTrackId, vehicleModelOf,
 } from "./api";
 import { sectorWindowS, type SectorComparison } from "./lib/leaderboard";
 
@@ -387,6 +387,28 @@ export function SimHome({ active }: { active: boolean }) {
    * driver's own course, controls and aids alone -- except the course, which
    * has to be the one the reference was set on or the reference is nonsense.
    */
+  /** Drive a course on a given car model, with the launcher's other
+   *  settings -- the leaderboard's "Launch 4-wheel". */
+  const launchCourse = useCallback((track: string, model: VehicleModel) => {
+    if (!driver) { setError("Sign in to Helios to start a run."); return; }
+    if (update.installing) { setError("The simulator is being updated; try again in a moment."); return; }
+    const prefs = readLaunchPrefs();
+    void simLaunch({
+      track: isTrackId(track) ? track : TRACKS[0]!.id,
+      vehicleModel: model,
+      profile: prefs.profile || undefined,
+      driver: driver.name,
+      driverId: driver.id,
+      session: prefs.session || undefined,
+      traction: prefs.traction,
+      abs: prefs.abs,
+      autoShift: prefs.autoShift,
+      autostart: prefs.autostart,
+      windowed: prefs.windowed,
+      noRecord: !prefs.record,
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [driver, update.installing]);
+
   const chase = useCallback((run: SimRun) => {
     if (!driver) { setError("Sign in to Helios to start a run."); return; }
     if (update.installing) { setError("The simulator is being updated; try again in a moment."); return; }
@@ -411,6 +433,8 @@ export function SimHome({ active }: { active: boolean }) {
       windowed: prefs.windowed,
       noRecord: !prefs.record,
       reference: run.runId,
+      // Chasing a lap means driving the car it was set on.
+      vehicleModel: vehicleModelOf(run),
     }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
     // The simulator reads the reference out of the runs directory -- it
     // builds its time-at-distance table from the lap's telemetry -- so a
@@ -509,6 +533,7 @@ export function SimHome({ active }: { active: boolean }) {
           ) : tab === "board" ? (
             <Leaderboard
               runs={allRuns}
+              onLaunchCourse={launchCourse}
               canReplay={canReplay}
               onOpenRun={(id) => { setSelectedId(id); selectTab("runs"); }}
               onReplayRun={(id) => replay(id, null)}
