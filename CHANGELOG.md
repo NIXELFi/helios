@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Simulator leaderboards keep their history through physics updates.** Each board is now per physics era: when a simulator update changes a car's physics enough to move lap times, that model's board starts fresh, and the older era stays one click away (the "rev" chips above the board) instead of being wiped or mixed in. The simulator stamps the era on every run (0.7.4+) and refuses to ship a physics change without deciding whether it is a new era; older runs are placed by version (the 4-wheel beta's rev 1 ended at simulator 0.7.3).
+
 ## [5.12.0] - 2026-09-23
 
 ### Added

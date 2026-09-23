@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { IconChartLine, IconMovie, IconTrendingUp, IconTrophy, IconX } from "@tabler/icons-react";
 import {
-  fmtGap, fmtTime, fmtWhen, parseGeneratedId, setupItems, vehicleModelOf,
+  fmtGap, fmtTime, fmtWhen, parseGeneratedId, physicsEraOf, setupItems, vehicleModelOf,
   VEHICLE_MODELS, type SimRun, type VehicleModel,
 } from "../api";
 import {
@@ -98,10 +98,24 @@ export function Leaderboard({
    * the same filtered runs; a run from before simulator 0.7.2 is a bicycle
    * run (`vehicleModelOf`).
    */
+  /**
+   * And each model's board is per PHYSICS ERA (`physicsEraOf`). The newest
+   * era any run of that model has been driven in is the default -- a physics
+   * update starts a fresh board -- and the older eras stay one click away in
+   * the board's header instead of being wiped.
+   */
+  const [eraPick, setEraPick] = useState<Partial<Record<VehicleModel, number>>>({});
   const perModel = useMemo(() => VEHICLE_MODELS.map((m) => {
-    const mruns = shown.filter((r) => vehicleModelOf(r) === m.id);
-    return { model: m, runs: mruns, boards: buildBoards(mruns), consistency: buildConsistencyBoards(mruns) };
-  }), [shown]);
+    const all = shown.filter((r) => vehicleModelOf(r) === m.id);
+    const eras = [...new Set(all.map(physicsEraOf))].sort((a, b) => b - a);
+    const current = eras[0] ?? 1;
+    const era = eraPick[m.id] != null && eras.includes(eraPick[m.id]!) ? eraPick[m.id]! : current;
+    const mruns = all.filter((r) => physicsEraOf(r) === era);
+    return {
+      model: m, runs: mruns, eras, era, current,
+      boards: buildBoards(mruns), consistency: buildConsistencyBoards(mruns),
+    };
+  }), [shown, eraPick]);
   /** Courses in activity order across both models. */
   const courseOrder = useMemo(() => {
     const score = new Map<string, { name: string; runs: number }>();
@@ -515,19 +529,25 @@ export function Leaderboard({
         <div key={`${mode}-${track}`} className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-helios-text">{trackName}</h2>
           <div className="grid items-start gap-3 xl:grid-cols-2">
-            {perModel.map(({ model: m, runs: mruns, boards: mb, consistency: mc }) => {
+            {perModel.map(({ model: m, runs: mruns, boards: mb, consistency: mc, eras, era, current }) => {
               const model = m.id;
               const modelName = m.name;
+              const eraBar = eras.length > 1 && (
+                <EraBar
+                  eras={eras} era={era} current={current}
+                  onPick={(e) => setEraPick((p) => ({ ...p, [model]: e }))}
+                />
+              );
               if (mode === "average") {
                 const b = mc.find((x) => x.track === track);
                 return b
-                  ? <div key={model}>{renderAverage(b, modelName)}</div>
-                  : <EmptyBoard key={model} modelName={modelName} detail={m.detail} />;
+                  ? <div key={model}>{eraBar}{renderAverage(b, modelName)}</div>
+                  : <div key={model}>{eraBar}<EmptyBoard modelName={modelName} detail={m.detail} /></div>;
               }
               const b = mb.find((x) => x.track === track);
               return b
-                ? <div key={model}>{renderFastest(b, model, modelName, mruns)}</div>
-                : <EmptyBoard key={model} modelName={modelName} detail={m.detail} />;
+                ? <div key={model}>{eraBar}{renderFastest(b, model, modelName, mruns)}</div>
+                : <div key={model}>{eraBar}<EmptyBoard modelName={modelName} detail={m.detail} /></div>;
             })}
           </div>
         </div>
@@ -837,5 +857,38 @@ function EmptyBoard({ modelName, detail }: { modelName: string; detail: string }
         (simulator 0.7.2 or newer) and the board fills itself.
       </p>
     </section>
+  );
+}
+
+/**
+ * The physics eras a model's board has, newest first. Only shown when there
+ * is more than one: a physics update starts a new board and keeps the old.
+ */
+function EraBar({ eras, era, current, onPick }: {
+  eras: number[]; era: number; current: number; onPick: (e: number) => void;
+}) {
+  return (
+    <div className="mb-1.5 flex flex-wrap items-center gap-1" role="group" aria-label="Physics era">
+      <span className="mr-1 text-[10px] uppercase tracking-wider text-helios-muted">Physics</span>
+      {eras.map((e) => (
+        <button
+          key={e}
+          type="button"
+          onClick={() => onPick(e)}
+          aria-pressed={e === era}
+          title={e === current
+            ? "The current physics. Times from older physics sit on their own board."
+            : "An earlier revision of this model's physics: times set then, kept for the record."}
+          className={
+            "rounded border px-2 py-0.5 text-[11px] transition " +
+            (e === era
+              ? "border-asu-gold bg-asu-gold/15 text-helios-text"
+              : "border-helios-line text-helios-dim hover:border-asu-gold hover:text-helios-text")
+          }
+        >
+          rev {e}{e === current ? " (current)" : ""}
+        </button>
+      ))}
+    </div>
   );
 }

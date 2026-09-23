@@ -179,3 +179,30 @@ describe("the bicycle and the 4-wheel model rank side by side", () => {
     expect(screen.getByText(/No times on this model here yet/)).toBeTruthy();
   });
 });
+
+describe("physics eras: an update starts a fresh board and keeps the old one", () => {
+  const base = run({ runId: "x" }).stats;
+  const old = run({
+    runId: "old", driver: "Edgar", driverId: "d-edgar", simVersion: "0.7.1",
+    stats: { ...base, bestLapS: 38.0, vehicleModel: 3, counted: true },
+  });
+  const fresh = run({
+    runId: "new", driver: "Ralf", driverId: "d-ralf", simVersion: "0.7.4",
+    stats: { ...base, bestLapS: 40.0, vehicleModel: 3, counted: true, physicsRev: 2 },
+  });
+
+  it("shows the current era by default, and the older one a click away", () => {
+    render(<Leaderboard {...props} runs={[old, fresh]} />);
+    const board = () => screen.getByRole("heading", { name: /4-wheel/ }).closest("section")!;
+    expect(board().textContent).toMatch(/Ralf/);
+    expect(board().textContent).not.toMatch(/Edgar/);
+    fireEvent.click(screen.getByRole("button", { name: /rev 1/ }));
+    expect(board().textContent).toMatch(/Edgar/);
+    expect(board().textContent).not.toMatch(/Ralf/);
+  });
+
+  it("does not offer an era picker when a model has only one era", () => {
+    render(<Leaderboard {...props} runs={[fresh]} />);
+    expect(screen.queryByRole("group", { name: "Physics era" })).toBeNull();
+  });
+});

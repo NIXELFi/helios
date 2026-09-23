@@ -299,6 +299,10 @@ pub struct Stats {
     /// the vehicle model, by parameter path). Absent before 0.7.2.
     #[serde(default)]
     pub setup: Option<std::collections::BTreeMap<String, f64>>,
+    /// The physics revision of that model: the leaderboard era (simulator
+    /// 0.7.4+). Absent before; Helios infers it from the version.
+    #[serde(default)]
+    pub physics_rev: Option<u32>,
 }
 
 /// One row of the Runs table.
