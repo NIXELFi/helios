@@ -107,7 +107,7 @@ function versionLess(a: string, b: string): boolean {
  * What the constant buys is the other direction: an impossibly HIGH version on
  * an old run stops being taken at its word.
  */
-export const NEWEST_KNOWN_SIM_VERSION = "0.7.4";
+export const NEWEST_KNOWN_SIM_VERSION = "0.7.5";
 
 /**
  * Was this run driven on a course that has since changed shape? See
@@ -178,6 +178,13 @@ export interface SimLap {
    */
   sectorCones?: (number | null)[];
   startedAtS: number;
+  /** Whether the car was one this lap could count on (simulator 0.7.2+). */
+  counted?: boolean;
+  vehicleModel?: number;
+  physicsRev?: number;
+  /** The clock time the lap took where that is not `raw`: the skidpad, whose
+   *  score is an average of two timed laps (simulator 0.7.5+). */
+  spanS?: number;
 }
 
 /**
@@ -315,6 +322,43 @@ export function vehicleModelOf(run: Pick<SimRun, "stats">): VehicleModel {
 }
 
 /**
+ * A run whose model cannot be told, so it belongs on neither board.
+ *
+ * Simulator 0.7.0 brought the 4-wheel model; from then on a run with no
+ * `vehicleModel` is one whose stats lost it on the way -- Helios 5.11 and
+ * older dropped the field when sharing -- not a bicycle run by default. (A
+ * run on this machine is classed from its own manifest, see runs.rs
+ * `legacy_class`, so this only bites a shared row.) And a model number this
+ * Helios does not know is not a bicycle either.
+ */
+export function modelUnknown(run: Pick<SimRun, "stats" | "simVersion">): boolean {
+  const vm = run.stats.vehicleModel;
+  if (vm != null) return vm !== 2 && vm !== 3;
+  const v = believableVersion(run.simVersion);
+  return v != null && !versionLess(v, "0.7.0");
+}
+
+/** The simulator version a run claims, when it is one that could be true. */
+function believableVersion(simVersion: string | null | undefined): string | null {
+  const v = simVersion?.replace(/^fsae-sim\s+/, "").trim();
+  return v && /^\d+\.\d+/.test(v) && !versionLess(NEWEST_KNOWN_SIM_VERSION, v) ? v : null;
+}
+
+/** Which board a run belongs on, course aside: model and physics era. */
+export function modelEraKey(run: Pick<SimRun, "stats" | "simVersion" | "startedAt">): string {
+  return `${vehicleModelOf(run)}.${physicsEraOf(run)}`;
+}
+
+/**
+ * A run's theoretical best, or null where adding up its sectors is not a lap:
+ * the skidpad's "sectors" are whole laps of the circles and its score is an
+ * average, so their sum (about 24 s against a 4.9 s score) means nothing.
+ */
+export function runTheoretical(run: Pick<SimRun, "track" | "stats">): number | null {
+  return run.track === "skidpad" ? null : run.stats.theoreticalBestS ?? null;
+}
+
+/**
  * Which physics era a run belongs to on its model's board.
  *
  * A physics change that moves lap times bumps that model's revision in the
@@ -358,7 +402,7 @@ export function setupItems(setup: Record<string, number> | null | undefined, mod
   if (pw != null || co != null || pre != null) {
     out.push({
       label: "Diff",
-      value: `${pw != null ? num(pw, 2) : "?"}/${co != null ? num(co, 2) : "?"}${pre != null ? ` \u00b7 ${num(pre, 0)} N\u00b7m` : ""}`,
+      value: `${pw != null ? pw.toFixed(2) : "?"}/${co != null ? co.toFixed(2) : "?"}${pre != null ? ` \u00b7 ${num(pre, 0)} N\u00b7m` : ""}`,
       title: "Diff power lock / coast lock, and preload",
     });
   }
@@ -810,6 +854,7 @@ export function isRankable(run: SimRun): boolean {
     // The simulator's own verdict (0.7.2+): a lap on a modified car, or a run
     // that changed vehicle model part way, is not a time on any board.
     run.stats.counted !== false &&
+    !modelUnknown(run) &&
     !run.assists.traction &&
     !run.assists.abs &&
     !run.assists.autoShift
@@ -822,6 +867,7 @@ export function unrankedReason(run: SimRun): string | null {
   if (run.synthetic) return "driven by the robot driver, not a person";
   if (!run.driverId) return "not launched from Helios, so the driver is unverified";
   if (run.stats.counted === false) return "the car was modified (or changed model) during the run, so it does not count";
+  if (modelUnknown(run)) return "which car model drove it was not recorded, so it belongs on neither board";
   if ((run.stats.laps ?? 0) === 0) return "no completed lap";
   // Before the time is looked at, not after. A run whose only lap went off
   // has had no time BY CONSTRUCTION since format 3, so asking "is there a

@@ -668,3 +668,42 @@ describe("ghostCandidates only offers laps that can be loaded", () => {
     expect(ghostCandidates(list, mine).map((r) => r.runId)).toEqual(["shared-lap"]);
   });
 });
+
+describe("tonight's board rules (5.12.2)", () => {
+  const st = (bestLapS: number, extra: Record<string, unknown> = {}) =>
+    ({ durationS: 40, distanceM: 685, laps: 1, bestLapS, bestLapRawS: bestLapS, totalCones: 0, ...extra }) as never;
+
+  it("a 0.7.x shared row that lost its model is on neither board, with a reason", () => {
+    const lost = run({ runId: "lost", simVersion: "0.7.1", stats: st(40) });
+    expect(isRankable(lost)).toBe(false);
+    expect(unrankedReason(lost)).toMatch(/model/);
+    // Before the 4-wheel existed, no model means the bicycle.
+    expect(isRankable(run({ runId: "old", simVersion: "0.6.6", stats: st(40) }))).toBe(true);
+    expect(isRankable(run({ runId: "stamped", simVersion: "0.7.1", stats: st(40, { vehicleModel: 2 }) }))).toBe(true);
+    expect(isRankable(run({ runId: "odd", simVersion: "0.7.4", stats: st(40, { vehicleModel: 9 }) }))).toBe(false);
+  });
+
+  it("the skidpad has no theoretical best or sector records", () => {
+    const lap = { lap: 1, raw: 4.9, cones: 0, off: 0, total: 4.9, valid: true, sectors: [2.7, 5.2, 5.2, 5.1, 5.2, 2.4], startedAtS: 0 };
+    const b = buildBoards([run({ runId: "s", track: "skidpad", trackName: "Skidpad", laps: [lap], stats: st(4.9, { vehicleModel: 2, bestSectors: [2.7, 5.2, 5.2, 5.1, 5.2, 2.4], theoreticalBestS: 25.8 }) })])[0]!;
+    expect(b.teamTheoretical).toBeNull();
+    expect(b.entries[0]!.theoretical).toBeNull();
+    expect(b.sectorRecords).toEqual([]);
+  });
+
+  it("the headline lap is a lap, not a skidpad score", () => {
+    const a = buildActivity([
+      run({ runId: "sk", track: "skidpad", trackName: "Skidpad", stats: st(4.9, { vehicleModel: 2 }) }),
+      run({ runId: "ax", stats: st(40, { vehicleModel: 2 }) }),
+    ]);
+    expect(a.fastest?.runId).toBe("ax");
+  });
+
+  it("a bicycle time then a 4-wheel time is two cars, not time found", () => {
+    const imp = buildImprovements([
+      run({ runId: "b", startedAt: "2026-09-20T10:00:00Z", simVersion: "0.7.4", stats: st(45, { vehicleModel: 2 }) }),
+      run({ runId: "f", startedAt: "2026-09-23T10:00:00Z", simVersion: "0.7.4", stats: st(41, { vehicleModel: 3, physicsRev: 2 }) }),
+    ]);
+    expect(imp).toEqual([]);
+  });
+});

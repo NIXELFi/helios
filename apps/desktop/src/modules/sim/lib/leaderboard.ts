@@ -14,7 +14,7 @@
  */
 
 import {
-  CONE_PENALTY_S, deviceClass, hasTelemetry, hasTrustworthySectors, isRankable, runBest,
+  CONE_PENALTY_S, deviceClass, hasTelemetry, hasTrustworthySectors, isRankable, modelEraKey, runBest,
   type SimLap, type SimRun,
 } from "../api";
 
@@ -313,17 +313,27 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
       // and the cone rules, live in `runBestSectors`. Only RANKED runs get
       // here, so a run on a course that has since changed shape
       // (`predatesCourse`) supplies no sector record either.
-      const sectors = runBestSectors(run);
-      foldSectors(entry.bestSectors, sectors);
-      foldSectors(sectorRecords, sectors);
+      // Not the skidpad: its "sectors" are whole laps of the circles, and a
+      // cone there is 0.125 s, not the 2 s a sector is scored with.
+      if (track !== "skidpad") {
+        const sectors = runBestSectors(run);
+        foldSectors(entry.bestSectors, sectors);
+        foldSectors(sectorRecords, sectors);
+      }
     }
 
     const entries = [...byDriver.values()].sort((a, b) => a.best - b.best);
     const leader = entries[0]?.best ?? 0;
+    // The skidpad's sectors are whole laps and its score an average: summed,
+    // they are not a lap anyone drives (see `runTheoretical`).
+    const sums = track !== "skidpad";
     entries.forEach((e, i) => {
       e.rank = i + 1;
       e.gap = e.best - leader;
-      e.theoretical = sumSectors(e.bestSectors.map((s) => s?.time ?? null));
+      // Never slower than the lap they actually drove: sectors are stored to
+      // the millisecond, so their sum can land a thousandth over it.
+      const t = sums ? sumSectors(e.bestSectors.map((s) => s?.time ?? null)) : null;
+      e.theoretical = t == null ? null : unround(t, e.best);
     });
 
     // A course with no sectors at all should not report an empty record row.
@@ -334,7 +344,10 @@ export function buildBoards(runs: SimRun[]): TrackBoard[] {
       trackName: all[0]?.trackName ?? track,
       entries,
       sectorRecords,
-      teamTheoretical: sumSectors(sectorRecords.map((s) => s?.time ?? null)),
+      teamTheoretical: (() => {
+        const t = sums ? sumSectors(sectorRecords.map((s) => s?.time ?? null)) : null;
+        return t == null ? null : entries.length ? unround(t, leader) : t;
+      })(),
       runCount: ranked.length,
       unrankedCount: all.length - ranked.length,
     });
@@ -461,6 +474,11 @@ export function buildConsistencyBoards(runs: SimRun[], window = CONSISTENCY_WIND
   return boards;
 }
 
+/** A sum of millisecond sectors a hair over the lap it came from is that lap. */
+function unround(sum: number, lap: number): number {
+  return sum > lap && sum - lap < 0.002 ? lap : sum;
+}
+
 /** A theoretical best only means something when every sector has a time. */
 function sumSectors(sectors: (number | null)[]): number | null {
   if (!sectors.length) return null;
@@ -500,7 +518,9 @@ export function buildImprovements(runs: SimRun[]): Improvement[] {
   for (const r of runs) {
     if (!isRankable(r)) continue;
     // Same reason as the board: the account is the identity, not the label.
-    const key = `${r.driverId} ${r.track}`;
+    // And per model and physics era, as the boards are: a bicycle time then
+    // a 4-wheel one is two cars, not an improvement.
+    const key = `${r.driverId} ${r.track} ${modelEraKey(r)}`;
     const list = groups.get(key);
     if (list) list.push(r);
     else groups.set(key, [r]);
@@ -563,7 +583,10 @@ export function buildActivity(runs: SimRun[]): Activity {
     cones += r.stats.totalCones ?? 0;
     const best = runBest(r);
     // The headline time is a real one: a robot lap is not the team record.
-    if (best != null && isRankable(r) && (fastest == null || best < fastest.time)) {
+    // And a LAP: a skidpad score or an accel run is a short event time, and
+    // would take the banner from every lap of the course by being short.
+    const lapCourse = r.track !== "skidpad" && r.track !== "accel";
+    if (best != null && lapCourse && isRankable(r) && (fastest == null || best < fastest.time)) {
       fastest = { driver: r.driver, track: r.track, trackName: r.trackName, time: best, runId: r.runId };
     }
   }
@@ -738,7 +761,9 @@ export function sectorWindowS(run: SimRun, lapNo: number | null, i: number): { s
 export function recordHolders(runs: SimRun[]): Set<string> {
   const byClass = new Map<string, SimRun[]>();
   for (const r of runs) {
-    const c = deviceClass(r);
+    // Per model and era too, as the boards are drawn: a record on the
+    // bicycle board is kept watchable whatever the 4-wheel board says.
+    const c = `${deviceClass(r)} ${modelEraKey(r)}`;
     const list = byClass.get(c);
     if (list) list.push(r);
     else byClass.set(c, [r]);

@@ -192,6 +192,26 @@ fn legacy_class(stats: &mut Stats, counted: Option<bool>, changes: Option<&[Mode
     }
 }
 
+/// Simulators 0.7.2-0.7.4 marked a whole run `counted: false` when any lap
+/// was uncounted -- and an off-course lap is always uncounted, so one off in
+/// an endurance stint took every real time in the run off the board as if
+/// the car had been modified. The laps say which it was: when every
+/// uncounted lap is one that left the course (no time anyway), the run was
+/// started on a legal car, and one model drove it all, it counts.
+fn unvoid_off_laps(stats: &mut Stats, header_counted: Option<bool>, laps: &[Lap]) {
+    if stats.counted != Some(false) || header_counted == Some(false) || laps.is_empty() {
+        return;
+    }
+    // Only a run whose laps carry the verdict (0.7.2+) can be read this way.
+    if laps.iter().any(|l| l.counted.is_none()) {
+        return;
+    }
+    let one_model = laps.windows(2).all(|w| w[0].vehicle_model == w[1].vehicle_model);
+    if one_model && laps.iter().all(|l| !l.valid || l.counted != Some(false)) {
+        stats.counted = Some(true);
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Assists {
     #[serde(default)]
@@ -228,8 +248,28 @@ pub struct Lap {
     /// record of having been invalidated.
     #[serde(default = "yes")]
     pub valid: bool,
+    /// Whether the car was one this lap could be driven in (simulator
+    /// 0.7.2+). Absent before; see `unvoid_off_laps`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counted: Option<bool>,
+    #[serde(default, rename = "vehicleModel", skip_serializing_if = "Option::is_none")]
+    pub vehicle_model: Option<u8>,
+    #[serde(default, rename = "physicsRev", skip_serializing_if = "Option::is_none")]
+    pub physics_rev: Option<u32>,
+    /// The clock time the lap took where that is not `raw` (the skidpad,
+    /// whose score is an average; simulator 0.7.5+).
+    #[serde(default, rename = "spanS", skip_serializing_if = "Option::is_none")]
+    pub span_s: Option<f64>,
+    /// `null` for a sector that was never timed (the car's course distance
+    /// jumped over the boundary). As `Vec<f64>` a single one failed the whole
+    /// manifest, and the run silently vanished from the list and the board.
     #[serde(default)]
-    pub sectors: Vec<f64>,
+    pub sectors: Vec<Option<f64>>,
+    /// Cones struck in each sector, aligned with `sectors` (manifest format
+    /// 4+). Dropped here before, so no shared lap had it and any sector with
+    /// a cone in it could not count toward a sector record.
+    #[serde(default, rename = "sectorCones", skip_serializing_if = "Option::is_none")]
+    pub sector_cones: Option<Vec<Option<u32>>>,
     #[serde(default, rename = "startedAtS")]
     pub started_at_s: f64,
 }
@@ -373,12 +413,14 @@ fn row_from(id: &str, dir: &Path, m: Manifest) -> RunRow {
         synthetic: m.synthetic,
         samples: m.samples,
         assists: m.assists.unwrap_or_default(),
-        laps: m.laps,
+        // Before `laps` moves: the laps are read to class the run.
         stats: {
             let mut s = m.stats.unwrap_or_default();
             legacy_class(&mut s, m.counted, m.model_changes.as_deref(), m.car.as_ref());
+            unvoid_off_laps(&mut s, m.counted, &m.laps);
             s
         },
+        laps: m.laps,
     }
 }
 
@@ -586,6 +628,45 @@ mod tests {
         assert_eq!(st.counted, Some(false));
     }
 
+    fn lap(valid: bool, counted: bool, vm: u8) -> Lap {
+        serde_json::from_value(serde_json::json!({
+            "lap": 1, "raw": 60.0, "total": 60.0, "valid": valid, "counted": counted, "vehicleModel": vm
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn an_untimed_sector_and_its_cones_survive_the_read() {
+        let l: Lap = serde_json::from_value(serde_json::json!({
+            "lap": 1, "raw": 60.0, "total": 62.0, "sectors": [20.1, null, 19.9], "sectorCones": [0, null, 1]
+        }))
+        .unwrap();
+        assert_eq!(l.sectors, vec![Some(20.1), None, Some(19.9)]);
+        assert_eq!(l.sector_cones, Some(vec![Some(0), None, Some(1)]));
+        let back = serde_json::to_value(&l).unwrap();
+        assert_eq!(back["sectorCones"], serde_json::json!([0, null, 1]), "and they are passed on");
+    }
+
+    #[test]
+    fn an_off_course_lap_does_not_void_the_run() {
+        let mut st = Stats { counted: Some(false), ..Default::default() };
+        unvoid_off_laps(&mut st, Some(true), &[lap(true, true, 2), lap(false, false, 2)]);
+        assert_eq!(st.counted, Some(true));
+    }
+
+    #[test]
+    fn a_scored_lap_on_a_modified_car_still_voids_it() {
+        let mut st = Stats { counted: Some(false), ..Default::default() };
+        unvoid_off_laps(&mut st, Some(true), &[lap(true, false, 2), lap(false, false, 2)]);
+        assert_eq!(st.counted, Some(false));
+        let mut st = Stats { counted: Some(false), ..Default::default() };
+        unvoid_off_laps(&mut st, Some(false), &[lap(true, true, 2)]);
+        assert_eq!(st.counted, Some(false), "started on a modified car");
+        let mut st = Stats { counted: Some(false), ..Default::default() };
+        unvoid_off_laps(&mut st, Some(true), &[lap(true, true, 2), lap(true, true, 3)]);
+        assert_eq!(st.counted, Some(false), "changed model part way");
+    }
+
     #[test]
     fn a_very_old_run_says_nothing_and_stays_unclassed() {
         let mut st = Stats::default();
@@ -670,7 +751,7 @@ mod tests {
         assert_eq!(rows[1].driver, "Alice");
         assert_eq!(rows[1].track, "autocross");
         assert_eq!(rows[1].stats.best_lap_s, Some(44.5));
-        assert_eq!(rows[1].laps[0].sectors, vec![1.0, 2.0]);
+        assert_eq!(rows[1].laps[0].sectors, vec![Some(1.0), Some(2.0)]);
         assert!(rows[1].assists.traction);
         assert!(!rows[1].assists.abs);
         assert!(rows[1].telemetry_bytes > 0);

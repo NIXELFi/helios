@@ -322,3 +322,16 @@ describe("noticing that a shared row has gone stale", () => {
       .not.toBe(rowStamp(server({ profile: "wheel|", detected_input: "" })));
   });
 });
+
+describe("telemetryToKeep per model (5.12.2)", () => {
+  it("a driver's 4-wheel laps do not push their bicycle bests out", () => {
+    const mk = (id: string, best: number, vm: number) => ({
+      runId: id, driverId: "me", track: "autocross", trackName: "AX", synthetic: false, simVersion: "0.7.4",
+      startedAt: `2026-09-2${id.length}T10:00:00Z`, assists: { traction: false, abs: false, autoShift: false },
+      laps: [], stats: { laps: 1, bestLapS: best, bestLapRawS: best, totalCones: 0, vehicleModel: vm, physicsRev: vm === 3 ? 2 : 1 },
+      formatVersion: 2, telemetryBytes: 1000,
+    }) as never;
+    const runs = [mk("b1", 44, 2), ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => mk(`f${i}`, 40 - i * 0.1, 3))];
+    expect(telemetryToKeep(runs, "me").has("b1")).toBe(true);
+  });
+});

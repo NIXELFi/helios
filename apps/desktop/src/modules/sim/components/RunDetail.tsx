@@ -4,7 +4,7 @@ import {
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, parseGeneratedId, runBest,
+  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, parseGeneratedId, runBest, runTheoretical,
   simDeleteRun, simReadRun, unrankedReason, type SimManifest, type SimRun,
 } from "../api";
 import { ghostCandidates } from "../lib/leaderboard";
@@ -108,7 +108,7 @@ export function RunDetail({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-4 grid grid-cols-2 gap-3">
           <Headline label="Best lap" value={fmtTime(best)} accent={!reason} />
-          <Headline label="Theoretical" value={fmtTime(st.theoreticalBestS)} />
+          <Headline label="Theoretical" value={fmtTime(runTheoretical(run))} />
         </div>
         {reason && (
           <p className="mb-4 rounded border border-helios-warn/30 bg-helios-warn/10 px-3 py-2 text-[11px] text-helios-warn">

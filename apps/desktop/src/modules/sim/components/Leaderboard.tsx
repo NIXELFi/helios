@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { IconChartLine, IconMovie, IconTrendingUp, IconTrophy, IconX } from "@tabler/icons-react";
 import {
-  fmtGap, fmtTime, fmtWhen, parseGeneratedId, physicsEraOf, setupItems, vehicleModelOf,
+  fmtGap, fmtTime, fmtWhen, parseGeneratedId, physicsEraOf, setupItems, unrankedReason, vehicleModelOf,
   VEHICLE_MODELS, type SimRun, type VehicleModel,
 } from "../api";
 import {
@@ -101,37 +101,50 @@ export function Leaderboard({
    * run (`vehicleModelOf`).
    */
   /**
-   * And each model's board is per PHYSICS ERA (`physicsEraOf`). The newest
-   * era any run of that model has been driven in is the default -- a physics
-   * update starts a fresh board -- and the older eras stay one click away in
-   * the board's header instead of being wiped.
+   * And each course x model board is per PHYSICS ERA (`physicsEraOf`). A
+   * model's current era is the newest any run of it has been driven in, on
+   * any course -- a physics update starts a fresh board everywhere -- and a
+   * course's older eras stay one click away above that course's board, not
+   * wiped. The pick is per course: looking back at one board leaves the
+   * others alone.
    */
-  const [eraPick, setEraPick] = useState<Partial<Record<VehicleModel, number>>>({});
+  const [eraPick, setEraPick] = useState<Record<string, number>>({});
   const perModel = useMemo(() => VEHICLE_MODELS.map((m) => {
     const all = shown.filter((r) => vehicleModelOf(r) === m.id);
-    const eras = [...new Set(all.map(physicsEraOf))].sort((a, b) => b - a);
-    const current = eras[0] ?? 1;
-    const era = eraPick[m.id] != null && eras.includes(eraPick[m.id]!) ? eraPick[m.id]! : current;
-    const mruns = all.filter((r) => physicsEraOf(r) === era);
-    return {
-      model: m, runs: mruns, eras, era, current,
-      boards: buildBoards(mruns), consistency: buildConsistencyBoards(mruns),
-    };
-  }), [shown, eraPick]);
+    return { model: m, all, current: Math.max(1, ...all.map(physicsEraOf)) };
+  }), [shown]);
   /** Courses in activity order across both models. */
   const courseOrder = useMemo(() => {
     const score = new Map<string, { name: string; runs: number }>();
-    for (const pm of perModel) {
-      for (const b of pm.boards) {
-        const cur = score.get(b.track) ?? { name: b.trackName, runs: 0 };
-        cur.runs += b.runCount + b.unrankedCount;
-        score.set(b.track, cur);
-      }
+    for (const r of shown) {
+      const cur = score.get(r.track) ?? { name: r.trackName, runs: 0 };
+      cur.runs += 1;
+      score.set(r.track, cur);
     }
     return [...score.entries()]
       .sort((a, b) => b[1].runs - a[1].runs || a[1].name.localeCompare(b[1].name))
       .map(([track, v]) => ({ track, trackName: v.name }));
-  }, [perModel]);
+  }, [shown]);
+  /** One board per course x model, at the era being looked at. */
+  const cells = useMemo(() => {
+    const out = new Map<string, BoardCell>();
+    for (const { track } of courseOrder) {
+      for (const pm of perModel) {
+        const here = pm.all.filter((r) => r.track === track);
+        const eras = [...new Set([pm.current, ...here.map(physicsEraOf)])].sort((a, b) => b - a);
+        const pick = eraPick[`${track}:${pm.model.id}`];
+        const era = pick != null && eras.includes(pick) ? pick : pm.current;
+        const runs = here.filter((r) => physicsEraOf(r) === era);
+        out.set(`${track}:${pm.model.id}`, {
+          eras, era, current: pm.current, runs, modelRuns: pm.all.length,
+          board: buildBoards(runs)[0] ?? null,
+          consistency: buildConsistencyBoards(runs)[0] ?? null,
+          whyNot: whyNotRanked(runs),
+        });
+      }
+    }
+    return out;
+  }, [courseOrder, perModel, eraPick]);
   /**
    * Two ways to rank the same runs. "Fastest" is the lap where everything
    * came together; "Average" is each driver's mean over their last
@@ -173,13 +186,17 @@ export function Leaderboard({
     </div>
   );
 
-  const renderAverage = (b: ConsistencyBoard, modelName: string) => (
+  const renderAverage = (b: ConsistencyBoard, modelName: string, whyNot: string) => (
         <section className="rounded-lg border border-helios-line bg-helios-panel">
           <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
             <h3 className="text-sm font-semibold">{modelName}</h3>
             <span className="text-[11px] text-helios-muted">
               {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
-              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
+              {b.unrankedCount > 0 && (
+                <span title={whyNot} className="cursor-help underline decoration-dotted underline-offset-2">
+                  {` · ${b.unrankedCount} not ranked`}
+                </span>
+              )}
             </span>
           </header>
 
@@ -194,17 +211,17 @@ export function Leaderboard({
                 <tr className="text-left text-helios-muted">
                   <th className="px-5 py-2 font-medium">#</th>
                   <th className="py-2 font-medium">Driver</th>
-                  <th className="py-2 text-right font-medium" title={`Mean scored lap over the newest ${CONSISTENCY_WINDOW} clean runs`}>
+                  <th className="px-2 py-2 text-right font-medium" title={`Mean scored lap over the newest ${CONSISTENCY_WINDOW} clean runs`}>
                     Average
                   </th>
-                  <th className="py-2 text-right font-medium">Gap</th>
-                  <th className="py-2 text-right font-medium" title="Standard deviation of those laps: how far a typical run sits from the average">
+                  <th className="px-2 py-2 text-right font-medium">Gap</th>
+                  <th className="px-2 py-2 text-right font-medium" title="Standard deviation of those laps: how far a typical run sits from the average">
                     Spread
                   </th>
-                  <th className="py-2 text-right font-medium" title="The quickest lap inside the window">
+                  <th className="px-2 py-2 text-right font-medium" title="The quickest lap inside the window">
                     Best
                   </th>
-                  <th className="py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
+                  <th className="px-2 py-2 text-right font-medium" title={`Runs in the average, out of the ${CONSISTENCY_WINDOW} the window holds`}>
                     Runs
                   </th>
                   <th className="py-2 pl-3 font-medium">Latest</th>
@@ -219,16 +236,16 @@ export function Leaderboard({
                     onClick={() => onOpenRun(e.runId)}
                   >
                     <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
-                    <td className="py-2 font-medium">{e.driver}</td>
-                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
+                    <td className="whitespace-nowrap py-2 font-medium">{e.driver}</td>
+                    <td className={"px-2 py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
                       {fmtTime(e.average)}
                     </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
-                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">
+                      {e.rank === 1 ? "" : fmtGap(e.gap)}
                     </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">±{e.spread.toFixed(3)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.best)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim" data-testid="counted">
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">±{e.spread.toFixed(3)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">{fmtTime(e.best)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim" data-testid="counted">
                       {e.counted}<span className="text-helios-muted">/{CONSISTENCY_WINDOW}</span>
                     </td>
                     <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.latest)}</td>
@@ -262,22 +279,24 @@ export function Leaderboard({
       
   );
 
-  const renderFastest = (b: TrackBoard, model: VehicleModel, modelName: string, mruns: SimRun[]) => (
+  const renderFastest = (b: TrackBoard, model: VehicleModel, modelName: string, mruns: SimRun[], whyNot: string) => (
         <section className="rounded-lg border border-helios-line bg-helios-panel">
           <header className="flex items-baseline justify-between border-b border-helios-line px-5 py-3">
             <h3 className="text-sm font-semibold">{modelName}</h3>
             <span className="text-[11px] text-helios-muted">
               {b.runCount} ranked run{b.runCount === 1 ? "" : "s"}
-              {b.unrankedCount > 0 && ` · ${b.unrankedCount} not ranked`}
+              {b.unrankedCount > 0 && (
+                <span title={whyNot} className="cursor-help underline decoration-dotted underline-offset-2">
+                  {` · ${b.unrankedCount} not ranked`}
+                </span>
+              )}
             </span>
           </header>
 
           {b.entries.length === 0 ? (
             <p className="px-5 py-6 text-center text-xs text-helios-dim">
-              Nothing ranked here yet. Every run on this course was either started
-              outside Helios (so nobody can say who drove it), went off course, had
-              driver aids on, was set by the robot driver, or never completed a lap.
-              Launch from the Launch tab while signed in and the time counts.
+              Nothing ranked here yet{whyNot ? ` (${whyNot})` : ""}. Launch from the
+              Launch tab while signed in, on an unmodified car, and the time counts.
             </p>
           ) : (
             <table className="w-full border-collapse text-xs">
@@ -285,42 +304,41 @@ export function Leaderboard({
                 <tr className="text-left text-helios-muted">
                   <th className="px-5 py-2 font-medium">#</th>
                   <th className="py-2 font-medium">Driver</th>
-                  <th className="py-2 text-right font-medium">Best</th>
-                  <th className="py-2 text-right font-medium">Gap</th>
+                  <th className="px-2 py-2 text-right font-medium">Best</th>
+                  <th className="px-2 py-2 text-right font-medium">Gap</th>
                   <th
-                    className="py-2 text-right font-medium"
+                    className="px-2 py-2 text-right font-medium"
                     title="That same lap before penalties — the gap to Best is what the cones cost"
                   >
                     Raw
                   </th>
-                  <th className="py-2 text-right font-medium" title="Their own quickest sectors added up">
+                  <th className="px-2 py-2 text-right font-medium" title="Their own quickest sectors added up">
                     Theoretical
                   </th>
-                  <th className="py-2 text-right font-medium">Runs</th>
-                  <th className="py-2 pl-3 font-medium">Set</th>
+                  <th className="px-2 py-2 text-right font-medium">Runs</th>
+                  <th className="py-2 pl-2 font-medium">Set</th>
                   <th className="px-5 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {b.entries.map((e) => (
+                {b.entries.map((e) => {
+                  const hasSetup = setupItems(e.setup, model).length > 0;
+                  return (
+                  <Fragment key={e.driverId}>
                   <tr
-                    key={e.driverId}
-                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    className="group cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
                     onClick={() => onOpenRun(e.runId)}
                   >
-                    <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
-                    <td className="py-2 font-medium">
-                      {e.driver}
-                      <SetupLine setup={e.setup} model={model} />
-                    </td>
-                    <td className={"py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
+                    <td className={"px-5 font-mono text-helios-dim " + (hasSetup ? "pt-2" : "py-2")}>{e.rank}</td>
+                    <td className={"whitespace-nowrap font-medium " + (hasSetup ? "pt-2" : "py-2")}>{e.driver}</td>
+                    <td className={"px-2 py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
                       {fmtTime(e.best)}
                     </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
-                      {e.rank === 1 ? "—" : fmtGap(e.gap)}
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">
+                      {e.rank === 1 ? "" : fmtGap(e.gap)}
                     </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(e.bestRaw)}</td>
-                    <td className="py-2 text-right font-mono text-helios-dim">
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">{fmtTime(e.bestRaw)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">
                       {/* Your own row only: where your perfect lap beats your
                           real one, sector by sector. */}
                       {driverId && e.driverId === driverId && e.theoretical != null ? (
@@ -339,8 +357,8 @@ export function Leaderboard({
                         </button>
                       ) : fmtTime(e.theoretical)}
                     </td>
-                    <td className="py-2 text-right font-mono text-helios-dim">{e.runs}</td>
-                    <td className="whitespace-nowrap py-2 pl-3 text-helios-dim">{fmtWhen(e.when)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-helios-dim">{e.runs}</td>
+                    <td className="whitespace-nowrap py-2 pl-2 text-helios-dim">{fmtWhen(e.when)}</td>
                     <td className="px-5 py-2 text-right">
                       <button
                         title={canReplay ? "Watch that lap" : "The simulator is not installed here"}
@@ -352,7 +370,17 @@ export function Leaderboard({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  {hasSetup && (
+                    <tr className="cursor-pointer transition hover:bg-helios-line/25" onClick={() => onOpenRun(e.runId)}>
+                      <td />
+                      <td colSpan={8} className="pb-2 pr-5">
+                        <SetupLine setup={e.setup} model={model} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -422,7 +450,7 @@ export function Leaderboard({
 
   if (runs.length === 0) {
     return (
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6">
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-5 p-6">
         {scopeTabs}
         <p className="p-8 text-center text-sm text-helios-dim">
           No runs yet. The board fills itself the first time somebody drives.
@@ -432,7 +460,7 @@ export function Leaderboard({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6">
+    <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-5 p-6">
       {scopeTabs}
       {/* Only when there is a choice to make. A team all on wheels never sees
           this, and the one view deliberately not offered is "all three at
@@ -506,7 +534,7 @@ export function Leaderboard({
           <div className="min-w-0 flex-1">
             <div
               className="text-[10px] uppercase tracking-wider text-helios-dim"
-              title="The best SCORED lap: raw time plus two seconds a cone. A lap that went off course has no time here — stricter than FSAE's +20 s, on purpose."
+              title="The best SCORED lap on a lapped course: raw time plus two seconds a cone. A lap that went off course has no time here — stricter than FSAE's +20 s, on purpose. Skidpad and accel are event times, on their own boards."
             >
               Best lap anyone has scored
             </div>
@@ -531,9 +559,15 @@ export function Leaderboard({
         <div key={`${mode}-${track}`} className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-helios-text">{trackName}</h2>
           <div className="grid items-start gap-3 xl:grid-cols-2">
-            {perModel.map(({ model: m, runs: mruns, boards: mb, consistency: mc, eras, era, current }) => {
+            {perModel.map(({ model: m }) => {
               const model = m.id;
               const modelName = m.name;
+              const cell = cells.get(`${track}:${model}`)!;
+              const { eras, era, current, runs: mruns, whyNot } = cell;
+              // A generated course is one board per seed; a model nobody has
+              // driven on this tab would put an identical empty card beside
+              // every one of them.
+              if (scope === "generated" && cell.modelRuns === 0) return null;
               // The 4-wheel beta is new and its board is thin: a one-click way
               // onto it, on the course being looked at.
               const launch = model === 3 && onLaunchCourse ? (
@@ -549,19 +583,19 @@ export function Leaderboard({
               const eraBar = eras.length > 1 && (
                 <EraBar
                   eras={eras} era={era} current={current}
-                  onPick={(e) => setEraPick((p) => ({ ...p, [model]: e }))}
+                  onPick={(e) => setEraPick((p) => ({ ...p, [`${track}:${model}`]: e }))}
                 />
               );
               if (mode === "average") {
-                const b = mc.find((x) => x.track === track);
+                const b = cell.consistency;
                 return b
-                  ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderAverage(b, modelName)}</div>
-                  : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} /></div>;
+                  ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderAverage(b, modelName, whyNot)}</div>
+                  : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} eraNote={era !== current ? "past" : eras.length > 1 ? "fresh" : null} /></div>;
               }
-              const b = mb.find((x) => x.track === track);
+              const b = cell.board;
               return b
-                ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderFastest(b, model, modelName, mruns)}</div>
-                : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} /></div>;
+                ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderFastest(b, model, modelName, mruns, whyNot)}</div>
+                : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} eraNote={era !== current ? "past" : eras.length > 1 ? "fresh" : null} /></div>;
             })}
           </div>
         </div>
@@ -850,7 +884,7 @@ function SetupLine({ setup, model }: { setup: Record<string, number> | null; mod
       data-testid="setup-line"
     >
       {items.map((it) => (
-        <span key={it.label} title={it.title}>
+        <span key={it.label} title={it.title} className="whitespace-nowrap">
           <span className="text-helios-dim">{it.label}</span> {it.value}
         </span>
       ))}
@@ -859,7 +893,12 @@ function SetupLine({ setup, model }: { setup: Record<string, number> | null; mod
 }
 
 /** A model with no ranked time on this course yet, so the pair still lines up. */
-function EmptyBoard({ modelName, detail }: { modelName: string; detail: string }) {
+function EmptyBoard({ modelName, detail, eraNote }: {
+  modelName: string; detail: string;
+  /** "fresh": the current physics, with earlier physics' times to look at;
+   *  "past": an earlier physics nobody drove this course on. */
+  eraNote?: "fresh" | "past" | null;
+}) {
   return (
     <section className="rounded-lg border border-dashed border-helios-line bg-helios-panel/50">
       <header className="flex items-baseline justify-between border-b border-helios-line/60 px-5 py-3">
@@ -867,8 +906,11 @@ function EmptyBoard({ modelName, detail }: { modelName: string; detail: string }
         <span className="text-[11px] text-helios-muted">{detail}</span>
       </header>
       <p className="px-5 py-6 text-center text-xs text-helios-dim">
-        No times on this model here yet. Pick it on the simulator's staging card
-        (simulator 0.7.2 or newer) and the board fills itself.
+        {eraNote === "fresh"
+          ? "No times on this course with the current physics yet. Earlier physics' times are one click away above."
+          : eraNote === "past"
+          ? "Nobody drove this course on that physics."
+          : "No times on this model here yet. Pick it on the simulator's staging card (simulator 0.7.2 or newer) and the board fills itself."}
       </p>
     </section>
   );
@@ -905,4 +947,30 @@ function EraBar({ eras, era, current, onPick }: {
       ))}
     </div>
   );
+}
+
+/** A course x model board at one physics era. */
+interface BoardCell {
+  eras: number[];
+  era: number;
+  current: number;
+  runs: SimRun[];
+  /** Runs of this model anywhere on the tab, any era. */
+  modelRuns: number;
+  board: TrackBoard | null;
+  consistency: ConsistencyBoard | null;
+  whyNot: string;
+}
+
+/** "14 modified car, 2 off course": why a board's runs are not ranked. */
+function whyNotRanked(runs: SimRun[]): string {
+  const tally = new Map<string, number>();
+  for (const r of runs) {
+    const why = unrankedReason(r);
+    if (why) tally.set(why, (tally.get(why) ?? 0) + 1);
+  }
+  return [...tally.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([why, n]) => `${n} ${why}`)
+    .join("; ");
 }
