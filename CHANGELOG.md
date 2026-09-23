@@ -27,6 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Simulator leaderboards: the bicycle and the 4-wheel model side by side.** Every course now shows two boards next to each other, one per vehicle model, so a 4-wheel beta time never ranks against a bicycle time. Each row shows the setup its best lap was set on (roll stiffness split, brake bias, diff, launch rpm, final drive, and on the 4-wheel model its toe, camber and Ackermann). Needs simulator 0.7.2 to record the model and setup; older runs sit on the bicycle board.
+
+### Fixed
+- **4-wheel runs no longer show up as bicycle times.** The simulator marked them "not counted", but Helios never read that and ranked them anyway. Runs recorded before simulator 0.7.2 are classified from the car they were driven on, and a shared row is re-uploaded once it can say which model it was, so an existing 4-wheel time moves to its own board when its driver's Helios updates. Runs driven on a modified car no longer rank at all.
+
 ## [5.11.0] - 2026-09-23
 
 ### Added

@@ -143,3 +143,39 @@ describe("sector records you can click", () => {
     expect(screen.getAllByTitle(/where the perfect lap beats the real one/)).toHaveLength(1);
   });
 });
+
+describe("the bicycle and the 4-wheel model rank side by side", () => {
+  const base = run({ runId: "x" }).stats;
+  it("puts each model's time on its own board for the same course, with the setup it was set on", () => {
+    const bike = run({
+      runId: "bike", driver: "Josh", driverId: "d-josh",
+      stats: { ...base, bestLapS: 40.5, vehicleModel: 2, counted: true, setup: { "roll.rsdFront": 0.48, brakeBiasFront: 0.65 } },
+    });
+    const dt = run({
+      runId: "dt", driver: "Edgar", driverId: "d-edgar",
+      stats: { ...base, bestLapS: 39.9, vehicleModel: 3, counted: true, setup: { "roll.rsdFront": 0.47, "dt.toeInRearDeg": -0.5 } },
+    });
+    render(<Leaderboard {...props} runs={[bike, dt]} />);
+    const bikeBoard = screen.getByRole("heading", { name: "Bicycle" }).closest("section")!;
+    const dtBoard = screen.getByRole("heading", { name: /4-wheel/ }).closest("section")!;
+    expect(bikeBoard.textContent).toMatch(/Josh/);
+    expect(bikeBoard.textContent).not.toMatch(/Edgar/);
+    expect(dtBoard.textContent).toMatch(/Edgar/);
+    expect(dtBoard.textContent).not.toMatch(/Josh/);
+    // Exact setups, beside the time.
+    expect(bikeBoard.textContent).toMatch(/RSD\s*48% F/);
+    expect(dtBoard.textContent).toMatch(/Toe\s*\?\/-0\.5/);
+  });
+
+  it("keeps a run the simulator did not count off both boards", () => {
+    const modified = run({ runId: "m", stats: { ...base, bestLapS: 30, vehicleModel: 2, counted: false } });
+    render(<Leaderboard {...props} runs={[modified]} />);
+    expect(screen.queryByText("30.000")).toBeNull();
+  });
+
+  it("shows an empty 4-wheel board beside the bicycle's rather than hiding it", () => {
+    render(<Leaderboard {...props} runs={[run({ runId: "only-bike" })]} />);
+    expect(screen.getByRole("heading", { name: /4-wheel/ })).toBeTruthy();
+    expect(screen.getByText(/No times on this model here yet/)).toBeTruthy();
+  });
+});

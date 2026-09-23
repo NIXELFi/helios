@@ -151,6 +151,45 @@ struct Manifest {
     laps: Vec<Lap>,
     #[serde(default)]
     stats: Option<Stats>,
+    // What a run from BEFORE simulator 0.7.2 says about its car, for
+    // `legacy_class`: whether its time counted as the simulator judged it at
+    // the start of the run, what was off as-shipped, and every parameter.
+    #[serde(default)]
+    counted: Option<bool>,
+    #[serde(default, rename = "modelChanges")]
+    model_changes: Option<Vec<ModelChange>>,
+    #[serde(default)]
+    car: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModelChange {
+    #[serde(default)]
+    path: String,
+}
+
+/// Which model drove a run and whether it counts, for a run from before
+/// simulator 0.7.2, which did not put either in `stats`.
+///
+/// Those builds counted the 4-wheel beta as a MODIFIED car, so its manifest
+/// says `counted: false` with `vehicleModel` among `modelChanges` -- and
+/// Helios, which never read that flag, ranked such runs as ordinary bicycle
+/// times. Since 0.7.2 the model is a class with its own board, so here it is
+/// read off the car snapshot, and the run counts unless something OTHER than
+/// the model was changed.
+fn legacy_class(stats: &mut Stats, counted: Option<bool>, changes: Option<&[ModelChange]>, car: Option<&serde_json::Value>) {
+    if stats.vehicle_model.is_none() {
+        stats.vehicle_model = car
+            .and_then(|c| c.get("vehicleModel"))
+            .and_then(|v| v.as_f64())
+            .map(|v| if v >= 2.5 { 3 } else { 2 });
+    }
+    if stats.counted.is_none() {
+        stats.counted = match changes {
+            Some(list) => Some(list.iter().all(|c| c.path == "vehicleModel")),
+            None => counted,
+        };
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -248,6 +287,18 @@ pub struct Stats {
     pub off_track_s: f64,
     #[serde(default)]
     pub ffb_clipped_frac: f64,
+    /// Which vehicle model drove the run: 2 the validated bicycle, 3 the
+    /// 4-wheel beta. Absent on runs from before simulator 0.7.2 (bicycle).
+    #[serde(default)]
+    pub vehicle_model: Option<u8>,
+    /// Whether the run's times count: false if any lap was driven on a
+    /// modified car or the run changed model part way. Absent before 0.7.2.
+    #[serde(default)]
+    pub counted: Option<bool>,
+    /// The run-to-run setup the best lap was set on (legal setup items and
+    /// the vehicle model, by parameter path). Absent before 0.7.2.
+    #[serde(default)]
+    pub setup: Option<std::collections::BTreeMap<String, f64>>,
 }
 
 /// One row of the Runs table.
@@ -319,7 +370,11 @@ fn row_from(id: &str, dir: &Path, m: Manifest) -> RunRow {
         samples: m.samples,
         assists: m.assists.unwrap_or_default(),
         laps: m.laps,
-        stats: m.stats.unwrap_or_default(),
+        stats: {
+            let mut s = m.stats.unwrap_or_default();
+            legacy_class(&mut s, m.counted, m.model_changes.as_deref(), m.car.as_ref());
+            s
+        },
     }
 }
 
@@ -498,6 +553,43 @@ pub fn sim_delete_run(run_id: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pre_0_7_2_four_wheel_run_is_classed_not_voided() {
+        let mut st = Stats::default();
+        let changes = vec![ModelChange { path: "vehicleModel".into() }];
+        let car = serde_json::json!({ "vehicleModel": 3, "massKg": 267 });
+        legacy_class(&mut st, Some(false), Some(&changes), Some(&car));
+        assert_eq!(st.vehicle_model, Some(3));
+        assert_eq!(st.counted, Some(true), "the model alone is a class, not a modification");
+    }
+
+    #[test]
+    fn a_pre_0_7_2_modified_car_does_not_count() {
+        let mut st = Stats::default();
+        let changes = vec![ModelChange { path: "massKg".into() }];
+        let car = serde_json::json!({ "vehicleModel": 2 });
+        legacy_class(&mut st, Some(false), Some(&changes), Some(&car));
+        assert_eq!(st.vehicle_model, Some(2));
+        assert_eq!(st.counted, Some(false));
+    }
+
+    #[test]
+    fn a_0_7_2_run_keeps_what_it_says() {
+        let mut st = Stats { vehicle_model: Some(2), counted: Some(false), ..Default::default() };
+        let car = serde_json::json!({ "vehicleModel": 3 });
+        legacy_class(&mut st, Some(true), Some(&[]), Some(&car));
+        assert_eq!(st.vehicle_model, Some(2));
+        assert_eq!(st.counted, Some(false));
+    }
+
+    #[test]
+    fn a_very_old_run_says_nothing_and_stays_unclassed() {
+        let mut st = Stats::default();
+        legacy_class(&mut st, None, None, None);
+        assert_eq!(st.vehicle_model, None);
+        assert_eq!(st.counted, None);
+    }
+
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 

@@ -286,6 +286,67 @@ export interface SimStats {
   brakingFrac: number;
   offTrackS: number;
   ffbClippedFrac: number;
+  /** Which vehicle model drove the run: 2 the validated bicycle, 3 the
+   *  4-wheel beta. Absent before simulator 0.7.2, which only ranked the
+   *  bicycle; see `vehicleModelOf`. */
+  vehicleModel?: number | null;
+  /** False when any lap was driven on a modified car, or the run changed
+   *  model part way. Absent before 0.7.2. */
+  counted?: boolean | null;
+  /** The run-to-run setup the best lap was set on, by parameter path
+   *  (`roll.rsdFront`, `diff.preloadNm`, `dt.toeInRearDeg`, ...). */
+  setup?: Record<string, number> | null;
+}
+
+/** The two vehicle models the simulator drives, each with its own boards. */
+export const VEHICLE_MODELS = [
+  { id: 2, name: "Bicycle", detail: "the validated model" },
+  { id: 3, name: "4-wheel \u03b2", detail: "double track with suspension, beta" },
+] as const;
+export type VehicleModel = (typeof VEHICLE_MODELS)[number]["id"];
+
+/** The model a run was driven on. A run from before simulator 0.7.2 does not
+ *  say, and those builds only counted the bicycle. */
+export function vehicleModelOf(run: Pick<SimRun, "stats">): VehicleModel {
+  return run.stats.vehicleModel === 3 ? 3 : 2;
+}
+
+/**
+ * The setup a time was set on, as short labelled values for a board row.
+ * Only the run-to-run setup (bars, bias, diff, launch, final drive, and on
+ * the 4-wheel model its alignment); the full car is in the run itself.
+ */
+export function setupItems(setup: Record<string, number> | null | undefined, model: VehicleModel): { label: string; value: string; title: string }[] {
+  if (!setup) return [];
+  const get = (k: string) => (typeof setup[k] === "number" ? setup[k]! : null);
+  const out: { label: string; value: string; title: string }[] = [];
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const num = (v: number, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toString();
+  const rsd = get("roll.rsdFront");
+  if (rsd != null) out.push({ label: "RSD", value: `${pct(rsd)} F`, title: "Front share of roll stiffness (the bar blades)" });
+  const bias = get("brakeBiasFront");
+  if (bias != null) out.push({ label: "Bias", value: `${pct(bias)} F`, title: "Front share of brake torque" });
+  const pw = get("diff.powerLock"), co = get("diff.coastLock"), pre = get("diff.preloadNm");
+  if (pw != null || co != null || pre != null) {
+    out.push({
+      label: "Diff",
+      value: `${pw != null ? num(pw, 2) : "?"}/${co != null ? num(co, 2) : "?"}${pre != null ? ` \u00b7 ${num(pre, 0)} N\u00b7m` : ""}`,
+      title: "Diff power lock / coast lock, and preload",
+    });
+  }
+  const lc = get("launchRpm");
+  if (lc != null) out.push({ label: "LC", value: `${num(lc, 0)}`, title: "Launch control rpm" });
+  const fd = get("finalDrive");
+  if (fd != null) out.push({ label: "FD", value: num(fd, 3), title: "Final drive ratio" });
+  if (model === 3) {
+    const tf = get("dt.toeInFrontDeg"), tr = get("dt.toeInRearDeg");
+    if (tf != null || tr != null) out.push({ label: "Toe", value: `${tf != null ? num(tf, 2) : "?"}/${tr != null ? num(tr, 2) : "?"}`, title: "Toe per wheel, front/rear (deg, + = toe-in)" });
+    const cf = get("dt.staticCamberFrontDeg"), cr = get("dt.staticCamberRearDeg");
+    if (cf != null || cr != null) out.push({ label: "Camber", value: `${cf != null ? num(cf, 2) : "?"}/${cr != null ? num(cr, 2) : "?"}`, title: "Static camber front/rear (deg)" });
+    const ack = get("dt.ackermann");
+    if (ack != null) out.push({ label: "Ack", value: pct(ack), title: "Fraction of true Ackermann" });
+  }
+  return out;
 }
 
 export interface SimRun {
@@ -716,6 +777,9 @@ export function isRankable(run: SimRun): boolean {
     !bestLapWentOffCourse(run) &&
     // A time on a course that has since changed shape. See `COURSE_REVISED_AT`.
     !predatesCourse(run) &&
+    // The simulator's own verdict (0.7.2+): a lap on a modified car, or a run
+    // that changed vehicle model part way, is not a time on any board.
+    run.stats.counted !== false &&
     !run.assists.traction &&
     !run.assists.abs &&
     !run.assists.autoShift
@@ -727,6 +791,7 @@ export function unrankedReason(run: SimRun): string | null {
   if (isRankable(run)) return null;
   if (run.synthetic) return "driven by the robot driver, not a person";
   if (!run.driverId) return "not launched from Helios, so the driver is unverified";
+  if (run.stats.counted === false) return "the car was modified (or changed model) during the run, so it does not count";
   if ((run.stats.laps ?? 0) === 0) return "no completed lap";
   // Before the time is looked at, not after. A run whose only lap went off
   // has had no time BY CONSTRUCTION since format 3, so asking "is there a
