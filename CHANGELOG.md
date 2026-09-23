@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.12.2] - 2026-09-23
+
 ### Added
 - Sim: launch the 4-wheel model from the Launch tab (new "Car model" choice) and straight from its leaderboard with a "Launch 4-wheel" button on each course. Needs simulator 0.7.5.
 - Sim: "N not ranked" on a board now says why when you hover it (e.g. "14 the car was modified").
