@@ -27,6 +27,9 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Simulator: Skidpad and Acceleration on the Launch tab.** The two new rulebook events in simulator 0.7.0+ can now be started from Helios. Skidpad is the FSAE figure of eight, scored (right + left) / 2 with 0.125 s a cone; Acceleration is 75 m timed from the line with the car staged 0.3 m behind it. Each gets its own leaderboard.
+
 ## [5.10.0] - 2026-09-21
 
 ### Changed

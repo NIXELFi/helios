@@ -317,7 +317,7 @@ pub struct LaunchResult {
 /// does not understand, but a value from the renderer should not reach a
 /// command line unvalidated in the first place.
 fn valid_track(t: &str) -> bool {
-    matches!(t, "autocross" | "endurance" | "mis") || valid_generated_track(t)
+    matches!(t, "autocross" | "endurance" | "skidpad" | "accel" | "mis") || valid_generated_track(t)
 }
 
 /// A procedural course: `gen-ax-SEED` or `gen-en-SEED`, the seed being the
@@ -855,6 +855,15 @@ mod tests {
     fn rejects_a_course_that_does_not_exist() {
         let r = LaunchRequest { track: Some("nurburgring".into()), ..drive() };
         assert!(build_args(&r).is_err());
+    }
+
+    #[test]
+    fn accepts_the_rulebook_events() {
+        for ok in ["skidpad", "accel"] {
+            let r = LaunchRequest { track: Some(ok.into()), ..drive() };
+            let args = build_args(&r).expect(ok);
+            assert!(args.windows(2).any(|w| w[0] == "--track" && w[1] == ok), "{ok}");
+        }
     }
 
     #[test]

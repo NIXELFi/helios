@@ -13,12 +13,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 /**
- * A course the simulator knows: one of the three fixed ones, or a
+ * A course the simulator knows: one of the fixed ones, or a
  * procedural course named by its event and seed -- `gen-ax-K7Q2`,
  * `gen-en-K7Q2`. The simulator builds the same course from the same seed on
  * every machine, so the id is the course.
  */
-export type TrackId = "autocross" | "endurance" | "mis" | `gen-ax-${string}` | `gen-en-${string}`;
+export type TrackId =
+  | "autocross" | "endurance" | "skidpad" | "accel" | "mis"
+  | `gen-ax-${string}` | `gen-en-${string}`;
 
 /** The two events a course can be generated for, as the simulator names them. */
 export const GENERATED_EVENTS = [
@@ -594,6 +596,10 @@ export function fmtWhen(iso: string | null | undefined): string {
 export const TRACKS: { id: TrackId; name: string; detail: string }[] = [
   { id: "autocross", name: "Autocross 2026", detail: "685 m, single timed run" },
   { id: "endurance", name: "Endurance 2026", detail: "2.12 km, lapped" },
+  // Built from the rulebook by the simulator (0.7.0+); an older build that
+  // does not know them loads its default course instead.
+  { id: "skidpad", name: "Skidpad", detail: "FSAE figure of eight, (R + L) / 2, 0.125 s a cone" },
+  { id: "accel", name: "Acceleration", detail: "75 m, timed from the line" },
   { id: "mis", name: "Michigan International Speedway", detail: "venue, free roam" },
 ];
 
