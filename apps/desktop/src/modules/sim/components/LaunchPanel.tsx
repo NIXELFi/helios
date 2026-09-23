@@ -17,6 +17,7 @@ import {
   simStatus,
   type GeneratedEvent, type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
 } from "../api";
+import { VEHICLE_MODELS, type VehicleModel } from "../api";
 import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
 import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
 
@@ -47,6 +48,8 @@ export function courseFor(prefs: Pick<LaunchPrefs, "track" | "seed">): TrackId {
 
 interface LaunchPrefs {
   track: CourseChoice;
+  /** Which car model: 2 the validated bicycle, 3 the 4-wheel beta. */
+  vehicleModel: VehicleModel;
   /** The seed for a generated course. Kept even while a fixed course is
    *  chosen, so switching back and forth does not lose it. */
   seed: string;
@@ -62,6 +65,7 @@ interface LaunchPrefs {
 
 const DEFAULTS: LaunchPrefs = {
   track: "autocross",
+  vehicleModel: 2,
   seed: "",
   profile: "wheel",
   session: "",
@@ -137,6 +141,7 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
     const track = courseFor(prefs);
     const req: LaunchRequest = {
       track,
+      vehicleModel: prefs.vehicleModel,
       profile: prefs.profile,
       driver: driver.name,
       driverId: driver.id,
@@ -250,6 +255,18 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
               ))}
               {GENERATED_EVENTS.map((g) => (
                 <option key={g.event} value={generatedChoice(g.event)}>Generated {g.name.toLowerCase()} — {g.detail}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Car model" hint="each model has its own leaderboard">
+            <select
+              className={inputCls}
+              value={prefs.vehicleModel ?? 2}
+              aria-label="Car model"
+              onChange={(e) => set("vehicleModel", (Number(e.target.value) === 3 ? 3 : 2) as VehicleModel)}
+            >
+              {VEHICLE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} — {m.detail}</option>
               ))}
             </select>
           </Field>

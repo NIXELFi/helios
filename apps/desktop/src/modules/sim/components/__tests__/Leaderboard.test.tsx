@@ -206,3 +206,14 @@ describe("physics eras: an update starts a fresh board and keeps the old one", (
     expect(screen.queryByRole("group", { name: "Physics era" })).toBeNull();
   });
 });
+
+describe("launching the 4-wheel model from its board", () => {
+  it("offers Launch 4-wheel on the 4-wheel board and launches that course on model 3", () => {
+    const onLaunchCourse = vi.fn();
+    render(<Leaderboard {...props} onLaunchCourse={onLaunchCourse} runs={[run({ runId: "b" })]} />);
+    const buttons = screen.getAllByRole("button", { name: "Launch 4-wheel" });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]!);
+    expect(onLaunchCourse).toHaveBeenCalledWith("autocross", 3);
+  });
+});

@@ -23,6 +23,8 @@ interface Props {
   onWatchSector?: (c: SectorComparison) => void;
   /** Open the sector's lap and the driver's own in Logs, side by side. */
   onCompareSector?: (c: SectorComparison) => void;
+  /** Drive this course on this car model ("Launch 4-wheel"). */
+  onLaunchCourse?: (track: string, model: VehicleModel) => void;
 }
 
 /** Which sector card is open: a team record, or the driver's own sectors. */
@@ -48,7 +50,7 @@ export const isGeneratedRun = (r: Pick<SimRun, "track">): boolean => parseGenera
 
 export function Leaderboard({
   runs: allRuns, canReplay, onOpenRun, onReplayRun,
-  driverId = null, onWatchSector, onCompareSector,
+  driverId = null, onWatchSector, onCompareSector, onLaunchCourse,
 }: Props) {
   const [scope, setScope] = useState<BoardScope>("competition");
   const [card, setCard] = useState<OpenCard>(null);
@@ -532,6 +534,18 @@ export function Leaderboard({
             {perModel.map(({ model: m, runs: mruns, boards: mb, consistency: mc, eras, era, current }) => {
               const model = m.id;
               const modelName = m.name;
+              // The 4-wheel beta is new and its board is thin: a one-click way
+              // onto it, on the course being looked at.
+              const launch = model === 3 && onLaunchCourse ? (
+                <button
+                  type="button"
+                  onClick={() => onLaunchCourse(track, 3)}
+                  title={`Drive ${trackName} on the 4-wheel model with your launcher settings`}
+                  className="mb-1.5 ml-auto rounded border border-asu-gold/60 bg-asu-gold/10 px-2.5 py-0.5 text-[11px] text-helios-text transition hover:bg-asu-gold/20"
+                >
+                  Launch 4-wheel
+                </button>
+              ) : null;
               const eraBar = eras.length > 1 && (
                 <EraBar
                   eras={eras} era={era} current={current}
@@ -541,13 +555,13 @@ export function Leaderboard({
               if (mode === "average") {
                 const b = mc.find((x) => x.track === track);
                 return b
-                  ? <div key={model}>{eraBar}{renderAverage(b, modelName)}</div>
-                  : <div key={model}>{eraBar}<EmptyBoard modelName={modelName} detail={m.detail} /></div>;
+                  ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderAverage(b, modelName)}</div>
+                  : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} /></div>;
               }
               const b = mb.find((x) => x.track === track);
               return b
-                ? <div key={model}>{eraBar}{renderFastest(b, model, modelName, mruns)}</div>
-                : <div key={model}>{eraBar}<EmptyBoard modelName={modelName} detail={m.detail} /></div>;
+                ? <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div>{renderFastest(b, model, modelName, mruns)}</div>
+                : <div key={model}><div className="flex min-h-7 items-start gap-2">{eraBar}{launch}</div><EmptyBoard modelName={modelName} detail={m.detail} /></div>;
             })}
           </div>
         </div>

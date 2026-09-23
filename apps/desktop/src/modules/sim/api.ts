@@ -481,6 +481,8 @@ export interface SimRunDetail {
 
 export interface LaunchRequest {
   track?: TrackId;
+  /** Which vehicle model drives: 2 the bicycle, 3 the 4-wheel beta. */
+  vehicleModel?: VehicleModel;
   profile?: string;
   driver?: string;
   driverId?: string;
