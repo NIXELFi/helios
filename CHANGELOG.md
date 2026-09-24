@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.13.0] - 2026-09-24
+
 ### Added
 - Sim: a sync pill in the header ("Synced 2 min ago", "Offline — showing this machine only", "Fetching Josh's lap…"), and errors now stay on screen as toasts until dismissed instead of vanishing on the next refresh.
 - Sim: "Recent records" strip on the leaderboard, with NEW badges for records and PBs set in the last 24 h, each judged on its own board.
