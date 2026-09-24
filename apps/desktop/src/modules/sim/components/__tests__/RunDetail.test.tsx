@@ -221,7 +221,7 @@ describe("RunDetail against the board", () => {
     });
     render(<RunDetail {...props(r)} allRuns={[r]} />);
     const off = screen.getByTestId("lap-row-off");
-    expect(off.textContent).toMatch(/no time \(off course\)/);
+    expect(off.textContent).toMatch(/off course/);
     expect(off.querySelector(".line-through")?.textContent).toBe("1:00.000");
     // Lap 2's gap is to lap 3, the best lap that counts: +1.000, not to lap 1.
     const counted = screen.getAllByTestId("lap-row");
