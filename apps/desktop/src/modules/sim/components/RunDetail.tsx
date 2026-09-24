@@ -262,12 +262,12 @@ export function RunDetail({
                       title={counts ? undefined : "Went off course, so this lap sets no time"}
                     >
                       <td className="py-1">L{l.lap}</td>
-                      <td className={"py-1 text-right " + (isBest ? "text-asu-gold" : counts ? "" : "line-through")}>
+                      <td className={"py-1 pl-2 text-right " + (isBest ? "text-asu-gold" : counts ? "" : "line-through")}>
                         {fmtTime(l.total)}
                       </td>
                       <td className="whitespace-nowrap py-1 pl-3 text-right text-helios-dim">
                         {!counts
-                          ? <span className="font-sans text-helios-warn">no time (off course)</span>
+                          ? <span className="font-sans text-helios-warn">off course</span>
                           : isBest || lapBest == null ? "—" : fmtGap(l.total - lapBest)}
                       </td>
                       <td className="py-1 pl-2 text-helios-dim">

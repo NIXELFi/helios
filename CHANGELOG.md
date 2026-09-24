@@ -27,6 +27,19 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Sim: a sync pill in the header ("Synced 2 min ago", "Offline — showing this machine only", "Fetching Josh's lap…"), and errors now stay on screen as toasts until dismissed instead of vanishing on the next refresh.
+- Sim: "Recent records" strip on the leaderboard, with NEW badges for records and PBs set in the last 24 h, each judged on its own board.
+- Sim: Chase and Compare buttons on every leaderboard row, your own row highlighted, and the run panel opens beside the board instead of jumping to Runs.
+- Sim: the run panel says which board a run is on, its position and gap, and offers "Compare in Logs with my PB / leader".
+- Sim: "Drive against" has its own reference choice (this lap / my PB / leader); Sign in buttons on the Launch tab and board.
+
+### Changed
+- Sim: "Open in Logs" lands on the run's best lap in the lap-analysis workspace.
+- Sim: bests are per course everywhere ("AX 40.870 · Accel 4.352"), and "new PB" compares against the same board (course, car model, device, physics revision).
+- Sim: off-course laps are struck through and left out of gaps; unranked runs show a short reason chip; the ghost picker is "Ghost in replay" and lists ranked laps on the same car model, your PB first.
+- Sim: today's runs open automatically when they include yours; tables and tabs work from the keyboard; the Launch tab no longer waits for the run archive to load.
+
 ## [5.12.3] - 2026-09-23
 
 ### Fixed
