@@ -887,3 +887,42 @@ export function unrankedReason(run: SimRun): string | null {
   if (run.assists.autoShift) on.push("automatic gearbox");
   return on.length ? `${on.join(", ")} was on` : null;
 }
+
+/**
+ * `unrankedReason` in a word or two, for a chip beside the time. Same order
+ * of questions, so the chip and the sentence on its tooltip never disagree.
+ * "off course" is the simulator's own word, and the one every panel uses.
+ */
+export function unrankedShort(run: SimRun): string | null {
+  if (isRankable(run)) return null;
+  if (run.synthetic) return "robot";
+  if (!run.driverId) return "unverified";
+  if (run.stats.counted === false) return "modified car";
+  if (modelUnknown(run)) return "model unknown";
+  if ((run.stats.laps ?? 0) === 0) return "no lap";
+  if (bestLapWentOffCourse(run)) return "off course";
+  if (runBest(run) == null) return "no lap";
+  if (predatesCourse(run)) return "old course";
+  const on: string[] = [];
+  if (run.assists.traction) on.push("TC");
+  if (run.assists.abs) on.push("ABS");
+  if (run.assists.autoShift) on.push("auto");
+  return on.length ? `${on.join("+")} on` : "unranked";
+}
+
+/** What a run's `finishedReason` means, in words. Unknown ones pass through. */
+export function finishedText(reason: string | null | undefined): string {
+  switch (reason) {
+    case null: case undefined: case "": return "—";
+    case "finished": return "Finished the run";
+    case "restarted": return "Restarted";
+    case "ended": return "Session ended";
+    case "left-the-run": return "Left the run";
+    case "replay-opened": return "Opened a replay";
+    case "window-closed": return "Closed the simulator";
+    case "track-changed": return "Changed course";
+    case "interrupted": return "Interrupted (saved on exit)";
+    case "abandoned": return "Abandoned";
+    default: return reason;
+  }
+}
