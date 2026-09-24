@@ -14,8 +14,9 @@
  */
 
 import {
-  CONE_PENALTY_S, deviceClass, hasTelemetry, hasTrustworthySectors, isRankable, modelEraKey, runBest,
-  type SimLap, type SimRun,
+  CONE_PENALTY_S, DEVICE_CLASSES, GENERATED_EVENTS, VEHICLE_MODELS, deviceClass, hasTelemetry, hasTrustworthySectors,
+  isRankable, modelEraKey, parseGeneratedId, physicsEraOf, runBest, trackName, vehicleModelOf,
+  type DeviceClass, type SimLap, type SimRun, type VehicleModel,
 } from "../api";
 
 /**
@@ -495,6 +496,11 @@ export interface Improvement {
   driver: string;
   track: string;
   trackName: string;
+  /** The car model and physics era the time was found on: each pair is its
+   *  own board, so two rows for one driver on one course are two boards and
+   *  have to say which. */
+  model: VehicleModel;
+  era: number;
   first: number;
   best: number;
   /** Seconds found since their first ranked run on the course. */
@@ -542,6 +548,8 @@ export function buildImprovements(runs: SimRun[]): Improvement[] {
       driver: ordered[ordered.length - 1]!.driver,
       track: ordered[0]!.track,
       trackName: ordered[0]!.trackName,
+      model: vehicleModelOf(ordered[0]!),
+      era: physicsEraOf(ordered[0]!),
       first,
       best,
       gained: first - best,
@@ -594,16 +602,271 @@ export function buildActivity(runs: SimRun[]): Activity {
 }
 
 /**
- * The runs a given run should be offered as a ghost against: the same course,
- * quickest first, excluding itself -- and only runs whose lap is actually
- * somewhere. A shared run whose telemetry was never uploaded, or was pruned,
- * is a time and nothing else: offered as a ghost, the simulator opened the
- * replay and drew "GHOST NOT LOADED" where the car should have been.
+ * The runs a given run should be offered as a ghost against: the same course
+ * AND the same car model -- a bicycle lap beside a 4-wheel one is two cars,
+ * not a comparison -- ranked runs only, quickest first, excluding itself. And
+ * only runs whose lap is actually somewhere: a shared run whose telemetry was
+ * never uploaded, or was pruned, is a time and nothing else; offered as a
+ * ghost, the simulator opened the replay and drew "GHOST NOT LOADED" where the
+ * car should have been.
+ *
+ * `driverId` (the viewer) puts their own best first, because "against my PB"
+ * is the comparison a driver reaches for; the rest follow quickest first.
  */
-export function ghostCandidates(runs: SimRun[], run: SimRun): SimRun[] {
-  return runs
-    .filter((r) => r.runId !== run.runId && r.track === run.track && runBest(r) != null && hasTelemetry(r))
-    .sort((a, b) => (runBest(a) ?? Infinity) - (runBest(b) ?? Infinity));
+export function ghostCandidates(runs: SimRun[], run: SimRun, driverId: string | null = null): SimRun[] {
+  const model = vehicleModelOf(run);
+  const out = runs
+    .filter((r) =>
+      r.runId !== run.runId && r.track === run.track && vehicleModelOf(r) === model &&
+      isRankable(r) && hasTelemetry(r))
+    .sort((a, b) => (runBest(a) ?? Infinity) - (runBest(b) ?? Infinity) || a.runId.localeCompare(b.runId));
+  if (driverId) {
+    const pb = out.findIndex((r) => r.driverId === driverId);
+    if (pb > 0) out.unshift(...out.splice(pb, 1));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- board key --
+
+/**
+ * Which board a run is ranked on: course, car model, device class and physics
+ * era. The Leaderboard draws exactly these boards; everything that says "P3"
+ * or "your best" about a run has to mean the same board, or it contradicts the
+ * tab beside it.
+ */
+export interface BoardKey {
+  track: string;
+  model: VehicleModel;
+  device: DeviceClass;
+  era: number;
+}
+
+export function boardKeyOf(run: SimRun): BoardKey {
+  return { track: run.track, model: vehicleModelOf(run), device: deviceClass(run), era: physicsEraOf(run) };
+}
+
+export function sameBoard(a: SimRun, b: SimRun): boolean {
+  const x = boardKeyOf(a), y = boardKeyOf(b);
+  return x.track === y.track && x.model === y.model && x.device === y.device && x.era === y.era;
+}
+
+/** "AX", "Accel", "AX K7Q2": a course in as few characters as still say which. */
+export function courseShort(track: string): string {
+  switch (track) {
+    case "autocross": return "AX";
+    case "endurance": return "EN";
+    case "skidpad": return "Skidpad";
+    case "accel": return "Accel";
+    case "mis": return "MIS";
+  }
+  const g = parseGeneratedId(track);
+  if (g) return `${g.event === "autocross" ? "AX" : "EN"} ${g.seed}`;
+  return trackName(track);
+}
+
+/** "Autocross", "Endurance K7Q2": the course without the season on it. */
+export function courseName(track: string): string {
+  const g = parseGeneratedId(track);
+  if (g) return `${GENERATED_EVENTS.find((e) => e.event === g.event)!.name} ${g.seed}`;
+  if (track === "accel") return "Accel";
+  return trackName(track).replace(/\s+20\d\d$/, "");
+}
+
+/** "Autocross · Bicycle · Wheel", with " · rev 2" when `era` is asked for. */
+export function boardLabel(key: BoardKey, opts: { era?: boolean; track?: boolean } = {}): string {
+  const parts: string[] = [];
+  if (opts.track !== false) parts.push(courseName(key.track));
+  parts.push(VEHICLE_MODELS.find((m) => m.id === key.model)?.name ?? `model ${key.model}`);
+  parts.push(DEVICE_CLASSES.find((d) => d.id === key.device)?.short ?? key.device);
+  if (opts.era) parts.push(`rev ${key.era}`);
+  return parts.join(" · ");
+}
+
+/** Where a run's driver stands on the run's own board. */
+export interface Standing {
+  key: BoardKey;
+  /** Null when nothing on that board is ranked. */
+  board: TrackBoard | null;
+  /** The run's driver on that board; null when they have no ranked time on it. */
+  entry: DriverEntry | null;
+  leader: DriverEntry | null;
+  /** This very run is the driver's best on the board. */
+  isDriversBest: boolean;
+}
+
+export function boardStanding(runs: SimRun[], run: SimRun): Standing {
+  const key = boardKeyOf(run);
+  const here = runs.filter((r) => sameBoard(r, run));
+  if (!here.some((r) => r.runId === run.runId)) here.push(run);
+  const built = buildBoards(here)[0] ?? null;
+  const board = built && built.entries.length ? built : null;
+  const entry = run.driverId ? board?.entries.find((e) => e.driverId === run.driverId) ?? null : null;
+  return {
+    key,
+    board,
+    entry,
+    leader: board?.entries[0] ?? null,
+    isDriversBest: !!entry && entry.runId === run.runId,
+  };
+}
+
+/**
+ * A driver's best watchable lap on a run's board: the reference for "drive
+ * against my PB" and "compare with my PB". Their quickest ranked run on that
+ * board that still has its telemetry.
+ */
+export function bestWatchable(runs: SimRun[], like: SimRun, driverId: string): SimRun | null {
+  let best: SimRun | null = null;
+  for (const r of runs) {
+    if (r.driverId !== driverId || !sameBoard(r, like) || !isRankable(r) || !hasTelemetry(r)) continue;
+    const t = runBest(r)!, b = best ? runBest(best)! : Infinity;
+    if (t < b || (t === b && best != null && r.runId < best.runId)) best = r;
+  }
+  return best;
+}
+
+/** The board leader's run, when its lap can still be loaded; null otherwise. */
+export function leaderWatchable(runs: SimRun[], like: SimRun): SimRun | null {
+  const leader = boardStanding(runs, like).leader;
+  if (!leader) return null;
+  const r = runs.find((x) => x.runId === leader.runId);
+  return r && hasTelemetry(r) ? r : null;
+}
+
+/**
+ * What a run did on its board, for the end-of-session card.
+ *
+ * `previousBest` is the same driver's best on the SAME board (course, model,
+ * device, era) from before this run started. The old rule compared course and
+ * driver only, so a first 4-wheel lap was measured against a bicycle best --
+ * a different car -- and a keyboard lap against a wheel one.
+ *
+ * Null for a run that cannot rank: nothing about it is a result.
+ */
+export interface SessionResult {
+  key: BoardKey;
+  previousBest: number | null;
+  /** Seconds quicker than `previousBest`; negative when slower. */
+  improvement: number | null;
+  standing: Standing;
+  /** This run holds the team record on its board. */
+  record: boolean;
+}
+
+export function sessionResult(allRuns: SimRun[], run: SimRun): SessionResult | null {
+  if (!isRankable(run)) return null;
+  const t = runBest(run)!;
+  let previousBest: number | null = null;
+  for (const r of allRuns) {
+    if (r.runId === run.runId || r.driverId !== run.driverId || !sameBoard(r, run) || !isRankable(r)) continue;
+    if ((r.startedAt ?? "") >= (run.startedAt ?? "")) continue;
+    const b = runBest(r);
+    if (b != null && (previousBest == null || b < previousBest)) previousBest = b;
+  }
+  const standing = boardStanding(allRuns, run);
+  return {
+    key: standing.key,
+    previousBest,
+    improvement: previousBest != null ? previousBest - t : null,
+    standing,
+    record: standing.leader?.runId === run.runId,
+  };
+}
+
+// ---------------------------------------------------------- course summaries --
+
+export interface CourseBest {
+  track: string;
+  /** `courseShort`: "AX", "Accel". */
+  short: string;
+  best: number;
+  runId: string;
+  /** Runs on the course in the list, timed or not. */
+  runs: number;
+}
+
+/**
+ * The quickest time on each course in a list of runs, busiest course first.
+ *
+ * A day, or a session, is often more than one course, and one "best" across
+ * them means nothing: an accel run's 4.352 is not quicker than an autocross
+ * lap, it is a different event. Courses with no time at all are left out.
+ */
+export function bestPerCourse(runs: SimRun[]): CourseBest[] {
+  const by = new Map<string, CourseBest>();
+  for (const r of runs) {
+    let c = by.get(r.track);
+    if (!c) {
+      c = { track: r.track, short: courseShort(r.track), best: Infinity, runId: "", runs: 0 };
+      by.set(r.track, c);
+    }
+    c.runs += 1;
+    const t = runBest(r);
+    if (t != null && t < c.best) { c.best = t; c.runId = r.runId; }
+  }
+  return [...by.values()]
+    .filter((c) => Number.isFinite(c.best))
+    .sort((a, b) => b.runs - a.runs || a.short.localeCompare(b.short));
+}
+
+// ----------------------------------------------------------- recent records --
+
+export interface RecordEvent {
+  /** "record": the quickest anyone had been on the board at that moment.
+   *  "pb": quicker than the driver had been before, but not a record. */
+  kind: "record" | "pb";
+  runId: string;
+  driver: string;
+  driverId: string;
+  key: BoardKey;
+  time: number;
+  /** The time it beat: the previous record, or the driver's previous best.
+   *  Null for the first time anyone set on the board. */
+  previous: number | null;
+  /** When the run was driven. */
+  at: string;
+}
+
+/**
+ * The newest personal bests and team records, newest first.
+ *
+ * Replaces one "best lap anyone has scored" across every course, model and
+ * era -- a comparison between times that do not compare, which a bicycle
+ * autocross lap "won" against a 4-wheel one. Each event is judged on its own
+ * board (`boardKeyOf`), in the order the laps were driven.
+ */
+export function buildRecentRecords(runs: SimRun[], limit = 6): RecordEvent[] {
+  const ranked = runs
+    .filter((r) => isRankable(r) && !!r.startedAt && !Number.isNaN(Date.parse(r.startedAt)))
+    .sort((a, b) => a.startedAt!.localeCompare(b.startedAt!) || a.runId.localeCompare(b.runId));
+  const team = new Map<string, number>();
+  const own = new Map<string, number>();
+  const out: RecordEvent[] = [];
+  for (const r of ranked) {
+    const key = boardKeyOf(r);
+    const k = `${key.track}|${key.model}|${key.device}|${key.era}`;
+    const mk = `${k}|${r.driverId}`;
+    const t = runBest(r)!;
+    const rec = team.get(k);
+    const mine = own.get(mk);
+    const base = { runId: r.runId, driver: r.driver, driverId: r.driverId!, key, time: t, at: r.startedAt! };
+    // A thousandth is the timing resolution: equalling a time is not beating it.
+    if (rec == null || t < rec - 0.0005) {
+      out.push({ ...base, kind: "record", previous: rec ?? null });
+      team.set(k, t);
+    } else if (mine != null && t < mine - 0.0005) {
+      out.push({ ...base, kind: "pb", previous: mine });
+    }
+    if (mine == null || t < mine) own.set(mk, t);
+  }
+  return out.reverse().slice(0, limit);
+}
+
+/** A lap that set a time: it stayed on the course. The same test the sector
+ *  fold uses (`lapSectorPieces`), so the lap table and the board agree. */
+export function lapCounts(lap: Pick<SimLap, "valid" | "off">): boolean {
+  return lap.valid !== false && (lap.off ?? 0) === 0;
 }
 
 // ------------------------------------------------------- sector comparison --
