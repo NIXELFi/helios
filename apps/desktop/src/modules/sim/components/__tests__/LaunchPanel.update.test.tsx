@@ -3,7 +3,7 @@
  * The update itself is automatic and lives in `useSimAutoUpdate` (tested
  * beside it). The panel's job is to say what is happening and to keep the
  * launch button out of the way while the executable is being replaced. */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import { LaunchPanel, installedVersion } from "../LaunchPanel";
@@ -121,6 +121,8 @@ describe("the launch tab while the simulator updates itself", () => {
 
   it("prints the sharing rule, both halves of it, where the run is started", () => {
     show(status(), idle());
+    // Behind an (i) beside the heading rather than a paragraph on every visit.
+    fireEvent.click(screen.getByRole("button", { name: "What gets shared" }));
     // Two rules since generated courses became unbounded in number: a driver
     // reading only the fixed numbers on the Launch tab would be told the wrong
     // thing about every seed they drive.
@@ -145,5 +147,41 @@ describe("the launch tab while the simulator updates itself", () => {
     expect(note.textContent).toMatch(/No macOS build has been published yet/);
     expect(note.textContent).toMatch(/Windows only/);
     expect(screen.queryByText(/Install the simulator/)).toBeNull();
+  });
+});
+
+describe("the launch tab's driver-facing status", () => {
+  it("offers to sign in rather than only saying you are signed out", () => {
+    const onSignIn = vi.fn();
+    render(
+      <LaunchPanel
+        status={status()}
+        driver={null}
+        onStatusChange={vi.fn()}
+        onLaunched={vi.fn()}
+        onSignIn={onSignIn}
+        update={idle()}
+      />,
+    );
+    const buttons = screen.getAllByRole("button", { name: "Sign in" });
+    expect(buttons.length).toBeGreaterThan(0);
+    fireEvent.click(buttons[buttons.length - 1]!);
+    expect(onSignIn).toHaveBeenCalled();
+  });
+
+  it("says what is running, in words, without a process id", () => {
+    render(
+      <LaunchPanel
+        status={status()}
+        driver={{ id: "d-1", name: "Nick" }}
+        onStatusChange={vi.fn()}
+        onLaunched={vi.fn()}
+        running="Autocross 2026 · Bicycle"
+        update={idle()}
+      />,
+    );
+    const line = screen.getByTestId("launch-running");
+    expect(line.textContent).toBe("Running — Autocross 2026 · Bicycle");
+    expect(line.textContent).not.toMatch(/pid/);
   });
 });

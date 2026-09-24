@@ -5,7 +5,7 @@
  * old number, as "what an event scores". It was neither what an event scores
  * (FSAE adds twenty seconds, not ten, and keeps the time) nor what this board
  * does. A tooltip explaining the wrong rule is worse than no tooltip. */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import { Leaderboard } from "../Leaderboard";
@@ -36,7 +36,7 @@ const props = { canReplay: true, onOpenRun: vi.fn(), onReplayRun: vi.fn() };
 describe("Leaderboard", () => {
   it("explains the scoring it actually uses", () => {
     render(<Leaderboard {...props} runs={[run({ runId: "a" })]} />);
-    const title = screen.getByText("Best lap anyone has scored").getAttribute("title") ?? "";
+    const title = screen.getByText("Recent records").getAttribute("title") ?? "";
     expect(title).toMatch(/two seconds a cone/);
     expect(title).toMatch(/off course/);
     expect(title).toMatch(/FSAE/);
@@ -196,7 +196,7 @@ describe("physics eras: an update starts a fresh board and keeps the old one", (
     const board = () => screen.getByRole("heading", { name: /4-wheel/ }).closest("section")!;
     expect(board().textContent).toMatch(/Ralf/);
     expect(board().textContent).not.toMatch(/Edgar/);
-    fireEvent.click(screen.getByRole("button", { name: /rev 1/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Physics era" })).getByRole("button", { name: /rev 1/ }));
     expect(board().textContent).toMatch(/Edgar/);
     expect(board().textContent).not.toMatch(/Ralf/);
   });
@@ -215,5 +215,69 @@ describe("launching the 4-wheel model from its board", () => {
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]!);
     expect(onLaunchCourse).toHaveBeenCalledWith("autocross", 3);
+  });
+});
+
+describe("board rows", () => {
+  const st = (t: number) => ({ ...run({ runId: "x" }).stats, bestLapS: t, bestLapRawS: t });
+  const runs = [
+    run({ runId: "j", driver: "Jordan", driverId: "d-2", stats: st(39) }),
+    run({ runId: "n", driver: "Nick", driverId: "d-1", stats: st(40) }),
+  ];
+
+  it("marks your own row and opens a run from the keyboard", () => {
+    const onOpenRun = vi.fn();
+    render(<Leaderboard {...props} onOpenRun={onOpenRun} runs={runs} driverId="d-1" />);
+    const mine = screen.getAllByText("you")[0]!.closest("tr")!;
+    expect(mine.textContent).toMatch(/Nick/);
+    expect(mine.className).toMatch(/bg-asu-gold/);
+    mine.focus();
+    fireEvent.keyDown(mine, { key: "Enter" });
+    expect(onOpenRun).toHaveBeenCalledWith("n");
+  });
+
+  it("chases a row and compares it with your best", () => {
+    const onChaseRun = vi.fn();
+    const onCompareRuns = vi.fn();
+    render(<Leaderboard {...props} runs={runs} driverId="d-1" onChaseRun={onChaseRun} onCompareRuns={onCompareRuns} />);
+    fireEvent.click(screen.getByRole("button", { name: "Drive against Jordan's 39.000" }));
+    expect(onChaseRun).toHaveBeenCalledWith("j");
+    fireEvent.click(screen.getByRole("button", { name: "Compare Jordan's lap with your best in Logs" }));
+    expect(onCompareRuns).toHaveBeenCalledWith("j", "n", "my PB");
+    // Your own row compares with the leader.
+    fireEvent.click(screen.getByRole("button", { name: "Compare your best with the leader's in Logs" }));
+    expect(onCompareRuns).toHaveBeenLastCalledWith("n", "j", "leader");
+  });
+
+  it("says when it is showing this machine's runs only", () => {
+    const onSignIn = vi.fn();
+    const { unmount } = render(<Leaderboard {...props} runs={runs} teamState="signed-out" onSignIn={onSignIn} />);
+    expect(screen.getByTestId("board-local-only").textContent).toMatch(/this machine.s runs only.*sign in for team times/);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(onSignIn).toHaveBeenCalled();
+    unmount();
+    render(<Leaderboard {...props} runs={runs} teamState="offline" />);
+    expect(screen.getByTestId("board-local-only").textContent).toMatch(/offline/);
+  });
+
+  it("lists recent records per board rather than one best lap across all of them", () => {
+    const four = run({
+      runId: "f", driver: "Ralf", driverId: "d-3", simVersion: "0.7.4",
+      stats: { ...st(44), vehicleModel: 3, physicsRev: 2 },
+    });
+    render(<Leaderboard {...props} runs={[...runs, four]} />);
+    const strip = screen.getByTestId("recent-records");
+    // Ralf's 44.000 is the 4-wheel record even though 39.000 is quicker: a
+    // different car is a different board.
+    expect(strip.textContent).toMatch(/44\.000Ralf/);
+    expect(strip.textContent).toMatch(/4-wheel/);
+    expect(strip.textContent).toMatch(/39\.000Jordan/);
+  });
+
+  it("labels time found with the car it was found on", () => {
+    const later = run({ runId: "n2", driver: "Nick", driverId: "d-1", startedAt: "2026-09-20T10:00:00Z", stats: st(39.5) });
+    render(<Leaderboard {...props} runs={[...runs, later]} />);
+    const row = screen.getByText("−0.500 s").closest("tr")!;
+    expect(row.textContent).toMatch(/Autocross · Bicycle/);
   });
 });

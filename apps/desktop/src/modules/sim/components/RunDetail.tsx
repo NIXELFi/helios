@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  IconChartLine, IconFolderOpen, IconMovie, IconStopwatch, IconTrash, IconX,
+  IconChartLine, IconFolderOpen, IconLoader2, IconMovie, IconStopwatch, IconTrash, IconX,
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import {
-  fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, parseGeneratedId, runBest, runTheoretical,
-  simDeleteRun, simReadRun, unrankedReason, type SimManifest, type SimRun,
+  VEHICLE_MODELS, finishedText, fmtBytes, fmtGap, fmtTime, fmtWhen, hasTelemetry, isRankable, parseGeneratedId,
+  runBest, runTheoretical, simDeleteRun, simReadRun, unrankedReason, vehicleModelOf,
+  type SimManifest, type SimRun,
 } from "../api";
-import { ghostCandidates } from "../lib/leaderboard";
+import {
+  bestWatchable, boardLabel, boardStanding, ghostCandidates, lapCounts, leaderWatchable,
+} from "../lib/leaderboard";
 import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { isPending, type Pending } from "./pending";
 
 /**
  * What this run's course costs to keep.
@@ -23,6 +28,9 @@ function limitsFor(track: string): { best: number; recent: number; kind: string 
     ? { best: GEN_KEEP_BEST, recent: GEN_KEEP_RECENT, kind: "generated course" }
     : { best: KEEP_BEST, recent: KEEP_RECENT, kind: "course" };
 }
+
+/** Which lap the live delta counts against when "Drive against" is pressed. */
+type Reference = "this" | "pb" | "leader";
 
 interface Props {
   run: SimRun;
@@ -41,21 +49,29 @@ interface Props {
    * per generated one; the rest share their time only.
    */
   lapShared?: boolean | null;
+  /** A button waiting on a download, so it can say so. */
+  pending?: Pending | null;
   onClose: () => void;
   onReplay: (run: SimRun, ghostId: string | null) => void;
   onOpenInLogs: (run: SimRun) => void;
-  onChase: (run: SimRun) => void;
+  /** Open this run's best lap in Logs as Main with `against`'s as Ref. */
+  onCompareInLogs?: (run: SimRun, against: SimRun, tag: string) => void;
+  /** Start a drive with `reference`'s best lap as the live delta's reference. */
+  onChase: (reference: SimRun) => void;
   onDeleted: (runId: string) => void;
 }
 
 export function RunDetail({
-  run, allRuns, canReplay, driverId, lapShared = null, onClose, onReplay, onOpenInLogs, onChase, onDeleted,
+  run, allRuns, canReplay, driverId, lapShared = null, pending = null,
+  onClose, onReplay, onOpenInLogs, onCompareInLogs, onChase, onDeleted,
 }: Props) {
   const canDrive = !!driverId;
   const mine = !!driverId && run.driverId === driverId;
   const [manifest, setManifest] = useState<SimManifest | null>(null);
   const [ghostId, setGhostId] = useState<string>("");
+  const [reference, setReference] = useState<Reference>("this");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // The full manifest carries the setup and the event list, which the listing
@@ -64,7 +80,9 @@ export function RunDetail({
     let cancelled = false;
     setManifest(null);
     setGhostId("");
+    setReference("this");
     setConfirmDelete(false);
+    setDeleted(false);
     // Cleared with the rest of it. A run whose `run.json` would not read left
     // its red line pinned under every healthy run opened afterwards, which
     // reads as "this run is broken too".
@@ -79,15 +97,65 @@ export function RunDetail({
     return () => { cancelled = true; };
   }, [run.runId, run.remote]);
 
-  const ghosts = useMemo(() => ghostCandidates(allRuns, run), [allRuns, run]);
+  // The viewer's own best first; signed out, the run's own driver's.
+  const ghosts = useMemo(() => ghostCandidates(allRuns, run, driverId ?? run.driverId), [allRuns, run, driverId]);
+  const ghostPbOf = driverId ?? run.driverId;
+  const standing = useMemo(() => boardStanding(allRuns, run), [allRuns, run]);
+  /** The viewer's best watchable lap on this run's board, and the leader's. */
+  const myPb = useMemo(() => (driverId ? bestWatchable(allRuns, run, driverId) : null), [allRuns, run, driverId]);
+  const leaderRun = useMemo(() => leaderWatchable(allRuns, run), [allRuns, run]);
   const best = runBest(run);
   // How many laps this run's course keeps. See `limitsFor`.
   const lim = limitsFor(run.track);
   const reason = unrankedReason(run);
   const st = run.stats;
+  const busy = isPending(pending, run.runId);
+  const whose = (id: string | null | undefined, name: string) => (driverId && id === driverId ? "your" : `${name}'s`);
+
+  // The laps that set a time, and the quickest of them: what every gap in the
+  // lap table is measured from. A lap that left the course has no time here
+  // (stricter than FSAE's +20 s, on purpose -- see `bestLapWentOffCourse`),
+  // so it is neither the best nor measured against it.
+  const counting = run.laps.filter(lapCounts);
+  const lapBest = counting.reduce<number | null>((b, l) => (b == null || l.total < b ? l.total : b), null);
+  const bestLapNo = run.stats.bestLapNumber != null && counting.some((l) => l.lap === run.stats.bestLapNumber)
+    ? run.stats.bestLapNumber
+    : counting.find((l) => l.total === lapBest)?.lap ?? null;
+
+  /** The run "Drive against" would use, and what the button should say. */
+  const refRun = reference === "pb" ? myPb : reference === "leader" ? leaderRun : run;
+  const refLabel = reference === "pb"
+    ? "your PB"
+    : reference === "leader"
+      ? "the leader"
+      : "this lap";
+  const refBlocked = !refRun
+    ? reference === "pb"
+      ? "You have no ranked lap with telemetry on this board yet"
+      : "The board leader's lap is not stored anywhere, so it cannot be chased"
+    : runBest(refRun) == null
+      ? "this run has no time to chase"
+      : !hasTelemetry(refRun)
+        ? refRun.remote
+          ? `${refRun.driver} shared this run's time, not the lap itself`
+          : "This run has no telemetry file to chase"
+        : !canDrive
+          ? "Sign in to Helios to start a run"
+          : !canReplay
+            ? "The simulator is not installed here"
+            : null;
+
+  // Setup: the manifest's full parameter set when the run is on this disk; a
+  // shared run carries only the run-to-run setup its best lap was set on, and
+  // that is still worth showing rather than nothing.
+  const setup = manifest?.setup && Object.keys(manifest.setup).length > 0
+    ? { values: manifest.setup, full: true }
+    : run.stats.setup && Object.keys(run.stats.setup).length > 0
+      ? { values: run.stats.setup, full: false }
+      : null;
 
   return (
-    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-helios-line bg-helios-strip">
+    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-helios-line bg-helios-strip" aria-label={`Run: ${run.driver}, ${run.trackName}`}>
       <header className="flex items-start gap-2 border-b border-helios-line px-4 py-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold">{run.driver}</h3>
@@ -116,13 +184,40 @@ export function RunDetail({
           </p>
         )}
 
+        {/* Which board this run is on, and where its driver stands there --
+            the same board the Leaderboard tab draws, keyed the same way. */}
+        <Group title="On the board">
+          <Row label="Board" value={boardLabel(standing.key, { era: true })} />
+          <Row
+            label="Position"
+            value={
+              !isRankable(run)
+                ? "not ranked"
+                : standing.entry
+                  ? `P${standing.entry.rank} of ${standing.board?.entries.length ?? 1}` +
+                    (standing.entry.rank > 1 && standing.leader
+                      ? ` · ${fmtGap(standing.entry.best - standing.leader.best)} to ${standing.leader.driverId === driverId ? "you" : standing.leader.driver}`
+                      : " · the record")
+                  : "—"
+            }
+            warn={!isRankable(run)}
+            testId="board-position"
+          />
+          {isRankable(run) && standing.entry && !standing.isDriversBest && (
+            <Row
+              label="This run"
+              value={`${fmtGap((best ?? 0) - standing.entry.best)} off ${whose(run.driverId, run.driver)} best`}
+            />
+          )}
+        </Group>
+
         <Group title="The run">
           <Row label="Laps" value={String(st.laps)} />
           <Row label="Wheel time" value={`${st.durationS.toFixed(1)} s`} />
           <Row label="Distance" value={`${(st.distanceM / 1000).toFixed(2)} km`} />
           <Row label="Cones" value={String(st.totalCones)} warn={st.totalCones > 0} />
           <Row label="Off course" value={String(st.totalOffCourse)} warn={st.totalOffCourse > 0} />
-          <Row label="Ended" value={run.finishedReason ?? "—"} />
+          <Row label="Ended" value={finishedText(run.finishedReason)} title={run.finishedReason ?? undefined} />
         </Group>
 
         <Group title="What the car did">
@@ -155,27 +250,30 @@ export function RunDetail({
               </thead>
               <tbody className="font-mono">
                 {run.laps.map((l) => {
-                  // By lap number, not by comparing floats: `best` comes from
-                  // the manifest's own `bestLapS`, and two laps that tie would
-                  // otherwise both light up.
-                  const isBest = run.stats.bestLapNumber != null
-                    ? l.lap === run.stats.bestLapNumber
-                    : best != null && l.total === best;
+                  const counts = lapCounts(l);
+                  // By lap number, not by comparing floats: two laps that tie
+                  // would otherwise both light up.
+                  const isBest = counts && l.lap === bestLapNo;
                   return (
-                    <tr key={l.lap} className="border-t border-helios-line/50">
+                    <tr
+                      key={l.lap}
+                      className={"border-t border-helios-line/50 " + (counts ? "" : "text-helios-muted")}
+                      data-testid={counts ? "lap-row" : "lap-row-off"}
+                      title={counts ? undefined : "Went off course, so this lap sets no time"}
+                    >
                       <td className="py-1">L{l.lap}</td>
-                      <td className={"py-1 text-right " + (isBest ? "text-asu-gold" : "")}>
+                      <td className={"py-1 text-right " + (isBest ? "text-asu-gold" : counts ? "" : "line-through")}>
                         {fmtTime(l.total)}
                       </td>
-                      <td className="py-1 text-right text-helios-dim">
-                        {isBest || best == null ? "—" : fmtGap(l.total - best)}
+                      <td className="whitespace-nowrap py-1 pl-3 text-right text-helios-dim">
+                        {!counts
+                          ? <span className="font-sans text-helios-warn">no time (off course)</span>
+                          : isBest || lapBest == null ? "—" : fmtGap(l.total - lapBest)}
                       </td>
                       <td className="py-1 pl-2 text-helios-dim">
                         {l.sectors.length ? l.sectors.map((s) => (s == null ? "—" : s.toFixed(2))).join(" / ") : "—"}
-                        {(l.cones > 0 || l.off > 0) && (
-                          <span className="ml-1 font-sans text-helios-warn">
-                            {l.cones > 0 && `${l.cones}c`}{l.off > 0 && ` ${l.off}off`}
-                          </span>
+                        {l.cones > 0 && (
+                          <span className="ml-1 font-sans text-helios-warn">{l.cones}c</span>
                         )}
                       </td>
                     </tr>
@@ -187,6 +285,7 @@ export function RunDetail({
         )}
 
         <Group title="How it was driven">
+          <Row label="Car" value={VEHICLE_MODELS.find((m) => m.id === vehicleModelOf(run))?.name ?? "—"} />
           <Row label="Controls" value={run.profile ?? "—"} />
           {run.device && <Row label="Device" value={run.device} />}
           <Row label="Physics" value={run.physics === "native-1khz" ? "native, 1 kHz" : run.physics ?? "—"} />
@@ -264,9 +363,7 @@ export function RunDetail({
           )}
         </Group>
 
-        {manifest?.setup && Object.keys(manifest.setup).length > 0 && (
-          <SetupBlock setup={manifest.setup} />
-        )}
+        {setup && <SetupBlock setup={setup.values} full={setup.full} />}
 
         {error && <p className="text-xs text-helios-danger">{error}</p>}
       </div>
@@ -274,16 +371,19 @@ export function RunDetail({
       <footer className="border-t border-helios-line px-4 py-3">
         {ghosts.length > 0 && canReplay && (
           <label className="mb-2 block">
-            <span className="mb-1 block text-[11px] text-helios-dim">Ghost to drive against</span>
+            {/* It only ever fed the replay: "Drive against" has its own
+                reference below, and the label used to suggest otherwise. */}
+            <span className="mb-1 block text-[11px] text-helios-dim">Ghost in replay</span>
             <select
               className="w-full rounded border border-helios-line bg-helios-deep px-2 py-1.5 text-xs outline-none focus:border-asu-gold"
               value={ghostId}
+              aria-label="Ghost in replay"
               onChange={(e) => setGhostId(e.target.value)}
             >
               <option value="">No ghost</option>
-              {ghosts.slice(0, 20).map((g) => (
+              {ghosts.slice(0, 20).map((g, i) => (
                 <option key={g.runId} value={g.runId}>
-                  {g.driver} — {fmtTime(runBest(g))}
+                  {ghostLabel(g, i === 0 && !!ghostPbOf && g.driverId === ghostPbOf, driverId)}
                 </option>
               ))}
             </select>
@@ -300,7 +400,8 @@ export function RunDetail({
         <div className="flex gap-2">
           <button
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded bg-asu-gold px-3 py-2 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!canReplay || !hasTelemetry(run)}
+            disabled={!canReplay || !hasTelemetry(run) || busy}
+            aria-busy={isPending(pending, run.runId, "replay") || undefined}
             title={
               !canReplay
                 ? "The simulator is not installed here"
@@ -314,11 +415,12 @@ export function RunDetail({
             }
             onClick={() => onReplay(run, ghostId || null)}
           >
-            <IconMovie size={14} /> Watch replay
+            {isPending(pending, run.runId, "replay") ? <Spinner /> : <IconMovie size={14} />} Watch replay
           </button>
           <button
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-2 text-xs transition hover:border-asu-gold disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!hasTelemetry(run)}
+            disabled={!hasTelemetry(run) || busy}
+            aria-busy={isPending(pending, run.runId, "logs") || undefined}
             title={
               !hasTelemetry(run)
                 ? run.remote
@@ -326,43 +428,78 @@ export function RunDetail({
                   : "This run has no telemetry file"
                 : run.remote
                   ? `Fetch ${run.driver}'s lap and open it in Logs`
-                  : undefined
+                  : "Open this run's best lap in Logs"
             }
             onClick={() => onOpenInLogs(run)}
           >
-            <IconChartLine size={14} /> Open in Logs
+            {isPending(pending, run.runId, "logs") ? <Spinner /> : <IconChartLine size={14} />} Open in Logs
           </button>
         </div>
-        <button
-          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded border border-asu-gold/50 bg-asu-gold/10 px-3 py-2 text-xs font-medium text-asu-gold transition hover:bg-asu-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canReplay || !canDrive || best == null || !hasTelemetry(run)}
-          title={
-            best == null
-              ? "this run has no time to chase"
-              : !hasTelemetry(run)
-                ? run.remote
-                  ? `${run.driver} shared this run's time, not the lap itself`
-                  : "This run has no telemetry file to chase"
-                : !canDrive
-                  ? "Sign in to Helios to start a run"
-                  : canReplay
-                    ? run.remote
-                      ? `Fetch ${run.driver}'s lap and drive against it`
-                      : "Start a drive with this lap as the live delta's reference"
-                    : "The simulator is not installed here"
-          }
-          onClick={() => onChase(run)}
-        >
-          <IconStopwatch size={14} /> Drive against this lap
-        </button>
-        {/* What "delete" will actually do, said before it is done. The button
-            reads "for good" and for a while meant "from this disk": the row
-            stayed, the run came straight back with a cloud icon, and its time
-            stayed ranked. Now it means what it says where it can, and says
-            exactly how far it reaches where it cannot. */}
-        {confirmDelete && (
-          <p className="mt-2 text-[11px] text-helios-dim">{deleteReach()}</p>
+        {/* Side by side in Logs: this run's best lap as Main, a reference as
+            Ref, in the lap-analysis workspace. Offered only where there is a
+            different lap with telemetry to put beside it. */}
+        {onCompareInLogs && hasTelemetry(run) && ((myPb && myPb.runId !== run.runId) || (leaderRun && leaderRun.runId !== run.runId)) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="text-helios-muted">Compare in Logs with</span>
+            {myPb && myPb.runId !== run.runId && (
+              <button
+                type="button"
+                className="rounded border border-helios-line px-2 py-1 transition hover:border-asu-gold disabled:opacity-40"
+                disabled={busy}
+                title={`This run's best lap as Main, your PB (${fmtTime(runBest(myPb))}) as Ref`}
+                onClick={() => onCompareInLogs(run, myPb, "my PB")}
+              >
+                my PB {fmtTime(runBest(myPb))}
+              </button>
+            )}
+            {leaderRun && leaderRun.runId !== run.runId && leaderRun.runId !== myPb?.runId && (
+              <button
+                type="button"
+                className="rounded border border-helios-line px-2 py-1 transition hover:border-asu-gold disabled:opacity-40"
+                disabled={busy}
+                title={`This run's best lap as Main, the board leader's (${leaderRun.driver}, ${fmtTime(runBest(leaderRun))}) as Ref`}
+                onClick={() => onCompareInLogs(run, leaderRun, "leader")}
+              >
+                leader {fmtTime(runBest(leaderRun))}
+              </button>
+            )}
+            {isPending(pending, run.runId, "compare") && <Spinner />}
+          </div>
         )}
+        {/* "Drive against" picks its reference explicitly. It used to ignore
+            the ghost picker above it while sitting right under it. */}
+        <div className="mt-2 flex gap-2">
+          <span className="flex-1" title={refBlocked ?? undefined}>
+            <button
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-asu-gold/50 bg-asu-gold/10 px-3 py-2 text-xs font-medium text-asu-gold transition hover:bg-asu-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!!refBlocked || busy}
+              aria-busy={isPending(pending, refRun?.runId ?? "", "chase") || undefined}
+              title={
+                refBlocked ??
+                (refRun!.remote
+                  ? `Fetch ${refRun!.driver}'s lap and drive against it`
+                  : `Start a drive with ${refLabel === "this lap" ? "this lap" : `${whose(refRun!.driverId, refRun!.driver)} ${fmtTime(runBest(refRun!))}`} as the live delta's reference`)
+              }
+              onClick={() => refRun && onChase(refRun)}
+            >
+              {isPending(pending, refRun?.runId ?? "", "chase") ? <Spinner /> : <IconStopwatch size={14} />}
+              Drive against {refLabel}
+            </button>
+          </span>
+          <select
+            className="w-28 shrink-0 rounded border border-helios-line bg-helios-deep px-1.5 py-1 text-[11px] outline-none focus:border-asu-gold"
+            aria-label="Reference lap for the live delta"
+            title="Which lap the live delta counts against"
+            value={reference}
+            onChange={(e) => setReference(e.target.value as Reference)}
+          >
+            <option value="this">this lap</option>
+            <option value="pb" disabled={!myPb}>my PB{myPb ? ` ${fmtTime(runBest(myPb))}` : ""}</option>
+            <option value="leader" disabled={!leaderRun}>
+              leader{leaderRun ? ` ${fmtTime(runBest(leaderRun))}` : ""}
+            </option>
+          </select>
+        </div>
         <div className="mt-2 flex gap-2">
           {/* No files to show for a run that is not here. */}
           {!run.remote && (
@@ -376,31 +513,33 @@ export function RunDetail({
           {/* A local run can always be deleted from this disk. A run that is
               only on the board can be deleted only by its driver -- the
               server would refuse anybody else, so nobody else is offered it. */}
-          {(!run.remote || mine) && (confirmDelete ? (
-            <span className="inline-flex flex-1 items-center gap-1">
-              <button
-                className="flex-1 rounded bg-helios-danger px-2 py-1.5 text-[11px] font-semibold text-white"
-                onClick={() => void handleDelete()}
-              >
-                Delete for good
-              </button>
-              <button
-                className="rounded border border-helios-line px-2 py-1.5 text-[11px]"
-                onClick={() => setConfirmDelete(false)}
-              >
-                No
-              </button>
-            </span>
-          ) : (
+          {(!run.remote || mine) && (
             <button
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-1.5 text-[11px] text-helios-dim transition hover:border-helios-danger hover:text-helios-danger"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded border border-helios-line px-3 py-1.5 text-[11px] text-helios-dim transition hover:border-helios-danger hover:text-helios-danger disabled:opacity-40"
+              disabled={deleted}
               onClick={() => setConfirmDelete(true)}
             >
-              <IconTrash size={13} /> Delete run
+              <IconTrash size={13} /> {deleted ? "Deleting…" : "Delete run"}
             </button>
-          ))}
+          )}
         </div>
       </footer>
+      {/* What "delete" will actually do, said before it is done. The button
+          reads "for good" and for a while meant "from this disk": the row
+          stayed, the run came straight back with a cloud icon, and its time
+          stayed ranked. Now it means what it says where it can, and says
+          exactly how far it reaches where it cannot. */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this run?"
+          body={deleteReach()}
+          confirmLabel="Delete for good"
+          confirmTone="danger"
+          cancelLabel="Keep it"
+          onConfirm={() => { setDeleted(true); void handleDelete(); }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </aside>
   );
 
@@ -424,9 +563,22 @@ export function RunDetail({
       onDeleted(run.runId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setConfirmDelete(false);
+      setDeleted(false);
     }
   }
+}
+
+/** "Jordan — 39.100 · Sep 21 · Bicycle", marked when it is the viewer's PB. */
+function ghostLabel(g: SimRun, isPb: boolean, viewerId: string | null): string {
+  const d = g.startedAt ? new Date(g.startedAt) : null;
+  const date = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "undated";
+  const model = VEHICLE_MODELS.find((m) => m.id === vehicleModelOf(g))?.name ?? "";
+  const pb = isPb ? (viewerId && g.driverId === viewerId ? " (your PB)" : " (their PB)") : "";
+  return `${g.driver} — ${fmtTime(runBest(g))} · ${date} · ${model}${pb}`;
+}
+
+function Spinner() {
+  return <IconLoader2 size={14} className="animate-spin" aria-hidden />;
 }
 
 function aidsText(run: SimRun): string {
@@ -462,17 +614,19 @@ function Row({
   value,
   warn,
   title,
+  testId,
 }: {
   label: string;
   value: string;
   warn?: boolean;
   /** Hover text, for a value that needs a sentence to be fair to. */
   title?: string;
+  testId?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-0.5 text-xs" title={title}>
-      <span className="text-helios-dim">{label}</span>
-      <span className={"font-mono " + (warn ? "text-helios-warn" : "")}>{value}</span>
+    <div className="flex items-baseline justify-between gap-3 py-0.5 text-xs" title={title} data-testid={testId}>
+      <span className="shrink-0 text-helios-dim">{label}</span>
+      <span className={"min-w-0 text-right font-mono " + (warn ? "text-helios-warn" : "")}>{value}</span>
     </div>
   );
 }
@@ -483,9 +637,11 @@ function Row({
  * A lap time only means something next to the car that set it — the
  * differential, the brake bias and the roll distribution all move between
  * sessions — so the whole live parameter set is in the manifest and the whole
- * thing is shown, collapsed by default because it is 27 numbers.
+ * thing is shown, collapsed by default because it is 27 numbers. A teammate's
+ * shared run has no manifest here, only the run-to-run setup its best lap was
+ * set on (`stats.setup`), which is shown instead and says it is the short list.
  */
-function SetupBlock({ setup }: { setup: Record<string, number> }) {
+function SetupBlock({ setup, full }: { setup: Record<string, number>; full: boolean }) {
   const [open, setOpen] = useState(false);
   const keys = Object.keys(setup).sort();
   return (
@@ -493,8 +649,9 @@ function SetupBlock({ setup }: { setup: Record<string, number> }) {
       <button
         className="mb-1.5 flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-helios-muted transition hover:text-helios-dim"
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
       >
-        <span>Car setup ({keys.length})</span>
+        <span>{full ? "Car setup" : "Run-to-run setup"} ({keys.length})</span>
         <span>{open ? "hide" : "show"}</span>
       </button>
       {/* Two columns where there is room: this is 27 parameters, and one column

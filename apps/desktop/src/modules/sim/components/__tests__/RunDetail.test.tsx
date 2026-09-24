@@ -150,3 +150,86 @@ describe("RunDetail for a shared run", () => {
     expect(screen.getByText(/only its driver can take it down/)).toBeTruthy();
   });
 });
+
+describe("RunDetail against the board", () => {
+  beforeEach(() => {
+    readRun.mockReset();
+    readRun.mockResolvedValue({ manifest: {} });
+  });
+
+  // Current runs, so they rank: the base fixture is a 0.3.0 run, which
+  // predates the autocross slaloms and ranks nowhere.
+  const ranked = (over: Partial<SimRun>) => run({
+    simVersion: "0.7.5",
+    ...over,
+    stats: { ...run().stats, vehicleModel: 2, ...(over.stats ?? {}) },
+  });
+  const ralf = ranked({ runId: "ralf", finishedReason: "window-closed", stats: { ...run().stats, bestLapS: 41.2 } });
+  const mine = ranked({ runId: "mine", driver: "Me", driverId: "me", stats: { ...run().stats, bestLapS: 40.5 } });
+  const jordan = ranked({ runId: "jordan", driver: "Jordan", driverId: "u-j", stats: { ...run().stats, bestLapS: 39 } });
+  const fourWheel = ranked({ runId: "four", driver: "Jordan", driverId: "u-j", stats: { ...run().stats, bestLapS: 30, vehicleModel: 3 } });
+  const all = [ralf, mine, jordan, fourWheel];
+
+  it("says which board the run is on and where its driver stands", () => {
+    render(<RunDetail {...props(ralf)} allRuns={all} />);
+    expect(screen.getByText("Autocross · Bicycle · Wheel · rev 1")).toBeTruthy();
+    expect(screen.getByTestId("board-position").textContent).toMatch(/P3 of 3 · \+2\.200 to Jordan/);
+    expect(screen.getByText("Closed the simulator")).toBeTruthy();
+  });
+
+  it("offers ghosts from the same car only, your own best first, labelled", () => {
+    render(<RunDetail {...props(ralf)} allRuns={all} />);
+    const select = screen.getByRole("combobox", { name: "Ghost in replay" });
+    const options = [...select.querySelectorAll("option")].map((o) => o.textContent);
+    expect(options[0]).toBe("No ghost");
+    expect(options[1]).toMatch(/^Me — 40\.500 · .* · Bicycle \(your PB\)$/);
+    expect(options[2]).toMatch(/^Jordan — 39\.000/);
+    // The 4-wheel lap is a different car.
+    expect(options.some((o) => /30\.000/.test(o ?? ""))).toBe(false);
+  });
+
+  it("drives against the reference you pick, not whatever the ghost picker says", () => {
+    const p = props(ralf);
+    render(<RunDetail {...p} allRuns={all} />);
+    const ref = screen.getByRole("combobox", { name: "Reference lap for the live delta" });
+    fireEvent.change(ref, { target: { value: "pb" } });
+    fireEvent.click(button(/drive against your pb/i));
+    expect(p.onChase).toHaveBeenLastCalledWith(expect.objectContaining({ runId: "mine" }));
+    fireEvent.change(ref, { target: { value: "leader" } });
+    fireEvent.click(button(/drive against the leader/i));
+    expect(p.onChase).toHaveBeenLastCalledWith(expect.objectContaining({ runId: "jordan" }));
+  });
+
+  it("compares with your PB or the leader in Logs", () => {
+    const onCompareInLogs = vi.fn();
+    render(<RunDetail {...props(ralf)} allRuns={all} onCompareInLogs={onCompareInLogs} />);
+    fireEvent.click(button(/my PB 40\.500/));
+    expect(onCompareInLogs).toHaveBeenLastCalledWith(ralf, mine, "my PB");
+    fireEvent.click(button(/leader 39\.000/));
+    expect(onCompareInLogs).toHaveBeenLastCalledWith(ralf, jordan, "leader");
+  });
+
+  it("gives a lap that went off course no time, and measures no gap from it", () => {
+    const r = ranked({
+      runId: "en", track: "endurance", trackName: "Endurance 2026",
+      laps: [
+        { lap: 1, raw: 60, cones: 0, off: 1, total: 60, valid: false, sectors: [], startedAtS: 0 },
+        { lap: 2, raw: 62, cones: 0, off: 0, total: 62, valid: true, sectors: [], startedAtS: 60 },
+        { lap: 3, raw: 61, cones: 0, off: 0, total: 61, valid: true, sectors: [], startedAtS: 122 },
+      ],
+      stats: { ...run().stats, laps: 3, bestLapS: 61, bestLapNumber: 3, totalOffCourse: 1 },
+    });
+    render(<RunDetail {...props(r)} allRuns={[r]} />);
+    const off = screen.getByTestId("lap-row-off");
+    expect(off.textContent).toMatch(/no time \(off course\)/);
+    expect(off.querySelector(".line-through")?.textContent).toBe("1:00.000");
+    // Lap 2's gap is to lap 3, the best lap that counts: +1.000, not to lap 1.
+    const counted = screen.getAllByTestId("lap-row");
+    expect(counted[0]!.textContent).toMatch(/\+1\.000/);
+  });
+
+  it("shows a shared run's setup from its row when there is no manifest here", () => {
+    render(<RunDetail {...props(shared({ stats: { ...run().stats, setup: { brakeBiasFront: 0.62, "roll.rsdFront": 0.5 } } }))} />);
+    expect(screen.getByText("Run-to-run setup (2)")).toBeTruthy();
+  });
+});

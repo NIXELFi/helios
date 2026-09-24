@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconChartLine, IconChevronDown, IconChevronRight, IconCloud, IconMovie, IconSearch,
-  IconRobot,
+  IconChartLine, IconChevronDown, IconChevronRight, IconCloud, IconFilterOff, IconListDetails, IconLoader2,
+  IconMovie, IconSearch, IconRobot,
 } from "@tabler/icons-react";
+import { EmptyState } from "../../../components/EmptyState";
 import {
-  TRACKS, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, runTheoretical, trackName, unrankedReason, type SimRun,
+  TRACKS, bestLapWentOffCourse, fmtTime, fmtWhen, hasTelemetry, isRankable, runBest, runTheoretical, trackName,
+  unrankedReason, unrankedShort, type SimRun,
 } from "../api";
-import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { bestPerCourse } from "../lib/leaderboard";
+import { InfoPopover, SharingPolicy } from "./InfoPopover";
+import { isPending, type Pending } from "./pending";
 
 type SortKey = "when" | "best" | "driver" | "track";
 
@@ -27,7 +31,9 @@ const view: {
   rankedOnly: boolean;
   mineOnly: boolean;
   opened: Set<string>;
-} = { query: "", track: "all", sort: "when", rankedOnly: false, mineOnly: false, opened: new Set() };
+  /** The newest day already opened on the viewer's behalf. See `autoOpen`. */
+  autoOpened: string | null;
+} = { query: "", track: "all", sort: "when", rankedOnly: false, mineOnly: false, opened: new Set(), autoOpened: null };
 
 /** Forget it. Exported for the tests, which must not inherit each other's view. */
 export function resetRunsView(): void {
@@ -37,6 +43,7 @@ export function resetRunsView(): void {
   view.rankedOnly = false;
   view.mineOnly = false;
   view.opened = new Set();
+  view.autoOpened = null;
 }
 
 interface Props {
@@ -49,6 +56,8 @@ interface Props {
   /** The signed-in account, so "just mine" can mean something. Null when
    *  signed out, which hides that filter rather than showing an empty one. */
   driverId?: string | null;
+  /** A button waiting on a download, so it can say so. */
+  pending?: Pending | null;
 }
 
 /**
@@ -74,7 +83,7 @@ function dayOf(run: SimRun): { key: string; label: string } {
 }
 
 export function RunsTable({
-  runs, selectedId, onSelect, onReplay, onOpenInLogs, canReplay, driverId,
+  runs, selectedId, onSelect, onReplay, onOpenInLogs, canReplay, driverId, pending = null,
 }: Props) {
   const [query, setQuery] = useState(view.query);
   const [track, setTrack] = useState<string>(view.track);
@@ -171,16 +180,25 @@ export function RunsTable({
   }, [shown, sort]);
 
   /**
-   * Every day starts closed.
+   * Days start closed -- except the newest one, when some of it is yours.
    *
    * This table is the whole team's archive, so on a shared machine the newest
-   * day is somebody else's session as often as it is yours. Opening it by
-   * default spends the top of the page on rows nobody asked for; a list of
-   * day headers fits on one screen and says what is there.
-   *
-   * One "is open" set and nothing else: a day is open because it was clicked.
-   * A new day arriving while the table is up does not open itself.
+   * day is somebody else's session as often as it is yours, and opening it
+   * for everyone spends the top of the page on rows nobody asked for. But a
+   * driver who has just driven comes here to see THOSE runs, and making them
+   * click a header first is a click every single time. So the newest day
+   * opens itself when it holds a run of the signed-in driver's, once: close
+   * it and it stays closed, and only a newer day of yours opens by itself.
    */
+  const newest = groups?.[0];
+  const autoOpen = !!newest && !!driverId && view.autoOpened !== newest.key
+    && newest.runs.some((r) => r.driverId === driverId);
+  useEffect(() => {
+    if (!autoOpen || !newest) return;
+    view.autoOpened = newest.key;
+    setOpened((prev) => (prev.has(newest.key) ? prev : new Set(prev).add(newest.key)));
+  }, [autoOpen, newest]);
+
   const isOpen = (key: string) => opened.has(key);
 
   const toggleDay = (key: string) => {
@@ -195,10 +213,10 @@ export function RunsTable({
   /**
    * A run picked somewhere else has to be visible when you land here.
    *
-   * The leaderboard and the end-of-session summary both set `selectedId` and
-   * switch to this tab, and with every day rolled up by default the row they
-   * selected is inside a closed one: you click your best lap and arrive at a
-   * table where nothing is highlighted. Open its day and scroll to it.
+   * The end-of-session summary sets `selectedId` and switches to this tab,
+   * and with days rolled up by default the row it selected may be inside a
+   * closed one: you click your best lap and arrive at a table where nothing
+   * is highlighted. Open its day and scroll to it.
    */
   const selectedRow = useRef<HTMLTableRowElement | null>(null);
   useEffect(() => {
@@ -217,10 +235,6 @@ export function RunsTable({
 
   const allOpen = !!groups?.length && groups.every((g) => opened.has(g.key));
 
-  /** The rows actually on screen — grouped means only the open days' runs. */
-  const visible = groups
-    ? groups.filter((g) => opened.has(g.key)).flatMap((g) => g.runs)
-    : shown;
   const toggleAll = () => {
     if (!groups) return;
     // Per visible group rather than wholesale: "Collapse all" with a filter on
@@ -239,16 +253,30 @@ export function RunsTable({
   /** One run's row. Shared by the grouped and the flat renderings. */
   const renderRow = (r: SimRun) => {
     const reason = unrankedReason(r);
+    const short = unrankedShort(r);
+    const best = runBest(r);
+    const wentOff = best == null && bestLapWentOffCourse(r);
     const selected = r.runId === selectedId;
+    const busy = isPending(pending, r.runId);
     return (
       <tr
         key={r.runId}
         ref={selected ? selectedRow : undefined}
+        tabIndex={0}
+        aria-selected={selected}
+        aria-label={`${r.driver}, ${r.trackName}, ${best != null ? fmtTime(best) : wentOff ? "off course" : "no time"}${short ? `, not ranked: ${short}` : ""}`}
         className={
-          "cursor-pointer border-b border-helios-line/60 transition " +
+          "cursor-pointer border-b border-helios-line/60 transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold " +
           (selected ? "bg-asu-gold/10" : "hover:bg-helios-line/25")
         }
         onClick={() => onSelect(r)}
+        onKeyDown={(e) => {
+          // Enter opens the run, as a click does. Only when the row itself has
+          // focus: Enter on one of its buttons belongs to the button.
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          onSelect(r);
+        }}
       >
         <Td>
           <span className="flex items-center gap-1.5">
@@ -270,10 +298,26 @@ export function RunsTable({
         </Td>
         <Td>{r.trackName}</Td>
         <Td className="text-right font-mono">
-          <span className={reason ? "text-helios-dim" : "text-asu-gold"} title={reason ?? undefined}>
-            {fmtTime(runBest(r))}
+          <span className="inline-flex items-center justify-end gap-1.5">
+            {/* A lap thrown out for leaving the course says so, in the same
+                words as everywhere else, instead of a dash and an asterisk. */}
+            {wentOff ? (
+              <span className="font-sans text-[11px] text-helios-warn" title={reason ?? undefined}>off course</span>
+            ) : (
+              <span className={reason ? "text-helios-dim" : "text-asu-gold"}>{fmtTime(best)}</span>
+            )}
+            {short && !wentOff && (
+              // Visible, not hover-only: why a time is not on the board is the
+              // first question anybody has about it.
+              <span
+                className="whitespace-nowrap rounded bg-helios-line/70 px-1 py-px font-sans text-[10px] text-helios-dim"
+                title={reason ? `Not ranked: ${reason}` : undefined}
+                data-testid="unranked-chip"
+              >
+                {short}
+              </span>
+            )}
           </span>
-          {reason && <span className="ml-1 text-[10px] text-helios-muted">*</span>}
         </Td>
         <Td className="text-right font-mono text-helios-dim">
           {fmtTime(runTheoretical(r))}
@@ -289,7 +333,7 @@ export function RunsTable({
         </Td>
         <Td className="whitespace-nowrap text-helios-dim">{fmtWhen(r.startedAt)}</Td>
         <Td className="text-right">
-          <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()}>
+          <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             {/* A shared run has no files here yet. It can still be opened --
                 clicking fetches it first -- but only if the driver shared the
                 lap and not just its time, which is the usual case for
@@ -304,7 +348,8 @@ export function RunsTable({
                       ? `Fetch ${r.driver}'s lap and watch it`
                       : "Watch the replay"
               }
-              disabled={!canReplay || !hasTelemetry(r)}
+              disabled={!canReplay || !hasTelemetry(r) || busy}
+              busy={isPending(pending, r.runId, "replay")}
               onClick={() => onReplay(r)}
             >
               <IconMovie size={14} />
@@ -319,11 +364,12 @@ export function RunsTable({
               title={
                 hasTelemetry(r)
                   ? r.remote
-                    ? `Fetch ${r.driver}'s lap and open it in Logs`
-                    : "Open the telemetry in Logs"
+                    ? `Fetch ${r.driver}'s lap and open its best lap in Logs`
+                    : "Open the best lap in Logs"
                   : "This run has no telemetry file"
               }
-              disabled={!hasTelemetry(r)}
+              disabled={!hasTelemetry(r) || busy}
+              busy={isPending(pending, r.runId, "logs")}
               onClick={() => onOpenInLogs(r)}
             >
               <IconChartLine size={14} />
@@ -342,12 +388,14 @@ export function RunsTable({
           <input
             className="w-56 rounded border border-helios-line bg-helios-deep py-1.5 pl-8 pr-2 text-xs outline-none transition focus:border-asu-gold"
             placeholder="Driver, course, session…"
+            aria-label="Search runs"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
         <select
           className="rounded border border-helios-line bg-helios-deep px-2 py-1.5 text-xs outline-none focus:border-asu-gold"
+          aria-label="Course"
           value={track}
           onChange={(e) => setTrack(e.target.value)}
         >
@@ -356,6 +404,7 @@ export function RunsTable({
         </select>
         <select
           className="rounded border border-helios-line bg-helios-deep px-2 py-1.5 text-xs outline-none focus:border-asu-gold"
+          aria-label="Sort"
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
         >
@@ -384,7 +433,7 @@ export function RunsTable({
             Just mine
           </label>
         )}
-        {/* Shown for one day as well as many: with every day rolled up by
+        {/* Shown for one day as well as many: with days rolled up by
             default, a single-session archive would otherwise offer no way to
             open it but clicking the header, which nothing says is clickable. */}
         {groups && groups.length > 0 && (
@@ -395,18 +444,23 @@ export function RunsTable({
             {allOpen ? "Collapse all" : "Expand all"}
           </button>
         )}
-        <span className="ml-auto text-xs text-helios-muted">
+        <span className="ml-auto flex items-center gap-2 text-xs text-helios-muted">
+          <InfoPopover label="What gets shared" align="right"><SharingPolicy /></InfoPopover>
           {shown.length} of {runs.length}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {shown.length === 0 ? (
-          <p className="p-8 text-center text-sm text-helios-dim">
-            {runs.length === 0
-              ? "No runs recorded yet. Launch the simulator and drive one."
-              : "Nothing matches that filter."}
-          </p>
+          runs.length === 0 ? (
+            <EmptyState
+              Icon={IconListDetails}
+              title="No runs recorded yet"
+              hint="Launch the simulator and drive a lap; the run files itself here."
+            />
+          ) : (
+            <EmptyState Icon={IconFilterOff} title="Nothing matches that filter" />
+          )
         ) : (
           <table className="w-full border-collapse text-xs">
             <thead className="sticky top-0 z-10 bg-helios-strip">
@@ -425,16 +479,13 @@ export function RunsTable({
             {groups ? (
               groups.map((g) => {
                 const open = isOpen(g.key);
-                const best = g.runs.reduce<number | null>((b, r) => {
-                  const t = runBest(r);
-                  return t != null && (b == null || t < b) ? t : b;
-                }, null);
+                const bests = bestPerCourse(g.runs);
                 const laps = g.runs.reduce((a, r) => a + (r.stats.laps ?? 0), 0);
                 return (
                   <tbody key={g.key}>
-                    {/* A real control, not a clickable row: it is now the only
-                        way to reach a run, so it has to be reachable from a
-                        keyboard and has to say whether it is open. */}
+                    {/* A real control, not a clickable row: it is the way to
+                        reach a run, so it has to be reachable from a keyboard
+                        and has to say whether it is open. */}
                     <tr
                       className="cursor-pointer border-b border-helios-line bg-helios-strip/70 transition hover:bg-helios-line/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold"
                       role="button"
@@ -455,8 +506,19 @@ export function RunsTable({
                             {g.runs.length} run{g.runs.length === 1 ? "" : "s"}
                             {laps ? ` · ${laps} lap${laps === 1 ? "" : "s"}` : ""}
                           </span>
-                          {best != null && (
-                            <span className="ml-auto font-mono text-asu-gold">{fmtTime(best)}</span>
+                          {/* Best per course. One minimum across courses put a
+                              single 4.352 accel run above forty autocross laps
+                              as "the day's best". */}
+                          {bests.length > 0 && (
+                            <span className="ml-auto truncate font-mono" data-testid="day-bests">
+                              {bests.map((c, i) => (
+                                <span key={c.track}>
+                                  {i > 0 && <span className="text-helios-muted"> · </span>}
+                                  <span className="font-sans text-helios-muted">{c.short}</span>{" "}
+                                  <span className="text-asu-gold">{fmtTime(c.best)}</span>
+                                </span>
+                              ))}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -471,24 +533,6 @@ export function RunsTable({
           </table>
         )}
       </div>
-
-      {/* Only when a starred row is actually rendered. With every day rolled up
-          this used to explain an asterisk that was nowhere on the page. */}
-      {visible.some((r) => unrankedReason(r)) && (
-        <p className="border-t border-helios-line px-3 py-1.5 text-[11px] text-helios-muted">
-          * not ranked — started outside Helios, went off course, driver aids were on,
-          the robot driver set it, or no lap was completed. Hover a time for the reason.
-        </p>
-      )}
-      {/* What the team gets and what it does not. Asked often enough to be
-          printed once, where the runs are. */}
-      <p className="border-t border-helios-line px-3 py-1.5 text-[11px] text-helios-muted">
-        Every run&rsquo;s time is shared with the team as soon as it is driven. The lap
-        itself is uploaded only for your best {KEEP_BEST} and latest {KEEP_RECENT} on each
-        fixed course, and your best {GEN_KEEP_BEST} and latest {GEN_KEEP_RECENT} on a
-        generated one; older laps leave the team&rsquo;s copy as new ones take their place, and
-        never leave this machine.
-      </p>
     </div>
   );
 }
@@ -502,17 +546,20 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 }
 
 function IconBtn({
-  children, title, onClick, disabled,
-}: { children: React.ReactNode; title: string; onClick: () => void; disabled?: boolean }) {
+  children, title, onClick, disabled, busy,
+}: { children: React.ReactNode; title: string; onClick: () => void; disabled?: boolean; busy?: boolean }) {
   return (
     <button
-      title={title}
+      title={busy ? "Working…" : title}
       aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
+      aria-busy={busy || undefined}
+      // The working button stays at full strength with its spinner; its
+      // neighbours for the same run are disabled until it is done.
+      disabled={disabled && !busy}
+      onClick={() => { if (!busy) onClick(); }}
       className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
     >
-      {children}
+      {busy ? <IconLoader2 size={14} className="animate-spin text-asu-gold" /> : children}
     </button>
   );
 }

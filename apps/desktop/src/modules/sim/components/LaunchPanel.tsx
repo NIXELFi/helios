@@ -18,7 +18,8 @@ import {
   type GeneratedEvent, type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
 } from "../api";
 import { VEHICLE_MODELS, type VehicleModel } from "../api";
-import { GEN_KEEP_BEST, GEN_KEEP_RECENT, KEEP_BEST, KEEP_RECENT } from "../lib/share";
+import { simInfo } from "../lib/toast";
+import { InfoPopover, SharingPolicy } from "./InfoPopover";
 import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
 
 // Kept here as well: the tests and older callers import it from this module.
@@ -114,16 +115,21 @@ interface Props {
    *  state in which a run cannot be started at all. */
   driver: { id: string; name: string } | null;
   onStatusChange: (s: SimStatus) => void;
-  onLaunched: () => void;
+  /** A drive was sent to the simulator; `what` says which, in words. */
+  onLaunched: (what: string) => void;
+  /** What the simulator Helios started is doing, until it exits; owned by
+   *  SimHome, which hears `sim://exited`. Null when nothing is running. */
+  running?: string | null;
+  /** Open the Shell's sign-in dialog. */
+  onSignIn?: () => void;
   /** The automatic update, owned by SimHome so it runs whichever tab is up. */
   update: AutoUpdateState;
 }
 
-export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update }: Props) {
+export function LaunchPanel({ status, driver, onStatusChange, onLaunched, running = null, onSignIn, update }: Props) {
   const [prefs, setPrefs] = useState<LaunchPrefs>(readPrefs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<string | null>(null);
 
   function set<K extends keyof LaunchPrefs>(key: K, value: LaunchPrefs[K]) {
     setPrefs((p) => {
@@ -137,7 +143,6 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
     if (!driver) return;
     setBusy(true);
     setError(null);
-    setSent(null);
     const track = courseFor(prefs);
     const req: LaunchRequest = {
       track,
@@ -154,9 +159,12 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
       noRecord: !prefs.record,
     };
     try {
-      const res = await simLaunch(req);
-      setSent(`${trackName(track)} · pid ${res.pid}`);
-      onLaunched();
+      await simLaunch(req);
+      // In words a driver uses. The process id it used to print is for
+      // whoever is debugging the launcher, not for the person in the seat.
+      const what = `${trackName(track)} · ${VEHICLE_MODELS.find((m) => m.id === prefs.vehicleModel)?.name ?? "car"}`;
+      simInfo(`Sent to simulator: ${what}`);
+      onLaunched(what);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -196,14 +204,31 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
       {ready && <UpdateBanner status={status} update={update} />}
 
       <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
-        <h3 className="mb-1 text-sm font-semibold">Start a run</h3>
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3 className="text-sm font-semibold">Start a run</h3>
+          <span className="ml-auto flex items-center gap-1">
+            <InfoPopover label="What gets shared" align="right"><SharingPolicy /></InfoPopover>
+            <InfoPopover label="Rig settings" align="right">
+              {/* Was a whole card at the foot of the page. It is a thing a
+                  driver needs to hear once, not scroll past every visit. */}
+              <span className="block">
+                Helios decides what a run <em>is</em>: who, which course, which aids. How the
+                rig <em>feels</em> belongs to the simulator, because those are numbers you can
+                only get right with the wheel in your hands: the control mapping and rotation,
+                force-feedback gain, pedal calibration, the throttle map, the camera. Set them
+                on the simulator&rsquo;s own Controls and Car tabs and they stay with that rig.
+              </span>
+              <span className="mt-2 block text-helios-muted">
+                What you choose here applies to the run you launch and is not written over the
+                rig&rsquo;s own settings, so launching as yourself doesn&rsquo;t leave the next
+                person driving under your name.
+              </span>
+            </InfoPopover>
+          </span>
+        </div>
         <p className="mb-4 text-xs text-helios-dim">
-          The simulator records everything at 100&nbsp;Hz and files it here. Every run&rsquo;s
-          time goes on the team board. The lap itself is uploaded only for your best{" "}
-          {KEEP_BEST} and latest {KEEP_RECENT} on each fixed course ({GEN_KEEP_BEST} and{" "}
-          {GEN_KEEP_RECENT} on a generated one) &mdash; older laps are removed
-          from the team&rsquo;s copy as new ones take their place, and always stay on this
-          machine.
+          The simulator records everything at 100&nbsp;Hz and files it here, and the time goes on
+          the team board.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -225,6 +250,15 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
                 <>
                   <IconLock size={15} className="shrink-0" />
                   <span>Not signed in</span>
+                  {onSignIn && (
+                    <button
+                      type="button"
+                      className="ml-auto rounded bg-asu-gold px-2 py-0.5 text-[11px] font-semibold text-helios-on-gold transition hover:brightness-110"
+                      onClick={(e) => { e.preventDefault(); onSignIn(); }}
+                    >
+                      Sign in
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -372,11 +406,20 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
         {!driver && (
           <p className="mt-4 flex items-start gap-2 rounded border border-helios-danger/30 bg-helios-danger/10 px-3 py-2 text-xs text-helios-danger">
             <IconLock size={14} className="mt-0.5 shrink-0" />
-            <span>
+            <span className="min-w-0 flex-1">
               Sign in to drive. A lap time is a claim about a person, so the driver is
               your Helios account rather than something typed into a box &mdash; which is
               what lets the leaderboard trust it.
             </span>
+            {onSignIn && (
+              <button
+                type="button"
+                className="shrink-0 rounded bg-asu-gold px-3 py-1 text-xs font-semibold text-helios-on-gold transition hover:brightness-110"
+                onClick={onSignIn}
+              >
+                Sign in
+              </button>
+            )}
           </p>
         )}
 
@@ -394,25 +437,11 @@ export function LaunchPanel({ status, driver, onStatusChange, onLaunched, update
             <IconPlayerPlayFilled size={15} />
             {busy ? "Starting…" : update.installing ? "Updating…" : "Launch simulator"}
           </button>
-          {sent && <span className="text-xs text-helios-success">Running — {sent}</span>}
+          {/* Until the simulator closes (SimHome hears `sim://exited`), not
+              for as long as this tab happens to stay mounted. */}
+          {running && <span className="text-xs text-helios-success" data-testid="launch-running">Running — {running}</span>}
           {error && <span className="text-xs text-helios-danger">{error}</span>}
         </div>
-      </section>
-
-      <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
-        <h3 className="mb-1 text-sm font-semibold">Set up in the simulator, not here</h3>
-        <p className="text-xs leading-relaxed text-helios-dim">
-          Helios decides what a run <em>is</em> — who, which course, which aids. How the
-          rig <em>feels</em> belongs to the simulator, because those are numbers you can
-          only get right with the wheel in your hands: the control mapping and rotation,
-          force-feedback gain, pedal calibration, the throttle map, the camera. Set them
-          on the simulator&rsquo;s own Controls and Car tabs and they stay with that rig.
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-helios-muted">
-          What you choose here applies to the run you launch and is not written over the
-          rig&rsquo;s own settings — so launching as yourself doesn&rsquo;t leave the next
-          person driving under your name.
-        </p>
       </section>
 
       <SimLocation status={status} onPick={pickExe} onStatusChange={onStatusChange} />

@@ -7,7 +7,7 @@
  * not anything had changed. And deleting a run removed its directory and
  * left its row, so the run came straight back from the server with a cloud
  * icon, still ranked. */
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type { SimRun } from "../api";
@@ -69,6 +69,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) })
 import { SimHome } from "../SimHome";
 import * as api from "../api";
 import * as share from "../lib/share";
+import { simToasts } from "../lib/toast";
 
 // Today, so the runs table has one day to open. See RunsTable.test.tsx.
 const today = (hour: number) => {
@@ -142,11 +143,12 @@ describe("SimHome", () => {
     const { container } = render(<SimHome active />);
     await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
 
-    // Open the day, select the run, delete it.
-    fireEvent.click(container.querySelector("tbody tr")!);
+    // The newest day holds the signed-in driver's run, so it is already
+    // open. Select the run, delete it.
+    expect(container.querySelector("tbody tr")?.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(screen.getByText("Sam"));
     fireEvent.click(screen.getByRole("button", { name: /delete run/i }));
-    fireEvent.click(screen.getByRole("button", { name: /delete for good/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete for good/i }));
     await waitFor(() => expect(deleteRun).toHaveBeenCalledWith("a"));
     await waitFor(() => expect(deleteShared).toHaveBeenCalledWith(expect.anything(), "a"));
     // Gone from the table now -- not re-merged from the shared copy with a
@@ -268,5 +270,76 @@ describe("watching a sector record", () => {
     await waitFor(() => expect(api.simLaunch).toHaveBeenCalledWith({
       replay: "mine-local", ghost: undefined, replayLap: undefined, ghostLap: undefined, sector: undefined,
     }));
+  });
+});
+
+describe("what the Sim header and toasts say", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    listRuns.mockReset();
+    fetchShared.mockReset();
+    push.mockClear();
+    vi.mocked(api.simLaunch).mockReset();
+    simToasts.reset();
+  });
+  afterEach(() => { simToasts.reset(); });
+
+  it("opens a run's best lap in Logs as Main, in the lap-analysis workspace", async () => {
+    listRuns.mockImplementation(async () => [run({ runId: "a" })]);
+    fetchShared.mockResolvedValue([]);
+    const seen: unknown[] = [];
+    const h = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("helios:open-in-logs", h);
+    try {
+      render(<SimHome active />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open the best lap in Logs" }));
+      await waitFor(() => expect(seen).toHaveLength(1));
+    } finally {
+      window.removeEventListener("helios:open-in-logs", h);
+    }
+    // It used to send the path alone, and Logs opened the file on its out lap.
+    expect(seen[0]).toMatchObject({
+      paths: ["C:/runs/a/telemetry.csv"],
+      labels: ["Sam — Autocross 2026"],
+      selection: { main: { path: "C:/runs/a/telemetry.csv", lap: 1 }, workspace: "lap-analysis" },
+    });
+  });
+
+  it("keeps a failed launch on screen until it is dismissed", async () => {
+    listRuns.mockImplementation(async () => [run({ runId: "a" })]);
+    fetchShared.mockResolvedValue([]);
+    vi.mocked(api.simLaunch).mockRejectedValue(new Error("the simulator would not start"));
+    render(<SimHome active />);
+    fireEvent.click(await screen.findByRole("button", { name: "Watch the replay" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/would not start/);
+    // Not wiped by the next good read of the archive, which is what the old
+    // header line did.
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.getByRole("alert")).toBeTruthy();
+    fireEvent.click(within(alert).getByRole("button", { name: /dismiss/i }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says when the team's runs were last read, and when the rig is offline", async () => {
+    listRuns.mockImplementation(async () => [run({ runId: "a" })]);
+    fetchShared.mockResolvedValue([]);
+    const { unmount } = render(<SimHome active />);
+    await waitFor(() => expect(screen.getByTestId("sync-pill").textContent).toMatch(/Synced just now/));
+    unmount();
+
+    fetchShared.mockRejectedValue(new Error("fetch failed"));
+    render(<SimHome active />);
+    await waitFor(() => expect(screen.getByTestId("sync-pill").textContent).toMatch(/Offline — showing this machine only/));
+    expect(screen.getByTestId("sync-pill").getAttribute("title")).toMatch(/fetch failed/);
+  });
+
+  it("marks the tabs as tabs", async () => {
+    listRuns.mockImplementation(async () => []);
+    fetchShared.mockResolvedValue([]);
+    render(<SimHome active />);
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["Launch", "Runs", "Leaderboard"]);
+    expect(screen.getByRole("tab", { name: /Runs/ }).getAttribute("aria-selected")).toBe("true");
   });
 });

@@ -1,22 +1,40 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { IconChartLine, IconMovie, IconTrendingUp, IconTrophy, IconX } from "@tabler/icons-react";
 import {
-  fmtGap, fmtTime, fmtWhen, parseGeneratedId, physicsEraOf, setupItems, unrankedReason, vehicleModelOf,
-  VEHICLE_MODELS, type SimRun, type VehicleModel,
+  IconChartLine, IconCloudOff, IconLoader2, IconLogin, IconMovie, IconStopwatch, IconTrendingUp, IconTrophy, IconX,
+} from "@tabler/icons-react";
+import { EmptyState } from "../../../components/EmptyState";
+import {
+  fmtGap, fmtTime, fmtWhen, hasTelemetry, parseGeneratedId, physicsEraOf, setupItems, unrankedReason,
+  vehicleModelOf, VEHICLE_MODELS, type SimRun, type VehicleModel,
 } from "../api";
 import {
-  buildActivity, buildBoards, buildConsistencyBoards, buildImprovements,
-  compareOwnSector, compareRecord,
+  bestWatchable, boardLabel, buildActivity, buildBoards, buildConsistencyBoards, buildImprovements, buildRecentRecords,
+  compareOwnSector, compareRecord, courseName,
   CONSISTENCY_MIN_RUNS, CONSISTENCY_WINDOW,
-  type ConsistencyBoard, type SectorComparison, type SectorTime, type TrackBoard,
+  type ConsistencyBoard, type DriverEntry, type RecordEvent, type SectorComparison, type SectorTime, type TrackBoard,
 } from "../lib/leaderboard";
 import { DEVICE_CLASSES, deviceClass, type DeviceClass } from "../api";
+import { isPending, type Pending } from "./pending";
 
 interface Props {
   runs: SimRun[];
   canReplay: boolean;
+  /** Open a run in the detail panel beside the board. */
   onOpenRun: (runId: string) => void;
   onReplayRun: (runId: string) => void;
+  /** Drive against this run's best lap (the live delta's reference). */
+  onChaseRun?: (runId: string) => void;
+  /** Open `runId`'s best lap in Logs as Main, `againstId`'s as Ref. */
+  onCompareRuns?: (runId: string, againstId: string, tag: string) => void;
+  /** The run open in the detail panel, so its row can say so. */
+  selectedId?: string | null;
+  /** The detail panel is open beside the board: one board per row. */
+  compact?: boolean;
+  /** A button waiting on a download, so it can say so. */
+  pending?: Pending | null;
+  /** Whether team times are in the list at all. */
+  teamState?: "ok" | "offline" | "signed-out";
+  onSignIn?: () => void;
   /** The signed-in driver, whose laps a sector is compared with. */
   driverId?: string | null;
   /** Watch a sector in the simulator, the driver's own lap as the ghost. */
@@ -49,7 +67,8 @@ export type BoardScope = "competition" | "generated";
 export const isGeneratedRun = (r: Pick<SimRun, "track">): boolean => parseGeneratedId(r.track) !== null;
 
 export function Leaderboard({
-  runs: allRuns, canReplay, onOpenRun, onReplayRun,
+  runs: allRuns, canReplay, onOpenRun, onReplayRun, onChaseRun, onCompareRuns,
+  selectedId = null, compact = false, pending = null, teamState = "ok", onSignIn,
   driverId = null, onWatchSector, onCompareSector, onLaunchCourse,
 }: Props) {
   const [scope, setScope] = useState<BoardScope>("competition");
@@ -155,6 +174,83 @@ export function Leaderboard({
   const [mode, setMode] = useState<"fastest" | "average">("fastest");
   const improvements = useMemo(() => buildImprovements(shown), [shown]);
   const activity = useMemo(() => buildActivity(shown), [shown]);
+  const records = useMemo(() => buildRecentRecords(shown, 6), [shown]);
+
+  /** A board row as a keyboard reaches it: focusable, Enter opens the run. */
+  const rowKeys = (runId: string) => ({
+    tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+      if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      onOpenRun(runId);
+    },
+  });
+  /** The row tint: yours is marked, the open one more strongly. */
+  const rowTint = (e: { driverId: string; runId: string }) =>
+    e.runId === selectedId
+      ? " bg-asu-gold/15"
+      : driverId && e.driverId === driverId
+        ? " bg-asu-gold/[0.07] shadow-[inset_2px_0_0_0_rgb(var(--asu-gold)/0.8)]"
+        : "";
+
+  /**
+   * The Chase and Compare buttons on a board row.
+   *
+   * Chase drives against that lap. Compare puts it beside yours in Logs --
+   * your best on the same board -- or, on your own row, beside the leader's.
+   */
+  const rowActions = (b: TrackBoard, e: DriverEntry, mruns: SimRun[]) => {
+    const run = mruns.find((r) => r.runId === e.runId);
+    const own = !!driverId && e.driverId === driverId;
+    const lapHere = !!run && hasTelemetry(run);
+    const noLap = run?.remote
+      ? `${e.driver} shared this time, not the lap itself`
+      : "This lap's telemetry is not stored";
+    const leaderRun = b.entries[0] && b.entries[0].runId !== e.runId
+      ? mruns.find((r) => r.runId === b.entries[0]!.runId) ?? null
+      : null;
+    const against = own
+      ? (leaderRun && hasTelemetry(leaderRun) ? leaderRun : null)
+      : run && driverId ? bestWatchable(mruns, run, driverId) : null;
+    const chaseWhy = !driverId ? "Sign in to Helios to start a run"
+      : !lapHere ? noLap
+      : !canReplay ? "The simulator is not installed here"
+      : null;
+    const compareWhy = !lapHere ? noLap
+      : !driverId ? "Sign in to compare it with your own laps"
+      : !against
+        ? own
+          ? e.rank === 1 ? "You hold the record: there is nothing quicker to compare with" : "The leader's lap is not stored, so there is nothing to compare with"
+          : "You have no lap with telemetry on this board to compare with"
+        : null;
+    const busy = isPending(pending, e.runId);
+    return (
+      <>
+        {onChaseRun && (
+          <IconAction
+            label={chaseWhy ?? `Drive against ${own ? "your" : `${e.driver}'s`} ${fmtTime(e.best)}`}
+            disabled={!!chaseWhy || busy}
+            busy={isPending(pending, e.runId, "chase")}
+            onClick={() => onChaseRun(e.runId)}
+          >
+            <IconStopwatch size={14} />
+          </IconAction>
+        )}
+        {onCompareRuns && (
+          <IconAction
+            label={compareWhy ?? (own
+              ? `Compare your best with the leader's in Logs`
+              : `Compare ${e.driver}'s lap with your best in Logs`)}
+            disabled={!!compareWhy || busy}
+            busy={isPending(pending, e.runId, "compare")}
+            onClick={() => against && onCompareRuns(e.runId, against.runId, own ? "leader" : "my PB")}
+          >
+            <IconChartLine size={14} />
+          </IconAction>
+        )}
+      </>
+    );
+  };
 
   const scopeTabs = generatedCount > 0 && (
     <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Courses">
@@ -185,6 +281,11 @@ export function Leaderboard({
       </span>
     </div>
   );
+
+  /** A small "you" beside the viewer's own name, so the tint is not the only cue. */
+  const you = (id: string) => (driverId && id === driverId
+    ? <span className="ml-1.5 rounded bg-asu-gold/20 px-1 align-middle text-[10px] font-normal text-asu-gold">you</span>
+    : null);
 
   const renderAverage = (b: ConsistencyBoard, modelName: string, whyNot: string) => (
         <section className="rounded-lg border border-helios-line bg-helios-panel">
@@ -232,11 +333,12 @@ export function Leaderboard({
                 {b.entries.map((e) => (
                   <tr
                     key={e.driverId}
-                    className="cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    className={"cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold" + rowTint(e)}
                     onClick={() => onOpenRun(e.runId)}
+                    {...rowKeys(e.runId)}
                   >
                     <td className="px-5 py-2 font-mono text-helios-dim">{e.rank}</td>
-                    <td className="whitespace-nowrap py-2 font-medium">{e.driver}</td>
+                    <td className="whitespace-nowrap py-2 font-medium">{e.driver}{you(e.driverId)}</td>
                     <td className={"px-2 py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
                       {fmtTime(e.average)}
                     </td>
@@ -326,11 +428,12 @@ export function Leaderboard({
                   return (
                   <Fragment key={e.driverId}>
                   <tr
-                    className="group cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25"
+                    className={"group cursor-pointer border-t border-helios-line/60 transition hover:bg-helios-line/25 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold" + rowTint(e)}
                     onClick={() => onOpenRun(e.runId)}
+                    {...rowKeys(e.runId)}
                   >
                     <td className={"px-5 font-mono text-helios-dim " + (hasSetup ? "pt-2" : "py-2")}>{e.rank}</td>
-                    <td className={"whitespace-nowrap font-medium " + (hasSetup ? "pt-2" : "py-2")}>{e.driver}</td>
+                    <td className={"whitespace-nowrap font-medium " + (hasSetup ? "pt-2" : "py-2")}>{e.driver}{you(e.driverId)}</td>
                     <td className={"px-2 py-2 text-right font-mono " + (e.rank === 1 ? "text-asu-gold" : "")}>
                       {fmtTime(e.best)}
                     </td>
@@ -360,18 +463,21 @@ export function Leaderboard({
                     <td className="px-2 py-2 text-right font-mono text-helios-dim">{e.runs}</td>
                     <td className="hidden whitespace-nowrap py-2 pl-2 text-helios-dim 2xl:table-cell">{fmtWhen(e.when)}</td>
                     <td className="px-5 py-2 text-right">
-                      <button
-                        title={canReplay ? "Watch that lap" : "The simulator is not installed here"}
-                        disabled={!canReplay}
-                        onClick={(ev) => { ev.stopPropagation(); onReplayRun(e.runId); }}
-                        className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
-                      >
-                        <IconMovie size={14} />
-                      </button>
+                      <span className="inline-flex gap-1" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
+                        <IconAction
+                          label={canReplay ? "Watch that lap" : "The simulator is not installed here"}
+                          disabled={!canReplay || isPending(pending, e.runId)}
+                          busy={isPending(pending, e.runId, "replay")}
+                          onClick={() => onReplayRun(e.runId)}
+                        >
+                          <IconMovie size={14} />
+                        </IconAction>
+                        {rowActions(b, e, mruns)}
+                      </span>
                     </td>
                   </tr>
                   {hasSetup && (
-                    <tr className="cursor-pointer transition hover:bg-helios-line/25" onClick={() => onOpenRun(e.runId)}>
+                    <tr className={"cursor-pointer transition hover:bg-helios-line/25" + rowTint(e)} onClick={() => onOpenRun(e.runId)}>
                       <td />
                       <td colSpan={8} className="pb-2 pr-5">
                         <SetupLine setup={e.setup} model={model} />
@@ -448,19 +554,49 @@ export function Leaderboard({
       
   );
 
+  // Said above everything else: a board that is only this machine's runs looks
+  // exactly like a team board nobody has beaten you on.
+  const localOnly = teamState !== "ok" && (
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-helios-warn/30 bg-helios-warn/10 px-4 py-2 text-xs text-helios-warn"
+      data-testid="board-local-only"
+    >
+      {teamState === "signed-out" ? <IconLogin size={15} className="shrink-0" /> : <IconCloudOff size={15} className="shrink-0" />}
+      <span className="min-w-0 flex-1">
+        Showing this machine&rsquo;s runs only &mdash;{" "}
+        {teamState === "signed-out"
+          ? "sign in for team times."
+          : "offline. Team times come back when this machine reconnects."}
+      </span>
+      {teamState === "signed-out" && onSignIn && (
+        <button
+          type="button"
+          className="shrink-0 rounded bg-asu-gold px-3 py-1 text-xs font-semibold text-helios-on-gold transition hover:brightness-110"
+          onClick={onSignIn}
+        >
+          Sign in
+        </button>
+      )}
+    </div>
+  );
+
   if (runs.length === 0) {
     return (
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-5 p-6">
+        {localOnly}
         {scopeTabs}
-        <p className="p-8 text-center text-sm text-helios-dim">
-          No runs yet. The board fills itself the first time somebody drives.
-        </p>
+        <EmptyState
+          Icon={IconTrophy}
+          title="No runs yet"
+          hint="The board fills itself the first time somebody drives."
+        />
       </div>
     );
   }
 
   return (
     <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-5 p-6">
+      {localOnly}
       {scopeTabs}
       {/* Only when there is a choice to make. A team all on wheels never sees
           this, and the one view deliberately not offered is "all three at
@@ -528,37 +664,26 @@ export function Leaderboard({
         <Stat label="Distance" value={`${(activity.metresDriven / 1000).toFixed(1)} km`} />
       </section>
 
-      {activity.fastest && (
-        <section className="flex items-center gap-4 rounded-lg border border-asu-gold/40 bg-asu-gold/10 px-5 py-4">
-          <IconTrophy size={26} className="shrink-0 text-asu-gold" />
-          <div className="min-w-0 flex-1">
-            <div
-              className="text-[10px] uppercase tracking-wider text-helios-dim"
-              title="The best SCORED lap on a lapped course: raw time plus two seconds a cone. A lap that went off course has no time here — stricter than FSAE's +20 s, on purpose. Skidpad and accel are event times, on their own boards."
-            >
-              Best lap anyone has scored
-            </div>
-            <div className="truncate text-sm">
-              <span className="font-mono text-xl font-semibold text-asu-gold">
-                {fmtTime(activity.fastest.time)}
-              </span>
-              <span className="ml-3 font-medium">{activity.fastest.driver}</span>
-              <span className="ml-2 text-helios-dim">on {activity.fastest.trackName}</span>
-            </div>
-          </div>
-          <button
-            className="shrink-0 rounded border border-helios-line bg-helios-panel px-3 py-1.5 text-xs transition hover:border-asu-gold"
-            onClick={() => onOpenRun(activity.fastest!.runId)}
-          >
-            Open it
-          </button>
-        </section>
+      {/* The newest records and personal bests, each on its own board. This
+          replaced "the best lap anyone has scored", one time picked across
+          every course, car model and physics era -- a comparison between
+          laps that do not compare. */}
+      {records.length > 0 && (
+        <RecentRecords
+          records={records}
+          driverId={driverId}
+          selectedId={selectedId}
+          showEra={perModel.some((pm) => pm.current > 1)}
+          onOpen={onOpenRun}
+        />
       )}
 
       {courseOrder.map(({ track, trackName }) => (
         <div key={`${mode}-${track}`} className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-helios-text">{trackName}</h2>
-          <div className="grid items-start gap-3 xl:grid-cols-2">
+          {/* One board per row while the run panel is open beside the page:
+              two side by side in what is left beside it are too narrow to read. */}
+          <div className={"grid items-start gap-3 " + (compact ? "" : "xl:grid-cols-2")}>
             {perModel.map(({ model: m }) => {
               const model = m.id;
               const modelName = m.name;
@@ -607,15 +732,24 @@ export function Leaderboard({
             <IconTrendingUp size={16} className="text-helios-success" />
             <h3 className="text-sm font-semibold">Time found</h3>
             <span className="text-[11px] text-helios-muted">
-              since each driver's first run on a course
+              since each driver's first run on a course, per car model
             </span>
           </header>
           <table className="w-full border-collapse text-xs">
             <tbody>
               {improvements.slice(0, 12).map((im) => (
-                <tr key={`${im.driverId}-${im.track}`} className="border-t border-helios-line/60">
-                  <td className="px-5 py-2 font-medium">{im.driver}</td>
-                  <td className="py-2 text-helios-dim">{im.trackName}</td>
+                <tr key={`${im.driverId}-${im.track}-${im.model}-${im.era}`} className="border-t border-helios-line/60">
+                  <td className="px-5 py-2 font-medium">{im.driver}{you(im.driverId)}</td>
+                  {/* Which board: a driver can have found time on the bicycle
+                      and on the 4-wheel on the same course, and two unlabelled
+                      rows for one name and one course read as a mistake. */}
+                  <td className="py-2 text-helios-dim">
+                    {courseName(im.track)}
+                    <span className="text-helios-muted">
+                      {" · "}{VEHICLE_MODELS.find((m) => m.id === im.model)?.name ?? `model ${im.model}`}
+                      {perModel.some((pm) => pm.current > 1) ? ` · rev ${im.era}` : ""}
+                    </span>
+                  </td>
                   <td className="py-2 text-right font-mono text-helios-dim">{fmtTime(im.first)}</td>
                   <td className="py-2 text-center text-helios-muted">→</td>
                   <td className="py-2 font-mono">{fmtTime(im.best)}</td>
@@ -983,4 +1117,100 @@ function whyNotRanked(runs: SimRun[]): string {
  */
 function honest(theoretical: number | null, best: number | null): number | null {
   return theoretical != null && best != null && theoretical > best + 0.002 ? null : theoretical;
+}
+
+/** A square icon button on a board row, with a spinner while it works. */
+function IconAction({
+  label, disabled, busy, onClick, children,
+}: { label: string; disabled?: boolean; busy?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={busy ? "Working…" : label}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled && !busy}
+      onClick={() => { if (!busy) onClick(); }}
+      className="rounded border border-helios-line p-1 text-helios-dim transition hover:border-asu-gold hover:text-helios-text disabled:cursor-not-allowed disabled:opacity-30"
+    >
+      {busy ? <IconLoader2 size={14} className="animate-spin text-asu-gold" /> : children}
+    </button>
+  );
+}
+
+/** Within this long of now, a record wears a NEW badge. */
+const NEW_FOR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The latest team records and personal bests, one card each, newest first.
+ * Each says which board it was set on, what it beat and by how much.
+ */
+function RecentRecords({
+  records, driverId, selectedId, showEra, onOpen,
+}: {
+  records: RecordEvent[];
+  driverId: string | null;
+  selectedId: string | null;
+  showEra: boolean;
+  onOpen: (runId: string) => void;
+}) {
+  const now = Date.now();
+  return (
+    <section className="rounded-lg border border-helios-line bg-helios-panel" data-testid="recent-records">
+      <header className="flex flex-wrap items-center gap-x-2 border-b border-helios-line px-5 py-2.5">
+        <IconTrophy size={16} className="shrink-0 text-asu-gold" />
+        <h3
+          className="text-sm font-semibold"
+          title="Team records and personal bests, each on its own board (course, car model, device, physics). Times are SCORED: raw time plus two seconds a cone. A lap that went off course has no time here, stricter than FSAE's +20 s, on purpose."
+        >
+          Recent records
+        </h3>
+        <span className="text-[11px] text-helios-muted">team records and personal bests, each on its own board</span>
+      </header>
+      <div className="grid gap-px bg-helios-line sm:grid-cols-2 2xl:grid-cols-3">
+        {records.map((ev) => {
+          const fresh = now - Date.parse(ev.at) < NEW_FOR_MS;
+          const yours = !!driverId && ev.driverId === driverId;
+          return (
+            <button
+              key={`${ev.runId}-${ev.kind}`}
+              type="button"
+              onClick={() => onOpen(ev.runId)}
+              className={
+                "flex min-w-0 items-center gap-3 px-4 py-2.5 text-left text-xs transition hover:bg-helios-line/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold " +
+                (ev.runId === selectedId ? "bg-asu-gold/15" : "bg-helios-panel")
+              }
+            >
+              <span
+                className={
+                  "w-14 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wider " +
+                  (ev.kind === "record" ? "bg-asu-gold/20 text-asu-gold" : "bg-helios-line text-helios-dim")
+                }
+              >
+                {ev.kind === "record" ? "Record" : "PB"}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2">
+                  <span className="font-mono text-sm font-semibold text-helios-text">{fmtTime(ev.time)}</span>
+                  <span className="truncate font-medium">{yours ? "You" : ev.driver}</span>
+                  {fresh && (
+                    <span className="shrink-0 rounded bg-helios-success/20 px-1 text-[10px] font-semibold text-helios-success">NEW</span>
+                  )}
+                </span>
+                <span className="block truncate text-[11px] text-helios-muted">
+                  {boardLabel(ev.key, { era: showEra })}
+                  {" · "}
+                  {ev.previous != null
+                    ? <span className="font-mono text-helios-success">{fmtGap(ev.time - ev.previous)}</span>
+                    : "first time on this board"}
+                  {" · "}
+                  {fmtWhen(ev.at)}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }

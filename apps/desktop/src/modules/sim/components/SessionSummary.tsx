@@ -14,9 +14,10 @@
 import { useEffect, useMemo } from "react";
 import { IconX, IconTrophy, IconFlag, IconAlertTriangle } from "@tabler/icons-react";
 import {
-  bestLapWentOffCourse, fmtTime, hasTrustworthySectors, isRankable, runBest, trackName,
+  bestLapWentOffCourse, fmtGap, fmtTime, hasTrustworthySectors, isRankable, runBest, trackName,
   unrankedReason, type SimRun,
 } from "../api";
+import { bestPerCourse, boardLabel, courseName, sessionResult } from "../lib/leaderboard";
 
 export interface SessionWindow {
   startedAtMs: number;
@@ -52,11 +53,15 @@ export function SessionSummary({
   onReplay,
   onClose,
   canReplay,
+  viewerId = null,
 }: {
   runs: SimRun[];
   session: SessionWindow;
   /** Every run, so "is this a personal best" can look past this session. */
   allRuns: SimRun[];
+  /** The signed-in account. The card says "your" only to the person whose
+   *  runs they are; on a shared rig that is often somebody else. */
+  viewerId?: string | null;
   onOpenRun: (id: string) => void;
   onReplay: (id: string) => void;
   onClose: () => void;
@@ -70,32 +75,22 @@ export function SessionSummary({
   }, [onClose]);
 
   const stats = useMemo(() => {
-    const withLap = runs.filter((r) => runBest(r) != null);
-    const best = withLap.reduce<SimRun | null>(
-      (b, r) => (b == null || (runBest(r) as number) < (runBest(b) as number) ? r : b),
-      null,
-    );
+    // Best PER COURSE. One minimum across the session called a 4.352 accel run
+    // "the best lap" of a session that was forty autocross laps. The headline
+    // is the course the session was mostly spent on; the others are listed
+    // beside it with their own bests.
+    const courses = bestPerCourse(runs);
+    const head = courses[0] ?? null;
+    const best = head ? runs.find((r) => r.runId === head.runId) ?? null : null;
     const bestTime = best ? runBest(best) : null;
 
-    // Was it a personal best? Only against runs that could rank, on the same
-    // course, by the same driver, from BEFORE this session — otherwise every
-    // first session claims a record.
-    //
-    // `isRankable(best)` as well as on the candidates, which is not a
-    // belt-and-braces check: a lap driven with traction control on cannot be
-    // a personal best, and without this the card congratulated you on one in
-    // green while the list below it flagged the same run as unranked.
-    let previousBest: number | null = null;
-    if (best && best.driverId && isRankable(best)) {
-      for (const r of allRuns) {
-        if (r.runId === best.runId) continue;
-        if (r.track !== best.track || r.driverId !== best.driverId) continue;
-        if (!isRankable(r)) continue;
-        if ((r.startedAt ?? "") >= (best.startedAt ?? "")) continue;
-        const t = runBest(r);
-        if (t != null && (previousBest == null || t < previousBest)) previousBest = t;
-      }
-    }
+    // What that lap did on its board -- the same board the Leaderboard draws
+    // (course, car model, device, physics era), against the same driver's
+    // runs from BEFORE this one. Course and driver alone measured a first
+    // 4-wheel lap against a bicycle best. Null when it cannot rank: a lap with
+    // traction control on is not a personal best, and the card used to say it
+    // was, in green, above a list that flagged the same run as unranked.
+    const result = best ? sessionResult(allRuns, best) : null;
 
     const laps = runs.reduce((a, r) => a + (r.stats.laps ?? 0), 0);
     const cones = runs.reduce((a, r) => a + (r.stats.totalCones ?? 0), 0);
@@ -108,11 +103,14 @@ export function SessionSummary({
     const peakLat = runs.reduce((a, r) => Math.max(a, r.stats.peakLatG ?? 0), 0);
 
     return {
-      best, bestTime, previousBest, laps, cones, off, driven, distance, unranked,
+      best, bestTime, result, others: courses.slice(1), laps, cones, off, driven, distance, unranked,
       bestUnranked, peakLat,
-      improvement: bestTime != null && previousBest != null ? previousBest - bestTime : null,
     };
   }, [runs, allRuns]);
+
+  /** "your" to the driver, their name to anybody else at the rig. */
+  const whose = stats.best && viewerId && stats.best.driverId === viewerId ? "your" : `${stats.best?.driver ?? "their"}'s`;
+  const Whose = whose === "your" ? "Your" : whose;
 
   const minutes = Math.round(stats.driven / 60);
 
@@ -157,29 +155,63 @@ export function SessionSummary({
                 <IconTrophy size={24} className="shrink-0 text-asu-gold" />
                 <div className="min-w-0 flex-1">
                   <div className="text-[10px] uppercase tracking-wider text-helios-dim">
-                    Best lap this session
+                    Best this session · {courseName(stats.best.track)}
                   </div>
                   <div className="truncate text-sm">
                     <span className="font-mono text-xl font-semibold text-asu-gold">
                       {fmtTime(stats.bestTime)}
                     </span>
-                    <span className="ml-3 text-helios-dim">{trackName(stats.best.track)}</span>
+                    <span className="ml-3 text-helios-dim">{stats.best.driver}</span>
                   </div>
-                  {stats.bestUnranked ? (
+                  {stats.bestUnranked || !stats.result ? (
                     <div className="mt-0.5 text-xs text-helios-dim">
                       Not ranked — {unrankedReason(stats.best) ?? "see the run"}
                     </div>
-                  ) : stats.improvement != null && stats.improvement > 0.0005 ? (
-                    <div className="mt-0.5 text-xs text-helios-success">
-                      {stats.improvement.toFixed(3)} s quicker than your previous best here
-                    </div>
-                  ) : stats.previousBest != null ? (
-                    <div className="mt-0.5 text-xs text-helios-dim">
-                      Your best here is still {fmtTime(stats.previousBest)}
-                    </div>
                   ) : (
-                    <div className="mt-0.5 text-xs text-helios-dim">
-                      First ranked time on this course
+                    <>
+                      {stats.result.improvement != null && stats.result.improvement > 0.0005 ? (
+                        <div className="mt-0.5 text-xs text-helios-success">
+                          {stats.result.improvement.toFixed(3)} s quicker than {whose} previous best on this board
+                        </div>
+                      ) : stats.result.previousBest != null ? (
+                        <div className="mt-0.5 text-xs text-helios-dim">
+                          {Whose} best here is still {fmtTime(stats.result.previousBest)}
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 text-xs text-helios-dim">
+                          First ranked time on this board
+                        </div>
+                      )}
+                      {/* Where it lands on the board the Leaderboard draws. */}
+                      <div className="mt-0.5 truncate text-xs" data-testid="session-board-line">
+                        {stats.result.record ? (
+                          <span className="font-semibold uppercase tracking-wider text-asu-gold">
+                            Team record
+                            <span className="ml-1.5 font-normal normal-case tracking-normal text-helios-dim">
+                              on {boardLabel(stats.result.key)}
+                            </span>
+                          </span>
+                        ) : stats.result.standing.entry && stats.result.standing.leader ? (
+                          <span className="text-helios-dim">
+                            P{stats.result.standing.entry.rank} on {boardLabel(stats.result.key)},{" "}
+                            <span className="font-mono">
+                              {fmtGap(stats.result.standing.entry.best - stats.result.standing.leader.best)}
+                            </span>{" "}
+                            to {viewerId && stats.result.standing.leader.driverId === viewerId ? "you" : stats.result.standing.leader.driver}
+                          </span>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+                  {stats.others.length > 0 && (
+                    <div className="mt-1 truncate text-[11px] text-helios-muted" data-testid="session-other-courses">
+                      Also:{" "}
+                      {stats.others.map((c, i) => (
+                        <span key={c.track}>
+                          {i > 0 && " · "}
+                          {c.short} <span className="font-mono text-helios-dim">{fmtTime(c.best)}</span>
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -211,7 +243,8 @@ export function SessionSummary({
                       className="flex w-full items-baseline gap-3 border-b border-helios-line/60 px-5 py-2 text-left text-xs transition hover:bg-helios-line/25"
                       onClick={() => onOpenRun(r.runId)}
                     >
-                      <span className="w-14 shrink-0 font-mono text-helios-dim">
+                      {/* Wide enough for "05:22 PM", which wrapped at w-14. */}
+                      <span className="w-[4.75rem] shrink-0 whitespace-nowrap font-mono text-helios-dim">
                         {r.startedAt
                           ? new Date(r.startedAt).toLocaleTimeString(undefined, {
                               hour: "2-digit",
