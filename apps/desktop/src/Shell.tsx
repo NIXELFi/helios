@@ -25,6 +25,7 @@ import { ModuleTransition } from "./components/ModuleTransition";
 import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
 import { readPrefs, usePrefs } from "./lib/prefs";
 import { useOpenInLogs } from "./lib/open-in-logs";
+import { OPEN_AUTH_EVENT } from "./lib/open-auth";
 import { applyTheme, useThemeVersion } from "./lib/theme";
 import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
@@ -243,6 +244,14 @@ function HeliosShell() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("helios:open-settings", onOpen);
     };
+  }, []);
+
+  // A module asked for the sign-in dialog (the Sim module's "Sign in" on its
+  // Launch tab and board). Same decoupling as open-in-logs: see open-auth.ts.
+  useEffect(() => {
+    const onOpenAuth = () => setAuthModalOpen(true);
+    window.addEventListener(OPEN_AUTH_EVENT, onOpenAuth);
+    return () => window.removeEventListener(OPEN_AUTH_EVENT, onOpenAuth);
   }, []);
 
   // Desktop toast when an update has been found — once per version, gated by
