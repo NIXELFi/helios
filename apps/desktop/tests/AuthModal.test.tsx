@@ -40,11 +40,15 @@ vi.mock("@helios/auth", async () => {
         // The signup step loads the subteam picker via the list_signup_subteams
         // RPC (de-duplicated union of pdm.subteams + pm.subteams), addressed
         // through the public schema: client.schema("public").rpc(...).
+        // list_signup_domains feeds the inline domain check; the tests sign up
+        // with @example.com, so the allowlist is example.com.
         schema: () => ({
-          rpc: () =>
-            subteamsShouldError
-              ? Promise.resolve({ data: null, error: { message: "permission denied" } })
-              : Promise.resolve({ data: [{ name: "Engine" }], error: null }),
+          rpc: (fn: string) =>
+            fn === "list_signup_domains"
+              ? Promise.resolve({ data: [{ domain: "example.com" }], error: null })
+              : subteamsShouldError
+                ? Promise.resolve({ data: null, error: { message: "permission denied" } })
+                : Promise.resolve({ data: [{ name: "Engine" }], error: null }),
         }),
       } as any);
     },
@@ -144,6 +148,37 @@ describe("<AuthModal>", () => {
         options: { data: { display_name: "Nick M.", subteam: "Engine" } },
       });
     });
+  });
+
+  it("rejects a non-allowed email domain inline, before hitting the server", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    await screen.findByRole("option", { name: "Engine" });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "someone@gmail.com" } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Someone" } });
+    fireEvent.change(screen.getByLabelText(/subteam/i), { target: { value: "Engine" } });
+    // The allowlist loads asynchronously; retry the submit until it has landed.
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Sign-up is restricted to @example.com accounts.");
+    });
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it("maps the server's opaque domain-gate 500 to a readable message", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    signUp.mockResolvedValue({ data: {}, error: { message: "Database error saving new user", status: 500 } });
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    await screen.findByRole("option", { name: "Engine" });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "correcthorsebattery" } });
+    fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Someone" } });
+    fireEvent.change(screen.getByLabelText(/subteam/i), { target: { value: "Engine" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sign-up is restricted to @example.com accounts.");
   });
 
   it("surfaces a sign-in error", async () => {
