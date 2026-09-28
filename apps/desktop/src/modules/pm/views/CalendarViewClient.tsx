@@ -339,29 +339,11 @@ export function CalendarViewClient({
     rememberCalendarSettings(teamSlug, calColors);
   }, [teamSlug, calColors]);
 
-  // Earliest due/milestone date in the current scope — used to seed the visible
-  // month. Computed live so it tracks the data (a previous empty-dep useMemo
-  // froze it to `new Date()` on the first render, before the async workspace
-  // load populated baseTasks/milestones, so the calendar never jumped to the
-  // first real deadline).
-  const seedAnchor = useMemo(() => {
-    const candidates: string[] = [];
-    for (const t of baseTasks) if (t.due_date) candidates.push(t.due_date);
-    for (const m of milestones) candidates.push(m.target_date);
-    candidates.sort();
-    return candidates[0] ? parseISO(candidates[0]) : new Date();
-  }, [baseTasks, milestones]);
-  const [anchor, setAnchor] = useState<Date>(seedAnchor);
-  // Seed the anchor to the first real deadline ONCE, the first time data is
-  // available. After that the user owns the anchor (paging/Today), so we never
-  // yank it back. `seeded` guards the one-shot.
-  const seededRef = useRef(false);
-  useEffect(() => {
-    if (seededRef.current) return;
-    if (baseTasks.length === 0 && milestones.length === 0) return;
-    seededRef.current = true;
-    setAnchor(seedAnchor);
-  }, [baseTasks, milestones, seedAnchor]);
+  // Open on TODAY (report 2026-09-24, Daniel Germaine). This used to seed to the
+  // earliest due/milestone date in scope, which for a season-long project meant
+  // opening months in the past and paging forward to find now. Paging/Today own
+  // the anchor from here.
+  const [anchor, setAnchor] = useState<Date>(() => new Date());
 
   // Events expanded into per-date occurrences (#24). Recurring events repeat from
   // their start date through recurrence_end, bounded to a window around the

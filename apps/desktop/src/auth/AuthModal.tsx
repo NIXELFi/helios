@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 
 import { useConnection, useHeliosAuth } from "./AuthShell";
 import { validateConnectionFields, type SupabaseConnection } from "./connection";
+import { EMAIL_RE, signupErrorMessage, validateSignupEmail } from "./signupEmail";
 
 interface Props {
   open: boolean;
@@ -302,6 +303,8 @@ function CredentialsStep(props: {
   // leaving an empty picker that dead-ends sign-up.
   const [subteamsLoading, setSubteamsLoading] = useState(false);
   const [subteamsError, setSubteamsError] = useState<string | null>(null);
+  // Sign-up domain allowlist (null = not loaded → the server gate alone decides).
+  const [signupDomains, setSignupDomains] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -345,6 +348,24 @@ function CredentialsStep(props: {
     return () => { on = false; };
   }, [mode, client]);
 
+  // Load the sign-up domain allowlist so a non-allowed address is rejected
+  // inline. Best-effort: on failure we skip the client check and fall back to
+  // mapping the server's rejection in signupErrorMessage().
+  useEffect(() => {
+    if (mode !== "signup") return;
+    let on = true;
+    (async () => {
+      try {
+        const { data, error } = await (client.schema("public").rpc("list_signup_domains") as any);
+        if (!on || error) return;
+        setSignupDomains(((data as { domain: string }[]) ?? []).map((r) => r.domain));
+      } catch {
+        // Older backend without the RPC — leave the check to the server.
+      }
+    })();
+    return () => { on = false; };
+  }, [mode, client]);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     // Guard against re-entry (Enter pressed again while in flight) — the
@@ -378,7 +399,7 @@ function CredentialsStep(props: {
     } else {
       // Sign-up. Validate the email format / domain first (H-1 hardening) so a
       // malformed or disallowed address is rejected inline before any round-trip.
-      const emailErr = validateSignupEmail(email);
+      const emailErr = validateSignupEmail(email, signupDomains);
       if (emailErr) {
         setError(emailErr);
         return;
@@ -410,7 +431,7 @@ function CredentialsStep(props: {
           },
         });
         if (error) {
-          setError(error.message);
+          setError(signupErrorMessage(error, signupDomains));
           return;
         }
         // If the project requires email confirmation, Supabase returns a
@@ -531,34 +552,6 @@ function CredentialsStep(props: {
 // ──────────────────────────────────────────────────────────────────────
 
 const MIN_PASSWORD_LEN = 12;
-
-// H-1 (open-signup hardening): client-side email validation so a malformed or
-// disallowed address is rejected inline before any auth round-trip — the first
-// of the layered defenses (the others being the server-side before_user_created
-// hook / captcha in config.toml). A reasonable, intentionally-strict single-`@`
-// pattern: non-space local part, a dotted domain with a 2+ char TLD.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-// Optional email-DOMAIN allowlist. Empty = allow any well-formed address (the
-// default, so self-hosters / the test suite aren't blocked). To lock the
-// production vault to ASU accounts, set e.g. ["asu.edu"] — it pairs with the
-// server-side before_user_created hook (the client check is UX only; the hook
-// is the real gate). Compared case-insensitively against the email's domain.
-const SIGNUP_EMAIL_DOMAINS: readonly string[] = [];
-
-/** Validates an email's format and (optionally) its domain against the
- *  allowlist. Returns an error string to display, or null when acceptable. */
-function validateSignupEmail(email: string): string | null {
-  const trimmed = email.trim().toLowerCase();
-  if (!EMAIL_RE.test(trimmed)) return "Enter a valid email address.";
-  if (SIGNUP_EMAIL_DOMAINS.length > 0) {
-    const domain = trimmed.slice(trimmed.lastIndexOf("@") + 1);
-    if (!SIGNUP_EMAIL_DOMAINS.includes(domain)) {
-      return `Sign-up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(", ")} accounts.`;
-    }
-  }
-  return null;
-}
 
 function ForgotStep(props: {
   client: SupabaseClient;

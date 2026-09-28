@@ -27,6 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Sign-up with a non-approved email (anything but @asu.edu) now says so right on the form, instead of failing with a generic server error.
+- PM Gantt: the task-name column stays frozen on the left however far you scroll right (it used to slide off-screen).
+- PM Gantt and Calendar now open on today instead of the project's earliest date.
+
 ## [5.13.1] - 2026-09-28
 
 ### Fixed

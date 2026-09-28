@@ -59,6 +59,12 @@ export function useScrollMemory(key: string): (node: HTMLElement | null) => void
   }, []);
 }
 
+/** True when `key` has a remembered position this session — lets a view pick a
+ *  smarter FIRST-open position (Gantt → today) without fighting the restore. */
+export function hasScrollMemory(key: string): boolean {
+  return positions.has(key);
+}
+
 /** Test helper — clears all remembered positions. */
 export function resetScrollMemory(): void {
   positions.clear();
