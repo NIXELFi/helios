@@ -26,7 +26,7 @@ pub fn solidworks_install_dir() -> Option<PathBuf> {
 
 /// True if a SLDWORKS.exe process is currently running.
 pub fn is_sldworks_running() -> bool {
-    std::process::Command::new("tasklist")
+    super::hidden_command("tasklist")
         .args(["/FI", "IMAGENAME eq SLDWORKS.exe", "/NH"])
         .output()
         .map(|o| {

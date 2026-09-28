@@ -211,7 +211,15 @@ fn exe_version(exe: &Path) -> Option<String> {
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn run_version(exe: &Path) -> Option<String> {
-    let mut child = Command::new(exe)
+    let mut cmd = Command::new(exe);
+    #[cfg(windows)]
+    {
+        // Same as sim_launch: no console window for the version probe.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
         .arg("--version")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
