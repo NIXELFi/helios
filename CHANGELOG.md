@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- PM: team members granted access through Org & Access can now add comments, calendar events, pages and vendors, and leads can edit milestones. These writes were silently refused for anyone without a legacy project membership.
+
+### Security
+- The team directory (names, emails, subteams) is no longer readable without signing in.
+- Locked down two internal backend functions (plugin signing and the Google Calendar sync) so app users can't call them directly.
+
 ## [5.13.2] - 2026-09-28
 
 ### Fixed
