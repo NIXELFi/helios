@@ -358,7 +358,8 @@ function CredentialsStep(props: {
       try {
         const { data, error } = await (client.schema("public").rpc("list_signup_domains") as any);
         if (!on || error) return;
-        setSignupDomains(((data as { domain: string }[]) ?? []).map((r) => r.domain));
+        const rows = Array.isArray(data) ? (data as { domain?: unknown }[]) : [];
+        setSignupDomains(rows.flatMap((r) => (typeof r?.domain === "string" ? [r.domain] : [])));
       } catch {
         // Older backend without the RPC — leave the check to the server.
       }
