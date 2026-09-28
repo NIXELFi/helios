@@ -27,6 +27,11 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.13.1] - 2026-09-28
+
+### Fixed
+- Windows: no more empty terminal windows flashing open and closed when Helios starts (or while the Sim tab is open).
+
 ## [5.13.0] - 2026-09-24
 
 ### Added
