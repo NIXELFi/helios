@@ -58,7 +58,7 @@ use crate::cylinder::valve::{
 };
 use crate::solver::muscl::{cfl_dt, muscl_hancock_step, LIMITER_MINMOD};
 use crate::solver::weno::weno5_ssprk2_step;
-use crate::solver::sources::apply_sources;
+use crate::solver::sources::{apply_local_losses, apply_sources};
 use crate::solver::state::{
     make_pipe_state, set_uniform, PipeState, ScratchBuffers,
     N_VARS, I_RHO_A,
@@ -215,6 +215,17 @@ pub struct SDM26Config {
     /// pipe. With `exhaust_collector_end_correction` the correction extends
     /// the pipe at the outlet with the outlet diameter.
     pub collector_diameter_profile: Option<Vec<(f64, f64)>>,
+    /// Finding 0035: lumped minor losses (bends, muffler) per pipe as
+    /// `[(x, K)]`: at geometric position x (same origin as that pipe's
+    /// `diameter_profile`: runners from the plenum mouth, primaries from the
+    /// valve, secondaries / collector from the upstream merge) the flow loses
+    /// K·½ρu|u| of stagnation pressure, applied as a momentum sink in the
+    /// cell containing x (energy is conserved, so the loss heats the gas).
+    /// None / empty → no extra loss (parity).
+    pub runner_local_losses: Option<Vec<Vec<(f64, f64)>>>,
+    pub primary_local_losses: Option<Vec<Vec<(f64, f64)>>>,
+    pub secondary_local_losses: Option<Vec<Vec<(f64, f64)>>>,
+    pub collector_local_losses: Option<Vec<(f64, f64)>>,
     /// Finding 0033: diffuser outlet diameter of the venturi restrictor.
     /// When set, the venturi area ratio σ = A_throat / A_outlet uses it
     /// instead of the plenum cross-section `volume / length`.
@@ -297,6 +308,23 @@ pub struct SDM26Config {
     /// When true, exhaust junctions use per-leg Borda-Carnot K from
     /// geometry, scaled by `exhaust_junction_loss_coef`. Default false.
     pub exhaust_junction_borda_carnot: bool,
+    /// Finding 0035: exhaust junctions use the momentum-mixing merge model
+    /// (`LossMode::Momentum`: supplying legs discharge as free jets at the
+    /// junction static pressure; receiving legs draw from the mixed stream
+    /// with the generalised Borda-Carnot loss). Overrides the two knobs
+    /// above on the Characteristic junction. Default false → parity.
+    pub exhaust_junction_momentum: bool,
+    /// Finding 0035: angle (deg) between each primary / secondary axis and
+    /// the outlet axis at a 2-1 merge, for `exhaust_junction_momentum`.
+    /// Geometry, not a fit: ~0-15° for side-by-side merge collectors.
+    pub exhaust_merge_angle_deg: f64,
+    /// Finding 0035: gas properties of the exhaust pipes (primaries,
+    /// secondaries, collector), constant per pipe. Every pipe used air
+    /// (1.4 / 287), so exhaust waves ran ~2-3 % fast; burned gas at
+    /// 900-1100 K is γ ≈ 1.29-1.31 (`gamma_burned`), R = 295. Defaults
+    /// 1.4 / 287 → parity.
+    pub exhaust_gas_gamma: f64,
+    pub exhaust_gas_r: f64,
     // restrictor
     pub restrictor_throat_diameter: f64,
     pub restrictor_cd: f64,
@@ -554,6 +582,10 @@ impl Default for SDM26Config {
             plenum_wall_t: 320.0,
             plenum_diameter_profile: None,
             runner_diameter_profiles: None,
+            runner_local_losses: None,
+            primary_local_losses: None,
+            secondary_local_losses: None,
+            collector_local_losses: None,
             primary_diameter_profiles: None,
             secondary_diameter_profiles: None,
             collector_diameter_profile: None,
@@ -572,6 +604,10 @@ impl Default for SDM26Config {
             intake_junction_borda_carnot: false,
             exhaust_junction_loss_coef: 0.0,
             exhaust_junction_borda_carnot: false,
+            exhaust_junction_momentum: false,
+            exhaust_merge_angle_deg: 10.0,
+            exhaust_gas_gamma: 1.4,
+            exhaust_gas_r: 287.0,
             restrictor_throat_diameter: 0.020,
             restrictor_cd: 0.967,
             restrictor_loss_coef: 0.0,
@@ -955,6 +991,8 @@ pub struct SDM26Engine {
     pub primary_idx: Vec<usize>,
     pub secondary_idx: Vec<usize>,
     pub collector_idx: usize,
+    /// Finding 0035: per-pipe lumped minor losses as (cell index, K).
+    pub local_losses: Vec<Vec<(usize, f64)>>,
     pub mass_in_restrictor: f64,
     pub mass_out_collector: f64,
 }
@@ -1012,14 +1050,15 @@ impl SDM26Engine {
         }
 
         // primaries
+        let (g_ex, r_ex) = (cfg.exhaust_gas_gamma, cfg.exhaust_gas_r);
         let mut primary_idx = Vec::with_capacity(n_cyl);
         for i in 0..n_cyl {
             let (l, d_in, d_out, n, wt) = cfg.primary_spec(i);
             let mut p = make_pipe_state(
                 n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, cfg.primary_profile(i)),
-                1.4, 287.0, wt, 2,
+                g_ex, r_ex, wt, 2,
             );
-            set_uniform(&mut p, cfg.p_ambient / (287.0 * cfg.t_ambient),
+            set_uniform(&mut p, cfg.p_ambient / (r_ex * cfg.t_ambient),
                         0.0, cfg.p_ambient, 0.0);
             primary_idx.push(pipes.len());
             pipes.push(p);
@@ -1032,9 +1071,9 @@ impl SDM26Engine {
                 let (l, d_in, d_out, n, wt) = cfg.secondary_spec(i);
                 let mut p = make_pipe_state(
                     n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, cfg.secondary_profile(i)),
-                    1.4, 287.0, wt, 2,
+                    g_ex, r_ex, wt, 2,
                 );
-                set_uniform(&mut p, cfg.p_ambient / (287.0 * cfg.t_ambient),
+                set_uniform(&mut p, cfg.p_ambient / (r_ex * cfg.t_ambient),
                             0.0, cfg.p_ambient, 0.0);
                 secondary_idx.push(pipes.len());
                 pipes.push(p);
@@ -1055,7 +1094,7 @@ impl SDM26Engine {
             Some(prof) => make_pipe_state(
                 n_col, l_col + delta_col,
                 exhaust_pipe_area(l_col, delta_col, d_col_in, d_col_out, Some(prof)),
-                1.4, 287.0, t_col, 2,
+                g_ex, r_ex, t_col, 2,
             ),
             None => {
                 // Legacy: the linear taper spans l + delta (parity).
@@ -1063,11 +1102,11 @@ impl SDM26Engine {
                 make_pipe_state(
                     n_col, l_col,
                     linear_diameter_area(l_col, d_col_in, d_col_out),
-                    1.4, 287.0, t_col, 2,
+                    g_ex, r_ex, t_col, 2,
                 )
             }
         };
-        set_uniform(&mut collector, cfg.p_ambient / (287.0 * cfg.t_ambient),
+        set_uniform(&mut collector, cfg.p_ambient / (r_ex * cfg.t_ambient),
                     0.0, cfg.p_ambient, 0.0);
         let collector_idx = pipes.len();
         pipes.push(collector);
@@ -1089,7 +1128,9 @@ impl SDM26Engine {
         } else {
             CharLossMode::Scalar(cfg.intake_junction_loss_coef)
         };
-        let exhaust_loss_mode = if cfg.exhaust_junction_borda_carnot {
+        let exhaust_loss_mode = if cfg.exhaust_junction_momentum {
+            CharLossMode::Momentum
+        } else if cfg.exhaust_junction_borda_carnot {
             let m = if cfg.exhaust_junction_loss_coef == 0.0 { 1.0 } else { cfg.exhaust_junction_loss_coef };
             CharLossMode::BordaCarnot { multiplier: m }
         } else {
@@ -1145,6 +1186,7 @@ impl SDM26Engine {
         }
         junctions.push(intake_junction);
 
+        let first_exhaust_junction = junctions.len();
         if cfg.exhaust_topology == ExhaustTopology::FourTwoOne {
             junctions.push(make_junction(vec![
                 (primary_idx[0], PipeEnd::Right),
@@ -1166,6 +1208,25 @@ impl SDM26Engine {
                 .map(|&p| (p, PipeEnd::Right)).collect();
             specs.push((collector_idx, PipeEnd::Left));
             junctions.push(make_junction(specs, &pipes, cfg.exhaust_junction_loss_coef, exhaust_loss_mode));
+        }
+        if cfg.exhaust_junction_momentum {
+            // Every exhaust junction is N inlets + one outlet (the last leg).
+            // Outlet axis +x; inlets fan out symmetrically at ±θ about −x.
+            let th = cfg.exhaust_merge_angle_deg.to_radians();
+            for j in junctions.iter_mut().skip(first_exhaust_junction) {
+                if let Junction::Char(cj) = j {
+                    let n_in = cj.legs.len() - 1;
+                    for (k, leg) in cj.legs.iter_mut().enumerate() {
+                        leg.dir = if k == n_in {
+                            [1.0, 0.0]
+                        } else {
+                            let side = if n_in == 1 { 0.0 } else { 2.0 * k as f64 / (n_in - 1) as f64 - 1.0 };
+                            let a = th * side;
+                            [-a.cos(), a.sin()]
+                        };
+                    }
+                }
+            }
         }
 
         // cylinders
@@ -1284,9 +1345,44 @@ impl SDM26Engine {
             cylinders.push(cyl);
         }
 
+        // Finding 0035: resolve lumped minor losses to cells. x is the
+        // geometric position; runners carry the plenum-mouth end correction
+        // ahead of x = 0, every other pipe starts at x = 0.
+        let mut local_losses: Vec<Vec<(usize, f64)>> = vec![Vec::new(); pipes.len()];
+        {
+            let mut place = |idx: usize, shift: f64, list: &[(f64, f64)]| {
+                let p = &pipes[idx];
+                for &(x, k) in list {
+                    if k > 0.0 {
+                        let c = (((x + shift) / p.dx).floor().max(0.0) as usize).min(p.n_cells - 1);
+                        local_losses[idx].push((p.n_ghost + c, k));
+                    }
+                }
+            };
+            if let Some(v) = cfg.runner_local_losses.as_ref() {
+                for (i, list) in v.iter().enumerate().take(n_cyl) {
+                    place(runner_idx[i], cfg.runner_end_correction(i), list);
+                }
+            }
+            if let Some(v) = cfg.primary_local_losses.as_ref() {
+                for (i, list) in v.iter().enumerate().take(n_cyl) {
+                    place(primary_idx[i], 0.0, list);
+                }
+            }
+            if let Some(v) = cfg.secondary_local_losses.as_ref() {
+                for (i, list) in v.iter().enumerate().take(secondary_idx.len()) {
+                    place(secondary_idx[i], 0.0, list);
+                }
+            }
+            if let Some(list) = cfg.collector_local_losses.as_ref() {
+                place(collector_idx, 0.0, list);
+            }
+        }
+
         Self {
             cfg, junction_kind, pipes, scratches, junctions, cylinders,
             plenum_idx, runner_idx, primary_idx, secondary_idx, collector_idx,
+            local_losses,
             mass_in_restrictor: 0.0,
             mass_out_collector: 0.0,
         }
@@ -1310,14 +1406,15 @@ impl SDM26Engine {
         total
     }
 
-    fn primary_entrance_t(pipe: &PipeState, gamma: f64) -> f64 {
+    fn primary_entrance_t(pipe: &PipeState) -> f64 {
+        let gamma = pipe.gamma;
         let idx = pipe.n_ghost;
         let a = pipe.area[idx];
         let rho = pipe.q[idx * N_VARS + I_RHO_A] / a;
         let u = pipe.q[idx * N_VARS + 1] / (rho * a);
         let big_e = pipe.q[idx * N_VARS + 2] / a;
         let p = ((gamma - 1.0) * (big_e - 0.5 * rho * u * u)).max(1.0);
-        p / (rho * 287.0)
+        p / (rho * pipe.r_gas)
     }
 
     pub fn step(&mut self, theta_deg: f64, dt: f64, rpm: f64) {
@@ -1453,7 +1550,7 @@ impl SDM26Engine {
                 sc.ensure_weno5_buffers(pipe.n_total());
                 weno5_ssprk2_step(
                     &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
-                    gamma, pipe.n_ghost,
+                    pipe.gamma, pipe.n_ghost,
                     &mut sc.q_temp, &mut sc.dqdt, &mut sc.flux_accum,
                     &mut sc.w, &mut sc.w_pred_l, &mut sc.w_pred_r,
                     &mut sc.flux,
@@ -1461,7 +1558,7 @@ impl SDM26Engine {
             } else {
                 muscl_hancock_step(
                     &mut pipe.q, &pipe.area, &pipe.area_f, pipe.dx, dt,
-                    gamma, pipe.n_ghost, cfg.limiter,
+                    pipe.gamma, pipe.n_ghost, cfg.limiter,
                     &mut sc.w, &mut sc.slopes, &mut sc.w_pred_l, &mut sc.w_pred_r,
                     &mut sc.flux,
                 );
@@ -1496,7 +1593,7 @@ impl SDM26Engine {
             exhaust_flux[i] = f0;
             if f0.abs() > 1e-20 {
                 let h_ex = f2 / f0;
-                let t_ex = h_ex * (gamma - 1.0) / gamma / 287.0;
+                let t_ex = h_ex * (primary.gamma - 1.0) / primary.gamma / primary.r_gas;
                 exhaust_flux_t[i] = t_ex.max(100.0);
             } else {
                 exhaust_flux_t[i] = self.cylinders[i].state.t_exhaust;
@@ -1527,10 +1624,11 @@ impl SDM26Engine {
         for k in 0..self.pipes.len() {
             let pipe = &mut self.pipes[k];
             apply_sources(
-                &mut pipe.q, &pipe.area, &pipe.hydraulic_d, dt, gamma, 287.0,
+                &mut pipe.q, &pipe.area, &pipe.hydraulic_d, dt, pipe.gamma, pipe.r_gas,
                 pipe.wall_t, pipe.n_ghost,
                 true, true,
             );
+            apply_local_losses(&mut pipe.q, &pipe.area, pipe.dx, dt, &self.local_losses[k]);
         }
 
         let dtheta = dt * (180.0 / PI) * omega_from_rpm(rpm);
@@ -1693,7 +1791,7 @@ impl SDM26Engine {
                 };
                 let egt_mean = {
                     let v: Vec<f64> = self.primary_idx.iter().map(|&idx| {
-                        Self::primary_entrance_t(&self.pipes[idx], 1.4)
+                        Self::primary_entrance_t(&self.pipes[idx])
                     }).collect();
                     v.iter().sum::<f64>() / (v.len() as f64)
                 };

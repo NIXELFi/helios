@@ -126,6 +126,26 @@ fn opt_profile(v: &Value, what: &str) -> Result<Option<Vec<(f64, f64)>>, ConfigL
     Ok(Some(out))
 }
 
+/// Finding 0035: optional lumped minor losses `[[x, K], ...]` (x in m from
+/// the pipe's upstream end, 0 <= x <= length; K >= 0). Absent key -> empty.
+fn opt_local_losses(v: &Value, what: &str) -> Result<Vec<(f64, f64)>, ConfigLoadError> {
+    let Some(raw) = v.get("local_losses") else { return Ok(Vec::new()) };
+    let err = |m: &str| ConfigLoadError::Schema(format!("{what}.local_losses {m}"));
+    let arr = raw.as_array().ok_or_else(|| err("must be an array of [x, K] pairs"))?;
+    let l = opt_f64(v, "length").unwrap_or(f64::INFINITY);
+    let mut out = Vec::with_capacity(arr.len());
+    for row in arr {
+        let r = row.as_array().filter(|r| r.len() == 2)
+            .ok_or_else(|| err("rows must be [x, K] pairs"))?;
+        let x = r[0].as_f64().ok_or_else(|| err("x must be numeric"))?;
+        let k = r[1].as_f64().ok_or_else(|| err("K must be numeric"))?;
+        if !k.is_finite() || k < 0.0 { return Err(err("K must be >= 0")); }
+        if !(0.0..=l + 1e-9).contains(&x) { return Err(err("x must lie within the pipe length")); }
+        out.push((x, k));
+    }
+    Ok(out)
+}
+
 fn all_same(values: &[f64]) -> bool {
     if values.is_empty() { return true; }
     values.iter().all(|v| (v - values[0]).abs() < 1e-12)
@@ -175,9 +195,11 @@ const RUNNER_EXTRA_KEYS: &[&str] = &[
     "entry_loss_k", "bellmouth_radius", "end_correction",
     // finding 0033
     "diameter_profile",
+    // finding 0035
+    "local_losses",
 ];
-/// Extra keys on exhaust pipes (finding 0034).
-const EXHAUST_EXTRA_KEYS: &[&str] = &["diameter_profile"];
+/// Extra keys on exhaust pipes (findings 0034, 0035).
+const EXHAUST_EXTRA_KEYS: &[&str] = &["diameter_profile", "local_losses"];
 const COMBUSTION_KEYS: &[&str] = &[
     "wiebe_a", "wiebe_m", "combustion_duration", "spark_advance",
     "ignition_delay", "combustion_efficiency", "q_lhv", "afr_stoich", "afr_target",
@@ -221,6 +243,9 @@ fn set_physics_f64(cfg: &mut SDM26Config, key: &str, v: f64) -> bool {
         "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = v,
         "intake_valve_re_crit" => cfg.intake_valve_re_crit = v,
         "exhaust_collector_reflection_coef" => cfg.exhaust_collector_reflection_coef = v,
+        "exhaust_merge_angle_deg" => cfg.exhaust_merge_angle_deg = v,
+        "exhaust_gas_gamma" => cfg.exhaust_gas_gamma = v,
+        "exhaust_gas_r" => cfg.exhaust_gas_r = v,
         "knock_integral_limit" => cfg.knock_integral_limit = v,
         "knock_retard_step_deg" => cfg.knock_retard_step_deg = v,
         "knock_max_retard_deg" => cfg.knock_max_retard_deg = v,
@@ -241,6 +266,7 @@ fn set_physics_bool(cfg: &mut SDM26Config, key: &str, v: bool) -> bool {
         "intake_junction_borda_carnot" => cfg.intake_junction_borda_carnot = v,
         "intake_junction_directional_loss" => cfg.intake_junction_directional_loss = v,
         "exhaust_junction_borda_carnot" => cfg.exhaust_junction_borda_carnot = v,
+        "exhaust_junction_momentum" => cfg.exhaust_junction_momentum = v,
         "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = v,
         "afr_eta_enabled" => cfg.afr_eta_enabled = v,
         "knock_control_enabled" => cfg.knock_control_enabled = v,
@@ -602,6 +628,15 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
             }
             cfg.afr_map = Some(map);
         }
+        // Finding 0035: exhaust gas properties must be a real gas.
+        if !(cfg.exhaust_gas_gamma > 1.1 && cfg.exhaust_gas_gamma <= 1.67) {
+            return Err(ConfigLoadError::Schema(format!(
+                "physics.exhaust_gas_gamma must be in (1.1, 1.67]; got {}", cfg.exhaust_gas_gamma)));
+        }
+        if !(cfg.exhaust_gas_r > 200.0 && cfg.exhaust_gas_r < 400.0) {
+            return Err(ConfigLoadError::Schema(format!(
+                "physics.exhaust_gas_r must be in (200, 400) J/kg/K; got {}", cfg.exhaust_gas_r)));
+        }
     }
 
     // ---- Per-runner entry loss / end correction (finding 0032) ---------
@@ -672,6 +707,22 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
     }
     cfg.collector_diameter_profile = exhaust_profiles(std::slice::from_ref(collector), "exhaust_collector")?
         .and_then(|mut v| v.pop().flatten());
+
+    // ---- Lumped minor losses (finding 0035) ------------------------------
+    type LossGroup = Option<Vec<Vec<(f64, f64)>>>;
+    let group = |pipes: &[Value], what: &str| -> Result<LossGroup, ConfigLoadError> {
+        let v = pipes.iter().enumerate()
+            .map(|(i, p)| opt_local_losses(p, &format!("{what}[{i}]")))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(if v.iter().any(|l| !l.is_empty()) { Some(v) } else { None })
+    };
+    cfg.runner_local_losses = group(runners, "intake_pipes")?;
+    cfg.primary_local_losses = group(primaries, "exhaust_primaries")?;
+    if !secondaries.is_empty() {
+        cfg.secondary_local_losses = group(&secondaries, "exhaust_secondaries")?;
+    }
+    let col = opt_local_losses(collector, "exhaust_collector")?;
+    if !col.is_empty() { cfg.collector_local_losses = Some(col); }
 
     // ---- Unknown-key warnings (finding 0032 fix 8) ----------------------
     warn_unknown(&data, "", TOP_KEYS, &[], &mut warnings);
@@ -1162,6 +1213,101 @@ mod tests {
         let mut d = base();
         d["restrictor"]["outlet_diameter"] = serde_json::json!(0.015);
         assert!(load_v1_value(&d).is_err());
+    }
+
+    #[test]
+    fn local_losses_and_momentum_junction_load_and_place() {
+        // Finding 0035: per-pipe lumped minor losses + momentum merge flag.
+        use crate::bcs::junction_characteristic::LossMode;
+        use crate::model::sdm26::{Junction, JunctionKind, SDM26Engine};
+        let mut data = base();
+        for i in 0..4 {
+            data["intake_pipes"][i]["local_losses"] = serde_json::json!([[0.1, 0.15]]);
+            data["exhaust_primaries"][i]["local_losses"] = serde_json::json!([[0.12, 0.2], [0.25, 0.2]]);
+        }
+        for i in 0..2 {
+            data["exhaust_secondaries"][i]["local_losses"] = serde_json::json!([[0.2, 0.35]]);
+        }
+        data["exhaust_collector"]["local_losses"] = serde_json::json!([[0.03, 0.25], [0.1, 0.5]]);
+        data["physics"] = serde_json::json!({"exhaust_junction_momentum": true, "exhaust_merge_angle_deg": 12.0});
+        let (cfg, w) = load_with(&data);
+        assert!(!w.iter().any(|m| m.contains("unknown key")), "{w:?}");
+        assert!(cfg.exhaust_junction_momentum && (cfg.exhaust_merge_angle_deg - 12.0).abs() < 1e-12);
+        assert_eq!(cfg.primary_local_losses.as_ref().unwrap()[3], vec![(0.12, 0.2), (0.25, 0.2)]);
+        assert_eq!(cfg.collector_local_losses.as_ref().unwrap().len(), 2);
+
+        let eng = SDM26Engine::new(cfg.clone(), JunctionKind::Characteristic);
+        let p = &eng.pipes[eng.primary_idx[0]];
+        let cells: Vec<usize> = eng.local_losses[eng.primary_idx[0]].iter().map(|&(c, _)| c - p.n_ghost).collect();
+        assert_eq!(cells, vec![(0.12 / p.dx).floor() as usize, (0.25 / p.dx).floor() as usize]);
+        assert!(eng.local_losses[eng.plenum_idx].is_empty());
+        assert_eq!(eng.local_losses[eng.collector_idx].len(), 2);
+        // exhaust junctions: momentum mode, outlet axis +x, inlets at ±12°
+        let mut n_mom = 0;
+        for j in &eng.junctions[1..] {
+            if let Junction::Char(cj) = j {
+                assert!(matches!(cj.loss_mode, LossMode::Momentum));
+                let last = cj.legs.last().unwrap();
+                assert_eq!(last.dir, [1.0, 0.0]);
+                let a = cj.legs[0].dir[1].atan2(-cj.legs[0].dir[0]).to_degrees();
+                assert!((a.abs() - 12.0).abs() < 1e-9, "inlet angle {a}");
+                n_mom += 1;
+            }
+        }
+        assert_eq!(n_mom, 3);
+        // without the keys nothing changes
+        let (c0, _) = load_with(&base());
+        assert!(c0.runner_local_losses.is_none() && c0.collector_local_losses.is_none());
+        assert!(!c0.exhaust_junction_momentum);
+        let e0 = SDM26Engine::new(c0, JunctionKind::Characteristic);
+        assert!(e0.local_losses.iter().all(|l| l.is_empty()));
+    }
+
+    #[test]
+    fn exhaust_gas_properties_apply_to_exhaust_pipes_only() {
+        // Finding 0035: burned-gas γ / R on primaries, secondaries and the
+        // collector; the intake side stays air.
+        use crate::model::sdm26::{JunctionKind, SDM26Engine};
+        let mut data = base();
+        data["physics"] = serde_json::json!({"exhaust_gas_gamma": 1.30, "exhaust_gas_r": 295.0});
+        let (cfg, w) = load_with(&data);
+        assert!(!w.iter().any(|m| m.contains("unknown key")), "{w:?}");
+        let eng = SDM26Engine::new(cfg, JunctionKind::Characteristic);
+        let mut ex: Vec<usize> = eng.primary_idx.clone();
+        ex.extend(eng.secondary_idx.iter().copied());
+        ex.push(eng.collector_idx);
+        for &i in &ex {
+            assert_eq!((eng.pipes[i].gamma, eng.pipes[i].r_gas), (1.30, 295.0), "pipe {i}");
+        }
+        for &i in eng.runner_idx.iter().chain(std::iter::once(&eng.plenum_idx)) {
+            assert_eq!((eng.pipes[i].gamma, eng.pipes[i].r_gas), (1.4, 287.0), "pipe {i}");
+        }
+        for bad in [serde_json::json!({"exhaust_gas_gamma": 1.0}), serde_json::json!({"exhaust_gas_r": 0.0})] {
+            let mut d = base();
+            d["physics"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn bad_local_losses_are_schema_errors() {
+        for bad in [
+            serde_json::json!([[0.1]]),
+            serde_json::json!([[0.1, -0.2]]),
+            serde_json::json!([[-0.01, 0.2]]),
+            serde_json::json!([[5.0, 0.2]]),
+            serde_json::json!({"x": 0.1}),
+        ] {
+            let mut d = base();
+            d["exhaust_primaries"][0]["local_losses"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "primary {bad}");
+            let mut d = base();
+            d["exhaust_collector"]["local_losses"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "collector {bad}");
+            let mut d = base();
+            d["intake_pipes"][1]["local_losses"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "runner {bad}");
+        }
     }
 
     #[test]

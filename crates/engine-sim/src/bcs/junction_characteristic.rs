@@ -29,6 +29,9 @@ pub struct CharJunctionLeg {
     /// Per-leg entry-loss K for `LossMode::Directional` (junction → pipe
     /// inflow). NaN = use the mode's default. Ignored by every other mode.
     pub entry_k: f64,
+    /// Unit vector of the pipe axis pointing AWAY from the junction, in the
+    /// junction's own 2-D frame. Only `LossMode::Momentum` reads it.
+    pub dir: [f64; 2],
 }
 
 impl CharJunctionLeg {
@@ -37,7 +40,7 @@ impl CharJunctionLeg {
             PipeEnd::Right => 1,
             PipeEnd::Left => -1,
         };
-        Self { pipe_idx, end, sign_into, entry_k: f64::NAN }
+        Self { pipe_idx, end, sign_into, entry_k: f64::NAN, dir: [f64::NAN, f64::NAN] }
     }
 
     #[inline]
@@ -168,7 +171,14 @@ fn face_from_pj(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct LegRef { rho: f64, u: f64, p: f64, c: f64 }
+struct LegRef {
+    rho: f64, u: f64, p: f64, c: f64,
+    /// Momentum mode, junction → pipe legs: (ρ, p) of the mixed supply. The
+    /// ghost takes u from this leg's own characteristic (rho/u/p/c above =
+    /// the pipe interior) and its entropy from the mixture, so a steady face
+    /// at p_j + Δp has no spurious jump against the interior.
+    mix: Option<(f64, f64)>,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct FaceState { rho_f: f64, u_f: f64, p_f: f64, f_mass: f64 }
@@ -227,6 +237,9 @@ pub enum LossMode {
     Scalar(f64),
     BordaCarnot { multiplier: f64 },
     Directional { entry_k: f64, expansion_multiplier: f64 },
+    /// Finding 0035: momentum-mixing merge junction (generalised
+    /// Borda-Carnot) for exhaust collectors. See `momentum_face_dp`.
+    Momentum,
 }
 
 impl LossMode {
@@ -239,7 +252,7 @@ impl LossMode {
             LossMode::BordaCarnot { multiplier } => multiplier * borda_carnot_k(a_leg, a_max),
             // Directional losses are resolved per direction in
             // `directional_face_dp`, not through this scalar hook.
-            LossMode::Directional { .. } => 0.0,
+            LossMode::Directional { .. } | LossMode::Momentum => 0.0,
         }
     }
 
@@ -252,7 +265,7 @@ impl LossMode {
             LossMode::Off => false,
             LossMode::Scalar(k) => k > 0.0,
             LossMode::BordaCarnot { multiplier } => multiplier > 0.0,
-            LossMode::Directional { .. } => true,
+            LossMode::Directional { .. } | LossMode::Momentum => true,
         }
     }
 }
@@ -281,19 +294,98 @@ pub(crate) fn directional_face_dp(
     }
 }
 
+/// Per-leg face static-pressure offsets for `LossMode::Momentum` (finding 0035).
+///
+/// The merge is a mixing region at static pressure p_j. Every leg that
+/// SUPPLIES flow issues into it as a free jet, so its face sits at p_j (the
+/// classical sudden-expansion / combining-flow assumption). The supplied
+/// jets mix into one stream with the mass-weighted velocity VECTOR
+/// V = Σ ṁ_i v_i / Σ ṁ_i (each v_i along the leg axis, pointing into the
+/// junction) and density ρ_m. Every leg that RECEIVES flow draws it from
+/// that stream with the generalised Borda-Carnot loss
+///     p_r + ½ρ_r w_r² = p_j + ½ρ_m (|V|² − L)
+///     L = |V_⊥|² + min(0, w_r − V·e_r)²   if V·e_r ≥ 0
+///     L = |V|²                             if V·e_r < 0 (flow must reverse)
+/// i.e. the velocity component across the leg is lost, a deceleration along
+/// it costs (V∥ − w)² (Borda-Carnot), an acceleration along it (contraction)
+/// is lossless, and a leg facing against the stream only recovers the
+/// static pressure. Checks: one pipe A → 2A gives the Borda-Carnot rise
+/// ¼ρw² at the outlet; an equal-area straight run and a symmetric 0° merge
+/// of equal flows give zero loss; a dead (idle) primary sits at p_j, i.e.
+/// BELOW the outlet by the recovered head (the collector's ejector effect),
+/// where the constant-static-pressure junction puts it AT the outlet
+/// pressure. Every Δp is O(u²), so small-amplitude acoustics are unchanged.
+fn momentum_leg_dp(
+    legs: &[CharJunctionLeg], interiors: &[Interior], fs: &[FaceState],
+) -> Vec<f64> {
+    let n = legs.len();
+    let a_max = interiors.iter().map(|it| it.a_i).fold(0.0_f64, f64::max);
+    let axis = |k: usize| -> [f64; 2] {
+        let d = legs[k].dir;
+        if d[0].is_finite() && d[1].is_finite() { d }
+        else if interiors[k].a_i >= a_max * (1.0 - 1e-9) { [1.0, 0.0] }
+        else { [-1.0, 0.0] }
+    };
+    // Outward (junction → pipe) face velocity of each leg.
+    let w: Vec<f64> = (0..n).map(|k| -(legs[k].sign_into as f64) * fs[k].u_f).collect();
+    let (mut m_sum, mut mv, mut m_rho) = (0.0_f64, [0.0_f64; 2], 0.0_f64);
+    for k in 0..n {
+        if w[k] < 0.0 {
+            let e = axis(k);
+            let md = fs[k].rho_f * (-w[k]) * interiors[k].a_i;
+            // Supplied velocity vector = |w|·(−e).
+            mv[0] += md * w[k] * e[0];
+            mv[1] += md * w[k] * e[1];
+            m_rho += md * fs[k].rho_f;
+            m_sum += md;
+        }
+    }
+    let mut dp = vec![0.0_f64; n];
+    if m_sum <= 1e-12 {
+        return dp;
+    }
+    let v = [mv[0] / m_sum, mv[1] / m_sum];
+    let rho_m = m_rho / m_sum;
+    let v2 = v[0] * v[0] + v[1] * v[1];
+    for k in 0..n {
+        if w[k] <= 0.0 { continue; }
+        let e = axis(k);
+        let v_par = v[0] * e[0] + v[1] * e[1];
+        let loss = if v_par < 0.0 {
+            v2
+        } else {
+            let d = (w[k] - v_par).min(0.0);
+            (v2 - v_par * v_par).max(0.0) + d * d
+        };
+        dp[k] = 0.5 * rho_m * (v2 - loss) - 0.5 * fs[k].rho_f * w[k] * w[k];
+    }
+    dp
+}
+
+#[allow(clippy::too_many_arguments)]
 fn hllc_mass_residual(
     legs: &[CharJunctionLeg], interiors: &[Interior], p_j: f64,
     references: &[LegRef], dt: f64, loss: LossMode, a_max: f64,
+    leg_dp: &[f64],
 ) -> (f64, Vec<FaceState>) {
     let mut r = 0.0_f64;
     let mut face_states = Vec::with_capacity(legs.len());
     let loss_active = loss.is_active();
-    for ((leg, it), reff) in legs.iter().zip(interiors.iter()).zip(references.iter()) {
+    let momentum = matches!(loss, LossMode::Momentum);
+    for (k, ((leg, it), reff)) in legs.iter().zip(interiors.iter()).zip(references.iter()).enumerate() {
         let gamma_leg = it.gamma;
+        // Momentum mode: each leg's face sits at its own static pressure
+        // p_j + Δp_leg, reached along that leg's characteristic (not by a
+        // post-hoc density scaling), so u and ρ stay Riemann-consistent.
+        let p_face = if momentum { (p_j + leg_dp[k]).max(0.5 * p_j) } else { p_j };
         let (mut rho_g, u_g, c_g) = face_from_pj(
-            reff.rho, reff.u, reff.p, reff.c, p_j, gamma_leg, leg.s_end(),
+            reff.rho, reff.u, reff.p, reff.c, p_face, gamma_leg, leg.s_end(),
         );
         let mut p_g = rho_g * c_g * c_g / gamma_leg;
+        if let (true, Some((rho_mix, p_mix))) = (momentum, reff.mix) {
+            rho_g = rho_mix * (p_face / p_mix.max(1.0)).powf(1.0 / gamma_leg);
+            p_g = p_face;
+        }
         let y_g = it.y_i;
 
         // In-residual Borda-Carnot dump loss (0005 fix).
@@ -328,7 +420,7 @@ fn hllc_mass_residual(
                 rho_g *= p_g_new / p_g.max(1.0);
                 p_g = p_g_new;
             }
-        } else if loss_active && (leg.sign_into as f64) * u_g < 0.0 {
+        } else if loss_active && !momentum && (leg.sign_into as f64) * u_g < 0.0 {
             let k_leg = loss.k_for(it.a_i, a_max);
             if k_leg > 0.0 {
                 let dp_loss = k_leg * 0.5 * rho_g * u_g * u_g;
@@ -389,6 +481,10 @@ pub struct CharacteristicJunction {
     pub last_niter: usize,
     pub last_regime: String,
     pub last_y_mixed: f64,
+    /// `LossMode::Momentum` state: the converged per-leg face Δp of the last
+    /// call (warm start for the next step) and the Picard pass count.
+    pub leg_dp: Vec<f64>,
+    pub momentum_picard_iters: usize,
 }
 
 impl CharacteristicJunction {
@@ -407,6 +503,8 @@ impl CharacteristicJunction {
             last_niter: 0,
             last_regime: String::from("subsonic"),
             last_y_mixed: 0.0,
+            leg_dp: Vec::new(),
+            momentum_picard_iters: 4,
         }
     }
 
@@ -437,14 +535,15 @@ impl CharacteristicJunction {
 
     /// Secant iteration on the HLLC-consistent mass residual.
     /// Returns (p_j, niter, face_states, converged).
+    #[allow(clippy::too_many_arguments)]
     fn secant_mass_balance(
         &mut self, interiors: &[Interior], references: &[LegRef],
-        p_j_init: f64, dt: f64, loss: LossMode, a_max: f64,
+        p_j_init: f64, dt: f64, loss: LossMode, a_max: f64, leg_dp: &[f64],
     ) -> (f64, usize, Vec<FaceState>, bool) {
         let p_floor = 1000.0_f64;
         let dp_fd = 1.0_f64;
 
-        let (r0, fs0) = hllc_mass_residual(&self.legs, interiors, p_j_init, references, dt, loss, a_max);
+        let (r0, fs0) = hllc_mass_residual(&self.legs, interiors, p_j_init, references, dt, loss, a_max, leg_dp);
         self.last_mass_residual = r0;
         if r0.abs() < self.newton_tol {
             return (p_j_init, 1, fs0, true);
@@ -453,7 +552,7 @@ impl CharacteristicJunction {
         let mut r_prev = r0;
         let mut p_curr = p_j_init + dp_fd;
         let (mut r_curr, mut fs_curr) = hllc_mass_residual(
-            &self.legs, interiors, p_curr, references, dt, loss, a_max,
+            &self.legs, interiors, p_curr, references, dt, loss, a_max, leg_dp,
         );
         for it in 0..self.newton_max_iter {
             self.last_mass_residual = r_curr;
@@ -471,7 +570,7 @@ impl CharacteristicJunction {
             else if dp < -cap { dp = -cap; }
             let p_next = (p_curr + dp).max(p_floor);
             let (r_next, fs_next) = hllc_mass_residual(
-                &self.legs, interiors, p_next, references, dt, loss, a_max,
+                &self.legs, interiors, p_next, references, dt, loss, a_max, leg_dp,
             );
             p_prev = p_curr;
             r_prev = r_curr;
@@ -497,9 +596,10 @@ impl CharacteristicJunction {
         choked
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn solve_with_choked(
         &mut self, interiors: &[Interior], references: &[LegRef],
-        choked_indices: &[usize], dt: f64, loss: LossMode, a_max: f64,
+        choked_indices: &[usize], dt: f64, loss: LossMode, a_max: f64, leg_dp: &[f64],
     ) -> Result<(f64, usize, Vec<FaceState>), JunctionConvergenceError> {
         let total = self.legs.len();
         if choked_indices.len() == total {
@@ -543,18 +643,19 @@ impl CharacteristicJunction {
         let dp_fd = 1.0_f64;
 
         // residual closure
+        // Slices of non-choked legs/interiors/refs
+        let sub_indices: Vec<usize> = (0..total).filter(|i| !choked_set.contains(i)).collect();
+        let sub_dp: Vec<f64> = sub_indices.iter().map(|&i| leg_dp[i]).collect();
         let residual = |p_j: f64,
                         s_legs: &[CharJunctionLeg],
                         s_interiors: &[Interior],
                         s_refs: &[LegRef]|
             -> (f64, Vec<FaceState>)
         {
-            let (r, fs) = hllc_mass_residual(s_legs, s_interiors, p_j, s_refs, dt, loss, a_max);
+            let (r, fs) = hllc_mass_residual(s_legs, s_interiors, p_j, s_refs, dt, loss, a_max, &sub_dp);
             (fixed_mdot_sum + r, fs)
         };
 
-        // Slices of non-choked legs/interiors/refs
-        let sub_indices: Vec<usize> = (0..total).filter(|i| !choked_set.contains(i)).collect();
         let sub_legs: Vec<CharJunctionLeg> = sub_indices.iter().map(|&i| self.legs[i]).collect();
         let sub_interiors: Vec<Interior> = sub_indices.iter().map(|&i| interiors[i]).collect();
         let sub_refs: Vec<LegRef> = sub_indices.iter().map(|&i| references[i]).collect();
@@ -629,11 +730,12 @@ impl CharacteristicJunction {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn inflow_entropy_pass(
         &mut self,
         interiors: &[Interior], face_states: &[FaceState],
         references: &[LegRef], p_j_current: f64, dt: f64,
-        loss: LossMode, a_max: f64,
+        loss: LossMode, a_max: f64, leg_dp: &[f64],
     ) -> Option<(f64, Vec<FaceState>, Vec<LegRef>)> {
         let mut inflow_legs = Vec::new();
         let mut outflow_legs = Vec::new();
@@ -671,15 +773,37 @@ impl CharacteristicJunction {
             let u_i = interiors[i].u_i;
             let gamma_leg = interiors[i].gamma;
             let c_mix = (gamma_leg * p_mix / rho_mix.max(1e-9)).sqrt();
-            new_refs[i] = LegRef { rho: rho_mix, u: u_i, p: p_mix, c: c_mix };
+            new_refs[i] = LegRef { rho: rho_mix, u: u_i, p: p_mix, c: c_mix, mix: None };
         }
         let (p_j, _niter, fs_new, converged) =
-            self.secant_mass_balance(interiors, &new_refs, p_j_current, dt, loss, a_max);
+            self.secant_mass_balance(interiors, &new_refs, p_j_current, dt, loss, a_max, leg_dp);
         if converged {
             Some((p_j, fs_new, new_refs))
         } else {
             None
         }
+    }
+
+    /// Momentum mode: interior references for every leg, plus the mixed
+    /// supply (ρ, p) on each junction → pipe leg (see `LegRef::mix`).
+    fn momentum_refs(&self, interiors: &[Interior], face_states: &[FaceState]) -> Vec<LegRef> {
+        let (mut m_sum, mut rho_m, mut p_m) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for ((leg, fs), it) in self.legs.iter().zip(face_states.iter()).zip(interiors.iter()) {
+            let md = (leg.sign_into as f64) * fs.f_mass * it.a_i;
+            if md > 0.0 {
+                m_sum += md;
+                rho_m += md * fs.rho_f;
+                p_m += md * fs.p_f;
+            }
+        }
+        let mix = if m_sum > 0.0 { Some((rho_m / m_sum, p_m / m_sum)) } else { None };
+        self.legs.iter().zip(face_states.iter()).zip(interiors.iter()).map(|((leg, fs), it)| {
+            let into_pipe = (leg.sign_into as f64) * fs.f_mass < 0.0;
+            LegRef {
+                rho: it.rho_i, u: it.u_i, p: it.p_i, c: it.c_i,
+                mix: if into_pipe { mix } else { None },
+            }
+        }).collect()
     }
 
     fn compute_mixed_y(&self, interiors: &[Interior], face_states: &[FaceState]) -> f64 {
@@ -764,7 +888,7 @@ impl CharacteristicJunction {
         }
         let p_j_init = sum_pa / sum_a;
         let mut references: Vec<LegRef> = interiors.iter().map(|it| LegRef {
-            rho: it.rho_i, u: it.u_i, p: it.p_i, c: it.c_i,
+            rho: it.rho_i, u: it.u_i, p: it.p_i, c: it.c_i, mix: None,
         }).collect();
 
         // Resolve loss config once per fill_ghosts; the Newton residual and
@@ -772,9 +896,35 @@ impl CharacteristicJunction {
         // face state is mass-conservation-consistent (0005 fix).
         let loss = self.effective_loss();
         let a_max = Self::max_leg_area(&interiors);
+        let momentum = matches!(loss, LossMode::Momentum);
+        let n_legs = self.legs.len();
+        if self.leg_dp.len() != n_legs {
+            self.leg_dp = vec![0.0; n_legs];
+        }
+        let mut leg_dp = if momentum { self.leg_dp.clone() } else { vec![0.0; n_legs] };
 
-        let (mut p_j, mut niter, mut face_states, converged) =
-            self.secant_mass_balance(&interiors, &references, p_j_init, dt, loss, a_max);
+        let (mut p_j, mut niter, mut face_states, mut converged) =
+            self.secant_mass_balance(&interiors, &references, p_j_init, dt, loss, a_max, &leg_dp);
+        if momentum && converged {
+            // Picard on the O(u²) offsets and the inflow-leg entropy,
+            // warm-started from the last step. Contraction factor ≈ face
+            // Mach number, so a few passes suffice.
+            for _ in 0..self.momentum_picard_iters {
+                let new_dp = momentum_leg_dp(&self.legs, &interiors, &face_states);
+                let delta = new_dp.iter().zip(leg_dp.iter())
+                    .map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
+                leg_dp = new_dp;
+                references = self.momentum_refs(&interiors, &face_states);
+                let (p2, n2, fs2, c2) = self.secant_mass_balance(
+                    &interiors, &references, p_j, dt, loss, a_max, &leg_dp,
+                );
+                niter += n2;
+                if !c2 { converged = false; break; }
+                p_j = p2;
+                face_states = fs2;
+                if delta < 1.0 { break; }
+            }
+        }
         if !converged {
             return Err(JunctionConvergenceError {
                 message: format!(
@@ -795,7 +945,7 @@ impl CharacteristicJunction {
 
         if !choked_legs.is_empty() {
             let (p_j_c, niter_c, fs_c) = self.solve_with_choked(
-                &interiors, &references, &choked_legs, dt, loss, a_max,
+                &interiors, &references, &choked_legs, dt, loss, a_max, &leg_dp,
             )?;
             p_j = p_j_c;
             niter += niter_c;
@@ -805,9 +955,9 @@ impl CharacteristicJunction {
             self.last_regime = String::from("subsonic");
         }
 
-        if self.inflow_entropy_picard && choked_legs.is_empty() {
+        if self.inflow_entropy_picard && choked_legs.is_empty() && !momentum {
             if let Some((p_j_corr, fs_corr, refs_corr)) =
-                self.inflow_entropy_pass(&interiors, &face_states, &references, p_j, dt, loss, a_max)
+                self.inflow_entropy_pass(&interiors, &face_states, &references, p_j, dt, loss, a_max, &leg_dp)
             {
                 p_j = p_j_corr;
                 face_states = fs_corr;
@@ -822,6 +972,9 @@ impl CharacteristicJunction {
         self.last_energy_residual = self.energy_residual(&interiors, &face_states);
 
         self.write_ghosts(pipes, &interiors, &face_states, y_mixed, p_j);
+        if momentum {
+            self.leg_dp = leg_dp;
+        }
         self.last_p_junction = p_j;
         self.last_niter = niter;
         Ok(())

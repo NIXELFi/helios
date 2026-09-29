@@ -5,7 +5,7 @@
 //! production BC, used by `SDM26Engine`) are ported.
 
 use crate::bcs::simple::{fill_reflective_left, fill_reflective_right};
-use crate::cylinder::gas_properties::{gamma_mixture, r_mixture, R_AIR};
+use crate::cylinder::gas_properties::{gamma_mixture, r_mixture};
 use crate::cylinder::valve::{valve_effective_area_profile, ValveParams};
 use crate::solver::state::{
     PipeState, N_VARS, I_RHO_A, I_MOM_A, I_E_A, I_Y_A,
@@ -123,11 +123,13 @@ pub fn fill_valve_ghost(
     let (p_up, t_up, gamma_up, r_up, y_up, p_down) = if forward && valve_type == ValveType::Exhaust {
         (p_cyl, t_cyl, gamma_mixture(t_cyl, xb_cyl), r_mixture(xb_cyl), xb_cyl, p_pipe)
     } else if !forward && valve_type == ValveType::Exhaust {
-        let t = (p_pipe / (rho_pipe.max(1e-6) * R_AIR)).max(100.0);
-        (p_pipe, t, gamma_pipe, R_AIR, y_pipe, p_cyl)
+        // 0035: the pipe's own gas constant (R_AIR unless the exhaust pipes
+        // carry burned-gas properties).
+        let t = (p_pipe / (rho_pipe.max(1e-6) * state.r_gas)).max(100.0);
+        (p_pipe, t, gamma_pipe, state.r_gas, y_pipe, p_cyl)
     } else if forward && valve_type == ValveType::Intake {
-        let t = (p_pipe / (rho_pipe.max(1e-6) * R_AIR)).max(100.0);
-        (p_pipe, t, gamma_pipe, R_AIR, y_pipe, p_cyl)
+        let t = (p_pipe / (rho_pipe.max(1e-6) * state.r_gas)).max(100.0);
+        (p_pipe, t, gamma_pipe, state.r_gas, y_pipe, p_cyl)
     } else {
         (p_cyl, t_cyl, gamma_mixture(t_cyl, xb_cyl), r_mixture(xb_cyl), xb_cyl, p_pipe)
     };
@@ -376,6 +378,8 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
     let n_total = state.n_total();
     let gamma = state.gamma;
     let gm1 = gamma - 1.0;
+    // 0035: the pipe's own gas constant (r_gas unless configured).
+    let r_gas = state.r_gas;
 
     let seat_rad = vp.seat_angle_deg.to_radians();
     let a_eff_base = valve_effective_area_profile(
@@ -418,20 +422,20 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
 
     if is_startup {
         let (rf, uf, pf, yf) = branch_startup(
-            p_int, t_cyl, rho_int, y_int, xb_cyl, R_AIR, pipe_side_inflow,
+            p_int, t_cyl, rho_int, y_int, xb_cyl, r_gas, pipe_side_inflow,
         );
         sol = Some((rf, uf, pf));
         y_face = yf;
     } else if pipe_side_inflow && is_choked {
         if let Some((rf, uf, pf, _mdot)) =
-            branch_choked_inflow(p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, R_AIR, pipe_end)
+            branch_choked_inflow(p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, r_gas, pipe_end)
         {
             sol = Some((rf, uf, pf));
         }
         y_face = xb_cyl;
     } else if pipe_side_inflow && !is_choked {
         if let Some(triple) = branch_subsonic_inflow(
-            u_int, c_int, p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, R_AIR, pipe_end,
+            u_int, c_int, p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, r_gas, pipe_end,
         ) {
             sol = Some(triple);
         }
@@ -439,7 +443,7 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
     } else if !pipe_side_inflow && is_choked {
         if let Some((rf, uf, pf, _t_face)) = solve_outflow_face(
             rho_int, u_int, p_int, c_int, p_cyl, t_cyl,
-            a_eff, a_pipe, gamma, R_AIR, pipe_end, u_int,
+            a_eff, a_pipe, gamma, r_gas, pipe_end, u_int,
         ) {
             sol = Some((rf, uf, pf));
         }
@@ -447,7 +451,7 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
     } else {
         if let Some((rf, uf, pf, _t_face)) = solve_outflow_face(
             rho_int, u_int, p_int, c_int, p_cyl, t_cyl,
-            a_eff, a_pipe, gamma, R_AIR, pipe_end, u_int,
+            a_eff, a_pipe, gamma, r_gas, pipe_end, u_int,
         ) {
             sol = Some((rf, uf, pf));
         }
@@ -456,7 +460,7 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
 
     if sol.is_none() && pipe_side_inflow {
         if let Some((rf, uf, pf, _mdot)) =
-            branch_choked_inflow(p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, R_AIR, pipe_end)
+            branch_choked_inflow(p_int, p_cyl, t_cyl, a_eff, a_pipe, gamma, r_gas, pipe_end)
         {
             sol = Some((rf, uf, pf));
         }
@@ -464,7 +468,7 @@ pub fn fill_valve_ghost_characteristic_with_cd_mult(
     }
     if sol.is_none() {
         let (rf, uf, pf, yf) = branch_startup(
-            p_int, t_cyl, rho_int, y_int, xb_cyl, R_AIR, pipe_side_inflow,
+            p_int, t_cyl, rho_int, y_int, xb_cyl, r_gas, pipe_side_inflow,
         );
         sol = Some((rf, uf, pf));
         y_face = yf;

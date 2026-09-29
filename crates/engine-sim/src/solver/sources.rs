@@ -96,6 +96,25 @@ pub fn apply_sources(
     }
 }
 
+/// Finding 0035: lumped minor losses (bends, mufflers). Each `(cell, K)`
+/// removes K·½ρu|u| of stagnation pressure from the flow through `cell`,
+/// applied as a momentum sink over the cell length (total energy is kept,
+/// so the lost head heats the gas). Explicit; the sink is capped so it can
+/// never reverse the cell's flow.
+pub fn apply_local_losses(q: &mut [f64], area: &[f64], dx: f64, dt: f64, losses: &[(usize, f64)]) {
+    for &(i, k) in losses {
+        let a = area[i];
+        let rho = q[i * N_VARS] / a;
+        if rho <= 0.0 {
+            continue;
+        }
+        let mom = q[i * N_VARS + 1];
+        let u = mom / (rho * a);
+        let dm = dt * k * 0.5 * rho * u * u.abs() * a / dx;
+        q[i * N_VARS + 1] = if dm.abs() >= 0.5 * mom.abs() { 0.5 * mom } else { mom - dm };
+    }
+}
+
 /// Strang-split step: source(dt/2) · hyperbolic(dt) · source(dt/2).
 #[allow(clippy::too_many_arguments)]
 pub fn strang_split_step(
