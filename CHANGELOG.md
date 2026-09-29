@@ -39,6 +39,8 @@ follow [semver](https://semver.org/).
 - Logs: saved math channels and lap-detection settings are checked when Helios loads them. Malformed entries are dropped and decimals are limited to 0-6, so a corrupt saved value can't stop Helios from starting.
 - XY plot fit overlays: the polynomial degree is limited to 1-6 as you type and when a saved layout loads. The fit rejects degrees above 12, so a saved degree can no longer lock up the plot.
 - Engine bar segments are limited to 1-200, and the decimals setting on numeric readouts and gauges is limited to 0-6 when you type it. Saved values are limited again when the widget draws. A large decimals value previously crashed the widget, and a huge segment count stalled every cursor move.
+- CFD: typing an out-of-range run size (for example 1,000,000,000 "Max cycles") could make the solver try to reserve gigabytes of memory up front and crash Helios. The Single-RPM, Sweep and Optimization dialogs now disable Start and name the bad field (max cycles, RPM, convergence tol, min cycles, optimization step and seed), and the app refuses the same bad values (plus a zero, negative or non-numeric RPM, pipe cell count or pipe size in the engine config) with a clear error instead of running them.
+- CFD lap-sim VD sweep: a tiny step or an unbounded range no longer freezes the app; a sweep is capped at 500 points.
 
 ## [5.13.4] - 2026-09-29
 
