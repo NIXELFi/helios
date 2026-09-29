@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 
 import { useConnection, useHeliosAuth } from "./AuthShell";
 import { validateConnectionFields, type SupabaseConnection } from "./connection";
+import { EMAIL_RE, signupErrorMessage, validateSignupEmail } from "./signupEmail";
 
 interface Props {
   open: boolean;
@@ -302,6 +303,11 @@ function CredentialsStep(props: {
   // leaving an empty picker that dead-ends sign-up.
   const [subteamsLoading, setSubteamsLoading] = useState(false);
   const [subteamsError, setSubteamsError] = useState<string | null>(null);
+  // True once a load finished without error, so an empty list gets its own
+  // message instead of a picker with nothing but the placeholder.
+  const [subteamsLoaded, setSubteamsLoaded] = useState(false);
+  // Sign-up domain allowlist (null = not loaded → the server gate alone decides).
+  const [signupDomains, setSignupDomains] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -322,6 +328,7 @@ function CredentialsStep(props: {
     let on = true;
     setSubteamsLoading(true);
     setSubteamsError(null);
+    setSubteamsLoaded(false);
     (async () => {
       try {
         // The client defaults to the `pdm` schema, but list_signup_subteams()
@@ -335,11 +342,31 @@ function CredentialsStep(props: {
           setSubteamsError(error.message ?? "Couldn't load subteams.");
           return;
         }
-        setSubteams((data as { name: string }[]) ?? []);
+        setSubteams(Array.isArray(data) ? (data as { name: string }[]) : []);
+        setSubteamsLoaded(true);
       } catch (e) {
         if (on) setSubteamsError(e instanceof Error ? e.message : String(e));
       } finally {
         if (on) setSubteamsLoading(false);
+      }
+    })();
+    return () => { on = false; };
+  }, [mode, client]);
+
+  // Load the sign-up domain allowlist so a non-allowed address is rejected
+  // inline. Best-effort: on failure we skip the client check and fall back to
+  // mapping the server's rejection in signupErrorMessage().
+  useEffect(() => {
+    if (mode !== "signup") return;
+    let on = true;
+    (async () => {
+      try {
+        const { data, error } = await (client.schema("public").rpc("list_signup_domains") as any);
+        if (!on || error) return;
+        const rows = Array.isArray(data) ? (data as { domain?: unknown }[]) : [];
+        setSignupDomains(rows.flatMap((r) => (typeof r?.domain === "string" ? [r.domain] : [])));
+      } catch {
+        // Older backend without the RPC — leave the check to the server.
       }
     })();
     return () => { on = false; };
@@ -378,7 +405,7 @@ function CredentialsStep(props: {
     } else {
       // Sign-up. Validate the email format / domain first (H-1 hardening) so a
       // malformed or disallowed address is rejected inline before any round-trip.
-      const emailErr = validateSignupEmail(email);
+      const emailErr = validateSignupEmail(email, signupDomains);
       if (emailErr) {
         setError(emailErr);
         return;
@@ -410,7 +437,7 @@ function CredentialsStep(props: {
           },
         });
         if (error) {
-          setError(error.message);
+          setError(signupErrorMessage(error, signupDomains));
           return;
         }
         // If the project requires email confirmation, Supabase returns a
@@ -449,8 +476,18 @@ function CredentialsStep(props: {
         required
       />
       {mode === "signup" && (
-        <p className="-mt-1 text-[10px] text-helios-muted">
-          Use a strong password — most Helios vaults require at least 12 characters.
+        // Live length feedback: the old soft hint ("most vaults require...")
+        // read as optional, and the hard check only fired on submit after the
+        // email/name/subteam checks, so short passwords looked like a dead form.
+        <p
+          className={`-mt-1 text-[10px] ${
+            password.length > 0 && password.length < MIN_PASSWORD_LEN ? "text-red-300" : "text-helios-muted"
+          }`}
+          data-testid="signup-password-hint"
+        >
+          {password.length > 0 && password.length < MIN_PASSWORD_LEN
+            ? `Password must be at least ${MIN_PASSWORD_LEN} characters (${password.length}/${MIN_PASSWORD_LEN}).`
+            : `Password must be at least ${MIN_PASSWORD_LEN} characters.`}
         </p>
       )}
       {mode === "signup" && (
@@ -468,7 +505,10 @@ function CredentialsStep(props: {
             value={subteam}
             onChange={(e) => setSubteam(e.target.value)}
             aria-label="Subteam"
-            className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold [&>option]:bg-helios-panel"
+            // No custom <option> background: a themed option bg with the
+            // native popup's default text color can render the list unreadable
+            // (reported as a "blank" picker). Let the OS draw the options.
+            className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold"
           >
             <option value="">
               {subteamsLoading ? "Loading subteams…" : "Select your subteam…"}
@@ -480,6 +520,11 @@ function CredentialsStep(props: {
           {subteamsError && (
             <span className="block text-[10px] text-red-300" role="alert">
               Couldn't load subteams: {subteamsError}
+            </span>
+          )}
+          {!subteamsLoading && !subteamsError && subteamsLoaded && subteams.length === 0 && (
+            <span className="block text-[10px] text-red-300" role="alert">
+              No subteams available. Ask a Helios admin to add your subteam.
             </span>
           )}
         </label>
@@ -531,34 +576,6 @@ function CredentialsStep(props: {
 // ──────────────────────────────────────────────────────────────────────
 
 const MIN_PASSWORD_LEN = 12;
-
-// H-1 (open-signup hardening): client-side email validation so a malformed or
-// disallowed address is rejected inline before any auth round-trip — the first
-// of the layered defenses (the others being the server-side before_user_created
-// hook / captcha in config.toml). A reasonable, intentionally-strict single-`@`
-// pattern: non-space local part, a dotted domain with a 2+ char TLD.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-// Optional email-DOMAIN allowlist. Empty = allow any well-formed address (the
-// default, so self-hosters / the test suite aren't blocked). To lock the
-// production vault to ASU accounts, set e.g. ["asu.edu"] — it pairs with the
-// server-side before_user_created hook (the client check is UX only; the hook
-// is the real gate). Compared case-insensitively against the email's domain.
-const SIGNUP_EMAIL_DOMAINS: readonly string[] = [];
-
-/** Validates an email's format and (optionally) its domain against the
- *  allowlist. Returns an error string to display, or null when acceptable. */
-function validateSignupEmail(email: string): string | null {
-  const trimmed = email.trim().toLowerCase();
-  if (!EMAIL_RE.test(trimmed)) return "Enter a valid email address.";
-  if (SIGNUP_EMAIL_DOMAINS.length > 0) {
-    const domain = trimmed.slice(trimmed.lastIndexOf("@") + 1);
-    if (!SIGNUP_EMAIL_DOMAINS.includes(domain)) {
-      return `Sign-up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(", ")} accounts.`;
-    }
-  }
-  return null;
-}
 
 function ForgotStep(props: {
   client: SupabaseClient;

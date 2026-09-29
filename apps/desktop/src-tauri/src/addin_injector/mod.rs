@@ -14,6 +14,20 @@ pub mod sw_detect;
 
 use tauri::{AppHandle, Manager};
 
+/// A `Command` for a console program (powershell, tasklist, …) that runs with
+/// no console window. Helios is a GUI-subsystem app with no console of its own,
+/// so Windows gives every console child a fresh, visible console — the empty
+/// terminal windows that flashed up on every launch while the injector ran.
+/// `-WindowStyle Hidden` doesn't prevent that: the console exists (and is
+/// drawn) before PowerShell gets to read its arguments.
+pub(crate) fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = std::process::Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 /// Write `content` to a freshly-created, per-invocation temp subdirectory and run
 /// an elevated `reg import` (one UAC) on it by absolute path, then clean up.
 ///
@@ -52,11 +66,11 @@ pub(crate) fn elevated_reg_import(content: &str) -> Result<bool, String> {
     // throws) surfaces as a non-zero exit. Import by absolute path.
     let ps = format!(
         "$ErrorActionPreference='Stop'; Start-Process -FilePath reg.exe \
-         -ArgumentList @('import', '{}') -Verb RunAs -Wait",
+         -ArgumentList @('import', '{}') -Verb RunAs -WindowStyle Hidden -Wait",
         path.display().to_string().replace('\'', "''")
     );
-    let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
+    let status = hidden_command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
         .status()
         .map_err(|e| format!("spawn elevation: {e}"));
     let _ = std::fs::remove_dir_all(&dir);

@@ -52,7 +52,7 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
-import { useScrollMemory } from "@pm/lib/useScrollMemory";
+import { hasScrollMemory, useScrollMemory } from "@pm/lib/useScrollMemory";
 import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
 import { tc } from "@helios/ui";
@@ -93,6 +93,9 @@ const MILESTONE_TYPE_LABEL: Record<MilestoneType, string> = {
   gate: "Gate",
   comp_event: "Competition",
 };
+
+// Frozen task-name column width; also offsets the first-open scroll to today.
+const LABEL_COLUMN_WIDTH = 224;
 
 // Default zoom levels — overridden by component state at runtime.
 const DEFAULT_DAY_WIDTH = 14;
@@ -190,9 +193,11 @@ export interface GanttViewClientProps {
 }
 
 export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: GanttViewClientProps) {
-  const scrollMemRef = useScrollMemory(
-    `gantt${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`,
-  );
+  const scrollKey = `gantt${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`;
+  const scrollMemRef = useScrollMemory(scrollKey);
+  const scrollNodeRef = useRef<HTMLDivElement | null>(null);
+  // Scope key we've already placed the first-open position for (one-shot per scope).
+  const initialScrollFor = useRef<string | null>(null);
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const milestones = usePmStore((s) => s.milestones);
@@ -386,6 +391,21 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       invalidDateTasks,
     };
   }, [visibleTasks, milestones, subteams, relationByTaskId, sort, critical]);
+
+  // First open of a scope lands on TODAY, not the start of the range (report
+  // 2026-09-24, Daniel Germaine: the chart opened at the project's first date and
+  // you had to scroll weeks to find now). A scope visited earlier this session
+  // keeps its remembered position instead (useScrollMemory restores it). Today
+  // sits a quarter of the way in so a little recent history stays visible.
+  useEffect(() => {
+    const node = scrollNodeRef.current;
+    if (!node || !layout || initialScrollFor.current === scrollKey) return;
+    initialScrollFor.current = scrollKey;
+    if (hasScrollMemory(scrollKey)) return;
+    const tx = differenceInCalendarDays(startOfDay(new Date()), layout.rangeStart) * dayWidth;
+    const timelineViewport = node.clientWidth - LABEL_COLUMN_WIDTH;
+    node.scrollLeft = Math.max(0, tx - timelineViewport * 0.25);
+  }, [layout, scrollKey, dayWidth]);
 
   if (!layout) {
     return (
@@ -622,11 +642,19 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         ref={(node) => {
           scrollRef(node);
           scrollMemRef(node);
+          scrollNodeRef.current = node;
         }}
         className="min-h-0 flex-1 overflow-auto"
       >
-        <div className="flex">
-          <div className="sticky left-0 z-30 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
+        {/* w-max: the row must be as wide as its content. A plain block is only
+            viewport-wide, and a sticky child can't stick past its parent's edge —
+            so the "frozen" task column slid off-screen once you scrolled more
+            than one viewport right (report 2026-09-24). */}
+        <div className="flex w-max min-w-full">
+          <div
+            className="sticky left-0 z-30 shrink-0 border-r border-helios-line bg-helios-panel"
+            style={{ width: LABEL_COLUMN_WIDTH }}
+          >
             <div
               className="border-b border-helios-line px-3 text-[10px] font-medium uppercase tracking-widest text-helios-dim"
               style={{ height: headerHeight, lineHeight: `${headerHeight}px` }}

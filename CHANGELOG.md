@@ -31,6 +31,25 @@ follow [semver](https://semver.org/).
 - PM Gantt: one task with a typo'd year (start 0202-08-18) stretched the timeline across 1,800 years, about 2.2 million elements, and pushed Helios to 3-5 GB of memory with lag everywhere. The Gantt now skips dates outside 2000-2100, names the affected tasks in its header so they can be fixed, and caps the timeline at about 10 years.
 - PM: the task sheet's start/due dates and the table's due date no longer save the partial years a date field reports while you type a year (0002, 0020, 0202); only a real year is saved.
 
+## [5.13.3] - 2026-09-29
+
+### Fixed
+- Sign-up now states the 12-character password minimum plainly and counts characters live as you type (e.g. "5/12"), instead of a soft "most vaults require" hint and an error only after pressing Create account.
+- Sign-up subteam dropdown now uses your system's native colors, so the list can't render unreadable/blank on some Windows setups.
+- If the subteam list ever loads empty, sign-up now says "No subteams available" instead of showing a blank dropdown.
+
+## [5.13.2] - 2026-09-28
+
+### Fixed
+- Sign-up with a non-approved email (anything but @asu.edu) now says so right on the form, instead of failing with a generic server error.
+- PM Gantt: the task-name column stays frozen on the left however far you scroll right (it used to slide off-screen).
+- PM Gantt and Calendar now open on today instead of the project's earliest date.
+
+## [5.13.1] - 2026-09-28
+
+### Fixed
+- Windows: no more empty terminal windows flashing open and closed when Helios starts (or while the Sim tab is open).
+
 ## [5.13.0] - 2026-09-24
 
 ### Added
