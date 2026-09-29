@@ -133,6 +133,13 @@ pub struct Inner {
     /// Per-file optimistic overrides not yet confirmed by a frontend snapshot
     /// push. Keyed by file_id. Empty in steady state.
     pub optimistic: HashMap<String, OptimisticOverride>,
+    /// `norm_path(local_path)` → index into `snapshot.files`, rebuilt whenever
+    /// the snapshot is replaced (`apply_snapshot`). Makes `file_by_path` O(1)
+    /// instead of an O(files) scan with two allocations per file under the read
+    /// lock (multiplied by every path in a `/status-batch`). The optimistic
+    /// mutators only touch lock/version fields, never paths, so they don't
+    /// invalidate it.
+    pub path_index: HashMap<String, usize>,
 }
 
 /// How long after the last authenticated add-in request we still consider the
@@ -273,8 +280,9 @@ impl BridgeState {
     /// redundant and letting genuine later remote changes through.
     pub(crate) fn apply_snapshot(&self, snapshot: Snapshot) {
         let mut inner = self.write();
-        let Inner { snapshot: cur, optimistic, .. } = &mut *inner;
+        let Inner { snapshot: cur, optimistic, path_index, .. } = &mut *inner;
         *cur = merge_snapshot(snapshot, optimistic, now_ms());
+        *path_index = build_path_index(cur);
     }
 
     /// Write the path→state cache the Windows Explorer shell extensions read for
@@ -360,13 +368,8 @@ impl BridgeState {
     /// Resolve a local filesystem path (what the add-in knows) to the vault file
     /// in the current snapshot, if it's tracked. Matching is path-normalized.
     pub(crate) fn file_by_path(&self, path: &str) -> Option<SnapshotFile> {
-        let target = norm_path(path);
-        self.read()
-            .snapshot
-            .files
-            .iter()
-            .find(|f| norm_path(&f.local_path) == target)
-            .cloned()
+        let inner = self.read();
+        lookup_by_path(&inner.snapshot, &inner.path_index, path).cloned()
     }
 
     /// Read access. Recovers from a poisoned lock instead of panicking — the
@@ -477,6 +480,36 @@ fn write_discovery_file(port: u16, token: &str) -> Result<(), String> {
 /// wrong file_id. `to_ascii_lowercase` matches what the OS and the C# side do.
 pub(crate) fn norm_path(p: &str) -> String {
     p.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
+}
+
+/// Build the `norm_path(local_path)` → index map for a snapshot. Keeps the
+/// FIRST file for a colliding normalized path, preserving the old linear
+/// `find`'s first-match semantics exactly.
+fn build_path_index(snapshot: &Snapshot) -> HashMap<String, usize> {
+    let mut index = HashMap::with_capacity(snapshot.files.len());
+    for (i, f) in snapshot.files.iter().enumerate() {
+        index.entry(norm_path(&f.local_path)).or_insert(i);
+    }
+    index
+}
+
+/// Resolve `path` against a snapshot via its path index. Pure (no `self`) so it
+/// is unit-testable without a `BridgeState`. The index is only ever rebuilt
+/// together with the snapshot (`apply_snapshot`), but a hit is still
+/// re-verified: if the indexed slot no longer holds that path (a snapshot
+/// swapped without a rebuild) we fall back to the linear scan rather than
+/// resolve to the wrong file.
+fn lookup_by_path<'a>(
+    snapshot: &'a Snapshot,
+    index: &HashMap<String, usize>,
+    path: &str,
+) -> Option<&'a SnapshotFile> {
+    let target = norm_path(path);
+    let &i = index.get(&target)?;
+    match snapshot.files.get(i) {
+        Some(f) if norm_path(&f.local_path) == target => Some(f),
+        _ => snapshot.files.iter().find(|f| norm_path(&f.local_path) == target),
+    }
 }
 
 /// Merge a freshly-pushed snapshot with the still-pending optimistic overrides,
@@ -867,6 +900,54 @@ mod tests {
         let kelvin = "C:/Vault/\u{212A}elvin.sldprt";
         let latin_k = "C:/Vault/kelvin.sldprt";
         assert_ne!(norm_path(kelvin), norm_path(latin_k));
+    }
+
+    /// The path index resolves separator/case variants in O(1), keeps the FIRST
+    /// file on a normalized-path collision (the old linear `find` semantics),
+    /// and misses cleanly for untracked paths. Pure fns only — no BridgeState.
+    #[test]
+    fn path_index_lookup_matches_linear_find() {
+        let snapshot = Snapshot {
+            vault_root: Some("C:/Vault".into()),
+            files: vec![
+                sf("a", "C:/Vault/SDM26/Part.SLDPRT", None),
+                sf("b", "C:\\Vault\\SDM26\\Other.SLDPRT", None),
+                // Collides with "a" once normalized — "a" must win.
+                sf("dup", "c:\\vault\\sdm26\\PART.sldprt", None),
+            ],
+        };
+        let index = build_path_index(&snapshot);
+        assert_eq!(index.len(), 2);
+        let id = |p: &str| lookup_by_path(&snapshot, &index, p).map(|f| f.file_id.clone());
+        assert_eq!(id(r"C:\Vault\SDM26\Part.SLDPRT"), Some("a".into()));
+        assert_eq!(id("c:/vault/sdm26/other.sldprt/"), Some("b".into()));
+        assert_eq!(id("C:/Vault/SDM26/Missing.SLDPRT"), None);
+        // Every path agrees with the old linear scan.
+        for f in &snapshot.files {
+            let target = norm_path(&f.local_path);
+            let linear = snapshot.files.iter().find(|g| norm_path(&g.local_path) == target);
+            assert_eq!(
+                lookup_by_path(&snapshot, &index, &f.local_path).map(|g| &g.file_id),
+                linear.map(|g| &g.file_id)
+            );
+        }
+    }
+
+    /// A stale index (snapshot replaced without a rebuild) must never resolve to
+    /// the wrong file: a mismatched slot falls back to the linear scan.
+    #[test]
+    fn path_index_stale_slot_falls_back_to_scan() {
+        let old = Snapshot {
+            vault_root: None,
+            files: vec![sf("a", "C:/V/a.sldprt", None), sf("b", "C:/V/b.sldprt", None)],
+        };
+        let index = build_path_index(&old);
+        let new = Snapshot {
+            vault_root: None,
+            files: vec![sf("b", "C:/V/b.sldprt", None), sf("a", "C:/V/a.sldprt", None)],
+        };
+        assert_eq!(lookup_by_path(&new, &index, "C:/V/a.sldprt").map(|f| f.file_id.as_str()), Some("a"));
+        assert_eq!(lookup_by_path(&new, &index, "C:/V/b.sldprt").map(|f| f.file_id.as_str()), Some("b"));
     }
 
     #[test]

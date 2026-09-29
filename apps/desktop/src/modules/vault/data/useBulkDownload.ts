@@ -5,7 +5,7 @@ import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
 import { localDestPathStrict, vaultRelPathFor } from "./folder-paths";
-import { ledgerRecord } from "./sync-ledger";
+import { flushLedger, ledgerRecord } from "./sync-ledger";
 import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
 
@@ -286,6 +286,8 @@ export function useBulkDownload(opts: {
     }
     const workerCount = Math.min(WORKERS, downloadable.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    // Persist the coalesced ledger records now that the bulk run is done.
+    if (vaultId) void flushLedger(vaultId);
     // Only flip terminal state if we're still the current generation —
     // a superseded run finishing late must not clobber the active run's UI.
     if (isCurrent()) {

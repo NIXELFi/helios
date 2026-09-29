@@ -34,6 +34,36 @@ export function normalizePathForCompare(p: string): string {
 }
 
 /**
+ * Build (once per `localFiles` snapshot) a Map from the normalized relative path
+ * to the local file, so `matchLocal` is an O(1) lookup instead of a linear
+ * `find` that re-normalized every local path on every call. Callers run
+ * matchLocal over every vault file (auto-sync passes, table rows, the bulk bar),
+ * which made each pass O(files x local) on a ~13k-file vault.
+ *
+ * Cached in a WeakMap keyed on the array identity: useLocalFolderScan publishes
+ * a new array only when the scan actually changes, so the index is rebuilt once
+ * per real change and dropped with the old snapshot. The cached length guards
+ * against a caller that mutates the array in place (the index is rebuilt).
+ *
+ * Duplicate normalized paths (e.g. `A.SLDPRT` and `a.sldprt` on a
+ * case-sensitive filesystem) keep the FIRST occurrence, preserving the old
+ * `Array.prototype.find` semantics exactly.
+ */
+const localIndexCache = new WeakMap<LocalFile[], { len: number; map: Map<string, LocalFile> }>();
+
+export function localFileIndex(localFiles: LocalFile[]): Map<string, LocalFile> {
+  const hit = localIndexCache.get(localFiles);
+  if (hit && hit.len === localFiles.length) return hit.map;
+  const map = new Map<string, LocalFile>();
+  for (const l of localFiles) {
+    const key = normalizePathForCompare(l.relativePath);
+    if (!map.has(key)) map.set(key, l);
+  }
+  localIndexCache.set(localFiles, { len: localFiles.length, map });
+  return map;
+}
+
+/**
  * Match a single vault file to a local file by full relative path
  * (vault folder hierarchy + filename). This eliminates false matches where
  * two files in different folders share the same basename.
@@ -53,7 +83,7 @@ export function matchLocal(
   if (localFiles === null) return { status: "no-folder" };
 
   const expected = normalizePathForCompare(vaultRelativePath(file, folders));
-  const local = localFiles.find((l) => normalizePathForCompare(l.relativePath) === expected);
+  const local = localFileIndex(localFiles).get(expected);
   if (!local) return { status: "vault-only" };
 
   const versions = versionsByFileId.get(file.id) ?? [];
