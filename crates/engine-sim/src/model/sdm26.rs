@@ -81,6 +81,26 @@ pub fn profile_diameter_area(length: f64, profile: &[(f64, f64)])
     }
 }
 
+/// Finding 0034: area function for a pipe of geometric length `l_geo` with
+/// an optional diameter profile (stretched to `l_geo`), falling back to the
+/// linear `d_in` -> `d_out` taper over `l_geo`. `extend_out` > 0 appends a
+/// straight extension of the outlet diameter (acoustic end correction).
+pub fn exhaust_pipe_area(
+    l_geo: f64, extend_out: f64, d_in: f64, d_out: f64,
+    profile: Option<&[(f64, f64)]>,
+) -> Box<dyn FnMut(f64) -> f64> {
+    let l = l_geo + extend_out.max(0.0);
+    match profile {
+        Some(prof) if prof.len() >= 2 => {
+            let scale = l_geo / prof[prof.len() - 1].0.max(1e-20);
+            let mut p: Vec<(f64, f64)> = prof.iter().map(|&(x, d)| (x * scale, d)).collect();
+            if extend_out > 0.0 { p.push((l, prof[prof.len() - 1].1)); }
+            Box::new(profile_diameter_area(l, &p))
+        }
+        _ => Box::new(linear_diameter_area(l, d_in, d_out)),
+    }
+}
+
 /// Diameter of a piecewise-linear `[(x, d)]` profile at `x` (ends held).
 pub fn profile_diameter_at(prof: &[(f64, f64)], x: f64) -> f64 {
     if prof.is_empty() { return 0.0; }
@@ -181,6 +201,20 @@ pub struct SDM26Config {
     /// `diameter` → `diameter_out` taper. Used to model runner + head port
     /// as one pipe.
     pub runner_diameter_profiles: Option<Vec<Option<Vec<(f64, f64)>>>>,
+    /// Finding 0034: optional per-primary piecewise-linear diameter profile
+    /// (x from the exhaust valve end, stretched to the primary length). A
+    /// `None` entry uses the linear `diameter` -> `diameter_out` taper.
+    /// Models head port + stepped header tube as one pipe.
+    pub primary_diameter_profiles: Option<Vec<Option<Vec<(f64, f64)>>>>,
+    /// Finding 0034: optional per-secondary diameter profile (x from the
+    /// first-collector merge, stretched to the secondary length).
+    pub secondary_diameter_profiles: Option<Vec<Option<Vec<(f64, f64)>>>>,
+    /// Finding 0034: optional collector / tail diameter profile (x from the
+    /// last merge, stretched to the collector length). Models the merged
+    /// collector cone + step sections + straight-through muffler as one
+    /// pipe. With `exhaust_collector_end_correction` the correction extends
+    /// the pipe at the outlet with the outlet diameter.
+    pub collector_diameter_profile: Option<Vec<(f64, f64)>>,
     /// Finding 0033: diffuser outlet diameter of the venturi restrictor.
     /// When set, the venturi area ratio σ = A_throat / A_outlet uses it
     /// instead of the plenum cross-section `volume / length`.
@@ -317,6 +351,10 @@ pub struct SDM26Config {
     /// sim runs the engine's ACTUAL ECU table — the team dynos reflect the
     /// flashed tune, not an idealized MBT map. Default None → parity.
     pub spark_advance_map: Option<Vec<(f64, f64)>>,
+    /// Finding 0034: optional measured per-RPM AFR map, (rpm, AFR) pairs
+    /// sorted by rpm. Overrides `afr_target` (see `WiebeParams::afr_at`).
+    /// Default None -> parity.
+    pub afr_map: Option<Vec<(f64, f64)>>,
     pub t_wall_cylinder: f64,
     // Woschni
     pub woschni_c1_gas_exchange: f64,
@@ -516,6 +554,9 @@ impl Default for SDM26Config {
             plenum_wall_t: 320.0,
             plenum_diameter_profile: None,
             runner_diameter_profiles: None,
+            primary_diameter_profiles: None,
+            secondary_diameter_profiles: None,
+            collector_diameter_profile: None,
             restrictor_outlet_diameter: None,
             spark_advance_rpm_slope_deg_per_krpm: 0.0,
             spark_advance_rpm_ref: 10000.0,
@@ -548,6 +589,7 @@ impl Default for SDM26Config {
             knock_max_retard_deg: 10.0,
             knock_tau_scale: 1.0,
             spark_advance_map: None,
+            afr_map: None,
             t_wall_cylinder: 450.0,
             woschni_c1_gas_exchange: 6.18, woschni_c1_compression: 2.28,
             woschni_c1_combustion: 2.28, woschni_c2_combustion: 3.24e-3,
@@ -726,7 +768,7 @@ impl SDM26Config {
         };
         (a_t / a_out.max(1e-12)).min(1.0)
     }
-    fn primary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
+    pub fn primary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.primary_lengths.as_ref().map(|v| v[i]).unwrap_or(self.primary_length);
         let d_in = self.primary_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.primary_diameter_in);
         // See runner_spec: a present vector means non-uniform pipes, so the
@@ -736,9 +778,12 @@ impl SDM26Config {
             None => self.primary_diameter_out.unwrap_or(d_in),
         };
         let wt = self.primary_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.primary_wall_t);
+        if let Some(prof) = self.primary_profile(i) {
+            return (l, prof[0].1, prof[prof.len() - 1].1, self.primary_n_cells, wt);
+        }
         (l, d_in, d_out, self.primary_n_cells, wt)
     }
-    fn secondary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
+    pub fn secondary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.secondary_lengths.as_ref().map(|v| v[i]).unwrap_or(self.secondary_length);
         let d_in = self.secondary_diameters_in.as_ref().map(|v| v[i]).unwrap_or(self.secondary_diameter_in);
         // See runner_spec: a present vector means non-uniform pipes, so the
@@ -748,9 +793,30 @@ impl SDM26Config {
             None => self.secondary_diameter_out.unwrap_or(d_in),
         };
         let wt = self.secondary_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.secondary_wall_t);
+        if let Some(prof) = self.secondary_profile(i) {
+            return (l, prof[0].1, prof[prof.len() - 1].1, self.secondary_n_cells, wt);
+        }
         (l, d_in, d_out, self.secondary_n_cells, wt)
     }
-    fn collector_spec(&self) -> (f64, f64, f64, usize, f64) {
+    /// Finding 0034: primary i's diameter profile, if any.
+    pub fn primary_profile(&self, i: usize) -> Option<&[(f64, f64)]> {
+        self.primary_diameter_profiles.as_ref()
+            .and_then(|v| v.get(i)).and_then(|p| p.as_deref()).filter(|p| p.len() >= 2)
+    }
+    /// Finding 0034: secondary i's diameter profile, if any.
+    pub fn secondary_profile(&self, i: usize) -> Option<&[(f64, f64)]> {
+        self.secondary_diameter_profiles.as_ref()
+            .and_then(|v| v.get(i)).and_then(|p| p.as_deref()).filter(|p| p.len() >= 2)
+    }
+    /// Finding 0034: collector diameter profile, if any.
+    pub fn collector_profile(&self) -> Option<&[(f64, f64)]> {
+        self.collector_diameter_profile.as_deref().filter(|p| p.len() >= 2)
+    }
+    pub fn collector_spec(&self) -> (f64, f64, f64, usize, f64) {
+        if let Some(prof) = self.collector_profile() {
+            return (self.collector_length, prof[0].1, prof[prof.len() - 1].1,
+                    self.collector_n_cells, self.collector_wall_t);
+        }
         let d_in = self.collector_diameter_in;
         let d_out = self.collector_diameter_out.unwrap_or(d_in);
         (self.collector_length, d_in, d_out, self.collector_n_cells, self.collector_wall_t)
@@ -950,7 +1016,7 @@ impl SDM26Engine {
         for i in 0..n_cyl {
             let (l, d_in, d_out, n, wt) = cfg.primary_spec(i);
             let mut p = make_pipe_state(
-                n, l, linear_diameter_area(l, d_in, d_out),
+                n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, cfg.primary_profile(i)),
                 1.4, 287.0, wt, 2,
             );
             set_uniform(&mut p, cfg.p_ambient / (287.0 * cfg.t_ambient),
@@ -965,7 +1031,7 @@ impl SDM26Engine {
             for i in 0..2 {
                 let (l, d_in, d_out, n, wt) = cfg.secondary_spec(i);
                 let mut p = make_pipe_state(
-                    n, l, linear_diameter_area(l, d_in, d_out),
+                    n, l, exhaust_pipe_area(l, 0.0, d_in, d_out, cfg.secondary_profile(i)),
                     1.4, 287.0, wt, 2,
                 );
                 set_uniform(&mut p, cfg.p_ambient / (287.0 * cfg.t_ambient),
@@ -978,16 +1044,29 @@ impl SDM26Engine {
         // collector
         let (l_col, d_col_in, d_col_out, n_col, t_col) = cfg.collector_spec();
         // 0032 fix 4: Levine–Schwinger unflanged end correction, 0.6133·r.
-        let l_col = if cfg.exhaust_collector_end_correction {
-            l_col + LEVINE_SCHWINGER_END_CORRECTION * 0.5 * d_col_out
+        let delta_col = if cfg.exhaust_collector_end_correction {
+            LEVINE_SCHWINGER_END_CORRECTION * 0.5 * d_col_out
         } else {
-            l_col
+            0.0
         };
-        let mut collector = make_pipe_state(
-            n_col, l_col,
-            linear_diameter_area(l_col, d_col_in, d_col_out),
-            1.4, 287.0, t_col, 2,
-        );
+        let mut collector = match cfg.collector_profile() {
+            // 0034: profile over the geometric length + a straight outlet
+            // extension of length delta (the profile is not stretched over it).
+            Some(prof) => make_pipe_state(
+                n_col, l_col + delta_col,
+                exhaust_pipe_area(l_col, delta_col, d_col_in, d_col_out, Some(prof)),
+                1.4, 287.0, t_col, 2,
+            ),
+            None => {
+                // Legacy: the linear taper spans l + delta (parity).
+                let l_col = l_col + delta_col;
+                make_pipe_state(
+                    n_col, l_col,
+                    linear_diameter_area(l_col, d_col_in, d_col_out),
+                    1.4, 287.0, t_col, 2,
+                )
+            }
+        };
         set_uniform(&mut collector, cfg.p_ambient / (287.0 * cfg.t_ambient),
                     0.0, cfg.p_ambient, 0.0);
         let collector_idx = pipes.len();
@@ -1112,6 +1191,7 @@ impl SDM26Engine {
             spark_advance_rpm_slope_deg_per_krpm: cfg.spark_advance_rpm_slope_deg_per_krpm,
             spark_advance_rpm_ref: cfg.spark_advance_rpm_ref,
             spark_map: cfg.spark_advance_map.clone(),
+            afr_map: cfg.afr_map.clone(),
             duration_rpm_exp: cfg.duration_rpm_exp,
             duration_rpm_ref: cfg.duration_rpm_ref,
             wiebe_a_rpm_exp: cfg.wiebe_a_rpm_exp,

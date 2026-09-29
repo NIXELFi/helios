@@ -676,11 +676,11 @@ impl CylinderModel {
                 let m_fresh = (self.state.m - self.state.m_residual).max(0.0);
                 self.state.m_fuel = if self.fuel_mass_from_trapped_air || self.heat_release_o2_limited {
                     fuel_mass_at_ivc(
-                        m_fresh, self.wiebe.afr_target, self.wiebe.afr_stoich,
+                        m_fresh, self.wiebe.afr_at(rpm), self.wiebe.afr_stoich,
                         self.fuel_mass_from_trapped_air, self.heat_release_o2_limited,
                     )
                 } else {
-                    m_fresh / (1.0 + self.wiebe.afr_target)
+                    m_fresh / (1.0 + self.wiebe.afr_at(rpm))
                 };
                 if self.state.m > 1e-12 {
                     let f = (self.state.m_residual / self.state.m).clamp(0.0, 1.0);
@@ -692,13 +692,13 @@ impl CylinderModel {
                 }
             } else if self.fuel_mass_from_trapped_air || self.heat_release_o2_limited {
                 self.state.m_fuel = fuel_mass_at_ivc(
-                    self.state.m, self.wiebe.afr_target, self.wiebe.afr_stoich,
+                    self.state.m, self.wiebe.afr_at(rpm), self.wiebe.afr_stoich,
                     self.fuel_mass_from_trapped_air, self.heat_release_o2_limited,
                 );
                 self.state.x_b = 0.0;
                 self.state.f_residual_at_ivc = 0.0;
             } else {
-                self.state.m_fuel = self.state.m / (1.0 + self.wiebe.afr_target);
+                self.state.m_fuel = self.state.m / (1.0 + self.wiebe.afr_at(rpm));
                 self.state.x_b = 0.0;
                 self.state.f_residual_at_ivc = 0.0;
             }

@@ -79,6 +79,11 @@ pub struct WiebeParams {
     /// that was flashed, not MBT. Knock-control retard still subtracts
     /// on top. Default None → parity preserved.
     pub spark_map: Option<Vec<(f64, f64)>>,
+    /// Finding 0034: optional measured per-RPM air-fuel ratio map,
+    /// (rpm, AFR) pairs sorted by rpm. Overrides `afr_target` for the fuel
+    /// mass at IVC (and the AFR efficiency factor) so a config can run the
+    /// engine's logged WOT lambda. Default None → `afr_target` (parity).
+    pub afr_map: Option<Vec<(f64, f64)>>,
 
     /// 0007: optional RPM-dependent Wiebe shape parameter `a` (turbulent
     /// flame speed scaling). Real engines have flame speed proportional
@@ -168,6 +173,7 @@ impl Default for WiebeParams {
             spark_advance_rpm_ref: 10000.0,
             knock_retard_deg: 0.0,
             spark_map: None,
+            afr_map: None,
             duration_rpm_exp: 0.0,
             duration_rpm_ref: 10000.0,
             wiebe_a_rpm_exp: 0.0,
@@ -230,6 +236,16 @@ impl WiebeParams {
             self.spark_advance_deg + self.spark_advance_rpm_slope_deg_per_krpm * delta_krpm
         };
         base - self.knock_retard_deg
+    }
+
+    /// Finding 0034: RPM-aware air-fuel ratio. The measured `afr_map`
+    /// wins when present; otherwise the scalar `afr_target` (parity).
+    #[inline]
+    pub fn afr_at(&self, rpm: f64) -> f64 {
+        match &self.afr_map {
+            Some(map) if !map.is_empty() => interp_map(map, rpm),
+            _ => self.afr_target,
+        }
     }
 
     /// RPM-aware Wiebe burn duration (deg). Falls back to the
@@ -300,8 +316,13 @@ impl WiebeParams {
     /// product (m_fuel × factor) peaks around φ ≈ 1.1, giving the
     /// textbook brake-power-rich peak.
     pub fn afr_eta_factor(&self) -> f64 {
+        self.afr_eta_factor_for(self.afr_target)
+    }
+
+    /// `afr_eta_factor` at an explicit AFR (finding 0034 `afr_map`).
+    pub fn afr_eta_factor_for(&self, afr: f64) -> f64 {
         // Equivalence ratio from the configured fuel stoich AFR (default 14.7).
-        let phi = self.afr_stoich.max(1.0) / self.afr_target.max(1.0);
+        let phi = self.afr_stoich.max(1.0) / afr.max(1.0);
         let f = if phi <= 0.7 {
             1.0 - 5.0 * (0.7 - phi).powi(2)
         } else if phi <= 1.0 {
@@ -319,7 +340,7 @@ impl WiebeParams {
     pub fn eta_at(&self, rpm: f64) -> f64 {
         let base = self.eta_comb_at_rpm(rpm);
         if self.afr_eta_enabled {
-            base * self.afr_eta_factor()
+            base * self.afr_eta_factor_for(self.afr_at(rpm))
         } else {
             base
         }

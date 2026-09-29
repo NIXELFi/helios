@@ -79,6 +79,29 @@ fn pipe_field(pipes: &[Value], key: &str, what: &str) -> Result<Vec<f64>, Config
         .collect()
 }
 
+/// Optional `[[rpm, value], ...]` map under `key` (findings 0030 / 0034).
+/// Rows must be numeric pairs sorted by strictly increasing rpm. Absent or
+/// empty -> Ok(None).
+fn opt_rpm_map(v: &Value, key: &str, unit: &str) -> Result<Option<Vec<(f64, f64)>>, ConfigLoadError> {
+    let Some(arr) = v.get(key).and_then(|x| x.as_array()) else { return Ok(None) };
+    let pair = || ConfigLoadError::Schema(format!("{key} rows must be [rpm, {unit}] pairs"));
+    let mut map: Vec<(f64, f64)> = Vec::with_capacity(arr.len());
+    for row in arr {
+        let r = row.as_array().ok_or_else(pair)?;
+        if r.len() != 2 { return Err(pair()); }
+        let rpm = r[0].as_f64().ok_or_else(|| ConfigLoadError::Schema(
+            format!("{key} rpm must be numeric")))?;
+        let y = r[1].as_f64().ok_or_else(|| ConfigLoadError::Schema(
+            format!("{key} {unit} must be numeric")))?;
+        map.push((rpm, y));
+    }
+    if map.windows(2).any(|w| w[1].0 <= w[0].0) {
+        return Err(ConfigLoadError::Schema(
+            format!("{key} must be sorted by strictly increasing rpm")));
+    }
+    Ok(if map.is_empty() { None } else { Some(map) })
+}
+
 /// Finding 0033: optional piecewise-linear diameter profile
 /// `[[x, d], ...]` (m). Needs >= 2 rows, x[0] = 0, strictly increasing x,
 /// positive d. Absent key -> Ok(None).
@@ -153,6 +176,8 @@ const RUNNER_EXTRA_KEYS: &[&str] = &[
     // finding 0033
     "diameter_profile",
 ];
+/// Extra keys on exhaust pipes (finding 0034).
+const EXHAUST_EXTRA_KEYS: &[&str] = &["diameter_profile"];
 const COMBUSTION_KEYS: &[&str] = &[
     "wiebe_a", "wiebe_m", "combustion_duration", "spark_advance",
     "ignition_delay", "combustion_efficiency", "q_lhv", "afr_stoich", "afr_target",
@@ -542,7 +567,7 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
                                 "physics.limiter must be an integer; got {v} (ignored)")),
                         },
                         // Finding 0030: parsed (and validated) below.
-                        "spark_advance_map" => {}
+                        "spark_advance_map" | "afr_map" => {}
                         key => {
                             let applied = match (v.as_bool(), v.as_f64()) {
                                 (Some(b), _) => set_physics_bool(&mut cfg, key, b),
@@ -567,26 +592,15 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         // Finding 0030: measured per-RPM ignition map, [[rpm, deg], ...].
         // Lets a config run the engine's actual ECU table instead of the
         // idealized scalar + slope tune.
-        if let Some(arr) = phys.get("spark_advance_map").and_then(|x| x.as_array()) {
-            let mut map: Vec<(f64, f64)> = Vec::with_capacity(arr.len());
-            for row in arr {
-                let r = row.as_array().ok_or_else(|| ConfigLoadError::Schema(
-                    "spark_advance_map rows must be [rpm, deg] pairs".into()))?;
-                if r.len() != 2 {
-                    return Err(ConfigLoadError::Schema(
-                        "spark_advance_map rows must be [rpm, deg] pairs".into()));
-                }
-                let rpm = r[0].as_f64().ok_or_else(|| ConfigLoadError::Schema(
-                    "spark_advance_map rpm must be numeric".into()))?;
-                let deg = r[1].as_f64().ok_or_else(|| ConfigLoadError::Schema(
-                    "spark_advance_map deg must be numeric".into()))?;
-                map.push((rpm, deg));
+        if let Some(map) = opt_rpm_map(phys, "spark_advance_map", "deg")? {
+            cfg.spark_advance_map = Some(map);
+        }
+        // Finding 0034: measured per-RPM AFR map, [[rpm, afr], ...].
+        if let Some(map) = opt_rpm_map(phys, "afr_map", "afr")? {
+            if map.iter().any(|&(_, a)| !(a > 1.0)) {
+                return Err(ConfigLoadError::Schema("afr_map afr must be > 1".into()));
             }
-            if map.windows(2).any(|w| w[1].0 <= w[0].0) {
-                return Err(ConfigLoadError::Schema(
-                    "spark_advance_map must be sorted by strictly increasing rpm".into()));
-            }
-            if !map.is_empty() { cfg.spark_advance_map = Some(map); }
+            cfg.afr_map = Some(map);
         }
     }
 
@@ -631,6 +645,34 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         cfg.runner_diameter_profiles = Some(profiles);
     }
 
+    // ---- Exhaust diameter profiles (finding 0034) -----------------------
+    // Same contract as the runner profile: x from the upstream end,
+    // stretched to the pipe `length` (warned when they disagree).
+    let mut exhaust_profiles = |pipes: &[Value], what: &str|
+        -> Result<Option<Vec<Option<Vec<(f64, f64)>>>>, ConfigLoadError>
+    {
+        let mut out = Vec::with_capacity(pipes.len());
+        for (i, p) in pipes.iter().enumerate() {
+            let prof = opt_profile(p, &format!("{what}[{i}]"))?;
+            if let Some(pr) = prof.as_ref() {
+                let l = opt_f64(p, "length").unwrap_or(0.0);
+                let x_last = pr[pr.len() - 1].0;
+                if (l - x_last).abs() > 1e-3 {
+                    warnings.push(format!(
+                        "{what}[{i}].diameter_profile ends at x = {x_last} but length is {l}; the profile is stretched to the length"));
+                }
+            }
+            out.push(prof);
+        }
+        Ok(if out.iter().any(|p| p.is_some()) { Some(out) } else { None })
+    };
+    cfg.primary_diameter_profiles = exhaust_profiles(primaries, "exhaust_primaries")?;
+    if !secondaries.is_empty() {
+        cfg.secondary_diameter_profiles = exhaust_profiles(&secondaries, "exhaust_secondaries")?;
+    }
+    cfg.collector_diameter_profile = exhaust_profiles(std::slice::from_ref(collector), "exhaust_collector")?
+        .and_then(|mut v| v.pop().flatten());
+
     // ---- Unknown-key warnings (finding 0032 fix 8) ----------------------
     warn_unknown(&data, "", TOP_KEYS, &[], &mut warnings);
     warn_unknown(cyl, "cylinder", CYLINDER_KEYS, &[], &mut warnings);
@@ -640,12 +682,12 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         warn_unknown(p, &format!("intake_pipes[{i}]"), PIPE_KEYS, RUNNER_EXTRA_KEYS, &mut warnings);
     }
     for (i, p) in primaries.iter().enumerate() {
-        warn_unknown(p, &format!("exhaust_primaries[{i}]"), PIPE_KEYS, &[], &mut warnings);
+        warn_unknown(p, &format!("exhaust_primaries[{i}]"), PIPE_KEYS, EXHAUST_EXTRA_KEYS, &mut warnings);
     }
     for (i, p) in secondaries.iter().enumerate() {
-        warn_unknown(p, &format!("exhaust_secondaries[{i}]"), PIPE_KEYS, &[], &mut warnings);
+        warn_unknown(p, &format!("exhaust_secondaries[{i}]"), PIPE_KEYS, EXHAUST_EXTRA_KEYS, &mut warnings);
     }
-    warn_unknown(collector, "exhaust_collector", PIPE_KEYS, &[], &mut warnings);
+    warn_unknown(collector, "exhaust_collector", PIPE_KEYS, EXHAUST_EXTRA_KEYS, &mut warnings);
     warn_unknown(comb, "combustion", COMBUSTION_KEYS, &[], &mut warnings);
     warn_unknown(restr, "restrictor", RESTRICTOR_KEYS, &[], &mut warnings);
     warn_unknown(plen, "plenum", PLENUM_KEYS, &[], &mut warnings);
@@ -916,6 +958,8 @@ mod tests {
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26-physics-v2.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25-physics-v2.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_exhaust.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_realtune.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm26.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm25.json",
         ] {
@@ -1105,9 +1149,120 @@ mod tests {
             let mut d = base();
             d["intake_pipes"][2]["diameter_profile"] = bad.clone();
             assert!(load_v1_value(&d).is_err(), "runner {bad}");
+            let mut d = base();
+            d["exhaust_primaries"][1]["diameter_profile"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "primary {bad}");
+            let mut d = base();
+            d["exhaust_secondaries"][0]["diameter_profile"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "secondary {bad}");
+            let mut d = base();
+            d["exhaust_collector"]["diameter_profile"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "collector {bad}");
         }
         let mut d = base();
         d["restrictor"]["outlet_diameter"] = serde_json::json!(0.015);
         assert!(load_v1_value(&d).is_err());
+    }
+
+    #[test]
+    fn exhaust_diameter_profiles_load_and_build() {
+        // Finding 0034: 4-2-1 with stepped primaries, merged-cone secondaries
+        // and a collector + step + muffler tail as one profiled pipe.
+        use crate::model::sdm26::{JunctionKind, SDM26Engine};
+        use std::f64::consts::PI;
+        let mut data = base();
+        let prim = serde_json::json!([[0.0, 0.0277], [0.065, 0.0293], [0.367, 0.0293], [0.377, 0.0356], [0.424, 0.0356]]);
+        for i in 0..4 {
+            data["exhaust_primaries"][i]["length"] = serde_json::json!(0.424);
+            data["exhaust_primaries"][i]["n_points"] = serde_json::json!(47);
+            data["exhaust_primaries"][i]["diameter_profile"] = prim.clone();
+        }
+        let sec = serde_json::json!([[0.0, 0.0504], [0.0597, 0.0356], [0.4673, 0.0356]]);
+        for i in 0..2 {
+            data["exhaust_secondaries"][i]["length"] = serde_json::json!(0.4673);
+            data["exhaust_secondaries"][i]["n_points"] = serde_json::json!(52);
+            data["exhaust_secondaries"][i]["diameter_profile"] = sec.clone();
+        }
+        data["exhaust_collector"]["length"] = serde_json::json!(0.6647);
+        data["exhaust_collector"]["n_points"] = serde_json::json!(74);
+        data["exhaust_collector"]["diameter_profile"] = serde_json::json!(
+            [[0.0, 0.0504], [0.0597, 0.0356], [0.0697, 0.042], [0.1597, 0.042], [0.1697, 0.0483], [0.6647, 0.0483]]);
+        let (cfg, w) = load_with(&data);
+        assert!(!w.iter().any(|m| m.contains("unknown key") || m.contains("stretched")), "{w:?}");
+        assert_eq!(cfg.primary_spec(0).1, 0.0277);
+        assert_eq!(cfg.primary_spec(0).2, 0.0356);
+        assert_eq!(cfg.collector_spec().2, 0.0483);
+
+        let dia = |a: f64| (4.0 * a / PI).sqrt();
+        let eng = SDM26Engine::new(cfg.clone(), JunctionKind::Characteristic);
+        let p = &eng.pipes[eng.primary_idx[0]];
+        let at = |pp: &crate::solver::state::PipeState, k: usize| dia(pp.area[pp.n_ghost + k]);
+        assert!((at(p, 0) - (0.0277 + 0.0016 * 0.5 * p.dx / 0.065)).abs() < 1e-9);
+        assert!((at(p, 20) - 0.0293).abs() < 1e-12);
+        assert!((at(p, 46) - 0.0356).abs() < 1e-12);
+        let s = &eng.pipes[eng.secondary_idx[1]];
+        assert!(at(s, 0) > 0.049 && (at(s, 30) - 0.0356).abs() < 1e-12);
+        // no end correction: the collector is its geometric length
+        let c = &eng.pipes[eng.collector_idx];
+        assert!((c.dx * c.n_cells as f64 - 0.6647).abs() < 1e-12);
+        assert!((at(c, 12) - 0.042).abs() < 1e-12);
+        assert!((at(c, 73) - 0.0483).abs() < 1e-12);
+
+        // with the end correction the tail grows by 0.6133 r_out at the
+        // OUTLET; the upstream profile stays put.
+        let mut c2 = cfg.clone();
+        c2.exhaust_collector_end_correction = true;
+        let e2 = SDM26Engine::new(c2, JunctionKind::Characteristic);
+        let c = &e2.pipes[e2.collector_idx];
+        let delta = 0.6133 * 0.5 * 0.0483;
+        assert!((c.dx * c.n_cells as f64 - (0.6647 + delta)).abs() < 1e-6);
+        let x12 = 12.5 * c.dx;
+        assert!(x12 > 0.0697 && x12 < 0.1597);
+        assert!((at(c, 12) - 0.042).abs() < 1e-12);
+        assert!((at(c, c.n_cells - 1) - 0.0483).abs() < 1e-12);
+    }
+
+    #[test]
+    fn exhaust_profiles_absent_keep_legacy_pipes() {
+        use crate::model::sdm26::{JunctionKind, SDM26Engine};
+        let (cfg, _) = load_with(&base());
+        assert!(cfg.primary_diameter_profiles.is_none());
+        assert!(cfg.secondary_diameter_profiles.is_none());
+        assert!(cfg.collector_diameter_profile.is_none());
+        assert!(cfg.afr_map.is_none());
+        let eng = SDM26Engine::new(cfg.clone(), JunctionKind::Characteristic);
+        let c = &eng.pipes[eng.collector_idx];
+        assert!((c.dx * c.n_cells as f64 - cfg.collector_length).abs() < 1e-12);
+    }
+
+    #[test]
+    fn afr_map_loads_interpolates_and_validates() {
+        let mut data = base();
+        data["physics"] = serde_json::json!({
+            "afr_map": [[5000.0, 10.3], [7000.0, 14.3], [9000.0, 12.7]],
+        });
+        let (cfg, w) = load_with(&data);
+        assert!(w.is_empty(), "{w:?}");
+        let map = cfg.afr_map.clone().expect("afr_map loaded");
+        assert_eq!(map.len(), 3);
+        let wiebe = crate::cylinder::combustion::WiebeParams {
+            afr_target: cfg.afr_target,
+            afr_map: cfg.afr_map.clone(),
+            ..Default::default()
+        };
+        assert!((wiebe.afr_at(6000.0) - 12.3).abs() < 1e-12);
+        assert_eq!(wiebe.afr_at(3000.0), 10.3);
+        assert_eq!(wiebe.afr_at(12000.0), 12.7);
+        let plain = crate::cylinder::combustion::WiebeParams { afr_target: 13.1, ..Default::default() };
+        assert_eq!(plain.afr_at(8000.0), 13.1);
+        for bad in [
+            serde_json::json!([[7000.0, 12.0], [5000.0, 12.0]]),
+            serde_json::json!([[5000.0, 0.5]]),
+            serde_json::json!([[5000.0]]),
+        ] {
+            let mut d = base();
+            d["physics"] = serde_json::json!({ "afr_map": bad.clone() });
+            assert!(load_v1_value(&d).is_err(), "afr_map {bad}");
+        }
     }
 }

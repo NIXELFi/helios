@@ -89,6 +89,8 @@ pub fn cfd_list_examples(app: AppHandle) -> Vec<ExampleConfig> {
         ("sdm26-physics-v2", "SDM26 — physics v2 (experimental)", "Finding 0032 opt-in physics fixes + service-manual cam timing. Not calibrated: reads high above 10k rpm. For relative studies only."),
         ("sdm25-physics-v2", "SDM25 — physics v2 (experimental)", "Finding 0032 opt-in physics fixes + service-manual cam timing on the SDM25 geometry. Not calibrated."),
         ("sdm26_asbuilt", "SDM26 — as-built intake (experimental)", "Finding 0033: physics v2 + the as-built SDM26 intake (venturi 36/20/38 mm, 1.44 L bell plenum, 248 mm tapered runners + estimated head port). Not calibrated. For relative studies only."),
+        ("sdm26_asbuilt_exhaust", "SDM26 — as-built intake + exhaust (experimental)", "Finding 0034: the as-built intake plus the as-built 4-2-1 exhaust (1.25 in primaries, two 2-1 collectors, 1.5 in secondaries, stepped tail + 12 in straight-through muffler; port and tail lengths estimated). Not calibrated. For relative studies only."),
+        ("sdm26_asbuilt_realtune", "SDM26 — as-built + logged WOT tune (experimental)", "Finding 0034: as-built intake + exhaust running the car's logged WOT ignition and lambda maps. For dyno comparison. Not calibrated."),
     ];
     for (id, name, desc) in entries {
         let p = cfg_dir.join(format!("{id}.json"));

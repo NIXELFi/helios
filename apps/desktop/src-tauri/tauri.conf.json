@@ -49,6 +49,8 @@
       "resources/cfd/configs/sdm25-physics-v2.json": "cfd/configs/sdm25-physics-v2.json",
       "resources/cfd/configs/sdm26-physics-v2.json": "cfd/configs/sdm26-physics-v2.json",
       "resources/cfd/configs/sdm26_asbuilt.json": "cfd/configs/sdm26_asbuilt.json",
+      "resources/cfd/configs/sdm26_asbuilt_exhaust.json": "cfd/configs/sdm26_asbuilt_exhaust.json",
+      "resources/cfd/configs/sdm26_asbuilt_realtune.json": "cfd/configs/sdm26_asbuilt_realtune.json",
       "resources/addin/HeliosVault.dll": "addin/HeliosVault.dll",
       "resources/shell/HeliosShell.dll": "shell/HeliosShell.dll",
       "resources/shell/SharpShell.dll": "shell/SharpShell.dll",
