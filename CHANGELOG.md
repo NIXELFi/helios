@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Vault: matching vault files to the local folder is now a direct lookup instead of a scan of every local file for every vault file, so auto-sync passes, the file table and the bulk-action bar stay fast on large vaults (~13k files).
+- Vault: folder paths are worked out once per folder list instead of once per file, which removes another per-file cost from every sync pass.
+- Vault: a periodic local rescan that finds nothing changed no longer restarts an in-progress auto-sync or recomputes every file's status. A pass that ends with failed downloads now retries them after 30 seconds, since an unchanged rescan no longer does.
+- Vault: the sync ledger stays in memory and is saved in batches (within a few seconds, and when a sync or bulk download finishes). It used to rewrite the whole ledger file once per downloaded file, which slowed large syncs down more and more. Deletion markers older than the 7-day cool-off are cleaned out.
+- SOLIDWORKS add-in bridge: looking up a file by its path no longer scans the whole vault each time, so status checks for many files at once are faster.
+
 ## [5.13.4] - 2026-09-29
 
 ### Fixed

@@ -9,6 +9,7 @@ import { ensureLocalFolderTree } from "./ensureLocalFolderTree";
 import {
   classifyMissing,
   emptyLedger,
+  flushLedger,
   ledgerRecord,
   ledgerTombstone,
   loadLedger,
@@ -48,6 +49,9 @@ export interface AutoSyncStatus {
   /** Epoch ms when the current pass started; null when idle. */
   startedAt: number | null;
 }
+
+/** Delay before re-running a pass that ended with failed downloads. */
+const FAILED_RETRY_MS = 30_000;
 
 /**
  * Background syncer for the Vault. Whenever vault rows or local-scan results
@@ -146,6 +150,13 @@ export function useAutoSync(input: {
     totalTasks: 0, completedTasks: 0, totalBytes: 0, completedBytes: 0,
     activeFiles: [], startedAt: null,
   });
+
+  // Retry trigger for failed downloads. A pass used to be re-triggered by every
+  // periodic rescan (each one published a new localFiles array); the scan now
+  // keeps its old reference when nothing changed, so a pass that ended with
+  // failures schedules its own retry instead of stalling until something moves.
+  const [retryTick, setRetryTick] = useState(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the latest onComplete in a ref so the run effect doesn't re-fire just
   // because the callback identity changed across renders.
@@ -543,6 +554,11 @@ export function useAutoSync(input: {
         }
       }
 
+      // The ledger coalesces writes in memory; push this pass's records and
+      // tombstones to disk now instead of waiting on the debounce.
+      // Fire-and-forget (best-effort, never throws).
+      if (vaultId) void flushLedger(vaultId);
+
       // Final commit — only if we're still the authoritative generation. If a
       // newer run took over (e.g. deps changed mid-pass), the new run owns the
       // status and will publish its own results.
@@ -572,6 +588,14 @@ export function useAutoSync(input: {
         // propagated — a propagation with zero downloads still needs the file
         // list / recycle bin to refresh.
         if (downloaded > 0 || propagated.length > 0) onCompleteRef.current?.();
+        if (failed > 0 && !retryTimerRef.current) {
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            // A pass already in flight covers the retry (and re-schedules on
+            // its own failures); bumping now would supersede and abort it.
+            if (activeGenRef.current === 0) setRetryTick((t) => t + 1);
+          }, FAILED_RETRY_MS);
+        }
       }
     } finally {
       // Reset run-owned bookkeeping regardless of whether we're still current.
@@ -594,6 +618,10 @@ export function useAutoSync(input: {
       activeAbortRef.current?.abort();
       activeAbortRef.current = null;
       activeGenRef.current = 0;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -637,7 +665,7 @@ export function useAutoSync(input: {
         pending.current = null;
       }
     };
-  }, [enabled, run]);
+  }, [enabled, run, retryTick]);
 
   return status;
 }
