@@ -840,6 +840,8 @@ mod tests {
             "python_ref/configs/sdm25.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26-physics-v2.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25-physics-v2.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm26.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm25.json",
         ] {

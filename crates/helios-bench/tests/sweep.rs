@@ -181,3 +181,52 @@ libm_source = "any"
         "expected error mentioning [sweep]: {stderr}"
     );
 }
+
+/// Finding 0032: `[[sweep.grid]]` runs every sampled trial at every grid
+/// value, so a multi-runner-length study is one TOML (one RPM sweep per
+/// length; the envelope is max over lengths per RPM).
+#[test]
+fn sweep_grid_runs_one_trial_per_runner_length() {
+    let dir = tempdir().unwrap();
+    let cfg = baseline_config_path().display().to_string().replace('\\', "/");
+    let study = dir.path().join("study.toml");
+    std::fs::write(&study, format!(r#"[run]
+config = "{cfg}"
+rpm = [6000.0, 9000.0]
+cycles = 2
+recorded = false
+seed = 1
+junction = "characteristic"
+
+[environment]
+target_triple = "any"
+rustc_version = "any"
+rayon_threads = 1
+libm_source = "any"
+
+[sweep]
+sampler = "lhs"
+n_trials = 1
+parameters = []
+
+[[sweep.grid]]
+name = "runner_length"
+values = [0.20, 0.245, 0.30]
+"#)).unwrap();
+    let out = dir.path().join("grid.ndjson");
+    let r = bin()
+        .args(["sweep", study.to_str().unwrap(), "--out", out.to_str().unwrap(), "--commit", "x"])
+        .output()
+        .expect("spawn");
+    assert!(r.status.success(), "stderr={}", String::from_utf8_lossy(&r.stderr));
+    let rows: Vec<Value> = std::fs::read_to_string(&out).unwrap().lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .filter(|v: &Value| v["kind"] == "trial")
+        .collect();
+    assert_eq!(rows.len(), 6, "3 lengths x 2 rpm");
+    let mut lengths: Vec<f64> = rows.iter().map(|r| r["overrides"]["runner_length"].as_f64().unwrap()).collect();
+    lengths.dedup();
+    assert_eq!(lengths, vec![0.20, 0.245, 0.30]);
+    let ids: Vec<u64> = rows.iter().map(|r| r["trial_id"].as_u64().unwrap()).collect();
+    assert_eq!(ids, vec![0, 0, 1, 1, 2, 2]);
+}

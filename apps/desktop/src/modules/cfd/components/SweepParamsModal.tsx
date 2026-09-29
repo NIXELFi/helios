@@ -193,7 +193,7 @@ export function SweepParamsModal({
             <label className="uppercase tracking-wider text-helios-muted">Junction kind</label>
             <select className={INPUT_CLS}
               value={junction} onChange={(e) => setJunction(e.target.value as JunctionKind)}>
-              <option value="stagnation">Stagnation</option>
+              <option value="stagnation" title="0-D stagnation volume at every junction. Absorbs ~98% of pressure-wave reflections, so runner/header tuning effects disappear. Kept for parity studies only.">Stagnation (not for wave tuning)</option>
               <option value="characteristic">Characteristic</option>
             </select>
             <label className="uppercase tracking-wider text-helios-muted">Convergence tol (IMEP)</label>

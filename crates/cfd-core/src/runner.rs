@@ -937,7 +937,7 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     });
 
     // 1. Load base config.
-    let base_cfg = match load_v1_json_logged(&config_path) {
+    let mut base_cfg = match load_v1_json_logged(&config_path) {
         Ok(c) => c,
         Err(e) => {
             emitter.emit_error(JobErrorEvent {
@@ -951,6 +951,21 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
             return RunOutcome::Errored;
         }
     };
+
+    // 1b. Physics-preset overrides (same mechanism as sweep / single-RPM).
+    for ov in &params.overrides {
+        if let Err(e) = crate::params::apply_override(&mut base_cfg, &ov.path, ov.value) {
+            emitter.emit_error(JobErrorEvent {
+                job_id: job_id.clone(),
+                kind: StudyKind::Optimization,
+                reason: ErrorReason::ConfigLoad,
+                message: format!("apply_override({}): {}", ov.path, e),
+                partial_cycles: vec![],
+                partial_points: vec![],
+            });
+            return RunOutcome::Errored;
+        }
+    }
 
     // 2. Validate inputs.
     if params.tunables.is_empty() {

@@ -11,8 +11,11 @@ import type {
   OptimizationParams,
   ParameterBounds,
   ParameterBoundsUI,
+  ParameterOverride,
   SamplerKind,
 } from "../../state/types";
+import { PresetPicker } from "../PresetPicker";
+import { DEFAULT_PRESET_ID, findPreset } from "../../lib/presets";
 import { parseRpmList } from "../../lib/rpmList";
 import { fieldErrors, runSizingFields, OPT_N_CYCLES_MAX } from "../../lib/runParams";
 import { followerOf, withPerElement } from "../../lib/lockedPairs";
@@ -50,10 +53,19 @@ export function OptimizationParamsModal({
   const [nTrials, setNTrials] = useState(32);
   const [sampler, setSampler] = useState<SamplerKind>("lhs");
   const [seedText, setSeedText] = useState("");
-  const [nCyclesMax, setNCyclesMax] = useState(8);
+  // Same run sizing as the sweep modal (40 max / 30 min cycles): the
+  // intake acoustics need ~30 cycles to settle, and 8/3 stopped trials on a
+  // transient IMEP plateau, so optimizer rankings disagreed with sweeps.
+  const [nCyclesMax, setNCyclesMax] = useState(40);
   const [junction, setJunction] = useState<JunctionKind>("characteristic");
   const [tol, setTol] = useState<number>(5e-3);
-  const [minCycles, setMinCycles] = useState<number>(3);
+  const [minCycles, setMinCycles] = useState<number>(30);
+  // Same physics preset as sweeps (finding 0032): trials were previously
+  // built from the bare JSON with no preset overrides at all.
+  const [presetId, setPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [overrides, setOverrides] = useState<ParameterOverride[]>(
+    () => findPreset(DEFAULT_PRESET_ID).overrides,
+  );
 
   const rpmParse = useMemo(() => parseRpmList(rpmListText), [rpmListText]);
 
@@ -129,6 +141,7 @@ export function OptimizationParamsModal({
       convergenceTolImep: tol,
       convergenceMinCycles: minCycles,
       lockedPairs,
+      overrides,
       rankBy: rankBy === "objective" ? null : rankBy,
     };
     onSubmit(params);
@@ -159,6 +172,10 @@ export function OptimizationParamsModal({
         </header>
 
         <div className="flex-1 overflow-y-auto p-3">
+          <PresetPicker
+            selectedId={presetId}
+            onChange={(ov, p) => { setPresetId(p.id); setOverrides(ov); }}
+          />
           <section className="mb-5">
             <h3 className="mb-2 text-[10px] uppercase tracking-wider text-helios-muted">
               1. Parameters
@@ -275,7 +292,7 @@ export function OptimizationParamsModal({
                 onChange={(e) => setJunction(e.target.value as JunctionKind)}
                 className={INPUT_CLS + " w-32"}
               >
-                <option value="stagnation">Stagnation</option>
+                <option value="stagnation" title="0-D stagnation volume at every junction. Absorbs ~98% of pressure-wave reflections, so runner/header tuning effects disappear. Kept for parity studies only.">Stagnation (not for wave tuning)</option>
                 <option value="characteristic">Characteristic</option>
               </select>
               <label htmlFor="opt-tol" className="uppercase tracking-wider text-[10px] text-helios-muted">

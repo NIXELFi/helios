@@ -214,6 +214,11 @@ pub struct OptimizationParams {
     /// known in/out diameter pairs is accepted (see `params::is_locked_pair`).
     #[serde(default)]
     pub locked_pairs: Vec<LockedPair>,
+    /// Physics-preset overrides applied to the base config before any
+    /// trial's tunables (finding 0032: optimizations previously ignored the
+    /// preset that sweeps / single-RPM runs apply, so the two disagreed).
+    #[serde(default)]
+    pub overrides: Vec<ParameterOverride>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

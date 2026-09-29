@@ -111,8 +111,11 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
     // "1")` (racy in edition 2024) with an install-scoped single-thread
     // pool. For recorded runs we wrap the body so any rayon parallel
     // iterator the engine pulls in sees a 1-thread pool.
+    let grid_points = sweep_spec.grid_points();
     let body = |writer: &mut ResultWriter| -> Result<()> {
-        for (trial_id, row) in samples.iter().enumerate() {
+        let mut trial_id = 0usize;
+        for row in samples.iter() {
+        for grid_pt in grid_points.iter() {
             let mut cfg = base_cfg.clone();
             // Build the override map in the SAME order as `params` so
             // the JSON output is stable for spec C4 byte-compare.
@@ -123,6 +126,14 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
                     format!("apply_override {}={} for trial {}", p.name, v, trial_id)
                 })?;
                 overrides.insert(p.name.clone(), json!(v));
+            }
+            // Grid axes after the sampled parameters (a grid value wins if
+            // the same path is in both).
+            for (name, v) in grid_pt {
+                apply_override(&mut cfg, name, *v).with_context(|| {
+                    format!("apply_override {}={} (grid) for trial {}", name, v, trial_id)
+                })?;
+                overrides.insert(name.clone(), json!(v));
             }
             for &rpm in &study.run.rpm {
                 let mut engine = SDM26Engine::new(cfg.clone(), junction_kind);
@@ -157,6 +168,8 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
                     "f_residual": stats.f_residual,
                 }))?;
             }
+            trial_id += 1;
+        }
         }
         Ok(())
     };
@@ -176,7 +189,7 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
         out_path: args.out.clone(),
         commit_hash: commit,
         seed: study.run.seed,
-        trials: sweep_spec.n_trials as usize,
+        trials: sweep_spec.n_trials as usize * grid_points.len(),
         rpms: study.run.rpm.clone(),
         sampler: sweep_spec.sampler.clone(),
         parameters: params.iter().map(|p| p.name.clone()).collect(),

@@ -1,5 +1,5 @@
 {
-    "name": "Honda CBR600RR (FSAE)",
+    "name": "Honda CBR600RR (FSAE) - physics v2 EXPERIMENTAL",
     "n_cylinders": 4,
     "firing_order": [
         1,
@@ -19,8 +19,8 @@
     "intake_valve": {
         "diameter": 0.0275,
         "max_lift": 0.00856,
-        "open_angle": 350.0,
-        "close_angle": 585.0,
+        "open_angle": 339.0,
+        "close_angle": 584.0,
         "seat_angle": 45.0,
         "cd_table": [
             [
@@ -184,13 +184,13 @@
     ],
     "exhaust_collector": {
         "name": "exhaust_collector",
-        "length": 0.130665,
+        "length": 0.1,
         "diameter": 0.05,
         "diameter_out": null,
         "n_points": 20,
         "wall_temperature": 500.0,
         "roughness": 4.6e-05,
-        "length_note": "includes Levine-Schwinger open-end correction +30.7 mm (0.6133 * 50.0 mm diameter). Original geometric length = 100 mm."
+        "length_note": "geometric length; the 0.6133*r Levine-Schwinger end correction is added by physics.exhaust_collector_end_correction"
     },
     "combustion": {
         "wiebe_a": 5.0,
@@ -226,21 +226,28 @@
     },
     "p_ambient": 101325.0,
     "T_ambient": 300.0,
-        "drivetrain_efficiency": 0.85,
+    "drivetrain_efficiency": 0.85,
     "physics": {
         "spark_advance_rpm_slope_deg_per_krpm": 1.5,
         "duration_rpm_exp": 0.4,
-        "restrictor_cd_mach_k": 0.1,
-        "restrictor_loss_from_diffuser_geometry": true,
-        "intake_junction_borda_carnot": true,
         "fmep_c": 0.00075,
         "limiter": 1,
         "cfl": 0.5,
-        "intake_lift_flat_top_ramp": 0.25,
-        "exhaust_lift_flat_top_ramp": 0.25,
         "intake_valve_re_correction_enabled": true,
-        "exhaust_collector_reflection_coef": 0.15,
         "octane_number": 98.0,
-        "knock_tau_scale": 2.0
-    }
+        "knock_tau_scale": 2.0,
+        "intake_junction_directional_loss": true,
+        "intake_runner_entry_k": 0.04,
+        "restrictor_venturi_model": true,
+        "intake_runner_end_correction": true,
+        "exhaust_collector_end_correction": true,
+        "exhaust_collector_open_end_physical": true,
+        "fuel_mass_from_trapped_air": true,
+        "heat_release_o2_limited": true,
+        "enable_residual_tracking": true,
+        "valve_events_at_reference_lift": true,
+        "valve_event_reference_lift": 0.001,
+        "valve_lift_shape_exponent": 1.3
+    },
+    "description": "Finding 0032 opt-in physics v2: directional junction loss, venturi restrictor, end corrections, physical open end, air-based fuel + O2-limited heat release, residual tracking, and the service-manual cam timing at 1 mm lift. NOT calibrated (no re-fit): reads high above 10k on SDM26. Use for relative studies; the shipped config remains the dyno-validated baseline."
 }

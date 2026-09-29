@@ -86,6 +86,8 @@ pub fn cfd_list_examples(app: AppHandle) -> Vec<ExampleConfig> {
     let entries = [
         ("sdm26", "SDM26 — Honda CBR600RR (FSAE)", "Phase-F-calibrated CBR600RR I4 with 20 mm FSAE restrictor and 4-2-1 exhaust. Default starting point."),
         ("sdm25", "SDM25 — Honda CBR600RR (legacy)", "Pre-Phase-F SDM25 calibration. Same engine, older tuning; useful for comparing against Python diagnostics."),
+        ("sdm26-physics-v2", "SDM26 — physics v2 (experimental)", "Finding 0032 opt-in physics fixes + service-manual cam timing. Not calibrated: reads high above 10k rpm. For relative studies only."),
+        ("sdm25-physics-v2", "SDM25 — physics v2 (experimental)", "Finding 0032 opt-in physics fixes + service-manual cam timing on the SDM25 geometry. Not calibrated."),
     ];
     for (id, name, desc) in entries {
         let p = cfg_dir.join(format!("{id}.json"));
