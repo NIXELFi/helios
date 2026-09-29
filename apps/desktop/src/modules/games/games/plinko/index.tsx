@@ -83,6 +83,9 @@ export function PlinkoGame({ paused, money }: GameProps) {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<{ id: number; cents: number; net: number }[]>([]);
   const [inFlight, setInFlight] = useState(0);
+  // True while a ball is falling or a bucket is still flashing. The frame
+  // loop runs only then: an idle board is drawn once, not 60 times a second.
+  const [animating, setAnimating] = useState(false);
 
   const balls = useRef<Ball[]>([]);
   const landed = useRef<Landed[]>([]);
@@ -149,6 +152,7 @@ export function PlinkoGame({ paused, money }: GameProps) {
         seq: mine,
         stake,
       });
+      setAnimating(true);
     } catch (e) {
       // The optimistic debit never happened server-side; put it back.
       setBalance((b) => b + stake);
@@ -186,7 +190,8 @@ export function PlinkoGame({ paused, money }: GameProps) {
       if (l.flash <= 0) landed.current.splice(i, 1);
     }
     draw();
-  }, paused);
+    if (bs.length === 0 && landed.current.length === 0) setAnimating(false);
+  }, paused || !animating);
 
   // Redraw on board changes even while nothing is falling.
   useEffect(() => {

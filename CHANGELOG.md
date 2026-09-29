@@ -41,6 +41,10 @@ follow [semver](https://semver.org/).
 - Engine bar segments are limited to 1-200, and the decimals setting on numeric readouts and gauges is limited to 0-6 when you type it. Saved values are limited again when the widget draws. A large decimals value previously crashed the widget, and a huge segment count stalled every cursor move.
 - CFD: typing an out-of-range run size (for example 1,000,000,000 "Max cycles") could make the solver try to reserve gigabytes of memory up front and crash Helios. The Single-RPM, Sweep and Optimization dialogs now disable Start and name the bad field (max cycles, RPM, convergence tol, min cycles, optimization step and seed), and the app refuses the same bad values (plus a zero, negative or non-numeric RPM, pipe cell count or pipe size in the engine config) with a clear error instead of running them.
 - CFD lap-sim VD sweep: a tiny step or an unbounded range no longer freezes the app; a sweep is capped at 500 points.
+- Less background work everywhere: a teammate opening Helios, leaving, or switching module no longer re-renders every module you have open (PM, Logs, Vault, CFD, Sim, Org...) on every signed-in client. Only the "On Helios" roster updates, and only when it actually changed.
+- Modules you are not looking at no longer re-render with the shell (the auto-update countdown, opening a dialog, switching modules), and the update download bar redraws at most four times a second instead of on every network chunk.
+- Org & Access Pulse stops refreshing its four admin queries every minute while it is hidden or the window is minimised, and catches up once when you come back.
+- Amethyst's graph stops animating once the layout settles or the module is hidden, and picks up again when you hover, drag, zoom or select a note. Plinko stops redrawing 60 times a second when no ball is falling.
 
 ## [5.13.4] - 2026-09-29
 

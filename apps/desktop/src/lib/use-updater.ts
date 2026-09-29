@@ -54,6 +54,9 @@ export interface UpdaterApi {
  */
 export const BACKGROUND_CHECK_MS = 5 * 60 * 1000;
 
+/** At most ~4 download-progress renders a second. */
+const PROGRESS_THROTTLE_MS = 250;
+
 export function useUpdater(): UpdaterApi {
   const [state, setState] = useState<UpdaterState>({ kind: "checking" });
   // Tracks whether a check is already in flight so manual rechecks during an
@@ -121,6 +124,7 @@ export function useUpdater(): UpdaterApi {
     const handle = state.update._handle;
     let downloaded = 0;
     let total: number | null = null;
+    let lastProgressAt = 0;
     setState({ kind: "downloading", update: state.update, downloaded, total });
     try {
       await handle.downloadAndInstall((event) => {
@@ -130,6 +134,12 @@ export function useUpdater(): UpdaterApi {
           setState({ kind: "downloading", update: state.update, downloaded, total });
         } else if (event.event === "Progress") {
           downloaded += event.data.chunkLength;
+          // Tauri reports every network chunk -- hundreds a second on a fast
+          // link -- and each setState re-rendered the Shell. The bar only
+          // needs a few frames a second.
+          const now = Date.now();
+          if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+          lastProgressAt = now;
           setState({ kind: "downloading", update: state.update, downloaded, total });
         } else if (event.event === "Finished") {
           setState({ kind: "installing", update: state.update });
