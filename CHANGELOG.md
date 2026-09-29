@@ -28,6 +28,7 @@ follow [semver](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- PM task sheet dates: a date the sheet refuses (a start after the due date) now snaps back instead of staying on screen unsaved, and blanking just one part of a date (e.g. backspacing the day) no longer wipes the whole date. The Gantt also names tasks with a typo'd date when they are the only dated tasks in view.
 - PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
 - PM task sheet: the estimate saves when you leave the field or press Enter, not on every keystroke, and rejects negative or longer-than-10-year values.
 - PM Productivity: typing a custom From/To date no longer freezes the view while the year is half-typed (0202); the range waits for a real year, and the weekly chart is capped at 10 years.
