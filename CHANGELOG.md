@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.13.4] - 2026-09-29
+
 ### Fixed
 - PM Gantt: one task with a typo'd year (start 0202-08-18) stretched the timeline across 1,800 years, about 2.2 million elements, and pushed Helios to 3-5 GB of memory with lag everywhere. The Gantt now skips dates outside 2000-2100, names the affected tasks in its header so they can be fixed, and caps the timeline at about 10 years.
 - PM: the task sheet's start/due dates and the table's due date no longer save the partial years a date field reports while you type a year (0002, 0020, 0202); only a real year is saved.
