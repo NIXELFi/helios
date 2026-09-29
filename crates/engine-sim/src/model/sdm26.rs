@@ -330,6 +330,10 @@ pub struct SDM26Config {
     /// Diagnostic knobs; 1.0 → parity, 0.0 disables the term.
     pub pipe_friction_multiplier: f64,
     pub pipe_heat_transfer_multiplier: f64,
+    /// Damping audit: extra heat-transfer multiplier on the exhaust pipes
+    /// only (primaries, secondaries, collector), applied on top of
+    /// `pipe_heat_transfer_multiplier`. 1.0 → parity.
+    pub exhaust_heat_transfer_multiplier: f64,
     // restrictor
     pub restrictor_throat_diameter: f64,
     pub restrictor_cd: f64,
@@ -615,6 +619,7 @@ impl Default for SDM26Config {
             exhaust_gas_r: 287.0,
             pipe_friction_multiplier: 1.0,
             pipe_heat_transfer_multiplier: 1.0,
+            exhaust_heat_transfer_multiplier: 1.0,
             restrictor_throat_diameter: 0.020,
             restrictor_cd: 0.967,
             restrictor_loss_coef: 0.0,
@@ -1629,7 +1634,10 @@ impl SDM26Engine {
 
         // sources on each pipe
         let (f_mult, h_mult) = (self.cfg.pipe_friction_multiplier, self.cfg.pipe_heat_transfer_multiplier);
+        let h_ex = self.cfg.exhaust_heat_transfer_multiplier;
         for k in 0..self.pipes.len() {
+            let is_ex = self.primary_idx.contains(&k) || self.secondary_idx.contains(&k) || k == self.collector_idx;
+            let h_mult = if is_ex { h_mult * h_ex } else { h_mult };
             let pipe = &mut self.pipes[k];
             apply_sources_scaled(
                 &mut pipe.q, &pipe.area, &pipe.hydraulic_d, dt, pipe.gamma, pipe.r_gas,
