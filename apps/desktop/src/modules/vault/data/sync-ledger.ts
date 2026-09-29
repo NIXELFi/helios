@@ -231,6 +231,8 @@ interface FlushState {
   timer: ReturnType<typeof setTimeout> | null;
   /** When the current dirty streak began (for the max-wait cap). */
   since: number;
+  /** When the last change was marked; a gap longer than the debounce means a one-off. */
+  lastMark: number;
 }
 const flushStates = new Map<string, FlushState>();
 
@@ -259,16 +261,24 @@ export async function loadLedger(vaultId: string): Promise<SyncLedger> {
 function markDirty(vaultId: string): void {
   let s = flushStates.get(vaultId);
   if (!s) {
-    s = { dirty: false, timer: null, since: 0 };
+    s = { dirty: false, timer: null, since: 0, lastMark: 0 };
     flushStates.set(vaultId, s);
   }
   const state = s;
   const now = Date.now();
+  // A record after a quiet spell is a one-off (Get Latest on a single file,
+  // check-in, a move): write it now, because Helios may be closed right after
+  // and WebView2 teardown doesn't reliably run the unload flush. Only a burst
+  // (sync pass, bulk download) is debounced.
+  const burst = now - state.lastMark < FLUSH_DEBOUNCE_MS;
+  state.lastMark = now;
   if (!state.dirty) state.since = now;
   state.dirty = true;
   if (state.timer) clearTimeout(state.timer);
   // Debounce, capped so a continuous stream still reaches disk every max-wait.
-  const delay = Math.max(0, Math.min(FLUSH_DEBOUNCE_MS, state.since + FLUSH_MAX_WAIT_MS - now));
+  const delay = burst
+    ? Math.max(0, Math.min(FLUSH_DEBOUNCE_MS, state.since + FLUSH_MAX_WAIT_MS - now))
+    : 0;
   state.timer = setTimeout(() => {
     state.timer = null;
     void flushLedger(vaultId);

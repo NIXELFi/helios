@@ -1450,7 +1450,13 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     if (!current) return;
     const { errors } = computeMathChannelsUpdate(current, oldChannels, next, mathErrorsRef.current);
     mathErrorsRef.current = errors;
-    setMathErrors(errors);
+    // Merge rather than replace: a lap-config or session-load update queued in
+    // the same batch writes through the functional form and must not be lost.
+    setMathErrors((prev) => {
+      const merged = new Map(prev);
+      for (const [sessionId, sessionErrors] of errors) merged.set(sessionId, sessionErrors);
+      return merged;
+    });
   }
 
   function handleToggleEditMode() {

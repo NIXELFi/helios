@@ -28,7 +28,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { AutoGrowTextarea } from "@pm/components/ui/AutoGrowTextarea";
 import { TaskLookup } from "@pm/components/TaskLookup";
@@ -138,6 +138,7 @@ export function TaskDetailSheet() {
   const [titleDraft, setTitleDraft] = useState("");
   const [descDraft, setDescDraft] = useState("");
   const [estimateDraft, setEstimateDraft] = useState("");
+  const estimateBadInput = useRef(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [linkUrlDraft, setLinkUrlDraft] = useState("");
   const [linkLabelDraft, setLinkLabelDraft] = useState("");
@@ -531,9 +532,15 @@ export function TaskDetailSheet() {
                 // Draft locally and save on blur / Enter, like the title: saving
                 // per keystroke wrote every intermediate number. Anything not a
                 // finite 0..MAX_ESTIMATE_DAYS reverts to the saved value.
-                onChange={(e) => setEstimateDraft(e.target.value)}
+                onChange={(e) => {
+                  // A number input holding junk ("e", "--") reports "", which
+                  // would read as a clear; remember it so blur reverts instead.
+                  estimateBadInput.current = e.currentTarget.validity?.badInput ?? false;
+                  setEstimateDraft(e.target.value);
+                }}
                 onBlur={() => {
-                  const next = parseEstimateDays(estimateDraft);
+                  const next = estimateBadInput.current ? undefined : parseEstimateDays(estimateDraft);
+                  estimateBadInput.current = false;
                   if (next === undefined) {
                     setEstimateDraft(task.estimate_days != null ? String(task.estimate_days) : "");
                     return;

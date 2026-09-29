@@ -237,6 +237,29 @@ describe("sync-ledger in-memory + coalesced writes", () => {
     }
   });
 
+  it("a one-off record after a quiet spell is written right away; a burst is batched", async () => {
+    vi.useFakeTimers();
+    try {
+      await ledgerRecord("v1", "single.sldprt", "s0");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(writeMock).toHaveBeenCalledTimes(1); // closing Helios now loses nothing
+
+      await vi.advanceTimersByTimeAsync(FLUSH_DEBOUNCE_MS + 10);
+      await ledgerRecord("v1", "a.sldprt", "s1"); // quiet before this one: immediate
+      await ledgerRecord("v1", "b.sldprt", "s2"); // burst: debounced
+      await ledgerRecord("v1", "c.sldprt", "s3");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(writeMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(FLUSH_DEBOUNCE_MS + 10);
+      expect(writeMock).toHaveBeenCalledTimes(2);
+      expect(Object.keys(lastWritten().entries).sort()).toEqual(
+        ["a.sldprt", "b.sldprt", "c.sldprt", "single.sldprt"],
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("vaults are independent", async () => {
     await ledgerRecord("v1", "a", "1");
     await ledgerRecord("v2", "b", "2");
