@@ -70,7 +70,7 @@ Nothing has been released. Before merging: the Tauri crate change in `apps/deskt
 - `proxy_lag*.csv`: the WOT VE proxy (PW − 1.0 ms) × λ(t+lag), in 250 rpm bins, for λ lags 0–360 ms. **Use 270 ms**, which is the measured sensor lag.
 - `ecu_ve_proxy.csv`: the earlier 120 ms version.
 - `sdm26_wot_tune_from_log7.5.csv`: per-rpm WOT median ignition, λ, λ target and MAP. This is the "real tune".
-- `scripts/load.py` and `scripts/proxy.py`: these rebuild the above. The raw `Log 7.5.csv` (~98 MB) is **not in git**; copy it over manually, then run `python load.py "<path>\Log 7.5.csv"`.
+- `scripts/load.py` and `scripts/proxy.py`: these rebuild the above. The raw `Log 7.5.csv` (~98 MB) is **not in git**. It is in the **Helios vault at `SDM27/Helios/Log 7.5.csv`** (on the work machine: `Documents\Vault\SDM27\Helios\Log 7.5.csv`). Get it from the vault, then run `python load.py "<path>\Log 7.5.csv"`.
 - Some analysis scripts inside the finding folders still point at the old machine's temp scratchpad. Re-point them at `references/ecu/` if you re-run them.
 
 Car targets: VE peaks ~6.0–6.4k and ~9.0k, troughs ~4.6k and ~7.4–8.0k. Dyno torque: peak 6.0k, dip 6.5–7.5k, peak 8.5k. The true ripple is ~±10%; the proxy overstates it because closed-loop λ trim is pinned at −20% at 5–6.5k and λ floors at ~0.70 at 4.4–5.6k.
