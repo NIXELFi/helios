@@ -43,7 +43,9 @@ describe("MathChannelsModal — C4 id collision guard", () => {
     const channels = [mc({ id: "math.power" }), mc({ id: "math.other", display_name: "Other" })];
     const { onChange } = renderModal(channels);
     // Editing the first channel's id to collide with the second.
-    fireEvent.change(idInput(), { target: { value: "math.other" } });
+    const input = idInput();
+    fireEvent.change(input, { target: { value: "math.other" } });
+    fireEvent.blur(input); // commits are debounced; blur flushes
     // An inline error must surface…
     expect(screen.getByText(/already (used|in use|exists)|duplicate|collid/i)).toBeInTheDocument();
     // …and the colliding id must NOT be committed to the parent.
@@ -58,7 +60,9 @@ describe("MathChannelsModal — C4 id collision guard", () => {
   it("warns when an id shadows an existing source channel id", () => {
     const channels = [mc({ id: "math.power" })];
     const { onChange } = renderModal(channels);
-    fireEvent.change(idInput(), { target: { value: "engine.rpm" } });
+    const input = idInput();
+    fireEvent.change(input, { target: { value: "engine.rpm" } });
+    fireEvent.blur(input); // commits are debounced; blur flushes
     // Shadow warning shown.
     expect(screen.getByText(/shadow|already|source channel|exists/i)).toBeInTheDocument();
     // The shadowing id must not be committed (would overwrite a real logged channel).
@@ -71,7 +75,9 @@ describe("MathChannelsModal — C4 id collision guard", () => {
   it("accepts a unique non-shadowing id and commits it", () => {
     const channels = [mc({ id: "math.power" })];
     const { onChange } = renderModal(channels);
-    fireEvent.change(idInput(), { target: { value: "math.torque" } });
+    const input = idInput();
+    fireEvent.change(input, { target: { value: "math.torque" } });
+    fireEvent.blur(input); // commits are debounced; blur flushes
     const committed = onChange.mock.calls.some((call) =>
       (call[0] as MathChannel[]).some((c) => c.id === "math.torque"),
     );
@@ -91,6 +97,7 @@ describe("MathChannelsModal — L11 decimals clamp", () => {
   it("clamps values above 6 down to 6", () => {
     const { onChange } = renderModal([mc({ decimals: 2 })]);
     fireEvent.change(decimalsInput(), { target: { value: "50" } });
+    fireEvent.blur(decimalsInput()); // commits are debounced; blur flushes
     const last = onChange.mock.calls.at(-1)![0] as MathChannel[];
     expect(last[0]!.decimals).toBe(6);
   });
@@ -98,6 +105,7 @@ describe("MathChannelsModal — L11 decimals clamp", () => {
   it("clamps negative values up to 0", () => {
     const { onChange } = renderModal([mc({ decimals: 2 })]);
     fireEvent.change(decimalsInput(), { target: { value: "-3" } });
+    fireEvent.blur(decimalsInput()); // commits are debounced; blur flushes
     const last = onChange.mock.calls.at(-1)![0] as MathChannel[];
     expect(last[0]!.decimals).toBe(0);
   });
@@ -105,6 +113,7 @@ describe("MathChannelsModal — L11 decimals clamp", () => {
   it("coerces empty / non-numeric input to 0", () => {
     const { onChange } = renderModal([mc({ decimals: 2 })]);
     fireEvent.change(decimalsInput(), { target: { value: "" } });
+    fireEvent.blur(decimalsInput()); // commits are debounced; blur flushes
     const last = onChange.mock.calls.at(-1)![0] as MathChannel[];
     expect(last[0]!.decimals).toBe(0);
   });
@@ -112,6 +121,7 @@ describe("MathChannelsModal — L11 decimals clamp", () => {
   it("rounds fractional input to an integer", () => {
     const { onChange } = renderModal([mc({ decimals: 2 })]);
     fireEvent.change(decimalsInput(), { target: { value: "2.7" } });
+    fireEvent.blur(decimalsInput()); // commits are debounced; blur flushes
     const last = onChange.mock.calls.at(-1)![0] as MathChannel[];
     expect(last[0]!.decimals).toBe(3);
   });

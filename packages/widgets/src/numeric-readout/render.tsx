@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { safeDecimals } from "../lib/config-clamp";
 import { thresholdColor } from "../lib/canvas-helpers";
 
 export interface NumericReadoutConfig {
@@ -29,7 +30,7 @@ export function NumericReadoutRender(props: WidgetRenderProps<NumericReadoutConf
     return off;
   }, [slice, config.channelId, cursorEmitter]);
 
-  const display = value === null ? "—" : value.toFixed(config.decimals);
+  const display = value === null ? "—" : value.toFixed(safeDecimals(config.decimals));
   // Shared with the canvas gauges so every readout in a workspace agrees on
   // what amber and red mean — and so low-side bounds work here too.
   const color = thresholdColor(value, config.warn, config.alarm, config.warnLow, config.alarmLow);

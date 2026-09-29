@@ -1,6 +1,7 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { RoundGaugeConfig } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
+import { clampEditorDecimals, MAX_EDITOR_DECIMALS } from "../lib/config-clamp";
 
 // Labels are spelled out for the low-side bounds because "Warn low" alone
 // reads as "a low warning" rather than "warn when the value drops below this".
@@ -30,10 +31,13 @@ export function RoundGaugeConfigEditor({ config, onChange, availableChannels }: 
           <input
             type="number"
             className="bg-helios-base border border-helios-line px-1 w-32"
+            {...(k === "decimals" ? { min: 0, max: MAX_EDITOR_DECIMALS } : {})}
             value={config[k] === undefined ? "" : String(config[k])}
             onChange={(e) => {
               const raw = e.target.value;
-              const v = raw === "" ? undefined : Number(raw);
+              // decimals feeds toFixed (throws outside 0..100): clamp as typed.
+              const v = k === "decimals" ? clampEditorDecimals(raw)
+                : raw === "" ? undefined : Number(raw);
               onChange({ ...config, [k]: v } as RoundGaugeConfig);
             }}
           />

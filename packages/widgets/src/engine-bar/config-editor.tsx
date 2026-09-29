@@ -1,6 +1,7 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { EngineBarConfig } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
+import { clampSegments, MIN_SEGMENTS, MAX_SEGMENTS } from "../lib/config-clamp";
 
 export function EngineBarConfigEditor({ config, onChange, availableChannels }: WidgetConfigEditorProps<EngineBarConfig>) {
   const set = (k: keyof EngineBarConfig, v: unknown) => onChange({ ...config, [k]: v } as EngineBarConfig);
@@ -19,7 +20,7 @@ export function EngineBarConfigEditor({ config, onChange, availableChannels }: W
         <input type="number" className="bg-helios-base border border-helios-line px-1 w-32" value={config.shiftLightStart} onChange={(e) => set("shiftLightStart", Number(e.target.value))} />
       </label>
       <label className="flex justify-between"><span>segments</span>
-        <input type="number" className="bg-helios-base border border-helios-line px-1 w-32" value={config.segments} onChange={(e) => set("segments", Number(e.target.value))} />
+        <input type="number" className="bg-helios-base border border-helios-line px-1 w-32" min={MIN_SEGMENTS} max={MAX_SEGMENTS} value={config.segments} onChange={(e) => set("segments", clampSegments(e.target.value))} />
       </label>
     </div>
   );

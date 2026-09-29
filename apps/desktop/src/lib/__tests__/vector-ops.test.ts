@@ -2,7 +2,7 @@
  *  duplicate adjacent timestamps, and the highpass() NaN-gap state reset. */
 
 import { describe, it, expect } from "vitest";
-import { derivative, highpass, lowpass } from "../vector-ops";
+import { derivative, highpass, lowpass, smooth } from "../vector-ops";
 
 function toTimeUs(secondsArr: number[]): BigInt64Array {
   return BigInt64Array.from(secondsArr.map((s) => BigInt(Math.round(s * 1_000_000))));
@@ -156,5 +156,93 @@ describe("highpass()", () => {
 
   it("returns empty array for length-0 input", () => {
     expect(highpass(new Float64Array([]), FC_HZ, FS_HZ).length).toBe(0);
+  });
+});
+
+describe("smooth()", () => {
+  /** The original O(n*w) implementation, kept as the reference semantics. */
+  function naiveSmooth(values: Float64Array, window: number): Float64Array {
+    const n = values.length;
+    const out = new Float64Array(n);
+    if (n === 0) return out;
+    let w = Math.max(1, Math.floor(window));
+    if (w % 2 === 0) w -= 1;
+    if (w < 1) w = 1;
+    if (w === 1) { out.set(values); return out; }
+    const half = (w - 1) / 2;
+    for (let i = 0; i < n; i++) {
+      if (i < half || i + half >= n) { out[i] = NaN; continue; }
+      let sum = 0;
+      let count = 0;
+      for (let k = i - half; k <= i + half; k++) {
+        const v = values[k]!;
+        if (Number.isFinite(v)) { sum += v; count++; }
+      }
+      out[i] = count > 0 ? sum / count : NaN;
+    }
+    return out;
+  }
+
+  function expectSame(a: Float64Array, b: Float64Array) {
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      if (Number.isNaN(b[i]!)) expect(a[i], `index ${i}`).toBeNaN();
+      else expect(a[i], `index ${i}`).toBeCloseTo(b[i]!, 9);
+    }
+  }
+
+  // Deterministic pseudo-random data with NaN / ±Infinity holes and a long
+  // all-NaN run (so some windows have count === 0).
+  function makeData(n: number): Float64Array {
+    const out = new Float64Array(n);
+    let seed = 12345;
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const r = seed / 2147483648;
+      out[i] = r < 0.08 ? NaN : r < 0.1 ? Infinity : r < 0.11 ? -Infinity : (r - 0.5) * 200;
+    }
+    for (let i = 100; i < 130 && i < n; i++) out[i] = NaN;
+    return out;
+  }
+
+  it("matches the naive centered average on data with NaNs for many windows", () => {
+    const data = makeData(500);
+    for (const w of [1, 2, 3, 4, 5, 7, 10, 11, 31, 64, 99, 499, 500, 501, 2.7, 0, -3]) {
+      expectSame(smooth(data, w), naiveSmooth(data, w));
+    }
+  });
+
+  it("matches on tiny arrays around the window-vs-length boundary", () => {
+    for (let n = 1; n <= 8; n++) {
+      const data = makeData(n);
+      for (let w = 1; w <= n + 3; w++) expectSame(smooth(data, w), naiveSmooth(data, w));
+    }
+  });
+
+  it("returns all-NaN quickly for a window far larger than the data", () => {
+    const data = new Float64Array(200_000).fill(1);
+    const t0 = performance.now();
+    const out = smooth(data, 1e12);
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(out.every((v) => Number.isNaN(v))).toBe(true);
+    expect(smooth(data, Infinity).every((v) => Number.isNaN(v))).toBe(true);
+  });
+
+  it("is O(n) for a large window that still fits the data", () => {
+    const data = makeData(400_000);
+    const t0 = performance.now();
+    const out = smooth(data, 200_001);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    // The center sample's window spans [0, 200_000] — compare to the naive
+    // result computed on exactly that slice.
+    const naive = naiveSmooth(data.subarray(0, 200_001), 200_001);
+    expect(out[100_000]).toBeCloseTo(naive[100_000]!, 6);
+  });
+
+  it("does not drift after a huge value leaves the window", () => {
+    const data = new Float64Array(1000).fill(1);
+    data[10] = 1e20;
+    const out = smooth(data, 5);
+    for (let i = 20; i < 998; i++) expect(out[i]).toBe(1);
   });
 });

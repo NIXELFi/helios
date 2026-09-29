@@ -33,9 +33,51 @@ function useStableKeys() {
   };
 }
 
+/** Field edits are committed to the parent this long after the last change
+ *  (or immediately on blur / close). Every commit re-evaluates math channels
+ *  across all loaded sessions, so committing per keystroke froze the app on
+ *  big logs. */
+export const MATH_COMMIT_DEBOUNCE_MS = 400;
+
 export function MathChannelsModal({
-  channels, errors, availableChannels, onChange, onClose,
+  channels: committedChannels, errors, availableChannels, onChange: commit, onClose,
 }: Props) {
+  // Local draft so typing stays instant; commits to the parent are debounced.
+  // An external change to the committed prop (anything other than our own
+  // last commit) replaces the draft.
+  const [channels, setDraft] = useState<MathChannel[]>(committedChannels);
+  const draftRef = useRef(channels);
+  const lastCommittedRef = useRef(committedChannels);
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (committedChannels !== lastCommittedRef.current) {
+      lastCommittedRef.current = committedChannels;
+      draftRef.current = committedChannels;
+      setDraft(committedChannels);
+    }
+  }, [committedChannels]);
+  function flush() {
+    if (timerRef.current === null) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    lastCommittedRef.current = draftRef.current;
+    commitRef.current(draftRef.current);
+  }
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  // Unmount (close) commits any pending edit so "edits save automatically".
+  useEffect(() => () => flushRef.current(), []);
+  /** `immediate` for structural changes (add/delete); field edits debounce. */
+  function onChange(next: MathChannel[], immediate = false) {
+    draftRef.current = next;
+    setDraft(next);
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => flushRef.current(), MATH_COMMIT_DEBOUNCE_MS);
+    if (immediate) flush();
+  }
+
   // Selection is tracked by the channel's array index rather than its editable
   // id: ids can change as the user types and can transiently collide, so an
   // id-based key is not a stable handle.
@@ -114,7 +156,7 @@ export function MathChannelsModal({
 
   function add() {
     const fresh = defaultMathChannel(channels.map((c) => c.id));
-    onChange([...channels, fresh]);
+    onChange([...channels, fresh], true);
     setSelectedIdx(channels.length);
   }
 
@@ -124,7 +166,7 @@ export function MathChannelsModal({
   }
 
   function remove(idx: number) {
-    onChange(channels.filter((_, i) => i !== idx));
+    onChange(channels.filter((_, i) => i !== idx), true);
     setPendingDelete(null);
     if (selectedIdx === idx) {
       // Select the previous channel (or the new first one) after removal.
@@ -231,7 +273,8 @@ export function MathChannelsModal({
           />
 
           {/* Editor pane */}
-          <main className="flex-1 overflow-y-auto">
+          {/* Blur out of any field commits the pending (debounced) edit. */}
+          <main className="flex-1 overflow-y-auto" onBlur={flush}>
             {selected
               ? <Editor
                   channel={selected}

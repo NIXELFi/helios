@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { safeDecimals } from "../lib/config-clamp";
 import { setupCanvas, canvasLogicalSize, thresholdColor } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -127,7 +128,7 @@ export function RoundGaugeRender(props: WidgetRenderProps<RoundGaugeConfig>) {
     ctx.font = `${Math.max(14, r * 0.35)}px "JetBrains Mono", ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const text = v === null ? "—" : v.toFixed(config.decimals);
+    const text = v === null ? "—" : v.toFixed(safeDecimals(config.decimals));
     ctx.fillText(text, cx, cy + r * 0.45);
 
     ctx.fillStyle = tc("dim");

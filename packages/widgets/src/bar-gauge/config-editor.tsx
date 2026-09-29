@@ -1,6 +1,7 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { BarGaugeConfig } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
+import { clampEditorDecimals, MAX_EDITOR_DECIMALS } from "../lib/config-clamp";
 
 // Labels are spelled out for the low-side bounds because "warnLow" alone
 // reads as "a low warning" rather than "warn when the value drops below this".
@@ -32,8 +33,14 @@ export function BarGaugeConfigEditor({ config, onChange, availableChannels }: Wi
         <label key={k} className="flex justify-between">
           <span>{label}</span>
           <input type="number" className="bg-helios-base border border-helios-line px-1 w-32"
+            {...(k === "decimals" ? { min: 0, max: MAX_EDITOR_DECIMALS } : {})}
             value={config[k] === undefined ? "" : String(config[k])}
-            onChange={(e) => onChange({ ...config, [k]: e.target.value === "" ? undefined : Number(e.target.value) } as BarGaugeConfig)} />
+            onChange={(e) => onChange({
+              ...config,
+              // decimals feeds toFixed (throws outside 0..100): clamp as typed.
+              [k]: k === "decimals" ? clampEditorDecimals(e.target.value)
+                : e.target.value === "" ? undefined : Number(e.target.value),
+            } as BarGaugeConfig)} />
         </label>
       ))}
       <label className="flex justify-between">
