@@ -64,6 +64,48 @@ use crate::solver::state::{
     N_VARS, I_RHO_A,
 };
 
+/// Finding 0033: area_fn(x) for a circular pipe whose diameter follows a
+/// piecewise-linear profile `[(x, d), ...]` (x from the pipe's LEFT end,
+/// strictly increasing, starting at 0). The profile is stretched to
+/// `length` (x scaled by length / x_last), so a length override keeps the
+/// shape. Outside the profile the end diameters are held.
+pub fn profile_diameter_area(length: f64, profile: &[(f64, f64)])
+    -> impl FnMut(f64) -> f64
+{
+    let prof: Vec<(f64, f64)> = profile.to_vec();
+    let x_last = prof.last().map(|p| p.0).unwrap_or(1.0).max(1e-20);
+    let scale = x_last / length.max(1e-20);
+    move |x: f64| {
+        let d = profile_diameter_at(&prof, x * scale);
+        0.25 * PI * d * d
+    }
+}
+
+/// Diameter of a piecewise-linear `[(x, d)]` profile at `x` (ends held).
+pub fn profile_diameter_at(prof: &[(f64, f64)], x: f64) -> f64 {
+    if prof.is_empty() { return 0.0; }
+    if x <= prof[0].0 { return prof[0].1; }
+    for w in prof.windows(2) {
+        let ((x0, d0), (x1, d1)) = (w[0], w[1]);
+        if x <= x1 {
+            let t = if x1 > x0 { (x - x0) / (x1 - x0) } else { 1.0 };
+            return d0 + (d1 - d0) * t;
+        }
+    }
+    prof[prof.len() - 1].1
+}
+
+/// Volume (m^3) of a circular pipe with a piecewise-linear diameter profile
+/// (exact for conical frusta between the profile points).
+pub fn profile_volume(prof: &[(f64, f64)]) -> f64 {
+    prof.windows(2)
+        .map(|w| {
+            let ((x0, d0), (x1, d1)) = (w[0], w[1]);
+            PI * (x1 - x0) / 12.0 * (d0 * d0 + d0 * d1 + d1 * d1)
+        })
+        .sum()
+}
+
 /// Build an area_fn(x) for a linearly-tapered circular pipe.
 pub fn linear_diameter_area(length: f64, d_in: f64, d_out: f64)
     -> impl FnMut(f64) -> f64
@@ -129,6 +171,20 @@ pub struct SDM26Config {
     pub plenum_length: f64,
     pub plenum_n_cells: usize,
     pub plenum_wall_t: f64,
+    /// Finding 0033: optional piecewise-linear plenum diameter profile
+    /// `[(x, d)]`, x from the restrictor (left) end. None → uniform pipe of
+    /// area `plenum_volume / plenum_length` (legacy). When set the loader
+    /// stores the profile's own volume / length in the scalar fields.
+    pub plenum_diameter_profile: Option<Vec<(f64, f64)>>,
+    /// Finding 0033: optional per-runner piecewise-linear diameter profile
+    /// (x from the plenum end). A `None` entry uses the linear
+    /// `diameter` → `diameter_out` taper. Used to model runner + head port
+    /// as one pipe.
+    pub runner_diameter_profiles: Option<Vec<Option<Vec<(f64, f64)>>>>,
+    /// Finding 0033: diffuser outlet diameter of the venturi restrictor.
+    /// When set, the venturi area ratio σ = A_throat / A_outlet uses it
+    /// instead of the plenum cross-section `volume / length`.
+    pub restrictor_outlet_diameter: Option<f64>,
     /// 0006: RPM-dependent spark advance slope (deg/krpm).
     /// `spark_advance` is the value at `spark_advance_rpm_ref` (default
     /// 10000); the effective advance is
@@ -458,6 +514,9 @@ impl Default for SDM26Config {
             collector_wall_t: 700.0,
             plenum_volume: 0.0015, plenum_length: 0.3, plenum_n_cells: 20,
             plenum_wall_t: 320.0,
+            plenum_diameter_profile: None,
+            runner_diameter_profiles: None,
+            restrictor_outlet_diameter: None,
             spark_advance_rpm_slope_deg_per_krpm: 0.0,
             spark_advance_rpm_ref: 10000.0,
             duration_rpm_exp: 0.0,
@@ -645,7 +704,27 @@ impl SDM26Config {
             None => self.runner_diameter_out.unwrap_or(d_in),
         };
         let wt = self.runner_wall_ts.as_ref().map(|v| v[i]).unwrap_or(self.runner_wall_t);
+        if let Some(prof) = self.runner_profile(i) {
+            return (l, prof[0].1, prof[prof.len() - 1].1, self.runner_n_cells, wt);
+        }
         (l, d_in, d_out, self.runner_n_cells, wt)
+    }
+    /// Finding 0033: runner i's diameter profile, if any.
+    pub fn runner_profile(&self, i: usize) -> Option<&[(f64, f64)]> {
+        self.runner_diameter_profiles.as_ref()
+            .and_then(|v| v.get(i))
+            .and_then(|p| p.as_deref())
+            .filter(|p| p.len() >= 2)
+    }
+    /// Venturi area ratio σ = A_throat / A_diffuser-outlet (finding 0032
+    /// fix 2; outlet diameter optional per finding 0033).
+    pub fn restrictor_venturi_sigma(&self) -> f64 {
+        let a_t = 0.25 * PI * self.restrictor_throat_diameter * self.restrictor_throat_diameter;
+        let a_out = match self.restrictor_outlet_diameter {
+            Some(d) if d > 0.0 => 0.25 * PI * d * d,
+            _ => self.plenum_volume / self.plenum_length.max(1e-6),
+        };
+        (a_t / a_out.max(1e-12)).min(1.0)
     }
     fn primary_spec(&self, i: usize) -> (f64, f64, f64, usize, f64) {
         let l = self.primary_lengths.as_ref().map(|v| v[i]).unwrap_or(self.primary_length);
@@ -821,11 +900,17 @@ impl SDM26Engine {
 
         // plenum
         let (l_plen, d_plen, n_plen, t_plen) = cfg.plenum_spec();
-        let mut plenum = make_pipe_state(
-            n_plen, l_plen,
-            linear_diameter_area(l_plen, d_plen, d_plen),
-            1.4, 287.0, t_plen, 2,
-        );
+        let mut plenum = match cfg.plenum_diameter_profile.as_deref() {
+            Some(prof) if prof.len() >= 2 => make_pipe_state(
+                n_plen, l_plen, profile_diameter_area(l_plen, prof),
+                1.4, 287.0, t_plen, 2,
+            ),
+            _ => make_pipe_state(
+                n_plen, l_plen,
+                linear_diameter_area(l_plen, d_plen, d_plen),
+                1.4, 287.0, t_plen, 2,
+            ),
+        };
         set_uniform(&mut plenum, cfg.p_ambient / (287.0 * cfg.t_ambient),
                     0.0, cfg.p_ambient, 0.0);
         pipes.push(plenum);
@@ -836,11 +921,24 @@ impl SDM26Engine {
         for i in 0..n_cyl {
             let (l, d_in, d_out, n, wt) = cfg.runner_spec(i);
             // 0032 fix 4: flanged open-end correction at the plenum mouth.
+            let l_geo = l;
             let l = l + cfg.runner_end_correction(i);
-            let mut p = make_pipe_state(
-                n, l, linear_diameter_area(l, d_in, d_out),
-                1.4, 287.0, wt, 2,
-            );
+            let mut p = match cfg.runner_profile(i) {
+                // 0033: the end correction extends the pipe at the plenum
+                // mouth with the mouth diameter, so shift the profile by δ.
+                Some(prof) => {
+                    let delta = l - l_geo;
+                    let scale = l_geo / prof[prof.len() - 1].0.max(1e-20);
+                    let mut shifted: Vec<(f64, f64)> = Vec::with_capacity(prof.len() + 1);
+                    if delta > 0.0 { shifted.push((0.0, prof[0].1)); }
+                    shifted.extend(prof.iter().map(|&(x, d)| (x * scale + delta, d)));
+                    make_pipe_state(n, l, profile_diameter_area(l, &shifted), 1.4, 287.0, wt, 2)
+                }
+                None => make_pipe_state(
+                    n, l, linear_diameter_area(l, d_in, d_out),
+                    1.4, 287.0, wt, 2,
+                ),
+            };
             set_uniform(&mut p, cfg.p_ambient / (287.0 * cfg.t_ambient),
                         0.0, cfg.p_ambient, 0.0);
             runner_idx.push(pipes.len());
@@ -1191,8 +1289,7 @@ impl SDM26Engine {
                 // 0032 fix 2: venturi with diffuser recovery + T0-conserving
                 // inlet. σ uses the plenum cross-section the diffuser
                 // discharges into. Supersedes the legacy loss / Mach-Cd terms.
-                let a_plenum = cfg.plenum_volume / cfg.plenum_length.max(1e-6);
-                let sigma = (a_t / a_plenum.max(1e-12)).min(1.0);
+                let sigma = cfg.restrictor_venturi_sigma();
                 let phi = idelchik_diffuser_phi(cfg.restrictor_diverging_half_angle_deg);
                 let recovery = venturi_recovery_fraction(
                     sigma, phi, cfg.restrictor_diffuser_efficiency,

@@ -48,6 +48,7 @@
       "resources/cfd/configs/sdm26.json": "cfd/configs/sdm26.json",
       "resources/cfd/configs/sdm25-physics-v2.json": "cfd/configs/sdm25-physics-v2.json",
       "resources/cfd/configs/sdm26-physics-v2.json": "cfd/configs/sdm26-physics-v2.json",
+      "resources/cfd/configs/sdm26_asbuilt.json": "cfd/configs/sdm26_asbuilt.json",
       "resources/addin/HeliosVault.dll": "addin/HeliosVault.dll",
       "resources/shell/HeliosShell.dll": "shell/HeliosShell.dll",
       "resources/shell/SharpShell.dll": "shell/SharpShell.dll",

@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::model::sdm26::{bellmouth_entry_k, ExhaustTopology, SDM26Config};
+use crate::model::sdm26::{bellmouth_entry_k, profile_volume, ExhaustTopology, SDM26Config};
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
@@ -79,6 +79,30 @@ fn pipe_field(pipes: &[Value], key: &str, what: &str) -> Result<Vec<f64>, Config
         .collect()
 }
 
+/// Finding 0033: optional piecewise-linear diameter profile
+/// `[[x, d], ...]` (m). Needs >= 2 rows, x[0] = 0, strictly increasing x,
+/// positive d. Absent key -> Ok(None).
+fn opt_profile(v: &Value, what: &str) -> Result<Option<Vec<(f64, f64)>>, ConfigLoadError> {
+    let Some(raw) = v.get("diameter_profile") else { return Ok(None) };
+    let err = |m: &str| ConfigLoadError::Schema(format!("{what}.diameter_profile {m}"));
+    let arr = raw.as_array().ok_or_else(|| err("must be an array of [x, d] pairs"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for row in arr {
+        let r = row.as_array().filter(|r| r.len() == 2)
+            .ok_or_else(|| err("rows must be [x, d] pairs"))?;
+        let x = r[0].as_f64().ok_or_else(|| err("x must be numeric"))?;
+        let d = r[1].as_f64().ok_or_else(|| err("d must be numeric"))?;
+        if !(d > 0.0) { return Err(err("diameters must be > 0")); }
+        out.push((x, d));
+    }
+    if out.len() < 2 { return Err(err("needs at least 2 rows")); }
+    if out[0].0.abs() > 1e-12 { return Err(err("must start at x = 0")); }
+    if out.windows(2).any(|w| w[1].0 <= w[0].0) {
+        return Err(err("x must be strictly increasing"));
+    }
+    Ok(Some(out))
+}
+
 fn all_same(values: &[f64]) -> bool {
     if values.is_empty() { return true; }
     values.iter().all(|v| (v - values[0]).abs() < 1e-12)
@@ -124,18 +148,22 @@ const PIPE_KEYS: &[&str] = &[
     "wall_temperature", "roughness", "artificial_viscosity", "length_note",
 ];
 /// Extra per-runner keys (finding 0032 fixes 1 + 4).
-const RUNNER_EXTRA_KEYS: &[&str] = &["entry_loss_k", "bellmouth_radius", "end_correction"];
+const RUNNER_EXTRA_KEYS: &[&str] = &[
+    "entry_loss_k", "bellmouth_radius", "end_correction",
+    // finding 0033
+    "diameter_profile",
+];
 const COMBUSTION_KEYS: &[&str] = &[
     "wiebe_a", "wiebe_m", "combustion_duration", "spark_advance",
     "ignition_delay", "combustion_efficiency", "q_lhv", "afr_stoich", "afr_target",
 ];
 const RESTRICTOR_KEYS: &[&str] = &[
     "throat_diameter", "discharge_coefficient", "converging_half_angle",
-    "diverging_half_angle",
+    "diverging_half_angle", "outlet_diameter",
 ];
 const PLENUM_KEYS: &[&str] = &[
     "volume", "length", "n_cells", "n_points", "wall_temperature",
-    "initial_pressure", "initial_temperature",
+    "initial_pressure", "initial_temperature", "diameter_profile",
 ];
 const SIMULATION_KEYS: &[&str] = &[
     "rpm_start", "rpm_end", "rpm_step", "n_cycles", "cfl_number",
@@ -381,8 +409,35 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         cfg.plenum_n_cells = n as usize;
     }
     if let Some(t) = opt_f64(plen, "wall_temperature") { cfg.plenum_wall_t = t; }
+    // Finding 0033: shaped (e.g. bell) plenum. The profile defines the pipe:
+    // its end x is the length and its integral the volume.
+    if let Some(prof) = opt_profile(plen, "plenum")? {
+        let l = prof[prof.len() - 1].0;
+        let v = profile_volume(&prof);
+        if (cfg.plenum_volume - v).abs() > 0.02 * v {
+            warnings.push(format!(
+                "plenum.volume {:.4} L disagrees with diameter_profile volume {:.4} L; using the profile",
+                cfg.plenum_volume * 1e3, v * 1e3));
+        }
+        if let Some(lj) = opt_f64(plen, "length") {
+            if (lj - l).abs() > 1e-4 {
+                warnings.push(format!(
+                    "plenum.length {lj} disagrees with diameter_profile end x {l}; using the profile"));
+            }
+        }
+        cfg.plenum_volume = v;
+        cfg.plenum_length = l;
+        cfg.plenum_diameter_profile = Some(prof);
+    }
     cfg.restrictor_throat_diameter = req_f64(restr, "throat_diameter")?;
     cfg.restrictor_cd = req_f64(restr, "discharge_coefficient")?;
+    if let Some(d) = opt_f64(restr, "outlet_diameter") {
+        if !(d > cfg.restrictor_throat_diameter) {
+            return Err(ConfigLoadError::Schema(
+                "restrictor.outlet_diameter must exceed throat_diameter".into()));
+        }
+        cfg.restrictor_outlet_diameter = Some(d);
+    }
     // 0006: pick up the diffuser half-angle if present (was silently dropped).
     // Default 6.0 if not in JSON — preserves behavior for older configs
     // that omit the field, and provides a sensible value for SDM26.
@@ -556,6 +611,24 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         .collect();
     if end_corrs.iter().any(|k| k.is_finite()) {
         cfg.intake_runner_end_corrections = Some(end_corrs);
+    }
+
+    // ---- Per-runner diameter profile (finding 0033) ---------------------
+    let mut profiles: Vec<Option<Vec<(f64, f64)>>> = Vec::with_capacity(runners.len());
+    for (i, p) in runners.iter().enumerate() {
+        let prof = opt_profile(p, &format!("intake_pipes[{i}]"))?;
+        if let Some(pr) = prof.as_ref() {
+            let l = opt_f64(p, "length").unwrap_or(0.0);
+            let x_last = pr[pr.len() - 1].0;
+            if (l - x_last).abs() > 1e-3 {
+                warnings.push(format!(
+                    "intake_pipes[{i}].diameter_profile ends at x = {x_last} but length is {l}; the profile is stretched to the length"));
+            }
+        }
+        profiles.push(prof);
+    }
+    if profiles.iter().any(|p| p.is_some()) {
+        cfg.runner_diameter_profiles = Some(profiles);
     }
 
     // ---- Unknown-key warnings (finding 0032 fix 8) ----------------------
@@ -842,6 +915,7 @@ mod tests {
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26-physics-v2.json",
             "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25-physics-v2.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm26.json",
             "../../apps/desktop/src/modules/cfd/editor/templates/sdm25.json",
         ] {
@@ -950,5 +1024,90 @@ mod tests {
         assert_eq!(cfg.fmep_a, def.fmep_a);
         assert_eq!(cfg.wiebe_a_rpm_exp, def.wiebe_a_rpm_exp);
         assert_eq!(cfg.exhaust_junction_borda_carnot, def.exhaust_junction_borda_carnot);
+    }
+
+    /// Finding 0033: shaped plenum / runner+port profiles / venturi outlet
+    /// load, reach the built pipes, and keep their theory values.
+    #[test]
+    fn diameter_profiles_and_restrictor_outlet_load_and_build() {
+        use crate::model::sdm26::{JunctionKind, SDM26Engine};
+        use std::f64::consts::PI;
+        let mut data = base();
+        // cone 38 -> 167 mm over 0.154 m: V = pi h/12 (d0^2 + d0 d1 + d1^2)
+        data["plenum"]["diameter_profile"] = serde_json::json!([[0.0, 0.038], [0.154, 0.167]]);
+        data["plenum"]["n_cells"] = serde_json::json!(20);
+        data["restrictor"]["outlet_diameter"] = serde_json::json!(0.038);
+        for i in 0..4 {
+            data["intake_pipes"][i]["length"] = serde_json::json!(0.328);
+            data["intake_pipes"][i]["diameter"] = serde_json::json!(0.040);
+            data["intake_pipes"][i]["n_points"] = serde_json::json!(40);
+            data["intake_pipes"][i]["diameter_profile"] =
+                serde_json::json!([[0.0, 0.040], [0.248, 0.036], [0.328, 0.033]]);
+        }
+        let (cfg, w) = load_with(&data);
+        let v_cone = PI * 0.154 / 12.0 * (0.038f64.powi(2) + 0.038 * 0.167 + 0.167f64.powi(2));
+        assert!((cfg.plenum_volume - v_cone).abs() < 1e-12);
+        assert_eq!(cfg.plenum_length, 0.154);
+        // the 1.5 L scalar in the fixture disagrees with the cone -> warned
+        assert!(w.iter().any(|m| m.contains("plenum.volume")), "{w:?}");
+        assert!(!w.iter().any(|m| m.contains("unknown key")), "{w:?}");
+        let s = cfg.restrictor_venturi_sigma();
+        assert!((s - (0.020f64 / 0.038).powi(2)).abs() < 1e-12);
+        let (_, d_in, d_out, _, _) = cfg.runner_spec(0);
+        assert_eq!((d_in, d_out), (0.040, 0.033));
+
+        let eng = SDM26Engine::new(cfg.clone(), JunctionKind::Characteristic);
+        let pl = &eng.pipes[eng.plenum_idx];
+        let ng = pl.n_ghost;
+        // cell-centre areas integrate back to the cone volume (midpoint rule)
+        let v_cells: f64 = (0..pl.n_cells).map(|k| pl.area[ng + k] * pl.dx).sum();
+        assert!((v_cells - v_cone).abs() / v_cone < 2e-3, "{v_cells} vs {v_cone}");
+        assert!(pl.area[ng] < pl.area[ng + pl.n_cells - 1]);
+        // runner: no end correction -> cell k centre at (k+0.5) dx on the profile
+        let r = &eng.pipes[eng.runner_idx[0]];
+        let dia = |a: f64| (4.0 * a / PI).sqrt();
+        let x_mid = |k: usize| (k as f64 + 0.5) * r.dx;
+        for k in [0usize, 10, 29, 35, 39] {
+            let x = x_mid(k);
+            let expect = if x <= 0.248 { 0.040 - 0.004 * x / 0.248 }
+                         else { 0.036 - 0.003 * (x - 0.248) / 0.080 };
+            assert!((dia(r.area[r.n_ghost + k]) - expect).abs() < 1e-9, "cell {k}");
+        }
+
+        // with the flanged end correction the pipe grows by delta at the
+        // MOUTH (constant mouth diameter), and the port end is unchanged
+        let mut c2 = cfg.clone();
+        c2.intake_runner_end_correction = true;
+        let delta = c2.runner_end_correction(0);
+        assert!((delta - 0.85 * 0.020).abs() < 1e-12);
+        let e2 = SDM26Engine::new(c2, JunctionKind::Characteristic);
+        let r2 = &e2.pipes[e2.runner_idx[0]];
+        assert!((r2.dx * r2.n_cells as f64 - (0.328 + delta)).abs() < 1e-12);
+        assert!((dia(r2.area[r2.n_ghost]) - 0.040).abs() < 1e-12);
+        let last = r2.n_ghost + r2.n_cells - 1;
+        let x_last = (r2.n_cells as f64 - 0.5) * r2.dx - delta;
+        let expect = 0.036 - 0.003 * (x_last - 0.248) / 0.080;
+        assert!((dia(r2.area[last]) - expect).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bad_diameter_profiles_are_schema_errors() {
+        for bad in [
+            serde_json::json!([[0.0, 0.04]]),
+            serde_json::json!([[0.01, 0.04], [0.2, 0.04]]),
+            serde_json::json!([[0.0, 0.04], [0.2, 0.04], [0.1, 0.04]]),
+            serde_json::json!([[0.0, 0.04], [0.2, -0.01]]),
+            serde_json::json!([[0.0, 0.04, 1.0], [0.2, 0.04]]),
+        ] {
+            let mut d = base();
+            d["plenum"]["diameter_profile"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "plenum {bad}");
+            let mut d = base();
+            d["intake_pipes"][2]["diameter_profile"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "runner {bad}");
+        }
+        let mut d = base();
+        d["restrictor"]["outlet_diameter"] = serde_json::json!(0.015);
+        assert!(load_v1_value(&d).is_err());
     }
 }
