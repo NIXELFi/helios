@@ -464,4 +464,23 @@ describe("ProductivityViewClient", () => {
     // ...but there is no EVENT to export.
     expect(screen.getByRole("button", { name: "Export CSV" })).toBeDisabled();
   });
+
+  it("ignores the partial years a custom From date passes through while typed", async () => {
+    fetchTaskHistory.mockResolvedValue({ rows: [], failure: null, message: null });
+    renderView();
+    fireEvent.click(await screen.findByRole("radio", { name: "Custom" }));
+    await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalled());
+    fetchTaskHistory.mockClear();
+
+    const from = screen.getByLabelText("From");
+    for (const v of ["0002-08-18", "0020-08-18", "0202-08-18"]) {
+      fireEvent.change(from, { target: { value: v } });
+    }
+    expect(fetchTaskHistory).not.toHaveBeenCalled();
+
+    fireEvent.change(from, { target: { value: "2025-08-18" } });
+    await waitFor(() => expect(fetchTaskHistory).toHaveBeenCalledTimes(1));
+    const q = fetchTaskHistory.mock.calls[0]![1] as { from: Date };
+    expect(q.from.getFullYear()).toBeGreaterThanOrEqual(2000);
+  });
 });

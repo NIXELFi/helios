@@ -27,6 +27,14 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
+- PM task sheet: the estimate saves when you leave the field or press Enter, not on every keystroke, and rejects negative or longer-than-10-year values.
+- PM Productivity: typing a custom From/To date no longer freezes the view while the year is half-typed (0202); the range waits for a real year, and the weekly chart is capped at 10 years.
+- PM: new tasks, events, milestones and the bulk Due field refuse a half-typed year (anything outside 2000-2100) and say why, instead of saving it. A new task's due date can't be before its start.
+- PM Dashboard: one task with a typo'd year no longer squashes the date histogram into a bar or two (it counts as undated), and "upcoming events" no longer lists a repeating event with a typo'd start with a date centuries in the past.
+- PM: the critical path ignores typo'd dates and caps any one task at 10 years, so one bad value can't take over the path.
+
 ## [5.13.4] - 2026-09-29
 
 ### Fixed

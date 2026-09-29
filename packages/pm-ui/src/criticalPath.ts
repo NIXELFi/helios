@@ -1,5 +1,17 @@
 import type { Task, TaskDependency } from "./types";
 
+// Ten years. One typo'd estimate or date must not dwarf every real task.
+const MAX_DURATION_DAYS = 3650;
+
+// A date input reports partial years while one is typed (0202-...); a span
+// from year 202 is not a duration. Mirrors the app's isPlausibleIsoDate.
+function plausibleDate(value: string | null | undefined): value is string {
+  const m = value ? /^(\d{4})-\d{2}-\d{2}/.exec(value) : null;
+  if (!m) return false;
+  const year = Number(m[1]);
+  return year >= 2000 && year <= 2100;
+}
+
 /** A task's duration for scheduling: its explicit estimate if set, otherwise the
  *  span of its scheduled window (due − start) when both dates exist, otherwise a
  *  unit fallback. Using real durations is what makes the critical path reflect
@@ -7,10 +19,12 @@ import type { Task, TaskDependency } from "./types";
 function durationOf(
   t: Pick<Task, "estimate_days" | "start_date" | "due_date">,
 ): number {
-  if (t.estimate_days != null && t.estimate_days > 0) return t.estimate_days;
-  if (t.start_date && t.due_date) {
+  if (t.estimate_days != null && t.estimate_days > 0) {
+    return Math.min(t.estimate_days, MAX_DURATION_DAYS);
+  }
+  if (plausibleDate(t.start_date) && plausibleDate(t.due_date)) {
     const span = (Date.parse(t.due_date) - Date.parse(t.start_date)) / 86_400_000;
-    if (Number.isFinite(span) && span >= 1) return span;
+    if (Number.isFinite(span) && span >= 1) return Math.min(span, MAX_DURATION_DAYS);
   }
   return 1;
 }

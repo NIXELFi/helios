@@ -2,9 +2,10 @@
 
 import type { Subteam, TaskRow } from "@helios/pm-ui";
 import { IconPlus, IconStar, IconStarFilled } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ContextMenu, type MenuAction } from "@pm/components/ui/ContextMenu";
 import { usePmStore } from "@pm/lib/pmStore";
+import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 
 import { tc } from "@helios/ui";
 export interface TaskSubteamChipsProps {
@@ -35,6 +36,26 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
   const removeTaskSubteam = usePmStore((s) => s.removeTaskSubteam);
   const setPrimarySubteam = usePmStore((s) => s.setPrimarySubteam);
   const reassignPrimarySubteam = usePmStore((s) => s.reassignPrimarySubteam);
+  const subsystems = usePmStore((s) => s.subsystems);
+  const projectId = usePmStore((s) => s.projectId);
+  const updateTask = usePmStore((s) => s.updateTask);
+
+  // Promote a member to primary. A subsystem that doesn't belong to (and isn't
+  // shared into) the new primary is cleared HERE, on the explicit switch —
+  // never on open, where per-device sharing would make it look foreign and a
+  // mere view would wipe it.
+  const promote = useCallback(
+    (subteamId: string) => {
+      setPrimarySubteam(task.id, subteamId);
+      const after = usePmStore.getState().tasks.find((t) => t.id === task.id);
+      if (!after || after.subteam_id !== subteamId || !after.subsystem_id) return;
+      const fits = subsystemsForSubteam(subsystems, subteamId, recallSharing(projectId)).some(
+        (s) => s.id === after.subsystem_id,
+      );
+      if (!fits) updateTask(task.id, { subsystem_id: null });
+    },
+    [task.id, setPrimarySubteam, subsystems, projectId, updateTask],
+  );
 
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -57,7 +78,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
     const actions: MenuAction[] = [];
     actions.push({
       label: "Set as primary",
-      onClick: () => setPrimarySubteam(task.id, menu.subteamId),
+      onClick: () => promote(menu.subteamId),
       disabledReason: isPrimary ? "Already the primary subteam" : undefined,
     });
     if (isPrimary) {
@@ -98,7 +119,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
     task.subteam_id,
     orgSubteams,
     baselineSubteams,
-    setPrimarySubteam,
+    promote,
     removeTaskSubteam,
     reassignPrimarySubteam,
   ]);
@@ -142,7 +163,7 @@ export function TaskSubteamChips({ task, editable = false }: TaskSubteamChipsPro
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPrimarySubteam(task.id, s.id);
+                  promote(s.id);
                 }}
                 aria-label={`Set ${s.name} as primary subteam`}
                 title="Set as primary"

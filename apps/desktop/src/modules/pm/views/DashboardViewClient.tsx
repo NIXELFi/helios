@@ -11,7 +11,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { addDays, addMonths, format, parseISO, startOfDay } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewHeader } from "@pm/components/ViewHeader";
 import { Select } from "@pm/components/ui/Select";
@@ -36,6 +36,7 @@ import {
   computeMetric,
   filterSet,
   groupTasks,
+  nextEventDate,
   subteamStats,
   taskDateHistogram,
   workloadByOwner,
@@ -81,23 +82,6 @@ function dueText(days: number): string {
   if (days === 0) return "today";
   if (days > 0) return `in ${days}d`;
   return `${-days}d overdue`;
-}
-
-// Next on-or-after-today occurrence of an event (handles recurrence). Returns
-// null if the (non-recurring) event is in the past or recurrence has ended.
-function nextEventDate(ev: CalendarEvent, today: Date): Date | null {
-  const start = parseISO(ev.date);
-  const rec = ev.recurrence ?? "none";
-  if (rec === "none") return start >= today ? start : null;
-  const end = ev.recurrence_end ? parseISO(ev.recurrence_end) : null;
-  let cur = start;
-  let guard = 0;
-  while (cur < today && guard < 1000) {
-    cur = rec === "daily" ? addDays(cur, 1) : rec === "weekly" ? addDays(cur, 7) : addMonths(cur, 1);
-    guard++;
-  }
-  if (end && cur > end) return null;
-  return cur;
 }
 
 export function DashboardViewClient({ teamSlug = null }: { teamSlug?: string | null }) {

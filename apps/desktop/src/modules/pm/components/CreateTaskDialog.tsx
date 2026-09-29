@@ -40,22 +40,35 @@ import { TaskLookup } from "@pm/components/TaskLookup";
 import { usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
+import { MAX_PLAUSIBLE_YEAR, MIN_PLAUSIBLE_YEAR, isPlausibleIsoDate } from "@pm/lib/plausibleDate";
+import { MAX_ESTIMATE_DAYS } from "@pm/lib/estimateDays";
 
 import { tc } from "@helios/ui";
-export const createTaskInput = z.object({
-  title: z.string().trim().min(1, "Title is required").max(200),
-  type: taskType,
-  status: taskStatus,
-  subteam_id: z.string().uuid("Pick a subteam"),
-  subsystem_id: z.string().uuid().nullable(),
-  owner_id: z.string().uuid().nullable(),
-  start_date: z.string().nullable(),
-  due_date: z.string().nullable(),
-  priority: z.enum(["low", "medium", "high", "critical"]),
-  estimate_days: z.number().nonnegative().nullable(),
-  mrl: z.number().int().min(1).max(9).nullable(),
-  description: z.string().nullable(),
-});
+// A date input can hold a partial year (0202-...) at submit time; that date
+// would otherwise be saved and blow up every date-range view.
+const plausibleDate = z
+  .string()
+  .refine((v) => isPlausibleIsoDate(v), `Enter a year between ${MIN_PLAUSIBLE_YEAR} and ${MAX_PLAUSIBLE_YEAR}`);
+
+export const createTaskInput = z
+  .object({
+    title: z.string().trim().min(1, "Title is required").max(200),
+    type: taskType,
+    status: taskStatus,
+    subteam_id: z.string().uuid("Pick a subteam"),
+    subsystem_id: z.string().uuid().nullable(),
+    owner_id: z.string().uuid().nullable(),
+    start_date: plausibleDate.nullable(),
+    due_date: plausibleDate.nullable(),
+    priority: z.enum(["low", "medium", "high", "critical"]),
+    estimate_days: z.number().nonnegative().max(MAX_ESTIMATE_DAYS).nullable(),
+    mrl: z.number().int().min(1).max(9).nullable(),
+    description: z.string().nullable(),
+  })
+  .refine((v) => !v.start_date || !v.due_date || v.start_date <= v.due_date, {
+    message: "Due date is before the start",
+    path: ["due_date"],
+  });
 type CreateTaskInput = z.infer<typeof createTaskInput>;
 
 const TYPE_LABEL: Record<TaskType, string> = {
@@ -712,7 +725,7 @@ export function CreateTaskDialog({
         </div>
 
         <div className="grid grid-cols-3 gap-4">
-          <Field label="Start" htmlFor="task-start">
+          <Field label="Start" error={errors.start_date?.message} htmlFor="task-start">
             <input
               id="task-start"
               type="date"
@@ -720,7 +733,7 @@ export function CreateTaskDialog({
               {...register("start_date", { setValueAs: (v) => (v === "" ? null : v) })}
             />
           </Field>
-          <Field label="Due date" htmlFor="task-due">
+          <Field label="Due date" error={errors.due_date?.message} htmlFor="task-due">
             <input
               id="task-due"
               type="date"
