@@ -27,6 +27,13 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.13.3] - 2026-09-29
+
+### Fixed
+- Sign-up now states the 12-character password minimum plainly and counts characters live as you type (e.g. "5/12"), instead of a soft "most vaults require" hint and an error only after pressing Create account.
+- Sign-up subteam dropdown now uses your system's native colors, so the list can't render unreadable/blank on some Windows setups.
+- If the subteam list ever loads empty, sign-up now says "No subteams available" instead of showing a blank dropdown.
+
 ## [5.13.2] - 2026-09-28
 
 ### Fixed

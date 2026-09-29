@@ -20,6 +20,8 @@ let clientShouldThrow = false;
 // When true, the subteam-picker query (pdm.subteams) resolves with an error —
 // used to exercise SUBTEAM-FETCH-ERR (the picker must not silently dead-end).
 let subteamsShouldError = false;
+// When true, the subteam RPC succeeds but returns no rows.
+let subteamsEmpty = false;
 
 vi.mock("@helios/auth", async () => {
   const actual = await vi.importActual<typeof import("@helios/auth")>("@helios/auth");
@@ -48,7 +50,9 @@ vi.mock("@helios/auth", async () => {
               ? Promise.resolve({ data: [{ domain: "example.com" }], error: null })
               : subteamsShouldError
                 ? Promise.resolve({ data: null, error: { message: "permission denied" } })
-                : Promise.resolve({ data: [{ name: "Engine" }], error: null }),
+                : subteamsEmpty
+                  ? Promise.resolve({ data: [], error: null })
+                  : Promise.resolve({ data: [{ name: "Engine" }], error: null }),
         }),
       } as any);
     },
@@ -69,6 +73,7 @@ describe("<AuthModal>", () => {
     clearConnection();
     clientShouldThrow = false;
     subteamsShouldError = false;
+    subteamsEmpty = false;
     signInWithPassword.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
     signUp.mockReset().mockResolvedValue({ data: { session: {} }, error: null });
     resetPasswordForEmail.mockReset().mockResolvedValue({ data: {}, error: null });
@@ -338,6 +343,29 @@ describe("<AuthModal>", () => {
     // An inline alert explains the picker couldn't load, instead of an empty
     // picker silently dead-ending the flow.
     expect(await screen.findByText(/couldn't load subteams/i)).toBeInTheDocument();
+  });
+
+  it("says so when the subteam list loads empty instead of showing a blank picker", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    subteamsEmpty = true;
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    expect(await screen.findByText(/no subteams available/i)).toBeInTheDocument();
+  });
+
+  it("signup: states the 12-char minimum up front and flags a short password live", async () => {
+    saveConnection({ url: "https://abc.supabase.co", anonKey: "key123" });
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /need an account\? sign up/i }));
+    const hint = await screen.findByTestId("signup-password-hint");
+    expect(hint).toHaveTextContent("Password must be at least 12 characters.");
+    expect(hint).not.toHaveTextContent(/most helios vaults/i);
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "short" } });
+    expect(hint).toHaveTextContent("(5/12)");
+    expect(hint).toHaveClass("text-red-300");
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "long-enough-pass" } });
+    expect(hint).not.toHaveTextContent("/12)");
+    expect(hint).not.toHaveClass("text-red-300");
   });
 
   // ── X2: modal a11y — Escape closes ────────────────────────────────────

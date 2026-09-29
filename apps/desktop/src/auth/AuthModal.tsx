@@ -303,6 +303,9 @@ function CredentialsStep(props: {
   // leaving an empty picker that dead-ends sign-up.
   const [subteamsLoading, setSubteamsLoading] = useState(false);
   const [subteamsError, setSubteamsError] = useState<string | null>(null);
+  // True once a load finished without error, so an empty list gets its own
+  // message instead of a picker with nothing but the placeholder.
+  const [subteamsLoaded, setSubteamsLoaded] = useState(false);
   // Sign-up domain allowlist (null = not loaded → the server gate alone decides).
   const [signupDomains, setSignupDomains] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -325,6 +328,7 @@ function CredentialsStep(props: {
     let on = true;
     setSubteamsLoading(true);
     setSubteamsError(null);
+    setSubteamsLoaded(false);
     (async () => {
       try {
         // The client defaults to the `pdm` schema, but list_signup_subteams()
@@ -338,7 +342,8 @@ function CredentialsStep(props: {
           setSubteamsError(error.message ?? "Couldn't load subteams.");
           return;
         }
-        setSubteams((data as { name: string }[]) ?? []);
+        setSubteams(Array.isArray(data) ? (data as { name: string }[]) : []);
+        setSubteamsLoaded(true);
       } catch (e) {
         if (on) setSubteamsError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -471,8 +476,18 @@ function CredentialsStep(props: {
         required
       />
       {mode === "signup" && (
-        <p className="-mt-1 text-[10px] text-helios-muted">
-          Use a strong password — most Helios vaults require at least 12 characters.
+        // Live length feedback: the old soft hint ("most vaults require...")
+        // read as optional, and the hard check only fired on submit after the
+        // email/name/subteam checks, so short passwords looked like a dead form.
+        <p
+          className={`-mt-1 text-[10px] ${
+            password.length > 0 && password.length < MIN_PASSWORD_LEN ? "text-red-300" : "text-helios-muted"
+          }`}
+          data-testid="signup-password-hint"
+        >
+          {password.length > 0 && password.length < MIN_PASSWORD_LEN
+            ? `Password must be at least ${MIN_PASSWORD_LEN} characters (${password.length}/${MIN_PASSWORD_LEN}).`
+            : `Password must be at least ${MIN_PASSWORD_LEN} characters.`}
         </p>
       )}
       {mode === "signup" && (
@@ -490,7 +505,10 @@ function CredentialsStep(props: {
             value={subteam}
             onChange={(e) => setSubteam(e.target.value)}
             aria-label="Subteam"
-            className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold [&>option]:bg-helios-panel"
+            // No custom <option> background: a themed option bg with the
+            // native popup's default text color can render the list unreadable
+            // (reported as a "blank" picker). Let the OS draw the options.
+            className="w-full rounded-sm border border-helios-line bg-helios-base px-2 py-1 text-[12px] text-helios-text outline-none focus:border-asu-gold"
           >
             <option value="">
               {subteamsLoading ? "Loading subteams…" : "Select your subteam…"}
@@ -502,6 +520,11 @@ function CredentialsStep(props: {
           {subteamsError && (
             <span className="block text-[10px] text-red-300" role="alert">
               Couldn't load subteams: {subteamsError}
+            </span>
+          )}
+          {!subteamsLoading && !subteamsError && subteamsLoaded && subteams.length === 0 && (
+            <span className="block text-[10px] text-red-300" role="alert">
+              No subteams available. Ask a Helios admin to add your subteam.
             </span>
           )}
         </label>
