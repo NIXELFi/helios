@@ -59,6 +59,7 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
+import { CommitDateInput } from "@pm/components/ui/CommitDateInput";
 
 import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -762,14 +763,11 @@ function RowFragmentInner({
           />
         </td>
         <td className="px-3 py-2 tabular-nums">
-          <input
-            type="date"
+          <CommitDateInput
             className={selectInline}
-            value={task.due_date ?? ""}
+            value={task.due_date}
             disabled={editsDisabled}
-            onChange={(e) =>
-              onChangeDue(e.target.value === "" ? null : e.target.value)
-            }
+            onCommit={onChangeDue}
           />
         </td>
         <td className="px-3 py-2 text-right tabular-nums">

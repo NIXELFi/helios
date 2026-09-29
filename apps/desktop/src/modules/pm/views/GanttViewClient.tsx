@@ -53,8 +53,13 @@ import {
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
 import { hasScrollMemory, useScrollMemory } from "@pm/lib/useScrollMemory";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
 import { tc } from "@helios/ui";
+// ~10 years of days. The timeline is one DOM node per day (header + weekend
+// shading), so this bounds the view no matter what the data says.
+const MAX_TIMELINE_DAYS = 3660;
+
 type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GanttSort, string> = {
@@ -299,12 +304,24 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
   }, []);
 
   const layout = useMemo(() => {
+    // The timeline renders DOM per day, so one typo'd year (0202-08-18) would
+    // stretch it across centuries -- 666k header cells and 3+ GB of renderer
+    // memory in the field. Chart only plausible dates; report the rest.
+    const invalidDateTasks: TaskRow[] = [];
     const dates: Date[] = [];
     for (const t of visibleTasks) {
+      const startBad = t.start_date != null && !isPlausibleIsoDate(t.start_date);
+      const dueBad = t.due_date != null && !isPlausibleIsoDate(t.due_date);
+      if (startBad || dueBad) {
+        invalidDateTasks.push(t);
+        continue;
+      }
       if (t.start_date) dates.push(parseISO(t.start_date));
       if (t.due_date) dates.push(parseISO(t.due_date));
     }
-    for (const m of milestones) dates.push(parseISO(m.target_date));
+    for (const m of milestones) {
+      if (isPlausibleIsoDate(m.target_date)) dates.push(parseISO(m.target_date));
+    }
     if (dates.length === 0) {
       return null;
     }
@@ -315,15 +332,20 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       if (d > max) max = d;
     }
     const rangeStart = startOfDay(addDays(min, -2));
-    const rangeEnd = startOfDay(addDays(max, 2));
+    let rangeEnd = startOfDay(addDays(max, 2));
+    // Backstop: even plausible dates can span decades. Cap the per-day DOM.
+    if (differenceInCalendarDays(rangeEnd, rangeStart) > MAX_TIMELINE_DAYS) {
+      rangeEnd = addDays(rangeStart, MAX_TIMELINE_DAYS);
+    }
     const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
+    const invalidIds = new Set(invalidDateTasks.map((t) => t.id));
 
     // Group by subteam (in current scope), preserving the global subteam order.
     const teamOrder = subteams.map((s) => s.id);
     const groups = new Map<string, TaskRow[]>();
     for (const id of teamOrder) groups.set(id, []);
     for (const t of visibleTasks) {
-      if (!t.start_date || !t.due_date) continue;
+      if (!t.start_date || !t.due_date || invalidIds.has(t.id)) continue;
       const arr = groups.get(t.subteam_id) ?? [];
       arr.push(t);
       groups.set(t.subteam_id, arr);
@@ -359,7 +381,15 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     }
     const totalRows = rowIndex;
 
-    return { days, totalDays: days.length, totalRows, bars, groupSpans, rangeStart };
+    return {
+      days,
+      totalDays: days.length,
+      totalRows,
+      bars,
+      groupSpans,
+      rangeStart,
+      invalidDateTasks,
+    };
   }, [visibleTasks, milestones, subteams, relationByTaskId, sort, critical]);
 
   // First open of a scope lands on TODAY, not the start of the range (report
@@ -396,7 +426,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     );
   }
 
-  const { days, totalDays, totalRows, bars, groupSpans, rangeStart } = layout;
+  const { days, totalDays, totalRows, bars, groupSpans, rangeStart, invalidDateTasks } = layout;
   const timelineWidth = totalDays * dayWidth;
   const headerHeight = 36;
 
@@ -462,6 +492,12 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         }
         description={
           `${bars.length} bars · ${groupSpans.length} subteam${groupSpans.length === 1 ? "" : "s"} · ` +
+          (invalidDateTasks.length > 0
+            ? `${invalidDateTasks.length} hidden with an invalid date (${invalidDateTasks
+                .slice(0, 3)
+                .map((t) => `${t.title}: ${[t.start_date, t.due_date].filter((d) => d && !isPlausibleIsoDate(d)).join(", ")}`)
+                .join("; ")}) · `
+            : "") +
           "ctrl + scroll to zoom time · ctrl + shift + scroll to zoom rows"
         }
         actions={

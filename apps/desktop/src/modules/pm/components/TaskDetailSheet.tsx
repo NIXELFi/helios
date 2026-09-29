@@ -40,6 +40,7 @@ import { useState } from "react";
 import { selectCanEditTask, usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
+import { CommitDateInput } from "@pm/components/ui/CommitDateInput";
 
 import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -481,16 +482,14 @@ export function TaskDetailSheet() {
           {/* Dates + estimate */}
           <div className="mb-4 grid grid-cols-3 gap-3">
             <Field label="Start">
-              <input
-                type="date"
-                value={task.start_date ?? ""}
+              <CommitDateInput
+                value={task.start_date}
                 disabled={!canEdit}
                 // Native max keeps the picker from offering an invalid date; the
-                // onChange guard rejects a typed start that lands after the due
+                // onCommit guard rejects a typed start that lands after the due
                 // date so start never exceeds due (cross-field validation).
                 max={task.due_date ?? undefined}
-                onChange={(e) => {
-                  const next = e.target.value || null;
+                onCommit={(next) => {
                   if (next && task.due_date && next > task.due_date) return;
                   updateTask(task.id, { start_date: next });
                 }}
@@ -498,13 +497,11 @@ export function TaskDetailSheet() {
               />
             </Field>
             <Field label="Due">
-              <input
-                type="date"
-                value={task.due_date ?? ""}
+              <CommitDateInput
+                value={task.due_date}
                 disabled={!canEdit}
                 min={task.start_date ?? undefined}
-                onChange={(e) => {
-                  const next = e.target.value || null;
+                onCommit={(next) => {
                   if (next && task.start_date && next < task.start_date) return;
                   updateTask(task.id, { due_date: next });
                 }}
