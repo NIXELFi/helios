@@ -27,6 +27,10 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- CFD: typing an out-of-range run size (for example 1,000,000,000 "Max cycles") could make the solver try to reserve gigabytes of memory up front and crash Helios. The Single-RPM, Sweep and Optimization dialogs now disable Start and name the bad field (max cycles, RPM, convergence tol, min cycles, optimization step and seed), and the app refuses the same bad values (plus a zero, negative or non-numeric RPM, pipe cell count or pipe size in the engine config) with a clear error instead of running them.
+- CFD lap-sim VD sweep: a tiny step or an unbounded range no longer freezes the app; a sweep is capped at 500 points.
+
 ## [5.13.4] - 2026-09-29
 
 ### Fixed

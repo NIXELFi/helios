@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { PresetPicker } from "./PresetPicker";
 import { parseRpmList } from "../lib/rpmList";
+import { fieldErrors, runSizingFields } from "../lib/runParams";
 import { basename } from "../lib/cfdPath";
 import { DEFAULT_PRESET_ID, findPreset } from "../lib/presets";
 import type { JunctionKind, ParameterOverride, SweepParams } from "../state/types";
@@ -83,7 +84,8 @@ export function SweepParamsModal({
     ? parseRpmList(advancedText)
     : parseRpmList(`${startRpm}:${stopRpm}:${stepRpm}`);
   const errMsg = parsed.ok ? null : parsed.error;
-  const canStart = parsed.ok && parsed.rpms.length > 0;
+  const fieldErrs = fieldErrors(runSizingFields(nCycles, tol, minCycles));
+  const canStart = parsed.ok && parsed.rpms.length > 0 && fieldErrs.length === 0;
 
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="cfd-sweep-title"
@@ -205,6 +207,11 @@ export function SweepParamsModal({
             waves={capWaves} pv={capPv} profiles={capProfiles}
             onWaves={setCapWaves} onPv={setCapPv} onProfiles={setCapProfiles}
           />
+          {fieldErrs.length > 0 && (
+            <ul className="mt-3 list-disc pl-4 text-[10px] text-red-300" role="alert">
+              {fieldErrs.map((e) => <li key={e}>{e}</li>)}
+            </ul>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onCancel}
               className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold">
@@ -213,7 +220,7 @@ export function SweepParamsModal({
             <button type="button" disabled={!canStart}
               className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
               onClick={() => {
-                if (!parsed.ok) return;
+                if (!parsed.ok || !canStart) return;
                 onStart({
                   rpmList: parsed.rpms,
                   nCyclesMax: nCycles,

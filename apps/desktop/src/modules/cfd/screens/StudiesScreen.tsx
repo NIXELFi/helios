@@ -10,6 +10,7 @@ import { studyName } from "../lib/studyName";
 import { StudyNameEditor } from "../components/StudyNameEditor";
 import { ReportButton } from "../components/ReportButton";
 import { parseRpmList } from "../lib/rpmList";
+import { fieldErrors, runSizingFields, RPM_MAX, RPM_MIN } from "../lib/runParams";
 import { rankTrials } from "../lib/analytics/optimizationStats";
 import { summarizeSweep } from "../lib/analytics/sweepStats";
 import { type ExportAction, exportActionsFor } from "../lib/export/exportStudy";
@@ -580,6 +581,10 @@ function SingleRpmParamsModal({
   );
 
   if (!open) return null;
+  const errors = fieldErrors([
+    { label: "RPM", value: rpm, min: RPM_MIN, max: RPM_MAX },
+    ...runSizingFields(nCycles, tol, minCycles),
+  ]);
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="cfd-params-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -623,14 +628,19 @@ function SingleRpmParamsModal({
             waves={capWaves} pv={capPv} profiles={capProfiles}
             onWaves={setCapWaves} onPv={setCapPv} onProfiles={setCapProfiles}
           />
+          {errors.length > 0 && (
+            <ul className="mt-3 list-disc pl-4 text-[10px] text-red-300" role="alert">
+              {errors.map((e) => <li key={e}>{e}</li>)}
+            </ul>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onCancel}
               className="rounded-sm border border-helios-line bg-helios-panel px-3 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold">
               Cancel
             </button>
-            <button type="button"
-              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90"
-              onClick={() => onStart({
+            <button type="button" disabled={errors.length > 0}
+              className="rounded-sm bg-asu-gold px-3 py-1 text-[10px] uppercase tracking-wider text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
+              onClick={() => errors.length === 0 && onStart({
                 rpm,
                 nCyclesMax: nCycles,
                 junctionKind: junction,

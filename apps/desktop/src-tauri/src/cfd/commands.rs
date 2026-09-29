@@ -132,6 +132,10 @@ pub fn cfd_start_job(
     state: tauri::State<'_, CfdState>,
     request: StartJobRequest,
 ) -> Result<StartJobResponse, String> {
+    // Reject out-of-range run sizing (cycles, rpm, trials, list lengths)
+    // before anything is registered or allocated — the runners size
+    // buffers and loops straight from these numbers.
+    cfd_core::validate::validate_start_request(&request)?;
     let job_id = ulid::Ulid::new().to_string();
     let kind = request.kind();
     let config_path = request.config_path().to_string();
