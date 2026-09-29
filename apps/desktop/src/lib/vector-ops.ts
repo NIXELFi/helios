@@ -114,15 +114,34 @@ export function smooth(values: Float64Array, window: number): Float64Array {
   if (w % 2 === 0) w -= 1; // force odd → centerable
   if (w < 1) w = 1;
   if (w === 1) { out.set(values); return out; }
+  // A window wider than the array (or a non-finite one) leaves no centerable
+  // sample: every output is an edge sample. Bail out before doing any work so
+  // a huge typed/stored window can't cost more than O(n).
+  if (!(w <= n)) { out.fill(NaN); return out; }
   const half = (w - 1) / 2;
+  // O(n) running sum over the finite samples in [i - half, i + half].
+  // The sum is re-seeded from scratch every `w` outputs so round-off from a
+  // large value entering and leaving the window can't drift unboundedly;
+  // amortised cost stays O(n).
+  let sum = 0;
+  let count = 0;
+  let sinceReseed = w;
   for (let i = 0; i < n; i++) {
     if (i < half || i + half >= n) { out[i] = NaN; continue; }
-    let sum = 0;
-    let count = 0;
-    for (let k = i - half; k <= i + half; k++) {
-      const v = values[k]!;
-      if (Number.isFinite(v)) { sum += v; count++; }
+    if (sinceReseed >= w) {
+      sum = 0; count = 0;
+      for (let k = i - half; k <= i + half; k++) {
+        const v = values[k]!;
+        if (Number.isFinite(v)) { sum += v; count++; }
+      }
+      sinceReseed = 0;
+    } else {
+      const vin = values[i + half]!;
+      if (Number.isFinite(vin)) { sum += vin; count++; }
+      const vout = values[i - half - 1]!;
+      if (Number.isFinite(vout)) { sum -= vout; count--; }
     }
+    sinceReseed++;
     out[i] = count > 0 ? sum / count : NaN;
   }
   return out;

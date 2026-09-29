@@ -23,9 +23,48 @@ export function loadAllLapConfigs(): Record<string, LapDetectionConfig> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as StoredState;
-    if (parsed?.version === 1) return parsed.bySession;
+    if (parsed?.version === 1 && parsed.bySession && typeof parsed.bySession === "object") {
+      const out: Record<string, LapDetectionConfig> = {};
+      for (const [id, cfg] of Object.entries(parsed.bySession)) {
+        if (isValidLapConfig(cfg)) out[id] = cfg;
+      }
+      return out;
+    }
   } catch { /* ignore */ }
   return {};
+}
+
+/** Cap on persisted manual crossings — far above any real session. */
+export const MAX_MANUAL_CROSSINGS = 10_000;
+
+/** Shape-check a persisted lap config. Configs are applied at session load,
+ *  so a corrupt / hand-edited one is dropped (the session falls back to
+ *  defaultLapConfig) rather than trusted. */
+export function isValidLapConfig(v: unknown): v is LapDetectionConfig {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object";
+  const str = (x: unknown) => typeof x === "string";
+  const fin = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+  if (c.speedChannelId !== undefined && !str(c.speedChannelId)) return false;
+  if (c.notesByIndex !== undefined && !obj(c.notesByIndex)) return false;
+  if (c.trustByIndex !== undefined && !obj(c.trustByIndex)) return false;
+  if (!["none", "gps_line", "beacon", "expression", "manual"].includes(c.mode as string)) return false;
+  // Sub-configs may legitimately be absent (the dialog saves a mode switch
+  // before its fields are touched; the detector treats that as no crossings),
+  // but when present they must be well-formed.
+  const g = c.gpsLine;
+  if (g !== undefined && !(obj(g) && str(g.latChannelId) && str(g.lonChannelId)
+      && fin(g.centerLat) && fin(g.centerLon) && fin(g.radiusM)
+      && (g.headingDeg === undefined || g.headingDeg === null || fin(g.headingDeg)))) return false;
+  const b = c.beacon;
+  if (b !== undefined && !(obj(b) && str(b.channelId) && fin(b.threshold))) return false;
+  const e = c.expression;
+  if (e !== undefined && !(obj(e) && str(e.expression) && (e.expression as string).length <= 4000)) return false;
+  const m = c.manual;
+  if (m !== undefined && !(obj(m) && Array.isArray(m.crossingsUs)
+      && m.crossingsUs.length <= MAX_MANUAL_CROSSINGS && m.crossingsUs.every(fin))) return false;
+  return true;
 }
 
 export function saveLapConfig(sessionId: string, cfg: LapDetectionConfig): void {

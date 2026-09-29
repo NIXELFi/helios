@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   mergeSessionsWithColors,
   computeOverrideChange,
-  computeMathChannelsUpdate,
 } from "../src/App";
+import { computeMathChannelsUpdate } from "../src/lib/math-channels";
 import type { LoadedSession } from "../src/lib/session";
 import { applySessionMeta, colorForIndex } from "../src/lib/session";
 import type { SessionMeta } from "../src/lib/app-state";

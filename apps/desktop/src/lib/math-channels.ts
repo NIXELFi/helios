@@ -37,9 +37,60 @@ export function loadMathChannels(): MathChannel[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as StoredState;
-    if (parsed?.version === 1 && Array.isArray(parsed.channels)) return parsed.channels;
+    if (parsed?.version === 1 && Array.isArray(parsed.channels)) {
+      return sanitizeMathChannels(parsed.channels);
+    }
   } catch { /* fall through */ }
   return [];
+}
+
+/** Hard caps for persisted math channels. The stored blob is applied to every
+ *  session at boot, so a hand-edited / corrupt value must not be able to make
+ *  that pass unbounded. */
+export const MAX_MATH_CHANNELS = 200;
+export const MAX_EXPRESSION_LENGTH = 4000;
+
+/** Validate the shape of persisted math channels. Drops entries that are not
+ *  objects, lack a string id/expression, have an over-long expression, or
+ *  repeat an earlier id; coerces the cosmetic fields to their types and clamps
+ *  `decimals` to [0, 6] (toFixed throws outside 0..100). Vector-op numeric
+ *  args (e.g. the smooth window) live inside the expression text and are
+ *  bounded by the ops themselves — smooth() is O(n) for any window. */
+export function sanitizeMathChannels(input: unknown): MathChannel[] {
+  if (!Array.isArray(input)) return [];
+  const out: MathChannel[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (out.length >= MAX_MATH_CHANNELS) break;
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== "string" || r.id.length === 0 || seen.has(r.id)) continue;
+    if (typeof r.expression !== "string" || r.expression.length > MAX_EXPRESSION_LENGTH) continue;
+    seen.add(r.id);
+    const str = (v: unknown, d: string) => (typeof v === "string" ? v : d);
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const mc: MathChannel = {
+      id: r.id,
+      display_name: str(r.display_name, r.id),
+      units: str(r.units, ""),
+      decimals: clampDecimals(r.decimals),
+      color: str(r.color, "#FFC627"),
+      group: str(r.group, "Math"),
+      expression: r.expression,
+    };
+    const min = num(r.min), max = num(r.max), warn = num(r.warn), alarm = num(r.alarm);
+    if (min !== undefined) mc.min = min;
+    if (max !== undefined) mc.max = max;
+    if (warn !== undefined) mc.warn = warn;
+    if (alarm !== undefined) mc.alarm = alarm;
+    out.push(mc);
+  }
+  return out;
+}
+
+function clampDecimals(v: unknown): number {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 2;
+  return Math.max(0, Math.min(6, n));
 }
 
 export function saveMathChannels(channels: MathChannel[]): void {
@@ -72,6 +123,66 @@ export function applyMathChannels(
     } catch (e) {
       errors.set(mc.id, e instanceof Error ? e.message : String(e));
     }
+  }
+  return { errors };
+}
+
+/** Minimal session shape computeMathChannelsUpdate needs. */
+export interface MathTargetSession {
+  id: string;
+  store: ChannelStore;
+  laps: LapSet | null;
+}
+
+/** Re-apply the math-channel set to every loaded session: remove the union of
+ *  old+new math ids from each store first (so a rename/delete leaves no stale
+ *  column) then re-apply, collecting per-session compile errors. PURE w.r.t.
+ *  React state — store mutation is intrinsic; the returned errors map is what
+ *  the caller feeds to setMathErrors OUTSIDE any setSessions updater.
+ *
+ *  Incremental path: math channels evaluate in declaration order and can only
+ *  see EARLIER math channels, so when the first `k` channels are unchanged
+ *  (same objects) only the suffix from `k` on is removed and re-applied, and
+ *  the prefix's errors are carried over from `prevErrors`. Taken only when
+ *  `prevErrors` covers every session and no prefix id collides with a suffix
+ *  id; otherwise this is the full remove-and-reapply. */
+export function computeMathChannelsUpdate(
+  sessions: readonly MathTargetSession[],
+  oldChannels: MathChannel[],
+  nextChannels: MathChannel[],
+  prevErrors?: Map<string, Map<string, string>>,
+): { errors: Map<string, Map<string, string>> } {
+  let k = 0;
+  const maxK = Math.min(oldChannels.length, nextChannels.length);
+  while (k < maxK && oldChannels[k] === nextChannels[k]) k++;
+  const prefix = nextChannels.slice(0, k);
+  const prefixIds = new Set(prefix.map((m) => m.id));
+  const suffixIds = new Set([
+    ...oldChannels.slice(k).map((m) => m.id),
+    ...nextChannels.slice(k).map((m) => m.id),
+  ]);
+  const incremental = k > 0
+    && prevErrors !== undefined
+    && sessions.every((s) => prevErrors.has(s.id))
+    && prefixIds.size === prefix.length
+    && ![...suffixIds].some((id) => prefixIds.has(id));
+  const removeIds = incremental
+    ? suffixIds
+    : new Set([...oldChannels.map((m) => m.id), ...nextChannels.map((m) => m.id)]);
+  const toApply = incremental ? nextChannels.slice(k) : nextChannels;
+  const errors = new Map<string, Map<string, string>>();
+  for (const session of sessions) {
+    for (const id of removeIds) session.store.removeChannel(id);
+    const r = applyMathChannels(session.store, toApply, session.laps);
+    if (!incremental) { errors.set(session.id, r.errors); continue; }
+    const merged = new Map<string, string>();
+    const prev = prevErrors!.get(session.id)!;
+    for (const id of prefixIds) {
+      const e = prev.get(id);
+      if (e !== undefined) merged.set(id, e);
+    }
+    for (const [id, e] of r.errors) merged.set(id, e);
+    errors.set(session.id, merged);
   }
   return { errors };
 }

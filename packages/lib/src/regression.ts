@@ -23,14 +23,30 @@ const NO_FIT: FitResult = {
   predict: () => NaN,
 };
 
+/** Highest degree the fit UI offers (and what a persisted degree is clamped to). */
+export const MAX_UI_POLY_DEGREE = 6;
+/** Hard cap inside fitPolynomial: the normal equations cost O(n·d²) + O(d³)
+ *  and are numerically meaningless long before this, so an absurd degree
+ *  (typed or persisted) must not be able to freeze the render path. */
+export const MAX_POLY_DEGREE = 12;
+
+/** Clamp a user-entered / persisted polynomial degree to [1, MAX_UI_POLY_DEGREE].
+ *  Non-numeric input falls back to 2 (the editor's default). */
+export function clampPolyDegree(degree: unknown): number {
+  const d = typeof degree === "number" ? degree : Number(degree);
+  if (!Number.isFinite(d)) return 2;
+  return Math.max(1, Math.min(MAX_UI_POLY_DEGREE, Math.round(d)));
+}
+
 /** y = b0 + b1·x + b2·x² + … + bd·x^d  (normal equations, Gauss-Jordan).
- *  Degree must be >= 1; >= 6 starts to numerically misbehave on real data. */
+ *  Degree must be in [1, MAX_POLY_DEGREE]; >= 6 starts to numerically
+ *  misbehave on real data. */
 export function fitPolynomial(
   xs: ArrayLike<number>,
   ys: ArrayLike<number>,
   degree: number,
 ): FitResult {
-  if (degree < 1 || !Number.isInteger(degree)) return NO_FIT;
+  if (degree < 1 || degree > MAX_POLY_DEGREE || !Number.isInteger(degree)) return NO_FIT;
   const n = Math.min(xs.length, ys.length);
   const X: number[] = [], Y: number[] = [];
   for (let i = 0; i < n; i++) {

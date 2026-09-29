@@ -34,6 +34,11 @@ follow [semver](https://semver.org/).
 - PM: new tasks, events, milestones and the bulk Due field refuse a half-typed year (anything outside 2000-2100) and say why, instead of saving it. A new task's due date can't be before its start.
 - PM Dashboard: one task with a typo'd year no longer squashes the date histogram into a bar or two (it counts as undated), and "upcoming events" no longer lists a repeating event with a typo'd start with a date centuries in the past.
 - PM: the critical path ignores typo'd dates and caps any one task at 10 years, so one bad value can't take over the path.
+- Logs: a large `smooth()` window in a math channel could freeze Helios, and freeze it again on every launch because the channel is saved. Smoothing now takes the same time whatever the window, and a window wider than the data returns gaps immediately.
+- Logs: typing in the Math channels editor no longer recalculates every math channel on every loaded session after each keystroke. Changes are saved 0.4 s after you stop typing, when you leave the field, or when you close the editor, and only the edited channel and the ones after it are recalculated.
+- Logs: saved math channels and lap-detection settings are checked when Helios loads them. Malformed entries are dropped and decimals are limited to 0-6, so a corrupt saved value can't stop Helios from starting.
+- XY plot fit overlays: the polynomial degree is limited to 1-6 as you type and when a saved layout loads. The fit rejects degrees above 12, so a saved degree can no longer lock up the plot.
+- Engine bar segments are limited to 1-200, and the decimals setting on numeric readouts and gauges is limited to 0-6 when you type it. Saved values are limited again when the widget draws. A large decimals value previously crashed the widget, and a huge segment count stalled every cursor move.
 
 ## [5.13.4] - 2026-09-29
 
