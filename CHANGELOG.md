@@ -27,6 +27,21 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- CFD engine sim: opt-in physics fixes from the September engine-sim audit (finding 0032), each behind its own `physics` flag and off by default: the intake junction applies the entry loss to plenum→runner flow and the sudden-expansion loss to backflow (they were the wrong way round); a venturi restrictor model with diffuser pressure recovery, so the restrictor chokes at a realistic ~95 kPa plenum pressure; open-end corrections on runners and the collector; a physical exhaust open-end reflection; fuel from trapped air with O2-limited burning on rich mixtures; and valve timing entered at 1 mm lift, the way the service manual quotes it.
+- CFD: two experimental example configs, "SDM26/SDM25 — physics v2", with all of the above plus the real CBR600RR cam timing. They are not calibrated and read high above 10k rpm on SDM26. The shipped SDM25/SDM26 examples are unchanged.
+- CFD configs: plenum length and cell count, per-runner bellmouth radius / entry loss / end correction, and residual-gas tracking can now be set in the config file.
+- helios-bench: `[[sweep.grid]]` runs a sweep at every value of a parameter, for example one RPM sweep per runner length when studying a variable-length intake.
+
+### Changed
+- CFD optimizations now apply the same physics preset as sweeps and default to 40 max / 30 min cycles (was 8 / 3), so optimizer rankings match sweep results.
+- CFD: the "Stagnation" junction option is labelled "not for wave tuning". It absorbs almost all pressure-wave reflections.
+
+### Fixed
+- CFD: a misspelled or unknown key in an engine config (for example a physics flag typo) is now shown as a warning on the Studies screen and in the log. Before, it was silently ignored and the run used the old physics.
+- CFD: new configs started from the SDM25/SDM26 templates now carry the full calibrated physics block, so they match the shipped examples.
+- CFD: a config without `drivetrain_efficiency` now defaults to 0.85, the same as the built-in default. It was 0.91, which read wheel power about 7 % high.
+
 ## [5.13.5] - 2026-09-29
 
 ### Fixed
