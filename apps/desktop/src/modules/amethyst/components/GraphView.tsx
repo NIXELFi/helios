@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useThemeVersion } from "../../../lib/theme";
+import { useModuleLive } from "../../../shell/module-activity";
 import type { KbVault } from "../types";
 
 import { tc, tca } from "@helios/ui";
@@ -39,6 +40,14 @@ export function GraphView({
   const activeRef = useRef<string | null>(activeId);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  // The animation loop runs only while it has something to animate AND the
+  // module is on screen. It used to spin at 60 fps forever -- settled, or
+  // behind another module (the Shell keeps Amethyst mounted). `kickRef`
+  // restarts it on interaction, a selection change or coming back on screen.
+  const live = useModuleLive();
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const kickRef = useRef<(() => void) | null>(null);
 
   const colorMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -89,7 +98,12 @@ export function GraphView({
 
   useEffect(() => {
     activeRef.current = activeId;
+    kickRef.current?.();
   }, [activeId]);
+
+  useEffect(() => {
+    if (live) kickRef.current?.();
+  }, [live]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -103,6 +117,7 @@ export function GraphView({
     const target = { scale: 0.55, tx: 0, ty: 0 };
     const drag = { x: 0, y: 0, panning: false };
     let raf = 0;
+    let running = false;
     let alpha = 1;
     let reveal = 0;
     let focusT = 0;
@@ -268,18 +283,44 @@ export function GraphView({
       view.scale += (target.scale - view.scale) * 0.14;
       view.tx += (target.tx - view.tx) * 0.14;
       view.ty += (target.ty - view.ty) * 0.14;
+      // Settled: layout cooled, fade-ins done, camera on its target. Snap the
+      // last fraction so the final frame is exact, draw it, and stop.
+      const settled =
+        alpha <= 0.05 &&
+        1 - reveal < 1e-3 &&
+        Math.abs(targetFocus - focusT) < 1e-3 &&
+        Math.abs(target.scale - view.scale) < 1e-4 &&
+        Math.abs(target.tx - view.tx) < 0.05 &&
+        Math.abs(target.ty - view.ty) < 0.05;
+      if (settled) {
+        reveal = 1;
+        focusT = targetFocus;
+        view.scale = target.scale; view.tx = target.tx; view.ty = target.ty;
+      }
       draw();
+      if (settled || !liveRef.current) {
+        running = false;
+        raf = 0;
+        return;
+      }
       raf = requestAnimationFrame(tick);
     }
+    function kick() {
+      if (running || !liveRef.current) return;
+      running = true;
+      raf = requestAnimationFrame(tick);
+    }
+    kickRef.current = kick;
 
     sizeCanvas();
     fitTarget();
     view.tx = target.tx; view.ty = target.ty; // start centered (scale eases in)
-    tick();
+    kick();
 
     const ro = new ResizeObserver(() => {
-      sizeCanvas();
+      sizeCanvas(); // resizing clears the canvas: always redraw
       fitTarget();
+      kick();
     });
     ro.observe(wrap);
 
@@ -300,6 +341,7 @@ export function GraphView({
       return best;
     }
     function onMove(e: MouseEvent) {
+      kick();
       if (drag.panning) {
         target.tx += e.clientX - drag.x;
         target.ty += e.clientY - drag.y;
@@ -313,6 +355,7 @@ export function GraphView({
       canvas!.style.cursor = i !== null ? "pointer" : "grab";
     }
     function onDown(e: MouseEvent) {
+      kick();
       const i = pick(e.clientX, e.clientY);
       if (i !== null) { onSelectRef.current(nodes[i]!.id); return; }
       drag.panning = true; drag.x = e.clientX; drag.y = e.clientY;
@@ -331,8 +374,9 @@ export function GraphView({
       target.scale = ns;
       target.tx = mx - wx * ns;
       target.ty = my - wy * ns;
+      kick();
     }
-    function onDbl() { fitTarget(); }
+    function onDbl() { fitTarget(); kick(); }
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mousedown", onDown);
     canvas.addEventListener("dblclick", onDbl);
@@ -341,6 +385,8 @@ export function GraphView({
 
     return () => {
       cancelAnimationFrame(raf);
+      running = false;
+      if (kickRef.current === kick) kickRef.current = null;
       ro.disconnect();
       canvas.removeEventListener("mousemove", onMove);
       canvas.removeEventListener("mousedown", onDown);

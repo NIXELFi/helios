@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
@@ -58,6 +58,39 @@ const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.O
 function ModuleLoading({ id, label }: { id: ModuleId; label: string }) {
   return <ModuleTransition label={label} Icon={MODULE_ICON[id]} />;
 }
+
+/**
+ * One module's pane: visibility class, crash boundary, optional Suspense for a
+ * code-split module, and the "am I on screen" context.
+ *
+ * Memoized, and handed a memoized module element as `children`, so a Shell
+ * re-render (the updater countdown, a rail click, a modal opening) leaves every
+ * pane whose own props did not change alone. Without this every visited
+ * module -- all kept mounted -- re-rendered its whole tree on each of those.
+ */
+const ModulePane = memo(function ModulePane({
+  id,
+  label,
+  isActive,
+  lazy: isLazy = true,
+  children,
+}: {
+  id: ModuleId;
+  label: string;
+  isActive: boolean;
+  /** False for Logs, which ships in the main bundle (no Suspense needed). */
+  lazy?: boolean;
+  children: ReactNode;
+}) {
+  const inner = <ModuleActivityProvider active={isActive}>{children}</ModuleActivityProvider>;
+  return (
+    <div className={"helios-pane-in absolute inset-0 " + (isActive ? "" : "hidden")}>
+      <ErrorBoundary label={label} compact>
+        {isLazy ? <Suspense fallback={<ModuleLoading id={id} label={label} />}>{inner}</Suspense> : inner}
+      </ErrorBoundary>
+    </div>
+  );
+});
 
 // Theme before the first React paint (index.html already set the attribute
 // from localStorage; this wires the live listeners for "system").
@@ -447,7 +480,7 @@ function HeliosShell() {
   // straight away when a release is announced.
   useHeliosReleaseSignal(client, updater.backgroundCheck);
 
-  const presenceRoster = useHeliosPresence({
+  const presenceStore = useHeliosPresence({
     client,
     userId: user?.id ?? null,
     name: userLabel ?? "Unknown",
@@ -458,6 +491,32 @@ function HeliosShell() {
   // role-granting capabilities (leads/execs). Server side mirrors this —
   // support.reports policies accept pm.can_triage_reports() (20260714040000).
   const canSeePresence = myRole === "owner" || myRole === "admin" || canManageOrg;
+
+  // Module elements, memoized on exactly the props each one takes, so the
+  // memoized ModulePane below sees the same `children` across unrelated Shell
+  // renders. Every prop here must be stable (setLogsPlaying is a state setter).
+  const logsActive = active === "logs";
+  const simActive = active === "sim";
+  const gamesActive = active === "games";
+  const logsEl = useMemo(
+    () => (
+      <LogsApp
+        appVersion={appVersion}
+        playing={logsPlaying}
+        onPlayingChange={setLogsPlaying}
+        keyboardShortcutsEnabled={logsActive}
+      />
+    ),
+    [appVersion, logsPlaying, logsActive],
+  );
+  const vaultEl = useMemo(() => <VaultModule />, []);
+  const cfdEl = useMemo(() => <CfdModule key={themeVersion} />, [themeVersion]);
+  const pmEl = useMemo(() => <PmModule />, []);
+  const simEl = useMemo(() => <SimModule active={simActive} />, [simActive]);
+  const gamesEl = useMemo(() => <GamesModule paused={!gamesActive} />, [gamesActive]);
+  const amethystEl = useMemo(() => <AmethystModule />, []);
+  const marketplaceEl = useMemo(() => <MarketplaceModule />, []);
+  const orgEl = useMemo(() => <OrgModule key={themeVersion} />, [themeVersion]);
 
   // Shown in the Windows title bar crumb — mirrors the rail's nav labels.
   const MODULE_LABEL: Record<ModuleId, string> = {
@@ -504,7 +563,7 @@ function HeliosShell() {
         orgEnabled={orgEnabled}
         authLoading={authLoading}
         presence={
-          canSeePresence ? { users: presenceRoster, currentUserId: user?.id ?? null } : null
+          canSeePresence ? { store: presenceStore, currentUserId: user?.id ?? null } : null
         }
         onOpenReport={setReportKind}
         canViewReports={canSeePresence}
@@ -524,18 +583,9 @@ function HeliosShell() {
             ModuleActivityProvider tells each module whether it is the one on
             screen so hidden modules can stand their polling down. */}
         {visited.has("logs") && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
-            <ErrorBoundary label="Logs" compact>
-              <ModuleActivityProvider active={active === "logs"}>
-                <LogsApp
-                  appVersion={appVersion}
-                  playing={logsPlaying}
-                  onPlayingChange={setLogsPlaying}
-                  keyboardShortcutsEnabled={active === "logs"}
-                />
-              </ModuleActivityProvider>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="logs" label="Logs" isActive={active === "logs"} lazy={false}>
+            {logsEl}
+          </ModulePane>
         )}
         {/* No-role accounts: the data-backed modules would only render RLS
             walls, so show the waiting-room screen for whichever of them is
@@ -552,95 +602,47 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("vault") && vaultEnabled && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
-            <ErrorBoundary label="Vault" compact>
-              <Suspense fallback={<ModuleLoading id="vault" label="Vault" />}>
-                <ModuleActivityProvider active={active === "vault"}>
-                  <VaultModule />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="vault" label="Vault" isActive={active === "vault"}>
+            {vaultEl}
+          </ModulePane>
         )}
         {visited.has("cfd") && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
-            <ErrorBoundary label="CFD" compact>
-              <Suspense fallback={<ModuleLoading id="cfd" label="CFD" />}>
-                <ModuleActivityProvider active={active === "cfd"}>
-                  <CfdModule key={themeVersion} />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="cfd" label="CFD" isActive={active === "cfd"}>
+            {cfdEl}
+          </ModulePane>
         )}
         {visited.has("pm") && pmEnabled && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
-            <ErrorBoundary label="PM" compact>
-              <Suspense fallback={<ModuleLoading id="pm" label="PM" />}>
-                <ModuleActivityProvider active={active === "pm"}>
-                  <PmModule />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="pm" label="PM" isActive={active === "pm"}>
+            {pmEl}
+          </ModulePane>
         )}
         {/* Sim: the driver-in-loop simulator's launcher and run archive.
             Ungated like Amethyst -- it reads run files this machine already
             has, and a rig at a test day may have no network at all. */}
         {visited.has("sim") && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "sim" ? "" : "hidden")}>
-            <ErrorBoundary label="Sim" compact>
-              <Suspense fallback={<ModuleLoading id="sim" label="Sim" />}>
-                <ModuleActivityProvider active={active === "sim"}>
-                  <SimModule active={active === "sim"} />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="sim" label="Sim" isActive={active === "sim"}>
+            {simEl}
+          </ModulePane>
         )}
         {visited.has("games") && gamesEnabled && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "games" ? "" : "hidden")}>
-            <ErrorBoundary label="Games" compact>
-              <Suspense fallback={<ModuleLoading id="games" label="Games" />}>
-                <ModuleActivityProvider active={active === "games"}>
-                  <GamesModule paused={active !== "games"} />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="games" label="Games" isActive={active === "games"}>
+            {gamesEl}
+          </ModulePane>
         )}
         {visited.has("amethyst") && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
-            <ErrorBoundary label="Amethyst" compact>
-              <Suspense fallback={<ModuleLoading id="amethyst" label="Amethyst" />}>
-                <ModuleActivityProvider active={active === "amethyst"}>
-                  <AmethystModule />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="amethyst" label="Amethyst" isActive={active === "amethyst"}>
+            {amethystEl}
+          </ModulePane>
         )}
         {visited.has("marketplace") && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
-            <ErrorBoundary label="Marketplace" compact>
-              <Suspense fallback={<ModuleLoading id="marketplace" label="Marketplace" />}>
-                <ModuleActivityProvider active={active === "marketplace"}>
-                  <MarketplaceModule />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="marketplace" label="Marketplace" isActive={active === "marketplace"}>
+            {marketplaceEl}
+          </ModulePane>
         )}
         {visited.has("org") && orgEnabled && !noOrgAccess && (
-          <div className={"helios-pane-in absolute inset-0 " + (active === "org" ? "" : "hidden")}>
-            <ErrorBoundary label="Org & Access" compact>
-              <Suspense fallback={<ModuleLoading id="org" label="Org & Access" />}>
-                <ModuleActivityProvider active={active === "org"}>
-                  <OrgModule key={themeVersion} />
-                </ModuleActivityProvider>
-              </Suspense>
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="org" label="Org & Access" isActive={active === "org"}>
+            {orgEl}
+          </ModulePane>
         )}
       </main>
       </div>

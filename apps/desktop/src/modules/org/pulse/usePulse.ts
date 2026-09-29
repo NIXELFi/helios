@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
+import { useModuleLive } from "../../../shell/module-activity";
 import type { OpsDay, OpsHourCell, OpsOverview, OpsPerson } from "./types";
 
 // All four reads are global-admin gated SECURITY DEFINER RPCs in the `pdm`
@@ -80,11 +81,20 @@ export function usePulse(): PulseState {
     };
   }, [client, tick]);
 
-  // Keep "online now" and today's numbers live while the tab is open.
+  // Keep "online now" and today's numbers live while the tab is open -- and
+  // only then. The Shell keeps Org mounted when you leave it, and this kept
+  // firing four admin RPCs a minute from a hidden pane (or a minimised
+  // window). Coming back after a stale stretch catches up with one refresh.
+  const live = useModuleLive();
+  const refreshedAtRef = useRef(refreshedAt);
+  refreshedAtRef.current = refreshedAt;
   useEffect(() => {
+    if (!live) return;
+    const last = refreshedAtRef.current;
+    if (last !== null && Date.now() - last >= REFRESH_MS) setTick((t) => t + 1);
     const id = window.setInterval(() => setTick((t) => t + 1), REFRESH_MS);
     return () => window.clearInterval(id);
-  }, []);
+  }, [live]);
 
   return { ...data, loading, error, refreshedAt, refresh };
 }

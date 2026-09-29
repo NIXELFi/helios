@@ -27,6 +27,12 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Less background work everywhere: a teammate opening Helios, leaving, or switching module no longer re-renders every module you have open (PM, Logs, Vault, CFD, Sim, Org...) on every signed-in client. Only the "On Helios" roster updates, and only when it actually changed.
+- Modules you are not looking at no longer re-render with the shell (the auto-update countdown, opening a dialog, switching modules), and the update download bar redraws at most four times a second instead of on every network chunk.
+- Org & Access Pulse stops refreshing its four admin queries every minute while it is hidden or the window is minimised, and catches up once when you come back.
+- Amethyst's graph stops animating once the layout settles or the module is hidden, and picks up again when you hover, drag, zoom or select a note. Plinko stops redrawing 60 times a second when no ball is falling.
+
 ## [5.13.4] - 2026-09-29
 
 ### Fixed
