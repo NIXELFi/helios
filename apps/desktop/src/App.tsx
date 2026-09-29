@@ -49,6 +49,7 @@ import { LapConfigDialog } from "./components/LapConfigDialog";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { HelpModal } from "./help/HelpModal";
+import { useModuleLive } from "./shell/module-activity";
 
 import { tc } from "@helios/ui";
 export interface LogsAppProps {
@@ -1749,7 +1750,11 @@ function CursorClock({ emitter }: { emitter: CursorEmitter }) {
 
 function FpsCounter() {
   const [stats, setStats] = useState({ fps: 0, ms: 0 });
+  // Counting frames is itself a per-frame loop; run it only while Logs is on
+  // screen, not for every minute the module sits hidden behind PM or Vault.
+  const live = useModuleLive();
   useEffect(() => {
+    if (!live) return;
     let rafId: number;
     let frames = 0;
     let windowStart = performance.now();
@@ -1771,7 +1776,7 @@ function FpsCounter() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [live]);
   const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-asu-gold" : "text-[#EF5350]";
   return (
     <span

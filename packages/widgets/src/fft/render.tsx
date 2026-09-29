@@ -95,6 +95,7 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleIdsKey, config, effectiveZoom]);
 
+  const zeroSizeRetries = useRef(0);
   drawRef.current = () => {
     const c = canvasRef.current; if (!c) return;
     const ctx = setupCanvas(c);
@@ -105,11 +106,17 @@ export function FftRender(props: WidgetRenderProps<FftConfig>) {
     // ResizeObserver will also fire when real dims arrive, so this is a
     // belt-and-suspenders second chance, not the primary path.
     if (w <= 0 || h <= 0) {
-      if (typeof requestAnimationFrame !== "undefined") {
+      // Bounded: a hidden module (display:none) keeps the canvas at 0x0
+      // indefinitely, and an unbounded retry ran a draw every frame for as
+      // long as Logs stayed hidden. The ResizeObserver redraws once real
+      // dims arrive.
+      if (zeroSizeRetries.current < 5 && typeof requestAnimationFrame !== "undefined") {
+        zeroSizeRetries.current += 1;
         requestAnimationFrame(() => drawRef.current());
       }
       return;
     }
+    zeroSizeRetries.current = 0;
     ctx.clearRect(0, 0, w, h);
     if (spectra.length === 0) {
       ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
