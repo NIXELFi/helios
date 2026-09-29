@@ -33,6 +33,12 @@ follow [semver](https://semver.org/).
 - CFD configs: plenum length and cell count, per-runner bellmouth radius / entry loss / end correction, and residual-gas tracking can now be set in the config file.
 - CFD: experimental example config "SDM26 — as-built intake" (finding 0033) with the car's measured intake: 36/20/38 mm venturi, 1.44 L bell plenum, 248 mm tapered runners, and an estimated head port. It is not calibrated. Config files can now give the plenum and runners a diameter profile (`diameter_profile`) and set the restrictor diffuser outlet diameter (`restrictor.outlet_diameter`).
 - CFD: experimental example configs "SDM26 — as-built intake + exhaust" and "SDM26 — as-built + logged WOT tune" (finding 0034). The first adds the car's as-built 4-2-1 exhaust (1.25 in primaries, two 2-into-1 collectors, 1.5 in secondaries, stepped tail pipe and a 12 in straight-through muffler; head-port and tail lengths are estimates). The second also runs the ignition and lambda the car logged at full throttle. Neither is calibrated. Config files can now give exhaust primaries, secondaries and the collector a `diameter_profile`, and set a per-rpm air-fuel ratio with `physics.afr_map`.
+- CFD engine sim: three opt-in physics models from finding 0035, each off by default:
+  - An exhaust collector merge model (`physics.exhaust_junction_momentum`). Pulses leaving one primary now pull on its partner primary, as in a real 2-into-1 collector, instead of every pipe at the merge sitting at one pressure.
+  - Per-pipe bend and muffler losses (`local_losses`).
+  - Burned-gas properties in the exhaust pipes (`physics.exhaust_gas_gamma` and `exhaust_gas_r`); exhaust pressure waves were travelling about 2 % too fast.
+
+  On SDM26 with the logged tune, these cut the dyno error at 7–11.5k rpm from 2.4 to 1.9 kW. The shipped configs are unchanged.
 - helios-bench: `[[sweep.grid]]` runs a sweep at every value of a parameter, for example one RPM sweep per runner length when studying a variable-length intake.
 
 ### Changed

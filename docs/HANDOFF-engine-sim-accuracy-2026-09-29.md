@@ -3,6 +3,27 @@
 **Branch:** `fix/engine-sim-accuracy-0929` (from `main` @ `3d6073d0`)
 **Goal:** get the 1D engine model (`crates/engine-sim`) as close to the real SDM26 as possible before designing an **active / variable runner-length intake** this season.
 
+## Update (later 2026-09-29): finding 0035
+
+Next steps 1-4 are done. See `physics_findings/0035-collector-merge-lambda-lag/finding.md`.
+
+- **Collector (step 1):** the new `physics.exhaust_junction_momentum` merge model is the one change that moves shape.
+  - Dyno-torque shape r goes 0.70 → 0.79, ECU r (270 ms) goes 0.52 → 0.56, and the 9k peak is restored.
+  - It does **not** make the 7.4-8k trough (model −0.06 vs car −0.25).
+- **Bends / muffler (step 2):** `local_losses` are small effects and not a trough mechanism.
+- **γ/R (step 4):** `physics.exhaust_gas_gamma/_r` give 2.3 % slower exhaust waves. The model trough moves to 7.9k, which is correct but small.
+- **Best dyno fit:** real tune + all three, with RMSE 2.66 kW over 6-12.5k and 1.89 kW over 7-11.5k (was 2.78 / 2.36).
+  The 10.5-12.5k band gets worse (3.54 vs 3.02), which is the level problem for step 5.
+- **Proxy (step 3): the 270 ms λ lag is the closed-throttle lag.**
+  - WOT ignition cuts in the raw log show about 90 ms.
+  - With the WOT lag (`references/ecu/proxy_wotA.csv`, **use this instead of proxy_lag270**) the car's trough is −0.25, not −0.40.
+  - It is real, but a third of it was lag.
+  - The dyno features sit 4-10 % lower in rpm than the ECU's. Check how the dyno derives rpm (`ERpmM`).
+- **New framing:** the model has roughly the car's phase but about 1/6 of its in-phase VE ripple (slope 0.16; car ripple 8.7 %
+  in both the proxy and the dyno, model 3 %). The next hunt is wave amplitude (damping or excitation), not one trough.
+  Top candidates are valve lift/Cd tables, wall friction/heat, and cylinder blowdown. A fast pressure trace would settle it.
+- The raw log is in the vault as a **gzip** object. Gunzip it before `load.py`.
+
 ## TL;DR — where it stands
 
 - The pipe solver is numerically sound. Wave speed is within 0.3%, and results are grid- and cycle-converged.
