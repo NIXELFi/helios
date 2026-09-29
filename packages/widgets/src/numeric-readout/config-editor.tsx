@@ -1,6 +1,7 @@
 import type { WidgetConfigEditorProps } from "../types";
 import type { NumericReadoutConfig } from "./render";
 import { ChannelPicker } from "../lib/channel-picker";
+import { clampEditorDecimals, MAX_EDITOR_DECIMALS } from "../lib/config-clamp";
 
 // Thresholds were already in the config but had no editor fields, so they were
 // unreachable from the UI. Labels are spelled out for the low-side bounds
@@ -26,10 +27,10 @@ export function NumericReadoutConfigEditor({ config, onChange, availableChannels
       </label>
       <label>Decimals
         <input
-          type="number" min={0} max={6}
+          type="number" min={0} max={MAX_EDITOR_DECIMALS}
           className="ml-2 w-12 bg-helios-base border border-helios-line px-1"
           value={config.decimals}
-          onChange={(e) => onChange({ ...config, decimals: Number(e.target.value) })}
+          onChange={(e) => onChange({ ...config, decimals: clampEditorDecimals(e.target.value) })}
         />
       </label>
       {thresholdFields.map(([k, label]) => (

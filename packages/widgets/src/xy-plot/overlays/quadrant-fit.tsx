@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower, linspace, type FitResult } from "@helios/lib";
+import { fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower, linspace, clampPolyDegree, MAX_UI_POLY_DEGREE, type FitResult } from "@helios/lib";
 import type { OverlayModule, QuadrantFitConfig, SessionGroup, FitKind } from "../types";
 import { register } from "./registry";
 
@@ -121,8 +121,8 @@ export const quadrantFitOverlay: OverlayModule<QuadrantFitConfig, QuadrantFitArt
       </Row>
       {config.kind.type === "polynomial" && (
         <Row label="degree">
-          <input type="number" min={1} max={6} value={config.kind.degree}
-            onChange={(e) => onChange({ ...config, kind: { type: "polynomial", degree: Number(e.target.value) } })}
+          <input type="number" min={1} max={MAX_UI_POLY_DEGREE} value={clampPolyDegree(config.kind.degree)}
+            onChange={(e) => onChange({ ...config, kind: { type: "polynomial", degree: clampPolyDegree(e.target.value) } })}
             className="w-16 bg-helios-base border border-helios-line px-1" />
         </Row>
       )}
@@ -161,7 +161,7 @@ register(quadrantFitOverlay);
 function runFit(kind: FitKind, xs: Float64Array, ys: Float64Array): FitResult {
   switch (kind.type) {
     case "linear":      return fitLinear(xs, ys);
-    case "polynomial":  return fitPolynomial(xs, ys, kind.degree);
+    case "polynomial":  return fitPolynomial(xs, ys, clampPolyDegree(kind.degree));
     case "exponential": return fitExponential(xs, ys);
     case "logarithmic": return fitLogarithmic(xs, ys);
     case "power":       return fitPower(xs, ys);

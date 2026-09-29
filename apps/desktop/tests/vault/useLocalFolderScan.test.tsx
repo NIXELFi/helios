@@ -255,4 +255,30 @@ describe("useLocalFolderScan", () => {
     expect(result.current.files).toEqual([]);
     expect(result.current.scanRoot).toBe("/root/SDM27");
   });
+
+  it("keeps the same files reference when a rescan finds nothing changed", async () => {
+    // Every periodic rescan used to publish a fresh array, invalidating every
+    // downstream memo and re-triggering (and superseding) auto-sync passes.
+    vi.mocked(fs.readDir).mockResolvedValue([
+      { name: "a.sldprt", isFile: true, isDirectory: false, isSymlink: false },
+    ] as any);
+    vi.mocked(fs.readFile).mockResolvedValue(new Uint8Array([1, 2, 3]));
+    const { result } = renderHook(() => useLocalFolderScan("/root"));
+    await waitFor(() => expect(result.current.files).toHaveLength(1));
+    const first = result.current.files;
+
+    const readsBefore = vi.mocked(fs.readFile).mock.calls.length;
+    await act(async () => { result.current.refetch(); });
+    await waitFor(() => {
+      expect(vi.mocked(fs.readFile).mock.calls.length).toBeGreaterThan(readsBefore);
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.files).toBe(first);
+
+    // A real content change still publishes a new array.
+    vi.mocked(fs.readFile).mockResolvedValue(new Uint8Array([4, 5, 6]));
+    await act(async () => { result.current.refetch(); });
+    await waitFor(() => expect(result.current.files).not.toBe(first));
+    expect(result.current.files![0]!.sha256).not.toBe(first![0]!.sha256);
+  });
 });

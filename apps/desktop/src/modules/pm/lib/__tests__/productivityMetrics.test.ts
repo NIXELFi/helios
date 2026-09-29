@@ -3,6 +3,7 @@ import {
   attentionLists,
   buildProductivity,
   isoWeekKey,
+  MAX_WEEK_COLUMNS,
   sliceWindow,
   subteamSummaries,
   stateCounts,
@@ -281,6 +282,17 @@ describe("buildProductivity — window padding", () => {
       "2026-09-14",
     ]);
     expect(m.throughput.map((w) => w.completed)).toEqual([0, 0, 1, 0]);
+  });
+
+  it("caps the week series at MAX_WEEK_COLUMNS, ending at the window's last week", () => {
+    // A custom range typed as year 0202 used to walk ~95k weeks per keystroke.
+    const m = buildProductivity([], {
+      now: new Date(2026, 8, 14),
+      from: new Date(202, 0, 1),
+      to: new Date(2026, 8, 14),
+    });
+    expect(m.throughput).toHaveLength(MAX_WEEK_COLUMNS);
+    expect(m.throughput.at(-1)!.weekStart).toBe("2026-09-14");
   });
 });
 

@@ -60,6 +60,20 @@ import { tc } from "@helios/ui";
 // shading), so this bounds the view no matter what the data says.
 const MAX_TIMELINE_DAYS = 3660;
 
+/** "N hidden with an invalid date (Title: 0202-08-18; ...) · ", or "". */
+function invalidDateNote(tasks: TaskRow[]): string {
+  if (tasks.length === 0) return "";
+  const named = tasks
+    .slice(0, 3)
+    .map((t) => {
+      const bad = [t.start_date, t.due_date].filter((d) => d && !isPlausibleIsoDate(d));
+      return `${t.title}: ${bad.join(", ")}`;
+    })
+    .join("; ");
+  const more = tasks.length > 3 ? `; +${tasks.length - 3} more` : "";
+  return `${tasks.length} hidden with an invalid date (${named}${more}) · `;
+}
+
 type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
 const SORT_LABEL: Record<GanttSort, string> = {
@@ -303,19 +317,25 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
   }, []);
 
+  // The timeline renders DOM per day, so one typo'd year (0202-08-18) would
+  // stretch it across centuries -- 666k header cells and 3+ GB of renderer
+  // memory in the field. Chart only plausible dates; report the rest, even
+  // when nothing else is left to chart.
+  const invalidDateTasks = useMemo(
+    () =>
+      visibleTasks.filter(
+        (t) =>
+          (t.start_date != null && !isPlausibleIsoDate(t.start_date)) ||
+          (t.due_date != null && !isPlausibleIsoDate(t.due_date)),
+      ),
+    [visibleTasks],
+  );
+
   const layout = useMemo(() => {
-    // The timeline renders DOM per day, so one typo'd year (0202-08-18) would
-    // stretch it across centuries -- 666k header cells and 3+ GB of renderer
-    // memory in the field. Chart only plausible dates; report the rest.
-    const invalidDateTasks: TaskRow[] = [];
+    const invalidIds = new Set(invalidDateTasks.map((t) => t.id));
     const dates: Date[] = [];
     for (const t of visibleTasks) {
-      const startBad = t.start_date != null && !isPlausibleIsoDate(t.start_date);
-      const dueBad = t.due_date != null && !isPlausibleIsoDate(t.due_date);
-      if (startBad || dueBad) {
-        invalidDateTasks.push(t);
-        continue;
-      }
+      if (invalidIds.has(t.id)) continue;
       if (t.start_date) dates.push(parseISO(t.start_date));
       if (t.due_date) dates.push(parseISO(t.due_date));
     }
@@ -338,7 +358,6 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       rangeEnd = addDays(rangeStart, MAX_TIMELINE_DAYS);
     }
     const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
-    const invalidIds = new Set(invalidDateTasks.map((t) => t.id));
 
     // Group by subteam (in current scope), preserving the global subteam order.
     const teamOrder = subteams.map((s) => s.id);
@@ -381,16 +400,8 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     }
     const totalRows = rowIndex;
 
-    return {
-      days,
-      totalDays: days.length,
-      totalRows,
-      bars,
-      groupSpans,
-      rangeStart,
-      invalidDateTasks,
-    };
-  }, [visibleTasks, milestones, subteams, relationByTaskId, sort, critical]);
+    return { days, totalDays: days.length, totalRows, bars, groupSpans, rangeStart };
+  }, [visibleTasks, invalidDateTasks, milestones, subteams, relationByTaskId, sort, critical]);
 
   // First open of a scope lands on TODAY, not the start of the range (report
   // 2026-09-24, Daniel Germaine: the chart opened at the project's first date and
@@ -412,7 +423,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       <>
         <ViewHeader
           title={currentTeam ? `${currentTeam.name} · Gantt` : "Gantt"}
-          description="No dated tasks to chart in this scope."
+          description={invalidDateNote(invalidDateTasks) + "No dated tasks to chart in this scope."}
           // Keep the toggle reachable here too: with "Primary only" on, a subteam
           // whose only dated tasks are secondary-membership ones lands on this
           // empty state — without the toggle the user couldn't switch it back off.
@@ -426,7 +437,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     );
   }
 
-  const { days, totalDays, totalRows, bars, groupSpans, rangeStart, invalidDateTasks } = layout;
+  const { days, totalDays, totalRows, bars, groupSpans, rangeStart } = layout;
   const timelineWidth = totalDays * dayWidth;
   const headerHeight = 36;
 
@@ -492,12 +503,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         }
         description={
           `${bars.length} bars · ${groupSpans.length} subteam${groupSpans.length === 1 ? "" : "s"} · ` +
-          (invalidDateTasks.length > 0
-            ? `${invalidDateTasks.length} hidden with an invalid date (${invalidDateTasks
-                .slice(0, 3)
-                .map((t) => `${t.title}: ${[t.start_date, t.due_date].filter((d) => d && !isPlausibleIsoDate(d)).join(", ")}`)
-                .join("; ")}) · `
-            : "") +
+          invalidDateNote(invalidDateTasks) +
           "ctrl + scroll to zoom time · ctrl + shift + scroll to zoom rows"
         }
         actions={

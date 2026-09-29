@@ -10,6 +10,7 @@ import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { SegmentedControl } from "@pm/components/ui/SegmentedControl";
 import { FilterField, filterInput } from "@pm/components/TaskFilterBar";
 import { usePmStore } from "@pm/lib/pmStore";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 import { useScrollMemory } from "@pm/lib/useScrollMemory";
 import { viewHref } from "@pm/lib/nav";
 import { EMPTY_FILTERS, filtersToParams, type TaskFilters } from "@pm/lib/filters";
@@ -23,6 +24,7 @@ import {
   isoWeekKey,
   isoWeekStart,
   localDayKey,
+  MAX_WEEK_COLUMNS,
   sliceWindow,
   stateCounts,
   subteamSummaries,
@@ -145,7 +147,10 @@ function fetchRange(r: Range, key: PresetKey): Range {
   const prev = previousRange(r, key);
   const context = isoWeekStart(r.to);
   context.setDate(context.getDate() - 7 * (SPARK_WEEKS - 1));
-  const from = new Date(Math.min(prev.from.getTime(), context.getTime()));
+  // Never pull more than two max-length windows (current + previous).
+  const floor = new Date(r.to.getTime());
+  floor.setDate(floor.getDate() - 2 * 7 * MAX_WEEK_COLUMNS);
+  const from = new Date(Math.max(floor.getTime(), Math.min(prev.from.getTime(), context.getTime())));
   return { from, to: r.to };
 }
 
@@ -197,6 +202,9 @@ export function ProductivityViewClient({ teamSlug = null }: ProductivityViewClie
 
   const range = useMemo(() => {
     if (preset === "custom") {
+      // A date input reports partial years while one is typed (0202-...);
+      // those are no range at all, not a ninety-year one.
+      if (!isPlausibleIsoDate(customFrom) || !isPlausibleIsoDate(customTo)) return null;
       const from = fromDayInput(customFrom);
       const to = fromDayInput(customTo);
       if (!from || !to) return null;

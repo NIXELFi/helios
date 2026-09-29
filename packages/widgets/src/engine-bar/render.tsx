@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { clampSegments } from "../lib/config-clamp";
 import { setupCanvas, canvasLogicalSize } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -96,7 +97,7 @@ export function EngineBarRender(props: WidgetRenderProps<EngineBarConfig>) {
     const rpm = sampled !== null && Number.isFinite(sampled) ? sampled : null;
     const r = rpm ?? 0;  // geometry only: no data draws an unlit bar
     const t = Math.max(0, Math.min(1, r / config.redline));
-    const segs = config.segments;
+    const segs = clampSegments(config.segments);
     const segGap = 2;
     const segW = (barW - segGap * (segs - 1)) / segs;
     // Convention: a segment is identified by its far edge, (i+1)/segs. It

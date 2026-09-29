@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { safeDecimals } from "../lib/config-clamp";
 import { setupCanvas, canvasLogicalSize, thresholdColor } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
@@ -134,7 +135,7 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     ctx.font = '14px "JetBrains Mono", ui-monospace, monospace';
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText(v === null ? "—" : v.toFixed(config.decimals), w / 2, h - 4);
+    ctx.fillText(v === null ? "—" : v.toFixed(safeDecimals(config.decimals)), w / 2, h - 4);
   }
 
   function drawTick(ctx: CanvasRenderingContext2D, horiz: boolean, x: number, y: number, w: number, h: number, t: number) {

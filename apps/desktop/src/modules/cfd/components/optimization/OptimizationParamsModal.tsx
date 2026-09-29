@@ -14,6 +14,7 @@ import type {
   SamplerKind,
 } from "../../state/types";
 import { parseRpmList } from "../../lib/rpmList";
+import { fieldErrors, runSizingFields, OPT_N_CYCLES_MAX } from "../../lib/runParams";
 import { followerOf, withPerElement } from "../../lib/lockedPairs";
 import { useParameterSchema } from "../../lib/useParameterSchema";
 import { ParameterPanel } from "./ParameterPanel";
@@ -82,6 +83,16 @@ export function OptimizationParamsModal({
   }
   if (!Number.isInteger(nTrials) || nTrials < 2 || nTrials > 500) {
     validationErrors.push("nTrials must be an integer in [2, 500].");
+  }
+  validationErrors.push(...fieldErrors(runSizingFields(nCyclesMax, tol, minCycles, OPT_N_CYCLES_MAX)));
+  for (const b of enabled) {
+    if (b.step != null && b.min < b.max && !(b.step <= b.max - b.min)) {
+      validationErrors.push(`${b.path}: step must not exceed max − min.`);
+    }
+  }
+  const seedTrimmed = seedText.trim();
+  if (seedTrimmed !== "" && !(Number.isSafeInteger(Number(seedTrimmed)) && Number(seedTrimmed) >= 0)) {
+    validationErrors.push("Seed must be a non-negative integer (or blank for random).");
   }
 
   function submit() {

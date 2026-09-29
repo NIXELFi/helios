@@ -97,8 +97,49 @@ export function sanitizePathSegment(name: string): string {
  * must never stack-overflow, since these run on the hot sync-match path and one
  * bad row would otherwise make the whole Vault UI unopenable.
  */
+interface FolderIndex {
+  /** folders.length when built — rebuilt if a caller mutates the array in place. */
+  len: number;
+  byId: Map<FolderId, Folder>;
+  /** Memoized folderChain results (null = unresolvable). Callers never mutate them. */
+  chains: Map<FolderId, Folder[] | null>;
+  /** Memoized sanitized folderPath results. */
+  paths: Map<FolderId, string>;
+}
+
+/**
+ * Per-`folders`-array index, built once. folderChain used to rebuild
+ * `new Map(folders...)` on EVERY call, and it sits under vaultRelativePath ->
+ * folderPath inside per-file loops (auto-sync, table rows, the bulk bar), so a
+ * pass over a ~13k-file vault rebuilt the folder map ~13k times. Keyed on the
+ * array identity (react-query hands out a new array on refetch), so a changed
+ * folder list gets a fresh index and the old one is garbage-collected with it.
+ */
+const folderIndexCache = new WeakMap<Folder[], FolderIndex>();
+
+function folderIndex(folders: Folder[]): FolderIndex {
+  const hit = folderIndexCache.get(folders);
+  if (hit && hit.len === folders.length) return hit;
+  const idx: FolderIndex = {
+    len: folders.length,
+    byId: new Map(folders.map((x) => [x.id, x])),
+    chains: new Map(),
+    paths: new Map(),
+  };
+  folderIndexCache.set(folders, idx);
+  return idx;
+}
+
 function folderChain(folderId: FolderId, folders: Folder[]): Folder[] | null {
-  const byId = new Map(folders.map((x) => [x.id, x]));
+  const idx = folderIndex(folders);
+  const cached = idx.chains.get(folderId);
+  if (cached !== undefined) return cached;
+  const chain = walkFolderChain(folderId, idx.byId);
+  idx.chains.set(folderId, chain);
+  return chain;
+}
+
+function walkFolderChain(folderId: FolderId, byId: Map<FolderId, Folder>): Folder[] | null {
   const chain: Folder[] = [];
   let cur = byId.get(folderId);
   if (!cur) return null;
@@ -137,9 +178,13 @@ function folderChain(folderId: FolderId, folders: Folder[]): Folder[] | null {
  */
 export function folderPath(folderId: FolderId | null, folders: Folder[]): string {
   if (!folderId) return "";
+  const idx = folderIndex(folders);
+  const cached = idx.paths.get(folderId);
+  if (cached !== undefined) return cached;
   const chain = folderChain(folderId, folders);
-  if (!chain) return "";
-  return chain.map((f) => sanitizePathSegment(f.name)).join("/");
+  const path = chain ? chain.map((f) => sanitizePathSegment(f.name)).join("/") : "";
+  idx.paths.set(folderId, path);
+  return path;
 }
 
 /**

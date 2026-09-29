@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower } from "../src/regression";
+import {
+  fitLinear, fitPolynomial, fitExponential, fitLogarithmic, fitPower,
+  clampPolyDegree, MAX_POLY_DEGREE,
+} from "../src/regression";
 
 describe("fitLinear", () => {
   it("recovers exact slope + intercept for a perfect line", () => {
@@ -47,6 +50,30 @@ describe("fitPolynomial", () => {
     const fit = fitPolynomial([0, 1], [0, 1], 3);
     expect(fit.coefficients).toEqual([]);
     expect(fit.validSamples).toBe(2);
+  });
+
+  it("rejects a degree above MAX_POLY_DEGREE without doing the O(n·d²) work", () => {
+    const xs = Array.from({ length: 50_000 }, (_, i) => i / 1000);
+    const ys = xs.map((x) => x * x);
+    const t0 = performance.now();
+    const fit = fitPolynomial(xs, ys, 1e6);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(fit.coefficients).toEqual([]);
+    expect(fitPolynomial(xs, ys, MAX_POLY_DEGREE + 1).coefficients).toEqual([]);
+    expect(fitPolynomial(xs.slice(0, 100), ys.slice(0, 100), 2).coefficients).toHaveLength(3);
+  });
+});
+
+describe("clampPolyDegree", () => {
+  it("clamps to [1, 6], rounds, and defaults non-numeric input to 2", () => {
+    expect(clampPolyDegree(0)).toBe(1);
+    expect(clampPolyDegree(-5)).toBe(1);
+    expect(clampPolyDegree(3.4)).toBe(3);
+    expect(clampPolyDegree(1e9)).toBe(6);
+    expect(clampPolyDegree("4")).toBe(4);
+    expect(clampPolyDegree(NaN)).toBe(2);
+    expect(clampPolyDegree(undefined)).toBe(2);
+    expect(clampPolyDegree("abc")).toBe(2);
   });
 });
 

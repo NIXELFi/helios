@@ -28,7 +28,7 @@ import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/gri
 import { stepToLapBoundary } from "./lib/lap-step";
 import { progressFraction } from "./lib/load-progress";
 import {
-  type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
+  type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels, computeMathChannelsUpdate,
 } from "./lib/math-channels";
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
@@ -158,6 +158,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   const mathChannelsRef = useRef(mathChannels);
   mathChannelsRef.current = mathChannels;
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
+  const mathErrorsRef = useRef(mathErrors);
+  mathErrorsRef.current = mathErrors;
   useFileOpener({ onPending: handleFileOpenPending });
   // Another module handing a data file over -- the Sim module's "Open in
   // Logs" on a recorded run. It is the same ingest as a drag-and-drop, which
@@ -1438,12 +1440,23 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     // closure values) and do all store mutation + error computation OUTSIDE
     // any setSessions updater, so each setState call is a pure assignment.
     const oldChannels = mathChannelsRef.current;
+    // Advance the refs synchronously so a second change arriving before the
+    // re-render (e.g. the editor's debounce flush on close) diffs against
+    // what the stores actually hold now.
+    mathChannelsRef.current = next;
     setMathChannelsState(next);
     saveMathChannels(next);
     const current = sessionsRef.current;
     if (!current) return;
-    const { errors } = computeMathChannelsUpdate(current, oldChannels, next);
-    setMathErrors(errors);
+    const { errors } = computeMathChannelsUpdate(current, oldChannels, next, mathErrorsRef.current);
+    mathErrorsRef.current = errors;
+    // Merge rather than replace: a lap-config or session-load update queued in
+    // the same batch writes through the functional form and must not be lost.
+    setMathErrors((prev) => {
+      const merged = new Map(prev);
+      for (const [sessionId, sessionErrors] of errors) merged.set(sessionId, sessionErrors);
+      return merged;
+    });
   }
 
   function handleToggleEditMode() {
@@ -2106,31 +2119,6 @@ export function computeOverrideChange(
     return { ...s, channelOverrides: overrides };
   });
   return { next, saved };
-}
-
-/** Re-apply the math-channel set to every loaded session: remove the union of
- *  old+new math ids from each store first (so a rename/delete leaves no stale
- *  column) then re-apply, collecting per-session compile errors. PURE w.r.t.
- *  React state — store mutation is intrinsic; the returned errors map is what
- *  the caller feeds to setMathErrors OUTSIDE any setSessions updater.
- *  IMPURE-UPDATERS: previously read the stale `mathChannels`/`sessions`
- *  closures and called setMathErrors coupled to the updater. */
-export function computeMathChannelsUpdate(
-  sessions: LoadedSession[],
-  oldChannels: MathChannel[],
-  nextChannels: MathChannel[],
-): { errors: Map<string, Map<string, string>> } {
-  const allIds = new Set([
-    ...oldChannels.map((m) => m.id),
-    ...nextChannels.map((m) => m.id),
-  ]);
-  const errors = new Map<string, Map<string, string>>();
-  for (const session of sessions) {
-    for (const id of allIds) session.store.removeChannel(id);
-    const r = applyMathChannels(session.store, nextChannels, session.laps);
-    errors.set(session.id, r.errors);
-  }
-  return { errors };
 }
 
 /** Format a µs span as a footer "range" string in seconds. Guards a non-finite

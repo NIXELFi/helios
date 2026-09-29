@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { CheckOutButton, CheckInButton, CancelButton, GetLatestButton } from "./RowActions";
-import { matchLocal, vaultRelativePath, normalizePathForCompare } from "../data/local-match";
+import { matchLocal, vaultRelativePath, normalizePathForCompare, type LocalMatch } from "../data/local-match";
 import { revealInExplorer } from "../data/reveal";
 import { FILE_MANAGER } from "../../../lib/platform";
 import { useLocalVersionNums, localVersionKey } from "../data/useLocalVersionNums";
@@ -290,7 +290,21 @@ export function FileTable({
   fileCountByFolder,
 }: Props) {
   const hasMultiSelect = selectedIds !== undefined && onToggleSelect !== undefined;
-  const versionsMap = versionsByFileId ?? new Map<FileId, Version[]>();
+  const versionsMap = useMemo(
+    () => versionsByFileId ?? new Map<FileId, Version[]>(),
+    [versionsByFileId],
+  );
+
+  // One local match per row, computed once per file/local/version/folder
+  // snapshot instead of twice per row on every render (the rows below and
+  // modifiedPairs both read it). null when the local scan isn't wired
+  // (localFiles === undefined) — rows then show no local status at all.
+  const localMatchById = useMemo(() => {
+    if (localFiles === undefined) return null;
+    const m = new Map<FileId, LocalMatch>();
+    for (const f of files) m.set(f.id, matchLocal(f, localFiles, versionsMap, folders));
+    return m;
+  }, [files, localFiles, versionsMap, folders]);
 
   // (fileId, local sha256) for every "modified" row in view - the only rows
   // that need an older-version lookup (synced is already at latest,
@@ -298,18 +312,16 @@ export function FileTable({
   // snapshots so useLocalVersionNums only refetches when the underlying data
   // actually changes, not on every render.
   const modifiedPairs = useMemo(() => {
-    if (!localFiles) return [];
+    if (!localFiles || !localMatchById) return [];
     const pairs: { fileId: FileId; sha256: string }[] = [];
     for (const f of files) {
-      const m = matchLocal(f, localFiles, versionsMap, folders);
-      if (m.status === "modified" && m.local?.sha256) {
+      const m = localMatchById.get(f.id);
+      if (m?.status === "modified" && m.local?.sha256) {
         pairs.push({ fileId: f.id, sha256: m.local.sha256 });
       }
     }
     return pairs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- versionsMap is
-    // recomputed every render (see above); depend on its source prop instead.
-  }, [files, localFiles, versionsByFileId, folders]);
+  }, [files, localFiles, localMatchById]);
   const localVersionNums = useLocalVersionNums(modifiedPairs);
 
   // Lock-holder name resolution is supplied by the parent (BrowseScreen wires
@@ -320,9 +332,10 @@ export function FileTable({
   // Normalize the "open in SolidWorks" paths the same way matchLocal compares
   // (NFC + lowercase), so a row's expected path lines up regardless of case /
   // Unicode form. Built once per render; empty when the prop is absent.
-  const openInSwNorm = openInSw
-    ? new Set(Array.from(openInSw, (p) => normalizePathForCompare(p)))
-    : null;
+  const openInSwNorm = useMemo(
+    () => (openInSw ? new Set(Array.from(openInSw, (p) => normalizePathForCompare(p))) : null),
+    [openInSw],
+  );
 
   return (
     <table className="w-full text-sm">
@@ -420,9 +433,7 @@ export function FileTable({
         {files.map((f) => {
           const isSel = selected === f.id;
           const lk = lockStateFor(f, locks, currentUserId);
-          const localMatch = localFiles !== undefined
-            ? matchLocal(f, localFiles ?? null, versionsMap, folders)
-            : null;
+          const localMatch = localMatchById?.get(f.id) ?? null;
           const info = deriveRowState(
             lk,
             localMatch?.status,

@@ -151,6 +151,9 @@ export interface ProductivityMetrics {
   subteams: Array<{ id: string; name: string }>;
 }
 
+/** Ten years of weekly columns; the week series never runs longer. */
+export const MAX_WEEK_COLUMNS = 520;
+
 export interface ProductivityOptions {
   /** Reference "now". Required; nothing here reads the clock. */
   now: Date;
@@ -304,9 +307,14 @@ export function buildProductivity(
   // first week (of the window when given, else the first populated) to the last.
   const throughput: WeekThroughput[] = [];
   const starts = [...weekBuckets.values()].map((b) => b.weekStart).sort();
-  const firstStart = opts.from ? isoWeekStart(opts.from) : parseDayKey(starts[0]);
+  let firstStart = opts.from ? isoWeekStart(opts.from) : parseDayKey(starts[0]);
   const lastStart = opts.to ? isoWeekStart(opts.to) : parseDayKey(starts[starts.length - 1]);
+  // Backstop: a window typed as year 0202 would walk ~95k weeks. Keep at most
+  // MAX_WEEK_COLUMNS, ending at the last week.
   if (firstStart && lastStart) {
+    const earliest = new Date(lastStart.getTime());
+    earliest.setDate(earliest.getDate() - 7 * (MAX_WEEK_COLUMNS - 1));
+    if (firstStart < earliest) firstStart = earliest;
     const cursor = new Date(firstStart.getTime());
     const end = lastStart;
     while (cursor.getTime() <= end.getTime()) {

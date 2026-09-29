@@ -28,7 +28,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { CreateTaskDialog } from "@pm/components/CreateTaskDialog";
 import { AutoGrowTextarea } from "@pm/components/ui/AutoGrowTextarea";
 import { TaskLookup } from "@pm/components/TaskLookup";
@@ -41,6 +41,7 @@ import { selectCanEditTask, usePmStore } from "@pm/lib/pmStore";
 import { SubsystemQuickCreate } from "@pm/components/SubsystemQuickCreate";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
 import { CommitDateInput } from "@pm/components/ui/CommitDateInput";
+import { MAX_ESTIMATE_DAYS, parseEstimateDays } from "@pm/lib/estimateDays";
 
 import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -136,6 +137,8 @@ export function TaskDetailSheet() {
   // changes (e.g. a teammate's edit arrives via realtime).
   const [titleDraft, setTitleDraft] = useState("");
   const [descDraft, setDescDraft] = useState("");
+  const [estimateDraft, setEstimateDraft] = useState("");
+  const estimateBadInput = useRef(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [linkUrlDraft, setLinkUrlDraft] = useState("");
   const [linkLabelDraft, setLinkLabelDraft] = useState("");
@@ -239,9 +242,11 @@ export function TaskDetailSheet() {
   // dialog and table editors — otherwise a shared subsystem can't be selected
   // when editing (see lib/subsystemSharing.ts).
   const sharing = useMemo(() => recallSharing(projectId), [projectId]);
-  const teamSubsystems = task
-    ? subsystemsForSubteam(subsystems, task.subteam_id, sharing)
-    : [];
+  const teamSubteamId = task?.subteam_id ?? null;
+  const teamSubsystems = useMemo(
+    () => (teamSubteamId ? subsystemsForSubteam(subsystems, teamSubteamId, sharing) : []),
+    [subsystems, teamSubteamId, sharing],
+  );
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
   // Re-seed the local title/description drafts whenever the selected task or its
@@ -252,18 +257,26 @@ export function TaskDetailSheet() {
     setTitleDraft(task?.title ?? "");
     setDescDraft(task?.description ?? "");
   }, [task?.id, task?.title, task?.description]);
-
-  // When the PRIMARY subteam changes (e.g. promoted via the chips), a previously
-  // chosen subsystem may no longer belong to it — clear it, matching the old
-  // single-Select behavior that reset subsystem on a subteam switch. Gated on
-  // canEdit so a view-only user never fires a (RLS-rejected) optimistic write
-  // that snaps back on the next refresh.
   useEffect(() => {
-    if (!task || !task.subsystem_id || !canEdit) return;
-    if (!teamSubsystems.some((s) => s.id === task.subsystem_id)) {
-      updateTask(task.id, { subsystem_id: null });
+    setEstimateDraft(task?.estimate_days != null ? String(task.estimate_days) : "");
+  }, [task?.id, task?.estimate_days]);
+
+  // No effect clears the subsystem here: sharing lives in per-device
+  // localStorage, so a subsystem shared on one machine looks "foreign" on
+  // another, and clearing on open wiped it just by viewing the task. The
+  // subteam-switch reset lives in the explicit primary-change handler
+  // (TaskSubteamChips) instead. A subsystem outside the visible list is still
+  // offered as the current value so the picker doesn't show "—".
+  const subsystemOptions = useMemo(() => {
+    const opts = teamSubsystems.map((s) => ({ value: s.id, label: s.name }));
+    const current = task?.subsystem_id;
+    if (current && !teamSubsystems.some((s) => s.id === current)) {
+      const name =
+        task?.subsystem?.name ?? subsystems.find((s) => s.id === current)?.name ?? "Unknown subsystem";
+      opts.unshift({ value: current, label: name });
     }
-  }, [task, teamSubsystems, updateTask, canEdit]);
+    return opts;
+  }, [teamSubsystems, task?.subsystem_id, task?.subsystem?.name, subsystems]);
 
   // Tasks already linked (either direction) plus self — excluded from the lookups.
   const depExcludeIds = useMemo(() => {
@@ -464,7 +477,7 @@ export function TaskDetailSheet() {
                 ariaLabel="Subsystem"
                 options={[
                   { value: "", label: "—" },
-                  ...teamSubsystems.map((s) => ({ value: s.id, label: s.name })),
+                  ...subsystemOptions,
                   ...(!canEdit ? [] : [{ value: "__new-subsystem__", label: "+ New subsystem…" }]),
                 ]}
               />
@@ -490,7 +503,7 @@ export function TaskDetailSheet() {
                 // date so start never exceeds due (cross-field validation).
                 max={task.due_date ?? undefined}
                 onCommit={(next) => {
-                  if (next && task.due_date && next > task.due_date) return;
+                  if (next && task.due_date && next > task.due_date) return false;
                   updateTask(task.id, { start_date: next });
                 }}
                 className={selectStyle}
@@ -502,7 +515,7 @@ export function TaskDetailSheet() {
                 disabled={!canEdit}
                 min={task.start_date ?? undefined}
                 onCommit={(next) => {
-                  if (next && task.start_date && next < task.start_date) return;
+                  if (next && task.start_date && next < task.start_date) return false;
                   updateTask(task.id, { due_date: next });
                 }}
                 className={selectStyle}
@@ -512,12 +525,34 @@ export function TaskDetailSheet() {
               <input
                 type="number"
                 min={0}
+                max={MAX_ESTIMATE_DAYS}
                 step={0.5}
-                value={task.estimate_days ?? ""}
+                value={estimateDraft}
                 disabled={!canEdit}
-                onChange={(e) =>
-                  updateTask(task.id, { estimate_days: e.target.value ? Number(e.target.value) : null })
-                }
+                // Draft locally and save on blur / Enter, like the title: saving
+                // per keystroke wrote every intermediate number. Anything not a
+                // finite 0..MAX_ESTIMATE_DAYS reverts to the saved value.
+                onChange={(e) => {
+                  // A number input holding junk ("e", "--") reports "", which
+                  // would read as a clear; remember it so blur reverts instead.
+                  estimateBadInput.current = e.currentTarget.validity?.badInput ?? false;
+                  setEstimateDraft(e.target.value);
+                }}
+                onBlur={() => {
+                  const next = estimateBadInput.current ? undefined : parseEstimateDays(estimateDraft);
+                  estimateBadInput.current = false;
+                  if (next === undefined) {
+                    setEstimateDraft(task.estimate_days != null ? String(task.estimate_days) : "");
+                    return;
+                  }
+                  if (next !== (task.estimate_days ?? null)) updateTask(task.id, { estimate_days: next });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
                 placeholder="—"
                 className={selectStyle}
               />

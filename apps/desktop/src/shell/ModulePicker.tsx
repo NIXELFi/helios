@@ -18,7 +18,7 @@ import {
 } from "@tabler/icons-react";
 import { UpdatesPill } from "../components/UpdatesPill";
 import { PresencePanel } from "./PresencePanel";
-import type { PresenceUser } from "./useHeliosPresence";
+import { usePresenceRoster, type PresenceStore } from "./presenceStore";
 import type { UpdaterState } from "../lib/use-updater";
 import { IS_MAC, IS_WINDOWS } from "../lib/platform";
 import type { ReportKind } from "./report/types";
@@ -113,14 +113,29 @@ interface Props {
   authLoading?: boolean;
   /** Live "who's on Helios" roster. Provided ONLY for admins/owners (the
    *  Shell gates it); null/undefined for everyone else, which hides the panel
-   *  entirely. */
-  presence?: { users: PresenceUser[]; currentUserId: string | null } | null;
+   *  entirely. The roster itself is a store read only by the panel, so a
+   *  presence change re-renders the panel and nothing else. */
+  presence?: { store: PresenceStore; currentUserId: string | null } | null;
   /** Open the bug/feature report modal; `kind` sets the initial type. */
   onOpenReport: (kind: ReportKind) => void;
   /** Show the admin-only "View reports" affordance under the report button. */
   canViewReports: boolean;
   /** Open the admin reports viewer. */
   onOpenReports: () => void;
+}
+
+/** The one subscriber to the presence roster (see PresenceStore). */
+function LivePresencePanel({
+  store,
+  currentUserId,
+  railCollapsed,
+}: {
+  store: PresenceStore;
+  currentUserId: string | null;
+  railCollapsed: boolean;
+}) {
+  const users = usePresenceRoster(store);
+  return <PresencePanel users={users} currentUserId={currentUserId} railCollapsed={railCollapsed} />;
 }
 
 export function ModulePicker(props: Props) {
@@ -318,8 +333,8 @@ export function ModulePicker(props: Props) {
       {/* Admin/owner-only live presence roster. Sits just above the user pill
           so "who's on Helios" clusters with your own identity. */}
       {presence && (
-        <PresencePanel
-          users={presence.users}
+        <LivePresencePanel
+          store={presence.store}
           currentUserId={presence.currentUserId}
           railCollapsed={collapsed}
         />

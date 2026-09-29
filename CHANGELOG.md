@@ -27,6 +27,32 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- PM task sheet dates: a date the sheet refuses (a start after the due date) now snaps back instead of staying on screen unsaved, and blanking just one part of a date (e.g. backspacing the day) no longer wipes the whole date. The Gantt also names tasks with a typo'd date when they are the only dated tasks in view.
+- PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
+- PM task sheet: the estimate saves when you leave the field or press Enter, not on every keystroke, and rejects negative or longer-than-10-year values.
+- PM Productivity: typing a custom From/To date no longer freezes the view while the year is half-typed (0202); the range waits for a real year, and the weekly chart is capped at 10 years.
+- PM: new tasks, events, milestones and the bulk Due field refuse a half-typed year (anything outside 2000-2100) and say why, instead of saving it. A new task's due date can't be before its start.
+- PM Dashboard: one task with a typo'd year no longer squashes the date histogram into a bar or two (it counts as undated), and "upcoming events" no longer lists a repeating event with a typo'd start with a date centuries in the past.
+- PM: the critical path ignores typo'd dates and caps any one task at 10 years, so one bad value can't take over the path.
+- Logs: a large `smooth()` window in a math channel could freeze Helios, and freeze it again on every launch because the channel is saved. Smoothing now takes the same time whatever the window, and a window wider than the data returns gaps immediately.
+- Logs: typing in the Math channels editor no longer recalculates every math channel on every loaded session after each keystroke. Changes are saved 0.4 s after you stop typing, when you leave the field, or when you close the editor, and only the edited channel and the ones after it are recalculated.
+- Logs: saved math channels and lap-detection settings are checked when Helios loads them. Malformed entries are dropped and decimals are limited to 0-6, so a corrupt saved value can't stop Helios from starting.
+- XY plot fit overlays: the polynomial degree is limited to 1-6 as you type and when a saved layout loads. The fit rejects degrees above 12, so a saved degree can no longer lock up the plot.
+- Engine bar segments are limited to 1-200, and the decimals setting on numeric readouts and gauges is limited to 0-6 when you type it. Saved values are limited again when the widget draws. A large decimals value previously crashed the widget, and a huge segment count stalled every cursor move.
+- CFD: typing an out-of-range run size (for example 1,000,000,000 "Max cycles") could make the solver try to reserve gigabytes of memory up front and crash Helios. The Single-RPM, Sweep and Optimization dialogs now disable Start and name the bad field (max cycles, RPM, convergence tol, min cycles, optimization step and seed), and the app refuses the same bad values (plus a zero, negative or non-numeric RPM, pipe cell count or pipe size in the engine config) with a clear error instead of running them.
+- CFD Optimization: "Max cycles per RPM" is now held to the 50 the field has always shown as its maximum; higher values used to be accepted silently.
+- CFD lap-sim VD sweep: a tiny step or an unbounded range no longer freezes the app; a sweep is capped at 500 points.
+- Less background work everywhere: a teammate opening Helios, leaving, or switching module no longer re-renders every module you have open (PM, Logs, Vault, CFD, Sim, Org...) on every signed-in client. Only the "On Helios" roster updates, and only when it actually changed.
+- Modules you are not looking at no longer re-render with the shell (the auto-update countdown, opening a dialog, switching modules), and the update download bar redraws at most four times a second instead of on every network chunk.
+- Org & Access Pulse stops refreshing its four admin queries every minute while it is hidden or the window is minimised, and catches up once when you come back.
+- Amethyst's graph stops animating once the layout settles or the module is hidden, and picks up again when you hover, drag, zoom or select a note. Plinko stops redrawing 60 times a second when no ball is falling.
+- Vault: matching vault files to the local folder is now a direct lookup instead of a scan of every local file for every vault file, so auto-sync passes, the file table and the bulk-action bar stay fast on large vaults (~13k files).
+- Vault: folder paths are worked out once per folder list instead of once per file, which removes another per-file cost from every sync pass.
+- Vault: a periodic local rescan that finds nothing changed no longer restarts an in-progress auto-sync or recomputes every file's status. A pass that ends with failed downloads now retries them after 30 seconds, since an unchanged rescan no longer does.
+- Vault: the sync ledger stays in memory and is saved in batches (within a few seconds, and when a sync or bulk download finishes). It used to rewrite the whole ledger file once per downloaded file, which slowed large syncs down more and more. Deletion markers older than the 7-day cool-off are cleaned out.
+- SOLIDWORKS add-in bridge: looking up a file by its path no longer scans the whole vault each time, so status checks for many files at once are faster.
+
 ## [5.13.4] - 2026-09-29
 
 ### Fixed

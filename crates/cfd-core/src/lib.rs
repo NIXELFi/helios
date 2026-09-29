@@ -13,5 +13,6 @@ pub mod params;
 pub mod runner;
 pub mod save;
 pub mod state;
+pub mod validate;
 
 pub use state::CfdState;

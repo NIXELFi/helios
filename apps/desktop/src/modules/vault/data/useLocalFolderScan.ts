@@ -49,6 +49,42 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 // consumers don't see a new identity (and re-render) on every render.
 const EMPTY_OPEN_IN_SW: Set<string> = new Set();
 
+/**
+ * True when two scan results are structurally identical (same entries, same
+ * order, every field equal). Used to keep the previous `files` reference when a
+ * rescan (every 30 s, plus watcher/focus triggers) found nothing new: a fresh
+ * array identity invalidated every downstream memo and re-ran auto-sync's
+ * full-vault match pass for no change at all.
+ */
+export function sameLocalFiles(a: readonly LocalFile[], b: readonly LocalFile[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.relativePath !== y.relativePath ||
+      x.absolutePath !== y.absolutePath ||
+      x.basename !== y.basename ||
+      x.sha256 !== y.sha256 ||
+      x.sizeBytes !== y.sizeBytes ||
+      x.readonly !== y.readonly ||
+      x.bytes !== y.bytes
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Same-contents check for the open-in-SOLIDWORKS set (same reason as above). */
+export function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
 // Hard cap on recursion depth. A vault tree this deep is pathological; the
 // cap is a backstop against cyclic real-path trees (and as a second line of
 // defense behind the symlink skip below) so the walk can't stack-overflow or
@@ -425,7 +461,9 @@ export function useLocalFolderScan(
         const pausedNow = pausedRef.current && !startedPaused;
         if (mounted && !pausedNow) {
           if (collected.length > 0) hadFilesRef.current = true;
-          setFiles(collected);
+          // Keep the old reference for an unchanged scan so downstream memos
+          // (local-match index, auto-sync pass, table rows) don't all re-run.
+          setFiles((prev) => (prev && sameLocalFiles(prev, collected) ? prev : collected));
           setScanRoot(rootPath);
           // `hadFilesRef` is false here (a missing root with prior files took
           // the error path above), so this is the never-synced bootstrap case:
@@ -436,7 +474,9 @@ export function useLocalFolderScan(
           setRootMissing(!rootExists);
           // Reuse the stable empty set when there's nothing open, so consumers
           // don't churn on a fresh empty-Set identity each scan.
-          setOpenInSw(openSw.size === 0 ? EMPTY_OPEN_IN_SW : openSw);
+          setOpenInSw((prev) =>
+            openSw.size === 0 ? EMPTY_OPEN_IN_SW : sameStringSet(prev, openSw) ? prev : openSw,
+          );
           setLoading(false);
         } else if (mounted) {
           // Clear the loading flag but leave `files` untouched — a later

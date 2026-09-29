@@ -38,3 +38,29 @@ describe("CommitDateInput", () => {
     expect(onCommit).toHaveBeenCalledWith(null);
   });
 });
+
+describe("CommitDateInput edge cases", () => {
+  it("shows the saved date again when onCommit rejects the value", () => {
+    const onCommit = vi.fn(() => false);
+    const { container } = render(
+      <CommitDateInput value="2026-01-10" onCommit={onCommit} aria-label="date" />,
+    );
+    const input = container.querySelector("input")!;
+    fireEvent.change(input, { target: { value: "2026-05-01" } });
+    expect(onCommit).toHaveBeenCalledWith("2026-05-01");
+    expect(input.value).toBe("2026-01-10");
+  });
+
+  it("treats a half-blanked date (badInput) as a partial edit, not a clear", () => {
+    const onCommit = vi.fn();
+    const { container } = render(
+      <CommitDateInput value="2026-07-25" onCommit={onCommit} aria-label="date" />,
+    );
+    const input = container.querySelector("input")!;
+    Object.defineProperty(input, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(onCommit).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(input.value).toBe("2026-07-25");
+  });
+});

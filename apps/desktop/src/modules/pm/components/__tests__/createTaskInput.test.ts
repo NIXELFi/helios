@@ -27,4 +27,27 @@ describe("createTaskInput", () => {
   test("rejects an unknown task type", () => {
     expect(createTaskInput.safeParse({ ...base, type: "bogus" }).success).toBe(false);
   });
+
+  // A date input can still hold a partial year (0202-...) at submit time.
+  test("rejects partial-year start and due dates", () => {
+    const ok = { ...base, type: "general" };
+    expect(createTaskInput.safeParse({ ...ok, start_date: "0202-08-18" }).success).toBe(false);
+    expect(createTaskInput.safeParse({ ...ok, due_date: "0020-08-18" }).success).toBe(false);
+    expect(createTaskInput.safeParse({ ...ok, start_date: "2026-08-18", due_date: "2026-09-01" }).success).toBe(true);
+  });
+
+  test("rejects a due date before the start", () => {
+    const r = createTaskInput.safeParse({
+      ...base,
+      type: "general",
+      start_date: "2026-09-01",
+      due_date: "2026-08-18",
+    });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0]?.path).toEqual(["due_date"]);
+  });
+
+  test("rejects an estimate over ten years", () => {
+    expect(createTaskInput.safeParse({ ...base, type: "general", estimate_days: 3651 }).success).toBe(false);
+  });
 });
