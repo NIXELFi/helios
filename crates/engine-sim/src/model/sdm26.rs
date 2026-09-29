@@ -58,7 +58,7 @@ use crate::cylinder::valve::{
 };
 use crate::solver::muscl::{cfl_dt, muscl_hancock_step, LIMITER_MINMOD};
 use crate::solver::weno::weno5_ssprk2_step;
-use crate::solver::sources::{apply_local_losses, apply_sources};
+use crate::solver::sources::{apply_local_losses, apply_sources_scaled};
 use crate::solver::state::{
     make_pipe_state, set_uniform, PipeState, ScratchBuffers,
     N_VARS, I_RHO_A,
@@ -325,6 +325,11 @@ pub struct SDM26Config {
     /// 1.4 / 287 → parity.
     pub exhaust_gas_gamma: f64,
     pub exhaust_gas_r: f64,
+    /// Damping audit: multipliers on the pipe wall-friction (Blasius) and
+    /// wall heat-transfer (Dittus-Boelter) source terms, every pipe.
+    /// Diagnostic knobs; 1.0 → parity, 0.0 disables the term.
+    pub pipe_friction_multiplier: f64,
+    pub pipe_heat_transfer_multiplier: f64,
     // restrictor
     pub restrictor_throat_diameter: f64,
     pub restrictor_cd: f64,
@@ -608,6 +613,8 @@ impl Default for SDM26Config {
             exhaust_merge_angle_deg: 10.0,
             exhaust_gas_gamma: 1.4,
             exhaust_gas_r: 287.0,
+            pipe_friction_multiplier: 1.0,
+            pipe_heat_transfer_multiplier: 1.0,
             restrictor_throat_diameter: 0.020,
             restrictor_cd: 0.967,
             restrictor_loss_coef: 0.0,
@@ -1621,12 +1628,13 @@ impl SDM26Engine {
         }
 
         // sources on each pipe
+        let (f_mult, h_mult) = (self.cfg.pipe_friction_multiplier, self.cfg.pipe_heat_transfer_multiplier);
         for k in 0..self.pipes.len() {
             let pipe = &mut self.pipes[k];
-            apply_sources(
+            apply_sources_scaled(
                 &mut pipe.q, &pipe.area, &pipe.hydraulic_d, dt, pipe.gamma, pipe.r_gas,
                 pipe.wall_t, pipe.n_ghost,
-                true, true,
+                true, true, f_mult, h_mult,
             );
             apply_local_losses(&mut pipe.q, &pipe.area, pipe.dx, dt, &self.local_losses[k]);
         }

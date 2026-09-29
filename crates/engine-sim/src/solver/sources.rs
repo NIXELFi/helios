@@ -51,6 +51,28 @@ pub fn apply_sources(
     apply_friction: bool,
     apply_heat: bool,
 ) {
+    apply_sources_scaled(q, area, hyd_d, dt, gamma, r_gas, t_wall, n_ghost,
+                         apply_friction, apply_heat, 1.0, 1.0);
+}
+
+/// `apply_sources` with diagnostic multipliers on the wall friction and
+/// wall heat-transfer terms (damping audit). 1.0 / 1.0 is bit-identical to
+/// `apply_sources` (x·1.0 == x); 0.0 disables a term.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_sources_scaled(
+    q: &mut [f64],
+    area: &[f64],
+    hyd_d: &[f64],
+    dt: f64,
+    gamma: f64,
+    r_gas: f64,
+    t_wall: f64,
+    n_ghost: usize,
+    apply_friction: bool,
+    apply_heat: bool,
+    friction_mult: f64,
+    heat_mult: f64,
+) {
     let n = area.len();
     let gm1 = gamma - 1.0;
     for i in n_ghost..(n - n_ghost) {
@@ -76,7 +98,7 @@ pub fn apply_sources(
             let mu_safe = if mu > 1e-20 { mu } else { 1e-20 };
             let re = rho * u.abs() * d / mu_safe;
             let f = friction_factor_blasius(re);
-            let dmom_a_dt = -a * f * rho * u.abs() * u / (2.0 * d);
+            let dmom_a_dt = -a * f * rho * u.abs() * u / (2.0 * d) * friction_mult;
             q[i * N_VARS + 1] += dt * dmom_a_dt;
         }
 
@@ -90,7 +112,7 @@ pub fn apply_sources(
             let h_floor = k / d;
             let h = if h_forced > h_floor { h_forced } else { h_floor };
             let p_w = PI * d;
-            let d_e_a_dt = -h * p_w * (t - t_wall);
+            let d_e_a_dt = -h * p_w * (t - t_wall) * heat_mult;
             q[i * N_VARS + 2] += dt * d_e_a_dt;
         }
     }

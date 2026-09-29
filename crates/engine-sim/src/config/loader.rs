@@ -246,6 +246,8 @@ fn set_physics_f64(cfg: &mut SDM26Config, key: &str, v: f64) -> bool {
         "exhaust_merge_angle_deg" => cfg.exhaust_merge_angle_deg = v,
         "exhaust_gas_gamma" => cfg.exhaust_gas_gamma = v,
         "exhaust_gas_r" => cfg.exhaust_gas_r = v,
+        "pipe_friction_multiplier" => cfg.pipe_friction_multiplier = v,
+        "pipe_heat_transfer_multiplier" => cfg.pipe_heat_transfer_multiplier = v,
         "knock_integral_limit" => cfg.knock_integral_limit = v,
         "knock_retard_step_deg" => cfg.knock_retard_step_deg = v,
         "knock_max_retard_deg" => cfg.knock_max_retard_deg = v,
@@ -627,6 +629,13 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
                 return Err(ConfigLoadError::Schema("afr_map afr must be > 1".into()));
             }
             cfg.afr_map = Some(map);
+        }
+        // Damping audit: source multipliers must be finite and >= 0.
+        for (k, v) in [("pipe_friction_multiplier", cfg.pipe_friction_multiplier),
+                       ("pipe_heat_transfer_multiplier", cfg.pipe_heat_transfer_multiplier)] {
+            if !v.is_finite() || v < 0.0 {
+                return Err(ConfigLoadError::Schema(format!("physics.{k} must be >= 0; got {v}")));
+            }
         }
         // Finding 0035: exhaust gas properties must be a real gas.
         if !(cfg.exhaust_gas_gamma > 1.1 && cfg.exhaust_gas_gamma <= 1.67) {
@@ -1283,6 +1292,24 @@ mod tests {
             assert_eq!((eng.pipes[i].gamma, eng.pipes[i].r_gas), (1.4, 287.0), "pipe {i}");
         }
         for bad in [serde_json::json!({"exhaust_gas_gamma": 1.0}), serde_json::json!({"exhaust_gas_r": 0.0})] {
+            let mut d = base();
+            d["physics"] = bad.clone();
+            assert!(load_v1_value(&d).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn pipe_source_multipliers_load_and_validate() {
+        // Damping audit: diagnostic friction / heat multipliers.
+        let (c0, _) = load_with(&base());
+        assert_eq!((c0.pipe_friction_multiplier, c0.pipe_heat_transfer_multiplier), (1.0, 1.0));
+        let mut d = base();
+        d["physics"] = serde_json::json!({"pipe_friction_multiplier": 0.0, "pipe_heat_transfer_multiplier": 2.0});
+        let (c, w) = load_with(&d);
+        assert!(!w.iter().any(|m| m.contains("unknown key")), "{w:?}");
+        assert_eq!((c.pipe_friction_multiplier, c.pipe_heat_transfer_multiplier), (0.0, 2.0));
+        for bad in [serde_json::json!({"pipe_friction_multiplier": -1.0}),
+                    serde_json::json!({"pipe_heat_transfer_multiplier": -0.5})] {
             let mut d = base();
             d["physics"] = bad.clone();
             assert!(load_v1_value(&d).is_err(), "{bad}");
