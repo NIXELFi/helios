@@ -30,6 +30,7 @@ follow [semver](https://semver.org/).
 ## [5.13.5] - 2026-09-29
 
 ### Fixed
+- Logs: with a log open, Helios kept running two animation loops at the display's full refresh rate (about 190 frames a second here) even while you were in PM, Vault or anywhere else: the FPS counter and an FFT chart retrying its first draw forever because a hidden module's chart has no size. Both now stop when Logs isn't on screen.
 - PM task sheet dates: a date the sheet refuses (a start after the due date) now snaps back instead of staying on screen unsaved, and blanking just one part of a date (e.g. backspacing the day) no longer wipes the whole date. The Gantt also names tasks with a typo'd date when they are the only dated tasks in view.
 - PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
 - PM task sheet: the estimate saves when you leave the field or press Enter, not on every keystroke, and rejects negative or longer-than-10-year values.
