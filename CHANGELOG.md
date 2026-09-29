@@ -27,6 +27,8 @@ follow [semver](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.13.5] - 2026-09-29
+
 ### Fixed
 - PM task sheet dates: a date the sheet refuses (a start after the due date) now snaps back instead of staying on screen unsaved, and blanking just one part of a date (e.g. backspacing the day) no longer wipes the whole date. The Gantt also names tasks with a typo'd date when they are the only dated tasks in view.
 - PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
