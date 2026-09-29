@@ -26,6 +26,9 @@ pub struct CharJunctionLeg {
     pub pipe_idx: usize,
     pub end: PipeEnd,
     pub sign_into: i32,
+    /// Per-leg entry-loss K for `LossMode::Directional` (junction → pipe
+    /// inflow). NaN = use the mode's default. Ignored by every other mode.
+    pub entry_k: f64,
 }
 
 impl CharJunctionLeg {
@@ -34,7 +37,7 @@ impl CharJunctionLeg {
             PipeEnd::Right => 1,
             PipeEnd::Left => -1,
         };
-        Self { pipe_idx, end, sign_into }
+        Self { pipe_idx, end, sign_into, entry_k: f64::NAN }
     }
 
     #[inline]
@@ -203,11 +206,27 @@ fn borda_carnot_k(a_leg: f64, a_max: f64) -> f64 {
 ///   *physical* setting is multiplier = 1.0; smaller values are diagnostic
 ///   under-dissipation; larger values cap above 1.0 are warned in the
 ///   junction config layer.
+///
+/// - `Directional { entry_k, expansion_multiplier }` (finding 0032): the
+///   junction pressure p_j is treated as the STAGNATION pressure of a
+///   near-stagnant volume (the plenum), and each leg's face static
+///   pressure follows from Bernoulli plus a direction-dependent loss:
+///     * reservoir leg (largest area — the plenum itself): p_f = p_j − q
+///     * junction → pipe (plenum→runner inflow): p_f = p_j − (1 + K_in)·q,
+///       K_in = the leg's `entry_k` (bellmouth 0.04 … sharp 0.5)
+///     * pipe → junction (runner→plenum backflow): p_f = p_j − (1 − K_bc)·q,
+///       K_bc = multiplier·(1 − A_leg/A_max)² (Borda-Carnot sudden expansion)
+///   with q = ½ρu² of the leg. The pressure change is applied at constant
+///   stagnation enthalpy (T held at fixed u, ρ ∝ p), not isentropically.
+///   Compare the legacy `BordaCarnot` mode, which applies the EXPANSION
+///   loss to the CONTRACTING (plenum→runner) direction and leaves backflow
+///   lossless.
 #[derive(Debug, Clone, Copy)]
 pub enum LossMode {
     Off,
     Scalar(f64),
     BordaCarnot { multiplier: f64 },
+    Directional { entry_k: f64, expansion_multiplier: f64 },
 }
 
 impl LossMode {
@@ -218,6 +237,9 @@ impl LossMode {
             LossMode::Off => 0.0,
             LossMode::Scalar(k) => k,
             LossMode::BordaCarnot { multiplier } => multiplier * borda_carnot_k(a_leg, a_max),
+            // Directional losses are resolved per direction in
+            // `directional_face_dp`, not through this scalar hook.
+            LossMode::Directional { .. } => 0.0,
         }
     }
 
@@ -230,7 +252,32 @@ impl LossMode {
             LossMode::Off => false,
             LossMode::Scalar(k) => k > 0.0,
             LossMode::BordaCarnot { multiplier } => multiplier > 0.0,
+            LossMode::Directional { .. } => true,
         }
+    }
+}
+
+/// Face static-pressure offset (relative to p_j) for `LossMode::Directional`.
+/// Returns Δp such that p_face = p_j + Δp. See the `LossMode` docs.
+#[inline]
+pub(crate) fn directional_face_dp(
+    entry_k: f64, expansion_multiplier: f64,
+    leg_entry_k: f64, sign_into: f64,
+    a_leg: f64, a_max: f64, rho: f64, u: f64,
+) -> f64 {
+    let q = 0.5 * rho * u * u;
+    if a_leg >= a_max * (1.0 - 1e-9) {
+        // The reservoir leg IS the junction volume: Bernoulli only.
+        return -q;
+    }
+    if sign_into * u < 0.0 {
+        // junction → pipe: accelerate from rest + entry loss.
+        let k_in = if leg_entry_k.is_finite() { leg_entry_k } else { entry_k };
+        -(1.0 + k_in.max(0.0)) * q
+    } else {
+        // pipe → junction: sudden expansion into the reservoir.
+        let k_bc = expansion_multiplier * borda_carnot_k(a_leg, a_max);
+        -(1.0 - k_bc) * q
     }
 }
 
@@ -268,7 +315,20 @@ fn hllc_mass_residual(
         // legacy write_ghosts condition `signed_into_hllc < 0`. We use
         // the ghost u_g (face_from_pj output) as a proxy since `f_mass`
         // is not yet known at this point.
-        if loss_active && (leg.sign_into as f64) * u_g < 0.0 {
+        if let LossMode::Directional { entry_k, expansion_multiplier } = loss {
+            let dp = directional_face_dp(
+                entry_k, expansion_multiplier, leg.entry_k, leg.sign_into as f64,
+                it.a_i, a_max, rho_g, u_g,
+            );
+            if dp != 0.0 {
+                // Constant stagnation enthalpy: u is unchanged, so T is held
+                // and ρ scales linearly with p (a throttling loss, not an
+                // isentropic expansion).
+                let p_g_new = (p_g + dp).max(0.5 * p_g);
+                rho_g *= p_g_new / p_g.max(1.0);
+                p_g = p_g_new;
+            }
+        } else if loss_active && (leg.sign_into as f64) * u_g < 0.0 {
             let k_leg = loss.k_for(it.a_i, a_max);
             if k_leg > 0.0 {
                 let dp_loss = k_leg * 0.5 * rho_g * u_g * u_g;

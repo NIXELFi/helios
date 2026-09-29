@@ -121,6 +121,40 @@ pub struct CylinderModel {
     /// ever knocked, so the worst-case KI across both shipped engine
     /// sweeps must sit below 1.0. Default 1.0 → parity preserved.
     pub knock_tau_scale: f64,
+    /// 0032 fix 7a: fuel = trapped fresh AIR / AFR (the pipes carry air
+    /// only). Default false → legacy m/(1+AFR), parity preserved.
+    pub fuel_mass_from_trapped_air: bool,
+    /// 0032 fix 7b: cap the burnable fuel at the O2-limited stoichiometric
+    /// amount m_air/AFR_stoich (rich mixtures cannot burn the excess).
+    /// Default false → parity.
+    pub heat_release_o2_limited: bool,
+}
+
+/// 0032 fix 7: fuel mass available for heat release at IVC.
+///
+/// `m_fresh` is the trapped fresh charge. The legacy convention treats it
+/// as an air+fuel mixture, m_fuel = m/(1+AFR); the network actually
+/// transports air only (the restrictor meters air, fuel is port-injected
+/// downstream), so the physical fuel is m_air/AFR. With `o2_limited`, the
+/// fuel that can burn is capped at the stoichiometric amount
+/// m_air/AFR_stoich (Heywood §3.5: rich of stoich the O2 runs out).
+pub fn fuel_mass_at_ivc(
+    m_fresh: f64, afr_target: f64, afr_stoich: f64,
+    from_trapped_air: bool, o2_limited: bool,
+) -> f64 {
+    let m_fresh = m_fresh.max(0.0);
+    let m_fuel = if from_trapped_air {
+        m_fresh / afr_target.max(1e-9)
+    } else {
+        m_fresh / (1.0 + afr_target)
+    };
+    if o2_limited {
+        // Air mass in the same convention the fuel was derived from.
+        let m_air = if from_trapped_air { m_fresh } else { m_fresh - m_fuel };
+        m_fuel.min(m_air / afr_stoich.max(1e-9))
+    } else {
+        m_fuel
+    }
 }
 
 #[inline]
@@ -145,6 +179,8 @@ impl CylinderModel {
             state, enable_residual_tracking,
             octane_number: 95.0,
             knock_tau_scale: 1.0,
+            fuel_mass_from_trapped_air: false,
+            heat_release_o2_limited: false,
         }
     }
 
@@ -638,7 +674,14 @@ impl CylinderModel {
             self.state.m_at_ivc = self.state.m;
             if self.enable_residual_tracking {
                 let m_fresh = (self.state.m - self.state.m_residual).max(0.0);
-                self.state.m_fuel = m_fresh / (1.0 + self.wiebe.afr_target);
+                self.state.m_fuel = if self.fuel_mass_from_trapped_air || self.heat_release_o2_limited {
+                    fuel_mass_at_ivc(
+                        m_fresh, self.wiebe.afr_target, self.wiebe.afr_stoich,
+                        self.fuel_mass_from_trapped_air, self.heat_release_o2_limited,
+                    )
+                } else {
+                    m_fresh / (1.0 + self.wiebe.afr_target)
+                };
                 if self.state.m > 1e-12 {
                     let f = (self.state.m_residual / self.state.m).clamp(0.0, 1.0);
                     self.state.x_b = f;
@@ -647,6 +690,13 @@ impl CylinderModel {
                     self.state.x_b = 0.0;
                     self.state.f_residual_at_ivc = 0.0;
                 }
+            } else if self.fuel_mass_from_trapped_air || self.heat_release_o2_limited {
+                self.state.m_fuel = fuel_mass_at_ivc(
+                    self.state.m, self.wiebe.afr_target, self.wiebe.afr_stoich,
+                    self.fuel_mass_from_trapped_air, self.heat_release_o2_limited,
+                );
+                self.state.x_b = 0.0;
+                self.state.f_residual_at_ivc = 0.0;
             } else {
                 self.state.m_fuel = self.state.m / (1.0 + self.wiebe.afr_target);
                 self.state.x_b = 0.0;
@@ -664,5 +714,45 @@ impl CylinderModel {
             self.state.knock_integral_accum = 0.0;
             self.state.knock_integral_at_spark = 0.0;
         }
+    }
+}
+
+#[cfg(test)]
+mod fuel_tests {
+    use super::fuel_mass_at_ivc;
+
+    /// Legacy convention is unchanged when both flags are off.
+    #[test]
+    fn legacy_fuel_convention_preserved() {
+        let m = 0.6e-3;
+        assert_eq!(fuel_mass_at_ivc(m, 13.1, 14.7, false, false), m / 14.1);
+    }
+
+    /// Air-only transport: fuel = m_air / AFR (7 % more than the legacy
+    /// m/(1+AFR) at AFR 13.1).
+    #[test]
+    fn fuel_from_trapped_air_is_air_over_afr() {
+        let m = 0.6e-3;
+        let f = fuel_mass_at_ivc(m, 13.1, 14.7, true, false);
+        assert!((f - m / 13.1).abs() < 1e-18);
+        assert!((f / (m / 14.1) - 14.1 / 13.1).abs() < 1e-12);
+    }
+
+    /// O2-limited heat release: rich of stoich only m_air/AFR_stoich burns;
+    /// at or lean of stoich the cap is inactive.
+    #[test]
+    fn o2_limited_caps_rich_mixtures_only() {
+        let m_air = 0.6e-3;
+        let rich = fuel_mass_at_ivc(m_air, 13.1, 14.7, true, true);
+        assert!((rich - m_air / 14.7).abs() < 1e-18, "rich burns stoich-equivalent fuel");
+        let lean = fuel_mass_at_ivc(m_air, 16.0, 14.7, true, true);
+        assert!((lean - m_air / 16.0).abs() < 1e-18, "lean burns all fuel");
+        // Heat-release ratio rich/stoich = 1 exactly: extra fuel adds nothing.
+        let stoich = fuel_mass_at_ivc(m_air, 14.7, 14.7, true, true);
+        assert!((rich - stoich).abs() < 1e-18);
+        // Also correct in the legacy mixture convention.
+        let legacy_rich = fuel_mass_at_ivc(m_air, 13.1, 14.7, false, true);
+        let air = m_air - m_air / 14.1;
+        assert!((legacy_rich - air / 14.7).abs() < 1e-18);
     }
 }

@@ -29,6 +29,34 @@ pub enum LiftProfile {
     /// fraction of the open duration spent in each ramp; the remaining
     /// (1 − 2·ramp_frac) holds at max_lift.
     FlatTop { ramp_frac: f64 },
+    /// Finding 0032 cam mode: L(τ) = max_lift · sin^n(π·τ) over the
+    /// seat-to-seat window. n > 1 gives zero velocity at the seat (C1).
+    /// Used with `seat_window_from_reference_lift`, which widens the
+    /// configured 1 mm-lift events to the seat-to-seat window.
+    SinPower { exponent: f64 },
+}
+
+/// Seat-to-seat window for a `SinPower { exponent: n }` lobe whose lift
+/// equals `ref_lift` exactly at the quoted `open`/`close` events (e.g. the
+/// "valve timing at 1 mm lift" in a service manual).
+///
+/// For a symmetric lobe L = L_max·sin^n(πτ), the reference lift is reached
+/// at τ₁ = asin((L_ref/L_max)^(1/n))/π, so the seat duration is
+/// D = D_ref / (1 − 2τ₁) and each event moves outward by (D − D_ref)/2.
+/// Returns the inputs unchanged when the geometry is degenerate
+/// (max_lift ≤ ref_lift, non-positive duration or exponent).
+pub fn seat_window_from_reference_lift(
+    open: f64, close: f64, max_lift: f64, ref_lift: f64, exponent: f64,
+) -> (f64, f64) {
+    let d_ref = close - open;
+    if !(max_lift > ref_lift) || ref_lift <= 0.0 || d_ref <= 0.0 || exponent <= 0.0 {
+        return (open, close);
+    }
+    let s1 = (ref_lift / max_lift).powf(1.0 / exponent);
+    let tau1 = s1.asin() / PI;
+    let d_seat = d_ref / (1.0 - 2.0 * tau1);
+    let ext = 0.5 * (d_seat - d_ref);
+    (open - ext, close + ext)
 }
 
 impl Default for LiftProfile {
@@ -119,6 +147,10 @@ pub fn valve_lift_profile(theta_local_deg: f64,
             } else {
                 max_lift * ((1.0 - tau) / r)
             }
+        }
+        LiftProfile::SinPower { exponent } => {
+            let s = (PI * tau).sin().max(0.0);
+            max_lift * s.powf(exponent)
         }
     }
 }
@@ -240,6 +272,42 @@ pub fn valve_effective_area_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0032 cam add-on: the lobe must pass through exactly 1 mm at the
+    /// quoted events (CBR600RR PC40 service manual: IN 21° BTDC / 44° ABDC,
+    /// EX 40° BBDC / 5° ATDC at 1 mm) and be C1-smooth — zero lift and zero
+    /// slope at the seat, continuous slope everywhere.
+    #[test]
+    fn reference_lift_lobe_hits_1mm_at_events_and_is_c1() {
+        for &(open, close, lmax) in &[(339.0, 584.0, 0.00856), (140.0, 365.0, 0.00735)] {
+            let n = 1.3;
+            let (so, sc) = seat_window_from_reference_lift(open, close, lmax, 0.001, n);
+            let prof = LiftProfile::SinPower { exponent: n };
+            let lift = |th: f64| valve_lift_profile(th, so, sc, lmax, prof);
+            assert!((lift(open) - 0.001).abs() < 1e-12, "IVO/EVO lift {}", lift(open));
+            assert!((lift(close) - 0.001).abs() < 1e-12, "IVC/EVC lift {}", lift(close));
+            // Seat-to-seat widening lands in the production-cam band.
+            let widen = (sc - so) - (close - open);
+            assert!(widen > 25.0 && widen < 45.0, "seat widening {widen}");
+            // Peak at the window centre.
+            assert!((lift(0.5 * (so + sc)) - lmax).abs() < 1e-12);
+            // C1: finite-difference slope is continuous (no jump anywhere)
+            // and → 0 at both seats.
+            let h = 1e-3;
+            let slope = |th: f64| (lift(th + h) - lift(th - h)) / (2.0 * h);
+            let mut th = so + 0.05;
+            let mut prev = slope(th);
+            while th < sc - 0.05 {
+                th += 0.05;
+                let cur = slope(th);
+                assert!((cur - prev).abs() < 1e-5, "slope jump at {th}: {prev} -> {cur}");
+                prev = cur;
+            }
+            assert!(slope(so + 1e-3).abs() < 2e-5 && slope(sc - 1e-3).abs() < 2e-5);
+            assert_eq!(lift(so - 1.0), 0.0);
+            assert_eq!(lift(sc + 1.0), 0.0);
+        }
+    }
 
     #[test]
     fn valve_cd_empty_tables_return_zero_not_panic() {

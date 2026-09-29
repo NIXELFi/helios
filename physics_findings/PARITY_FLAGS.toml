@@ -63,3 +63,27 @@ inflow_loss_coef = 0.0
 # Authority: Woschni 1967 (SAE 670931) eq. 8.
 woschni_c1_scale = 1.0
 woschni_c2 = 0.00324
+
+# ---- Finding 0032 (audit 0929) — all opt-in, parity-preserving defaults ----
+# Direction-aware, stagnation-referenced intake junction loss (entry K_in on
+# plenum->runner, Borda-Carnot (1-A_r/A_p)^2 on backflow). Authority:
+# Idelchik Handbook of Hydraulic Resistance 3rd ed. §3/§4; Crane TP-410 A-29.
+intake_junction_directional_loss = false
+intake_runner_entry_k = 0.04
+# Converging-diverging venturi restrictor with diffuser recovery and
+# T0-conserving inlet ghost. Authority: Idelchik diagram 5-2; Shapiro Vol. 1 ch. 4.
+restrictor_venturi_model = false
+# Open-end corrections: flanged 0.85 r on runners, Levine-Schwinger 0.6133 r
+# on the collector. Authority: Levine & Schwinger, Phys. Rev. 73 (1948).
+intake_runner_end_correction = false
+exhaust_collector_end_correction = false
+# Physical open-end reflection |R| = 1 - (ka)^2/2 at the firing frequency.
+exhaust_collector_open_end_physical = false
+# Fuel = trapped air / AFR (air-only pipes) and O2-limited heat release.
+# Authority: Heywood ICE Fundamentals §3.5 / §4.
+fuel_mass_from_trapped_air = false
+heat_release_o2_limited = false
+# Valve events quoted at 1 mm lift (service-manual convention), sin^n lobe.
+valve_events_at_reference_lift = false
+valve_event_reference_lift = 0.001
+valve_lift_shape_exponent = 1.3

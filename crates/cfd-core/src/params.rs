@@ -155,6 +155,28 @@ pub fn enumerate_schema(cfg: &SDM26Config) -> Vec<ParameterMeta> {
         m("knock_retard_step_deg", Scalar, 1, "deg", cfg.knock_retard_step_deg, 0.25, 3.0, "Combustion"),
         m("knock_max_retard_deg", Scalar, 1, "deg", cfg.knock_max_retard_deg, 0.0, 15.0, "Combustion"),
         m("knock_tau_scale", Scalar, 1, "-", cfg.knock_tau_scale, 0.5, 5.0, "Combustion"),
+        // 0032 — audit 0929 physics fixes (all opt-in; see finding 0032)
+        m("intake_junction_directional_loss", Scalar, 1, "bool",
+          if cfg.intake_junction_directional_loss { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
+        m("intake_runner_entry_k", Scalar, 1, "-", cfg.intake_runner_entry_k, 0.0, 0.6, "Intake"),
+        m("intake_runner_end_correction", Scalar, 1, "bool",
+          if cfg.intake_runner_end_correction { 1.0 } else { 0.0 }, 0.0, 1.0, "Intake"),
+        m("restrictor_venturi_model", Scalar, 1, "bool",
+          if cfg.restrictor_venturi_model { 1.0 } else { 0.0 }, 0.0, 1.0, "Restrictor"),
+        m("restrictor_diffuser_efficiency", Scalar, 1, "-",
+          cfg.restrictor_diffuser_efficiency.unwrap_or(0.0), 0.0, 1.0, "Restrictor"),
+        m("exhaust_collector_end_correction", Scalar, 1, "bool",
+          if cfg.exhaust_collector_end_correction { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("exhaust_collector_open_end_physical", Scalar, 1, "bool",
+          if cfg.exhaust_collector_open_end_physical { 1.0 } else { 0.0 }, 0.0, 1.0, "Exhaust"),
+        m("fuel_mass_from_trapped_air", Scalar, 1, "bool",
+          if cfg.fuel_mass_from_trapped_air { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("heat_release_o2_limited", Scalar, 1, "bool",
+          if cfg.heat_release_o2_limited { 1.0 } else { 0.0 }, 0.0, 1.0, "Combustion"),
+        m("valve_events_at_reference_lift", Scalar, 1, "bool",
+          if cfg.valve_events_at_reference_lift { 1.0 } else { 0.0 }, 0.0, 1.0, "Valves"),
+        m("valve_event_reference_lift", Scalar, 1, "m", cfg.valve_event_reference_lift, 0.0001, 0.002, "Valves"),
+        m("valve_lift_shape_exponent", Scalar, 1, "-", cfg.valve_lift_shape_exponent, 1.05, 3.0, "Valves"),
 
         // --- Restrictor ---
         m("restrictor_throat_diameter", Scalar, 1, "m", cfg.restrictor_throat_diameter, 0.015, 0.025, "Restrictor"),
@@ -488,6 +510,22 @@ pub fn apply_override(
         "knock_retard_step_deg" => cfg.knock_retard_step_deg = value,
         "knock_max_retard_deg" => cfg.knock_max_retard_deg = value,
         "knock_tau_scale" => cfg.knock_tau_scale = value,
+        // 0032 — audit 0929 physics fixes
+        "intake_junction_directional_loss" => cfg.intake_junction_directional_loss = value != 0.0,
+        "intake_runner_entry_k" => cfg.intake_runner_entry_k = value,
+        "intake_runner_end_correction" => cfg.intake_runner_end_correction = value != 0.0,
+        "restrictor_venturi_model" => cfg.restrictor_venturi_model = value != 0.0,
+        // <= 0 clears the explicit efficiency (derive from Idelchik instead).
+        "restrictor_diffuser_efficiency" => {
+            cfg.restrictor_diffuser_efficiency = if value > 0.0 { Some(value) } else { None }
+        }
+        "exhaust_collector_end_correction" => cfg.exhaust_collector_end_correction = value != 0.0,
+        "exhaust_collector_open_end_physical" => cfg.exhaust_collector_open_end_physical = value != 0.0,
+        "fuel_mass_from_trapped_air" => cfg.fuel_mass_from_trapped_air = value != 0.0,
+        "heat_release_o2_limited" => cfg.heat_release_o2_limited = value != 0.0,
+        "valve_events_at_reference_lift" => cfg.valve_events_at_reference_lift = value != 0.0,
+        "valve_event_reference_lift" => cfg.valve_event_reference_lift = value,
+        "valve_lift_shape_exponent" => cfg.valve_lift_shape_exponent = value,
         // 0015 — low-Re intake Cd correction
         "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = value != 0.0,
         "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = value,
@@ -745,6 +783,39 @@ mod tests {
         // when the example file moves; this is honest because all paths
         // we exercise are present on Default.
         SDM26Config::default()
+    }
+
+    #[test]
+    fn every_schema_path_is_accepted_by_apply_override() {
+        // A schema entry without an apply_override arm is a knob the UI can
+        // show but a sweep silently cannot move (the B6-B12 bug class).
+        let cfg = load_cfg();
+        for meta in enumerate_schema(&cfg) {
+            let mut c = cfg.clone();
+            apply_override(&mut c, &meta.path, meta.default)
+                .unwrap_or_else(|e| panic!("{}: {e}", meta.path));
+        }
+    }
+
+    #[test]
+    fn finding_0032_flags_round_trip_through_apply_override() {
+        let mut c = SDM26Config::default();
+        for p in [
+            "intake_junction_directional_loss", "intake_runner_end_correction",
+            "restrictor_venturi_model", "exhaust_collector_end_correction",
+            "exhaust_collector_open_end_physical", "fuel_mass_from_trapped_air",
+            "heat_release_o2_limited", "valve_events_at_reference_lift",
+        ] {
+            apply_override(&mut c, p, 1.0).unwrap();
+        }
+        assert!(c.intake_junction_directional_loss && c.intake_runner_end_correction);
+        assert!(c.restrictor_venturi_model && c.exhaust_collector_end_correction);
+        assert!(c.exhaust_collector_open_end_physical && c.fuel_mass_from_trapped_air);
+        assert!(c.heat_release_o2_limited && c.valve_events_at_reference_lift);
+        apply_override(&mut c, "restrictor_diffuser_efficiency", 0.85).unwrap();
+        assert_eq!(c.restrictor_diffuser_efficiency, Some(0.85));
+        apply_override(&mut c, "restrictor_diffuser_efficiency", 0.0).unwrap();
+        assert_eq!(c.restrictor_diffuser_efficiency, None);
     }
 
     #[test]
