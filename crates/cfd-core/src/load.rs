@@ -30,7 +30,7 @@ pub fn load_config_from_path(
         .map_err(|e| format!("Couldn't read {}: {}", path.display(), e))?;
     let raw: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("JSON parse error in {}: {}", path.display(), e))?;
-    engine_sim::config::loader::load_v1_json(path)
+    let (_, warnings) = engine_sim::config::loader::load_v1_json_with_warnings(path)
         .map_err(|e| format!("Schema error in {}: {}", path.display(), e))?;
     let summary: ConfigSummary = build_config_summary(&raw);
     let is_example = resource_dir.map(|r| path_under(path, r)).unwrap_or(false);
@@ -39,6 +39,7 @@ pub fn load_config_from_path(
         raw,
         summary,
         is_example,
+        warnings,
     })
 }
 

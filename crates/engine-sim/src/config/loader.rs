@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::model::sdm26::{ExhaustTopology, SDM26Config};
+use crate::model::sdm26::{bellmouth_entry_k, ExhaustTopology, SDM26Config};
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
@@ -33,10 +33,6 @@ fn req_u(v: &Value, key: &str) -> Result<usize, ConfigLoadError> {
 
 fn opt_f64(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(|x| x.as_f64())
-}
-
-fn opt_bool(v: &Value, key: &str) -> Option<bool> {
-    v.get(key).and_then(|x| x.as_bool())
 }
 
 fn unpack_cd_table(v: &Value, key: &str) -> Result<(Vec<f64>, Vec<f64>), ConfigLoadError> {
@@ -100,9 +96,162 @@ fn all_same_opt(values: &[Option<f64>]) -> bool {
     })
 }
 
+// ---- Schema key registry (finding 0032 fix 8) ------------------------------
+//
+// Keys the V1 schema defines per section. Anything else is reported as a
+// load WARNING (typo / stale key) instead of being silently dropped: a
+// misspelled physics flag used to leave the model on legacy physics with no
+// trace. Some keys are accepted but not consumed by the 1-D solver
+// (`simulation.*`, `roughness`, `artificial_viscosity`, `*_note`,
+// `converging_half_angle`, `initial_*`); they are listed so they do not warn.
+
+const TOP_KEYS: &[&str] = &[
+    "name", "description", "n_cylinders", "firing_order", "firing_interval",
+    "cylinder", "intake_valve", "exhaust_valve", "intake_pipes",
+    "exhaust_primaries", "exhaust_secondaries", "exhaust_collector",
+    "combustion", "restrictor", "plenum", "simulation", "p_ambient",
+    "T_ambient", "drivetrain_efficiency", "physics",
+];
+const CYLINDER_KEYS: &[&str] = &[
+    "bore", "stroke", "con_rod_length", "compression_ratio",
+    "n_intake_valves", "n_exhaust_valves",
+];
+const VALVE_KEYS: &[&str] = &[
+    "diameter", "max_lift", "open_angle", "close_angle", "seat_angle", "cd_table",
+];
+const PIPE_KEYS: &[&str] = &[
+    "name", "length", "diameter", "diameter_out", "n_points",
+    "wall_temperature", "roughness", "artificial_viscosity", "length_note",
+];
+/// Extra per-runner keys (finding 0032 fixes 1 + 4).
+const RUNNER_EXTRA_KEYS: &[&str] = &["entry_loss_k", "bellmouth_radius", "end_correction"];
+const COMBUSTION_KEYS: &[&str] = &[
+    "wiebe_a", "wiebe_m", "combustion_duration", "spark_advance",
+    "ignition_delay", "combustion_efficiency", "q_lhv", "afr_stoich", "afr_target",
+];
+const RESTRICTOR_KEYS: &[&str] = &[
+    "throat_diameter", "discharge_coefficient", "converging_half_angle",
+    "diverging_half_angle",
+];
+const PLENUM_KEYS: &[&str] = &[
+    "volume", "length", "n_cells", "n_points", "wall_temperature",
+    "initial_pressure", "initial_temperature",
+];
+const SIMULATION_KEYS: &[&str] = &[
+    "rpm_start", "rpm_end", "rpm_step", "n_cycles", "cfl_number",
+    "convergence_tolerance", "crank_step_max", "artificial_viscosity",
+];
+
+/// Numeric `physics` keys -> SDM26Config field setter. Returns false for
+/// keys it does not own.
+fn set_physics_f64(cfg: &mut SDM26Config, key: &str, v: f64) -> bool {
+    match key {
+        "spark_advance_rpm_slope_deg_per_krpm" => cfg.spark_advance_rpm_slope_deg_per_krpm = v,
+        "spark_advance_rpm_ref" => cfg.spark_advance_rpm_ref = v,
+        "duration_rpm_exp" => cfg.duration_rpm_exp = v,
+        "duration_rpm_ref" => cfg.duration_rpm_ref = v,
+        "wiebe_a_rpm_exp" => cfg.wiebe_a_rpm_exp = v,
+        "wiebe_a_rpm_ref" => cfg.wiebe_a_rpm_ref = v,
+        "tumble_burn_factor" => cfg.tumble_burn_factor = v,
+        "restrictor_cd_mach_k" => cfg.restrictor_cd_mach_k = v,
+        "restrictor_loss_coef" => cfg.restrictor_loss_coef = v,
+        "restrictor_diffuser_efficiency" => cfg.restrictor_diffuser_efficiency = Some(v),
+        "intake_junction_loss_coef" => cfg.intake_junction_loss_coef = v,
+        "exhaust_junction_loss_coef" => cfg.exhaust_junction_loss_coef = v,
+        "intake_runner_entry_k" => cfg.intake_runner_entry_k = v,
+        "fmep_a" => cfg.fmep_a = v,
+        "fmep_b" => cfg.fmep_b = v,
+        "fmep_c" => cfg.fmep_c = v,
+        "cfl" => cfg.cfl = v,
+        "intake_lift_flat_top_ramp" => cfg.intake_lift_flat_top_ramp = v,
+        "exhaust_lift_flat_top_ramp" => cfg.exhaust_lift_flat_top_ramp = v,
+        "intake_valve_re_cd_min" => cfg.intake_valve_re_cd_min = v,
+        "intake_valve_re_crit" => cfg.intake_valve_re_crit = v,
+        "exhaust_collector_reflection_coef" => cfg.exhaust_collector_reflection_coef = v,
+        "knock_integral_limit" => cfg.knock_integral_limit = v,
+        "knock_retard_step_deg" => cfg.knock_retard_step_deg = v,
+        "knock_max_retard_deg" => cfg.knock_max_retard_deg = v,
+        "knock_tau_scale" => cfg.knock_tau_scale = v,
+        "octane_number" => cfg.octane_number = v,
+        "valve_event_reference_lift" => cfg.valve_event_reference_lift = v,
+        "valve_lift_shape_exponent" => cfg.valve_lift_shape_exponent = v,
+        _ => return false,
+    }
+    true
+}
+
+/// Boolean `physics` keys -> SDM26Config field setter.
+fn set_physics_bool(cfg: &mut SDM26Config, key: &str, v: bool) -> bool {
+    match key {
+        "restrictor_loss_from_diffuser_geometry" => cfg.restrictor_loss_from_diffuser_geometry = v,
+        "restrictor_venturi_model" => cfg.restrictor_venturi_model = v,
+        "intake_junction_borda_carnot" => cfg.intake_junction_borda_carnot = v,
+        "intake_junction_directional_loss" => cfg.intake_junction_directional_loss = v,
+        "exhaust_junction_borda_carnot" => cfg.exhaust_junction_borda_carnot = v,
+        "intake_valve_re_correction_enabled" => cfg.intake_valve_re_correction_enabled = v,
+        "afr_eta_enabled" => cfg.afr_eta_enabled = v,
+        "knock_control_enabled" => cfg.knock_control_enabled = v,
+        "two_zone_enabled" => cfg.two_zone_enabled = v,
+        "two_zone_gamma_cv_weighted" => cfg.two_zone_gamma_cv_weighted = v,
+        "use_weno5_in_pipes" => cfg.use_weno5_in_pipes = v,
+        "enable_residual_tracking" => cfg.enable_residual_tracking = v,
+        "intake_runner_end_correction" => cfg.intake_runner_end_correction = v,
+        "exhaust_collector_end_correction" => cfg.exhaust_collector_end_correction = v,
+        "exhaust_collector_open_end_physical" => cfg.exhaust_collector_open_end_physical = v,
+        "fuel_mass_from_trapped_air" => cfg.fuel_mass_from_trapped_air = v,
+        "heat_release_o2_limited" => cfg.heat_release_o2_limited = v,
+        "valve_events_at_reference_lift" => cfg.valve_events_at_reference_lift = v,
+        _ => return false,
+    }
+    true
+}
+
+fn is_physics_f64_key(key: &str) -> bool {
+    set_physics_f64(&mut SDM26Config::default(), key, 0.0)
+}
+
+fn is_physics_bool_key(key: &str) -> bool {
+    set_physics_bool(&mut SDM26Config::default(), key, false)
+}
+
+/// Report keys of `obj` that are not in `known` (or `extra`) as warnings.
+/// Keys starting with `_` are treated as comments and never warn.
+fn warn_unknown(
+    obj: &Value, section: &str, known: &[&str], extra: &[&str], warnings: &mut Vec<String>,
+) {
+    if let Some(map) = obj.as_object() {
+        for k in map.keys() {
+            if k.starts_with('_') || known.contains(&k.as_str()) || extra.contains(&k.as_str()) {
+                continue;
+            }
+            let path = if section.is_empty() { k.clone() } else { format!("{section}.{k}") };
+            warnings.push(format!(
+                "unknown key {path} ignored (typo? not part of the V1 config schema)"
+            ));
+        }
+    }
+}
+
 pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadError> {
+    load_v1_json_with_warnings(path).map(|(cfg, _)| cfg)
+}
+
+/// As [`load_v1_json`], also returning human-readable load warnings:
+/// unknown / misspelled keys, `physics` keys with the wrong JSON type, and
+/// defaulted fields worth knowing about. Warnings never change the loaded
+/// config; callers surface them in logs / the UI.
+pub fn load_v1_json_with_warnings<P: AsRef<Path>>(
+    path: P,
+) -> Result<(SDM26Config, Vec<String>), ConfigLoadError> {
     let text = fs::read_to_string(path)?;
     let data: Value = serde_json::from_str(&text)?;
+    load_v1_value(&data)
+}
+
+/// Parse an already-decoded V1 JSON document (see `load_v1_json_with_warnings`).
+pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigLoadError> {
+    let data = data.clone();
+    let mut warnings: Vec<String> = Vec::new();
 
     let cyl = data.get("cylinder").ok_or_else(|| ConfigLoadError::Schema("cylinder".into()))?;
     let iv = data.get("intake_valve").ok_or_else(|| ConfigLoadError::Schema("intake_valve".into()))?;
@@ -217,6 +366,21 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.collector_wall_t = req_f64(collector, "wall_temperature")?;
 
     cfg.plenum_volume = req_f64(plen, "volume")?;
+    // 0032 fix 3: plenum pipe length / resolution / wall T are config data
+    // (were hard-wired 0.3 m / 20 cells / 320 K). Defaults unchanged.
+    if let Some(l) = opt_f64(plen, "length") {
+        if !(l > 0.0) {
+            return Err(ConfigLoadError::Schema("plenum.length must be > 0".into()));
+        }
+        cfg.plenum_length = l;
+    }
+    if let Some(n) = plen.get("n_cells").or_else(|| plen.get("n_points")).and_then(|x| x.as_u64()) {
+        if n < 4 {
+            return Err(ConfigLoadError::Schema("plenum.n_cells must be >= 4".into()));
+        }
+        cfg.plenum_n_cells = n as usize;
+    }
+    if let Some(t) = opt_f64(plen, "wall_temperature") { cfg.plenum_wall_t = t; }
     cfg.restrictor_throat_diameter = req_f64(restr, "throat_diameter")?;
     cfg.restrictor_cd = req_f64(restr, "discharge_coefficient")?;
     // 0006: pick up the diffuser half-angle if present (was silently dropped).
@@ -261,7 +425,18 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     cfg.exhaust_cd_table = exhaust_cd;
 
     cfg.exhaust_topology = topology;
-    cfg.drivetrain_efficiency = opt_f64(&data, "drivetrain_efficiency").unwrap_or(0.91);
+    // Fallback matches the struct default (0.85, Python models/sdm26.py
+    // "Fix 14b"). The loader used to fall back to 0.91: a silent 7 %
+    // wheel-power disagreement between a config without the key and
+    // `SDM26Config::default()`.
+    cfg.drivetrain_efficiency = match opt_f64(&data, "drivetrain_efficiency") {
+        Some(v) => v,
+        None => {
+            let d = SDM26Config::default().drivetrain_efficiency;
+            warnings.push(format!("drivetrain_efficiency missing; using default {d}"));
+            d
+        }
+    };
 
     // Per-pipe geometry: stored only when it actually varies, otherwise the
     // scalar seeded from `[0]` above already describes every pipe. Port gap
@@ -299,58 +474,41 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
     // config without the section (including every parity fixture) loads
     // bit-identically to before.
     if let Some(phys) = data.get("physics") {
-        // Combustion phasing vs RPM (finding 0006: MBT map + Bonatesta burn
-        // scaling; recommended 1.5 °/krpm and exp 0.4).
-        if let Some(v) = opt_f64(phys, "spark_advance_rpm_slope_deg_per_krpm") {
-            cfg.spark_advance_rpm_slope_deg_per_krpm = v;
+        match phys.as_object() {
+            None => warnings.push("physics section is not an object; ignored".into()),
+            Some(map) => {
+                for (k, v) in map {
+                    if k.starts_with('_') { continue; }
+                    match k.as_str() {
+                        // Finding 0028: numerics limiter enum.
+                        "limiter" => match v.as_i64() {
+                            Some(n) => cfg.limiter = n as i32,
+                            None => warnings.push(format!(
+                                "physics.limiter must be an integer; got {v} (ignored)")),
+                        },
+                        // Finding 0030: parsed (and validated) below.
+                        "spark_advance_map" => {}
+                        key => {
+                            let applied = match (v.as_bool(), v.as_f64()) {
+                                (Some(b), _) => set_physics_bool(&mut cfg, key, b),
+                                (None, Some(x)) => set_physics_f64(&mut cfg, key, x),
+                                _ => false,
+                            };
+                            if !applied {
+                                let why = if is_physics_bool_key(key) {
+                                    format!("physics.{key} expects true/false; got {v} (ignored)")
+                                } else if is_physics_f64_key(key) {
+                                    format!("physics.{key} expects a number; got {v} (ignored)")
+                                } else {
+                                    format!("unknown key physics.{key} ignored (typo? not a known physics flag)")
+                                };
+                                warnings.push(why);
+                            }
+                        }
+                    }
+                }
+            }
         }
-        if let Some(v) = opt_f64(phys, "spark_advance_rpm_ref") { cfg.spark_advance_rpm_ref = v; }
-        if let Some(v) = opt_f64(phys, "duration_rpm_exp") { cfg.duration_rpm_exp = v; }
-        if let Some(v) = opt_f64(phys, "duration_rpm_ref") { cfg.duration_rpm_ref = v; }
-        if let Some(v) = opt_f64(phys, "wiebe_a_rpm_exp") { cfg.wiebe_a_rpm_exp = v; }
-        if let Some(v) = opt_f64(phys, "wiebe_a_rpm_ref") { cfg.wiebe_a_rpm_ref = v; }
-        if let Some(v) = opt_f64(phys, "tumble_burn_factor") { cfg.tumble_burn_factor = v; }
-        // Restrictor (findings 0006/0021: Mach-dependent Cd k=0.10 for the
-        // contoured nozzle + Idelchik diffuser loss from the half-angle).
-        if let Some(v) = opt_f64(phys, "restrictor_cd_mach_k") { cfg.restrictor_cd_mach_k = v; }
-        if let Some(v) = opt_bool(phys, "restrictor_loss_from_diffuser_geometry") {
-            cfg.restrictor_loss_from_diffuser_geometry = v;
-        }
-        // Junction losses (finding 0005: geometry-derived Borda-Carnot,
-        // applied inside the inter-leg mass residual).
-        if let Some(v) = opt_f64(phys, "intake_junction_loss_coef") { cfg.intake_junction_loss_coef = v; }
-        if let Some(v) = opt_bool(phys, "intake_junction_borda_carnot") { cfg.intake_junction_borda_carnot = v; }
-        if let Some(v) = opt_f64(phys, "exhaust_junction_loss_coef") { cfg.exhaust_junction_loss_coef = v; }
-        if let Some(v) = opt_bool(phys, "exhaust_junction_borda_carnot") { cfg.exhaust_junction_borda_carnot = v; }
-        // Chen-Flynn friction (finding 0020: fmep_c 0.00075 = Heywood
-        // motorcycle midpoint; the old 0.003 was 3× the literature ceiling).
-        if let Some(v) = opt_f64(phys, "fmep_a") { cfg.fmep_a = v; }
-        if let Some(v) = opt_f64(phys, "fmep_b") { cfg.fmep_b = v; }
-        if let Some(v) = opt_f64(phys, "fmep_c") { cfg.fmep_c = v; }
-        // Finding 0028: dyno-RMSE recalibration. Numerics fidelity (van Leer
-        // limiter + CFL 0.5 cut the MUSCL dissipation that was damping the
-        // intake/exhaust acoustics), real cam lift shape (flat-top ramp),
-        // low-Re valve Cd, and the collector open-end reflection.
-        if let Some(v) = phys.get("limiter").and_then(|x| x.as_i64()) { cfg.limiter = v as i32; }
-        if let Some(v) = opt_f64(phys, "cfl") { cfg.cfl = v; }
-        if let Some(v) = opt_f64(phys, "intake_lift_flat_top_ramp") { cfg.intake_lift_flat_top_ramp = v; }
-        if let Some(v) = opt_f64(phys, "exhaust_lift_flat_top_ramp") { cfg.exhaust_lift_flat_top_ramp = v; }
-        if let Some(v) = opt_bool(phys, "intake_valve_re_correction_enabled") {
-            cfg.intake_valve_re_correction_enabled = v;
-        }
-        if let Some(v) = opt_f64(phys, "intake_valve_re_cd_min") { cfg.intake_valve_re_cd_min = v; }
-        if let Some(v) = opt_f64(phys, "intake_valve_re_crit") { cfg.intake_valve_re_crit = v; }
-        if let Some(v) = opt_f64(phys, "exhaust_collector_reflection_coef") {
-            cfg.exhaust_collector_reflection_coef = v;
-        }
-        if let Some(v) = opt_bool(phys, "afr_eta_enabled") { cfg.afr_eta_enabled = v; }
-        // Finding 0029: ECU-style closed-loop knock control.
-        if let Some(v) = opt_bool(phys, "knock_control_enabled") { cfg.knock_control_enabled = v; }
-        if let Some(v) = opt_f64(phys, "knock_integral_limit") { cfg.knock_integral_limit = v; }
-        if let Some(v) = opt_f64(phys, "knock_retard_step_deg") { cfg.knock_retard_step_deg = v; }
-        if let Some(v) = opt_f64(phys, "knock_max_retard_deg") { cfg.knock_max_retard_deg = v; }
-        if let Some(v) = opt_f64(phys, "knock_tau_scale") { cfg.knock_tau_scale = v; }
-        if let Some(v) = opt_f64(phys, "octane_number") { cfg.octane_number = v; }
         // Finding 0030: measured per-RPM ignition map, [[rpm, deg], ...].
         // Lets a config run the engine's actual ECU table instead of the
         // idealized scalar + slope tune.
@@ -377,7 +535,52 @@ pub fn load_v1_json<P: AsRef<Path>>(path: P) -> Result<SDM26Config, ConfigLoadEr
         }
     }
 
-    Ok(cfg)
+    // ---- Per-runner entry loss / end correction (finding 0032) ---------
+    // `entry_loss_k` wins; otherwise a `bellmouth_radius` maps to K via
+    // Crane TP-410; otherwise NaN = "use physics.intake_runner_entry_k".
+    let entry_ks: Vec<f64> = runners.iter()
+        .map(|p| {
+            let d = opt_f64(p, "diameter").unwrap_or(1.0);
+            if let Some(k) = opt_f64(p, "entry_loss_k") { return k; }
+            if let Some(rb) = opt_f64(p, "bellmouth_radius") {
+                return bellmouth_entry_k(rb / d.max(1e-9));
+            }
+            f64::NAN
+        })
+        .collect();
+    if entry_ks.iter().any(|k| k.is_finite()) {
+        cfg.intake_runner_entry_ks = Some(entry_ks);
+    }
+    let end_corrs: Vec<f64> = runners.iter()
+        .map(|p| opt_f64(p, "end_correction").unwrap_or(f64::NAN))
+        .collect();
+    if end_corrs.iter().any(|k| k.is_finite()) {
+        cfg.intake_runner_end_corrections = Some(end_corrs);
+    }
+
+    // ---- Unknown-key warnings (finding 0032 fix 8) ----------------------
+    warn_unknown(&data, "", TOP_KEYS, &[], &mut warnings);
+    warn_unknown(cyl, "cylinder", CYLINDER_KEYS, &[], &mut warnings);
+    warn_unknown(iv, "intake_valve", VALVE_KEYS, &[], &mut warnings);
+    warn_unknown(ev, "exhaust_valve", VALVE_KEYS, &[], &mut warnings);
+    for (i, p) in runners.iter().enumerate() {
+        warn_unknown(p, &format!("intake_pipes[{i}]"), PIPE_KEYS, RUNNER_EXTRA_KEYS, &mut warnings);
+    }
+    for (i, p) in primaries.iter().enumerate() {
+        warn_unknown(p, &format!("exhaust_primaries[{i}]"), PIPE_KEYS, &[], &mut warnings);
+    }
+    for (i, p) in secondaries.iter().enumerate() {
+        warn_unknown(p, &format!("exhaust_secondaries[{i}]"), PIPE_KEYS, &[], &mut warnings);
+    }
+    warn_unknown(collector, "exhaust_collector", PIPE_KEYS, &[], &mut warnings);
+    warn_unknown(comb, "combustion", COMBUSTION_KEYS, &[], &mut warnings);
+    warn_unknown(restr, "restrictor", RESTRICTOR_KEYS, &[], &mut warnings);
+    warn_unknown(plen, "plenum", PLENUM_KEYS, &[], &mut warnings);
+    if let Some(sim) = data.get("simulation") {
+        warn_unknown(sim, "simulation", SIMULATION_KEYS, &[], &mut warnings);
+    }
+
+    Ok((cfg, warnings))
 }
 
 #[cfg(test)]
@@ -617,6 +820,106 @@ mod tests {
         let res = load_v1_json(&p);
         let _ = fs::remove_file(&p);
         assert!(matches!(res, Err(ConfigLoadError::Schema(_))));
+    }
+
+    fn load_with(data: &Value) -> (SDM26Config, Vec<String>) {
+        load_v1_value(data).unwrap()
+    }
+
+    fn base() -> Value {
+        serde_json::from_str(&fs::read_to_string(python_ref_sdm26()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn shipped_and_parity_configs_load_without_warnings() {
+        // Every config the app / parity suite ships must be warning-free,
+        // otherwise the warning channel is noise.
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for rel in [
+            "python_ref/configs/sdm26.json",
+            "python_ref/configs/sdm25.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm26.json",
+            "../../apps/desktop/src-tauri/resources/cfd/configs/sdm25.json",
+            "../../apps/desktop/src/modules/cfd/editor/templates/sdm26.json",
+            "../../apps/desktop/src/modules/cfd/editor/templates/sdm25.json",
+        ] {
+            let (_, w) = load_v1_json_with_warnings(root.join(rel)).unwrap();
+            assert!(w.is_empty(), "{rel}: {w:?}");
+        }
+    }
+
+    #[test]
+    fn misspelled_physics_key_warns_instead_of_silently_dropping() {
+        let mut data = base();
+        data["physics"] = serde_json::json!({
+            "intake_junction_bordacarnot": true,   // typo
+            "fmep_c": 0.00075,
+            "restrictor_venturi_model": "yes",     // wrong type
+            "cfl": true,                           // wrong type
+        });
+        data["plenum"]["lenght"] = serde_json::json!(0.25); // typo
+        data["intake_pipes"][0]["belmouth_radius"] = serde_json::json!(0.01); // typo
+        let (cfg, w) = load_with(&data);
+        assert_eq!(cfg.fmep_c, 0.00075, "valid keys still apply");
+        assert!(!cfg.intake_junction_borda_carnot);
+        let joined = w.join("\n");
+        assert!(joined.contains("physics.intake_junction_bordacarnot"), "{joined}");
+        assert!(joined.contains("physics.restrictor_venturi_model expects true/false"), "{joined}");
+        assert!(joined.contains("physics.cfl expects a number"), "{joined}");
+        assert!(joined.contains("plenum.lenght"), "{joined}");
+        assert!(joined.contains("intake_pipes[0].belmouth_radius"), "{joined}");
+        assert_eq!(w.len(), 5, "{w:?}");
+    }
+
+    #[test]
+    fn drivetrain_fallback_matches_struct_default() {
+        let mut data = base();
+        data.as_object_mut().unwrap().remove("drivetrain_efficiency");
+        let (cfg, w) = load_with(&data);
+        assert_eq!(cfg.drivetrain_efficiency, SDM26Config::default().drivetrain_efficiency);
+        assert!(w.iter().any(|m| m.contains("drivetrain_efficiency")));
+    }
+
+    #[test]
+    fn plenum_geometry_and_new_physics_flags_load() {
+        let mut data = base();
+        data["plenum"]["length"] = serde_json::json!(0.2);
+        data["plenum"]["n_cells"] = serde_json::json!(16);
+        data["intake_pipes"][0]["bellmouth_radius"] = serde_json::json!(0.0057); // r/d = 0.15
+        data["intake_pipes"][1]["entry_loss_k"] = serde_json::json!(0.5);
+        data["intake_pipes"][2]["end_correction"] = serde_json::json!(0.02);
+        data["physics"] = serde_json::json!({
+            "intake_junction_directional_loss": true,
+            "intake_runner_entry_k": 0.1,
+            "restrictor_venturi_model": true,
+            "restrictor_diffuser_efficiency": 0.85,
+            "intake_runner_end_correction": true,
+            "exhaust_collector_end_correction": true,
+            "exhaust_collector_open_end_physical": true,
+            "fuel_mass_from_trapped_air": true,
+            "heat_release_o2_limited": true,
+            "enable_residual_tracking": true,
+            "valve_events_at_reference_lift": true,
+            "valve_lift_shape_exponent": 1.5,
+        });
+        let (cfg, w) = load_with(&data);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(cfg.plenum_length, 0.2);
+        assert_eq!(cfg.plenum_n_cells, 16);
+        assert!(cfg.intake_junction_directional_loss && cfg.restrictor_venturi_model);
+        assert_eq!(cfg.intake_runner_entry_k, 0.1);
+        assert_eq!(cfg.restrictor_diffuser_efficiency, Some(0.85));
+        assert!(cfg.intake_runner_end_correction && cfg.exhaust_collector_end_correction);
+        assert!(cfg.exhaust_collector_open_end_physical);
+        assert!(cfg.fuel_mass_from_trapped_air && cfg.heat_release_o2_limited);
+        assert!(cfg.enable_residual_tracking && cfg.valve_events_at_reference_lift);
+        assert_eq!(cfg.valve_lift_shape_exponent, 1.5);
+        let ks = cfg.intake_runner_entry_ks.as_ref().unwrap();
+        assert!((ks[0] - 0.04).abs() < 1e-12, "bellmouth r/d 0.15 -> Crane K 0.04");
+        assert_eq!(ks[1], 0.5);
+        assert!(ks[2].is_nan() && ks[3].is_nan());
+        assert_eq!(cfg.runner_end_correction(2), 0.02);
+        assert!((cfg.runner_end_correction(0) - 0.85 * 0.019).abs() < 1e-12);
     }
 
     #[test]

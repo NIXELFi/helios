@@ -24,6 +24,11 @@ pub struct LoadedConfig {
     /// examples can't be overwritten in place. Defense-in-depth check
     /// also runs Rust-side in `cfd_save_config`.
     pub is_example: bool,
+    /// Load warnings from the engine config loader (unknown / misspelled
+    /// keys, wrong-typed physics flags, defaulted fields). Empty for a clean
+    /// config. Finding 0032: typos used to be dropped silently.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -524,9 +529,11 @@ mod tests {
                 plenum_volume_l: 0.0,
             },
             is_example: true,
+            warnings: vec!["unknown key physics.x ignored".into()],
         };
         let s = serde_json::to_string(&lc).unwrap();
         assert!(s.contains("\"isExample\":true"), "{s}");
+        assert!(s.contains("\"warnings\":[\"unknown key physics.x ignored\"]"), "{s}");
     }
 
     #[test]

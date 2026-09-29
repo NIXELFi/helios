@@ -24,7 +24,7 @@ use cfd_core::dto::SamplerKind;
 use cfd_core::optimization::sampler::sample;
 use cfd_core::params::apply_override;
 use clap::Args as ClapArgs;
-use engine_sim::config::loader::load_v1_json;
+use engine_sim::config::loader::load_v1_json_with_warnings;
 use engine_sim::model::sdm26::{CycleStats, JunctionKind, RunResult, SDM26Engine};
 use serde::Serialize;
 use serde_json::json;
@@ -91,8 +91,11 @@ pub fn execute_with(args: &Args) -> Result<SweepSummary> {
     let env = capture(study.environment.rayon_threads);
     let mut writer = ResultWriter::create(&args.out, &env, study.run.seed, &commit)?;
 
-    let base_cfg = load_v1_json(&study.run.config)
+    let (base_cfg, load_warnings) = load_v1_json_with_warnings(&study.run.config)
         .with_context(|| format!("load engine config {}", study.run.config))?;
+    for w in &load_warnings {
+        eprintln!("warning: {}: {w}", study.run.config);
+    }
     let junction_kind = parse_junction_kind(study.run.junction.as_deref())?;
     // Same junction-label emission as `run.rs`. Lets `helios-bench validate`
     // pick the right C9 band per trial and keeps sweep / run NDJSONs schema-
