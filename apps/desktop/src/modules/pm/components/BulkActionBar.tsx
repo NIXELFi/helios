@@ -14,6 +14,7 @@ import { IconX } from "@tabler/icons-react";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
 import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -107,8 +108,9 @@ export function BulkActionBar({ selectableIds, ownerOptions }: BulkActionBarProp
   // merely focusing the date input and tabbing away (which fires onBlur with "")
   // must never wipe the due_date of every selected task (data-loss bug H-3).
   // Clearing a due date in bulk requires the explicit "Clear due" action below.
+  // A partial year still being typed (0202-...) is ignored the same way.
   const commitDue = (value: string) => {
-    if (value === "") return;
+    if (!isPlausibleIsoDate(value)) return;
     apply({ due_date: value });
   };
 

@@ -5,6 +5,7 @@ import { IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
 import { Select } from "@pm/components/ui/Select";
+import { MAX_PLAUSIBLE_YEAR, MIN_PLAUSIBLE_YEAR, isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
 const inputClass =
   "rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm text-helios-text " +
@@ -55,8 +56,16 @@ export function MilestoneDialog({
     setDescription(milestone?.description ?? "");
   }, [open, milestone]);
 
+  // A date input can hold a partial year (0202-...) at save time; a milestone
+  // there would stretch every timeline back to year 202.
+  const dateError =
+    targetDate !== "" && !isPlausibleIsoDate(targetDate)
+      ? `Enter a year between ${MIN_PLAUSIBLE_YEAR} and ${MAX_PLAUSIBLE_YEAR}`
+      : null;
+  const canSave = name.trim().length > 0 && targetDate !== "" && !dateError && projectId !== "";
+
   function handleSave() {
-    if (!name.trim() || !targetDate) return;
+    if (!name.trim() || !targetDate || dateError) return;
     onSave({
       id: milestone?.id ?? crypto.randomUUID(),
       project_id: projectId,
@@ -67,8 +76,6 @@ export function MilestoneDialog({
     });
     onClose();
   }
-
-  const canSave = name.trim().length > 0 && targetDate !== "" && projectId !== "";
 
   return (
     <FloatingWindow
@@ -137,6 +144,7 @@ export function MilestoneDialog({
             onChange={(e) => setTargetDate(e.target.value)}
             className={inputClass}
           />
+          {dateError ? <span className="text-xs text-red-400">{dateError}</span> : null}
         </Field>
 
         <Field label="Type">
