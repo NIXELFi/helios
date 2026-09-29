@@ -490,7 +490,7 @@ export function TaskDetailSheet() {
                 // date so start never exceeds due (cross-field validation).
                 max={task.due_date ?? undefined}
                 onCommit={(next) => {
-                  if (next && task.due_date && next > task.due_date) return;
+                  if (next && task.due_date && next > task.due_date) return false;
                   updateTask(task.id, { start_date: next });
                 }}
                 className={selectStyle}
@@ -502,7 +502,7 @@ export function TaskDetailSheet() {
                 disabled={!canEdit}
                 min={task.start_date ?? undefined}
                 onCommit={(next) => {
-                  if (next && task.start_date && next < task.start_date) return;
+                  if (next && task.start_date && next < task.start_date) return false;
                   updateTask(task.id, { due_date: next });
                 }}
                 className={selectStyle}
