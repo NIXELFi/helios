@@ -2,7 +2,7 @@
 id: 36
 slug: map-reference-level-calibration
 status: INVESTIGATED
-topic: A MAP-based airflow reference from the raw ECU log replaces PW·λ as the car shape target. Six parallel experiments (MAP reference, damping audit, excitation sensitivity, literature, intake restriction, exhaust wall temperature) found three model errors - sea-level ambient, over-recovering restrictor diffuser, cold exhaust walls - and showed ripple amplitude is set by exhaust blowdown strength and exhaust-pipe heat loss (numerics and friction are not it). The corrected, level-calibrated config `sdm26_asbuilt_cal` reaches team-dyno RMSE 2.18 kW (6-12.5k) / 1.76 kW (7-11.5k), was 2.78 / 2.36, matches the car's intake pressure drop within 0.5 kPa, and carries 0.65 of the car's in-phase VE ripple (was 0.29).
+topic: A MAP-based airflow reference from the raw ECU log replaces PW·λ as the car shape target. Six parallel experiments (MAP reference, damping audit, excitation sensitivity, literature, intake restriction, exhaust wall temperature) found three model errors - sea-level ambient, over-recovering restrictor diffuser, cold exhaust walls - and showed ripple amplitude is set by exhaust blowdown strength and exhaust-pipe heat loss (numerics and friction are not it). The corrected config `sdm26_asbuilt_cal` fits a single constant drivetrain efficiency (0.94); speed-dependent loss models lose on cross-validation. It reaches team-dyno RMSE 2.01 kW (6-12.5k) / 1.69 kW (7-11.5k), was 2.78 / 2.36, matches the car's intake pressure drop within 0.5 kPa, and carries 0.62 of the car's in-phase VE ripple (was 0.29).
 hypothesis: The model/car shape gap after 0035 is partly the reference (PW·λ) and partly missing wave amplitude; the dyno level gap is boundary conditions, not combustion.
 opened: 2026-09-29
 closed: ~
@@ -29,8 +29,10 @@ acceptance_approved_at: ~
   - Friction is not the limiter, and intake valve area does nothing.
 - **`sdm26_asbuilt_cal` (new experimental example config):**
   - It combines the as-built geometry, the logged tune (λ at the WOT-measured lag), the 0035 momentum collector and exhaust γ/R, and fixes 1-3.
-  - It then has **level-only** calibration: combustion efficiency 0.98 and FMEP ×0.775. No wave knob was fitted.
-  - Team-dyno RMSE is 2.18 kW over 6-12.5k, 1.76 over 7-11.5k and 2.05 over 10.5-12.5k (the logged-tune config was 2.78 / 2.36 / 3.02).
+  - The engine level stays at the shipped values (combustion efficiency 0.94, stock FMEP).
+  - The **only fitted number is a constant drivetrain efficiency, 0.94** (§5). A constant fraction beats every speed-dependent loss model on cross-validation.
+  - No wave knob was fitted.
+  - Team-dyno RMSE is 2.01 kW over 6-12.5k, 1.69 over 7-11.5k and 1.80 over 10.5-12.5k, with bias +0.04 (the logged-tune config was 2.78 / 2.36 / 3.02).
 
 ![fig](fig_0036.png)
 
@@ -93,7 +95,10 @@ All experiments ran on sdm26_asbuilt_exhaust + momentum collector (M10) unless n
   - Mean EGT stays at about 1200 K in every variant.
   - Realistic walls are the physical version of the heat multiplier, so no multiplier is used.
 
-## 3. Level calibration (`scripts/`)
+## 3. Level calibration, first pass (`scripts/`). Superseded by §5.
+
+This first pass fitted combustion efficiency and FMEP at a fixed drivetrain efficiency of 0.85. The shipped config uses §5 instead.
+
 
 - **Base config** = logged-tune config + momentum collector + exhaust γ 1.30 / R 295 + ambient 97.3 kPa / 305 K + diffuser η 0.62 + walls 900/750/650 K.
 - **λ map:** the logged-tune λ map was rebuilt at the WOT-measured lag (`references/ecu/proxy_wotA.csv`). The 270 ms map was shifted about 250 rpm where λ changes fastest (errors up to 0.08 λ). The corrected map left the fit unchanged.
@@ -109,18 +114,57 @@ All experiments ran on sdm26_asbuilt_exhaust + momentum collector (M10) unless n
 
 - **The fit pins η_comb at its upper bound.** The residual pull comes from 8-9.5k, where the dyno's 8.5k torque peak (49.5 N·m wheel) is sharper than the model's (about 45). η is capped at 0.98.
 - **FMEP ×0.775** gives 1.47 bar at 9k (was 1.90), which is plausible for a 600 cc four.
-- **The drivetrain efficiency (0.85) is an assumption** and trades directly against this level.
-- **Verification run of the committed config** (`run4.csv`; the repo config reproduces the verification run bit-for-bit at 9k):
+- **The drivetrain efficiency (0.85) is an assumption** and trades directly against this level. §5 fits it instead.
+- **First-pass verification run** (`run4.csv`, config CAL2):
 
 | config | r / slope vs MAP-VE | intake Δp RMSE | dyno RMSE 6-12.5 | 6-8.5 | 7-11.5 | 10.5-12.5 | bias | dyno-T r |
 |---|---|---|---|---|---|---|---|---|
 | sdm26_asbuilt_realtune (0034) | 0.80 / 0.29 | 2.85 kPa | 2.78 | 2.77 | 2.36 | 3.02 | −0.10 | 0.65 |
-| **sdm26_asbuilt_cal (0036)** | **0.81 / 0.65** | **0.50 kPa** | **2.18** | **2.57** | **1.76** | **2.05** | −0.29 | **0.71** |
+| first pass (CAL2: η_comb 0.98, FMEP ×0.775, drivetrain 0.85) | 0.81 / 0.65 | 0.50 kPa | 2.18 | 2.57 | 1.76 | 2.05 | −0.29 | 0.71 |
+| **shipped `sdm26_asbuilt_cal` (§5)** | **0.82 / 0.62** | **0.49 kPa** | **2.01** | **2.50** | **1.69** | **1.80** | +0.04 | 0.64 |
+
+## 5. Drivetrain-efficiency refit and linearity (`scripts/dtfit.py`, `fig_dt.py`)
+
+- **The refit.** Engine level is back to the shipped values (combustion efficiency 0.94, FMEP a/b/c 0.5/0.1/0.00075), which is the A_e94 run. Wheel power is modelled as a function of that brake power and speed, fitted to the dyno over 6-12.5k.
+- **Loss models tested:**
+  - a constant fraction;
+  - a fraction plus a constant loss torque (bearing, seal, chain and tyre drag, so the loss grows ∝ω);
+  - a fraction plus ω² or ω³ loss (windage, tyre on the roller);
+  - a fraction plus ω + ω²;
+  - a constant power offset.
+
+| wheel-power model (500 rpm dyno grid, n = 14) | fitted | RMSE | leave-one-out RMSE | BIC |
+|---|---|---|---|---|
+| **η·Pb (constant, linear)** | **η 0.938** | 2.01 | **2.14** | **22.1** |
+| η·Pb − c1·ω | η **1.05** (unphysical), c1 4.9 | 1.94 | 2.21 | 23.8 |
+| η·Pb − c2·ω² | η 0.985 | 1.92 | 2.21 | 23.6 |
+| η·Pb − c3·ω³ | η 0.970 | 1.91 | 2.19 | 23.4 |
+| η·Pb − c1·ω − c2·ω² | η 0.970, c1 < 0 | 1.92 | 2.52 | 26.2 |
+| η·Pb − c0 | η 0.893, c0 < 0 | 1.99 | 2.51 | 24.5 |
+
+- **The linear model wins on both cross-validation and BIC.** Restricting the fit to 7-12.5k gives the same ranking.
+- **The raw 25-rpm dyno trace (n = 261) prefers the extra terms**, but its points are strongly autocorrelated, which inflates n. The fits it prefers are unphysical (η 1.05-1.22).
+- **The extra terms only tilt the implied efficiency from about 0.96 at 6k to 0.92 at 12k.** The residuals are dominated by the engine's peak shape (6k, 8.5k), not by a smooth speed trend (`fig_drivetrain.png`).
+- **Why the dyno can't settle it:** a speed-dependent drivetrain loss has the same functional form as engine friction. Friction power is FMEP·Vd·ω/4π with FMEP = a + b·sp + c·sp², so it scales as ω, ω² and ω³. Any such term is indistinguishable from an FMEP change. Separating them would need a coast-down/loss run on the dyno or a motored FMEP measurement.
+- **0.94 is an effective value.** It is at the high end for a chain-drive chassis dyno (component estimates give about 0.89-0.93), so it probably also absorbs a slightly high stock FMEP. It replaces the unphysical need for η_comb = 1 in §3.
+
+| config | dyno RMSE 6-12.5 | 6-8.5 | 7-11.5 | 10.5-12.5 | bias |
+|---|---|---|---|---|---|
+| §3 first pass (η_comb 0.98, FMEP ×0.775, drivetrain 0.85) | 2.18 | 2.57 | 1.76 | 2.05 | −0.29 |
+| **§5 shipped (η_comb 0.94, stock FMEP, drivetrain 0.94)** | **2.01** | **2.50** | **1.69** | **1.80** | **+0.04** |
+
+- **Airflow results are nearly unchanged:** MAP-VE r 0.82, slope 0.62 (first pass 0.81 / 0.65).
+- **Torque-shape correlation is lower:** 0.64, against 0.71 for the first pass.
+  - Combustion efficiency 0.98 raised torque more at 8-9.5k than elsewhere, because the rich logged λ interacts with the O2-limited burn.
+  - So combustion efficiency is not a pure level knob.
+  - The shipped fit still wins on every RMSE band, and its η_comb stays physical.
+
+![drivetrain](fig_drivetrain.png)
 
 ## 4. What is still wrong
 
 1. **Peaks are about 250 rpm late:** the model has 6.25k / 9.0k against the car's 6.0k / 8.75k. The broad 9-10k shoulder over-reads MAP-VE slightly.
-2. **The dyno's torque peaks are sharper than the model's.** The model under-reads 6.0k by about 7 N·m and 8.25-9.5k by 2-5 N·m, and over-reads 6.5-7.5k by about 1.5 N·m. Part of this is the remaining amplitude gap (slope 0.65).
+2. **The dyno's torque peaks are sharper than the model's.** The model under-reads 6.0k by about 7 N·m and 8.25-9.5k by 2-5 N·m, and over-reads 6.5-7.5k by about 1.5 N·m. Part of this is the remaining amplitude gap (slope 0.62).
 3. **Below 5.5k** the dyno is written off (the README calls it a pull-settle artefact), so it was not scored.
 4. **The strongest remaining levers are unmeasured:** exhaust valve lift and Cd, and EVO at real lash. A flow-bench Cd/lift curve for the exhaust valve and a measured exhaust cam profile would do more than any further modelling. So would a baro logger channel or a key-on baro reading, and head port lengths.
 
@@ -132,7 +176,8 @@ All experiments ran on sdm26_asbuilt_exhaust + momentum collector (M10) unless n
 
 ## Reproducibility
 
-- `scripts/gen.py` writes the configs. `make("x", losses=False, afr_wot=True, eta_comb=0.98, fmep_scale=0.775)` reproduces `sdm26_asbuilt_cal.json` except for its name and description.
+- `scripts/gen.py` writes the configs. `make("x", losses=False, afr_wot=True)` plus `drivetrain_efficiency = 0.94` reproduces the shipped `sdm26_asbuilt_cal.json`, apart from its name and description. That run is `A_e94`, which the shipped config reproduces bit-for-bit at 9k.
+- `scripts/dtfit.py` runs the drivetrain linearity test and `fig_dt.py` draws `fig_drivetrain.png`. Set `SDM_DYNO_RAW` to the raw Dynojet `SDM.CSV`.
 - `run1.py`, `run3.py` and `run4.py` run the sweeps (`HUNTEXP` = the 0035 driver built on this branch). `levelfit.py` does the offline η × FMEP fit, and `fig36.py` draws the figure.
 - `scripts/lib.py` is the 0035 scoring plus `analyze5` (MAP-VE, intake Δp, de-biased RMSE).
 - `experiments/*` are the as-run scripts of the six experiments. They point at the session scratch directory and are kept as a record.

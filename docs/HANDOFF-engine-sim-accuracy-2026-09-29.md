@@ -14,7 +14,7 @@ See `physics_findings/0036-map-reference-level-calibration/finding.md`.
   - ambient (97.3 kPa / 305 K, not sea level);
   - venturi diffuser recovery 0.62, which now matches the car's intake pressure drop within 0.5 kPa;
   - exhaust walls at 900/750/650 K instead of 650/550/500. The cold walls were damping the waves.
-- **Calibration was level only** (combustion efficiency 0.98, FMEP ×0.775). Dyno RMSE is 2.18 kW over 6-12.5k and 1.76 over 7-11.5k. It carries 0.65 of the car's in-phase ripple (was 0.29).
+- **Calibration** fits only one number: a constant drivetrain efficiency of 0.94, with the engine at the shipped combustion efficiency 0.94 and stock FMEP. A constant fraction beats every speed-dependent loss model on cross-validation, and those models are FMEP-equivalent anyway. Dyno RMSE is 2.01 kW over 6-12.5k and 1.69 over 7-11.5k. It carries 0.62 of the car's in-phase ripple (was 0.29).
 - **Ripple amplitude** is set by exhaust blowdown (EVO, exhaust lift, exhaust Cd) and exhaust heat loss, not by numerics or friction. The next data to get: exhaust valve flow-bench Cd/lift, the measured exhaust cam profile, and a baro reading or channel.
 - **Handoff step 7 (the active-runner study)** can now use `sdm26_asbuilt_cal` as its base.
 - The desktop crate compiles on this machine (`cargo check`), which closes the earlier compile-unverified note.
