@@ -201,12 +201,19 @@ export function useMyInstalls(): {
   loading: boolean;
   rows: MyInstallRow[] | null;
   refetch: () => void;
+  /** Drop a row locally the moment an uninstall succeeds, so a failed reload
+   *  (which keeps the last good rows) can never resurrect it. */
+  forget: (pluginId: string) => void;
 } {
   const client = useSupabaseClient();
   const [rows, setRows] = useState<MyInstallRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+  const forget = useCallback(
+    (pluginId: string) => setRows((r) => (r ? r.filter((x) => x.plugin_id !== pluginId) : r)),
+    [],
+  );
 
   useEffect(() => {
     if (DEMO) {
@@ -235,7 +242,7 @@ export function useMyInstalls(): {
     };
   }, [client, reloadKey]);
 
-  return { loading, rows, refetch };
+  return { loading, rows, refetch, forget };
 }
 
 /** The caller's installed plugins (see `mergeInstalled`). */

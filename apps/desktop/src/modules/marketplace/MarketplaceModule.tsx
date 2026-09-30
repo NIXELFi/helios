@@ -66,7 +66,12 @@ const DEMO = isMarketplaceDemo();
 
 export function MarketplaceModule() {
   const { plugins, loading, error, refetch: refetchAvailable } = useAvailablePlugins();
-  const { rows: installRows, loading: installsLoading, refetch: refetchInstalls } = useMyInstalls();
+  const {
+    rows: installRows,
+    loading: installsLoading,
+    refetch: refetchInstalls,
+    forget: forgetInstall,
+  } = useMyInstalls();
   // Every mutation changes both lists (an install, a yank, an approval), so one
   // refetch refreshes both.
   // Bumped by every refetch so the tabs that own their own data (My plugins,
@@ -151,7 +156,10 @@ export function MarketplaceModule() {
         setBusyId(p.id);
         setLaunchError(null);
         void uninstall(p.id, { keepData: true })
-          .then(() => refetch())
+          .then(() => {
+            forgetInstall(p.id);
+            refetch();
+          })
           .catch((e: unknown) =>
             setLaunchError({ baseUrl: p.name, message: e instanceof Error ? e.message : String(e) }),
           )
@@ -160,7 +168,7 @@ export function MarketplaceModule() {
       }
       setUninstallFor(p);
     },
-    [uninstall, refetch],
+    [uninstall, refetch, forgetInstall],
   );
 
   const confirmUninstall = useCallback(async () => {
@@ -169,6 +177,7 @@ export function MarketplaceModule() {
     setBusyId(p.id);
     try {
       await uninstall(p.id);
+      forgetInstall(p.id);
       setUninstallFor(null);
       refetch();
     } catch {
@@ -176,7 +185,7 @@ export function MarketplaceModule() {
     } finally {
       setBusyId(null);
     }
-  }, [uninstallFor, uninstall, refetch]);
+  }, [uninstallFor, uninstall, refetch, forgetInstall]);
 
   const handleOpen = useCallback(async (p: AvailablePlugin) => {
     setLaunchError(null);

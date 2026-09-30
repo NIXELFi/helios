@@ -24,7 +24,7 @@ vi.mock("../data/useMarketplace", () => ({
   useUninstall: () => ({ uninstall: mocks.uninstall, removing: false, error: null }),
   // null = the install list is unavailable, so Installed falls back to the
   // Browse-derived rows (see mergeInstalled), which is what these tests drive.
-  useMyInstalls: () => ({ rows: null, loading: false, refetch: () => {} }),
+  useMyInstalls: () => ({ rows: null, loading: false, refetch: () => {}, forget: () => {} }),
   mergeInstalled: (available: ReturnType<typeof makePlugin>[]) =>
     available.filter((p) => p.installedVersion !== null),
 }));

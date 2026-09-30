@@ -8,6 +8,7 @@ import {
   useInstalledPlugins,
   useInstall,
   mergeInstalled,
+  useMyInstalls,
   type MyInstallRow,
 } from "../data/useMarketplace";
 
@@ -227,3 +228,25 @@ function installRow(over: Partial<MyInstallRow>): MyInstallRow {
     ...over,
   };
 }
+
+describe("useMyInstalls", () => {
+  it("keeps the last good rows on a failed reload, and forget() drops one immediately", async () => {
+    let fail = false;
+    const { client } = mockClient({
+      rpc: (name) =>
+        name === "my_installed_plugins"
+          ? fail
+            ? { data: null, error: { message: "Failed to fetch" } }
+            : { data: [installRow({ plugin_id: "a" }), installRow({ plugin_id: "b" })], error: null }
+          : { data: [], error: null },
+    });
+    const { result } = renderHook(() => useMyInstalls(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.rows?.length).toBe(2));
+    fail = true;
+    act(() => result.current.refetch());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.rows?.map((r) => r.plugin_id)).toEqual(["a", "b"]);
+    act(() => result.current.forget("a"));
+    expect(result.current.rows?.map((r) => r.plugin_id)).toEqual(["b"]);
+  });
+});
