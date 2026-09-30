@@ -55,8 +55,16 @@ follow [semver](https://semver.org/).
   every step of the submit wizard: what the sandbox blocks and why, what each
   permission actually grants, how review works, and what to do after a rejection.
 
+### Changed
+
+- Marketplace: while self-serve publishing is new, plugin review is done by the
+  owner role only, and owners can approve their own submissions. Everyone else
+  still needs an independent reviewer.
+
 ### Fixed
 
+- Marketplace: a plugin's owning subteam shows by name everywhere instead of as
+  an internal id.
 - Marketplace: a plugin whose only release was yanked no longer disappears from
   Installed. It stays openable and uninstallable, marked as pulled by its author.
 - Marketplace: the plugin check now fails a normal multi-file build (a separate
