@@ -1,0 +1,81 @@
+{
+ "duty_cycles": {
+  "josh_0426": {
+   "below4k": 0.09724066696178248
+  }
+ },
+ "tiers": [
+  {
+   "tier": "T1 static, same envelope (runner <= as-built, plenum <= 1.44 L)",
+   "robust": {
+    "design": "0.75 L plenum, runner 248 mm above flange (+0)",
+    "worst": NaN,
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   },
+   "best_p1": {
+    "design": "0.75 L plenum, runner 248 mm above flange (+0)",
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   }
+  },
+  {
+   "tier": "T2 static, +40 mm reach, plenum <= 2.0 L",
+   "robust": {
+    "design": "0.75 L plenum, runner 288 mm above flange (+40)",
+    "worst": NaN,
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   },
+   "best_p1": {
+    "design": "0.75 L plenum, runner 288 mm above flange (+40)",
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   }
+  },
+  {
+   "tier": "T3 VRLI in a 1.44 L box, reach <= as-built, stroke <= 100",
+   "robust": {
+    "design": "0.75 L box, runner 223-248 mm (25 stroke)",
+    "worst": NaN,
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   },
+   "best_p1": {
+    "design": "0.75 L box, runner 223-248 mm (25 stroke)",
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   }
+  },
+  {
+   "tier": "T4 VRLI in a 2.0 L box, reach <= +40 mm, stroke <= 150",
+   "robust": {
+    "design": "0.75 L box, runner 263-288 mm (25 stroke)",
+    "worst": NaN,
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   },
+   "best_p1": {
+    "design": "0.75 L box, runner 263-288 mm (25 stroke)",
+    "P1 6-12k": NaN,
+    "driver 7-10.5k": NaN,
+    "josh_0426": NaN,
+    "josh_0426 shift4": NaN
+   }
+  }
+ ]
+}
