@@ -325,6 +325,23 @@ pub struct SDM26Config {
     /// 1.4 / 287 → parity.
     pub exhaust_gas_gamma: f64,
     pub exhaust_gas_r: f64,
+    /// Finding 0037 (VRLI): telescoping-trumpet runner length change (m),
+    /// applied at the plenum MOUTH as a constant-diameter section at the
+    /// mouth diameter. Positive lengthens, negative shortens (trims the
+    /// mouth end of the profile); the port / taper end is untouched and
+    /// the end correction stays at the (new) mouth. Same value for every
+    /// runner (one carrier plate moves all trumpets). 0 → parity.
+    pub runner_mouth_extension: f64,
+    /// Finding 0037 (VRLI): trumpet outer diameter (m) for plenum volume
+    /// displacement. Runner length beyond `vrli_displacement_ref` protrudes
+    /// into the plenum and removes n_cyl·(π/4)·OD²·(ext − ref) from it
+    /// (cross-sections scaled uniformly). 0 → no displacement (parity).
+    pub vrli_trumpet_od: f64,
+    /// Finding 0037: extension (m) at which the trumpet mouth sits at the
+    /// plenum floor, i.e. zero displaced volume. Default 0 = the config's
+    /// own runner mouth. Shorter runners (ext < ref) give no volume back:
+    /// the plenum envelope is fixed (VRLI requirement C3).
+    pub vrli_displacement_ref: f64,
     /// Damping audit: multipliers on the pipe wall-friction (Blasius) and
     /// wall heat-transfer (Dittus-Boelter) source terms, every pipe.
     /// Diagnostic knobs; 1.0 → parity, 0.0 disables the term.
@@ -617,6 +634,9 @@ impl Default for SDM26Config {
             exhaust_merge_angle_deg: 10.0,
             exhaust_gas_gamma: 1.4,
             exhaust_gas_r: 287.0,
+            runner_mouth_extension: 0.0,
+            vrli_trumpet_od: 0.0,
+            vrli_displacement_ref: 0.0,
             pipe_friction_multiplier: 1.0,
             pipe_heat_transfer_multiplier: 1.0,
             exhaust_heat_transfer_multiplier: 1.0,
@@ -883,6 +903,67 @@ impl SDM26Config {
         let (_, d_in, _, _, _) = self.runner_spec(i);
         FLANGED_END_CORRECTION * 0.5 * d_in
     }
+    /// Finding 0037: resolve the VRLI knobs into plain geometry.
+    ///
+    /// Returns the config with `runner_mouth_extension` baked into the
+    /// runner profiles / lengths (cell count scaled with length) and the
+    /// knobs zeroed (so resolving again is a no-op), plus the plenum
+    /// cross-section scale factor for trumpet displacement (1.0 = none).
+    /// With both knobs at 0 the config is returned unchanged.
+    pub fn resolve_vrli(&self) -> (SDM26Config, f64) {
+        let ext = self.runner_mouth_extension;
+        let mut out = self.clone();
+        out.runner_mouth_extension = 0.0;
+        out.vrli_trumpet_od = 0.0;
+        out.vrli_displacement_ref = 0.0;
+        if ext == 0.0 && self.vrli_trumpet_od == 0.0 {
+            return (out, 1.0);
+        }
+        let n = self.n_cylinders;
+        if ext != 0.0 {
+            let mut lens = Vec::with_capacity(n);
+            let mut profs = Vec::with_capacity(n);
+            for i in 0..n {
+                let (l, d_in, d_out, _, _) = self.runner_spec(i);
+                // Profile as actually built: stretched to the pipe length.
+                let base: Vec<(f64, f64)> = match self.runner_profile(i) {
+                    Some(p) => {
+                        let s = l / p[p.len() - 1].0.max(1e-20);
+                        p.iter().map(|&(x, d)| (x * s, d)).collect()
+                    }
+                    None => vec![(0.0, d_in), (l, d_out)],
+                };
+                let (l2, prof) = if ext > 0.0 {
+                    let mut v = vec![(0.0, base[0].1)];
+                    v.extend(base.iter().map(|&(x, d)| (x + ext, d)));
+                    (l + ext, v)
+                } else {
+                    let e = (-ext).min(l - 0.05);
+                    let mut v = vec![(0.0, profile_diameter_at(&base, e))];
+                    v.extend(base.iter().filter(|&&(x, _)| x > e + 1e-9).map(|&(x, d)| (x - e, d)));
+                    (l - e, v)
+                };
+                lens.push(l2);
+                profs.push(Some(prof));
+            }
+            let l_mean0: f64 = (0..n).map(|i| self.runner_spec(i).0).sum::<f64>() / n as f64;
+            let l_mean1: f64 = lens.iter().sum::<f64>() / n as f64;
+            out.runner_n_cells = ((self.runner_n_cells as f64) * l_mean1 / l_mean0).round().max(10.0) as usize;
+            out.runner_length = lens[0];
+            out.runner_lengths = Some(lens);
+            out.runner_diameter_profiles = Some(profs);
+        }
+        let mut scale = 1.0;
+        let protrusion = ext - self.vrli_displacement_ref;
+        if self.vrli_trumpet_od > 0.0 && protrusion > 0.0 {
+            let dv = n as f64 * 0.25 * PI * self.vrli_trumpet_od * self.vrli_trumpet_od * protrusion;
+            let v0 = self.plenum_volume;
+            scale = ((v0 - dv) / v0).max(0.2);
+            out.plenum_volume = v0 * scale;
+        }
+        (out, scale)
+    }
+
     fn plenum_spec(&self) -> (f64, f64, usize, f64) {
         let a = self.plenum_volume / self.plenum_length;
         let d = 2.0 * (a / PI).sqrt();
@@ -1011,6 +1092,12 @@ pub struct SDM26Engine {
 
 impl SDM26Engine {
     pub fn new(cfg: SDM26Config, junction_kind: JunctionKind) -> Self {
+        // 0037: bake the VRLI knobs into plain geometry (no-op at defaults).
+        let (cfg, plenum_area_scale) = if cfg.runner_mouth_extension != 0.0 || cfg.vrli_trumpet_od != 0.0 {
+            cfg.resolve_vrli()
+        } else {
+            (cfg, 1.0)
+        };
         let n_cyl = cfg.n_cylinders;
         let mut pipes = Vec::new();
 
@@ -1027,6 +1114,13 @@ impl SDM26Engine {
                 1.4, 287.0, t_plen, 2,
             ),
         };
+        if plenum_area_scale != 1.0 {
+            // 0037: trumpets displace plenum volume; keep the length.
+            for a in plenum.area.iter_mut() { *a *= plenum_area_scale; }
+            for a in plenum.area_f.iter_mut() { *a *= plenum_area_scale; }
+            let s = plenum_area_scale.sqrt();
+            for d in plenum.hydraulic_d.iter_mut() { *d *= s; }
+        }
         set_uniform(&mut plenum, cfg.p_ambient / (287.0 * cfg.t_ambient),
                     0.0, cfg.p_ambient, 0.0);
         pipes.push(plenum);

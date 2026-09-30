@@ -246,6 +246,9 @@ fn set_physics_f64(cfg: &mut SDM26Config, key: &str, v: f64) -> bool {
         "exhaust_merge_angle_deg" => cfg.exhaust_merge_angle_deg = v,
         "exhaust_gas_gamma" => cfg.exhaust_gas_gamma = v,
         "exhaust_gas_r" => cfg.exhaust_gas_r = v,
+        "runner_mouth_extension" => cfg.runner_mouth_extension = v,
+        "vrli_trumpet_od" => cfg.vrli_trumpet_od = v,
+        "vrli_displacement_ref" => cfg.vrli_displacement_ref = v,
         "pipe_friction_multiplier" => cfg.pipe_friction_multiplier = v,
         "pipe_heat_transfer_multiplier" => cfg.pipe_heat_transfer_multiplier = v,
         "exhaust_heat_transfer_multiplier" => cfg.exhaust_heat_transfer_multiplier = v,
@@ -643,6 +646,14 @@ pub fn load_v1_value(data: &Value) -> Result<(SDM26Config, Vec<String>), ConfigL
         if !(cfg.exhaust_gas_gamma > 1.1 && cfg.exhaust_gas_gamma <= 1.67) {
             return Err(ConfigLoadError::Schema(format!(
                 "physics.exhaust_gas_gamma must be in (1.1, 1.67]; got {}", cfg.exhaust_gas_gamma)));
+        }
+        if !(cfg.vrli_trumpet_od >= 0.0 && cfg.vrli_trumpet_od < 0.2) {
+            return Err(ConfigLoadError::Schema(format!(
+                "physics.vrli_trumpet_od must be in [0, 0.2) m; got {}", cfg.vrli_trumpet_od)));
+        }
+        if !cfg.runner_mouth_extension.is_finite() || cfg.runner_mouth_extension.abs() > 0.5 {
+            return Err(ConfigLoadError::Schema(format!(
+                "physics.runner_mouth_extension must be within ±0.5 m; got {}", cfg.runner_mouth_extension)));
         }
         if !(cfg.exhaust_gas_r > 200.0 && cfg.exhaust_gas_r < 400.0) {
             return Err(ConfigLoadError::Schema(format!(
@@ -1319,6 +1330,102 @@ mod tests {
             d["physics"] = bad.clone();
             assert!(load_v1_value(&d).is_err(), "{bad}");
         }
+    }
+
+    use crate::model::sdm26::{JunctionKind, SDM26Engine};
+
+    fn asbuilt_cal() -> SDM26Config {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json");
+        load_v1_json_with_warnings(p.to_str().unwrap()).unwrap().0
+    }
+
+    #[test]
+    fn vrli_defaults_are_a_no_op() {
+        let cfg = asbuilt_cal();
+        let (r, s) = cfg.resolve_vrli();
+        assert_eq!(s, 1.0);
+        assert_eq!(format!("{r:?}"), format!("{cfg:?}"));
+    }
+
+    #[test]
+    fn vrli_mouth_extension_prepends_a_mouth_section_and_trims() {
+        // Finding 0037: telescoping trumpet = constant-diameter section at
+        // the plenum mouth; the port / taper end must not move or stretch.
+        let base = asbuilt_cal();
+        let (l0, d0_in, d0_out, n0, _) = base.runner_spec(0);
+        let mut c = base.clone();
+        c.runner_mouth_extension = 0.05;
+        let (r, s) = c.resolve_vrli();
+        assert_eq!(s, 1.0);
+        let (l1, d1_in, d1_out, n1, _) = r.runner_spec(2);
+        assert!((l1 - (l0 + 0.05)).abs() < 1e-12);
+        assert_eq!((d1_in, d1_out), (d0_in, d0_out));
+        let p = r.runner_profile(2).unwrap();
+        assert_eq!(p[0], (0.0, d0_in));
+        assert!((p[1].0 - 0.05).abs() < 1e-12 && p[1].1 == d0_in);
+        // the 36 mm taper end sits 0.05 further downstream
+        let p0 = base.runner_profile(2).unwrap();
+        assert!((p[2].0 - (p0[1].0 * l0 / p0[p0.len() - 1].0 + 0.05)).abs() < 1e-12);
+        assert_eq!(n1, ((n0 as f64) * l1 / l0).round() as usize);
+        // idempotent: the knobs are baked in and zeroed
+        let (r2, s2) = r.resolve_vrli();
+        assert_eq!((format!("{r2:?}"), s2), (format!("{r:?}"), 1.0));
+
+        let mut c = base.clone();
+        c.runner_mouth_extension = -0.05;
+        let (r, _) = c.resolve_vrli();
+        let (l2, d2_in, d2_out, _, _) = r.runner_spec(0);
+        assert!((l2 - (l0 - 0.05)).abs() < 1e-12);
+        let expect_mouth = 0.040 - 0.004 * 0.05 / 0.2481;
+        assert!((d2_in - expect_mouth).abs() < 1e-9, "{d2_in}");
+        assert_eq!(d2_out, d0_out);
+
+        // engine: runner pipe = geometric + end correction at the new mouth
+        let mut c = base.clone();
+        c.runner_mouth_extension = 0.08;
+        let eng = SDM26Engine::new(c, JunctionKind::Characteristic);
+        let rp = &eng.pipes[eng.runner_idx[1]];
+        let delta = eng.cfg.runner_end_correction(1);
+        assert!((rp.dx * rp.n_cells as f64 - (l0 + 0.08 + delta)).abs() < 1e-9);
+        let dia = |a: f64| (4.0 * a / std::f64::consts::PI).sqrt();
+        assert!((dia(rp.area[rp.n_ghost + 2]) - 0.040).abs() < 1e-12);
+    }
+
+    #[test]
+    fn vrli_trumpets_displace_plenum_volume() {
+        let base = asbuilt_cal();
+        let plen_vol = |e: &SDM26Engine| {
+            let p = &e.pipes[e.plenum_idx];
+            (p.n_ghost..p.n_ghost + p.n_cells).map(|i| p.area[i] * p.dx).sum::<f64>()
+        };
+        let v_base = plen_vol(&SDM26Engine::new(base.clone(), JunctionKind::Characteristic));
+        let mut c = base.clone();
+        c.runner_mouth_extension = 0.10;
+        c.vrli_trumpet_od = 0.044;
+        let dv = 4.0 * 0.25 * std::f64::consts::PI * 0.044 * 0.044 * 0.10;
+        let e = SDM26Engine::new(c.clone(), JunctionKind::Characteristic);
+        assert!((plen_vol(&e) - v_base * (1.0 - dv / base.plenum_volume)).abs() < 1e-9);
+        assert!((e.cfg.plenum_volume - (base.plenum_volume - dv)).abs() < 1e-12);
+        // shorter than the reference: no volume given back
+        c.runner_mouth_extension = -0.03;
+        let e = SDM26Engine::new(c.clone(), JunctionKind::Characteristic);
+        assert!((plen_vol(&e) - v_base).abs() < 1e-12);
+        // displacement counted from the reference position
+        c.runner_mouth_extension = 0.10;
+        c.vrli_displacement_ref = 0.04;
+        let e = SDM26Engine::new(c, JunctionKind::Characteristic);
+        assert!((plen_vol(&e) - v_base * (1.0 - 0.6 * dv / base.plenum_volume)).abs() < 1e-9);
+        // bad inputs are schema errors
+        let mut d = base_value_asbuilt();
+        d["physics"]["vrli_trumpet_od"] = serde_json::json!(-0.01);
+        assert!(load_v1_value(&d).is_err());
+    }
+
+    fn base_value_asbuilt() -> Value {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources/cfd/configs/sdm26_asbuilt_cal.json");
+        serde_json::from_str(&fs::read_to_string(p).unwrap()).unwrap()
     }
 
     #[test]
