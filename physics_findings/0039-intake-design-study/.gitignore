@@ -2,3 +2,6 @@ driver/target/
 __pycache__/
 *.log
 runner.pid
+data/josh_raw/
+data/ld_raw/
+data/ld_traces/

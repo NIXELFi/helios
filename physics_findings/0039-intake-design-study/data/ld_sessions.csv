@@ -1,0 +1,41 @@
+session,class,dur_s,rpm_max,gear_upshifts,gear_upshift_median_drop_rpm,gear_upshifts_wot,ratio_median,ratio_frac_within_8pct,ratio_upshifts,ratio_upshifts_wot,ratio_upshift_median_drop_rpm,wot_rpm_drops,wot_rpm_drops_flat,onthr_s,p25,median,p75,pct_3k_6k,pct_6k_10k,pct_10k_12.5k,pct_12.5k_up,shifting,used
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__41,autocross,354.6,1.102e+04,0,,0,105.4,0.8819,0,0,,12,0,50.98,4759,6063,7522,48.29,45.31,6.395,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__42,autocross,141.3,1.117e+04,0,,0,104.9,0.8841,0,0,,4,0,13.46,4664,6297,7621,40.86,53.79,5.349,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__43,autocross,236.4,1.226e+04,0,,0,104.7,0.8482,0,0,,11,1,27.54,5335,6495,8653,36.02,55.85,8.134,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__44,autocross,444.6,1.226e+04,0,,0,105.3,0.9092,0,0,,4,0,15.2,4248,5843,7752,52.5,42.76,4.737,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__46,autocross,506.3,1.186e+04,0,,0,105.4,0.942,0,0,,1,0,20,4394,5336,6723,63.5,35.8,0.7,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Diego_+_Matt.R__driver_tryout_4_16__47,autocross,364.9,1.191e+04,0,,0,105.1,0.9154,0,0,,5,2,53.44,4498,5816,7154,54,44.39,1.609,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Josh__driver_tryout_4_16__59,autocross,398.3,1.358e+04,0,,0,104.8,0.8581,0,0,,7,1,35.66,4790,6005,7521,49.86,44.64,3.646,1.851,no upshifts (single gear),True
+4-16-26_DriverSelection__Josh__driver_tryout_4_16__60,autocross,154.2,1.247e+04,0,,0,105,0.8498,0,0,,2,0,17.84,4882,5844,7414,53.36,41.48,5.157,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Josh__driver_tryout_4_16__61,autocross,79.64,1.407e+04,0,,0,104.1,0.7589,0,0,,2,0,8.38,5092,6052,8643,47.73,41.05,6.444,4.773,no upshifts (single gear),True
+4-16-26_DriverSelection__Kaden__driver_tryout_4_16__57,autocross,591.1,1.292e+04,0,,0,105.3,0.8323,1,1,4882,12,2,79.32,4378,5162,6834,65.51,31.82,2.496,0.1765,WOT upshifts OK,True
+4-16-26_DriverSelection__Matt.M__driver_tryout_4_16__73,autocross,634.8,1.432e+04,0,,0,104.6,0.7818,0,0,,5,1,26.76,4018,4951,6563,65.99,27.5,2.765,3.737,no upshifts (single gear),True
+4-16-26_DriverSelection__Matt.M__driver_tryout_4_16__74,autocross,38.52,7755,0,,0,,,0,0,,0,0,0,,,,,,,,no upshifts (single gear),False
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__26,autocross,285.2,9359,0,,0,86.15,0.9692,0,0,,0,0,7.14,6286,6888,7775,12.61,87.39,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__29,autocross,357.2,7828,0,,0,106.1,0.9513,0,0,,0,0,12.74,4248,4911,5989,75.04,24.96,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__32,autocross,190.1,7705,0,,0,106.6,0.9384,0,0,,0,0,4.22,4351,5113,6173,69.19,30.81,0,0,no upshifts (single gear),False
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__34,autocross,262.1,8365,0,,0,107.9,0.9559,0,0,,0,0,1.36,3497,4049,4570,100,0,0,0,no upshifts (single gear),False
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__35,autocross,159.3,9854,0,,0,105.8,0.957,0,0,,2,0,22.8,4209,5222,6373,65,35,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__36,autocross,59.08,8679,0,,0,107.8,1,0,0,,0,0,1.1,3772,4368,4946,100,0,0,0,no upshifts (single gear),False
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__37,autocross,56.5,8092,0,,0,107,0.9656,0,0,,0,0,5.82,4108,4982,5841,78.35,21.65,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Matt.S__driver_tryout_4_16__38,autocross,82.2,8467,0,,0,105.9,0.9388,0,0,,0,0,7.84,3745,4531,5717,79.08,20.92,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__65,autocross,783.8,8926,0,,0,105.5,0.9038,0,0,,0,0,8.52,4533,5318,6414,63.62,36.38,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__66,autocross,210.7,8902,0,,0,104.9,0.8611,0,0,,0,0,17.86,4154,4759,5790,81.97,18.03,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__67,autocross,95.06,9175,0,,0,105.5,0.8815,0,0,,1,0,8.78,4383,5897,6800,53.08,46.92,0,0,no upshifts (single gear),True
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__69,autocross,77.06,7296,0,,0,,,0,0,,0,0,0,,,,,,,,no upshifts (single gear),False
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__70,autocross,143.9,8219,0,,0,103.6,0.9474,0,0,,0,0,1.14,3328,3496,3709,100,0,0,0,no upshifts (single gear),False
+4-16-26_DriverSelection__Sarah__driver_tryout_4_16__72,autocross,74.5,1.05e+04,0,,0,104.3,0.8541,0,0,,1,0,13.16,4114,4758,5989,75.08,23.71,1.216,0,no upshifts (single gear),True
+4-19-26_MockEndurance__Diego__endurance3,endurance,244.1,1.102e+04,6,1274,0,135.4,0.7163,0,0,,1,0,4.3,5814,6646,7306,31.16,60.47,8.372,0,gear-channel increments without ratio change (flicker or failed shifts),False
+4-19-26_MockEndurance__Diego__endurance4,endurance,819.8,1.195e+04,5,1173,0,147.4,0.9875,0,0,,9,0,12.8,9383,1.008e+04,1.066e+04,0,47.34,52.66,0,gear-channel increments without ratio change (flicker or failed shifts),True
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__208,endurance,352.1,1.428e+04,1,1312,0,122.1,0.9326,0,0,,1,0,8.9,5485,6492,7142,34.38,65.62,0,0,no upshifts (single gear),True
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__209,endurance,38.52,1.087e+04,1,1392,0,148.4,0.9257,0,0,,1,0,2.96,6489,7918,1.025e+04,7.432,64.19,28.38,0,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__210,endurance,82.2,1.074e+04,2,1274,0,148.5,0.9186,0,0,,2,0,3.44,6451,7214,9563,9.302,77.91,12.79,0,gear-channel increments without ratio change (flicker or failed shifts),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__214,endurance,74.5,8485,0,,0,,,0,0,,0,0,0,,,,,,,,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__215,endurance,30.8,1.05e+04,0,,0,,,0,0,,0,0,0,,,,,,,,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__217,endurance,128.5,1.127e+04,0,,0,147.8,0.9581,0,0,,0,0,3.82,9392,9917,1.03e+04,0,57.07,42.93,0,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__218,endurance,66.78,1.125e+04,0,,0,146.4,0.8593,0,0,,2,0,5.4,8224,9916,1.024e+04,0,53.7,46.3,0,no upshifts (single gear),True
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__219,endurance,92.48,1.135e+04,1,1022,0,146.6,0.9363,0,0,,2,0,5.02,9062,1.007e+04,1.05e+04,0,49.4,50.6,0,no upshifts (single gear),True
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__221,endurance,61.64,1.114e+04,0,,0,132.7,0.6423,0,0,,1,0,2.74,4395,5120,9655,67.15,10.95,21.9,0,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__222,endurance,123.3,1.174e+04,1,759,1,134,0.5779,0,0,,1,0,3.98,4390,8340,9967,49.25,26.63,24.12,0,no upshifts (single gear),False
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__223,endurance,113,1.12e+04,0,,0,139.2,0.8318,0,0,,3,1,10.94,7380,8412,9028,0.9141,89.58,9.506,0,no upshifts (single gear),True
+4-19-26_MockEndurance__Josh__driver_tryout_4_16__224,endurance,190.1,1.05e+04,1,0,0,134,0.8945,0,0,,0,0,5.5,6202,7275,7740,24.73,75.27,0,0,no upshifts (single gear),True
