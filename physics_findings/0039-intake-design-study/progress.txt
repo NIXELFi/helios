@@ -1,1 +1,1 @@
-2026-09-30 16:15 grid rows 4709 (of ~4540 + retries), tip-in rows 0/92
+2026-09-30 16:36 grid rows 177 (of 3168), tip-in rows 0/92
