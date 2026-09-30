@@ -109,6 +109,14 @@ describe("marketplace publish-UI migration", () => {
     expect(bodyOf("review_plugin_version")).toMatch(/name = coalesce\(/);
   });
 
+  it("puts the approved name back after a yank", () => {
+    expect(bodyOf("yank_plugin_version")).toMatch(/name = coalesce\(/);
+  });
+
+  it("refuses to wrap someone else's unpublished upload in a version", () => {
+    expect(bodyOf("publish_plugin_version")).toMatch(/was uploaded by someone else/);
+  });
+
   it("lets uploaders read their own objects by owner or owner_id", () => {
     expect(SQL).toMatch(/owner = auth\.uid\(\) or owner_id = auth\.uid\(\)::text/);
   });

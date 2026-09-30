@@ -239,8 +239,8 @@ export function preflight(
       code: "unscanned",
       title: isEntry ? "Your entry page is too large to check" : "A file is too large to check",
       detail:
-        "The check reads every script and page in the bundle, but this file is over 16 MB, so it was " +
-        "not read and nothing here can vouch for it. " +
+        "The check reads every script and page in the bundle, but this file could not be read in full " +
+        "(it is over 16 MB, or the bundle's text passed the 200 MB total), so nothing here can vouch for it. " +
         (isEntry
           ? "Since the entry page is what runs, it has to be checked: trim what the build inlines " +
             "(unused libraries, embedded data) until it is under 16 MB."

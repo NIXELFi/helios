@@ -266,6 +266,12 @@ begin
           where pv.plugin_id = p_plugin_id and pv.review_status = 'approved'
           order by pv.published_at desc limit 1
         ),
+        -- Same rule as review: the name follows the newest approved version.
+        name = coalesce((
+          select pv.manifest->>'name' from marketplace.plugin_versions pv
+          where pv.plugin_id = p_plugin_id and pv.review_status = 'approved'
+          order by pv.published_at desc limit 1
+        ), p.name),
         updated_at = now()
     where p.id = p_plugin_id;
 
@@ -547,6 +553,7 @@ declare
   v_sig     record;
   v_msg     bytea;
   v_stored  bigint;
+  v_owner   text;
 begin
   if v_uid is null then
     raise exception 'authentication required';
@@ -582,12 +589,22 @@ begin
   -- which bundles exist in the private bucket.
   -- The bytes must already be uploaded. Storage records the object size in
   -- metadata; when it is there it must match what the version will claim.
-  select coalesce((o.metadata->>'size')::bigint, -1) into v_stored
+  select coalesce((o.metadata->>'size')::bigint, -1),
+         coalesce(o.owner::text, o.owner_id)
+    into v_stored, v_owner
   from storage.objects o
   where o.bucket_id = 'plugins' and o.name = lower(p_sha256)
   limit 1;
   if not found then
     raise exception 'bundle % is not in storage; upload it before publishing', lower(p_sha256);
+  end if;
+  -- Point a version only at bytes the caller uploaded, or bytes an existing
+  -- version already uses. Otherwise a publisher who learned another subteam's
+  -- unapproved sha could wrap it in their own pending version and read it.
+  -- (Objects with no recorded owner predate uploads from the app; allowed.)
+  if v_owner is not null and v_owner <> v_uid::text
+     and not exists (select 1 from marketplace.plugin_versions pv where pv.bundle_sha256 = lower(p_sha256)) then
+    raise exception 'bundle % was uploaded by someone else; upload your own build', lower(p_sha256);
   end if;
   if v_stored <> -1 and v_stored <> p_bytes then
     raise exception 'bundle % in storage is % bytes, not %', lower(p_sha256), v_stored, p_bytes;

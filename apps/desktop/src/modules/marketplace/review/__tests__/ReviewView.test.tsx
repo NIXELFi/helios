@@ -242,7 +242,7 @@ describe("ReviewView", () => {
         report: {
           ...CLEAN_REPORT,
           ok: false,
-          errors: [{ level: "error", code: "manifest-drift", title: "drift", detail: "", helpTopic: "review" }],
+          errors: [{ level: "error", code: "forbidden-api", title: "fetch", detail: "", helpTopic: "network" }],
         },
       },
     };
@@ -258,5 +258,28 @@ describe("ReviewView", () => {
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
     expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
     expect(screen.queryByText(/loading the review queue/i)).not.toBeInTheDocument();
+  });
+
+  it("never lets a note override manifest drift", () => {
+    state.reports = {
+      "aero.test@1.2.0": {
+        report: {
+          ...CLEAN_REPORT,
+          ok: false,
+          errors: [{ level: "error", code: "manifest-drift", title: "drift", detail: "", helpTopic: "review" }],
+        },
+      },
+    };
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/review notes/i), { target: { value: "looks fine" } });
+    const approve = screen.getByRole("button", { name: /^approve$/i }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByText(/does not match what was submitted, so it cannot be approved/i)).toBeInTheDocument();
+  });
+
+  it("shows the submitted name and flags a rename", () => {
+    state.queue = [{ ...ITEM, name: "Old Name" }];
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText(/renames “old name”/i)).toBeInTheDocument();
   });
 });

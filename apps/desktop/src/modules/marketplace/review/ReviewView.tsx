@@ -179,9 +179,15 @@ function ReviewCard({
   const busy = inspecting === key || previewing === key || reviewing;
   // Approval is what ships code to members, so it waits for the reviewer's own
   // scan of the uploaded bytes; over blocking findings it needs a written reason.
+  // Manifest drift is never overridable: the bundle is not what was submitted,
+  // and installs/launches would fail for everyone. Other blocking findings can
+  // be approved over with a written reason (scanner false positives happen).
+  const drifted = scan?.report.errors.some((e) => e.code === "manifest-drift") ?? false;
   const approveBlockedReason = !scan
     ? "Scan the uploaded bundle first"
-    : !scan.report.ok && notes.trim().length === 0
+    : drifted
+      ? "The uploaded bundle does not match what was submitted, so it cannot be approved: reject it"
+      : !scan.report.ok && notes.trim().length === 0
       ? "The scan has blocking findings: write a note saying why you are approving anyway"
       : null;
 
@@ -209,9 +215,14 @@ function ReviewCard({
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-helios-text">
-            {item.name}{" "}
+            {item.manifest.name || item.name}{" "}
             <span className="font-mono text-xs font-normal text-helios-dim">{item.version}</span>
           </h3>
+          {item.manifest.name && item.manifest.name !== item.name && (
+            <p className="mt-0.5 text-[10px] text-asu-gold">
+              Renames “{item.name}” — approving changes the name everyone sees.
+            </p>
+          )}
           <p className="mt-0.5 truncate font-mono text-[10px] text-helios-dim">{item.pluginId}</p>
         </div>
         <span className="shrink-0 rounded-sm bg-asu-gold/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-asu-gold">
@@ -299,6 +310,7 @@ function ReviewCard({
                 {scan.report.warnings.map((f, i) => (
                   <li key={i} className="text-[11px] text-helios-dim">
                     {f.title}
+                    {f.path && <span className="ml-1.5 font-mono text-[10px]">{f.path}</span>}
                   </li>
                 ))}
               </ul>
@@ -444,7 +456,7 @@ function ReviewCard({
                 ) : (
                   <IconThumbUp size={13} />
                 )}
-                {scan && !scan.report.ok ? "Approve anyway" : "Approve"}
+                {scan && !scan.report.ok && !drifted ? "Approve anyway" : "Approve"}
               </button>
             </div>
           </>

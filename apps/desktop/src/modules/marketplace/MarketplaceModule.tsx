@@ -267,21 +267,24 @@ export function MarketplaceModule() {
   if (builtIn) {
     return <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />;
   }
-  if (launch) {
-    return (
-      <PluginStage
-        plugin={launch}
-        preview={launchIsPreview}
-        onBack={() => {
-          setLaunch(null);
-          setLaunchIsPreview(false);
-        }}
-      />
-    );
-  }
+  // A running add-on covers the module instead of replacing it: the tabs stay
+  // mounted underneath, so a reviewer who opens a preview comes back to the same
+  // card with their scan and notes intact.
+  const stage = launch ? (
+    <PluginStage
+      plugin={launch}
+      preview={launchIsPreview}
+      onBack={() => {
+        setLaunch(null);
+        setLaunchIsPreview(false);
+      }}
+    />
+  ) : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-helios-base">
+    <>
+    {stage}
+    <div className={launch ? "hidden" : "h-full overflow-y-auto bg-helios-base"}>
       <div className="mx-auto max-w-4xl px-6 py-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -424,18 +427,23 @@ export function MarketplaceModule() {
                 onAdd={() => setWizardOpen(true)}
                 onChanged={refetch}
               />
-            ) : (
-              <ReviewView
-                reloadToken={reloadToken}
-                available={plugins}
-                installed={installed}
-                onHelp={help.openHelp}
-                onPreviewInstalled={refetch}
-                onOpenPreview={openPreview}
-                onDecided={refetch}
-              />
-            )}
+            ) : null}
           </>
+        )}
+        {/* Review stays mounted (hidden) across tab switches and the detail
+            page, so an in-progress review keeps its scan and notes. */}
+        {canReview && (
+          <div hidden={detail !== null || tab !== "review"}>
+            <ReviewView
+              reloadToken={reloadToken}
+              available={plugins}
+              installed={installed}
+              onHelp={help.openHelp}
+              onPreviewInstalled={refetch}
+              onOpenPreview={openPreview}
+              onDecided={refetch}
+            />
+          </div>
         )}
       </div>
 
@@ -470,6 +478,7 @@ export function MarketplaceModule() {
         />
       )}
     </div>
+    </>
   );
 }
 

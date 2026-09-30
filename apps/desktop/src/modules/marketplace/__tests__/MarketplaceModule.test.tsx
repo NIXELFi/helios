@@ -43,6 +43,11 @@ vi.mock("../../org/data/useOrgData", () => ({
   useSubteams: () => ({ data: [], refetch: () => {} }),
 }));
 
+// The running-add-on stage reads the member and mounts the sandbox iframe;
+// neither exists in jsdom, and neither is what these tests are about.
+vi.mock("@helios/auth", () => ({ useUser: () => ({ id: "u1" }) }));
+vi.mock("../runtime/PluginHost", () => ({ PluginHost: () => <div data-testid="plugin-host" /> }));
+
 const loader = vi.hoisted(() => ({ version: "1.0.0" }));
 vi.mock("../runtime/loader", () => ({
   installedBaseUrl: (id: string) => `plugin://${id}`,
@@ -157,5 +162,16 @@ describe("MarketplaceModule — opening an installed add-on", () => {
     fireEvent.click(screen.getByRole("button", { name: /installed/i }));
     fireEvent.click(screen.getByRole("button", { name: /^open$/i }));
     expect(await screen.findByText(/this computer has v1\.0\.0, not v1\.2\.0/i)).toBeTruthy();
+  });
+
+  it("covers the module with a running add-on instead of unmounting the tabs", async () => {
+    loader.version = "1.2.0";
+    mocks.state.plugins = [makePlugin({ id: "m", name: "M", installedVersion: "1.2.0", version: "1.2.0" })];
+    render(<MarketplaceModule />);
+    fireEvent.click(screen.getByRole("button", { name: /installed/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^open$/i }));
+    // The stage is up, and the tab bar is still in the DOM underneath it.
+    await screen.findByTestId("plugin-host");
+    expect(screen.getByRole("button", { name: /^browse$/i, hidden: true })).toBeTruthy();
   });
 });
