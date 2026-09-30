@@ -149,15 +149,20 @@ pub struct DesignResult {
     pub lmax_mm: f64,
     /// P1: band-average gain vs the fixed baseline, quasi-steady map.
     pub p1_gain: f64,
-    /// P1 with the actuator rate limit at `sweep_rate_rpm_s` (1st-gear WOT).
+    /// Upper bound at `sweep_rate_rpm_s`: the best position schedule an
+    /// actuator of speed stroke/full_stroke_time can follow (DP).
     pub p1_gain_rate_limited: f64,
-    /// P1 with the rate-limited map quantised to the F3 resolution.
+    /// P1 of the ECU table (quasi-steady optimum quantised to F3), i.e. a
+    /// slow (dyno-like) sweep.
     pub p1_gain_quantised: f64,
+    /// P1 when the plate chases the ECU table at full actuator speed during
+    /// an up-sweep at `sweep_rate_rpm_s` (what the car does in that gear).
+    pub p1_gain_follow: f64,
     /// Driver band (7-10.5k) average gain, quasi-steady.
     pub driver_gain: f64,
-    /// P2: min over the band of VRLI / max(fixed short, fixed long),
-    /// for the rate-limited schedule (the quasi-steady envelope is ≥ 1 by
-    /// construction).
+    /// P2: min over the band of VRLI / max(fixed short, fixed long) for the
+    /// plate chasing the ECU table at `sweep_rate_rpm_s` (the quasi-steady
+    /// envelope is ≥ 1 by construction).
     pub p2_ratio: f64,
     pub p2_rpm: f64,
     /// Best single fixed position inside the stroke (fail-safe length).
@@ -182,7 +187,25 @@ pub struct Schedule {
     pub rpm: Vec<f64>,
     pub quasi_steady_mm: Vec<f64>,
     pub rate_limited_mm: Vec<f64>,
+    /// The ECU table: quasi-steady optimum quantised to F3.
     pub quantised_mm: Vec<f64>,
+    /// Plate position chasing the table during an up-sweep.
+    pub follow_mm: Vec<f64>,
+}
+
+/// Plate chasing a static rpm -> position table during an up-sweep at
+/// `sweep_rpm_s`, moving at most `vmax_mm_s` toward the table value.
+pub fn follow_table(rpm: &[f64], table: &[f64], vmax_mm_s: f64, sweep_rpm_s: f64) -> Vec<f64> {
+    let mut p = Vec::with_capacity(table.len());
+    let mut x = table[0];
+    p.push(x);
+    for j in 1..table.len() {
+        let reach = vmax_mm_s * (rpm[j] - rpm[j - 1]) / sweep_rpm_s;
+        let d = table[j] - x;
+        x += d.clamp(-reach, reach);
+        p.push(x);
+    }
+    p
 }
 
 fn positions(a: f64, stroke: f64, step: f64) -> Vec<f64> {
@@ -270,15 +293,17 @@ pub fn evaluate(s: &Surface, spec: &DesignSpec, a: f64, stroke: f64) -> (DesignR
     let ones = vec![1.0; nr];
     let (rl_v, rl_p) = rate_limited(s, a, stroke, spec.position_step_mm, vmax, spec.sweep_rate_rpm_s, &ones);
     let q = spec.f3_resolution_mm.max(1e-9);
-    let qp: Vec<f64> = rl_p.iter().map(|&p| (a + ((p - a) / q).round() * q).clamp(a, a + stroke)).collect();
+    let qp: Vec<f64> = env_p.iter().map(|&p| (a + ((p - a) / q).round() * q).clamp(a, a + stroke)).collect();
     let q_v: Vec<f64> = (0..nr).map(|j| s.at(qp[j], j)).collect();
+    let fp = follow_table(&s.rpm, &qp, vmax, spec.sweep_rate_rpm_s);
+    let f_v: Vec<f64> = (0..nr).map(|j| s.at(fp[j], j)).collect();
 
     // P2 against this design's own fixed ends, over the band.
     let (mut p2, mut p2_rpm) = (f64::INFINITY, f64::NAN);
     for j in 0..nr {
         if wb[j] > 0.0 {
             let ends = s.at(a, j).max(s.at(a + stroke, j));
-            let r = rl_v[j] / ends;
+            let r = f_v[j] / ends;
             if r < p2 {
                 p2 = r;
                 p2_rpm = s.rpm[j];
@@ -314,6 +339,7 @@ pub fn evaluate(s: &Surface, spec: &DesignSpec, a: f64, stroke: f64) -> (DesignR
         p1_gain: Surface::mean(&env_v, &wb) / base_band - 1.0,
         p1_gain_rate_limited: Surface::mean(&rl_v, &wb) / base_band - 1.0,
         p1_gain_quantised: Surface::mean(&q_v, &wb) / base_band - 1.0,
+        p1_gain_follow: Surface::mean(&f_v, &wb) / base_band - 1.0,
         driver_gain: Surface::mean(&env_v, &wd) / base_drv - 1.0,
         p2_ratio: p2,
         p2_rpm,
@@ -327,7 +353,7 @@ pub fn evaluate(s: &Surface, spec: &DesignSpec, a: f64, stroke: f64) -> (DesignR
         feasible_mass: mass <= spec.mass.limit_kg + 1e-12,
         feasible_packaging: protrusion <= spec.max_protrusion_mm + 1e-9,
     };
-    let sched = Schedule { rpm: s.rpm.clone(), quasi_steady_mm: env_p, rate_limited_mm: rl_p, quantised_mm: qp };
+    let sched = Schedule { rpm: s.rpm.clone(), quasi_steady_mm: env_p, rate_limited_mm: rl_p, quantised_mm: qp, follow_mm: fp };
     (r, sched)
 }
 
@@ -464,6 +490,7 @@ mod tests {
             last = b.p1_gain;
             assert!(b.p1_gain_rate_limited <= b.p1_gain + 1e-12);
             assert!(b.p1_gain_quantised <= b.p1_gain + 1e-12);
+            assert!(b.p1_gain_follow <= b.p1_gain_rate_limited + 0.01);
         }
     }
 
@@ -484,6 +511,17 @@ mod tests {
     }
 
     #[test]
+    fn follow_table_is_rate_limited_and_catches_up() {
+        let rpm: Vec<f64> = (0..9).map(|i| 6000.0 + 250.0 * i as f64).collect();
+        let table = vec![0.0, 0.0, 100.0, 100.0, 100.0, 100.0, 100.0, 0.0, 0.0];
+        // 100 mm/s at 6000 rpm/s: 250 rpm = 41.7 ms -> 4.17 mm per step
+        let p = follow_table(&rpm, &table, 100.0, 6000.0);
+        assert!((p[2] - 100.0 / 24.0).abs() < 1e-9);
+        let fast = follow_table(&rpm, &table, 1e6, 6000.0);
+        assert_eq!(fast, table);
+    }
+
+    #[test]
     fn mass_model_matches_the_cdr_estimate() {
         let m = MassModel::default();
         assert!((m.mass(100.0) - 1.02).abs() < 1e-12);
@@ -494,7 +532,7 @@ mod tests {
     #[test]
     fn recommendation_picks_best_feasible_and_knee() {
         let mk = |s: f64, g: f64, m: f64| DesignResult {
-            stroke_mm: s, lmin_mm: 0.0, lmax_mm: s, p1_gain: g, p1_gain_rate_limited: g, p1_gain_quantised: g,
+            stroke_mm: s, lmin_mm: 0.0, lmax_mm: s, p1_gain: g, p1_gain_rate_limited: g, p1_gain_quantised: g, p1_gain_follow: g,
             driver_gain: g, p2_ratio: 1.0, p2_rpm: 0.0, failsafe_mm: 0.0, failsafe_gain: 0.0,
             required_speed_mm_s: 0.0, available_speed_mm_s: 0.0, max_map_jump_mm: 0.0, mass_kg: m,
             protrusion_mm: 0.0, feasible_mass: m <= 1.5, feasible_packaging: true,

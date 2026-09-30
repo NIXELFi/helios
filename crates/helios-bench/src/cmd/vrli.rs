@@ -425,14 +425,22 @@ pub fn execute(args: Args) -> Result<()> {
         let (_, sched) = evaluate(surf, &spec, r.lmin_mm, r.stroke_mm);
         let l0 = base.runner_length * 1000.0;
         let mut f = std::fs::File::create(args.out.join("ecu_map.csv"))?;
-        writeln!(f, "rpm,runner_length_mm,extension_mm,plate_position_mm,quasi_steady_extension_mm,{m}_vrli,{m}_quasi_steady,{m}_fixed_short,{m}_fixed_long,{m}_failsafe,{m}_baseline", m = d.metric)?;
+        // The ECU table is the quasi-steady optimum quantised to F3; the
+        // follow / DP columns show what happens at the design sweep rate.
+        writeln!(
+            f,
+            "rpm,runner_length_mm,extension_mm,plate_position_mm,follow_extension_mm,dp_extension_mm,\
+             {m}_table,{m}_follow,{m}_dp,{m}_fixed_short,{m}_fixed_long,{m}_failsafe,{m}_baseline",
+            m = d.metric
+        )?;
         for j in 0..sched.rpm.len() {
             let e = sched.quantised_mm[j];
             writeln!(
-                f, "{},{:.1},{:.1},{:.1},{:.1},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
-                sched.rpm[j], l0 + e, e, e - r.lmin_mm, sched.quasi_steady_mm[j],
-                surf.at(e, j), surf.at(sched.quasi_steady_mm[j], j), surf.at(r.lmin_mm, j),
-                surf.at(r.lmax_mm, j), surf.at(r.failsafe_mm, j), surf.at(spec.baseline_ext_mm, j),
+                f, "{},{:.1},{:.1},{:.1},{:.1},{:.1},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+                sched.rpm[j], l0 + e, e, e - r.lmin_mm, sched.follow_mm[j], sched.rate_limited_mm[j],
+                surf.at(e, j), surf.at(sched.follow_mm[j], j), surf.at(sched.rate_limited_mm[j], j),
+                surf.at(r.lmin_mm, j), surf.at(r.lmax_mm, j), surf.at(r.failsafe_mm, j),
+                surf.at(spec.baseline_ext_mm, j),
             )?;
         }
     }
@@ -455,11 +463,12 @@ pub fn execute(args: Args) -> Result<()> {
     });
     std::fs::write(args.out.join("recommended.json"), serde_json::to_string_pretty(&summary)?)?;
 
-    println!("stroke  Lmin  Lmax   P1 gain  (rate-lim)  driver   P2     failsafe(gain)   req/avail mm/s  mass  ok");
+    println!("stroke  Lmin  Lmax   P1 table (follow)  (DP bound)  driver   P2     failsafe(gain)   req/avail mm/s  mass  ok");
     for r in &per_stroke {
         println!(
-            "{:5.0} {:6.0} {:5.0}  {:+6.2}%  ({:+6.2}%)  {:+6.2}%  {:.3}  {:5.0} ({:+5.2}%)   {:5.0}/{:<5.0}  {:.2}  {}",
-            r.stroke_mm, r.lmin_mm, r.lmax_mm, 100.0 * r.p1_gain, 100.0 * r.p1_gain_rate_limited,
+            "{:5.0} {:6.0} {:5.0}  {:+6.2}% ({:+6.2}%)  ({:+6.2}%)  {:+6.2}%  {:.3}  {:5.0} ({:+5.2}%)   {:5.0}/{:<5.0}  {:.2}  {}",
+            r.stroke_mm, r.lmin_mm, r.lmax_mm, 100.0 * r.p1_gain_quantised, 100.0 * r.p1_gain_follow,
+            100.0 * r.p1_gain_rate_limited,
             100.0 * r.driver_gain, r.p2_ratio, r.failsafe_mm, 100.0 * r.failsafe_gain,
             r.required_speed_mm_s, r.available_speed_mm_s, r.mass_kg,
             if r.feasible_mass && r.feasible_packaging { "yes" } else { "no" },
@@ -473,14 +482,15 @@ pub fn execute(args: Args) -> Result<()> {
     Ok(())
 }
 
-const CSV_HEADER: &str = "stroke_mm,lmin_mm,lmax_mm,p1_gain,p1_gain_rate_limited,p1_gain_quantised,driver_gain,\
-p2_ratio,p2_rpm,failsafe_mm,failsafe_gain,required_speed_mm_s,available_speed_mm_s,max_map_jump_mm,mass_kg,\
+const CSV_HEADER: &str = "stroke_mm,lmin_mm,lmax_mm,p1_gain,p1_gain_rate_limited,p1_gain_quantised,p1_gain_follow,\
+driver_gain,p2_ratio,p2_rpm,failsafe_mm,failsafe_gain,required_speed_mm_s,available_speed_mm_s,max_map_jump_mm,mass_kg,\
 protrusion_mm,feasible_mass,feasible_packaging";
 
 fn csv_row(r: &DesignResult) -> String {
     format!(
-        "{},{},{},{:.6},{:.6},{:.6},{:.6},{:.5},{},{},{:.6},{:.1},{:.1},{:.1},{:.3},{:.1},{},{}",
-        r.stroke_mm, r.lmin_mm, r.lmax_mm, r.p1_gain, r.p1_gain_rate_limited, r.p1_gain_quantised, r.driver_gain,
+        "{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.5},{},{},{:.6},{:.1},{:.1},{:.1},{:.3},{:.1},{},{}",
+        r.stroke_mm, r.lmin_mm, r.lmax_mm, r.p1_gain, r.p1_gain_rate_limited, r.p1_gain_quantised, r.p1_gain_follow,
+        r.driver_gain,
         r.p2_ratio, r.p2_rpm, r.failsafe_mm, r.failsafe_gain, r.required_speed_mm_s, r.available_speed_mm_s,
         r.max_map_jump_mm, r.mass_kg, r.protrusion_mm, r.feasible_mass, r.feasible_packaging
     )
