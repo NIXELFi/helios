@@ -107,7 +107,20 @@ struct VrliRun {
     /// Extra `apply_override` values applied to the base config.
     #[serde(default)]
     overrides: BTreeMap<String, f64>,
+    /// Metrics are the mean of the last `avg_cycles` cycles.
+    #[serde(default = "d_avg")]
+    avg_cycles: usize,
+    /// A point is converged when (max - min)/mean of VE over the last
+    /// `conv_window` cycles is <= `max_spread` (a tiny plenum can drive a
+    /// multi-cycle limit cycle instead of a periodic state).
+    #[serde(default = "d_win")]
+    conv_window: usize,
+    #[serde(default = "d_spread")]
+    max_spread: f64,
 }
+fn d_avg() -> usize { 5 }
+fn d_win() -> usize { 6 }
+fn d_spread() -> f64 { 0.02 }
 fn d_cycles() -> usize { 30 }
 fn d_threads() -> usize { 8 }
 fn d_tune() -> String { "neutral".into() }
@@ -127,6 +140,9 @@ struct DesignCfg {
     metric: String,
     knee_fraction: f64,
     max_protrusion_mm: f64,
+    /// Packaging: the trumpets may not displace more than (1 - this) of
+    /// the plenum volume (only with `trumpet_od_mm` > 0).
+    min_plenum_fraction: f64,
     mass: MassCfg,
 }
 
@@ -168,6 +184,7 @@ impl Default for DesignCfg {
             metric: "torque".into(),
             knee_fraction: 0.9,
             max_protrusion_mm: f64::INFINITY,
+            min_plenum_fraction: 0.5,
             mass: MassCfg::default(),
         }
     }
@@ -180,6 +197,8 @@ struct Point {
     torque: f64,
     power: f64,
     imep: f64,
+    /// (max - min)/mean of VE over the convergence window.
+    spread: f64,
 }
 
 pub fn execute(args: Args) -> Result<()> {
@@ -220,7 +239,8 @@ pub fn execute(args: Args) -> Result<()> {
     let od = st.vrli.trumpet_od_mm;
     let dref = st.vrli.displacement_ref_mm;
     let tag = format!(
-        "{}|{}|{}|{:?}|{:?}",
+        "v2|avg{}|win{}|{}|{}|{}|{:?}|{:?}",
+        st.vrli.avg_cycles, st.vrli.conv_window,
         st.vrli.config, st.vrli.tune, st.vrli.cycles,
         st.vrli.overrides.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(),
         st.vrli.junction
@@ -236,10 +256,11 @@ pub fn execute(args: Args) -> Result<()> {
     if let Ok(f) = std::fs::File::open(&cache_path) {
         for line in std::io::BufReader::new(f).lines().map_while(|l| l.ok()) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let (Some(k), Some(ve), Some(t), Some(p), Some(i)) = (
+                if let (Some(k), Some(ve), Some(t), Some(p), Some(i), Some(sp)) = (
                     v["key"].as_str(), v["ve"].as_f64(), v["torque"].as_f64(), v["power"].as_f64(), v["imep"].as_f64(),
+                    v["ve_spread"].as_f64(),
                 ) {
-                    cache.insert(k.to_string(), Point { ve, torque: t, power: p, imep: i });
+                    cache.insert(k.to_string(), Point { ve, torque: t, power: p, imep: i, spread: sp });
                 }
             }
         }
@@ -269,11 +290,28 @@ pub fn execute(args: Args) -> Result<()> {
                     cfg.vrli_displacement_ref = dref / 1000.0;
                     let mut eng = SDM26Engine::new(cfg, junction);
                     let res = eng.run_single_rpm(r, st.vrli.cycles, false, 0.005, 3, false);
-                    let s = res.cycle_stats.last().ok_or_else(|| anyhow::anyhow!("no cycle at ext {e} rpm {r}"))?;
-                    let p = Point { ve: s.ve_atm, torque: s.brake_torque_nm, power: s.brake_power_k_w, imep: s.imep_bar };
+                    let cs = &res.cycle_stats;
+                    if cs.is_empty() {
+                        bail!("no cycle at ext {e} rpm {r}");
+                    }
+                    let na = st.vrli.avg_cycles.clamp(1, cs.len());
+                    let tail = &cs[cs.len() - na..];
+                    let mean = |f: &dyn Fn(&engine_sim::model::sdm26::CycleStats) -> f64| {
+                        tail.iter().map(f).sum::<f64>() / na as f64
+                    };
+                    let nw = st.vrli.conv_window.clamp(1, cs.len());
+                    let win: Vec<f64> = cs[cs.len() - nw..].iter().map(|c| c.ve_atm).collect();
+                    let wmean = win.iter().sum::<f64>() / nw as f64;
+                    let hi = win.iter().cloned().fold(f64::MIN, f64::max);
+                    let lo = win.iter().cloned().fold(f64::MAX, f64::min);
+                    let spread = (hi - lo) / wmean.abs().max(1e-12);
+                    let p = Point {
+                        ve: mean(&|c| c.ve_atm), torque: mean(&|c| c.brake_torque_nm),
+                        power: mean(&|c| c.brake_power_k_w), imep: mean(&|c| c.imep_bar), spread,
+                    };
                     let k = key(e, r);
                     let line = json!({"key": k, "ext_mm": e, "rpm": r, "ve": p.ve, "torque": p.torque,
-                                      "power": p.power, "imep": p.imep});
+                                      "power": p.power, "imep": p.imep, "ve_spread": p.spread});
                     writeln!(file.lock().unwrap(), "{line}")?;
                     let mut d = done.lock().unwrap();
                     *d += 1;
@@ -298,16 +336,46 @@ pub fn execute(args: Args) -> Result<()> {
     let ve = Surface { ext_mm: exts.clone(), rpm: rpms.clone(), val: grid(&|p| p.ve) };
     {
         let mut f = std::fs::File::create(args.out.join("surface.csv"))?;
-        writeln!(f, "ext_mm,runner_mm,rpm,ve,brake_torque_Nm,brake_power_kW,imep_bar")?;
+        writeln!(f, "ext_mm,runner_mm,rpm,ve,brake_torque_Nm,brake_power_kW,imep_bar,ve_spread,converged")?;
         let l0 = base.runner_length * 1000.0;
         for e in &exts {
             for r in &rpms {
                 let p = cache[&key(*e, *r)];
-                writeln!(f, "{e},{:.1},{r},{:.5},{:.4},{:.4},{:.4}", l0 + e, p.ve, p.torque, p.power, p.imep)?;
+                writeln!(f, "{e},{:.1},{r},{:.5},{:.4},{:.4},{:.4},{:.5},{}", l0 + e, p.ve, p.torque, p.power, p.imep,
+                    p.spread, p.spread <= st.vrli.max_spread)?;
             }
         }
     }
     let d = &st.design;
+    // Valid extension range: the contiguous block of extensions, around the
+    // baseline, whose every rpm point converged to a periodic state.
+    let ext_ok: Vec<bool> = exts
+        .iter()
+        .map(|&e| rpms.iter().all(|&r| cache[&key(e, r)].spread <= st.vrli.max_spread))
+        .collect();
+    let n_bad: usize = exts.iter().flat_map(|&e| rpms.iter().map(move |&r| (e, r)))
+        .filter(|&(e, r)| cache[&key(e, r)].spread > st.vrli.max_spread).count();
+    let kb = exts.iter().position(|&e| (e - d.baseline_extension_mm).abs() < 1e-9)
+        .ok_or_else(|| anyhow::anyhow!("baseline_extension_mm must be an extension grid point"))?;
+    if !ext_ok[kb] {
+        bail!("the baseline extension did not converge at every rpm");
+    }
+    let (mut klo, mut khi) = (kb, kb);
+    while klo > 0 && ext_ok[klo - 1] { klo -= 1; }
+    while khi + 1 < exts.len() && ext_ok[khi + 1] { khi += 1; }
+    if n_bad > 0 {
+        eprintln!("vrli: {n_bad} unconverged points (VE spread > {}); design range limited to extension {}..{} mm",
+            st.vrli.max_spread, exts[klo], exts[khi]);
+    }
+    // Packaging from plenum displacement: keep >= min_plenum_fraction of it.
+    let n_cyl = base.n_cylinders as f64;
+    let plenum_limit_mm = if od > 0.0 {
+        (1.0 - d.min_plenum_fraction) * base.plenum_volume
+            / (n_cyl * 0.25 * std::f64::consts::PI * (od / 1000.0).powi(2)) * 1000.0
+    } else {
+        f64::INFINITY
+    };
+    let max_protrusion = d.max_protrusion_mm.min(plenum_limit_mm);
     let surf = match d.metric.as_str() {
         "torque" => &torque,
         "ve" => &ve,
@@ -328,10 +396,10 @@ pub fn execute(args: Args) -> Result<()> {
             actuator_exponent: d.mass.actuator_exponent,
             limit_kg: d.mass.limit_kg,
         },
-        max_protrusion_mm: d.max_protrusion_mm,
+        max_protrusion_mm: max_protrusion,
         displacement_ref_mm: dref,
     };
-    let (e_lo, e_hi) = (exts[0], exts[exts.len() - 1]);
+    let (e_lo, e_hi) = (exts[klo], exts[khi]);
     let mut per_stroke: Vec<DesignResult> = Vec::new();
     let mut fd = std::fs::File::create(args.out.join("designs.csv"))?;
     writeln!(fd, "{}", CSV_HEADER)?;
@@ -357,10 +425,15 @@ pub fn execute(args: Args) -> Result<()> {
         let (_, sched) = evaluate(surf, &spec, r.lmin_mm, r.stroke_mm);
         let l0 = base.runner_length * 1000.0;
         let mut f = std::fs::File::create(args.out.join("ecu_map.csv"))?;
-        writeln!(f, "rpm,runner_length_mm,extension_mm,plate_position_mm,quasi_steady_extension_mm")?;
+        writeln!(f, "rpm,runner_length_mm,extension_mm,plate_position_mm,quasi_steady_extension_mm,{m}_vrli,{m}_quasi_steady,{m}_fixed_short,{m}_fixed_long,{m}_failsafe,{m}_baseline", m = d.metric)?;
         for j in 0..sched.rpm.len() {
             let e = sched.quantised_mm[j];
-            writeln!(f, "{},{:.1},{:.1},{:.1},{:.1}", sched.rpm[j], l0 + e, e, e - r.lmin_mm, sched.quasi_steady_mm[j])?;
+            writeln!(
+                f, "{},{:.1},{:.1},{:.1},{:.1},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+                sched.rpm[j], l0 + e, e, e - r.lmin_mm, sched.quasi_steady_mm[j],
+                surf.at(e, j), surf.at(sched.quasi_steady_mm[j], j), surf.at(r.lmin_mm, j),
+                surf.at(r.lmax_mm, j), surf.at(r.failsafe_mm, j), surf.at(spec.baseline_ext_mm, j),
+            )?;
         }
     }
     let summary = json!({
@@ -371,6 +444,10 @@ pub fn execute(args: Args) -> Result<()> {
         "base_runner_length_mm": base.runner_length * 1000.0,
         "trumpet_od_mm": od,
         "displacement_ref_mm": dref,
+        "valid_extension_range_mm": [e_lo, e_hi],
+        "unconverged_points": n_bad,
+        "max_protrusion_mm": max_protrusion,
+        "min_plenum_fraction": d.min_plenum_fraction,
         "best_feasible": best,
         "recommended_knee": knee,
         "knee_fraction": d.knee_fraction,
