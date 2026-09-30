@@ -1,0 +1,64 @@
+
+== static | reach <= as-built | plenum <= 1.44 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 0.75 L plenum, runner 208 mm above flange (-40) {'P1 6-12k': 0.7, 'driver 7-10.5k': -0.7, 'josh_0426': -0.1, 'josh_0426 shift4': 0.5, 'ld416_ax': -0.1, 'ld416_ax shift4': -0.1, 'ld416_optshift': -0.5, 'ld416_optshift shift4': -0.4, 'ld419_endu': 0.5, 'ld419_endu shift4': 1.4, 'duty_mean': -0.1}
+
+== static | reach <= as-built | plenum <= 2 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 0.75 L plenum, runner 208 mm above flange (-40) {'P1 6-12k': 0.7, 'driver 7-10.5k': -0.7, 'josh_0426': -0.1, 'josh_0426 shift4': 0.5, 'ld416_ax': -0.1, 'ld416_ax shift4': -0.1, 'ld416_optshift': -0.5, 'ld416_optshift shift4': -0.4, 'ld419_endu': 0.5, 'ld419_endu shift4': 1.4, 'duty_mean': -0.1}
+
+== static | reach <= as-built | plenum <= 2.75 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 0.75 L plenum, runner 208 mm above flange (-40) {'P1 6-12k': 0.7, 'driver 7-10.5k': -0.7, 'josh_0426': -0.1, 'josh_0426 shift4': 0.5, 'ld416_ax': -0.1, 'ld416_ax shift4': -0.1, 'ld416_optshift': -0.5, 'ld416_optshift shift4': -0.4, 'ld419_endu': 0.5, 'ld419_endu shift4': 1.4, 'duty_mean': -0.1}
+
+== static | reach <= as-built | plenum <= 3.5 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 0.75 L plenum, runner 208 mm above flange (-40) {'P1 6-12k': 0.7, 'driver 7-10.5k': -0.7, 'josh_0426': -0.1, 'josh_0426 shift4': 0.5, 'ld416_ax': -0.1, 'ld416_ax shift4': -0.1, 'ld416_optshift': -0.5, 'ld416_optshift shift4': -0.4, 'ld419_endu': 0.5, 'ld419_endu shift4': 1.4, 'duty_mean': -0.1}
+
+== static | reach <= +40 mm | plenum <= 1.44 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 1 L plenum, runner 288 mm above flange (+40) {'P1 6-12k': 0.8, 'driver 7-10.5k': -0.6, 'josh_0426': -0.3, 'josh_0426 shift4': -0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.1, 'ld416_optshift': 0.9, 'ld416_optshift shift4': 0.5, 'ld419_endu': -0.5, 'ld419_endu shift4': 0.4, 'duty_mean': 0.1}
+
+== static | reach <= +40 mm | plenum <= 2 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 1 L plenum, runner 288 mm above flange (+40) {'P1 6-12k': 0.8, 'driver 7-10.5k': -0.6, 'josh_0426': -0.3, 'josh_0426 shift4': -0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.1, 'ld416_optshift': 0.9, 'ld416_optshift shift4': 0.5, 'ld419_endu': -0.5, 'ld419_endu shift4': 0.4, 'duty_mean': 0.1}
+
+== static | reach <= +40 mm | plenum <= 2.75 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 1 L plenum, runner 288 mm above flange (+40) {'P1 6-12k': 0.8, 'driver 7-10.5k': -0.6, 'josh_0426': -0.3, 'josh_0426 shift4': -0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.1, 'ld416_optshift': 0.9, 'ld416_optshift shift4': 0.5, 'ld419_endu': -0.5, 'ld419_endu shift4': 0.4, 'duty_mean': 0.1}
+
+== static | reach <= +40 mm | plenum <= 3.5 L
+  robust : 1 L plenum, runner 248 mm above flange (+0) {'worst': 0.3, 'P1 6-12k': 0.3, 'driver 7-10.5k': 0.4, 'josh_0426': 0.4, 'josh_0426 shift4': 0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.4, 'ld416_optshift': 0.3, 'ld416_optshift shift4': 0.3, 'ld419_endu': 0.3, 'ld419_endu shift4': 0.3, 'duty_mean': 0.3}
+  best P1: 1 L plenum, runner 288 mm above flange (+40) {'P1 6-12k': 0.8, 'driver 7-10.5k': -0.6, 'josh_0426': -0.3, 'josh_0426 shift4': -0.3, 'ld416_ax': 0.4, 'ld416_ax shift4': 0.1, 'ld416_optshift': 0.9, 'ld416_optshift shift4': 0.5, 'ld419_endu': -0.5, 'ld419_endu shift4': 0.4, 'duty_mean': 0.1}
+
+== vrli | reach <= as-built | plenum <= 1.44 L
+  robust : 1 L box, runner 198-248 mm (50 stroke) {'worst': 1.4, 'P1 6-12k': 3.1, 'driver 7-10.5k': 1.4, 'josh_0426': 2.3, 'josh_0426 shift4': 2.7, 'ld416_ax': 2.1, 'ld416_ax shift4': 2.3, 'ld416_optshift': 2.0, 'ld416_optshift shift4': 2.2, 'ld419_endu': 2.6, 'ld419_endu shift4': 3.5, 'duty_mean': 2.3}
+  best P1: 1.44 L box, runner 98-248 mm (150 stroke) {'P1 6-12k': 3.6, 'driver 7-10.5k': 1.4, 'josh_0426': 2.4, 'josh_0426 shift4': 3.0, 'ld416_ax': 2.3, 'ld416_ax shift4': 2.5, 'ld416_optshift': 2.1, 'ld416_optshift shift4': 2.5, 'ld419_endu': 2.8, 'ld419_endu shift4': 3.9, 'duty_mean': 2.4}
+
+== vrli | reach <= as-built | plenum <= 2 L
+  robust : 1 L box, runner 198-248 mm (50 stroke) {'worst': 1.4, 'P1 6-12k': 3.1, 'driver 7-10.5k': 1.4, 'josh_0426': 2.3, 'josh_0426 shift4': 2.7, 'ld416_ax': 2.1, 'ld416_ax shift4': 2.3, 'ld416_optshift': 2.0, 'ld416_optshift shift4': 2.2, 'ld419_endu': 2.6, 'ld419_endu shift4': 3.5, 'duty_mean': 2.3}
+  best P1: 1.44 L box, runner 98-248 mm (150 stroke) {'P1 6-12k': 3.6, 'driver 7-10.5k': 1.4, 'josh_0426': 2.4, 'josh_0426 shift4': 3.0, 'ld416_ax': 2.3, 'ld416_ax shift4': 2.5, 'ld416_optshift': 2.1, 'ld416_optshift shift4': 2.5, 'ld419_endu': 2.8, 'ld419_endu shift4': 3.9, 'duty_mean': 2.4}
+
+== vrli | reach <= as-built | plenum <= 2.75 L
+  robust : 1 L box, runner 198-248 mm (50 stroke) {'worst': 1.4, 'P1 6-12k': 3.1, 'driver 7-10.5k': 1.4, 'josh_0426': 2.3, 'josh_0426 shift4': 2.7, 'ld416_ax': 2.1, 'ld416_ax shift4': 2.3, 'ld416_optshift': 2.0, 'ld416_optshift shift4': 2.2, 'ld419_endu': 2.6, 'ld419_endu shift4': 3.5, 'duty_mean': 2.3}
+  best P1: 1.44 L box, runner 98-248 mm (150 stroke) {'P1 6-12k': 3.6, 'driver 7-10.5k': 1.4, 'josh_0426': 2.4, 'josh_0426 shift4': 3.0, 'ld416_ax': 2.3, 'ld416_ax shift4': 2.5, 'ld416_optshift': 2.1, 'ld416_optshift shift4': 2.5, 'ld419_endu': 2.8, 'ld419_endu shift4': 3.9, 'duty_mean': 2.4}
+
+== vrli | reach <= as-built | plenum <= 3.5 L
+  robust : 1 L box, runner 198-248 mm (50 stroke) {'worst': 1.4, 'P1 6-12k': 3.1, 'driver 7-10.5k': 1.4, 'josh_0426': 2.3, 'josh_0426 shift4': 2.7, 'ld416_ax': 2.1, 'ld416_ax shift4': 2.3, 'ld416_optshift': 2.0, 'ld416_optshift shift4': 2.2, 'ld419_endu': 2.6, 'ld419_endu shift4': 3.5, 'duty_mean': 2.3}
+  best P1: 1.44 L box, runner 98-248 mm (150 stroke) {'P1 6-12k': 3.6, 'driver 7-10.5k': 1.4, 'josh_0426': 2.4, 'josh_0426 shift4': 3.0, 'ld416_ax': 2.3, 'ld416_ax shift4': 2.5, 'ld416_optshift': 2.1, 'ld416_optshift shift4': 2.5, 'ld419_endu': 2.8, 'ld419_endu shift4': 3.9, 'duty_mean': 2.4}
+
+== vrli | reach <= +40 mm | plenum <= 1.44 L
+  robust : 1 L box, runner 213-288 mm (75 stroke) {'worst': 2.8, 'P1 6-12k': 3.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.0, 'josh_0426 shift4': 3.2, 'ld416_ax': 2.9, 'ld416_ax shift4': 2.8, 'ld416_optshift': 3.3, 'ld416_optshift shift4': 3.0, 'ld419_endu': 3.2, 'ld419_endu shift4': 3.8, 'duty_mean': 3.1}
+  best P1: 1.44 L box, runner 138-288 mm (150 stroke) {'P1 6-12k': 4.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.2, 'josh_0426 shift4': 3.5, 'ld416_ax': 3.0, 'ld416_ax shift4': 2.9, 'ld416_optshift': 3.4, 'ld416_optshift shift4': 3.4, 'ld419_endu': 3.5, 'ld419_endu shift4': 4.5, 'duty_mean': 3.3}
+
+== vrli | reach <= +40 mm | plenum <= 2 L
+  robust : 1 L box, runner 213-288 mm (75 stroke) {'worst': 2.8, 'P1 6-12k': 3.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.0, 'josh_0426 shift4': 3.2, 'ld416_ax': 2.9, 'ld416_ax shift4': 2.8, 'ld416_optshift': 3.3, 'ld416_optshift shift4': 3.0, 'ld419_endu': 3.2, 'ld419_endu shift4': 3.8, 'duty_mean': 3.1}
+  best P1: 1.44 L box, runner 138-288 mm (150 stroke) {'P1 6-12k': 4.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.2, 'josh_0426 shift4': 3.5, 'ld416_ax': 3.0, 'ld416_ax shift4': 2.9, 'ld416_optshift': 3.4, 'ld416_optshift shift4': 3.4, 'ld419_endu': 3.5, 'ld419_endu shift4': 4.5, 'duty_mean': 3.3}
+
+== vrli | reach <= +40 mm | plenum <= 2.75 L
+  robust : 1 L box, runner 213-288 mm (75 stroke) {'worst': 2.8, 'P1 6-12k': 3.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.0, 'josh_0426 shift4': 3.2, 'ld416_ax': 2.9, 'ld416_ax shift4': 2.8, 'ld416_optshift': 3.3, 'ld416_optshift shift4': 3.0, 'ld419_endu': 3.2, 'ld419_endu shift4': 3.8, 'duty_mean': 3.1}
+  best P1: 1.44 L box, runner 138-288 mm (150 stroke) {'P1 6-12k': 4.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.2, 'josh_0426 shift4': 3.5, 'ld416_ax': 3.0, 'ld416_ax shift4': 2.9, 'ld416_optshift': 3.4, 'ld416_optshift shift4': 3.4, 'ld419_endu': 3.5, 'ld419_endu shift4': 4.5, 'duty_mean': 3.3}
+
+== vrli | reach <= +40 mm | plenum <= 3.5 L
+  robust : 1 L box, runner 213-288 mm (75 stroke) {'worst': 2.8, 'P1 6-12k': 3.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.0, 'josh_0426 shift4': 3.2, 'ld416_ax': 2.9, 'ld416_ax shift4': 2.8, 'ld416_optshift': 3.3, 'ld416_optshift shift4': 3.0, 'ld419_endu': 3.2, 'ld419_endu shift4': 3.8, 'duty_mean': 3.1}
+  best P1: 1.44 L box, runner 138-288 mm (150 stroke) {'P1 6-12k': 4.5, 'driver 7-10.5k': 2.8, 'josh_0426': 3.2, 'josh_0426 shift4': 3.5, 'ld416_ax': 3.0, 'ld416_ax shift4': 2.9, 'ld416_optshift': 3.4, 'ld416_optshift shift4': 3.4, 'ld419_endu': 3.5, 'ld419_endu shift4': 4.5, 'duty_mean': 3.3}
