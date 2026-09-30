@@ -52,7 +52,27 @@ import {
   usePmStore,
   type CrossTeamRelation,
 } from "@pm/lib/pmStore";
-import { useScrollMemory } from "@pm/lib/useScrollMemory";
+import { hasScrollMemory, useScrollMemory } from "@pm/lib/useScrollMemory";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
+
+import { tc } from "@helios/ui";
+// ~10 years of days. The timeline is one DOM node per day (header + weekend
+// shading), so this bounds the view no matter what the data says.
+const MAX_TIMELINE_DAYS = 3660;
+
+/** "N hidden with an invalid date (Title: 0202-08-18; ...) · ", or "". */
+function invalidDateNote(tasks: TaskRow[]): string {
+  if (tasks.length === 0) return "";
+  const named = tasks
+    .slice(0, 3)
+    .map((t) => {
+      const bad = [t.start_date, t.due_date].filter((d) => d && !isPlausibleIsoDate(d));
+      return `${t.title}: ${bad.join(", ")}`;
+    })
+    .join("; ");
+  const more = tasks.length > 3 ? `; +${tasks.length - 3} more` : "";
+  return `${tasks.length} hidden with an invalid date (${named}${more}) · `;
+}
 
 type GanttSort = "criticality" | "upcoming" | "subteam_asc" | "subteam_desc";
 
@@ -87,6 +107,9 @@ const MILESTONE_TYPE_LABEL: Record<MilestoneType, string> = {
   gate: "Gate",
   comp_event: "Competition",
 };
+
+// Frozen task-name column width; also offsets the first-open scroll to today.
+const LABEL_COLUMN_WIDTH = 224;
 
 // Default zoom levels — overridden by component state at runtime.
 const DEFAULT_DAY_WIDTH = 14;
@@ -184,9 +207,11 @@ export interface GanttViewClientProps {
 }
 
 export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: GanttViewClientProps) {
-  const scrollMemRef = useScrollMemory(
-    `gantt${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`,
-  );
+  const scrollKey = `gantt${manufacturingOnly ? "-mfg" : ""}:${teamSlug ?? "__project__"}`;
+  const scrollMemRef = useScrollMemory(scrollKey);
+  const scrollNodeRef = useRef<HTMLDivElement | null>(null);
+  // Scope key we've already placed the first-open position for (one-shot per scope).
+  const initialScrollFor = useRef<string | null>(null);
   const tasks = usePmStore((s) => s.tasks);
   const subteams = usePmStore((s) => s.subteams);
   const milestones = usePmStore((s) => s.milestones);
@@ -292,13 +317,31 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
   }, []);
 
+  // The timeline renders DOM per day, so one typo'd year (0202-08-18) would
+  // stretch it across centuries -- 666k header cells and 3+ GB of renderer
+  // memory in the field. Chart only plausible dates; report the rest, even
+  // when nothing else is left to chart.
+  const invalidDateTasks = useMemo(
+    () =>
+      visibleTasks.filter(
+        (t) =>
+          (t.start_date != null && !isPlausibleIsoDate(t.start_date)) ||
+          (t.due_date != null && !isPlausibleIsoDate(t.due_date)),
+      ),
+    [visibleTasks],
+  );
+
   const layout = useMemo(() => {
+    const invalidIds = new Set(invalidDateTasks.map((t) => t.id));
     const dates: Date[] = [];
     for (const t of visibleTasks) {
+      if (invalidIds.has(t.id)) continue;
       if (t.start_date) dates.push(parseISO(t.start_date));
       if (t.due_date) dates.push(parseISO(t.due_date));
     }
-    for (const m of milestones) dates.push(parseISO(m.target_date));
+    for (const m of milestones) {
+      if (isPlausibleIsoDate(m.target_date)) dates.push(parseISO(m.target_date));
+    }
     if (dates.length === 0) {
       return null;
     }
@@ -309,7 +352,11 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
       if (d > max) max = d;
     }
     const rangeStart = startOfDay(addDays(min, -2));
-    const rangeEnd = startOfDay(addDays(max, 2));
+    let rangeEnd = startOfDay(addDays(max, 2));
+    // Backstop: even plausible dates can span decades. Cap the per-day DOM.
+    if (differenceInCalendarDays(rangeEnd, rangeStart) > MAX_TIMELINE_DAYS) {
+      rangeEnd = addDays(rangeStart, MAX_TIMELINE_DAYS);
+    }
     const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
 
     // Group by subteam (in current scope), preserving the global subteam order.
@@ -317,7 +364,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     const groups = new Map<string, TaskRow[]>();
     for (const id of teamOrder) groups.set(id, []);
     for (const t of visibleTasks) {
-      if (!t.start_date || !t.due_date) continue;
+      if (!t.start_date || !t.due_date || invalidIds.has(t.id)) continue;
       const arr = groups.get(t.subteam_id) ?? [];
       arr.push(t);
       groups.set(t.subteam_id, arr);
@@ -354,14 +401,29 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
     const totalRows = rowIndex;
 
     return { days, totalDays: days.length, totalRows, bars, groupSpans, rangeStart };
-  }, [visibleTasks, milestones, subteams, relationByTaskId, sort, critical]);
+  }, [visibleTasks, invalidDateTasks, milestones, subteams, relationByTaskId, sort, critical]);
+
+  // First open of a scope lands on TODAY, not the start of the range (report
+  // 2026-09-24, Daniel Germaine: the chart opened at the project's first date and
+  // you had to scroll weeks to find now). A scope visited earlier this session
+  // keeps its remembered position instead (useScrollMemory restores it). Today
+  // sits a quarter of the way in so a little recent history stays visible.
+  useEffect(() => {
+    const node = scrollNodeRef.current;
+    if (!node || !layout || initialScrollFor.current === scrollKey) return;
+    initialScrollFor.current = scrollKey;
+    if (hasScrollMemory(scrollKey)) return;
+    const tx = differenceInCalendarDays(startOfDay(new Date()), layout.rangeStart) * dayWidth;
+    const timelineViewport = node.clientWidth - LABEL_COLUMN_WIDTH;
+    node.scrollLeft = Math.max(0, tx - timelineViewport * 0.25);
+  }, [layout, scrollKey, dayWidth]);
 
   if (!layout) {
     return (
       <>
         <ViewHeader
           title={currentTeam ? `${currentTeam.name} · Gantt` : "Gantt"}
-          description="No dated tasks to chart in this scope."
+          description={invalidDateNote(invalidDateTasks) + "No dated tasks to chart in this scope."}
           // Keep the toggle reachable here too: with "Primary only" on, a subteam
           // whose only dated tasks are secondary-membership ones lands on this
           // empty state — without the toggle the user couldn't switch it back off.
@@ -441,6 +503,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         }
         description={
           `${bars.length} bars · ${groupSpans.length} subteam${groupSpans.length === 1 ? "" : "s"} · ` +
+          invalidDateNote(invalidDateTasks) +
           "ctrl + scroll to zoom time · ctrl + shift + scroll to zoom rows"
         }
         actions={
@@ -554,7 +617,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
             <button
               type="button"
               onClick={() => setDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90"
+              className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90"
             >
               <IconPlus size={16} strokeWidth={1.5} />
               New task
@@ -585,11 +648,19 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
         ref={(node) => {
           scrollRef(node);
           scrollMemRef(node);
+          scrollNodeRef.current = node;
         }}
         className="min-h-0 flex-1 overflow-auto"
       >
-        <div className="flex">
-          <div className="sticky left-0 z-30 w-56 shrink-0 border-r border-helios-line bg-helios-panel">
+        {/* w-max: the row must be as wide as its content. A plain block is only
+            viewport-wide, and a sticky child can't stick past its parent's edge —
+            so the "frozen" task column slid off-screen once you scrolled more
+            than one viewport right (report 2026-09-24). */}
+        <div className="flex w-max min-w-full">
+          <div
+            className="sticky left-0 z-30 shrink-0 border-r border-helios-line bg-helios-panel"
+            style={{ width: LABEL_COLUMN_WIDTH }}
+          >
             <div
               className="border-b border-helios-line px-3 text-[10px] font-medium uppercase tracking-widest text-helios-dim"
               style={{ height: headerHeight, lineHeight: `${headerHeight}px` }}
@@ -605,7 +676,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: g.subteam.color ?? "#6B7280" }}
+                    style={{ backgroundColor: g.subteam.color ?? tc("dim") }}
                   />
                   {g.subteam.name}
                 </div>
@@ -865,7 +936,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
               >
                 <defs>
                   <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#9097A0" />
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={tc("dim")} />
                   </marker>
                 </defs>
                 {showDependencies && deps.map((d) => {
@@ -905,7 +976,7 @@ export function GanttViewClient({ teamSlug = null, manufacturingOnly = false }: 
                     <path
                       key={`${d.predecessor_id}-${d.successor_id}`}
                       d={path}
-                      stroke="#9097A0"
+                      stroke={tc("dim")}
                       strokeWidth={1}
                       fill="none"
                       markerEnd="url(#arrow)"

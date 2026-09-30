@@ -16,6 +16,7 @@ import "./overlays/stats";
 import "./overlays/quadrant-fit";
 import "./overlays/friction-circle";
 
+import { tc } from "@helios/ui";
 /* Re-export for back-compat with `import type { XyPlotConfig } from "./render"`. */
 export type { XyPlotConfig } from "./types";
 
@@ -136,7 +137,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     });
 
     if (groups.length === 0) {
-      ctx.fillStyle = "#7B8088"; ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = tc("dim"); ctx.font = "12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("no data", w / 2, h / 2);
       layoutRef.current = null;
@@ -172,9 +173,9 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     layoutRef.current = { groups, layout };
 
     // Frame + zero crosshair
-    ctx.strokeStyle = "#2A2C32"; ctx.lineWidth = 1;
+    ctx.strokeStyle = tc("line"); ctx.lineWidth = 1;
     ctx.strokeRect(padL + 0.5, padT + 0.5, plotW, plotH);
-    ctx.strokeStyle = "#5A5F66";
+    ctx.strokeStyle = tc("muted");
     ctx.beginPath();
     if (xmin! < 0 && xmax! > 0) {
       const x0 = layout.project(0, 0).px;
@@ -245,7 +246,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
     setDomOverlays(nextDomOverlays);
 
     // Axis labels
-    ctx.fillStyle = "#7B8088"; ctx.font = "10px Inter, system-ui, sans-serif";
+    ctx.fillStyle = tc("dim"); ctx.font = "10px Inter, system-ui, sans-serif";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(
       `${channelLabel(config.xChannelId, availableChannels)} × ${channelLabel(config.yChannelId, availableChannels)}`,
@@ -263,7 +264,7 @@ export function XyPlotRender(props: WidgetRenderProps<XyPlotConfig>) {
   }
 
   return (
-    <div className="relative w-full h-full bg-[#16171B]">
+    <div className="relative w-full h-full bg-helios-panel">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <canvas ref={markerCanvasRef} className="absolute inset-0 w-full h-full cursor-crosshair" />
       {/* DOM overlay layer — pointer-events-none so the marker canvas keeps
@@ -297,7 +298,7 @@ function drawCursorAndDatums(
       ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py);
       ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH);
       ctx.stroke();
-      ctx.fillStyle = "#FF6B4A"; ctx.strokeStyle = "#0E0E10"; ctx.lineWidth = 1;
+      ctx.fillStyle = "#FF6B4A"; ctx.strokeStyle = tc("base"); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
     }

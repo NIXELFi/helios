@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@helios/auth";
-import type { ModuleId } from "./ModulePicker";
+import { MODULE_ICON, type ModuleId } from "./ModulePicker";
+import { createPresenceStore, type PresenceStore } from "./presenceStore";
 
 /** One signed-in person currently connected to Helios, collapsed across all of
  *  their open windows/tabs. */
@@ -25,15 +26,17 @@ interface TrackedMeta {
   online_at: number;
 }
 
-const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set<ModuleId>([
-  "logs",
-  "vault",
-  "cfd",
-  "pm",
-  "games",
-  "marketplace",
-  "org",
-]);
+/**
+ * Every module the rail can show, taken from the rail's own icon table.
+ *
+ * This list used to be written out by hand, and it fell behind three times:
+ * "org", then "sim" and "amethyst". Each time, everyone sitting in that module
+ * showed up in everyone else's presence panel as being in Logs -- a wrong
+ * answer that looks exactly like a right one. `MODULE_ICON` is typed
+ * `Record<ModuleId, ...>`, so the compiler will not let it be incomplete;
+ * deriving from it means the drift cannot happen again.
+ */
+const KNOWN_MODULES: ReadonlySet<ModuleId> = new Set(Object.keys(MODULE_ICON) as ModuleId[]);
 
 /** Coerce an off-the-wire module string to a known ModuleId (a newer/renamed
  *  client could send something we don't recognize); default to "logs" so the
@@ -89,7 +92,9 @@ export function dedupePresence(
 /**
  * App-wide Helios presence. Joins ONE shared realtime channel ("presence:helios")
  * the moment a user is signed in and tracks who's connected — across every
- * module, not scoped to PM or Vault. Returns the deduped roster.
+ * module, not scoped to PM or Vault. Returns a stable store holding the
+ * deduped roster; read it with `usePresenceRoster` where it is displayed, so a
+ * presence event re-renders the roster and nothing else.
  *
  * Mounted once at the shell. Re-tracks (cheaply) when the active module changes
  * so the roster shows what each person is currently looking at. No-ops when
@@ -101,9 +106,9 @@ export function useHeliosPresence(input: {
   name: string;
   subteam: string | null;
   module: ModuleId;
-}): PresenceUser[] {
+}): PresenceStore {
   const { client, userId, name, subteam, module } = input;
-  const [roster, setRoster] = useState<PresenceUser[]>([]);
+  const [store] = useState(createPresenceStore);
 
   // Keep the latest identity/module in a ref so the channel callbacks always
   // announce current values without re-subscribing on every module switch.
@@ -119,7 +124,7 @@ export function useHeliosPresence(input: {
   // identity so a sign-out/sign-in cleanly tears down and rejoins.
   useEffect(() => {
     if (!client || !userId) {
-      setRoster([]);
+      store.set([]);
       return;
     }
     const c = client as unknown as {
@@ -149,7 +154,7 @@ export function useHeliosPresence(input: {
       if (disposed) return;
       try {
         const state = channel.presenceState();
-        setRoster(dedupePresence(state));
+        store.set(dedupePresence(state));
         // Self-heal: if a re-sync lands and our own presence is missing — e.g.
         // a socket drop/reconnect dropped our one-shot track — re-announce so
         // we don't silently vanish from everyone else's roster until remount.
@@ -185,7 +190,7 @@ export function useHeliosPresence(input: {
       }
       c.removeChannel?.(channel);
     };
-  }, [client, userId]);
+  }, [client, userId, store]);
 
   // Re-track (not re-subscribe) when the active module / identity changes, so
   // everyone sees what each person is currently looking at. Only fires once the
@@ -203,5 +208,5 @@ export function useHeliosPresence(input: {
     } satisfies TrackedMeta);
   }, [module, name, subteam, userId]);
 
-  return useMemo(() => roster, [roster]);
+  return store;
 }

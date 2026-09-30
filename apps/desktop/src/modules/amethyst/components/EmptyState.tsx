@@ -16,7 +16,7 @@ export function EmptyState({ onPick }: { onPick: () => void }) {
         </p>
         <button
           onClick={onPick}
-          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-asu-gold px-4 py-2.5 text-sm font-semibold text-helios-base transition-colors hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold focus-visible:ring-offset-2 focus-visible:ring-offset-helios-base"
+          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-asu-gold px-4 py-2.5 text-sm font-semibold text-helios-on-gold transition-colors hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold focus-visible:ring-offset-2 focus-visible:ring-offset-helios-base"
         >
           <IconFolderOpen size={18} strokeWidth={1.8} />
           Choose folder…

@@ -1,8 +1,10 @@
 "use client";
 
 import type { TaskRow, User } from "@helios/pm-ui";
-import { IconPlus, IconX } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { IconX } from "@tabler/icons-react";
+import { useMemo } from "react";
+import { Select } from "@pm/components/ui/Select";
+import { ownerOptions } from "@pm/lib/ownerScope";
 import { usePmStore } from "@pm/lib/pmStore";
 
 export interface TaskOwnerChipsProps {
@@ -19,10 +21,9 @@ export interface TaskOwnerChipsProps {
  */
 export function TaskOwnerChips({ task, editable = false }: TaskOwnerChipsProps) {
   const users = usePmStore((s) => s.users);
+  const tasks = usePmStore((s) => s.tasks);
   const addTaskOwner = usePmStore((s) => s.addTaskOwner);
   const removeTaskOwner = usePmStore((s) => s.removeTaskOwner);
-
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Co-owners = all owners except the primary (owner_id). Falls back to an empty
   // list when a task has only its primary owner.
@@ -31,13 +32,16 @@ export function TaskOwnerChips({ task, editable = false }: TaskOwnerChipsProps) 
     [task.owners, task.owner_id],
   );
 
-  // Members not already an owner (primary or co), available to add.
+  // Members not already an owner (primary or co), available to add — grouped so
+  // this task's own subteam comes first instead of the whole flat directory.
   const available = useMemo(() => {
     if (!editable) return [];
     const ownerIds = new Set((task.owners ?? []).map((u) => u.id));
     if (task.owner_id) ownerIds.add(task.owner_id);
-    return users.filter((u) => !ownerIds.has(u.id));
-  }, [editable, users, task.owners, task.owner_id]);
+    return ownerOptions(users, tasks, task.subteam_id, task.subteam?.name ?? null).filter(
+      (o) => !ownerIds.has(o.value),
+    );
+  }, [editable, users, tasks, task.owners, task.owner_id, task.subteam_id, task.subteam?.name]);
 
   if (!editable && coOwners.length === 0) {
     return <span className="text-xs text-helios-dim">None</span>;
@@ -67,51 +71,20 @@ export function TaskOwnerChips({ task, editable = false }: TaskOwnerChipsProps) 
       ))}
 
       {editable && available.length > 0 ? (
-        <span className="relative inline-flex">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setPickerOpen((o) => !o);
+        // Fire-once action menu: pick a person, they become a chip, the control
+        // resets to its placeholder. Select brings the search box and the
+        // subteam grouping that the old hand-rolled <ul> had neither of.
+        <span className="inline-flex min-w-[9rem]">
+          <Select
+            value=""
+            onChange={(v) => {
+              if (v) addTaskOwner(task.id, v);
             }}
-            aria-label="Add co-owner"
-            aria-expanded={pickerOpen}
-            className="inline-flex items-center gap-0.5 rounded border border-dashed border-helios-line px-1.5 py-0.5 text-[11px] leading-none text-helios-dim hover:border-helios-text/40 hover:text-helios-text"
-          >
-            <IconPlus size={11} strokeWidth={1.5} />
-            Add
-          </button>
-          {pickerOpen ? (
-            <>
-              <button
-                type="button"
-                aria-label="Close owner picker"
-                onClick={() => setPickerOpen(false)}
-                className="fixed inset-0 z-[60] cursor-default"
-              />
-              <ul
-                role="listbox"
-                className="absolute left-0 top-full z-[70] mt-1 max-h-56 min-w-[10rem] overflow-y-auto rounded-md border border-helios-line bg-helios-panel py-1 shadow-xl"
-              >
-                {available.map((u) => (
-                  <li key={u.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={false}
-                      onClick={() => {
-                        addTaskOwner(task.id, u.id);
-                        setPickerOpen(false);
-                      }}
-                      className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-helios-text hover:bg-helios-base"
-                    >
-                      <span className="truncate">{u.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
+            size="sm"
+            ariaLabel="Add co-owner"
+            placeholder="Add co-owner…"
+            options={available}
+          />
         </span>
       ) : null}
     </div>

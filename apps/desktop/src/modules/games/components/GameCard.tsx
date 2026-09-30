@@ -1,4 +1,5 @@
 import type { GameDef } from "../registry";
+import { tca } from "@helios/ui";
 
 export function GameCard({ game, onPlay, index }: { game: GameDef; onPlay: () => void; index: number }) {
   const Icon = game.icon;
@@ -7,7 +8,7 @@ export function GameCard({ game, onPlay, index }: { game: GameDef; onPlay: () =>
       type="button"
       onClick={onPlay}
       style={{ animationDelay: `${index * 70}ms` }}
-      className="games-rise group relative flex flex-col items-start gap-3 overflow-hidden rounded-sm border border-helios-line bg-helios-panel p-5 text-left transition hover:-translate-y-0.5 hover:border-asu-gold hover:shadow-[0_0_24px_-6px_rgba(255,198,39,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold sm:p-6"
+      className="games-rise group relative flex flex-col items-start gap-3 overflow-hidden rounded-sm border border-helios-line bg-helios-panel p-5 text-left transition hover:-translate-y-0.5 hover:border-asu-gold hover:shadow-[0_0_24px_-6px_rgb(var(--asu-gold)/0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold sm:p-6"
     >
       {/* grid-position badge — casino cabinets are tables, not grid slots */}
       <span className="games-num absolute right-3 top-3 text-xs font-semibold text-helios-dim/70">

@@ -110,22 +110,22 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-[#0E0E10] border border-[#2A2C32] rounded-md helios-elevate helios-modal-in w-[640px] max-h-[80vh] flex flex-col"
+        className="bg-helios-base border border-helios-line rounded-md helios-elevate helios-modal-in w-[640px] max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-9 flex items-center justify-between px-3 border-b border-[#2A2C32]">
-          <span className="text-xs uppercase tracking-wider text-[#FFC627]">Add Tile</span>
+        <div className="h-9 flex items-center justify-between px-3 border-b border-helios-line">
+          <span className="text-xs uppercase tracking-wider text-asu-gold">Add Tile</span>
           <button
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="w-5 h-5 flex items-center justify-center text-[#9097A0] hover:text-[#FFC627] hover:bg-[#16171B] rounded-sm"
+            className="w-5 h-5 flex items-center justify-center text-helios-dim hover:text-asu-gold hover:bg-helios-panel rounded-sm"
           >×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-3">
           {CATEGORIES.map((cat) => (
             <div key={cat} className="mb-3 last:mb-0">
-              <div className="text-[10px] uppercase tracking-wider text-[#5A5F66] mb-1.5">{cat}</div>
+              <div className="text-[10px] uppercase tracking-wider text-helios-muted mb-1.5">{cat}</div>
               <div className="grid grid-cols-2 gap-2">
                 {PALETTE.filter((e) => e.category === cat).map((entry) => (
                   <button
@@ -145,18 +145,18 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
                       });
                       onClose();
                     }}
-                    className="group flex items-center gap-2.5 text-left bg-[#16171B] border border-[#2A2C32] hover:border-[#FFC627] rounded-sm p-2.5 cursor-pointer transition-colors"
+                    className="group flex items-center gap-2.5 text-left bg-helios-panel border border-helios-line hover:border-asu-gold rounded-sm p-2.5 cursor-pointer transition-colors"
                   >
-                    <span className="w-8 h-8 flex-shrink-0 flex items-center justify-center bg-[#0E0E10] border border-[#2A2C32] rounded-sm text-[#9097A0] group-hover:text-[#FFC627] transition-colors">
+                    <span className="w-8 h-8 flex-shrink-0 flex items-center justify-center bg-helios-base border border-helios-line rounded-sm text-helios-dim group-hover:text-asu-gold transition-colors">
                       <WidgetIcon type={entry.type} />
                     </span>
                     <span className="flex flex-col min-w-0">
-                      <span className="text-xs text-[#FFC627] font-semibold truncate">{entry.widget.label}</span>
-                      <span className="text-[10px] text-[#9097A0] truncate" title={entry.description}>
+                      <span className="text-xs text-asu-gold font-semibold truncate">{entry.widget.label}</span>
+                      <span className="text-[10px] text-helios-dim truncate" title={entry.description}>
                         {entry.description}
                       </span>
                     </span>
-                    <span className="ml-auto flex-shrink-0 text-[10px] text-[#5A5F66] font-mono-num">
+                    <span className="ml-auto flex-shrink-0 text-[10px] text-helios-muted font-mono-num">
                       {entry.defaultCells.w}×{entry.defaultCells.h}
                     </span>
                   </button>
@@ -165,7 +165,7 @@ export function AddTileModal({ existingIds, onAdd, onClose }: Props) {
             </div>
           ))}
         </div>
-        <div className="px-3 py-2 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+        <div className="px-3 py-2 border-t border-helios-line text-[10px] text-helios-dim">
           New tiles drop into the next free slot. You can drag and resize them once placed.
         </div>
       </div>

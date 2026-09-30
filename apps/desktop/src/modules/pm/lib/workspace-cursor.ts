@@ -46,12 +46,75 @@ export function pmCursorChanged(prev: PmCursor | null, next: PmCursor): boolean 
 }
 
 /**
- * Fetch the current PM cursor. Four head-only counts (tasks, activity,
- * task_owners, task_links) plus one limit-1 read of the newest task's
- * updated_at. Throws if any sub-query errors so the caller can fall back to a
- * full refresh rather than mistake an error for "nothing changed".
+ * Has this process seen the server answer "no such function" for the cursor
+ * RPC? A database that predates 20260909100100 answers that on every probe, so
+ * we latch it once and use the legacy five requests for the rest of the
+ * session. Only a genuine missing-function signal sets it; a 500 must not
+ * downgrade the client permanently.
+ */
+let rpcMissing = false;
+
+/** PostgREST answers PGRST202 for an unknown RPC, Postgres 42883; match the
+ *  wording too, because some call paths lose the code. */
+function isMissingFunction(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null;
+  if (e?.code === "PGRST202" || e?.code === "42883") return true;
+  return /could not find the function|does not exist/i.test(String(e?.message ?? ""));
+}
+
+const EMPTY_CURSOR: PmCursor = {
+  tasks: 0,
+  tasksUpdatedAt: "",
+  activity: 0,
+  taskOwners: 0,
+  taskLinks: 0,
+};
+
+/**
+ * Fetch the current PM cursor.
+ *
+ * Fast path: one `pm.workspace_cursor()` call. It is `security definer`, so
+ * pm.can_read_pm is evaluated ONCE in its WHERE clause instead of once per row
+ * in five RLS'd count queries — measured in prod at 13.3% of all database time
+ * (a 797-row activity count took 72 ms). Falls back to the legacy five
+ * requests on a database without the function; any other error throws so the
+ * caller runs a full refresh rather than mistake it for "nothing changed".
  */
 export async function fetchPmCursor(client: SupabaseClient): Promise<PmCursor> {
+  if (!rpcMissing) {
+    const { data, error } = await (client.schema("pm") as any).rpc("workspace_cursor");
+    if (error) {
+      if (!isMissingFunction(error)) {
+        throw new Error(`pm cursor rpc: ${(error as { message?: string }).message ?? "failed"}`);
+      }
+      rpcMissing = true;
+    } else {
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      // No row means the caller failed can_read_pm — the RPC's WHERE clause
+      // filtered the whole result away. That is the same "nothing visible"
+      // answer RLS gave the old counts (all zeros), and treating it as a
+      // stable signature keeps a non-member from looping on full refreshes.
+      if (!row) return { ...EMPTY_CURSOR };
+      return {
+        tasks: Number(row.tasks ?? 0),
+        tasksUpdatedAt: (row.tasks_updated_at as string | null) ?? "",
+        activity: Number(row.activity ?? 0),
+        taskOwners: Number(row.task_owners ?? 0),
+        taskLinks: Number(row.task_links ?? 0),
+      };
+    }
+  }
+  return fetchPmCursorLegacy(client);
+}
+
+/**
+ * The pre-RPC probe: four head-only counts (tasks, activity, task_owners,
+ * task_links) plus one limit-1 read of the newest task's updated_at. Kept as
+ * the fallback for a database without 20260909100100. Throws if any sub-query
+ * errors so the caller can fall back to a full refresh rather than mistake an
+ * error for "nothing changed".
+ */
+export async function fetchPmCursorLegacy(client: SupabaseClient): Promise<PmCursor> {
   const sb = client.schema("pm");
   const head = { count: "exact", head: true } as const;
 

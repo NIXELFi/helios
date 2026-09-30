@@ -20,10 +20,10 @@ interface Props {
 }
 
 const NUM_INPUT_CLS =
-  "w-24 rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1.5 py-0.5 text-right font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:opacity-40";
+  "w-24 rounded-sm border border-helios-line bg-helios-deep px-1.5 py-0.5 text-right font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none disabled:opacity-40";
 
 const SELECT_CLS =
-  "rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1.5 py-0.5 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none disabled:opacity-40";
+  "rounded-sm border border-helios-line bg-helios-deep px-1.5 py-0.5 font-mono text-[10px] text-helios-text focus:border-asu-gold focus:outline-none disabled:opacity-40";
 
 export function ParameterRow({
   meta,
@@ -44,7 +44,7 @@ export function ParameterRow({
   const dimmed = isFollower || !bounds.enabled ? "opacity-60" : "";
 
   return (
-    <tr className={"border-t border-[#16171B] " + dimmed}>
+    <tr className={"border-t border-helios-panel " + dimmed}>
       <td className="px-2 py-1">
         <input
           type="checkbox"
@@ -54,10 +54,10 @@ export function ParameterRow({
           aria-label={`Enable ${meta.path} as tunable`}
         />
       </td>
-      <td className="px-2 py-1 font-mono text-[11px] text-[#D8DCE2]">
+      <td className="px-2 py-1 font-mono text-[11px] text-helios-text">
         <span>{meta.path}</span>
         {meta.kind === "array" && bounds.perElement !== null && (
-          <span className="ml-1 text-[#5A5F66]">[{bounds.perElement}]</span>
+          <span className="ml-1 text-helios-muted">[{bounds.perElement}]</span>
         )}
         {canLock && !isFollower && (
           <label
@@ -74,8 +74,8 @@ export function ParameterRow({
             <span
               className={
                 bounds.lockToFollower
-                  ? "uppercase tracking-wider text-[#FFC627]"
-                  : "uppercase tracking-wider text-[#5A5F66]"
+                  ? "uppercase tracking-wider text-asu-gold"
+                  : "uppercase tracking-wider text-helios-muted"
               }
             >
               lock in/out
@@ -84,15 +84,15 @@ export function ParameterRow({
         )}
         {isFollower && (
           <span
-            className="ml-2 text-[10px] uppercase tracking-wider text-[#FFC627]"
+            className="ml-2 text-[10px] uppercase tracking-wider text-asu-gold"
             aria-label={`Locked to ${lockedAsFollower!.leader}`}
           >
             ← locked to {lockedAsFollower!.leader}
           </span>
         )}
       </td>
-      <td className="px-2 py-1 font-mono text-[10px] text-[#5A5F66]">{meta.unit}</td>
-      <td className="px-2 py-1 text-right font-mono text-[10px] text-[#5A5F66]">
+      <td className="px-2 py-1 font-mono text-[10px] text-helios-muted">{meta.unit}</td>
+      <td className="px-2 py-1 text-right font-mono text-[10px] text-helios-muted">
         {Number.isFinite(meta.default) ? meta.default.toPrecision(4) : "—"}
       </td>
       <td className="px-2 py-1">
@@ -142,7 +142,7 @@ export function ParameterRow({
             ))}
           </select>
         ) : (
-          <span className="text-[10px] text-[#5A5F66]">scalar</span>
+          <span className="text-[10px] text-helios-muted">scalar</span>
         )}
       </td>
     </tr>

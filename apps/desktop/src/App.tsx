@@ -11,7 +11,7 @@ import type { LoadedSession } from "./lib/session";
 import { SESSION_PALETTE, applySessionMeta, colorForIndex } from "./lib/session";
 import { lapInputsFor, saveLapConfig } from "./lib/lap-config";
 import { saveChannelOverrides } from "./lib/channel-overrides";
-import { classifyPaths, loadUserSession } from "./lib/load-user-session";
+import { classifyPaths, loadUserSession, userSessionIdFor } from "./lib/load-user-session";
 import { useFileDrop } from "./lib/use-file-drop";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type { TileSpec, Workspace } from "./workspaces/types";
@@ -21,17 +21,19 @@ import {
   loadRecentSessions, addRecentSession, removeRecentSession,
   loadViewStateFor, saveViewStateFor,
   loadLapSelection, saveLapSelection,
-  saveSessionMeta, removeSessionMeta,
+  saveSessionMeta, removeSessionMeta, loadSessionMeta,
 } from "./lib/app-state";
+import { planRecentsBoot } from "./lib/boot-order";
 import { findNextFreeSlot, snapAllToGrid, GRID_COLS, GRID_ROWS } from "./lib/grid";
 import { stepToLapBoundary } from "./lib/lap-step";
 import { progressFraction } from "./lib/load-progress";
 import {
-  type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels,
+  type MathChannel, applyMathChannels, loadMathChannels, saveMathChannels, computeMathChannelsUpdate,
 } from "./lib/math-channels";
 import { serializeBundle, parseBundle, mergeImported, slugifyForFilename } from "./lib/workspace-bundle";
 import { saveBundleFile, openBundleFile } from "./lib/workspace-dialog";
 import { useFileOpener, processBundlePaths } from "./lib/use-file-opener";
+import { labelForPath, resolveOpenSelection, useOpenInLogs } from "./lib/open-in-logs";
 import { formatFileOpenSummary } from "./lib/file-open-summary";
 import type { PerFileResult } from "./lib/file-open-summary";
 import { Tile } from "./components/Tile";
@@ -47,7 +49,9 @@ import { LapConfigDialog } from "./components/LapConfigDialog";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
 import { HelpModal } from "./help/HelpModal";
+import { useModuleLive } from "./shell/module-activity";
 
+import { tc } from "@helios/ui";
 export interface LogsAppProps {
   /** Current app version — used to stamp exported workspace bundles. The
    *  Shell owns the live `getVersion()` call so the wordmark + version in
@@ -85,6 +89,10 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     bootRef.current = { workspaces: list, activeId };
   }
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => bootRef.current!.workspaces);
+  // For the open-in-Logs handler, which is subscribed once and must not
+  // close over a stale list.
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
   const [workspaceId, setWorkspaceIdRaw] = useState(() => bootRef.current!.activeId);
   // Wrap setWorkspaceId to persist the choice. Every call site (tab click,
   // import, duplicate, new) flows through this so we never miss a write.
@@ -151,7 +159,54 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   const mathChannelsRef = useRef(mathChannels);
   mathChannelsRef.current = mathChannels;
   const [mathErrors, setMathErrors] = useState<Map<string, Map<string, string>>>(new Map());
+  const mathErrorsRef = useRef(mathErrors);
+  mathErrorsRef.current = mathErrors;
   useFileOpener({ onPending: handleFileOpenPending });
+  // Another module handing a data file over -- the Sim module's "Open in
+  // Logs" on a recorded run. It is the same ingest as a drag-and-drop, which
+  // is the point: a simulator run is an ordinary Helios-canonical CSV, and
+  // it lands beside the real car's logs on the same axes with no special
+  // case anywhere in the pipeline. The Shell switches to this module; this
+  // loads the files.
+  useOpenInLogs(useCallback((detail) => {
+    // Name it after where it came from. Every simulator run's telemetry file
+    // is called `telemetry.csv`, so without this two overlaid runs are two
+    // sessions both called "telemetry". A rename the user has already made
+    // wins -- this fills the blank, it does not overwrite a decision.
+    // Per path: a sector comparison opens two runs at once, and two sessions
+    // both called "Nick -- Autocross 2026" are no better than two called
+    // "telemetry".
+    detail.paths.forEach((p, i) => {
+      const label = labelForPath(detail, i);
+      if (!label) return;
+      const id = userSessionIdFor(p);
+      if (!loadSessionMeta(id)?.label) saveSessionMeta(id, { label });
+    });
+    const selection = detail.selection;
+    void handleAddSessionFiles(detail.paths).then((opened) => {
+      if (!selection) return;
+      // Resolved against the sessions that actually loaded -- a file that
+      // failed, or a lap its table does not have, is skipped, never guessed.
+      const r = resolveOpenSelection(selection, opened);
+      if (selection.workspace && workspacesRef.current.some((w) => w.id === selection.workspace)) {
+        setWorkspaceId(selection.workspace);
+      }
+      if (r.primaryId) setPrimaryId(r.primaryId);
+      if (r.main || r.ref) {
+        const cur = lapSelectionEmitter.get();
+        lapSelectionEmitter.set({ ...cur, main: r.main ?? cur.main, ref: r.ref ?? cur.ref });
+      }
+      if (r.zoom) viewState.setZoom(r.zoom);
+    });
+    // Empty deps on purpose, and it is load-bearing: `handleAddSessionFiles`
+    // is re-created every render but reads everything it needs through refs
+    // (`sessionsRef`, `mathChannelsRef`) and functional setters, so the stale
+    // closure captured here still acts on current state. If that function is
+    // ever changed to read state directly, this array has to change with it --
+    // there is no ESLint in this repo to notice.
+    // This is also the consumer that actually loads the files, so it is the
+    // one that drains a request made before this module existed.
+  }, []), { drainsPending: true });
   // OS-level drag-drop of data files (CSV) onto the app window. .helios
   // workspace bundles are routed away from this hook (they belong to the
   // useFileOpener path above). Fires for any drop over the webview, so the
@@ -198,31 +253,96 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   useEffect(() => {
     loadAllSessions((p) => setLoadProgress(p))
       .then(async (bundled) => {
-        // Silently re-load recent user sessions before the first paint. Files
-        // that no longer exist (deleted, moved off a removable drive) are
-        // dropped from the recents list and never bother the user with a
-        // popup — they came from days-ago activity, not the current intent.
-        const recents = loadRecentSessions();
-        // One monotonic total for every post-load stage: each recent file is a
-        // step, plus a "compute math" step and a final "ready" step. The bar's
-        // monotonic floor (progressFraction) guards the boundary against the
-        // bundled-only denominator used during the loadAllSessions phase.
-        const total = bundled.length + recents.length + 2;
+        // PAINT-FIRST BOOT. Silently re-load recent user sessions. Files that
+        // no longer exist (deleted, moved off a removable drive) are dropped
+        // from the recents list and never bother the user with a popup — they
+        // came from days-ago activity, not the current intent.
+        //
+        // Only ONE of them is loaded before the first paint: the one that will
+        // become primary. Reopening the whole history first meant a user with
+        // a dozen remembered logs watched the loading screen parse every last
+        // one before seeing anything. The rest stream in behind the first
+        // frame and merge into the session list as they arrive.
+        const plan = planRecentsBoot(
+          loadRecentSessions(),
+          (p) => loadSessionMeta(userSessionIdFor(p))?.visible === false,
+        );
+        // One monotonic total for every post-load stage: the single pre-paint
+        // recent is a step, plus a "compute math" step and a final "ready"
+        // step. The bar's monotonic floor (progressFraction) guards the
+        // boundary against the bundled-only denominator used during the
+        // loadAllSessions phase.
+        const total = bundled.length + 1 + 2;
         const userLoaded: LoadedSession[] = [];
-        let colorIdx = bundled.length;
-        for (let i = 0; i < recents.length; i++) {
-          const path = recents[i]!;
+        if (plan.first !== null) {
+          const path = plan.first;
           setLoadProgress({
             label: `Re-opening ${path.split(/[\\/]/).pop() ?? path}`,
-            loaded: bundled.length + i,
+            loaded: bundled.length,
             total,
           });
           try {
-            const session = await loadUserSession(path, colorForIndex(colorIdx));
-            colorIdx++;
-            userLoaded.push(session);
+            userLoaded.push(await loadUserSession(path, colorForIndex(bundled.length)));
           } catch {
             removeRecentSession(path);
+          }
+        }
+
+        /** Load the remaining recents AFTER the first paint and fold them into
+         *  the committed session list. Never touches the loading screen: by the
+         *  time this runs the user is already looking at their primary session.
+         *  `recovering` is true when boot ended with nothing loaded at all — a
+         *  session that arrives here can still rescue that state. */
+        async function loadRest(paths: string[], recovering: boolean): Promise<void> {
+          try {
+            await loadRestInner(paths, recovering);
+          } catch (e) {
+            // Nothing here may strand the user: the app is already usable.
+            console.error("Background re-open of recent sessions failed:", e);
+          }
+        }
+        async function loadRestInner(paths: string[], recovering: boolean): Promise<void> {
+          if (paths.length === 0) return;
+          const settled = await Promise.allSettled(
+            paths.map((p) => loadUserSession(p, colorForIndex(0))),
+          );
+          const arrived: LoadedSession[] = [];
+          for (let i = 0; i < settled.length; i++) {
+            const r = settled[i]!;
+            if (r.status === "fulfilled") arrived.push(r.value);
+            else removeRecentSession(paths[i]!);
+          }
+          if (arrived.length === 0) return;
+          // Math channels for the newcomers only; merge their error maps into
+          // whatever the pre-paint phase already recorded.
+          const errors = new Map<string, Map<string, string>>();
+          for (const session of arrived) {
+            try {
+              errors.set(session.id, applyMathChannels(session.store, mathChannelsRef.current, session.laps).errors);
+            } catch (mathErr) {
+              errors.set(session.id, new Map([["*", String(mathErr)]]));
+            }
+          }
+          setMathErrors((prev) => {
+            const next = new Map(prev);
+            for (const [id, e] of errors) next.set(id, e);
+            return next;
+          });
+          // applySessionMeta AFTER the merge so a pinned color wins over the
+          // positional one the merge just assigned — same order as the
+          // explicit file-open path.
+          const merged = applySessionMeta(
+            mergeSessionsWithColors(sessionsRef.current ?? [], arrived),
+          );
+          setSessions(() => merged);
+          if (recovering) {
+            // Boot had nothing to show; adopt a primary and clear the notice.
+            setPrimaryId((cur) =>
+              cur && merged.some((s) => s.id === cur)
+                ? cur
+                : merged.find((s) => s.visible)?.id ?? merged[0]?.id ?? null,
+            );
+            setError(null);
           }
         }
         // Apply the user's saved per-session overrides (custom label, pinned
@@ -234,7 +354,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         const loaded = applySessionMeta([...bundled, ...userLoaded]);
         setLoadProgress({
           label: "Computing math channels",
-          loaded: bundled.length + recents.length,
+          loaded: bundled.length + 1,
           total,
         });
         // Everything from here through the lap-restore is best-effort: a single
@@ -257,6 +377,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         if (loaded.length === 0) {
           setError(`No data loaded yet — open a CSV (${shortcut("O")}), or switch to Vault / CFD in the sidebar.`);
           setLoadProgress({ label: "No sessions", loaded: total, total });
+          // A later recent may still load and rescue the empty state.
+          void loadRest(plan.rest, true);
           return;
         }
         try {
@@ -320,6 +442,9 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           console.error("Lap-selection restore failed during boot:", lapErr);
         }
         setLoadProgress({ label: "Ready", loaded: total, total });
+        // First paint is unblocked from here — the remaining recents load
+        // behind it. Deliberately NOT awaited.
+        void loadRest(plan.rest, false);
       })
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -779,6 +904,33 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     return prim ? prim.store.list().filter((c) => c.source !== "math") : [];
   }, [sessions, primaryId, mathChannels, mathErrors]);
 
+  // These three callbacks are hooks, so they MUST sit above the LoadingScreen
+  // early return below: the first (loading) render would otherwise call fewer
+  // hooks than the renders after it, which React reports as error #310 the
+  // moment the sessions land (caught by the 5.7.1 real-app smoke test).
+  // Stable across renders (setWorkspaces is stable, saveWorkspaces is a module
+  // import) so the callbacks built on it — updateTile in particular — can be
+  // stable too and keep the memoised Tile from re-rendering on every App tick.
+  const commitWorkspaces = useCallback((updater: (prev: Workspace[]) => Workspace[]) => {
+    setWorkspaces((prev) => {
+      const next = updater(prev);
+      saveWorkspaces(next);
+      return next;
+    });
+  }, []);
+
+  // Stable per workspace: passed to every Tile as `onChange`, so an unstable
+  // identity would re-render all of them on each App render.
+  const updateTile = useCallback((nextTile: TileSpec) => {
+    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
+      ? w
+      : { ...w, tiles: w.tiles.map((t) => (t.id === nextTile.id ? nextTile : t)) }
+    )));
+  }, [commitWorkspaces, workspaceId]);
+
+  /** Stable tile-selection callback — the Tile passes its own id back. */
+  const onSelectTile = useCallback((id: string) => setSelectedTileId(id), []);
+
   if (error || !sessions || !primaryId) {
     // Clamp to [0,1] and never let the bar slide backward as the denominator
     // changes between boot stages.
@@ -859,13 +1011,6 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
    *  the LATEST committed state instead of whatever was in scope when the
    *  closure was created, so a stale-closure can't quietly clobber a
    *  previous edit (the "field reverts instantly after edit" bug). */
-  function commitWorkspaces(updater: (prev: Workspace[]) => Workspace[]) {
-    setWorkspaces((prev) => {
-      const next = updater(prev);
-      saveWorkspaces(next);
-      return next;
-    });
-  }
 
   function handleCreateWorkspace() {
     const usedColors = new Set(workspaces.map((w) => w.color));
@@ -1030,12 +1175,6 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     });
   }
 
-  function updateTile(nextTile: TileSpec) {
-    commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
-      ? w
-      : { ...w, tiles: w.tiles.map((t) => (t.id === nextTile.id ? nextTile : t)) }
-    )));
-  }
 
   function deleteTile(tileId: string) {
     commitWorkspaces((prev) => prev.map((w) => (w.id !== workspaceId
@@ -1107,7 +1246,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
    *  becomes its own LoadedSession with auto-detected laps and the same
    *  math channels applied. Failures surface in a single ConfirmDialog
    *  rather than per-file dialogs so a 5-file drop doesn't queue 5 modals. */
-  async function handleAddSessionFiles(paths: string[]) {
+  async function handleAddSessionFiles(paths: string[]): Promise<LoadedSession[]> {
     // NB: do NOT bail when sessionsRef.current is null — that's the zero-session
     // boot state (no bundled samples + no recents), and opening a file is the
     // ONLY way out of the empty Logs tab. Treat null as an empty list below.
@@ -1177,6 +1316,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         onConfirm: () => setConfirmState(null),
       });
     }
+    return newSessions;
   }
 
   function handleRemoveSession(sessionId: string) {
@@ -1301,12 +1441,23 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
     // closure values) and do all store mutation + error computation OUTSIDE
     // any setSessions updater, so each setState call is a pure assignment.
     const oldChannels = mathChannelsRef.current;
+    // Advance the refs synchronously so a second change arriving before the
+    // re-render (e.g. the editor's debounce flush on close) diffs against
+    // what the stores actually hold now.
+    mathChannelsRef.current = next;
     setMathChannelsState(next);
     saveMathChannels(next);
     const current = sessionsRef.current;
     if (!current) return;
-    const { errors } = computeMathChannelsUpdate(current, oldChannels, next);
-    setMathErrors(errors);
+    const { errors } = computeMathChannelsUpdate(current, oldChannels, next, mathErrorsRef.current);
+    mathErrorsRef.current = errors;
+    // Merge rather than replace: a lap-config or session-load update queued in
+    // the same batch writes through the functional form and must not be lost.
+    setMathErrors((prev) => {
+      const merged = new Map(prev);
+      for (const [sessionId, sessionErrors] of errors) merged.set(sessionId, sessionErrors);
+      return merged;
+    });
   }
 
   function handleToggleEditMode() {
@@ -1320,7 +1471,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
   return (
     // h-full (not h-screen): the Shell's Windows title bar sits above this
     // pane, so the viewport height is no longer ours to claim.
-    <div className="flex flex-col h-full bg-[#0E0E10] text-[#D8DCE2]">
+    <div className="flex flex-col h-full bg-helios-base text-helios-text">
       {/* Header doubles as the macOS drag region under titleBarStyle: Overlay.
           No extra left padding needed here: the 176px-wide ModulePicker rail
           sits to the left of this header in the Shell layout, so the inset
@@ -1330,7 +1481,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           so brand chrome persists across Log / Vault / CFD. */}
       <header
         data-tauri-drag-region
-        className="h-10 flex items-center px-3 border-b border-[#2A2C32] text-xs"
+        className="h-10 flex items-center px-3 border-b border-helios-line text-xs"
       >
         {/* Primary-session label is the first thing to go when space is tight:
             it's hidden in edit mode so the tab bar and the (wider) edit
@@ -1342,8 +1493,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             fixed-width toolbar to its right never gets squeezed. */}
         {!editMode && (
           <>
-            <span className="text-[#9097A0] truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
-            <div className="ml-3 self-stretch border-l border-[#2A2C32] flex-shrink-0" aria-hidden />
+            <span className="text-helios-dim truncate max-w-[160px] flex-shrink-0" title={primary.label}>{primary.label}</span>
+            <div className="ml-3 self-stretch border-l border-helios-line flex-shrink-0" aria-hidden />
           </>
         )}
         <WorkspaceTabBar
@@ -1360,7 +1511,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           onExportAll={handleExportAllWorkspaces}
           onImport={handleImportWorkspaces}
         />
-        <div className="flex items-center gap-2 self-stretch flex-shrink-0 ml-3 pl-3 border-l border-[#2A2C32]">
+        <div className="flex items-center gap-2 self-stretch flex-shrink-0 ml-3 pl-3 border-l border-helios-line">
           <ViewStatePills viewState={viewState} />
           <button
             onClick={() => setPaletteOpen(true)}
@@ -1371,14 +1522,14 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           </button>
           <button
             onClick={() => openHelp()}
-            className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+            className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
             title="Open Help &amp; Wiki"
           >
             Help
           </button>
           <button
             onClick={() => setChannelsOpen(true)}
-            className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+            className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
             title={`Inspect channels in ${primary.label}`}
           >
             Channels
@@ -1388,8 +1539,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             className={
               "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
               (primaryMathErrors.size > 0
-                ? "bg-[#16171B] text-[#EF5350] border-[#EF5350]"
-                : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                ? "bg-helios-panel text-[#EF5350] border-[#EF5350]"
+                : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
             }
             title={primaryMathErrors.size > 0
               ? `${primaryMathErrors.size} math channel(s) failed to compile`
@@ -1403,8 +1554,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             className={
               "px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors " +
               (editMode
-                ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
-                : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                ? "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold"
+                : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
             }
             title={editMode ? "Exit edit mode" : "Edit workspace"}
           >
@@ -1414,7 +1565,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
             <>
               <button
                 onClick={() => setAddTileOpen(true)}
-                className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+                className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-asu-gold hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
                 title="Add a tile"
               >+ Add tile</button>
               <EditMoreMenu
@@ -1450,8 +1601,8 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
           {editMode && <GridOverlay />}
           {workspace.tiles.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center text-[#9097A0] text-sm max-w-xs px-4">
-                <div className="text-[#D8DCE2] font-medium mb-1">No tiles</div>
+              <div className="text-center text-helios-dim text-sm max-w-xs px-4">
+                <div className="text-helios-text font-medium mb-1">No tiles</div>
                 <div>
                   {editMode
                     ? "Press + Add tile to place a widget."
@@ -1473,7 +1624,7 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
               gpsPickerEmitter={gpsPickerEmitter}
               editMode={editMode}
               selected={editMode && spec.id === selectedTileId}
-              onSelect={() => setSelectedTileId(spec.id)}
+              onSelect={onSelectTile}
               onChange={updateTile}
             />
           ))}
@@ -1490,14 +1641,14 @@ export default function App({ appVersion, playing, onPlayingChange, keyboardShor
         )}
       </div>
 
-      <footer className="h-6 flex items-center px-3 border-t border-[#2A2C32] text-[10px] text-[#9097A0]">
+      <footer className="h-6 flex items-center px-3 border-t border-helios-line text-[10px] text-helios-dim">
         {visibleSessions.length} session{visibleSessions.length === 1 ? "" : "s"} visible
         {" · "}primary: {primary.store.list().length} channels
         {" · "}range {formatRangeSeconds(ext.endUs - ext.startUs)}
         {" · "}{workspace.tiles.length} tile{workspace.tiles.length === 1 ? "" : "s"}
         <LapCompareSegment sessions={sessions} selection={lapSelection} />
         {" · "}<FpsCounter />
-        {editMode && <span className="ml-2 text-[#FFC627]">· editing</span>}
+        {editMode && <span className="ml-2 text-asu-gold">· editing</span>}
       </footer>
 
       {channelsOpen && (
@@ -1578,14 +1729,14 @@ function LapCompareSegment({ sessions, selection }: { sessions: LoadedSession[];
   const deltaColor =
     delta > 0.005 ? "#EF5350"
     : delta < -0.005 ? "#66BB6A"
-    : "#D8DCE2";
+    : tc("text");
   return (
-    <span className="ml-2 pl-2 border-l border-[#2A2C32] font-mono-num tabular-nums">
-      <span className="text-[#9097A0]">Main</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(mainLap.durationS * 1_000_000)}</span>
-      <span className="text-[#9097A0]"> · Ref</span>{" "}
-      <span className="text-[#D8DCE2]">{formatLapTime(refLap.durationS * 1_000_000)}</span>
-      <span className="text-[#9097A0]"> · Δ</span>{" "}
+    <span className="ml-2 pl-2 border-l border-helios-line font-mono-num tabular-nums">
+      <span className="text-helios-dim">Main</span>{" "}
+      <span className="text-helios-text">{formatLapTime(mainLap.durationS * 1_000_000)}</span>
+      <span className="text-helios-dim"> · Ref</span>{" "}
+      <span className="text-helios-text">{formatLapTime(refLap.durationS * 1_000_000)}</span>
+      <span className="text-helios-dim"> · Δ</span>{" "}
       <span style={{ color: deltaColor }}>{delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)}s</span>
     </span>
   );
@@ -1599,7 +1750,11 @@ function CursorClock({ emitter }: { emitter: CursorEmitter }) {
 
 function FpsCounter() {
   const [stats, setStats] = useState({ fps: 0, ms: 0 });
+  // Counting frames is itself a per-frame loop; run it only while Logs is on
+  // screen, not for every minute the module sits hidden behind PM or Vault.
+  const live = useModuleLive();
   useEffect(() => {
+    if (!live) return;
     let rafId: number;
     let frames = 0;
     let windowStart = performance.now();
@@ -1621,8 +1776,8 @@ function FpsCounter() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, []);
-  const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-[#FFC627]" : "text-[#EF5350]";
+  }, [live]);
+  const color = stats.fps >= 55 ? "" : stats.fps >= 30 ? "text-asu-gold" : "text-[#EF5350]";
   return (
     <span
       className={`font-mono-num ${color}`}
@@ -1642,7 +1797,7 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
       {state.zoomRange && (
         <button
           onClick={() => viewState.resetZoom()}
-          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-asu-gold text-helios-on-gold border-asu-gold font-semibold hover:brightness-110"
           title="Reset zoom to the full session range (or double-click any chart)"
         >
           Reset zoom
@@ -1651,7 +1806,7 @@ function ViewStatePills({ viewState }: { viewState: ViewStateEmitter }) {
       {state.datums.length > 0 && (
         <button
           onClick={() => viewState.clearDatums()}
-          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold hover:brightness-110"
+          className="px-2 py-0.5 text-xs border rounded-sm cursor-pointer transition-colors bg-asu-gold text-helios-on-gold border-asu-gold font-semibold hover:brightness-110"
           title="Remove all datum markers"
         >
           Clear datums ({state.datums.length})
@@ -1709,15 +1864,15 @@ function ExportMenuButton({ sessions, primary, viewState }: {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="Export"
       >Export ▾</button>
       {open && (
-        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
-          <button type="button" onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary session, full</button>
-          <button type="button" onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">CSV — primary, zoom range</button>
-          <button type="button" onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]">KML — GPS path (primary)</button>
-          {err && <div role="alert" className="px-2 py-1.5 text-[#EF5350] border-t border-[#2A2C32]">Export failed: {err}</div>}
+        <div className="absolute right-0 mt-1 w-56 bg-helios-base border border-helios-line z-30 text-xs">
+          <button type="button" onClick={() => exportCsv("session")} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">CSV — primary session, full</button>
+          <button type="button" onClick={() => exportCsv("zoom")} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">CSV — primary, zoom range</button>
+          <button type="button" onClick={() => exportKml()} className="w-full text-left px-2 py-1.5 hover:bg-helios-panel">KML — GPS path (primary)</button>
+          {err && <div role="alert" className="px-2 py-1.5 text-[#EF5350] border-t border-helios-line">Export failed: {err}</div>}
         </div>
       )}
     </div>
@@ -1742,19 +1897,19 @@ function EditMoreMenu({ onSnapToGrid, onResetAll }: {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="More edit actions"
-        className="px-2 py-0.5 text-xs border border-[#2A2C32] bg-[#16171B] text-[#D8DCE2] hover:border-[#FFC627] rounded-sm cursor-pointer transition-colors"
+        className="px-2 py-0.5 text-xs border border-helios-line bg-helios-panel text-helios-text hover:border-asu-gold rounded-sm cursor-pointer transition-colors"
         title="More actions"
       >⋯</button>
       {open && (
-        <div className="absolute right-0 mt-1 w-56 bg-[#0E0E10] border border-[#2A2C32] z-30 text-xs">
+        <div className="absolute right-0 mt-1 w-56 bg-helios-base border border-helios-line z-30 text-xs">
           <button
             onClick={() => { onSnapToGrid(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 hover:bg-[#16171B]"
+            className="w-full text-left px-2 py-1.5 hover:bg-helios-panel"
             title="Snap every tile's position and size to the grid; sizes are preserved"
           >Snap to grid</button>
           <button
             onClick={() => { onResetAll(); setOpen(false); }}
-            className="w-full text-left px-2 py-1.5 text-[#9097A0] hover:bg-[#16171B] hover:text-[#EF5350]"
+            className="w-full text-left px-2 py-1.5 text-helios-dim hover:bg-helios-panel hover:text-[#EF5350]"
             title="Reset every workspace to its built-in default"
           >Reset all workspaces</button>
         </div>
@@ -1883,8 +2038,8 @@ function PlaybackControls({
         className={
           "w-7 h-6 flex items-center justify-center text-xs border rounded-sm cursor-pointer transition-colors " +
           (playing
-            ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]"
-            : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+            ? "bg-asu-gold text-helios-on-gold border-asu-gold"
+            : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
         }
         title={playing ? "Pause (Space)" : "Play (Space)"}
         aria-label={playing ? "Pause" : "Play"}
@@ -1894,7 +2049,7 @@ function PlaybackControls({
       <select
         value={speed}
         onChange={(e) => setSpeed(Number(e.target.value))}
-        className="bg-[#16171B] text-[#D8DCE2] border border-[#2A2C32] hover:border-[#FFC627] rounded-sm px-1 h-6 text-xs cursor-pointer"
+        className="bg-helios-panel text-helios-text border border-helios-line hover:border-asu-gold rounded-sm px-1 h-6 text-xs cursor-pointer"
         title="Playback speed"
       >
         {PLAYBACK_SPEEDS.map((s) => (
@@ -1969,31 +2124,6 @@ export function computeOverrideChange(
     return { ...s, channelOverrides: overrides };
   });
   return { next, saved };
-}
-
-/** Re-apply the math-channel set to every loaded session: remove the union of
- *  old+new math ids from each store first (so a rename/delete leaves no stale
- *  column) then re-apply, collecting per-session compile errors. PURE w.r.t.
- *  React state — store mutation is intrinsic; the returned errors map is what
- *  the caller feeds to setMathErrors OUTSIDE any setSessions updater.
- *  IMPURE-UPDATERS: previously read the stale `mathChannels`/`sessions`
- *  closures and called setMathErrors coupled to the updater. */
-export function computeMathChannelsUpdate(
-  sessions: LoadedSession[],
-  oldChannels: MathChannel[],
-  nextChannels: MathChannel[],
-): { errors: Map<string, Map<string, string>> } {
-  const allIds = new Set([
-    ...oldChannels.map((m) => m.id),
-    ...nextChannels.map((m) => m.id),
-  ]);
-  const errors = new Map<string, Map<string, string>>();
-  for (const session of sessions) {
-    for (const id of allIds) session.store.removeChannel(id);
-    const r = applyMathChannels(session.store, nextChannels, session.laps);
-    errors.set(session.id, r.errors);
-  }
-  return { errors };
 }
 
 /** Format a µs span as a footer "range" string in seconds. Guards a non-finite

@@ -7,6 +7,7 @@ import { useMemo, useRef } from "react";
 
 import { useElementWidth } from "./useElementWidth";
 
+import { tc } from "@helios/ui";
 export interface HistSeries {
   /** Channel samples. */
   values: number[];
@@ -68,7 +69,7 @@ export function MiniHistogram({ title, unit, series, overlay, bins = 24, height 
   return (
     <div ref={hostRef} className="w-full">
       <svg width={width} height={height} role="img" aria-label={`${title} histogram`} className="block">
-        <text x={4} y={12} fontSize={9} fill="#9097A0" style={{ textTransform: "uppercase", letterSpacing: 1 }}>
+        <text x={4} y={12} fontSize={9} fill={tc("dim")} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
           {title}
         </text>
         {model.a.map((f, i) =>
@@ -96,10 +97,10 @@ export function MiniHistogram({ title, unit, series, overlay, bins = 24, height 
             strokeWidth={1.5}
           />
         )}
-        <text x={2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="'JetBrains Mono Variable', ui-monospace, monospace">
+        <text x={2} y={height - 4} fontSize={8} fill={tc("muted")} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace">
           {model.lo.toFixed(0)}
         </text>
-        <text x={width - 2} y={height - 4} fontSize={8} fill="#5A5F66" fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" textAnchor="end">
+        <text x={width - 2} y={height - 4} fontSize={8} fill={tc("muted")} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" textAnchor="end">
           {model.hi.toFixed(0)} {unit}
         </text>
       </svg>

@@ -1,6 +1,4 @@
-import type {
-  DropRequest, DropResult, PlacedBet, RaisedBet, SettledBet,
-} from "../api";
+import type { BjTable, DropRequest, DropResult } from "../api";
 
 /** What a rated game reports at the end of a run. Rated games don't submit a
  *  score at all — they submit how well the session was PLAYED, and the server
@@ -37,19 +35,19 @@ export interface MoneyTable {
    *  second one. Rejects with the server's message when the stake is refused. */
   place: (req: DropRequest, nonce: string) => Promise<DropResult>;
 
-  // --- two-phase games (blackjack) -----------------------------------------
-  // A hand is played over time, so its chips leave the budget when the cards
-  // come out and come back when it finishes. Every call is idempotent under
-  // its own nonce.
-  /** Take the stake for a hand about to be dealt. */
-  placeBet: (stake: number, nonce: string) => Promise<PlacedBet>;
-  /** Double down: a SECOND stake of the same size, capped on its own. */
-  raiseBet: (betId: string, nonce: string) => Promise<RaisedBet>;
-  /** Pay a finished hand. The server refuses any amount no legal hand could
-   *  produce. */
-  settleBet: (
-    betId: string, payout: number, outcome: string, nonce: string,
-  ) => Promise<SettledBet>;
+  // --- server-dealt games (blackjack) --------------------------------------
+  // The shoe lives on the server: every action is an RPC that returns the
+  // table as the server now sees it, settlement included. The cabinet renders
+  // what it is handed and never computes an outcome. Each call is idempotent
+  // under its nonce.
+  /** Deal a hand: debits the stake and draws. Naturals arrive settled. */
+  deal: (stake: number, nonce: string) => Promise<BjTable>;
+  /** Draw one card. A bust arrives settled, hole card revealed. */
+  hit: (betId: string, nonce: string) => Promise<BjTable>;
+  /** Dealer plays out to 17+ and the hand settles. */
+  stand: (betId: string, nonce: string) => Promise<BjTable>;
+  /** Double the stake (second debit, capped on its own), one card, settle. */
+  double: (betId: string, nonce: string) => Promise<BjTable>;
   /** Close out a hand abandoned by a previous session, forfeiting its stake.
    *  Resolves to null when there was nothing open. */
   forfeitOpen: () => Promise<{ stake: number } | null>;

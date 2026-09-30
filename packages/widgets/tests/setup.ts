@@ -52,6 +52,10 @@ if (typeof (globalThis as Record<string, unknown>).Path2D === "undefined") {
 import { vi } from "vitest";
 vi.mock("maplibre-gl", () => {
   class FakeMap {
+    constructor() {
+      const g = globalThis as unknown as { __mapConstructions?: number };
+      g.__mapConstructions = (g.__mapConstructions ?? 0) + 1;
+    }
     on() { return this; }
     once() { return this; }
     off() { return this; }

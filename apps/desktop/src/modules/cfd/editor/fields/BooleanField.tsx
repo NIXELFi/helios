@@ -22,9 +22,9 @@ export function BooleanField({
         aria-label={meta.label}
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-3 w-3 accent-[#FFC627]"
+        className="h-3 w-3 accent-asu-gold"
       />
-      <span className="text-[10px] text-[#9097A0]">{checked ? "on" : "off"}</span>
+      <span className="text-[10px] text-helios-dim">{checked ? "on" : "off"}</span>
     </label>
   );
 }

@@ -12,8 +12,11 @@ export type GameId = "snake" | "breakout" | "flappy" | "2048" | "blackjack" | "p
  *  hot streak banks nothing. */
 // Empty today: blackjack was the only rated cabinet and it now plays purely for
 // the subteam's money. The ratings table, its RPCs and the whole leaderboard
-// path below are deliberately LEFT IN PLACE — nobody's history is deleted, and
-// putting a game back on the ladder is a one-line change here.
+// path below are deliberately LEFT IN PLACE — nobody's history is deleted.
+// Putting a game back on the ladder is the one-line change here PLUS a grant:
+// 20260829000100 revoked execute on games.apply_rated_session_v3 from
+// authenticated (it trusts client-claimed hands/advantage), so re-enabling a
+// rated game without re-granting it fails every submission with 42501.
 const RATED_GAMES: ReadonlySet<GameId> = new Set<GameId>([]);
 
 export function isRated(gameId: GameId): boolean {
@@ -505,35 +508,36 @@ export async function fetchBudgetStandings(
   }));
 }
 
-// ------------------------------------------------- two-phase bets (blackjack)
-// A blackjack hand is played over many seconds and several decisions, so it
-// can't settle atomically the way a plinko drop does. The chips leave the
-// budget when the cards come out and return when the hand finishes — which is
-// also where they really are in between: on the table.
-//
-// Every call carries its own nonce and is idempotent, because every one of
-// them moves money and all three can be interrupted by a flaky network.
+// -------------------------------------------------- server-dealt blackjack
+// The shoe lives on the server: deal, hit, stand and double are RPCs that
+// draw from a per-player shoe no client can read, and settlement is computed
+// in the same transaction that draws the cards. There is no payout parameter
+// anywhere in this flow — the client is handed a finished table to render,
+// exactly like a plinko ball. Every call is idempotent under its nonce: a
+// retry replays the stored result rather than drawing (or paying) twice.
 
-export interface PlacedBet {
+export interface BjCard {
+  rank: string;
+  suit: string;
+}
+
+/** The table as the server last reported it. While `state` is "player" the
+ *  dealer array holds ONLY the up card — the hole card does not exist
+ *  client-side until the hand is over. */
+export interface BjTable {
   betId: string;
-  balance: number;
-  maxBet: number;
-  replay: boolean;
-}
-
-export interface RaisedBet {
-  /** Total on the hand after doubling — twice what was placed. */
+  state: "player" | "settled";
+  player: BjCard[];
+  dealer: BjCard[];
+  /** Live stake on the hand — doubled if the hand was doubled. */
   stake: number;
+  outcome: "blackjack" | "win" | "push" | "lose" | null;
+  payout: number | null;
   balance: number;
   maxBet: number;
-  replay: boolean;
-}
-
-export interface SettledBet {
-  payout: number;
-  net: number;
-  balance: number;
-  maxBet: number;
+  cardsLeft: number;
+  /** True when the server reshuffled the shoe for this action. */
+  reshuffled: boolean;
   replay: boolean;
 }
 
@@ -544,88 +548,65 @@ function firstRow<T>(res: { data: unknown; error: { message: string } | null }, 
   return row;
 }
 
-/** Take the stake for a hand about to be dealt. Rejects if the subteam can't
- *  cover it, or if this player already has a hand open. */
-export async function placeBet(
+interface BjRow {
+  bj_bet_id: string; bj_state: string; bj_player: BjCard[]; bj_dealer: BjCard[];
+  bj_stake: number; bj_outcome: string | null; bj_payout: number | null;
+  new_balance: number; new_max_bet: number;
+  bj_cards_left: number; bj_reshuffled: boolean; was_replay: boolean;
+}
+
+function toBjTable(row: BjRow): BjTable {
+  return {
+    betId: row.bj_bet_id,
+    state: row.bj_state === "settled" ? "settled" : "player",
+    player: row.bj_player ?? [],
+    dealer: row.bj_dealer ?? [],
+    stake: Number(row.bj_stake),
+    outcome: (row.bj_outcome as BjTable["outcome"]) ?? null,
+    payout: row.bj_payout === null || row.bj_payout === undefined ? null : Number(row.bj_payout),
+    balance: Number(row.new_balance),
+    maxBet: Number(row.new_max_bet),
+    cardsLeft: Number(row.bj_cards_left),
+    reshuffled: Boolean(row.bj_reshuffled),
+    replay: Boolean(row.was_replay),
+  };
+}
+
+async function bjCall(
   client: SupabaseClient,
-  gameId: GameId,
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<BjTable> {
+  return toBjTable(firstRow<BjRow>(await client.schema("games").rpc(fn, args), fn));
+}
+
+/** Deal a hand: the stake leaves the budget and the server draws from the
+ *  shoe, all in one transaction. A natural (either side) comes back already
+ *  settled. Rejects if the subteam can't cover the stake or a hand is open. */
+export async function bjDeal(
+  client: SupabaseClient,
   stake: number,
   nonce: string,
-): Promise<PlacedBet> {
+): Promise<BjTable> {
   if (!Number.isInteger(stake) || stake <= 0) {
     throw new Error(`stake must be whole chips: ${stake}`);
   }
   if (!nonce) throw new Error("nonce required");
-  const row = firstRow<{
-    bet_id: string; new_balance: number; new_max_bet: number; was_replay: boolean;
-  }>(
-    await client.schema("games").rpc("place_bet", {
-      p_game_id: gameId, p_stake: stake, p_nonce: nonce,
-    }),
-    "place bet",
-  );
-  return {
-    betId: row.bet_id,
-    balance: Number(row.new_balance),
-    maxBet: Number(row.new_max_bet),
-    replay: Boolean(row.was_replay),
-  };
+  return bjCall(client, "bj_deal", { p_stake: stake, p_nonce: nonce });
 }
 
-/** Double down: a second stake of the same size, capped on its own, so a
- *  doubled hand can carry up to 10% of the budget. */
-export async function raiseBet(
-  client: SupabaseClient,
-  betId: string,
-  nonce: string,
-): Promise<RaisedBet> {
-  if (!nonce) throw new Error("nonce required");
-  const row = firstRow<{
-    new_stake: number; new_balance: number; new_max_bet: number; was_replay: boolean;
-  }>(
-    await client.schema("games").rpc("raise_bet", { p_bet_id: betId, p_nonce: nonce }),
-    "raise bet",
-  );
-  return {
-    stake: Number(row.new_stake),
-    balance: Number(row.new_balance),
-    maxBet: Number(row.new_max_bet),
-    replay: Boolean(row.was_replay),
-  };
-}
+/** Draw one card. A bust comes back settled with the hole card revealed. */
+export const bjHit = (client: SupabaseClient, betId: string, nonce: string) =>
+  bjCall(client, "bj_hit", { p_bet_id: betId, p_nonce: nonce });
 
-/** Pay a finished hand. The server can't know whether the hand was really won
- *  — the shoe is dealt client-side — but it does refuse any payout no legal
- *  blackjack hand could produce, and every settle lands in a ledger the whole
- *  subteam can read. */
-export async function settleBet(
-  client: SupabaseClient,
-  betId: string,
-  payout: number,
-  outcome: string,
-  nonce: string,
-): Promise<SettledBet> {
-  if (!Number.isInteger(payout) || payout < 0) {
-    throw new Error(`payout must be whole chips: ${payout}`);
-  }
-  if (!nonce) throw new Error("nonce required");
-  const row = firstRow<{
-    settled_payout: number; settled_net: number; new_balance: number;
-    new_max_bet: number; was_replay: boolean;
-  }>(
-    await client.schema("games").rpc("settle_bet", {
-      p_bet_id: betId, p_payout: payout, p_outcome: outcome, p_nonce: nonce,
-    }),
-    "settle bet",
-  );
-  return {
-    payout: Number(row.settled_payout),
-    net: Number(row.settled_net),
-    balance: Number(row.new_balance),
-    maxBet: Number(row.new_max_bet),
-    replay: Boolean(row.was_replay),
-  };
-}
+/** Stop drawing: the dealer plays out to 17+ and the hand settles. */
+export const bjStand = (client: SupabaseClient, betId: string, nonce: string) =>
+  bjCall(client, "bj_stand", { p_bet_id: betId, p_nonce: nonce });
+
+/** Double down: a second stake of the same size (capped on its own), exactly
+ *  one more card, and the hand settles. */
+export const bjDouble = (client: SupabaseClient, betId: string, nonce: string) =>
+  bjCall(client, "bj_double", { p_bet_id: betId, p_nonce: nonce });
 
 /** Close out a hand abandoned by a previous session. The stake is FORFEIT, not
  *  refunded: the client knows the outcome before it settles, so refunding an

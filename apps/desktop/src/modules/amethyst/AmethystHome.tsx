@@ -158,7 +158,7 @@ export function AmethystHome() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-helios-line bg-helios-panel/30">
+        <aside className="flex w-64 shrink-0 flex-col border-r border-helios-line bg-helios-strip">
           {/* left-pane mode toggle */}
           <div className="flex gap-0.5 border-b border-helios-line p-1.5">
             <SegBtn active={leftMode === "files"} onClick={() => setLeftMode("files")} icon={<IconFiles size={14} />} label="Files" />

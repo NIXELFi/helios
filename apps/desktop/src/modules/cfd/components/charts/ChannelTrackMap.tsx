@@ -10,6 +10,7 @@ import { useMemo, useRef } from "react";
 import { useElementWidth } from "./useElementWidth";
 import { boundsOf, type VisualTrack, type XY } from "../../lib/performance";
 
+import { tc } from "@helios/ui";
 interface Props {
   track: VisualTrack;
   /** Distance fraction (0..1 of lap length) per channel sample, ascending. */
@@ -88,7 +89,7 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
       while (j < fracs.length - 1 && fracs[j + 1]! <= f) j++;
       const a = track.centerline[i - 1]!;
       const b = track.centerline[i]!;
-      out.push({ x1: px(a), y1: py(a), x2: px(b), y2: py(b), c: colors[j] ?? "#5A5F66" });
+      out.push({ x1: px(a), y1: py(a), x2: px(b), y2: py(b), c: colors[j] ?? tc("muted") });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -107,13 +108,13 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
   const staticLayer = useMemo(
     () => (
       <g>
-        <polygon points={ribbon} fill="#1B1D22" stroke="#2A2C32" strokeWidth={1} />
+        <polygon points={ribbon} fill="#1B1D22" stroke={tc("line")} strokeWidth={1} />
         {segs.map((s, i) => (
           <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={s.c} strokeWidth={3} strokeLinecap="round" />
         ))}
-        {start && <circle cx={px(start)} cy={py(start)} r={4} fill="#FAFAFA" stroke="#0E0E10" strokeWidth={1} />}
+        {start && <circle cx={px(start)} cy={py(start)} r={4} fill="#FAFAFA" stroke={tc("base")} strokeWidth={1} />}
         {finish && !track.closed && (
-          <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke="#0E0E10" strokeWidth={1} />
+          <circle cx={px(finish)} cy={py(finish)} r={4} fill="#FF5252" stroke={tc("base")} strokeWidth={1} />
         )}
       </g>
     ),
@@ -129,7 +130,7 @@ export function ChannelTrackMap({ track, fracs, colors, height = 300, markers }:
           const p = pointAtFrac(track.centerline, centerFracs, mk.frac);
           return (
             <g key={i}>
-              <circle cx={px(p)} cy={py(p)} r={6} fill={mk.color} stroke="#0E0E10" strokeWidth={1.5} />
+              <circle cx={px(p)} cy={py(p)} r={6} fill={mk.color} stroke={tc("base")} strokeWidth={1.5} />
               {mk.label && (
                 <text x={px(p) + 9} y={py(p) + 3.5} fontSize={10} fontFamily="'JetBrains Mono Variable', ui-monospace, monospace" fill={mk.color}>
                   {mk.label}

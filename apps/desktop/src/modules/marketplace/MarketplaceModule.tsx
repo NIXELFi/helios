@@ -8,7 +8,7 @@
 // PluginStage. NOTE: live launch of untrusted backend bundles is gated on the
 // iframe nav-hardening work (Phase 0.2); see runtime/loader.ts `installedBaseUrl`.
 
-import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   IconArrowLeft,
   IconPuzzle,
@@ -19,6 +19,8 @@ import {
   IconHelpCircle,
 } from "@tabler/icons-react";
 import { useUser } from "@helios/auth";
+import { useModuleLive } from "../../shell/module-activity";
+import { useThrottledFocus } from "../../lib/use-throttled-focus";
 import { useAvailablePlugins, useInstall, useUninstall, type AvailablePlugin } from "./data/useMarketplace";
 import { isMarketplaceDemo, demoLaunchUrl } from "./data/demoStore";
 import { loadPlugin, installedBaseUrl, type LoadedPlugin } from "./runtime/loader";
@@ -86,11 +88,10 @@ export function MarketplaceModule() {
   // Elegant auto-refresh: re-check the catalog whenever the window regains focus
   // (e.g. after a new version is published elsewhere), so new plugins/versions show
   // up without a manual reload. The Refresh button covers same-focus updates.
-  useEffect(() => {
-    const onFocus = () => refetch();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refetch]);
+  // Throttled to once a minute and only while the module is on screen — the
+  // catalog changes when someone publishes, which is rare, and this used to
+  // re-run on every single alt-tab even from another module.
+  useThrottledFocus(refetch, 60_000, useModuleLive());
 
   const confirmInstall = useCallback(async () => {
     if (!consentFor) return;
@@ -198,7 +199,7 @@ export function MarketplaceModule() {
             <div className="flex items-center gap-2 text-asu-gold">
               <IconPuzzle size={22} strokeWidth={1.5} />
               <h1 className="font-display text-2xl tracking-wide">MARKETPLACE</h1>
-              <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-base">
+              <span className="ml-2 rounded-sm bg-asu-gold px-1.5 py-0.5 text-[10px] font-bold text-helios-on-gold">
                 BETA
               </span>
             </div>

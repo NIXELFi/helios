@@ -9,6 +9,7 @@ import "uplot/dist/uPlot.min.css";
 
 import type { CycleStats } from "../../state/types";
 
+import { tc } from "@helios/ui";
 export interface CycleSeries {
   label: string;
   field: keyof CycleStats;
@@ -56,8 +57,8 @@ export function CycleChart({
       ...series.map((s) => cycles.map((c) => Number(c[s.field]))),
     ];
 
-    const axisStroke = "#5A5F66";
-    const gridStroke = "#23252B";
+    const axisStroke = tc("muted");
+    const gridStroke = tc("grid");
     const labelFont = "10px ui-sans-serif, system-ui, sans-serif";
     const valueFont = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -158,11 +159,11 @@ export function CycleChart({
 
   return (
     <div ref={wrapRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">{title}</div>
         <div className="flex items-center gap-2">
           {series.map((s, i) => (
-            <span key={String(s.field)} className="flex items-center gap-1 text-[10px] text-[#5A5F66]">
+            <span key={String(s.field)} className="flex items-center gap-1 text-[10px] text-helios-muted">
               <span
                 className="inline-block h-[2px] w-3"
                 style={{ background: s.color ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length] }}

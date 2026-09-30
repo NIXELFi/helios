@@ -10,6 +10,7 @@ import { useMemo, useRef } from "react";
 
 import { useElementWidth } from "./useElementWidth";
 
+import { tc } from "@helios/ui";
 export interface ScatterPt {
   id: number;
   x: number;
@@ -116,8 +117,8 @@ export function ScatterPlot({
   return (
     <div ref={hostRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
       {/* Title strip — identical chrome to LinePlot. */}
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">{title}</div>
       </div>
       <svg
         width={width}
@@ -136,31 +137,31 @@ export function ScatterPlot({
           stroke="#3f3f46"
         />
         {/* Y axis labels (max top, min bottom). */}
-        <text x={padLeft - 4} y={padTop + 4} fontSize="9" fill="#71717a" textAnchor="end">
+        <text x={padLeft - 4} y={padTop + 4} fontSize="9" fill={tc("dim")} textAnchor="end">
           {Number.isFinite(yMax) ? yMax.toPrecision(3) : "—"}
         </text>
-        <text x={padLeft - 4} y={padTop + plotH} fontSize="9" fill="#71717a" textAnchor="end">
+        <text x={padLeft - 4} y={padTop + plotH} fontSize="9" fill={tc("dim")} textAnchor="end">
           {Number.isFinite(yMin) ? yMin.toPrecision(3) : "—"}
         </text>
         <text
           x={6}
           y={padTop + plotH / 2}
           fontSize="10"
-          fill="#D8DCE2"
+          fill={tc("text")}
           textAnchor="middle"
           transform={`rotate(-90 6 ${padTop + plotH / 2})`}
         >
           {yLabel}
         </text>
         {/* X axis labels (min left, max right). */}
-        <text x={padLeft} y={padTop + plotH + 12} fontSize="9" fill="#71717a" textAnchor="start">
+        <text x={padLeft} y={padTop + plotH + 12} fontSize="9" fill={tc("dim")} textAnchor="start">
           {Number.isFinite(xMin) ? xMin.toPrecision(3) : "—"}
         </text>
         <text
           x={padLeft + plotW}
           y={padTop + plotH + 12}
           fontSize="9"
-          fill="#71717a"
+          fill={tc("dim")}
           textAnchor="end"
         >
           {Number.isFinite(xMax) ? xMax.toPrecision(3) : "—"}
@@ -169,7 +170,7 @@ export function ScatterPlot({
           x={padLeft + plotW / 2}
           y={padTop + plotH + 24}
           fontSize="10"
-          fill="#D8DCE2"
+          fill={tc("text")}
           textAnchor="middle"
         >
           {xLabel}

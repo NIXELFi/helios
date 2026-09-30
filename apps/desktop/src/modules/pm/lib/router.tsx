@@ -53,8 +53,15 @@ export function usePathname(): string {
 // URLSearchParams is structurally compatible for our read-only usage.
 export type ReadonlyURLSearchParams = URLSearchParams;
 
+// Memoized on the query string, NOT rebuilt per call. Every view does
+// `const filters = useMemo(() => parseFilters(sp), [sp])`; handing back a fresh
+// URLSearchParams on each render made that memo (and every memo derived from it
+// — filtered rows, grouping, selection sets) miss on EVERY render, so an
+// unrelated store tick re-derived and re-rendered the whole view. The object is
+// only ever read, so sharing one instance per query string is safe.
 export function useSearchParams(): URLSearchParams {
-  return new URLSearchParams(splitPath(useRouterState().path).search);
+  const search = splitPath(useRouterState().path).search;
+  return useMemo(() => new URLSearchParams(search), [search]);
 }
 
 export function useRouter() {

@@ -4,6 +4,7 @@ import type { TaskRow } from "@helios/pm-ui";
 import { IconSearch } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { tc } from "@helios/ui";
 export interface TaskLookupProps {
   tasks: ReadonlyArray<TaskRow>;
   excludeIds: ReadonlySet<string>;
@@ -83,7 +84,7 @@ export function TaskLookup({
                   <span
                     aria-hidden
                     className="size-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: t.subteam.color ?? "#6B7280" }}
+                    style={{ backgroundColor: t.subteam.color ?? tc("dim") }}
                   />
                   <span className="flex-1 truncate">{t.title}</span>
                   <span className="shrink-0 text-[10px] uppercase tracking-widest text-helios-dim">

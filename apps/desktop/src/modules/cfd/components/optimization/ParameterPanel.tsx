@@ -104,12 +104,12 @@ export function ParameterPanel({ schema, bounds, onChange }: Props) {
     <div className="space-y-4">
       {groups.map((g) => (
         <section key={g.name}>
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-[#FFC627]">
+          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-asu-gold">
             {g.name}
           </h3>
           <table className="w-full">
             <thead>
-              <tr className="text-left text-[9px] uppercase tracking-wider text-[#5A5F66]">
+              <tr className="text-left text-[9px] uppercase tracking-wider text-helios-muted">
                 <th className="px-2 py-1 font-normal">on</th>
                 <th className="px-2 py-1 font-normal">path</th>
                 <th className="px-2 py-1 font-normal">unit</th>

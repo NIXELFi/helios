@@ -61,12 +61,12 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
       <Row label="point size">
         <input type="number" min={1} max={6} step={1} value={config.pointSize}
           onChange={(e) => onChange({ ...config, pointSize: Number(e.target.value) })}
-          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+          className="w-16 bg-helios-base border border-helios-line px-1" />
       </Row>
       <Row label="alpha">
         <input type="number" min={0} max={1} step={0.1} value={config.alpha}
           onChange={(e) => onChange({ ...config, alpha: Number(e.target.value) })}
-          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+          className="w-16 bg-helios-base border border-helios-line px-1" />
       </Row>
       <Row label="trail (time-color)">
         <input type="checkbox" checked={config.trail}
@@ -90,8 +90,8 @@ export const scatterOverlay: OverlayModule<ScatterConfig, ScatterArtifact> = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

@@ -70,20 +70,20 @@ export class ErrorBoundary extends Component<Props, State> {
         role="alert"
         className={
           (compact ? "absolute inset-0" : "fixed inset-0") +
-          " flex flex-col items-center justify-center bg-[#0E0E10] text-[#D8DCE2] px-6"
+          " flex flex-col items-center justify-center bg-helios-base text-helios-text px-6"
         }
       >
         <div className="flex flex-col items-center gap-3">
-          <h1 className="font-helios text-[3.5rem] md:text-[5rem] leading-none text-[#FFC627]">
+          <h1 className="font-helios text-[3.5rem] md:text-[5rem] leading-none text-asu-gold">
             HELIOS
           </h1>
-          <div className="text-[10px] md:text-xs uppercase tracking-[0.4em] text-[#9097A0]">
+          <div className="text-[10px] md:text-xs uppercase tracking-[0.4em] text-helios-dim">
             {heading}
           </div>
         </div>
 
         <div className="mt-10 w-[520px] max-w-[80%] flex flex-col items-center gap-4">
-          <div className="w-full border border-[#EF5350] bg-[#16171B] px-3 py-2 text-center text-xs text-[#EF5350]">
+          <div className="w-full border border-[#EF5350] bg-helios-panel px-3 py-2 text-center text-xs text-[#EF5350]">
             {error.message || String(error)}
           </div>
           <div className="flex gap-3">
@@ -91,7 +91,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={compact ? this.reset : () => window.location.reload()}
-              className="border border-[#FFC627] px-5 py-2 text-xs uppercase tracking-wider text-[#FFC627] transition-colors hover:bg-[#FFC627] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFC627]"
+              className="border border-asu-gold px-5 py-2 text-xs uppercase tracking-wider text-asu-gold transition-colors hover:bg-asu-gold hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
               {compact ? "Try again" : "Reload Helios"}
             </button>
@@ -99,7 +99,7 @@ export class ErrorBoundary extends Component<Props, State> {
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                className="border border-[#2A2C32] px-5 py-2 text-xs uppercase tracking-wider text-[#9097A0] transition-colors hover:border-[#9097A0] hover:text-[#D8DCE2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9097A0]"
+                className="border border-helios-line px-5 py-2 text-xs uppercase tracking-wider text-helios-dim transition-colors hover:border-helios-dim hover:text-helios-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-helios-dim"
               >
                 Reload Helios
               </button>

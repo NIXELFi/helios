@@ -85,12 +85,18 @@ export function applyVdParam(v: VehicleConfig, param: VdParam, x: number): Vehic
   }
 }
 
-/** Inclusive value grid for a sweep spec, robust to float step drift. */
+/** Max points in one VD sweep. Each point is a full `simLap`, so a tiny step
+ *  over a wide range (or an infinite bound) would otherwise freeze the UI. */
+export const VD_SWEEP_MAX_POINTS = 500;
+
+/** Inclusive value grid for a sweep spec, robust to float step drift.
+ *  Non-finite bounds/step yield []; the grid is capped at VD_SWEEP_MAX_POINTS. */
 export function vdSweepValues(spec: VdSweepSpec): number[] {
+  if (![spec.start, spec.stop, spec.step].every(Number.isFinite)) return [];
   const step = Math.abs(spec.step) || 1;
   const lo = Math.min(spec.start, spec.stop);
   const hi = Math.max(spec.start, spec.stop);
-  const n = Math.floor((hi - lo) / step + 1e-9);
+  const n = Math.min(Math.floor((hi - lo) / step + 1e-9), VD_SWEEP_MAX_POINTS - 1);
   const out: number[] = [];
   for (let i = 0; i <= n; i++) out.push(Number((lo + i * step).toFixed(6)));
   return out;

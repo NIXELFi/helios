@@ -96,6 +96,7 @@ vi.mock("../../src/modules/vault/data/sync-ledger", () => ({
     ledgerTombstoneCalls.push({ vaultId, rel });
     return Promise.resolve();
   }),
+  flushLedger: vi.fn(() => Promise.resolve()),
 }));
 
 function resolveDownload(sha: string, ok = true): void {

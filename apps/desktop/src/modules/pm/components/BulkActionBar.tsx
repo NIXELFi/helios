@@ -14,7 +14,9 @@ import { IconX } from "@tabler/icons-react";
 import { Select, type SelectOption } from "@pm/components/ui/Select";
 import { selectMyRole, usePmStore } from "@pm/lib/pmStore";
 import { recallSharing, subsystemsForSubteam } from "@pm/lib/subsystemSharing";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
+import { tc } from "@helios/ui";
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
   medium: "Medium",
@@ -51,9 +53,13 @@ export interface BulkActionBarProps {
   // batch back. Intersecting against this set guarantees every write touches
   // only rows the active view actually owns.
   selectableIds?: ReadonlySet<string>;
+  /** Subteam-grouped owner options from the view (see lib/ownerScope.ts) so
+   *  "Set owner" ranks the same way every other picker does. Falls back to the
+   *  flat directory. */
+  ownerOptions?: ReadonlyArray<SelectOption<string>>;
 }
 
-export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
+export function BulkActionBar({ selectableIds, ownerOptions }: BulkActionBarProps = {}) {
   const selectedTaskIds = usePmStore((s) => s.selectedTaskIds);
   const clearSelection = usePmStore((s) => s.clearSelection);
   const bulkUpdateTasks = usePmStore((s) => s.bulkUpdateTasks);
@@ -92,7 +98,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
       : new Set([...relevantSets[0]!].filter((id) => relevantSets.every((set) => set.has(id))));
   const subsystemOptions: SelectOption<string>[] = subsystems
     .filter((s) => commonIds.has(s.id))
-    .map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? "#6B7280" }));
+    .map((s) => ({ value: s.id, label: s.name, swatch: s.color ?? tc("dim") }));
 
   const apply = (patch: Parameters<typeof bulkUpdateTasks>[1]) => {
     bulkUpdateTasks(ids, patch);
@@ -102,8 +108,9 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
   // merely focusing the date input and tabbing away (which fires onBlur with "")
   // must never wipe the due_date of every selected task (data-loss bug H-3).
   // Clearing a due date in bulk requires the explicit "Clear due" action below.
+  // A partial year still being typed (0202-...) is ignored the same way.
   const commitDue = (value: string) => {
-    if (value === "") return;
+    if (!isPlausibleIsoDate(value)) return;
     apply({ due_date: value });
   };
 
@@ -114,7 +121,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-6">
       <div className="pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-lg border border-helios-line bg-helios-panel/95 px-3 py-2 shadow-xl backdrop-blur">
-        <span className="shrink-0 rounded bg-asu-gold px-2 py-0.5 text-xs font-semibold text-helios-base tabular-nums">
+        <span className="shrink-0 rounded bg-asu-gold px-2 py-0.5 text-xs font-semibold text-helios-on-gold tabular-nums">
           {count} selected
         </span>
 
@@ -166,7 +173,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
             options={[
               { value: ACTION, label: "Owner…" },
               { value: "__unassign__", label: "Unassigned" },
-              ...users.map((u) => ({ value: u.id, label: u.name })),
+              ...(ownerOptions ?? users.map((u) => ({ value: u.id, label: u.name }))),
             ]}
             onChange={(v) => {
               if (v === ACTION) return;
@@ -187,7 +194,7 @@ export function BulkActionBar({ selectableIds }: BulkActionBarProps = {}) {
               ...subteams.map((st) => ({
                 value: st.id,
                 label: st.name,
-                swatch: st.color ?? "#6B7280",
+                swatch: st.color ?? tc("dim"),
               })),
             ]}
             onChange={(v) => v !== ACTION && apply({ subteam_id: v })}

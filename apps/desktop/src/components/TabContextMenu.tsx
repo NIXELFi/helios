@@ -159,9 +159,9 @@ export function TabContextMenu(props: TabContextMenuProps) {
   }
 
   const itemBase =
-    "w-full text-left px-3 py-1 text-xs cursor-pointer text-[#D8DCE2] hover:bg-[#23252b] hover:text-[#FFC627] focus-visible:outline-none focus-visible:bg-[#23252b] focus-visible:text-[#FFC627] flex items-center justify-between";
+    "w-full text-left px-3 py-1 text-xs cursor-pointer text-helios-text hover:bg-helios-grid hover:text-asu-gold focus-visible:outline-none focus-visible:bg-helios-grid focus-visible:text-asu-gold flex items-center justify-between";
   const itemDisabled =
-    "w-full text-left px-3 py-1 text-xs text-[#5A5F66] flex items-center justify-between cursor-not-allowed";
+    "w-full text-left px-3 py-1 text-xs text-helios-muted flex items-center justify-between cursor-not-allowed";
 
   return (
     <div
@@ -169,7 +169,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
       role="menu"
       aria-label="Workspace actions"
       style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 60, minWidth: 160 }}
-      className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in py-1"
+      className="bg-helios-base border border-helios-line rounded-sm helios-elevate helios-modal-in py-1"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={onMenuKeyDown}
     >
@@ -199,12 +199,12 @@ export function TabContextMenu(props: TabContextMenuProps) {
         onKeyDown={onColorItemKeyDown}
       >
         <span>Color</span>
-        <span className="text-[#9097A0]" aria-hidden>▸</span>
+        <span className="text-helios-dim" aria-hidden>▸</span>
         {colorOpen && (
           <div
             role="menu"
             aria-label="Color"
-            className="absolute bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in py-1"
+            className="absolute bg-helios-base border border-helios-line rounded-sm helios-elevate helios-modal-in py-1"
             style={{
               top: 0,
               [colorFlipLeft ? "right" : "left"]: "100%" as const,
@@ -252,7 +252,7 @@ export function TabContextMenu(props: TabContextMenuProps) {
       >
         Export…
       </button>
-      <div className="my-1 border-t border-[#2A2C32]" />
+      <div className="my-1 border-t border-helios-line" />
       {canDelete ? (
         <button
           type="button"

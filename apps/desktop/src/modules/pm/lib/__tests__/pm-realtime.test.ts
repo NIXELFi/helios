@@ -6,12 +6,12 @@ import { subscribePmRealtime, PM_REALTIME_TABLES } from "../pm-realtime";
  *  registration (so a test can fire a table's event) and the .subscribe() status
  *  callback (to drive reconnect transitions). Mirrors the useVaultRealtime test. */
 function realtimeClient() {
-  const handlers: Record<string, () => void> = {};
+  const handlers: Record<string, (payload: unknown) => void> = {};
   const channelNames: string[] = [];
   const subscribeMock = vi.fn();
   let statusCb: ((status: string, err?: unknown) => void) | undefined;
   const channelMock = {
-    on: vi.fn(function (this: unknown, _e: string, filter: { table: string; schema: string }, cb: () => void) {
+    on: vi.fn(function (this: unknown, _e: string, filter: { table: string; schema: string }, cb: (payload: unknown) => void) {
       handlers[`${filter.schema}.${filter.table}`] = cb;
       return channelMock;
     }),
@@ -33,7 +33,8 @@ function realtimeClient() {
     channelMock,
     subscribeMock,
     channelNames,
-    fire: (table: string) => handlers[`pm.${table}`]?.(),
+    fire: (table: string, payload: unknown = { eventType: "UPDATE", new: { id: "x" }, old: null }) =>
+      handlers[`pm.${table}`]?.(payload),
     fireStatus: (s: string, e?: unknown) => statusCb?.(s, e),
     removeChannel: client.removeChannel as unknown as ReturnType<typeof vi.fn>,
   };
@@ -60,6 +61,15 @@ describe("subscribePmRealtime", () => {
     h.fire("milestones");
     h.fire("task_comments");
     expect(onEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it("tells onEvent WHICH table fired and hands over the payload", () => {
+    const h = realtimeClient();
+    const onEvent = vi.fn();
+    subscribePmRealtime(h.client, onEvent);
+    const payload = { eventType: "INSERT", new: { id: "m-1" }, old: null };
+    h.fire("milestones", payload);
+    expect(onEvent).toHaveBeenCalledWith({ table: "milestones", payload });
   });
 
   it("removes the channel on teardown", () => {

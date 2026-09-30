@@ -34,6 +34,36 @@ export function normalizePathForCompare(p: string): string {
 }
 
 /**
+ * Build (once per `localFiles` snapshot) a Map from the normalized relative path
+ * to the local file, so `matchLocal` is an O(1) lookup instead of a linear
+ * `find` that re-normalized every local path on every call. Callers run
+ * matchLocal over every vault file (auto-sync passes, table rows, the bulk bar),
+ * which made each pass O(files x local) on a ~13k-file vault.
+ *
+ * Cached in a WeakMap keyed on the array identity: useLocalFolderScan publishes
+ * a new array only when the scan actually changes, so the index is rebuilt once
+ * per real change and dropped with the old snapshot. The cached length guards
+ * against a caller that mutates the array in place (the index is rebuilt).
+ *
+ * Duplicate normalized paths (e.g. `A.SLDPRT` and `a.sldprt` on a
+ * case-sensitive filesystem) keep the FIRST occurrence, preserving the old
+ * `Array.prototype.find` semantics exactly.
+ */
+const localIndexCache = new WeakMap<LocalFile[], { len: number; map: Map<string, LocalFile> }>();
+
+export function localFileIndex(localFiles: LocalFile[]): Map<string, LocalFile> {
+  const hit = localIndexCache.get(localFiles);
+  if (hit && hit.len === localFiles.length) return hit.map;
+  const map = new Map<string, LocalFile>();
+  for (const l of localFiles) {
+    const key = normalizePathForCompare(l.relativePath);
+    if (!map.has(key)) map.set(key, l);
+  }
+  localIndexCache.set(localFiles, { len: localFiles.length, map });
+  return map;
+}
+
+/**
  * Match a single vault file to a local file by full relative path
  * (vault folder hierarchy + filename). This eliminates false matches where
  * two files in different folders share the same basename.
@@ -53,7 +83,7 @@ export function matchLocal(
   if (localFiles === null) return { status: "no-folder" };
 
   const expected = normalizePathForCompare(vaultRelativePath(file, folders));
-  const local = localFiles.find((l) => normalizePathForCompare(l.relativePath) === expected);
+  const local = localFileIndex(localFiles).get(expected);
   if (!local) return { status: "vault-only" };
 
   const versions = versionsByFileId.get(file.id) ?? [];
@@ -66,4 +96,31 @@ export function matchLocal(
     status: latest.sha256?.toLowerCase() === local.sha256?.toLowerCase() ? "synced" : "modified",
     local,
   };
+}
+
+/**
+ * Decide whether auto-sync should HOLD BACK a locally-present file that
+ * differs from the latest vault version (true = hold back / don't touch,
+ * false = safe to refresh by downloading the new version over it).
+ *
+ * The read-only bit is the primary "clean copy" signal (reconciliation only
+ * ever sets a SYNCED file read-only): a read-only local copy is always safe
+ * to refresh regardless of the ledger.
+ *
+ * A WRITABLE copy is normally held back - it might be an unsaved local edit -
+ * UNLESS its content is byte-identical to what THIS machine previously
+ * materialized for this exact path, per the per-vault sync ledger
+ * (`ledgerEntrySha`, i.e. `SyncLedger.entries[normalizedRelPath].sha256`). In
+ * that case the writable bit is stale (predates the read-only model, or got
+ * cleared some other way) but the content itself is just an older revision
+ * this machine already had, not an edit, so it's safe to refresh. No
+ * ledger entry for the path means we've never recorded materializing it here,
+ * so there's nothing to compare against and the writable copy is held back.
+ */
+export function shouldHoldBack(local: LocalFile, ledgerEntrySha: string | undefined): boolean {
+  if (local.readonly === true) return false;
+  if (!ledgerEntrySha) return true;
+  // Case-insensitive for the same reason as the synced/modified compare above:
+  // ledger shas are written lowercase, but be defensive either way.
+  return local.sha256?.toLowerCase() !== ledgerEntrySha.toLowerCase();
 }

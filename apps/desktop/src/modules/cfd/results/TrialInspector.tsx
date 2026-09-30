@@ -17,6 +17,7 @@ import type {
   ParameterMeta,
 } from "../state/types";
 
+import { tc } from "@helios/ui";
 /** The active ranking dimension's display contract — label, unit, and value
  *  formatter. Supplied by the results screen so the inspector's headline value
  *  and Δ line always agree with the podium/table (the trial's objectiveValue is
@@ -47,7 +48,7 @@ interface Props {
 }
 
 const RANK_BADGE: Record<number, { label: string; cls: string }> = {
-  1: { label: "#1", cls: "border-[#FFC627]/60 text-[#FFC627]" },
+  1: { label: "#1", cls: "border-asu-gold/60 text-asu-gold" },
   2: { label: "#2", cls: "border-[#C0C7D1]/60 text-[#C0C7D1]" },
   3: { label: "#3", cls: "border-[#CD7F32]/60 text-[#CD7F32]" },
 };
@@ -98,7 +99,7 @@ export function TrialInspector({
     <div className="space-y-3">
       <header className="text-[11px]">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-[#FFC627]">
+          <span className="text-[10px] uppercase tracking-wider text-asu-gold">
             Trial #{trial.trialIdx}
           </span>
           {badge && (
@@ -112,20 +113,20 @@ export function TrialInspector({
             </span>
           )}
           {rank != null && rank > 3 && (
-            <span className="rounded-sm border border-[#2A2C32] px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-[#9097A0]">
+            <span className="rounded-sm border border-helios-line px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-helios-dim">
               #{rank}
             </span>
           )}
         </div>
-        <div className="mt-1 font-mono text-[#9097A0]">
+        <div className="mt-1 font-mono text-helios-dim">
           {dim.label} = {trial.objectiveValue !== null ? dim.fmt(trial.objectiveValue) : "—"}
-          {dim.unit && <span className="ml-1 text-[#5A5F66]">{dim.unit}</span>}
+          {dim.unit && <span className="ml-1 text-helios-muted">{dim.unit}</span>}
           {trial.wallTimeS !== null && (
-            <span className="ml-2 text-[#5A5F66]">{trial.wallTimeS.toFixed(2)} s</span>
+            <span className="ml-2 text-helios-muted">{trial.wallTimeS.toFixed(2)} s</span>
           )}
         </div>
         {rank != null && (
-          <div className="mt-0.5 font-mono text-[10px] text-[#5A5F66]">
+          <div className="mt-0.5 font-mono text-[10px] text-helios-muted">
             {/* "best" is gated on rank ONLY (matching podium + table): a tied
                 rank-2 trial has deltaToBest === 0 but is NOT the best. */}
             {rank === 1 || deltaToBest == null
@@ -142,14 +143,14 @@ export function TrialInspector({
 
       <div>
         <div className="mb-1 flex items-center justify-between">
-          <h4 className="text-[10px] uppercase tracking-wider text-[#5A5F66]">Recipe</h4>
+          <h4 className="text-[10px] uppercase tracking-wider text-helios-muted">Recipe</h4>
           <div className="flex items-center gap-1.5">
             {onRunSweep && (
               <button
                 type="button"
                 onClick={onRunSweep}
                 title="Open the sweep menu with this trial's parameters, to sweep it across RPM"
-                className="rounded-sm border border-[#FFC627]/50 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+                className="rounded-sm border border-asu-gold/50 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-asu-gold hover:bg-asu-gold/10"
               >
                 Run sweep
               </button>
@@ -157,7 +158,7 @@ export function TrialInspector({
             <button
               type="button"
               onClick={() => void copyRecipe()}
-              className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+              className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
             >
               {copied ? "Copied!" : "Copy"}
             </button>
@@ -168,14 +169,14 @@ export function TrialInspector({
             {parameterPaths.map((p) => {
               const unit = unitForPath(schema, p);
               return (
-                <tr key={p} className="border-t border-[#16171B]">
-                  <td className="px-2 py-0.5 text-[#9097A0]">{p}</td>
-                  <td className="px-2 py-0.5 text-right text-[#D8DCE2]">
+                <tr key={p} className="border-t border-helios-panel">
+                  <td className="px-2 py-0.5 text-helios-dim">{p}</td>
+                  <td className="px-2 py-0.5 text-right text-helios-text">
                     {trial.parameterValues[p] !== undefined
                       ? trial.parameterValues[p]!.toPrecision(5)
                       : "—"}
                     {unit && trial.parameterValues[p] !== undefined && (
-                      <span className="ml-1 text-[#5A5F66]">{unit}</span>
+                      <span className="ml-1 text-helios-muted">{unit}</span>
                     )}
                   </td>
                 </tr>
@@ -188,8 +189,8 @@ export function TrialInspector({
       {points.length > 0 && (
         <div className="space-y-2">
           {overlay && (
-            <p className="text-[9px] text-[#5A5F66]">
-              <span className="mr-1 inline-block h-[2px] w-3 align-middle bg-[#5A5F66]" />
+            <p className="text-[9px] text-helios-muted">
+              <span className="mr-1 inline-block h-[2px] w-3 align-middle bg-helios-muted" />
               best (#{overlay.trialIdx}) overlaid
             </p>
           )}
@@ -203,7 +204,7 @@ export function TrialInspector({
                       label: "best",
                       xs: overlayRpms,
                       y: overlayPoints.map((p) => p.lastCycle.brakeTorqueNm),
-                      color: "#5A5F66",
+                      color: tc("muted"),
                       showPoints: false,
                     }]
                   : []),
@@ -224,7 +225,7 @@ export function TrialInspector({
                       label: "best",
                       xs: overlayRpms,
                       y: overlayPoints.map((p) => p.lastCycle.brakePowerKW),
-                      color: "#5A5F66",
+                      color: tc("muted"),
                       showPoints: false,
                     }]
                   : []),
@@ -245,7 +246,7 @@ export function TrialInspector({
                       label: "best",
                       xs: overlayRpms,
                       y: overlayPoints.map((p) => p.lastCycle.imepBar),
-                      color: "#5A5F66",
+                      color: tc("muted"),
                       showPoints: false,
                     }]
                   : []),

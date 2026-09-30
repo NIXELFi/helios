@@ -3,7 +3,7 @@ import type { LapDeltaConfig } from "./render";
 
 export function LapDeltaConfigEditor(_props: WidgetConfigEditorProps<LapDeltaConfig>) {
   return (
-    <div className="p-2 text-xs text-[#9097A0]">
+    <div className="p-2 text-xs text-helios-dim">
       <p>
         Δt traces lap-time differences along distance for the globally selected
         Main and Ref laps. Pick those in the Lap Panel — this widget needs no

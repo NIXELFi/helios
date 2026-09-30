@@ -1,4 +1,5 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { tca } from "@helios/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import heliosIcon from "../assets/helios-icon.png";
 
@@ -84,14 +85,14 @@ export function TitleBar({ context }: { context: string | null }) {
   return (
     <div
       onMouseDown={handleDragMouseDown}
-      className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-[#15161B] to-[#0E0E10]"
+      className="flex h-[38px] flex-none select-none items-center border-b border-helios-line bg-gradient-to-b from-helios-panel to-helios-base"
     >
       <div className="flex items-center gap-[9px] pl-[13px]">
         <img
           src={heliosIcon}
           alt=""
           draggable={false}
-          className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgba(255,198,39,0.35)]"
+          className="size-[18px] rounded-[4px] shadow-[0_0_10px_rgb(var(--asu-gold)/0.35)]"
         />
         <span className="font-helios text-[12.5px] text-asu-gold">
           HELIOS

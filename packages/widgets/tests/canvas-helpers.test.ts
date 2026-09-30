@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { tc } from "@helios/ui";
 import { thresholdColor } from "../src/lib/canvas-helpers";
 
 const NORMAL = "#D8DCE2";
 const WARN = "#FFB800";
 const ALARM = "#EF5350";
-const NO_DATA = "#7B8088";
+const NO_DATA = tc("dim"); // theme token (was the pre-token grey #7B8088)
 
 describe("thresholdColor", () => {
   it("returns the no-data color for a null value", () => {

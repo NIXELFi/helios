@@ -57,7 +57,7 @@ export function StudyNameEditor({ display, customName, onRename, className }: Pr
         }}
         onBlur={() => close(true)}
         className={
-          "min-w-0 rounded-sm border border-[#FFC627] bg-[#0B0B0D] px-1 py-0 font-mono text-inherit text-[#D8DCE2] focus:outline-none " +
+          "min-w-0 rounded-sm border border-asu-gold bg-helios-deep px-1 py-0 font-mono text-inherit text-helios-text focus:outline-none " +
           (className ?? "")
         }
       />
@@ -72,12 +72,12 @@ export function StudyNameEditor({ display, customName, onRename, className }: Pr
       title="Click to rename"
       onClick={() => setEditing(true)}
       className={
-        "min-w-0 cursor-text truncate rounded-sm text-left text-inherit hover:bg-[#16171B] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FFC627]/60 " +
+        "min-w-0 cursor-text truncate rounded-sm text-left text-inherit hover:bg-helios-panel focus:outline-none focus-visible:ring-1 focus-visible:ring-asu-gold/60 " +
         (className ?? "")
       }
     >
       {display}
-      <span aria-hidden className="ml-1 select-none text-[9px] text-[#5A5F66] opacity-0 transition-opacity group-hover:opacity-100">
+      <span aria-hidden className="ml-1 select-none text-[9px] text-helios-muted opacity-0 transition-opacity group-hover:opacity-100">
         ✎
       </span>
     </button>

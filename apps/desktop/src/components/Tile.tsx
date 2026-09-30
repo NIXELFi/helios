@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
+import { useThemeVersion } from "../lib/theme";
 import { widgetRegistry, SPEED_CHANNEL_CANDIDATES, type OverlaySession } from "@helios/widgets";
 import type { CursorEmitter, ViewStateEmitter, LapSelectionEmitter, LapSelection, GpsPickerEmitter } from "@helios/lib";
 import type { TileSpec } from "../workspaces/types";
@@ -16,7 +17,11 @@ interface Props {
   gpsPickerEmitter: GpsPickerEmitter;
   editMode: boolean;
   selected: boolean;
-  onSelect?: () => void;
+  /** Called with this tile's id. Takes the id (rather than closing over it in
+   *  the parent) so App can pass ONE stable callback to every tile — an inline
+   *  `() => setSelectedTileId(spec.id)` changed identity on every App render
+   *  and defeated the memo below. */
+  onSelect?: (id: string) => void;
   /** Called on pointer-up after a drag/resize, with the snapped final spec.
    *  Only invoked while editMode is true. */
   onChange?: (next: TileSpec) => void;
@@ -36,7 +41,14 @@ type DragState =
   | { kind: "move"; clientX0: number; clientY0: number; dx: number; dy: number; captureEl: Element; pointerId: number }
   | { kind: "resize"; dw: number; dh: number; captureEl: Element; pointerId: number };
 
-export function Tile({
+/** Memoised: every tile re-rendered on every App state change (cursor moves,
+ *  playback ticks, panel toggles) even when none of its own props moved, and
+ *  each re-render rebuilds a ChannelSlice per visible session. With a stable
+ *  `onSelect`/`onChange` from App, only the tiles whose spec or session data
+ *  actually changed re-render. */
+export const Tile = memo(TileImpl);
+
+function TileImpl({
   spec, primary, visibleSessions, cursorEmitter, viewState,
   lapSelectionEmitter, lapSelection, gpsPickerEmitter,
   editMode, selected, onSelect, onChange,
@@ -110,6 +122,8 @@ export function Tile({
     });
 
   const RenderC = widget.Render;
+  // Canvas widgets read theme colors at draw time; remount on a theme change.
+  const themeVersion = useThemeVersion();
 
   const liveX = spec.x + (drag.kind === "move" ? drag.dx : 0);
   const liveY = spec.y + (drag.kind === "move" ? drag.dy : 0);
@@ -174,7 +188,7 @@ export function Tile({
     if (drag.kind === "none" || drag.pointerId !== e.pointerId) return;
     releaseCapture(drag);
     if (drag.kind === "press") {
-      onSelect?.();
+      onSelect?.(spec.id);
     } else if (drag.kind === "move" && onChange) {
       const snapped = snapTile({ ...spec, x: liveX, y: liveY });
       if (snapped.x !== spec.x || snapped.y !== spec.y) onChange(snapped);
@@ -212,9 +226,9 @@ export function Tile({
   }
 
   const editRing = selected
-    ? "ring-2 ring-[#FFC627]"
+    ? "ring-2 ring-asu-gold"
     : editMode
-      ? "ring-1 ring-[#2A2C32] hover:ring-[#FFC627]"
+      ? "ring-1 ring-helios-line hover:ring-asu-gold"
       : "";
 
   // Human header: the user's custom title, else the widget's registry label,
@@ -225,12 +239,12 @@ export function Tile({
   const subtitle = widget.summarize?.(spec.config, availableChannels) ?? null;
   const titleContent = (
     <>
-      <span className="text-[#9097A0] truncate flex-shrink-0 max-w-[60%]">{title}</span>
+      <span className="text-helios-dim truncate flex-shrink-0 max-w-[60%]">{title}</span>
       {subtitle && (
-        <span className="ml-2 text-[#5A5F66] normal-case truncate min-w-0">{subtitle}</span>
+        <span className="ml-2 text-helios-muted normal-case truncate min-w-0">{subtitle}</span>
       )}
       {editMode && (
-        <span className="ml-2 text-[#5A5F66] normal-case flex-shrink-0">
+        <span className="ml-2 text-helios-muted normal-case flex-shrink-0">
           · {Math.round(liveW * GRID_COLS)}×{Math.round(liveH * GRID_ROWS)}
         </span>
       )}
@@ -252,7 +266,7 @@ export function Tile({
           mouse-rest away. */}
       {editMode && (
         <div
-          className="h-[20px] flex items-center bg-[#0E0E10] text-[10px] uppercase tracking-wider px-2 border-b border-[#2A2C32] cursor-grab active:cursor-grabbing select-none"
+          className="h-[20px] flex items-center bg-helios-base text-[10px] uppercase tracking-wider px-2 border-b border-helios-line cursor-grab active:cursor-grabbing select-none"
           onPointerDown={onMoveDown}
           onPointerMove={onMoveMove}
           onPointerUp={onMoveUp}
@@ -261,8 +275,9 @@ export function Tile({
           {titleContent}
         </div>
       )}
-      <div className={"absolute inset-0 border border-[#2A2C32] " + (editMode ? "top-[20px] border-t-0" : "")}>
+      <div className={"absolute inset-0 border border-helios-line " + (editMode ? "top-[20px] border-t-0" : "")}>
         <RenderC
+          key={themeVersion}
           config={spec.config}
           slice={primarySlice.slice}
           cursorEmitter={cursorEmitter}
@@ -316,7 +331,7 @@ export function Tile({
           /* Hover-reveal header: identifies the tile without spending 20px of
              chrome on every widget all the time. pointer-events-none so it
              never intercepts scrubbing near the top edge of a chart. */
-          <div className="absolute top-0 left-0 right-0 z-20 h-[20px] flex items-center px-2 text-[10px] uppercase tracking-wider bg-[#0E0E10]/90 border-b border-[#2A2C32] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="absolute top-0 left-0 right-0 z-20 h-[20px] flex items-center px-2 text-[10px] uppercase tracking-wider bg-helios-base/90 border-b border-helios-line opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             {titleContent}
           </div>
         )}

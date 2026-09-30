@@ -126,26 +126,40 @@ export function BulkActionBar({
     return { canCheckOut, lockedByOtherForCheckOut, alreadyMine, canCancel, notMineForCancel };
   }, [selectedIds, lockByFile, currentUserId]);
 
+  // O(1) file lookup by id. The action loops and the two flags below used
+  // `files.find` per selected id — O(selected x files) on a ~13k-file vault.
+  const filesById = useMemo(() => new Map(files.map((f) => [f.id, f])), [files]);
+
   // Determine which selected files have a modified local copy available.
-  const hasModifiedLocal =
-    localFiles != null &&
-    selectedIds.some((id) => {
-      const file = files.find((f) => f.id === id);
-      if (!file) return false;
-      const m = matchLocal(file, localFiles, versionsByFileId, folders);
-      return m.status === "modified" && !!m.local;
-    });
+  // Memoized on the selection CONTENT (selectionKey) — selectedIds is a fresh
+  // array every render — so this doesn't re-match on unrelated re-renders.
+  const hasModifiedLocal = useMemo(
+    () =>
+      localFiles != null &&
+      selectedIds.some((id) => {
+        const file = filesById.get(id);
+        if (!file) return false;
+        const m = matchLocal(file, localFiles, versionsByFileId, folders);
+        return m.status === "modified" && !!m.local;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectionKey stands in for selectedIds
+    [selectionKey, filesById, localFiles, versionsByFileId, folders],
+  );
 
   // Determine if Get Latest is applicable for any selected file.
-  const hasGetLatest =
-    vaultRoot != null &&
-    selectedIds.some((id) => {
-      const file = files.find((f) => f.id === id);
-      if (!file) return false;
-      const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
-      return (m.status === "vault-only" || m.status === "modified") &&
-        !!versionsByFileId.get(id)?.[0];
-    });
+  const hasGetLatest = useMemo(
+    () =>
+      vaultRoot != null &&
+      selectedIds.some((id) => {
+        const file = filesById.get(id);
+        if (!file) return false;
+        const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
+        return (m.status === "vault-only" || m.status === "modified") &&
+          !!versionsByFileId.get(id)?.[0];
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectionKey stands in for selectedIds
+    [selectionKey, vaultRoot, filesById, localFiles, versionsByFileId, folders],
+  );
 
   async function bulkCheckInChanges() {
     const signal = beginAbortScope();
@@ -157,7 +171,7 @@ export function BulkActionBar({
       // we stop reading files and calling check-in RPCs for rows the user is
       // no longer acting on.
       if (signal.aborted) return;
-      const file = files.find((f) => f.id === id);
+      const file = filesById.get(id);
       if (!file) { skipped++; continue; }
       const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
       if (m.status !== "modified" || !m.local) { skipped++; continue; }
@@ -246,7 +260,7 @@ export function BulkActionBar({
       // (unmount / selection cleared) — and pass the signal through so an
       // in-flight download drops its terminal disk write too.
       if (signal.aborted) return;
-      const file = files.find((f) => f.id === id);
+      const file = filesById.get(id);
       if (!file) { skipped++; continue; }
       const ver = versionsByFileId.get(id)?.[0];
       if (!ver) { skipped++; continue; }
@@ -298,7 +312,7 @@ export function BulkActionBar({
       // it in over a teammate's newer work), then clear the read-only bit.
       // Mirrors single-file CheckOut, including rolling the lock back if the
       // required download fails.
-      const file = files.find((f) => f.id === id);
+      const file = filesById.get(id);
       if (file && vaultRoot) {
         const m = matchLocal(file, localFiles ?? null, versionsByFileId, folders);
         const ver = versionsByFileId.get(id)?.[0];
@@ -348,7 +362,7 @@ export function BulkActionBar({
       // Only rows the user owns can be released — releasing someone else's lock
       // requires force-unlock, which is admin-only and out of the bulk path.
       if (lockKindFor(id) !== "me") { notMine++; continue; }
-      const file = files.find((f) => f.id === id);
+      const file = filesById.get(id);
       const ver = file ? versionsByFileId.get(id)?.[0] : undefined;
       // Never-checked-in draft: there is no vaulted version to restore, so undo
       // = discard the draft (soft-delete releases the lock; the reaper removes

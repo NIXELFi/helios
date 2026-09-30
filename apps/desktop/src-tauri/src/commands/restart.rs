@@ -47,6 +47,7 @@
 //! UX would be worse than the current exposure. Revisit when the updater
 //! flow is refactored.
 
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
@@ -67,14 +68,23 @@ pub fn helios_relaunch(app: AppHandle) {
 #[cfg(target_os = "macos")]
 fn perform_relaunch(_app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let bundle = bundle_path()?;
-    // Defense in depth: if the bundle picked up a quarantine xattr from the
-    // updater download, clear it before LaunchServices sees the new path.
-    let _ = Command::new("xattr").args(["-cr"]).arg(&bundle).output();
-    Command::new("open").args(["-na"]).arg(&bundle).spawn()?;
-    // 800 ms is empirically enough for LaunchServices to register the new
-    // process and bring its window to the foreground; less than that
-    // produces the "ghost launch" the bug report describes.
-    thread::sleep(Duration::from_millis(800));
+    // The new instance must start AFTER this process is gone: Helios runs the
+    // single-instance plugin, so a copy launched while the old one is still
+    // alive just pokes the old window (which then exits) and never shows —
+    // the "update did nothing" symptom on macOS. Hand the launch to a
+    // detached shell that waits for us to exit, clears any quarantine xattr
+    // the download left on the bundle, then opens it fresh.
+    let script = "sleep 1.5; xattr -cr \"$0\" 2>/dev/null; open -na \"$0\"";
+    Command::new("/bin/sh")
+        .arg("-c")
+        .arg(script)
+        .arg(&bundle)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    // Give the shell a moment to start before we exit; it outlives us.
+    thread::sleep(Duration::from_millis(150));
     Ok(())
 }
 

@@ -1,0 +1,505 @@
+{
+  "projects": [
+    {
+      "id": "p-1",
+      "name": "SDM26",
+      "description": "Season 26"
+    },
+    {
+      "id": "p-2",
+      "name": "SDM27",
+      "description": null
+    }
+  ],
+  "projectData": {
+    "p-1": {
+      "tasks": [
+        {
+          "id": "t-1",
+          "project_id": "p-1",
+          "subteam_id": "st-1",
+          "subsystem_id": "ss-1",
+          "parent_task_id": null,
+          "title": "Weld main hoop",
+          "description": "with the good jig",
+          "type": "part",
+          "status": "in_progress",
+          "priority": "high",
+          "owner_id": "u-1",
+          "start_date": "2026-03-01",
+          "due_date": "2026-03-10",
+          "estimate_days": 2.5,
+          "mrl": 4,
+          "on_critical_path": true,
+          "created_by": "u-2",
+          "subteam": {
+            "id": "st-1",
+            "name": "Chassis",
+            "code": "CH",
+            "slug": "chassis",
+            "color": "#8c1d40",
+            "icon": null
+          },
+          "subteams": [
+            {
+              "id": "st-1",
+              "name": "Chassis",
+              "code": "CH",
+              "slug": "chassis",
+              "color": "#8c1d40",
+              "icon": null
+            },
+            {
+              "id": "st-2",
+              "name": "Aero",
+              "code": "AE",
+              "slug": "aero",
+              "color": "#ffc627",
+              "icon": "wing"
+            }
+          ],
+          "subsystem": {
+            "id": "ss-1",
+            "subteam_id": "st-1",
+            "parent_subsystem_id": null,
+            "name": "Main hoop",
+            "code": "MH",
+            "color": null
+          },
+          "owner": {
+            "id": "u-1",
+            "name": "Ada",
+            "email": "ada@asu.edu",
+            "subteam_ids": [
+              "st-1"
+            ]
+          },
+          "owners": [
+            {
+              "id": "u-1",
+              "name": "Ada",
+              "email": "ada@asu.edu",
+              "subteam_ids": [
+                "st-1"
+              ]
+            },
+            {
+              "id": "u-2",
+              "name": "Bo",
+              "email": null
+            }
+          ]
+        },
+        {
+          "id": "t-2",
+          "project_id": "p-1",
+          "subteam_id": "st-2",
+          "subsystem_id": null,
+          "parent_task_id": "t-1",
+          "title": "Undertray layup",
+          "description": null,
+          "type": "analysis",
+          "status": "not_started",
+          "priority": "low",
+          "owner_id": null,
+          "start_date": null,
+          "due_date": null,
+          "estimate_days": null,
+          "mrl": null,
+          "on_critical_path": false,
+          "created_by": null,
+          "subteam": {
+            "id": "st-2",
+            "name": "Aero",
+            "code": "AE",
+            "slug": "aero",
+            "color": "#ffc627",
+            "icon": "wing"
+          },
+          "subteams": [
+            {
+              "id": "st-2",
+              "name": "Aero",
+              "code": "AE",
+              "slug": "aero",
+              "color": "#ffc627",
+              "icon": "wing"
+            }
+          ],
+          "subsystem": null,
+          "owner": null,
+          "owners": []
+        }
+      ],
+      "subteams": [
+        {
+          "id": "st-1",
+          "name": "Chassis",
+          "code": "CH",
+          "slug": "chassis",
+          "color": "#8c1d40",
+          "icon": null
+        },
+        {
+          "id": "st-2",
+          "name": "Aero",
+          "code": "AE",
+          "slug": "aero",
+          "color": "#ffc627",
+          "icon": "wing"
+        }
+      ],
+      "subsystems": [
+        {
+          "id": "ss-1",
+          "subteam_id": "st-1",
+          "parent_subsystem_id": null,
+          "name": "Main hoop",
+          "code": "MH",
+          "color": null
+        }
+      ],
+      "users": [
+        {
+          "id": "u-1",
+          "name": "Ada",
+          "email": "ada@asu.edu",
+          "subteam_ids": [
+            "st-1"
+          ]
+        },
+        {
+          "id": "u-2",
+          "name": "Bo",
+          "email": null
+        }
+      ],
+      "dependencies": [
+        {
+          "predecessor_id": "t-1",
+          "successor_id": "t-2",
+          "dep_type": "FS",
+          "lag_days": 3
+        }
+      ],
+      "milestones": [
+        {
+          "id": "m-1",
+          "project_id": "p-1",
+          "name": "DR1",
+          "target_date": "2026-04-01",
+          "type": "design_review",
+          "description": null
+        }
+      ],
+      "pages": [
+        {
+          "id": "pg-1",
+          "project_id": "p-1",
+          "subteam_id": "st-1",
+          "title": "Notes",
+          "icon": null,
+          "type": "doc",
+          "parent_page_id": null,
+          "order_key": "a0"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "b-1",
+          "page_id": "pg-1",
+          "parent_block_id": null,
+          "order_key": "a0",
+          "type": "text",
+          "props": {
+            "text": "hi"
+          }
+        }
+      ],
+      "activity": [
+        {
+          "id": "a-1",
+          "project_id": "p-1",
+          "actor_id": "u-1",
+          "action": "updated",
+          "target_type": "task",
+          "target_id": "t-1",
+          "target_name": "Weld main hoop",
+          "subteam_ids": [
+            "st-1"
+          ],
+          "payload": null,
+          "created_at": "2026-03-02T12:00:00Z"
+        }
+      ],
+      "vendors": [
+        {
+          "id": "v-1",
+          "project_id": "p-1",
+          "name": "Acme Machining",
+          "category": "machining",
+          "contact_name": null,
+          "email": null,
+          "phone": null,
+          "website": null,
+          "location": "Tempe",
+          "processes": [
+            "mill"
+          ],
+          "machining": null,
+          "lead_time_days": 10,
+          "status": "active",
+          "notes": null
+        }
+      ],
+      "comments": [
+        {
+          "id": "c-1",
+          "task_id": "t-1",
+          "author_id": "u-2",
+          "body": "looks good",
+          "kind": "general",
+          "created_at": "2026-03-02T00:00:00Z"
+        }
+      ],
+      "links": [
+        {
+          "id": "l-1",
+          "task_id": "t-1",
+          "url": "https://example.com",
+          "label": "spec",
+          "created_at": "2026-03-02T00:00:00Z",
+          "created_by": "u-1"
+        }
+      ],
+      "buildRecords": [
+        {
+          "task_id": "t-1",
+          "part_file": {
+            "name": "hoop.SLDPRT",
+            "present": true
+          },
+          "drawing_file": null,
+          "drawing_review": "pending"
+        }
+      ],
+      "events": [
+        {
+          "id": "e-1",
+          "project_id": "p-1",
+          "title": "Design review",
+          "date": "2026-04-01",
+          "all_subteams": true,
+          "subteam_ids": [],
+          "type_tags": [
+            "review"
+          ],
+          "description": null,
+          "recurrence": "none",
+          "recurrence_end": null
+        }
+      ],
+      "hiddenSubteams": [
+        "st-2"
+      ]
+    },
+    "p-2": {
+      "tasks": [
+        {
+          "id": "t-3",
+          "project_id": "p-2",
+          "subteam_id": "st-1",
+          "subsystem_id": null,
+          "parent_task_id": null,
+          "title": "Rules review",
+          "description": null,
+          "type": "general",
+          "status": "done",
+          "priority": "medium",
+          "owner_id": "u-2",
+          "start_date": null,
+          "due_date": "2026-09-01",
+          "estimate_days": 1,
+          "mrl": null,
+          "on_critical_path": false,
+          "created_by": "u-1",
+          "subteam": {
+            "id": "st-1",
+            "name": "Chassis",
+            "code": "CH",
+            "slug": "chassis",
+            "color": "#8c1d40",
+            "icon": null
+          },
+          "subteams": [
+            {
+              "id": "st-1",
+              "name": "Chassis",
+              "code": "CH",
+              "slug": "chassis",
+              "color": "#8c1d40",
+              "icon": null
+            }
+          ],
+          "subsystem": null,
+          "owner": {
+            "id": "u-2",
+            "name": "Bo",
+            "email": null
+          },
+          "owners": [
+            {
+              "id": "u-2",
+              "name": "Bo",
+              "email": null
+            }
+          ]
+        }
+      ],
+      "subteams": [
+        {
+          "id": "st-1",
+          "name": "Chassis",
+          "code": "CH",
+          "slug": "chassis",
+          "color": "#8c1d40",
+          "icon": null
+        },
+        {
+          "id": "st-2",
+          "name": "Aero",
+          "code": "AE",
+          "slug": "aero",
+          "color": "#ffc627",
+          "icon": "wing"
+        }
+      ],
+      "subsystems": [
+        {
+          "id": "ss-1",
+          "subteam_id": "st-1",
+          "parent_subsystem_id": null,
+          "name": "Main hoop",
+          "code": "MH",
+          "color": null
+        }
+      ],
+      "users": [
+        {
+          "id": "u-1",
+          "name": "Ada",
+          "email": "ada@asu.edu",
+          "subteam_ids": [
+            "st-1"
+          ]
+        },
+        {
+          "id": "u-2",
+          "name": "Bo",
+          "email": null
+        }
+      ],
+      "dependencies": [
+        {
+          "predecessor_id": "t-3",
+          "successor_id": "t-1",
+          "dep_type": "SS",
+          "lag_days": 0
+        }
+      ],
+      "milestones": [
+        {
+          "id": "m-2",
+          "project_id": "p-2",
+          "name": "Comp",
+          "target_date": "2026-06-01",
+          "type": "comp_event",
+          "description": "Michigan"
+        }
+      ],
+      "pages": [],
+      "blocks": [],
+      "activity": [
+        {
+          "id": "a-2",
+          "project_id": "p-2",
+          "actor_id": "u-2",
+          "action": "created",
+          "target_type": "task",
+          "target_id": "t-3",
+          "target_name": "Rules review",
+          "subteam_ids": [
+            "st-1"
+          ],
+          "payload": {
+            "foo": 1
+          },
+          "created_at": "2026-03-01T12:00:00Z"
+        }
+      ],
+      "vendors": [],
+      "comments": [
+        {
+          "id": "c-2",
+          "task_id": "t-3",
+          "author_id": null,
+          "body": "ok",
+          "kind": "drawing_review",
+          "created_at": "2026-03-03T00:00:00Z"
+        }
+      ],
+      "links": [],
+      "buildRecords": [],
+      "events": [],
+      "hiddenSubteams": []
+    }
+  },
+  "baselineOrg": {
+    "subteams": [
+      {
+        "id": "st-1",
+        "name": "Chassis",
+        "code": "CH",
+        "slug": "chassis",
+        "color": "#8c1d40",
+        "icon": null
+      },
+      {
+        "id": "st-2",
+        "name": "Aero",
+        "code": "AE",
+        "slug": "aero",
+        "color": "#ffc627",
+        "icon": "wing"
+      }
+    ],
+    "subsystems": [
+      {
+        "id": "ss-1",
+        "subteam_id": "st-1",
+        "parent_subsystem_id": null,
+        "name": "Main hoop",
+        "code": "MH",
+        "color": null
+      }
+    ],
+    "users": [
+      {
+        "id": "u-1",
+        "name": "Ada",
+        "email": "ada@asu.edu",
+        "subteam_ids": [
+          "st-1"
+        ]
+      },
+      {
+        "id": "u-2",
+        "name": "Bo",
+        "email": null
+      }
+    ]
+  },
+  "roles": {
+    "p-1": "lead"
+  }
+}

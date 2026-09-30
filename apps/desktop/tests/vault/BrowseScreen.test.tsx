@@ -4,6 +4,9 @@ import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BrowseScreen } from "../../src/modules/vault/screens/BrowseScreen";
+// The whole-vault file catalog is provided once per Vault tree (VaultHome does
+// it in the app); a screen rendered in isolation needs the provider too.
+import { VaultFilesProvider } from "../../src/modules/vault/data/vault-files-context";
 
 // Mock Tauri fs plugin — vault folder scan won't run in tests (path is null).
 vi.mock("@tauri-apps/plugin-fs", () => ({
@@ -291,7 +294,9 @@ describe("<BrowseScreen>", () => {
     const c = buildMockClient();
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     // The vault name now renders in BOTH the tree header and the breadcrumb
@@ -319,7 +324,9 @@ describe("<BrowseScreen>", () => {
       const c = buildMockClient();
       render(
         <SupabaseAuthProvider client={c}>
-          <BrowseScreen />
+          <VaultFilesProvider vaultId="v1">
+            <BrowseScreen />
+          </VaultFilesProvider>
         </SupabaseAuthProvider>,
       );
       await waitFor(() => expect(screen.getAllByText("sdm26").length).toBeGreaterThan(0));
@@ -335,7 +342,9 @@ describe("<BrowseScreen>", () => {
     const c = buildMockClient();
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/select a file/i)).toBeInTheDocument());
@@ -347,7 +356,9 @@ describe("<BrowseScreen>", () => {
     const c = buildEmptyVaultClient(true);
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() =>
@@ -360,7 +371,9 @@ describe("<BrowseScreen>", () => {
     const c = buildEmptyVaultClient(false);
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/contact an admin/i)).toBeInTheDocument());
@@ -372,7 +385,9 @@ describe("<BrowseScreen>", () => {
     const c = buildFoldersErrorClient();
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/folders unavailable|couldn't load folders/i)).toBeInTheDocument());
@@ -385,7 +400,9 @@ describe("<BrowseScreen>", () => {
     const c = buildMockClient();
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     // Open the chassis folder and select its file via the row checkbox.
@@ -409,7 +426,9 @@ describe("<BrowseScreen>", () => {
     const c = buildLockHolderClient();
     render(
       <SupabaseAuthProvider client={c}>
-        <BrowseScreen />
+        <VaultFilesProvider vaultId="v1">
+          <BrowseScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     // rocker.sldprt appears in both the folder tree and the file table, so use

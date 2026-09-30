@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
+import { tc } from "@helios/ui";
 export interface LineSeries {
   label: string;
   /** Y values aligned to `x` (or to the series' own `x` if `xs` is set). */
@@ -146,8 +147,8 @@ export function LinePlot({
     if (!plotHostRef.current) return;
     const usesY2 = series.some((s) => s.axis === "y2");
 
-    const axisStroke = "#5A5F66";
-    const gridStroke = "#23252B";
+    const axisStroke = tc("muted");
+    const gridStroke = tc("grid");
     const labelFont = "10px ui-sans-serif, system-ui, sans-serif";
     const valueFont = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
     const baseAxis: Partial<uPlot.Axis> = {
@@ -274,21 +275,21 @@ export function LinePlot({
 
   return (
     <div ref={wrapRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">{title}</div>
         <div className="flex flex-wrap items-center gap-2">
           {zoomable && zoomed && (
             <button
               type="button"
               aria-label="Reset zoom"
               onClick={resetZoom}
-              className="rounded-sm border border-[#FFC627]/40 px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10"
+              className="rounded-sm border border-asu-gold/40 px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-asu-gold hover:bg-asu-gold/10"
             >
               Reset zoom
             </button>
           )}
           {series.map((s, i) => (
-            <span key={s.label + i} className="flex items-center gap-1 text-[10px] text-[#5A5F66]">
+            <span key={s.label + i} className="flex items-center gap-1 text-[10px] text-helios-muted">
               <span
                 className="inline-block h-[2px] w-3"
                 style={{ background: s.color ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length] }}

@@ -4,6 +4,9 @@ import "@testing-library/jest-dom/vitest";
 import { SupabaseAuthProvider } from "@helios/auth";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HistoryScreen } from "../../src/modules/vault/screens/HistoryScreen";
+// The whole-vault file catalog is provided once per Vault tree (VaultHome does
+// it in the app); a screen rendered in isolation needs the provider too.
+import { VaultFilesProvider } from "../../src/modules/vault/data/vault-files-context";
 
 // HistoryScreen now renders GetVersionButton per version → pulls in Tauri
 // dialog/fs plugins. Mock so rendering never hits a real Tauri runtime.
@@ -95,7 +98,9 @@ describe("<HistoryScreen>", () => {
   it("shows 'Pick a folder' empty state initially", async () => {
     render(
       <SupabaseAuthProvider client={mockClient()}>
-        <HistoryScreen />
+        <VaultFilesProvider vaultId="v1">
+          <HistoryScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/pick a folder/i)).toBeInTheDocument());
@@ -105,7 +110,9 @@ describe("<HistoryScreen>", () => {
   it("V18: shows a folders loading state distinct from the empty copy", async () => {
     render(
       <SupabaseAuthProvider client={mockClient({ foldersHang: true })}>
-        <HistoryScreen />
+        <VaultFilesProvider vaultId="v1">
+          <HistoryScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/loading folders/i)).toBeInTheDocument());
@@ -114,7 +121,9 @@ describe("<HistoryScreen>", () => {
   it("V18: surfaces a folders query error", async () => {
     render(
       <SupabaseAuthProvider client={mockClient({ foldersError: { message: "folders boom" } })}>
-        <HistoryScreen />
+        <VaultFilesProvider vaultId="v1">
+          <HistoryScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     await waitFor(() => expect(screen.getByText(/folders boom/i)).toBeInTheDocument());
@@ -128,7 +137,9 @@ describe("<HistoryScreen>", () => {
     ];
     render(
       <SupabaseAuthProvider client={mockClient({ folders, files, versions })}>
-        <HistoryScreen />
+        <VaultFilesProvider vaultId="v1">
+          <HistoryScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     const folderRow = await screen.findByRole("button", { name: "chassis" });
@@ -152,7 +163,9 @@ describe("<HistoryScreen>", () => {
     ];
     render(
       <SupabaseAuthProvider client={mockClient({ folders, files, locks, users })}>
-        <HistoryScreen />
+        <VaultFilesProvider vaultId="v1">
+          <HistoryScreen />
+        </VaultFilesProvider>
       </SupabaseAuthProvider>,
     );
     // Pick the folder so the file table loads.

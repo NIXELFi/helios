@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useActiveVault } from "../data/useActiveVault";
-import { useAllFiles } from "../data/useAllFiles";
+import { useVaultFiles } from "../data/vault-files-context";
 import { useFolders } from "../data/useFolders";
 import { useLocks } from "../data/useLocks";
 import { useVaultUsers } from "../data/useVaultUsers";
@@ -26,7 +26,9 @@ import type { VaultFile } from "../data/types";
 
 export function InsightsScreen() {
   const { activeVaultId: vaultId, activeVault, refetch: refetchVaults } = useActiveVault();
-  const { data: files, loading: filesLoading, error: filesError } = useAllFiles(vaultId ?? undefined);
+  // The shared vault catalog (provided once by VaultHome) — Insights used to
+  // open its own copy of the same multi-megabyte query.
+  const { data: files, loading: filesLoading, error: filesError } = useVaultFiles();
   const { data: folders } = useFolders(vaultId ?? undefined);
   const { data: locks } = useLocks();
   const { data: users } = useVaultUsers(); // admin-gated; errors ignored (fallback below)

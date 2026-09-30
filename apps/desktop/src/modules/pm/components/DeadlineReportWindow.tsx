@@ -14,6 +14,7 @@ import {
   type ReportTask,
 } from "@pm/lib/deadlineReport";
 
+import { tc } from "@helios/ui";
 interface DeadlineReportWindowProps {
   open: boolean;
   onClose: () => void;
@@ -215,7 +216,7 @@ function ReportSection({
                       <span
                         aria-hidden
                         className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: t.subteamColor ?? "#6B7280" }}
+                        style={{ backgroundColor: t.subteamColor ?? tc("dim") }}
                       />
                       <span className="truncate">{t.subteamName}</span>
                     </span>

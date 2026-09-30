@@ -1,0 +1,779 @@
+import { useEffect, useState } from "react";
+import {
+  IconAlertTriangle,
+  IconDeviceGamepad,
+  IconDownload,
+  IconFolderOpen,
+  IconLock,
+  IconPlayerPlayFilled,
+  IconRefresh,
+  IconUserCheck,
+} from "@tabler/icons-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  GENERATED_EVENTS, PLATFORM_NAMES, PROFILES, TRACKS, fmtBytes, generatedTrackId, normaliseSeed, onSimInstallProgress,
+  randomSeed, simAvailableBuild, simFeedPlatforms, simInstall, simLaunch, thisPlatform, trackName,
+  simSetExePath,
+  simStatus,
+  type GeneratedEvent, type LaunchRequest, type SimBuild, type SimStatus, type TrackId,
+} from "../api";
+import { VEHICLE_MODELS, type VehicleModel } from "../api";
+import { simInfo } from "../lib/toast";
+import { InfoPopover, SharingPolicy } from "./InfoPopover";
+import { installedVersion, type AutoUpdateState } from "./useSimAutoUpdate";
+
+// Kept here as well: the tests and older callers import it from this module.
+export { installedVersion };
+
+const PREFS_KEY = "helios:sim:launch";
+
+/**
+ * What the course selector offers: a fixed course by id, or a generated one
+ * by event -- `gen:autocross` -- whose seed lives in `seed` beside it. The
+ * course id the simulator is launched with is put together at launch time,
+ * so a driver who types a seed and changes their mind has changed nothing.
+ */
+type CourseChoice = TrackId | `gen:${GeneratedEvent}`;
+
+const generatedChoice = (event: GeneratedEvent): CourseChoice => `gen:${event}`;
+function generatedEventOf(choice: string): GeneratedEvent | null {
+  const ev = GENERATED_EVENTS.find((e) => generatedChoice(e.event) === choice);
+  return ev ? ev.event : null;
+}
+
+/** The course id a launch would ask for. */
+export function courseFor(prefs: Pick<LaunchPrefs, "track" | "seed">): TrackId {
+  const event = generatedEventOf(prefs.track);
+  return event ? generatedTrackId(event, prefs.seed) : (prefs.track as TrackId);
+}
+
+interface LaunchPrefs {
+  track: CourseChoice;
+  /** Which car model: 2 the validated bicycle, 3 the 4-wheel beta. */
+  vehicleModel: VehicleModel;
+  /** The seed for a generated course. Kept even while a fixed course is
+   *  chosen, so switching back and forth does not lose it. */
+  seed: string;
+  profile: string;
+  session: string;
+  traction: boolean;
+  abs: boolean;
+  autoShift: boolean;
+  autostart: boolean;
+  windowed: boolean;
+  record: boolean;
+}
+
+const DEFAULTS: LaunchPrefs = {
+  track: "autocross",
+  vehicleModel: 2,
+  seed: "",
+  profile: "wheel",
+  session: "",
+  // Off by default because the real car has none of them, and a time set with
+  // any of them on does not go on the board.
+  traction: false,
+  abs: false,
+  autoShift: false,
+  autostart: true,
+  windowed: false,
+  record: true,
+};
+
+/**
+ * The launch settings, as last left.
+ *
+ * Exported because `SimHome.chase` starts a drive too, and used to re-read
+ * and re-default this same key by hand -- two descriptions of one thing that
+ * agreed only by coincidence.
+ */
+export function readLaunchPrefs(): LaunchPrefs {
+  return readPrefs();
+}
+
+function readPrefs(): LaunchPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return DEFAULTS;
+    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<LaunchPrefs>) };
+  } catch {
+    return DEFAULTS;
+  }
+}
+
+function writePrefs(p: LaunchPrefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  } catch {
+    // ignore (private mode / quota)
+  }
+}
+
+interface Props {
+  status: SimStatus | null;
+  /** The signed-in driver. Null when nobody is signed in, which is the one
+   *  state in which a run cannot be started at all. */
+  driver: { id: string; name: string } | null;
+  onStatusChange: (s: SimStatus) => void;
+  /** A drive was sent to the simulator; `what` says which, in words. */
+  onLaunched: (what: string) => void;
+  /** What the simulator Helios started is doing, until it exits; owned by
+   *  SimHome, which hears `sim://exited`. Null when nothing is running. */
+  running?: string | null;
+  /** Open the Shell's sign-in dialog. */
+  onSignIn?: () => void;
+  /** The automatic update, owned by SimHome so it runs whichever tab is up. */
+  update: AutoUpdateState;
+}
+
+export function LaunchPanel({ status, driver, onStatusChange, onLaunched, running = null, onSignIn, update }: Props) {
+  const [prefs, setPrefs] = useState<LaunchPrefs>(readPrefs);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function set<K extends keyof LaunchPrefs>(key: K, value: LaunchPrefs[K]) {
+    setPrefs((p) => {
+      const next = { ...p, [key]: value };
+      writePrefs(next);
+      return next;
+    });
+  }
+
+  async function launch() {
+    if (!driver) return;
+    setBusy(true);
+    setError(null);
+    const track = courseFor(prefs);
+    const req: LaunchRequest = {
+      track,
+      vehicleModel: prefs.vehicleModel,
+      profile: prefs.profile,
+      driver: driver.name,
+      driverId: driver.id,
+      session: prefs.session.trim() || undefined,
+      traction: prefs.traction,
+      abs: prefs.abs,
+      autoShift: prefs.autoShift,
+      autostart: prefs.autostart,
+      windowed: prefs.windowed,
+      noRecord: !prefs.record,
+    };
+    try {
+      await simLaunch(req);
+      // In words a driver uses. The process id it used to print is for
+      // whoever is debugging the launcher, not for the person in the seat.
+      const what = `${trackName(track)} · ${VEHICLE_MODELS.find((m) => m.id === prefs.vehicleModel)?.name ?? "car"}`;
+      simInfo(`Sent to simulator: ${what}`);
+      onLaunched(what);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickExe() {
+    // Inside the try as well: the dialog itself can reject (no permission, no
+    // window), and a rejection out here is an unhandled one that tells the
+    // user nothing at all.
+    let picked: unknown;
+    try {
+      picked = await openDialog({
+        multiple: false,
+        title: "Where is the simulator?",
+        filters: [{ name: "Simulator", extensions: ["exe"] }],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (typeof picked !== "string") return;
+    try {
+      onStatusChange(await simSetExePath(picked));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const ready = !!status?.exePath;
+
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 p-6">
+      {!ready && <NotFound status={status} onPick={pickExe} onStatusChange={onStatusChange} />}
+      {ready && <UpdateBanner status={status} update={update} />}
+
+      <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3 className="text-sm font-semibold">Start a run</h3>
+          <span className="ml-auto flex items-center gap-1">
+            <InfoPopover label="What gets shared" align="right"><SharingPolicy /></InfoPopover>
+            <InfoPopover label="Rig settings" align="right">
+              {/* Was a whole card at the foot of the page. It is a thing a
+                  driver needs to hear once, not scroll past every visit. */}
+              <span className="block">
+                Helios decides what a run <em>is</em>: who, which course, which aids. How the
+                rig <em>feels</em> belongs to the simulator, because those are numbers you can
+                only get right with the wheel in your hands: the control mapping and rotation,
+                force-feedback gain, pedal calibration, the throttle map, the camera. Set them
+                on the simulator&rsquo;s own Controls and Car tabs and they stay with that rig.
+              </span>
+              <span className="mt-2 block text-helios-muted">
+                What you choose here applies to the run you launch and is not written over the
+                rig&rsquo;s own settings, so launching as yourself doesn&rsquo;t leave the next
+                person driving under your name.
+              </span>
+            </InfoPopover>
+          </span>
+        </div>
+        <p className="mb-4 text-xs text-helios-dim">
+          The simulator records everything at 100&nbsp;Hz and files it here, and the time goes on
+          the team board.
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Driver" hint="from your Helios account">
+            <div
+              className={
+                "flex items-center gap-2 rounded border px-2.5 py-1.5 text-sm " +
+                (driver
+                  ? "border-helios-line bg-helios-deep"
+                  : "border-helios-danger/40 bg-helios-danger/10 text-helios-danger")
+              }
+            >
+              {driver ? (
+                <>
+                  <IconUserCheck size={15} className="shrink-0 text-helios-success" />
+                  <span className="truncate">{driver.name}</span>
+                </>
+              ) : (
+                <>
+                  <IconLock size={15} className="shrink-0" />
+                  <span>Not signed in</span>
+                  {onSignIn && (
+                    <button
+                      type="button"
+                      className="ml-auto rounded bg-asu-gold px-2 py-0.5 text-[11px] font-semibold text-helios-on-gold transition hover:brightness-110"
+                      onClick={(e) => { e.preventDefault(); onSignIn(); }}
+                    >
+                      Sign in
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </Field>
+          <Field label="Session" hint="optional">
+            <input
+              className={inputCls}
+              value={prefs.session}
+              placeholder="e.g. Tuesday test, rear ARB stiff"
+              maxLength={96}
+              onChange={(e) => set("session", e.target.value)}
+            />
+          </Field>
+          <Field label="Course">
+            <select
+              className={inputCls}
+              value={prefs.track}
+              onChange={(e) => {
+                const choice = e.target.value as CourseChoice;
+                set("track", choice);
+                // A generated course needs a seed; hand the driver one
+                // rather than an empty box and the simulator's default.
+                if (generatedEventOf(choice) && !normaliseSeed(prefs.seed)) set("seed", randomSeed());
+              }}
+            >
+              {TRACKS.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} — {t.detail}</option>
+              ))}
+              {GENERATED_EVENTS.map((g) => (
+                <option key={g.event} value={generatedChoice(g.event)}>Generated {g.name.toLowerCase()} — {g.detail}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Car model" hint="each model has its own leaderboard">
+            <select
+              className={inputCls}
+              value={prefs.vehicleModel ?? 2}
+              aria-label="Car model"
+              onChange={(e) => set("vehicleModel", (Number(e.target.value) === 3 ? 3 : 2) as VehicleModel)}
+            >
+              {VEHICLE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} — {m.detail}</option>
+              ))}
+            </select>
+          </Field>
+          {generatedEventOf(prefs.track) && (
+            <Field label="Seed" hint="same seed, same course, on every rig">
+              <div className="flex gap-2">
+                <input
+                  className={inputCls + " font-mono uppercase tracking-widest"}
+                  value={prefs.seed}
+                  placeholder="e.g. K7Q2"
+                  maxLength={12}
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-label="Seed"
+                  onChange={(e) => set("seed", e.target.value)}
+                  onBlur={(e) => set("seed", normaliseSeed(e.target.value) || randomSeed())}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-helios-line px-3 py-1.5 text-xs transition hover:border-asu-gold"
+                  onClick={() => set("seed", randomSeed())}
+                >
+                  New seed
+                </button>
+              </div>
+              <span className="mt-1 block text-[11px] text-helios-muted">
+                Course id <span className="font-mono">{courseFor(prefs)}</span>. Built to the FSAE
+                course rules by the simulator (0.6.0 or newer); times rank on their own board.
+              </span>
+            </Field>
+          )}
+          <Field label="Controls">
+            <select
+              className={inputCls}
+              value={prefs.profile}
+              onChange={(e) => set("profile", e.target.value)}
+            >
+              {PROFILES.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <Check
+            label="Traction control"
+            hint="The real car has none. A time set with it on is not ranked."
+            checked={prefs.traction}
+            onChange={(v) => set("traction", v)}
+          />
+          <Check
+            label="ABS"
+            hint="Same: not ranked."
+            checked={prefs.abs}
+            onChange={(v) => set("abs", v)}
+          />
+          <Check
+            label="Automatic gearbox"
+            hint="Shifts at the torque crossover. Not ranked."
+            checked={prefs.autoShift}
+            onChange={(v) => set("autoShift", v)}
+          />
+          <Check
+            label="Record the run"
+            hint="Off means this drive is not logged anywhere."
+            checked={prefs.record}
+            onChange={(v) => set("record", v)}
+          />
+          <Check
+            label="Go straight to the grid"
+            hint="Skip the simulator's own launch screen."
+            checked={prefs.autostart}
+            onChange={(v) => set("autostart", v)}
+          />
+          <Check
+            label="Windowed"
+            hint="A 1600×900 window instead of filling the screen."
+            checked={prefs.windowed}
+            onChange={(v) => set("windowed", v)}
+          />
+        </div>
+
+        {/* Free roam has no finish line, so `Timing` never completes a lap and
+            the recorder never files anything. Better said here than discovered
+            twenty minutes later as "the simulator closed without filing a
+            run". */}
+        {prefs.track === "mis" && (
+          <p className="mt-4 flex items-start gap-2 rounded border border-helios-warn/30 bg-helios-warn/10 px-3 py-2 text-xs text-helios-warn">
+            <IconAlertTriangle size={14} className="mt-0.5 shrink-0" />
+            Free roam has no timed lap, so this run will not be filed and will not appear
+            in the archive. Pick Autocross or Endurance for a time.
+          </p>
+        )}
+
+        {!prefs.record && (
+          <p className="mt-4 flex items-start gap-2 rounded border border-helios-warn/30 bg-helios-warn/10 px-3 py-2 text-xs text-helios-warn">
+            <IconAlertTriangle size={14} className="mt-0.5 shrink-0" />
+            Recording is off — this run will leave no telemetry and no lap time.
+          </p>
+        )}
+
+        {!driver && (
+          <p className="mt-4 flex items-start gap-2 rounded border border-helios-danger/30 bg-helios-danger/10 px-3 py-2 text-xs text-helios-danger">
+            <IconLock size={14} className="mt-0.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              Sign in to drive. A lap time is a claim about a person, so the driver is
+              your Helios account rather than something typed into a box &mdash; which is
+              what lets the leaderboard trust it.
+            </span>
+            {onSignIn && (
+              <button
+                type="button"
+                className="shrink-0 rounded bg-asu-gold px-3 py-1 text-xs font-semibold text-helios-on-gold transition hover:brightness-110"
+                onClick={onSignIn}
+              >
+                Sign in
+              </button>
+            )}
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            className="inline-flex items-center gap-2 rounded bg-asu-gold px-4 py-2 text-sm font-semibold text-helios-on-gold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!ready || busy || !driver || update.installing}
+            title={
+              !driver ? "Sign in to Helios to start a run"
+                : update.installing ? "The simulator is being updated; it launches when that is done"
+                : undefined
+            }
+            onClick={() => void launch()}
+          >
+            <IconPlayerPlayFilled size={15} />
+            {busy ? "Starting…" : update.installing ? "Updating…" : "Launch simulator"}
+          </button>
+          {/* Until the simulator closes (SimHome hears `sim://exited`), not
+              for as long as this tab happens to stay mounted. */}
+          {running && <span className="text-xs text-helios-success" data-testid="launch-running">Running — {running}</span>}
+          {error && <span className="text-xs text-helios-danger">{error}</span>}
+        </div>
+      </section>
+
+      <SimLocation status={status} onPick={pickExe} onStatusChange={onStatusChange} />
+    </div>
+  );
+}
+
+/**
+ * Ask the feed what it has, once.
+ *
+ * Shared by the not-installed panel and the update banner, because they used
+ * NOT to be: the feed was only ever consulted when no simulator could be
+ * found, so once you had one Helios never looked again and there was no way
+ * to get a newer build except deleting the one you had. A fix published to
+ * the feed could not reach anybody who had already installed.
+ */
+function useAvailableBuild(enabled: boolean) {
+  const [build, setBuild] = useState<SimBuild | null>(null);
+  const [checking, setChecking] = useState(enabled);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    setChecking(true);
+    simAvailableBuild()
+      .then((b) => { if (!cancelled) setBuild(b); })
+      .catch((e) => { if (!cancelled) setFeedError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, [enabled]);
+  return { build, checking, feedError, setFeedError };
+}
+
+/**
+ * Which platforms the feed offers -- asked only once it is known there is
+ * nothing for this one, because that is the only time the answer changes
+ * what the panel says.
+ */
+function useFeedPlatforms(enabled: boolean) {
+  const [offered, setOffered] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!enabled) { setOffered(null); return; }
+    let cancelled = false;
+    simFeedPlatforms()
+      .then((p) => { if (!cancelled) setOffered(p); })
+      .catch(() => { if (!cancelled) setOffered(null); });
+    return () => { cancelled = true; };
+  }, [enabled]);
+  return offered;
+}
+
+/**
+ * Download and install one build, with progress.
+ *
+ * Returns the click handler and what to put on the button, so the first-run
+ * panel and the update banner behave identically -- including the progress,
+ * which is the whole reason a 7 MB download does not look like a hang.
+ */
+function useInstaller(onStatusChange: (s: SimStatus) => void, onError: (m: string | null) => void) {
+  const [installing, setInstalling] = useState(false);
+  const [got, setGot] = useState(0);
+
+  async function install(build: SimBuild) {
+    setInstalling(true);
+    setGot(0);
+    onError(null);
+    const off = onSimInstallProgress((p) => setGot(p.bytes));
+    try {
+      await simInstall(build.version);
+      onStatusChange(await simStatus());
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      off();
+      setInstalling(false);
+    }
+  }
+
+  const label = (build: SimBuild | null, idle: string) => {
+    if (!installing) return idle;
+    const pct = build?.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+    return pct != null ? `Downloading… ${pct.toFixed(0)}%` : `Downloading… ${fmtBytes(got)}`;
+  };
+  const pct = (build: SimBuild | null) =>
+    installing && build?.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+
+  return { install, installing, label, pct };
+}
+
+/**
+ * What the automatic update is doing.
+ *
+ * The update itself runs in `useSimAutoUpdate`, owned by SimHome so it goes
+ * on whichever tab is open; this only says so. Three states are worth a
+ * line: it is downloading (with how far), it failed (with a retry), and it
+ * just installed (so a driver who saw the version change knows why). When
+ * the feed matches what is installed there is nothing to say.
+ */
+function UpdateBanner({ status, update }: { status: SimStatus | null; update: AutoUpdateState }) {
+  const { build, installing, got, error, installed, retry } = update;
+  const have = installedVersion(status);
+
+  if (installing && build) {
+    const pct = build.bytes ? Math.min(100, (got / build.bytes) * 100) : null;
+    return (
+      <section className="rounded-lg border border-asu-gold/40 bg-asu-gold/10 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <IconDownload size={18} className="shrink-0 text-asu-gold" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">Updating the simulator to {build.version}</h3>
+            <p className="mt-0.5 text-xs text-helios-dim">
+              {have ? `Replacing ${have}` : "Installing"}
+              {pct != null ? ` · ${pct.toFixed(0)}%` : got ? ` · ${fmtBytes(got)}` : ""}
+              {build.notes ? ` — ${build.notes}` : ""}
+              . Launching waits for it.
+            </p>
+          </div>
+          {pct != null && (
+            <span className="h-1 w-24 overflow-hidden rounded bg-helios-line" aria-hidden>
+              <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${pct}%` }} />
+            </span>
+          )}
+        </div>
+      </section>
+    );
+  }
+  if (error && build) {
+    return (
+      <section className="rounded-lg border border-helios-danger/40 bg-helios-danger/10 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <IconAlertTriangle size={18} className="shrink-0 text-helios-danger" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">Could not update the simulator to {build.version}</h3>
+            <p className="mt-0.5 text-xs text-helios-dim">
+              {error}
+              {have ? ` · still on ${have}` : ""}
+            </p>
+          </div>
+          <button
+            className="shrink-0 rounded bg-helios-danger/80 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+            onClick={retry}
+          >
+            Try again
+          </button>
+        </div>
+      </section>
+    );
+  }
+  if (installed && have === installed) {
+    return (
+      <p className="flex items-center gap-2 text-xs text-helios-success">
+        <IconDownload size={14} className="shrink-0" />
+        Simulator {installed} installed just now.
+      </p>
+    );
+  }
+  return null;
+}
+
+function NotFound({
+  status, onPick, onStatusChange,
+}: { status: SimStatus | null; onPick: () => void; onStatusChange: (s: SimStatus) => void }) {
+  const [showPaths, setShowPaths] = useState(false);
+  const { build, checking, feedError, setFeedError } = useAvailableBuild(true);
+  const { install: doInstall, installing, label, pct } = useInstaller(onStatusChange, setFeedError);
+  const offered = useFeedPlatforms(!checking && !feedError && build == null);
+
+  const shown = pct(build);
+  const here = thisPlatform();
+
+  return (
+    <section className="rounded-lg border border-helios-warn/40 bg-helios-warn/10 p-5">
+      <div className="flex items-start gap-3">
+        <IconDeviceGamepad size={20} className="mt-0.5 shrink-0 text-helios-warn" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold">The simulator is not installed here</h3>
+          <p className="mt-1 text-xs text-helios-dim">
+            Helios does not ship with it &mdash; a driving simulator is not something
+            everyone wants inside their installer. You can still browse, analyse and
+            compare runs that are already recorded; launching and replaying need the
+            executable.
+          </p>
+          {!build && !checking && !feedError && offered && (
+            <p className="mt-2 text-xs text-helios-warn" data-testid="no-build-here">
+              {offered.length === 0
+                ? "The build feed is empty: nothing has been published for any platform yet."
+                : `No ${PLATFORM_NAMES[here] ?? here} build has been published yet; the feed has ` +
+                  offered.map((p) => PLATFORM_NAMES[p] ?? p).join(" and ") +
+                  " only. That is a request to whoever publishes the simulator, not something to fix on this machine." +
+                  " If you have a copy already, point Helios at it below."}
+            </p>
+          )}
+          {build && (
+            <p className="mt-2 text-xs text-helios-dim">
+              Version <span className="font-mono">{build.version}</span> is available
+              {build.bytes ? " (" + fmtBytes(build.bytes) + ")" : ""}. It downloads once and
+              is checked against its SHA-256 before anything is installed.
+              {build.notes ? " " + build.notes : ""}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {build && (
+              <button
+                className="inline-flex items-center gap-2 rounded bg-asu-gold px-3 py-1.5 text-xs font-semibold text-helios-on-gold transition hover:brightness-110 disabled:opacity-50"
+                disabled={installing}
+                onClick={() => void doInstall(build)}
+              >
+                <IconDownload size={14} />
+                {label(build, "Install the simulator")}
+              </button>
+            )}
+            {shown != null && (
+              <span className="h-1 w-32 overflow-hidden rounded bg-helios-line" aria-hidden>
+                <span className="block h-full bg-asu-gold transition-[width]" style={{ width: `${shown}%` }} />
+              </span>
+            )}
+            {checking && <span className="text-xs text-helios-muted">Checking for a build…</span>}
+            <button
+              className="inline-flex items-center gap-2 rounded border border-helios-line bg-helios-panel px-3 py-1.5 text-xs transition hover:border-asu-gold"
+              onClick={onPick}
+            >
+              <IconFolderOpen size={14} /> Point Helios at it
+            </button>
+            {status && status.searched.length > 0 && (
+              <button
+                className="text-xs text-helios-dim underline decoration-dotted"
+                onClick={() => setShowPaths((s) => !s)}
+              >
+                {showPaths ? "hide" : "show"} where it looked
+              </button>
+            )}
+          </div>
+          {feedError && (
+            <p className="mt-2 text-xs text-helios-muted">
+              No build feed reachable ({feedError}). Build it from the{" "}
+              <span className="font-mono">fsae-sim</span> repo, or point Helios at a copy.
+            </p>
+          )}
+          {showPaths && status && (
+            <ul className="mt-3 max-h-40 overflow-y-auto font-mono text-[11px] leading-relaxed text-helios-muted">
+              {status.searched.map((p) => <li key={p} className="truncate">{p}</li>)}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SimLocation({
+  status, onPick, onStatusChange,
+}: { status: SimStatus | null; onPick: () => void; onStatusChange: (s: SimStatus) => void }) {
+  // "Forget it and search again" writes to disk, so it can fail -- a read-only
+  // config directory, a locked file. Discarding the rejection left the button
+  // looking like it had worked while the path it was meant to clear was still
+  // there, and the only trace was an unhandled rejection in a console nobody
+  // has open.
+  const [forgetError, setForgetError] = useState<string | null>(null);
+  if (!status) return null;
+  return (
+    <section className="rounded-lg border border-helios-line bg-helios-panel p-5">
+      <h3 className="mb-3 text-sm font-semibold">Where things are</h3>
+      <dl className="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-[110px_1fr]">
+        <dt className="text-helios-dim">Simulator</dt>
+        <dd className="min-w-0 break-all font-mono text-[11px]">
+          {status.exePath ?? <span className="font-sans text-helios-warn">not found</span>}
+          {status.version && <span className="ml-2 font-sans text-helios-dim">{status.version}</span>}
+          {status.exeConfigured && <span className="ml-2 font-sans text-helios-dim">(set by you)</span>}
+        </dd>
+        <dt className="text-helios-dim">Runs</dt>
+        <dd className="min-w-0 break-all font-mono text-[11px]">
+          {status.runsDir}
+          <span className="ml-2 font-sans text-helios-dim">
+            {status.runCount} run{status.runCount === 1 ? "" : "s"}
+          </span>
+        </dd>
+      </dl>
+      <div className="mt-4 flex gap-2">
+        <button
+          className="inline-flex items-center gap-2 rounded border border-helios-line px-3 py-1.5 text-xs transition hover:border-asu-gold"
+          onClick={onPick}
+        >
+          <IconFolderOpen size={14} /> Choose the executable
+        </button>
+        {status.exeConfigured && (
+          <button
+            className="inline-flex items-center gap-2 rounded border border-helios-line px-3 py-1.5 text-xs transition hover:border-asu-gold"
+            onClick={() => {
+              simSetExePath(null)
+                .then(onStatusChange)
+                .catch((e) => setForgetError(e instanceof Error ? e.message : String(e)));
+            }}
+          >
+            <IconRefresh size={14} /> Forget it and search again
+          </button>
+        )}
+      </div>
+      {forgetError && <p className="mt-2 text-xs text-helios-danger">{forgetError}</p>}
+    </section>
+  );
+}
+
+const inputCls =
+  "w-full rounded border border-helios-line bg-helios-deep px-2.5 py-1.5 text-sm text-helios-text outline-none transition focus:border-asu-gold";
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs text-helios-dim">
+        {label}
+        {hint && <span className="ml-1 text-helios-muted">({hint})</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Check({
+  label, hint, checked, onChange,
+}: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2.5 rounded border border-helios-line px-3 py-2 transition hover:border-helios-dim">
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-asu-gold"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="min-w-0">
+        <span className="block text-xs font-medium">{label}</span>
+        <span className="block text-[11px] leading-snug text-helios-muted">{hint}</span>
+      </span>
+    </label>
+  );
+}

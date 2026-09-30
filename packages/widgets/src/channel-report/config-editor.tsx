@@ -29,36 +29,36 @@ export function ChannelReportConfigEditor({ config, onChange, availableChannels 
     set("channelIds", config.channelIds.filter((c) => c !== id));
   }
   return (
-    <div className="p-2 text-xs text-[#D8DCE2] flex flex-col gap-3">
+    <div className="p-2 text-xs text-helios-text flex flex-col gap-3">
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0] mb-1">Channels</div>
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim mb-1">Channels</div>
         <div className="flex flex-wrap gap-1 mb-1">
           {config.channelIds.map((id) => (
-            <span key={id} className="px-1.5 py-0.5 bg-[#16171B] border border-[#2A2C32] flex items-center gap-1">
+            <span key={id} className="px-1.5 py-0.5 bg-helios-panel border border-helios-line flex items-center gap-1">
               <span className="font-mono-num text-[10px]">{id}</span>
-              <button onClick={() => removeChannel(id)} className="text-[#9097A0] hover:text-[#EF5350]">×</button>
+              <button onClick={() => removeChannel(id)} className="text-helios-dim hover:text-[#EF5350]">×</button>
             </span>
           ))}
         </div>
         <ChannelPicker channels={availableChannels} value="" onChange={addChannel} allowEmpty />
       </div>
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0] mb-1">Stats</div>
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim mb-1">Stats</div>
         <div className="grid grid-cols-2 gap-1">
           {ALL_STATS.map((s) => (
             <label key={s.id} className="flex items-center gap-1 text-[11px] cursor-pointer">
-              <input type="checkbox" checked={config.stats.includes(s.id)} onChange={() => toggleStat(s.id)} className="accent-[#FFC627]" />
+              <input type="checkbox" checked={config.stats.includes(s.id)} onChange={() => toggleStat(s.id)} className="accent-asu-gold" />
               {s.label}
             </label>
           ))}
         </div>
       </div>
       <label className="flex items-center gap-2 text-[11px] cursor-pointer">
-        <input type="checkbox" checked={config.hideUntrusted} onChange={(e) => set("hideUntrusted", e.target.checked)} className="accent-[#FFC627]" />
+        <input type="checkbox" checked={config.hideUntrusted} onChange={(e) => set("hideUntrusted", e.target.checked)} className="accent-asu-gold" />
         Hide out-laps / in-laps (untrusted)
       </label>
       <label className="flex items-center gap-2 text-[11px] cursor-pointer">
-        <input type="checkbox" checked={config.perSession} onChange={(e) => set("perSession", e.target.checked)} className="accent-[#FFC627]" />
+        <input type="checkbox" checked={config.perSession} onChange={(e) => set("perSession", e.target.checked)} className="accent-asu-gold" />
         Show all visible sessions (one block each)
       </label>
     </div>

@@ -1,8 +1,9 @@
 /**
  * Vault notification feed hook.
  *
- * Subscribes to realtime events (via a dedicated focused subscription — not
- * bloating useVaultRealtime which is already used for file-list updates),
+ * Reads the vault's realtime events off the shared vault-events bus (fed by the
+ * single channel in VaultHome — this hook used to open a SECOND Supabase
+ * channel per vault, which the 2026-09-09 load audit confirmed live in prod),
  * maps them through eventToNotification against the current watch set, and
  * merges results into a localStorage-persisted capped list.
  *
@@ -17,7 +18,7 @@
  * for cross-device / offline history is a planned follow-up.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSupabaseClient } from "@helios/auth";
+import { subscribeVaultEvents } from "./vault-events";
 import { eventToNotification, mergeNotifications, unreadCount, type RealtimePayload } from "../lib/notifications";
 import type { Notification } from "../lib/notifications";
 import type { FileId, VaultId, VaultFile } from "./types";
@@ -62,8 +63,6 @@ export function useNotifications(
   /** The current file list so we can resolve fileId → name. */
   files: VaultFile[],
 ): UseNotifications {
-  const client = useSupabaseClient();
-
   const [items, setItems] = useState<Notification[]>(() =>
     vaultId ? loadNotifs(vaultId) : [],
   );
@@ -84,19 +83,14 @@ export function useNotifications(
   const vaultIdRef = useRef(vaultId);
   useEffect(() => { vaultIdRef.current = vaultId; });
 
-  // Dedicated realtime subscription for notifications — kept separate from
-  // useVaultRealtime (which handles file-list updates) so neither hook adds
-  // concerns to the other. Subscribes to the same 4 tables but with a
-  // distinct channel name so the two don't collide.
+  // Notification subscription over the shared bus. The feed in VaultHome owns
+  // the one channel per vault; this hook sees exactly the payloads it saw
+  // before (versions / locks / files — folder events never produced a
+  // notification, so they are filtered out here).
   useEffect(() => {
     if (!vaultId) return;
-    if (typeof (client as { channel?: unknown }).channel !== "function") return;
-
-    let channel: ReturnType<typeof client.channel> | null = null;
-    let disposed = false;
 
     function handlePayload(raw: unknown) {
-      if (disposed) return;
       const payload = raw as RealtimePayload;
       const currentVaultId = vaultIdRef.current;
       if (!currentVaultId) return;
@@ -117,18 +111,11 @@ export function useNotifications(
       });
     }
 
-    channel = client
-      .channel(`vault-notifs:${vaultId}`)
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "versions" }, handlePayload)
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "locks" }, handlePayload)
-      .on("postgres_changes", { event: "*", schema: "pdm", table: "files" }, handlePayload)
-      .subscribe();
-
-    return () => {
-      disposed = true;
-      if (channel) client.removeChannel(channel);
-    };
-  }, [client, vaultId]);
+    return subscribeVaultEvents(vaultId, (table, payload) => {
+      if (table === "folders") return;
+      handlePayload(payload);
+    });
+  }, [vaultId]);
 
   const markAllRead = useCallback(() => {
     setItems((prev) => {

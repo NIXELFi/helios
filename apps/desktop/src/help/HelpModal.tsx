@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdown } from "./markdown";
-import { WIKI_PAGES, HOME_SLUG, getPage } from "./pages";
+import {
+  WIKI_INDEX, HOME_SLUG, loadPage, loadAllPages, getLoadedPage, type WikiPage,
+} from "./pages";
 
 interface HelpModalProps {
   open: boolean;
@@ -22,6 +24,17 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
   const [history, setHistory] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const contentRef = useRef<HTMLDivElement | null>(null);
+  // Wiki pages are fetched on demand (see pages.ts), so the displayed page is
+  // state rather than a synchronous lookup. `active` is only ever REPLACED,
+  // never cleared, so navigating keeps the previous page on screen until the
+  // next one arrives instead of flashing an empty pane.
+  const [active, setActive] = useState<WikiPage | null>(
+    () => getLoadedPage(initialSlug ?? HOME_SLUG) ?? null,
+  );
+  // Every page's content, for full-text search and for upgrading the sidebar
+  // titles to each page's own `# ` heading. Fetched in the background once the
+  // modal is open — a dozen small chunks off local disk, and never at launch.
+  const [allPages, setAllPages] = useState<WikiPage[] | null>(null);
 
   // Sync to initialSlug whenever the modal opens with a different target.
   useEffect(() => {
@@ -44,26 +57,73 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
-  // Scroll content to top on slug change.
+  // Scroll content to top when a new page is actually shown. Keyed on the
+  // rendered page, not the slug: the content element does not exist yet while
+  // the first page is still being fetched.
   useEffect(() => {
-    contentRef.current?.scrollTo({ top: 0 });
-  }, [slug]);
+    // `?.` on scrollTo too: jsdom's Element has no scrollTo, and an
+    // uncaught throw in a commit-phase effect unmounts the whole modal.
+    contentRef.current?.scrollTo?.({ top: 0 });
+  }, [active]);
 
-  const active = useMemo(() => getPage(slug) ?? getPage(HOME_SLUG)!, [slug]);
-  const html = useMemo(() => renderMarkdown(active.content), [active]);
+  // Fetch the page for the current slug. An unknown slug falls back to Home,
+  // matching the old synchronous `getPage(slug) ?? getPage(HOME_SLUG)`.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void loadPage(slug).then((page) => {
+      if (cancelled) return;
+      if (page) { setActive(page); return; }
+      void loadPage(HOME_SLUG).then((home) => {
+        if (!cancelled && home) setActive(home);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [open, slug]);
+
+  // Background load of the rest of the wiki while the user reads the first page.
+  useEffect(() => {
+    if (!open || allPages) return;
+    let cancelled = false;
+    void loadAllPages().then((pages) => { if (!cancelled) setAllPages(pages); });
+    return () => { cancelled = true; };
+  }, [open, allPages]);
+
+  const activeSlug = active?.slug ?? slug;
+  const html = useMemo(
+    () => (active ? renderMarkdown(active.content) : ""),
+    [active],
+  );
+
+  /** Sidebar entries: filenames give the list immediately; each page's real
+   *  heading replaces the derived title as soon as its content is in. */
+  const sidebarPages = useMemo(() => {
+    const loaded = new Map((allPages ?? []).map((p) => [p.slug, p.title]));
+    if (active) loaded.set(active.slug, active.title);
+    return WIKI_INDEX.map((m) => ({ ...m, title: loaded.get(m.slug) ?? m.title }));
+  }, [allPages, active]);
 
   const filteredPages = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return WIKI_PAGES;
-    return WIKI_PAGES.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.content.toLowerCase().includes(q),
+    if (!q) return sidebarPages;
+    // Until every page's text has arrived, search what we do have: the titles.
+    if (!allPages) {
+      return sidebarPages.filter((p) => p.title.toLowerCase().includes(q));
+    }
+    const matched = new Set(
+      allPages
+        .filter(
+          (p) =>
+            p.title.toLowerCase().includes(q) ||
+            p.content.toLowerCase().includes(q),
+        )
+        .map((p) => p.slug),
     );
-  }, [search]);
+    return sidebarPages.filter((p) => matched.has(p.slug));
+  }, [search, sidebarPages, allPages]);
 
   function navigate(nextSlug: string) {
-    if (!getPage(nextSlug)) return;
+    if (!WIKI_INDEX.some((p) => p.slug === nextSlug)) return;
     setHistory((h) => [...h, slug]);
     setSlug(nextSlug);
   }
@@ -164,7 +224,7 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
                     }}
                     className={
                       "w-full text-left text-xs px-2 py-1.5 rounded transition-colors " +
-                      (p.slug === active.slug
+                      (p.slug === activeSlug
                         ? "bg-helios-panel text-asu-gold border-l-2 border-asu-gold"
                         : "text-helios-text hover:bg-helios-panel hover:text-asu-gold")
                     }
@@ -181,26 +241,33 @@ export function HelpModal({ open, initialSlug, onClose }: HelpModalProps) {
             </ul>
           </nav>
 
-          {/* Content */}
-          <div
-            ref={contentRef}
-            className="flex-1 min-w-0 overflow-y-auto px-8 py-6 helios-wiki-prose"
-            onClick={onContentClick}
-            // Rendered markdown is generated locally (no remote input) and
-            // escaped by the renderer, so dangerouslySetInnerHTML is safe.
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          {/* Content. Only ever empty on the very first frame after opening —
+              navigating between pages keeps the previous one on screen. */}
+          {active ? (
+            <div
+              ref={contentRef}
+              className="flex-1 min-w-0 overflow-y-auto px-8 py-6 helios-wiki-prose"
+              onClick={onContentClick}
+              // Rendered markdown is generated locally (no remote input) and
+              // escaped by the renderer, so dangerouslySetInnerHTML is safe.
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          ) : (
+            <div className="flex-1 min-w-0 flex items-center justify-center text-helios-dim text-xs">
+              Loading…
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-helios-line px-4 py-2 text-[10px] text-helios-dim font-mono-num">
           <span>
-            Source: <code>docs/wiki/{active.slug}.md</code>
+            Source: <code>docs/wiki/{activeSlug}.md</code>
           </span>
           <span>
             Edit on{" "}
             <a
-              href={`https://github.com/NIXELFi/helios/blob/main/docs/wiki/${active.slug}.md`}
+              href={`https://github.com/NIXELFi/helios/blob/main/docs/wiki/${activeSlug}.md`}
               target="_blank"
               rel="noreferrer noopener"
               className="text-asu-gold hover:underline"

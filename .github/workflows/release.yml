@@ -18,8 +18,50 @@ permissions:
   contents: write
 
 jobs:
+  # Create the draft release ONCE, before any build starts.
+  #
+  # tauri-action creates the draft itself when none exists for the tag, and
+  # four build jobs starting within the same second each found none: 5.8.3
+  # ended up with TWO drafts named v5.8.3, the assets split between them, and
+  # the updater job -- which asks `gh release view v5.8.3` and gets one of
+  # the two -- failed with "no uploaded asset matches darwin-x86_64" while
+  # the x64 bundle sat in the other draft. The release was never published.
+  # With the draft already there, every job appends to the same one.
+  prepare:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Determine version tag
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create the draft if it does not exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          n="$(gh release list --limit 100 --json tagName,isDraft -q "[.[] | select(.tagName == \"$TAG\")] | length" -R "$GITHUB_REPOSITORY")"
+          if [ "$n" = "0" ]; then
+            gh release create "$TAG" --draft --title "Helios $TAG" --notes "Building." -R "$GITHUB_REPOSITORY"
+            echo "created draft $TAG"
+          elif [ "$n" = "1" ]; then
+            echo "release $TAG already exists"
+          else
+            echo "::error::$n releases carry the tag $TAG; delete the duplicates before re-running"
+            exit 1
+          fi
+
   build:
     name: Build (${{ matrix.platform }})
+    needs: prepare
     # Expose the resolved release tag (from push.tags or workflow_dispatch
     # input) so downstream jobs can gate on the *tag*, not `github.ref_name`
     # — which on `workflow_dispatch` is the branch name and would let manual
@@ -299,6 +341,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
         run: gh release edit "${RELEASE_TAG}" --draft=false
+
+      # Tell every running Helios to look now. Each one checks GitHub every five
+      # minutes on its own (apps/desktop/src/lib/use-updater.ts); this realtime
+      # broadcast makes it seconds. It runs only AFTER the promote above, when
+      # latest.json is live, and it carries nothing an app trusts: Helios runs
+      # its ordinary updater check, which reads the signed manifest. Public key
+      # on purpose -- the anon key ships in every client anyway. Skips cleanly
+      # when the secrets are unset, like the Slack step below.
+      - name: Announce to running Helios apps
+        if: ${{ !contains(needs.build.outputs.tag, '-') }}
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          REALTIME_URL: ${{ secrets.HELIOS_REALTIME_URL }}
+          REALTIME_KEY: ${{ secrets.HELIOS_REALTIME_ANON_KEY }}
+        shell: bash
+        run: |
+          if [ -z "$REALTIME_URL" ] || [ -z "$REALTIME_KEY" ]; then
+            echo "HELIOS_REALTIME_URL / HELIOS_REALTIME_ANON_KEY not set; apps find the release at their next five-minute check."
+            exit 0
+          fi
+          jq -n --arg v "$RELEASE_TAG" \
+            '{messages: [{topic: "helios-releases", event: "published", payload: {version: $v}}]}' \
+            | curl -sf -X POST "${REALTIME_URL%/}/realtime/v1/api/broadcast" \
+                -H "apikey: $REALTIME_KEY" -H "Authorization: Bearer $REALTIME_KEY" \
+                -H 'Content-Type: application/json' -d @- \
+            && echo "announced $RELEASE_TAG on helios-releases" \
+            || echo "::warning::could not announce $RELEASE_TAG; apps find it at their next five-minute check"
 
       # Announce stable releases in the team Slack channel. The webhook is a
       # Slack Workflow Builder trigger that expects a single string variable

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePmStore } from "@pm/lib/pmStore";
 import { recallSharing, rememberSharing, type SharingMap } from "@pm/lib/subsystemSharing";
 
+import { tc } from "@helios/ui";
 const SWATCHES = [
   "#34D399", "#10B981", "#F87171", "#A78BFA", "#22D3EE",
   "#FB923C", "#F472B6", "#FBBF24", "#60A5FA", "#8C1D40", "#FFC627",
@@ -230,7 +231,7 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
                     onClick={() => toggleShared(s.id)}
                     className={"inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors " + (on ? "border-asu-gold bg-asu-gold/15 text-asu-gold" : "border-helios-line text-helios-dim hover:text-helios-text")}
                   >
-                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? "#6B7280" }} />
+                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: s.color ?? tc("dim") }} />
                     {s.name}
                   </button>
                 );
@@ -246,7 +247,7 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
                 Cancel edit
               </button>
             ) : null}
-            <button type="submit" className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-base hover:bg-asu-gold/90">
+            <button type="submit" className="inline-flex items-center gap-1.5 rounded bg-asu-gold px-3 py-1.5 text-sm font-medium text-helios-on-gold hover:bg-asu-gold/90">
               <IconPlus size={15} strokeWidth={1.5} />
               {editingId ? "Save subsystem" : "Add subsystem"}
             </button>
@@ -261,8 +262,8 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
             <ul className="flex flex-col gap-4">
               {grouped.filter((g) => g.items.length > 0).map(({ st, items }) => (
                 <li key={st.id}>
-                  <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold" style={{ color: st.color ?? "#D8DCE2" }}>
-                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: st.color ?? "#6B7280" }} />
+                  <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold" style={{ color: st.color ?? tc("text") }}>
+                    <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: st.color ?? tc("dim") }} />
                     {st.name}
                   </div>
                   <ul className="flex flex-col gap-1">
@@ -270,14 +271,14 @@ export function SubsystemEditor({ open, onClose }: { open: boolean; onClose: () 
                       const extra = (sharing[ss.id] ?? []).map((id) => subteamById.get(id)).filter(Boolean);
                       return (
                         <li key={ss.id} className="group flex items-center gap-2 rounded border border-helios-line bg-helios-base/40 px-3 py-1.5">
-                          <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: ss.color ?? st.color ?? "#6B7280" }} />
+                          <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: ss.color ?? st.color ?? tc("dim") }} />
                           <span className="text-sm text-helios-text">{ss.name}</span>
                           <span className="text-[10px] uppercase tracking-widest text-helios-dim">{ss.code}</span>
                           {extra.length ? (
                             <span className="flex items-center gap-1 text-[10px] text-helios-dim">
                               · shared:
                               {extra.map((e) => (
-                                <span key={e!.id} className="rounded-full px-1.5" style={{ backgroundColor: (e!.color ?? "#6B7280") + "33", color: e!.color ?? "#D8DCE2" }}>{e!.code}</span>
+                                <span key={e!.id} className="rounded-full px-1.5" style={{ backgroundColor: (e!.color ?? tc("dim")) + "33", color: e!.color ?? tc("text") }}>{e!.code}</span>
                               ))}
                             </span>
                           ) : null}

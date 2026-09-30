@@ -6,25 +6,25 @@ export function TimeReportConfigEditor({ config, onChange }: WidgetConfigEditorP
     onChange({ ...config, [k]: v });
   }
   return (
-    <div className="p-2 text-xs text-[#D8DCE2] flex flex-col gap-2">
+    <div className="p-2 text-xs text-helios-text flex flex-col gap-2">
       <label className="flex items-center gap-2 text-[11px] cursor-pointer">
         <input type="checkbox" checked={config.hideUntrusted}
                onChange={(e) => set("hideUntrusted", e.target.checked)}
-               className="accent-[#FFC627]" />
+               className="accent-asu-gold" />
         Hide out-laps / in-laps
       </label>
       <label className="flex items-center gap-2 text-[11px] cursor-pointer">
         <input type="checkbox" checked={config.perSession}
                onChange={(e) => set("perSession", e.target.checked)}
-               className="accent-[#FFC627]" />
+               className="accent-asu-gold" />
         Show all visible sessions
       </label>
       <label className="flex items-center gap-2 text-[11px]">
-        <span className="text-[#9097A0] w-24">rolling window</span>
+        <span className="text-helios-dim w-24">rolling window</span>
         <input type="number" min={0} max={20} value={config.rollingWindow}
                onChange={(e) => set("rollingWindow", Math.max(0, Math.min(20, Number(e.target.value))))}
-               className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1 py-0.5" />
-        <span className="text-[10px] text-[#9097A0]">laps (0 = off)</span>
+               className="w-16 bg-helios-base border border-helios-line px-1 py-0.5" />
+        <span className="text-[10px] text-helios-dim">laps (0 = off)</span>
       </label>
     </div>
   );

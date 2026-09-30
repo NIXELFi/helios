@@ -58,7 +58,7 @@ export function ConfirmDialog({
     "px-3 py-1 text-xs rounded-sm border font-semibold cursor-pointer transition-colors " +
     (confirmTone === "danger"
       ? "bg-[#EF5350] text-white border-[#EF5350] hover:bg-[#D32F2F] hover:border-[#D32F2F]"
-      : "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] hover:bg-[#FFB300] hover:border-[#FFB300]");
+      : "bg-asu-gold text-helios-on-gold border-asu-gold hover:bg-[#FFB300] hover:border-[#FFB300]");
 
   return (
     <div
@@ -70,22 +70,22 @@ export function ConfirmDialog({
       aria-labelledby="confirm-title"
     >
       <div
-        className="bg-[#0E0E10] border border-[#2A2C32] rounded-sm helios-elevate helios-modal-in w-[360px] flex flex-col"
+        className="bg-helios-base border border-helios-line rounded-sm helios-elevate helios-modal-in w-[360px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="h-9 flex items-center px-4 border-b border-[#2A2C32]">
-          <span id="confirm-title" className="text-sm text-[#D8DCE2] font-semibold">{title}</span>
+        <div className="h-9 flex items-center px-4 border-b border-helios-line">
+          <span id="confirm-title" className="text-sm text-helios-text font-semibold">{title}</span>
         </div>
         <div className="px-4 py-4">
-          <div className="text-xs text-[#D8DCE2]">{body}</div>
+          <div className="text-xs text-helios-text">{body}</div>
         </div>
-        <div className="px-4 py-3 border-t border-[#2A2C32] flex justify-end gap-2">
+        <div className="px-4 py-3 border-t border-helios-line flex justify-end gap-2">
           {!isAlert && (
             <button
               ref={cancelRef}
               type="button"
               onClick={onClose}
-              className="px-3 py-1 text-xs rounded-sm border cursor-pointer transition-colors bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
+              className="px-3 py-1 text-xs rounded-sm border cursor-pointer transition-colors bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold"
             >
               {cancelLabel}
             </button>

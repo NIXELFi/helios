@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { ModulePicker, type ModuleId } from "./shell/ModulePicker";
-import { VaultModule } from "./modules/vault";
-import { CfdModule } from "./modules/cfd";
-import { PmModule } from "./modules/pm";
-import { GamesModule } from "./modules/games";
-import { AmethystModule } from "./modules/amethyst";
-import { MarketplaceModule } from "./modules/marketplace";
-import { OrgModule } from "./modules/org";
+import { invoke } from "@tauri-apps/api/core";
+import { ModulePicker, MODULE_ICON, type ModuleId } from "./shell/ModulePicker";
+import { ModuleActivityProvider } from "./shell/module-activity";
 import LogsApp from "./App";
 import { TitleBar } from "./shell/TitleBar";
 import { IS_WINDOWS } from "./lib/platform";
@@ -16,6 +11,8 @@ import { UpdateModal } from "./components/UpdateModal";
 import { AuthShell, useHeliosAuth, useConnection, useMyRole, userDisplayName, userSubteam } from "./auth/AuthShell";
 import { useMyDisplayRole } from "./auth/useMyDisplayRole";
 import { useHeliosPresence } from "./shell/useHeliosPresence";
+import { useSimReleaseSignal } from "./modules/sim/lib/useSimReleaseSignal";
+import { useHeliosReleaseSignal } from "./shell/useHeliosReleaseSignal";
 import { AuthModal } from "./auth/AuthModal";
 import { ChangePasswordModal } from "./auth/ChangePasswordModal";
 import { useBridgeSync } from "./modules/vault/data/useBridgeSync";
@@ -23,10 +20,81 @@ import { BridgeOpHandler } from "./modules/vault/BridgeOpHandler";
 import { useOrgAccess } from "./shell/useOrgAccess";
 import { NoAccessScreen } from "./shell/NoAccessScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Splash } from "./components/Splash";
+import { ModuleTransition } from "./components/ModuleTransition";
+import { SettingsDialog, type SettingsTab } from "./components/SettingsDialog";
+import { readPrefs, usePrefs } from "./lib/prefs";
+import { useOpenInLogs } from "./lib/open-in-logs";
+import { OPEN_AUTH_EVENT } from "./lib/open-auth";
+import { applyTheme, useThemeVersion } from "./lib/theme";
+import { osNotify } from "./lib/os-notify";
 import { recordBreadcrumb } from "./lib/breadcrumbs";
 import { ReportModal } from "./shell/report/ReportModal";
 import { ReportsViewer } from "./shell/report/ReportsViewer";
 import type { ReportKind } from "./shell/report/types";
+
+// Every module except Logs is code-split and fetched the first time the user
+// opens it, so launch parses the Logs app instead of one 3.9 MB bundle holding
+// Vault + CFD + PM + Games + Amethyst + Marketplace + Org as well.
+//
+// The CFD specifier is deliberately the same module the marketplace's
+// first-party entry lazy-loads (`modules/marketplace/firstParty.tsx` uses
+// `import("../cfd")`), so both resolve to ONE chunk rather than duplicating it.
+const VaultModule = lazy(() => import("./modules/vault").then((m) => ({ default: m.VaultModule })));
+const CfdModule = lazy(() => import("./modules/cfd").then((m) => ({ default: m.CfdModule })));
+const PmModule = lazy(() => import("./modules/pm").then((m) => ({ default: m.PmModule })));
+const GamesModule = lazy(() => import("./modules/games").then((m) => ({ default: m.GamesModule })));
+const SimModule = lazy(() => import("./modules/sim").then((m) => ({ default: m.SimModule })));
+const AmethystModule = lazy(() =>
+  import("./modules/amethyst").then((m) => ({ default: m.AmethystModule })),
+);
+const MarketplaceModule = lazy(() =>
+  import("./modules/marketplace").then((m) => ({ default: m.MarketplaceModule })),
+);
+const OrgModule = lazy(() => import("./modules/org").then((m) => ({ default: m.OrgModule })));
+
+// Shown while a module's chunk is in flight — normally a few hundred ms on
+// first open, instant afterwards (the chunk is cached).
+function ModuleLoading({ id, label }: { id: ModuleId; label: string }) {
+  return <ModuleTransition label={label} Icon={MODULE_ICON[id]} />;
+}
+
+/**
+ * One module's pane: visibility class, crash boundary, optional Suspense for a
+ * code-split module, and the "am I on screen" context.
+ *
+ * Memoized, and handed a memoized module element as `children`, so a Shell
+ * re-render (the updater countdown, a rail click, a modal opening) leaves every
+ * pane whose own props did not change alone. Without this every visited
+ * module -- all kept mounted -- re-rendered its whole tree on each of those.
+ */
+const ModulePane = memo(function ModulePane({
+  id,
+  label,
+  isActive,
+  lazy: isLazy = true,
+  children,
+}: {
+  id: ModuleId;
+  label: string;
+  isActive: boolean;
+  /** False for Logs, which ships in the main bundle (no Suspense needed). */
+  lazy?: boolean;
+  children: ReactNode;
+}) {
+  const inner = <ModuleActivityProvider active={isActive}>{children}</ModuleActivityProvider>;
+  return (
+    <div className={"helios-pane-in absolute inset-0 " + (isActive ? "" : "hidden")}>
+      <ErrorBoundary label={label} compact>
+        {isLazy ? <Suspense fallback={<ModuleLoading id={id} label={label} />}>{inner}</Suspense> : inner}
+      </ErrorBoundary>
+    </div>
+  );
+});
+
+// Theme before the first React paint (index.html already set the attribute
+// from localStorage; this wires the live listeners for "system").
+applyTheme(readPrefs().theme);
 
 // Top-level component. The AuthShell is hoisted ABOVE the module picker so
 // every module — Logs, Vault, CFD — can read auth state from the same
@@ -49,8 +117,24 @@ export default function ShellRoot() {
 // all live inside the ModulePicker rail; the UpdateModal and AuthModal are
 // mounted at the shell level so they can fire over any module.
 function HeliosShell() {
+  // Landing module. Nothing is mounted until auth resolves (see the landing
+  // effect below): a signed-in member lands on PM, everyone else on Logs.
+  // Mounting Logs eagerly here used to cost every PM-bound launch a full Logs
+  // boot (session reopen, uPlot canvases) behind a pane they never looked at.
   const [active, setActive] = useState<ModuleId>("logs");
-  const [visited, setVisited] = useState<Set<ModuleId>>(() => new Set(["logs"]));
+  const [visited, setVisited] = useState<Set<ModuleId>>(() => new Set());
+  // Flips once we have chosen the landing module (or the user picked one
+  // first). Keeps the landing effect from yanking someone who already clicked.
+  const [landed, setLanded] = useState(false);
+  const prefs = usePrefs((s) => s.prefs);
+  const updatePrefs = usePrefs((s) => s.update);
+  useEffect(() => {
+    applyTheme(prefs.theme);
+  }, [prefs.theme]);
+  // Modules whose charts read colors at draw time remount on a theme change.
+  const themeVersion = useThemeVersion();
+  // App Settings dialog (Ctrl/Cmd+, · user pill · rail gear · Vault settings link).
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const updater = useUpdater();
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("dev");
@@ -132,6 +216,88 @@ function HeliosShell() {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
+  // LANDING: pick the first module once auth has resolved. PM is the team's
+  // home screen (5.7.4) — it needs a signed-in session, so a signed-out launch
+  // (or one where the org gate is still unknown/denied) lands on Logs, which
+  // works offline. Runs exactly once; a rail click before auth resolves wins.
+  useEffect(() => {
+    if (landed || authLoading) return;
+    let home: ModuleId = "logs";
+    if (pmEnabled && !noOrgAccess) {
+      // Settings → General → "Open Helios on". "Last used" falls back to PM
+      // when the remembered module is gated (org-only) or unknown.
+      const wanted = prefs.landing === "last" ? prefs.lastModule : prefs.landing;
+      const openable = new Set<ModuleId>(["pm", "logs", "vault", "cfd", "sim", "games", "amethyst", "marketplace"]);
+      home = wanted && openable.has(wanted as ModuleId) ? (wanted as ModuleId) : "pm";
+    }
+    setLanded(true);
+    setActive(home);
+    setVisited((prev) => (prev.has(home) ? prev : new Set(prev).add(home)));
+  }, [landed, authLoading, pmEnabled, noOrgAccess, prefs.landing, prefs.lastModule]);
+
+  // Another module asked for a data file to be opened in Logs (the Sim
+  // module's "Open in Logs" on a recorded run). Bring Logs to the front; the
+  // Logs app itself is listening for the same event and does the loading.
+  useOpenInLogs(
+    useCallback(() => {
+      setActive("logs");
+      setVisited((prev) => (prev.has("logs") ? prev : new Set(prev).add("logs")));
+    }, []),
+  );
+
+  // Remember where the user is for landing: "last".
+  useEffect(() => {
+    if (!landed) return;
+    if (prefs.lastModule !== active) updatePrefs({ lastModule: active });
+  }, [landed, active, prefs.lastModule, updatePrefs]);
+
+  // Push the stored close-button preference to the Rust side once per boot
+  // (the default there is hide-to-tray, so only a "quit" preference matters).
+  useEffect(() => {
+    if (!prefs.closeToTray) void invoke("set_close_to_tray", { enabled: false }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ctrl/Cmd+, opens Settings from anywhere; Vault's settings screen can also
+  // ask for it via a window event.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "," && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        setSettingsTab((t) => t ?? "general");
+      }
+    }
+    function onOpen(e: Event) {
+      const tab = (e as CustomEvent<SettingsTab | undefined>).detail;
+      setSettingsTab(tab ?? "general");
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("helios:open-settings", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("helios:open-settings", onOpen);
+    };
+  }, []);
+
+  // A module asked for the sign-in dialog (the Sim module's "Sign in" on its
+  // Launch tab and board). Same decoupling as open-in-logs: see open-auth.ts.
+  useEffect(() => {
+    const onOpenAuth = () => setAuthModalOpen(true);
+    window.addEventListener(OPEN_AUTH_EVENT, onOpenAuth);
+    return () => window.removeEventListener(OPEN_AUTH_EVENT, onOpenAuth);
+  }, []);
+
+  // Desktop toast when an update has been found — once per version, gated by
+  // Settings → Notifications → App updates.
+  const notifiedUpdateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (updater.state.kind !== "available") return;
+    const v = updater.state.update.version;
+    if (notifiedUpdateRef.current === v) return;
+    notifiedUpdateRef.current = v;
+    void osNotify("updates", "Helios update ready", `v${v} has been downloaded. Open Helios to install it.`);
+  }, [updater.state]);
+
   // Record module navigation as a breadcrumb so a bug report shows where the
   // user had been just before filing it.
   useEffect(() => {
@@ -149,12 +315,66 @@ function HeliosShell() {
   // Escape (one keypress would close both) and is disorienting. If another
   // modal is open we hold off; the moment it closes (this effect re-runs on the
   // anotherModalOpen dep) the update modal pops.
-  const anotherModalOpen = authModalOpen || changePwOpen;
+  const anotherModalOpen = authModalOpen || changePwOpen || settingsTab !== null;
   useEffect(() => {
     if (updater.state.kind !== "available") return;
     if (anotherModalOpen) return;
     setUpdateModalOpen(true);
   }, [updater.state.kind, anotherModalOpen]);
+
+  // AUTO-UPDATE (Settings → General, default on): once an update is found,
+  // count down 20 s in the UpdateModal, then download + install + restart
+  // without a click. Waits while Logs playback is running (a restart would
+  // drop the scrub position). One "Postpone 30 min" per update; after that
+  // the countdown returns and cannot be postponed again — the point is that
+  // the team stays current instead of dismissing the prompt forever.
+  const AUTO_UPDATE_COUNTDOWN_S = 20;
+  const AUTO_UPDATE_DEFER_MS = 30 * 60 * 1000;
+  const [autoInstallIn, setAutoInstallIn] = useState<number | null>(null);
+  const [deferredUntil, setDeferredUntil] = useState<number | null>(null);
+  const [deferUsedFor, setDeferUsedFor] = useState<string | null>(null);
+  const autoArmedForRef = useRef<string | null>(null);
+  const availableVersion = updater.state.kind === "available" ? updater.state.update.version : null;
+  const autoUpdateActive = prefs.autoUpdate && availableVersion !== null;
+  useEffect(() => {
+    if (!autoUpdateActive || availableVersion === null) {
+      setAutoInstallIn(null);
+      return;
+    }
+    // Postponed: re-arm when the deferral lapses.
+    if (deferredUntil !== null && Date.now() < deferredUntil) {
+      setAutoInstallIn(null);
+      const t = setTimeout(() => setDeferredUntil(null), deferredUntil - Date.now());
+      return () => clearTimeout(t);
+    }
+    // Hold while playback runs (the modal explains why) or while another
+    // modal has the screen — same stacking rule as the auto-open above.
+    if (logsPlaying || anotherModalOpen) {
+      setAutoInstallIn(null);
+      return;
+    }
+    autoArmedForRef.current = availableVersion;
+    setAutoInstallIn(AUTO_UPDATE_COUNTDOWN_S);
+    setUpdateModalOpen(true);
+    const tick = setInterval(() => {
+      setAutoInstallIn((n) => (n === null ? null : Math.max(0, n - 1)));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [autoUpdateActive, availableVersion, deferredUntil, logsPlaying, anotherModalOpen]);
+  useEffect(() => {
+    if (autoInstallIn !== 0) return;
+    setAutoInstallIn(null);
+    setInstallAttempted(true);
+    void updater.installAndRelaunch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoInstallIn]);
+  function deferAutoUpdate() {
+    if (availableVersion === null) return;
+    setDeferUsedFor(availableVersion);
+    setDeferredUntil(Date.now() + AUTO_UPDATE_DEFER_MS);
+    setUpdateModalOpen(false);
+  }
+
 
   // If the user navigates away from Vault (or signs out while on Vault),
   // bounce them to Logs so they don't sit on a forbidden module. Otherwise
@@ -171,13 +391,15 @@ function HeliosShell() {
     // Vault here would flash the forbidden state before their session lands.
     if (authLoading) return;
     if (vaultEnabled && pmEnabled && gamesEnabled) return;
-    if (active === "vault" || active === "pm" || active === "games") setActive("logs");
+    const bounced = active === "vault" || active === "pm" || active === "games";
+    if (bounced) setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("vault") && !prev.has("pm") && !prev.has("games")) return prev;
+      if (!prev.has("vault") && !prev.has("pm") && !prev.has("games") && (!bounced || prev.has("logs"))) return prev;
       const next = new Set(prev);
       next.delete("vault");
       next.delete("pm");
       next.delete("games");
+      if (bounced) next.add("logs");
       return next;
     });
   }, [active, vaultEnabled, pmEnabled, gamesEnabled, authLoading]);
@@ -187,11 +409,13 @@ function HeliosShell() {
   useEffect(() => {
     if (authLoading) return;
     if (orgEnabled) return;
-    if (active === "org") setActive("logs");
+    const bounced = active === "org";
+    if (bounced) setActive("logs");
     setVisited((prev) => {
-      if (!prev.has("org")) return prev;
+      if (!prev.has("org") && (!bounced || prev.has("logs"))) return prev;
       const next = new Set(prev);
       next.delete("org");
+      if (bounced) next.add("logs");
       return next;
     });
   }, [active, orgEnabled, authLoading]);
@@ -214,6 +438,7 @@ function HeliosShell() {
       setAuthModalOpen(true);
       return;
     }
+    setLanded(true);
     setActive(id);
     setVisited((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   }
@@ -248,7 +473,14 @@ function HeliosShell() {
   // just PM/Vault) via one shared realtime channel. The roster is only
   // surfaced to admins/owners — but we always TRACK (so an admin sees everyone,
   // including non-admins) and only gate the VIEW.
-  const presenceRoster = useHeliosPresence({
+  // The simulator keeps itself current from here, in every module: a check at
+  // startup, and another the moment a release is broadcast. See simUpdater.ts.
+  useSimReleaseSignal(client);
+  // Helios itself: checks every five minutes on its own (use-updater.ts), and
+  // straight away when a release is announced.
+  useHeliosReleaseSignal(client, updater.backgroundCheck);
+
+  const presenceStore = useHeliosPresence({
     client,
     userId: user?.id ?? null,
     name: userLabel ?? "Unknown",
@@ -260,12 +492,39 @@ function HeliosShell() {
   // support.reports policies accept pm.can_triage_reports() (20260714040000).
   const canSeePresence = myRole === "owner" || myRole === "admin" || canManageOrg;
 
+  // Module elements, memoized on exactly the props each one takes, so the
+  // memoized ModulePane below sees the same `children` across unrelated Shell
+  // renders. Every prop here must be stable (setLogsPlaying is a state setter).
+  const logsActive = active === "logs";
+  const simActive = active === "sim";
+  const gamesActive = active === "games";
+  const logsEl = useMemo(
+    () => (
+      <LogsApp
+        appVersion={appVersion}
+        playing={logsPlaying}
+        onPlayingChange={setLogsPlaying}
+        keyboardShortcutsEnabled={logsActive}
+      />
+    ),
+    [appVersion, logsPlaying, logsActive],
+  );
+  const vaultEl = useMemo(() => <VaultModule />, []);
+  const cfdEl = useMemo(() => <CfdModule key={themeVersion} />, [themeVersion]);
+  const pmEl = useMemo(() => <PmModule />, []);
+  const simEl = useMemo(() => <SimModule active={simActive} />, [simActive]);
+  const gamesEl = useMemo(() => <GamesModule paused={!gamesActive} />, [gamesActive]);
+  const amethystEl = useMemo(() => <AmethystModule />, []);
+  const marketplaceEl = useMemo(() => <MarketplaceModule />, []);
+  const orgEl = useMemo(() => <OrgModule key={themeVersion} />, [themeVersion]);
+
   // Shown in the Windows title bar crumb — mirrors the rail's nav labels.
   const MODULE_LABEL: Record<ModuleId, string> = {
     logs: "Logs",
     vault: "Vault",
     cfd: "CFD",
     pm: "PM",
+    sim: "Sim",
     games: "Games",
     amethyst: "Amethyst",
     marketplace: "Market",
@@ -273,14 +532,19 @@ function HeliosShell() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col">
+    // `overflow-hidden` is not decoration. The app is exactly one screen tall
+    // and every scrollable region inside it is supposed to be its own; without
+    // this, anything that outgrows the viewport scrolls the DOCUMENT instead,
+    // which slides the title bar off the top of a window that has no other way
+    // to get it back.
+    <div className="flex h-screen w-screen flex-col overflow-hidden">
       {/* Windows runs frameless (decorations:false in tauri.windows.conf.json)
           and gets the custom in-app title bar; macOS keeps its native overlay
           traffic lights and skips it. */}
-      {IS_WINDOWS && <TitleBar context={MODULE_LABEL[active]} />}
+      {IS_WINDOWS && <TitleBar context={landed ? MODULE_LABEL[active] : null} />}
       <div className="flex min-h-0 w-full flex-1">
       <ModulePicker
-        active={active}
+        active={landed ? active : null}
         onSelect={activate}
         appVersion={appVersion}
         updaterState={updater.state}
@@ -292,33 +556,36 @@ function HeliosShell() {
         onSignOut={() => void handleSignOut()}
         onDisconnect={() => void handleDisconnect()}
         onChangePassword={() => setChangePwOpen(true)}
+        onOpenSettings={() => setSettingsTab("general")}
         vaultEnabled={vaultEnabled}
         pmEnabled={pmEnabled}
         gamesEnabled={gamesEnabled}
         orgEnabled={orgEnabled}
         authLoading={authLoading}
         presence={
-          canSeePresence ? { users: presenceRoster, currentUserId: user?.id ?? null } : null
+          canSeePresence ? { store: presenceStore, currentUserId: user?.id ?? null } : null
         }
         onOpenReport={setReportKind}
         canViewReports={canSeePresence}
         onOpenReports={() => setReportsOpen(true)}
       />
       <main className="relative min-w-0 flex-1">
+        {/* Boot: auth is still resolving, so the landing module is unknown.
+            One branded splash here hands off to the module's own loader with
+            the wordmark in the same place, so boot reads as one screen. */}
+        {!landed && <Splash stage="Signing in…" version={appVersion} />}
         {/* Each module gets its own boundary so a crash in one (an unexpected
             data shape, a render bug) shows a contained error in that pane while
-            the rail + sibling modules stay usable. */}
+            the rail + sibling modules stay usable. Each also gets its OWN
+            Suspense boundary: one shared boundary around <main> would unmount
+            the already-mounted Logs tree (and its uPlot canvases) behind the
+            fallback the first time any other module's chunk loads.
+            ModuleActivityProvider tells each module whether it is the one on
+            screen so hidden modules can stand their polling down. */}
         {visited.has("logs") && (
-          <div className={"absolute inset-0 " + (active === "logs" ? "" : "hidden")}>
-            <ErrorBoundary label="Logs" compact>
-              <LogsApp
-                appVersion={appVersion}
-                playing={logsPlaying}
-                onPlayingChange={setLogsPlaying}
-                keyboardShortcutsEnabled={active === "logs"}
-              />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="logs" label="Logs" isActive={active === "logs"} lazy={false}>
+            {logsEl}
+          </ModulePane>
         )}
         {/* No-role accounts: the data-backed modules would only render RLS
             walls, so show the waiting-room screen for whichever of them is
@@ -335,53 +602,47 @@ function HeliosShell() {
           </div>
         )}
         {visited.has("vault") && vaultEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "vault" ? "" : "hidden")}>
-            <ErrorBoundary label="Vault" compact>
-              <VaultModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="vault" label="Vault" isActive={active === "vault"}>
+            {vaultEl}
+          </ModulePane>
         )}
         {visited.has("cfd") && (
-          <div className={"absolute inset-0 " + (active === "cfd" ? "" : "hidden")}>
-            <ErrorBoundary label="CFD" compact>
-              <CfdModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="cfd" label="CFD" isActive={active === "cfd"}>
+            {cfdEl}
+          </ModulePane>
         )}
         {visited.has("pm") && pmEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "pm" ? "" : "hidden")}>
-            <ErrorBoundary label="PM" compact>
-              <PmModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="pm" label="PM" isActive={active === "pm"}>
+            {pmEl}
+          </ModulePane>
+        )}
+        {/* Sim: the driver-in-loop simulator's launcher and run archive.
+            Ungated like Amethyst -- it reads run files this machine already
+            has, and a rig at a test day may have no network at all. */}
+        {visited.has("sim") && (
+          <ModulePane id="sim" label="Sim" isActive={active === "sim"}>
+            {simEl}
+          </ModulePane>
         )}
         {visited.has("games") && gamesEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "games" ? "" : "hidden")}>
-            <ErrorBoundary label="Games" compact>
-              <GamesModule paused={active !== "games"} />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="games" label="Games" isActive={active === "games"}>
+            {gamesEl}
+          </ModulePane>
         )}
         {visited.has("amethyst") && (
-          <div className={"absolute inset-0 " + (active === "amethyst" ? "" : "hidden")}>
-            <ErrorBoundary label="Amethyst" compact>
-              <AmethystModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="amethyst" label="Amethyst" isActive={active === "amethyst"}>
+            {amethystEl}
+          </ModulePane>
         )}
         {visited.has("marketplace") && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "marketplace" ? "" : "hidden")}>
-            <ErrorBoundary label="Marketplace" compact>
-              <MarketplaceModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="marketplace" label="Marketplace" isActive={active === "marketplace"}>
+            {marketplaceEl}
+          </ModulePane>
         )}
         {visited.has("org") && orgEnabled && !noOrgAccess && (
-          <div className={"absolute inset-0 " + (active === "org" ? "" : "hidden")}>
-            <ErrorBoundary label="Org & Access" compact>
-              <OrgModule />
-            </ErrorBoundary>
-          </div>
+          <ModulePane id="org" label="Org & Access" isActive={active === "org"}>
+            {orgEl}
+          </ModulePane>
         )}
       </main>
       </div>
@@ -409,6 +670,9 @@ function HeliosShell() {
             setUpdateModalOpen(false);
             setInstallAttempted(false);
           }}
+          autoInstallIn={autoInstallIn}
+          onDefer={deferAutoUpdate}
+          canDefer={deferUsedFor !== availableVersion}
         />
       )}
       {/* Runs the add-in bridge's blob ops (check-in / get-latest) using the
@@ -419,6 +683,22 @@ function HeliosShell() {
         open={changePwOpen}
         client={client}
         onClose={() => setChangePwOpen(false)}
+      />
+      <SettingsDialog
+        open={settingsTab !== null}
+        initialTab={settingsTab ?? undefined}
+        onClose={() => setSettingsTab(null)}
+        appVersion={appVersion}
+        updater={updater}
+        onOpenUpdate={() => setUpdateModalOpen(true)}
+        onOpenReport={setReportKind}
+        onGoToVaultSettings={() => {
+          activate("vault");
+          // VaultHome listens for this once mounted; a tick lets a first
+          // mount happen before the event fires.
+          setTimeout(() => window.dispatchEvent(new CustomEvent("helios:vault:screen", { detail: "settings" })), 50);
+        }}
+        account={user ? { email: user.email ?? null, id: user.id, role: myDisplayRole } : null}
       />
       {reportKind && (
         <ReportModal

@@ -37,45 +37,45 @@ function pillFor(state: UpdaterState): { label: string; title: string; className
       return {
         label: "checking…",
         title: "Checking for updates",
-        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32]",
+        className: "bg-helios-panel text-helios-dim border-helios-line",
       };
     case "up_to_date":
       return {
         label: `✓ v${state.current || "—"}`,
         title: "You're on the latest version. Click to recheck.",
-        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32] hover:border-[#FFC627]",
+        className: "bg-helios-panel text-helios-dim border-helios-line hover:border-asu-gold",
       };
     case "available":
       return {
         label: `↑ v${state.update.version} ready`,
         title: `Update available (you're on v${state.update.currentVersion})`,
-        className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold animate-pulse",
+        className: "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold animate-pulse",
       };
     case "downloading": {
       const pct = state.total ? Math.min(100, Math.round((state.downloaded / state.total) * 100)) : null;
       return {
         label: pct === null ? "downloading…" : `downloading ${pct}%`,
         title: "Downloading update",
-        className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]",
+        className: "bg-asu-gold text-helios-on-gold border-asu-gold",
       };
     }
     case "installing":
       return {
         label: "installing…",
         title: "Installing update; the app will relaunch",
-        className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627]",
+        className: "bg-asu-gold text-helios-on-gold border-asu-gold",
       };
     case "installed":
       return {
         label: `↻ restart for v${state.version}`,
         title: `Helios v${state.version} is installed — quit and reopen Helios to finish updating.`,
-        className: "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold",
+        className: "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold",
       };
     case "offline":
       return {
         label: "– offline",
         title: `Update check failed: ${state.error}. Click to retry.`,
-        className: "bg-[#16171B] text-[#9097A0] border-[#2A2C32] hover:border-[#FFC627]",
+        className: "bg-helios-panel text-helios-dim border-helios-line hover:border-asu-gold",
       };
   }
 }

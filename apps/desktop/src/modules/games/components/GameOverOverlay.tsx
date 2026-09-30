@@ -111,7 +111,7 @@ export function GameOverOverlay({
             <button
               type="button"
               onClick={onRestart}
-              className="games-display rounded-sm border border-asu-gold bg-asu-gold px-3 py-1.5 text-[10px] tracking-wider text-helios-base transition-opacity hover:opacity-90"
+              className="games-display rounded-sm border border-asu-gold bg-asu-gold px-3 py-1.5 text-[10px] tracking-wider text-helios-on-gold transition-opacity hover:opacity-90"
             >
               PLAY AGAIN
             </button>

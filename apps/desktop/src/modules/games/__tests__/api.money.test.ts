@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@helios/auth";
 import {
-  dropBall, fetchAllTime, fetchBudget, fetchBudgetStandings, fetchBudgets, fetchLedger,
-  forfeitOpenBet, isMoney, isRated, placeBet, settleBet,
+  bjDeal, bjDouble, bjHit, bjStand, dropBall, fetchAllTime, fetchBudget,
+  fetchBudgetStandings, fetchBudgets, fetchLedger, forfeitOpenBet, isMoney, isRated,
 } from "../api";
 
 // Stub shaped like the games data layer: client.schema("games").from(...) for
@@ -223,46 +223,95 @@ describe("blackjack is a money game and nothing else", () => {
   });
 });
 
-describe("two-phase bets", () => {
-  it("places a bet for the hand about to be dealt", async () => {
-    const { client, rpc } = stubClient({
-      data: [{ bet_id: "b1", new_balance: 9900, new_max_bet: 495, was_replay: false }],
+describe("server-dealt blackjack", () => {
+  const OPEN_ROW = {
+    bj_bet_id: "b1", bj_state: "player",
+    bj_player: [{ rank: "9", suit: "S" }, { rank: "5", suit: "H" }],
+    bj_dealer: [{ rank: "K", suit: "D" }],
+    bj_stake: 100, bj_outcome: null, bj_payout: null,
+    new_balance: 9900, new_max_bet: 495,
+    bj_cards_left: 178, bj_reshuffled: false, was_replay: false,
+  };
+
+  it("deals through games.bj_deal and returns the server's table", async () => {
+    const { client, rpc } = stubClient({ data: [OPEN_ROW], error: null });
+    const table = await bjDeal(client, 100, "n1");
+    expect(rpc).toHaveBeenCalledWith("bj_deal", { p_stake: 100, p_nonce: "n1" });
+    expect(table).toMatchObject({
+      betId: "b1", state: "player", stake: 100, outcome: null, payout: null,
+      balance: 9900, maxBet: 495, cardsLeft: 178, reshuffled: false, replay: false,
+    });
+    expect(table.player).toHaveLength(2);
+    // While the hand is live the dealer array holds ONLY the up card — the
+    // hole card must not exist client-side at all.
+    expect(table.dealer).toHaveLength(1);
+  });
+
+  it("hands back a hand the server already settled (a natural)", async () => {
+    const { client } = stubClient({
+      data: [{
+        ...OPEN_ROW, bj_state: "settled",
+        bj_player: [{ rank: "A", suit: "S" }, { rank: "K", suit: "H" }],
+        bj_dealer: [{ rank: "9", suit: "D" }, { rank: "7", suit: "C" }],
+        bj_outcome: "blackjack", bj_payout: 250, new_balance: 10150,
+      }],
       error: null,
     });
-    const placed = await placeBet(client, "blackjack", 100, "n1");
-    expect(rpc).toHaveBeenCalledWith("place_bet", {
-      p_game_id: "blackjack", p_stake: 100, p_nonce: "n1",
+    const table = await bjDeal(client, 100, "n1");
+    expect(table.state).toBe("settled");
+    expect(table.outcome).toBe("blackjack");
+    expect(table.payout).toBe(250);
+    expect(table.dealer).toHaveLength(2);
+  });
+
+  it("rejects a stake that isn't whole chips before hitting the network", async () => {
+    const { client, rpc } = stubClient({ data: [OPEN_ROW], error: null });
+    await expect(bjDeal(client, 2.5, "n")).rejects.toThrow(/whole/i);
+    await expect(bjDeal(client, 0, "n")).rejects.toThrow(/whole/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("requires a nonce, so a retry can never deal a second hand", async () => {
+    const { client, rpc } = stubClient({ data: [OPEN_ROW], error: null });
+    await expect(bjDeal(client, 100, "")).rejects.toThrow(/nonce/i);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("hits and stands through their RPCs with the bet id", async () => {
+    const { client, rpc } = stubClient({ data: [OPEN_ROW], error: null });
+    await bjHit(client, "b1", "n2");
+    expect(rpc).toHaveBeenCalledWith("bj_hit", { p_bet_id: "b1", p_nonce: "n2" });
+    await bjStand(client, "b1", "n3");
+    expect(rpc).toHaveBeenCalledWith("bj_stand", { p_bet_id: "b1", p_nonce: "n3" });
+  });
+
+  it("doubles through games.bj_double and returns the settled, doubled table", async () => {
+    const { client, rpc } = stubClient({
+      data: [{
+        ...OPEN_ROW, bj_state: "settled", bj_stake: 200,
+        bj_player: [
+          { rank: "9", suit: "S" }, { rank: "2", suit: "H" }, { rank: "K", suit: "C" },
+        ],
+        bj_dealer: [{ rank: "K", suit: "D" }, { rank: "9", suit: "S" }],
+        bj_outcome: "win", bj_payout: 400, new_balance: 10100,
+      }],
+      error: null,
     });
-    expect(placed).toEqual({ betId: "b1", balance: 9900, maxBet: 495, replay: false });
+    const table = await bjDouble(client, "b1", "n4");
+    expect(rpc).toHaveBeenCalledWith("bj_double", { p_bet_id: "b1", p_nonce: "n4" });
+    // The doubled stake and the server-computed payout come back together —
+    // there is nothing for the client to report.
+    expect(table.state).toBe("settled");
+    expect(table.stake).toBe(200);
+    expect(table.payout).toBe(400);
+    expect(table.player).toHaveLength(3);
   });
 
   it("surfaces the server's refusal when a hand is already open", async () => {
     const { client } = stubClient({
       data: null, error: { message: "a hand is already open (b1)" },
     });
-    await expect(placeBet(client, "blackjack", 100, "n")).rejects.toThrow(/already open/);
-  });
-
-  it("settles a finished hand with its payout", async () => {
-    const { client, rpc } = stubClient({
-      data: [{
-        settled_payout: 250, settled_net: 150, new_balance: 10150,
-        new_max_bet: 507, was_replay: false,
-      }],
-      error: null,
-    });
-    const done = await settleBet(client, "b1", 250, "blackjack", "n2");
-    expect(rpc).toHaveBeenCalledWith("settle_bet", {
-      p_bet_id: "b1", p_payout: 250, p_outcome: "blackjack", p_nonce: "n2",
-    });
-    expect(done.payout).toBe(250);
-    expect(done.net).toBe(150);
-  });
-
-  it("refuses to send a payout that isn't whole chips", async () => {
-    const { client, rpc } = stubClient({ data: [], error: null });
-    await expect(settleBet(client, "b1", 12.5, "win", "n")).rejects.toThrow(/whole/i);
-    expect(rpc).not.toHaveBeenCalled();
+    await expect(bjDeal(client, 100, "n")).rejects.toThrow(/already open/);
   });
 
   it("reports nothing when there was no hand left open to forfeit", async () => {

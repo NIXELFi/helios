@@ -1,4 +1,5 @@
 import type { Task, TaskPriority } from "./types";
+import { tca } from "@helios/ui";
 
 export type TaskOutlineState =
   | "past_due"
@@ -95,7 +96,7 @@ export interface PriorityTone {
 export const PRIORITY_TONE: Record<TaskPriority, PriorityTone> = {
   low:      { background: "transparent",          textClassName: "text-helios-text", accent: "#5A5F66" },
   medium:   { background: "rgba(96,165,250,0.06)", textClassName: "text-helios-text", accent: "#60A5FA" },
-  high:     { background: "rgba(255,198,39,0.10)", textClassName: "text-helios-text", accent: "#FFC627" },
+  high:     { background: tca("gold", 0.10), textClassName: "text-helios-text", accent: "#FFC627" },
   critical: { background: "rgba(248,113,113,0.14)", textClassName: "text-helios-text", accent: "#F87171" },
 };
 

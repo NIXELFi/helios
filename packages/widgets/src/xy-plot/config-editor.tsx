@@ -40,17 +40,17 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
   };
 
   return (
-    <div className="flex flex-col gap-2 p-2 text-xs text-[#D8DCE2]">
+    <div className="flex flex-col gap-2 p-2 text-xs text-helios-text">
       {/* Mode toggle */}
-      <div className="flex items-center gap-2 border-b border-[#2A2C32] pb-2">
+      <div className="flex items-center gap-2 border-b border-helios-line pb-2">
         {(["simple", "advanced"] as const).map((m) => (
           <button key={m} type="button"
             onClick={() => set("mode", m)}
             className={
               "px-2 py-0.5 text-[11px] border rounded-sm cursor-pointer " +
               (config.mode === m
-                ? "bg-[#FFC627] text-[#0E0E10] border-[#FFC627] font-semibold"
-                : "bg-[#16171B] text-[#D8DCE2] border-[#2A2C32] hover:border-[#FFC627]")
+                ? "bg-asu-gold text-helios-on-gold border-asu-gold font-semibold"
+                : "bg-helios-panel text-helios-text border-helios-line hover:border-asu-gold")
             }>{m}</button>
         ))}
       </div>
@@ -65,7 +65,7 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
         </label>
         {(["xMin", "xMax", "yMin", "yMax"] as const).map((k) => (
           <label key={k} className="flex justify-between"><span>{k}</span>
-            <input type="number" className="bg-[#0E0E10] border border-[#2A2C32] px-1 w-32"
+            <input type="number" className="bg-helios-base border border-helios-line px-1 w-32"
               value={config[k] === undefined ? "" : config[k]}
               onChange={(e) => set(k, e.target.value === "" ? undefined : Number(e.target.value))} />
           </label>
@@ -75,7 +75,7 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
       {/* Advanced-only sections */}
       {config.mode === "advanced" && (
         <>
-          <div className="flex flex-col gap-1 border-t border-[#2A2C32] pt-2">
+          <div className="flex flex-col gap-1 border-t border-helios-line pt-2">
             <FilterInput value={config.filter ?? ""} onChange={(v) => set("filter", v || undefined)} />
             <label className="flex justify-between items-center"><span>group by channel</span>
               <ChannelPicker className="w-40" value={config.groupByChannelId ?? ""}
@@ -84,8 +84,8 @@ export function XyPlotConfigEditor({ config, onChange, availableChannels }: Widg
             </label>
           </div>
 
-          <div className="flex flex-col gap-1 border-t border-[#2A2C32] pt-2">
-            <div className="text-[10px] text-[#9097A0] uppercase tracking-wider">overlays</div>
+          <div className="flex flex-col gap-1 border-t border-helios-line pt-2">
+            <div className="text-[10px] text-helios-dim uppercase tracking-wider">overlays</div>
             {config.overlays.map((o, idx) => (
               <OverlayRow key={o.id} overlay={o} index={idx} total={config.overlays.length}
                 availableChannels={availableChannels}
@@ -128,11 +128,11 @@ function OverlayRow({ overlay, index, total, availableChannels, siblings, onConf
     siblings: Array<{ id: string; kind: string }>;
   }>;
   return (
-    <div className="border border-[#2A2C32] rounded-sm">
-      <div className="flex items-center justify-between px-1 py-0.5 bg-[#0E0E10] text-[11px]">
+    <div className="border border-helios-line rounded-sm">
+      <div className="flex items-center justify-between px-1 py-0.5 bg-helios-base text-[11px]">
         <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-left flex-1">
           <span>{open ? "▾" : "▸"}</span>
-          <span className="font-semibold text-[#FFC627]">{overlay.kind}</span>
+          <span className="font-semibold text-asu-gold">{overlay.kind}</span>
         </button>
         <div className="flex items-center gap-1">
           <button onClick={() => onMove(-1)} disabled={index === 0} className="px-1 disabled:opacity-30">↑</button>
@@ -163,8 +163,8 @@ function FilterInput({ value, onChange }: { value: string; onChange: (v: string)
           onChange={(e) => onChange(e.target.value)}
           placeholder="(none — e.g. throttle > 50)"
           className={
-            "w-44 bg-[#0E0E10] border px-1 font-mono text-[11px] " +
-            (error ? "border-[#EF5350]" : "border-[#2A2C32]")
+            "w-44 bg-helios-base border px-1 font-mono text-[11px] " +
+            (error ? "border-[#EF5350]" : "border-helios-line")
           } />
       </label>
       {error && <div className="text-[10px] text-[#EF5350] text-right">{error}</div>}
@@ -178,14 +178,14 @@ function AddOverlayPicker({ mode, onAdd }: { mode: "simple" | "advanced"; onAdd:
   return (
     <div className="relative">
       <button onClick={() => setOpen((s) => !s)}
-        className="px-2 py-0.5 text-[11px] border border-[#2A2C32] bg-[#16171B] text-[#FFC627] hover:border-[#FFC627] rounded-sm cursor-pointer">
+        className="px-2 py-0.5 text-[11px] border border-helios-line bg-helios-panel text-asu-gold hover:border-asu-gold rounded-sm cursor-pointer">
         + Add overlay
       </button>
       {open && (
-        <div className="absolute z-10 mt-1 bg-[#0E0E10] border border-[#2A2C32] rounded-sm flex flex-col">
+        <div className="absolute z-10 mt-1 bg-helios-base border border-helios-line rounded-sm flex flex-col">
           {available.map((mod) => (
             <button key={mod.kind} onClick={() => { onAdd(mod.kind); setOpen(false); }}
-              className="px-2 py-1 text-left text-[11px] hover:bg-[#16171B]">{mod.kind}</button>
+              className="px-2 py-1 text-left text-[11px] hover:bg-helios-panel">{mod.kind}</button>
           ))}
         </div>
       )}

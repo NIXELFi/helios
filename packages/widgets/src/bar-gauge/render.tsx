@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { WidgetRenderProps } from "../types";
 import { sampleAt } from "../lib/sample-at";
+import { safeDecimals } from "../lib/config-clamp";
 import { setupCanvas, canvasLogicalSize, thresholdColor } from "../lib/canvas-helpers";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
+import { tc } from "@helios/ui";
 export interface BarGaugeConfig {
   channelId: string;
   units: string;
@@ -91,9 +93,9 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     const t = v === null ? 0 : Math.max(0, Math.min(1, (v - config.min) / span));
     const color = thresholdColor(v, config.warn, config.alarm, config.warnLow, config.alarmLow);
 
-    ctx.fillStyle = "#0E0E10";
+    ctx.fillStyle = tc("base");
     ctx.fillRect(trackX, trackY, trackW, trackH);
-    ctx.strokeStyle = "#2A2C32";
+    ctx.strokeStyle = tc("line");
     ctx.strokeRect(trackX, trackY, trackW, trackH);
 
     ctx.fillStyle = color;
@@ -117,11 +119,11 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
 
     if (peakRef.current !== null) {
       const pt = Math.max(0, Math.min(1, (peakRef.current - config.min) / span));
-      ctx.strokeStyle = "#D8DCE2";
+      ctx.strokeStyle = tc("text");
       drawTick(ctx, horiz, trackX, trackY, trackW, trackH, pt);
     }
 
-    ctx.fillStyle = "#7B8088";
+    ctx.fillStyle = tc("dim");
     ctx.font = '10px Inter, system-ui, sans-serif';
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -133,7 +135,7 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     ctx.font = '14px "JetBrains Mono", ui-monospace, monospace';
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText(v === null ? "—" : v.toFixed(config.decimals), w / 2, h - 4);
+    ctx.fillText(v === null ? "—" : v.toFixed(safeDecimals(config.decimals)), w / 2, h - 4);
   }
 
   function drawTick(ctx: CanvasRenderingContext2D, horiz: boolean, x: number, y: number, w: number, h: number, t: number) {
@@ -149,5 +151,5 @@ export function BarGaugeRender(props: WidgetRenderProps<BarGaugeConfig>) {
     ctx.stroke();
   }
 
-  return <canvas ref={canvasRef} className="w-full h-full bg-[#16171B]" />;
+  return <canvas ref={canvasRef} className="w-full h-full bg-helios-panel" />;
 }

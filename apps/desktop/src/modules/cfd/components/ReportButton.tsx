@@ -22,7 +22,7 @@ export function ReportButton({ defaultOnly, label = "Report (PDF)", title }: Pro
         type="button"
         onClick={() => setOpen(true)}
         title="Compose a numbered engineering report (pick studies, then print to PDF)"
-        className="rounded-sm border border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0] hover:border-[#FFC627] hover:text-[#FFC627]"
+        className="rounded-sm border border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim hover:border-asu-gold hover:text-asu-gold"
       >
         {label}
       </button>

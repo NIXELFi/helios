@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   pmCursorKey,
   pmCursorChanged,
   fetchPmCursor,
+  fetchPmCursorLegacy,
   type PmCursor,
 } from "../workspace-cursor";
 
@@ -112,7 +113,7 @@ function makePmClient(opts: {
   return { client, states, schemaUsed: () => schemaUsed };
 }
 
-describe("fetchPmCursor", () => {
+describe("fetchPmCursorLegacy", () => {
   it("reads the pm schema and returns the task/activity/owner/link signature", async () => {
     const h = makePmClient({
       tasksCount: 42,
@@ -121,7 +122,7 @@ describe("fetchPmCursor", () => {
       ownersCount: 7,
       linksCount: 3,
     });
-    const c = await fetchPmCursor(h.client);
+    const c = await fetchPmCursorLegacy(h.client);
     expect(c).toEqual({
       tasks: 42,
       tasksUpdatedAt: "2026-06-06T01:00:00Z",
@@ -141,12 +142,127 @@ describe("fetchPmCursor", () => {
 
   it("treats an empty tasks table as an empty updated_at marker", async () => {
     const h = makePmClient({ tasksCount: 0, activityCount: 0, tasksUpdatedAt: null });
-    const c = await fetchPmCursor(h.client);
+    const c = await fetchPmCursorLegacy(h.client);
     expect(c).toEqual({ tasks: 0, tasksUpdatedAt: "", activity: 0, taskOwners: 0, taskLinks: 0 });
   });
 
   it("throws if a sub-query errors so the caller falls back to a full refresh", async () => {
     const h = makePmClient({ tasksCount: 1, activityCount: 1, tasksUpdatedAt: "t", errorTableHead: "activity" });
-    await expect(fetchPmCursor(h.client)).rejects.toThrow();
+    await expect(fetchPmCursorLegacy(h.client)).rejects.toThrow();
+  });
+});
+
+// ── the pm.workspace_cursor RPC path ─────────────────────────────────────────
+// One request instead of five, with pm.can_read_pm evaluated once instead of
+// once per row (prod: 13.3% of all database time went on these five probes).
+type RpcResult = { data: unknown; error: { code?: string; message?: string } | null };
+
+function makeRpcPmClient(rpcResults: RpcResult[], counts?: Parameters<typeof makePmClient>[0]) {
+  const rpcCalls: string[] = [];
+  const legacy = counts ? makePmClient(counts) : null;
+  const client = {
+    schema(s: string) {
+      const base: Record<string, unknown> = {
+        rpc(fn: string) {
+          rpcCalls.push(`${s}.${fn}`);
+          const r = rpcResults.shift() ?? { data: [], error: null };
+          return { then: (resolve: (v: RpcResult) => void) => resolve(r) };
+        },
+        from(table: string) {
+          if (!legacy) throw new Error("unexpected legacy request");
+          return (legacy.client as any).schema("pm").from(table);
+        },
+      };
+      return base;
+    },
+  } as never;
+  return { client, rpcCalls, legacyStates: () => legacy?.states ?? [] };
+}
+
+async function freshPmModule() {
+  vi.resetModules();
+  return await import("../workspace-cursor");
+}
+
+describe("fetchPmCursor (RPC)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("calls pm.workspace_cursor once and maps its row", async () => {
+    const m = await freshPmModule();
+    const h = makeRpcPmClient([
+      {
+        data: [
+          {
+            tasks: 420,
+            tasks_updated_at: "2026-09-09T12:00:00+00:00",
+            activity: 797,
+            task_owners: 327,
+            task_links: 12,
+          },
+        ],
+        error: null,
+      },
+    ]);
+    expect(await m.fetchPmCursor(h.client)).toEqual({
+      tasks: 420,
+      tasksUpdatedAt: "2026-09-09T12:00:00+00:00",
+      activity: 797,
+      taskOwners: 327,
+      taskLinks: 12,
+    });
+    expect(h.rpcCalls).toEqual(["pm.workspace_cursor"]);
+  });
+
+  it("treats a null max(updated_at) as the empty marker", async () => {
+    const m = await freshPmModule();
+    const h = makeRpcPmClient([
+      { data: [{ tasks: 0, tasks_updated_at: null, activity: 0, task_owners: 0, task_links: 0 }], error: null },
+    ]);
+    expect((await m.fetchPmCursor(h.client)).tasksUpdatedAt).toBe("");
+  });
+
+  it("reads zero rows (a non-member) as 'no access, nothing changed'", async () => {
+    // The RPC's WHERE clause returns NO ROW for a user who fails can_read_pm.
+    // That is exactly what RLS gave the old counts (zeros), so the signature
+    // must stay stable rather than throw and trigger a full refresh loop.
+    const m = await freshPmModule();
+    const h = makeRpcPmClient([{ data: [], error: null }]);
+    expect(await m.fetchPmCursor(h.client)).toEqual({
+      tasks: 0,
+      tasksUpdatedAt: "",
+      activity: 0,
+      taskOwners: 0,
+      taskLinks: 0,
+    });
+  });
+
+  it("falls back to the five requests when the function is missing, and remembers it", async () => {
+    const m = await freshPmModule();
+    const h = makeRpcPmClient(
+      [{ data: null, error: { code: "PGRST202", message: "Could not find the function pm.workspace_cursor" } }],
+      { tasksCount: 5, activityCount: 6, tasksUpdatedAt: "2026-06-06T00:00:00Z", ownersCount: 2, linksCount: 1 },
+    );
+    expect(await m.fetchPmCursor(h.client)).toEqual({
+      tasks: 5,
+      tasksUpdatedAt: "2026-06-06T00:00:00Z",
+      activity: 6,
+      taskOwners: 2,
+      taskLinks: 1,
+    });
+    expect(h.rpcCalls).toHaveLength(1);
+    const after = h.legacyStates().length;
+    expect(after).toBeGreaterThan(0);
+
+    await m.fetchPmCursor(h.client);
+    expect(h.rpcCalls).toHaveLength(1); // latched: no second doomed RPC
+    expect(h.legacyStates().length).toBe(after * 2);
+  });
+
+  it("throws on any other RPC error so the caller runs a full refresh", async () => {
+    const m = await freshPmModule();
+    const h = makeRpcPmClient([{ data: null, error: { code: "500", message: "boom" } }]);
+    await expect(m.fetchPmCursor(h.client)).rejects.toThrow(/boom/);
   });
 });

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { avatarStyle, chipStyle, useTheme } from "../../lib/theme";
 import {
+  IconActivity,
   IconBolt,
   IconDeviceFloppy,
   IconEngine,
@@ -31,13 +33,17 @@ import {
   type RoleWithCaps,
 } from "./data/useOrgData";
 import { useOrgMutations } from "./data/useOrgMutations";
+import { useMyRole } from "../vault/data/useMyRole";
+import { PulsePanel } from "./pulse/PulsePanel";
 
-type Tab = "people" | "structure" | "roles";
+import { tc } from "@helios/ui";
+type Tab = "people" | "structure" | "roles" | "pulse";
 
 const TABS: { id: Tab; label: string; Icon: typeof IconUsers }[] = [
   { id: "people", label: "People & Roles", Icon: IconUsers },
   { id: "structure", label: "Org Structure", Icon: IconSitemap },
   { id: "roles", label: "Role Editor", Icon: IconShieldLock },
+  { id: "pulse", label: "Pulse", Icon: IconActivity },
 ];
 
 export function OrgModule() {
@@ -53,10 +59,18 @@ export function OrgModule() {
     can("org.grant_roles") ||
     can("org.manage_roles") ||
     canAnywhere("pm.grant_subteam_roles");
-  const visibleTabs = TABS.filter((t) => t.id !== "people" || canSeePeople);
+  // Pulse reads the pdm_admin_ops_* RPCs, which are gated server-side on a
+  // GLOBAL owner/admin row (pdm.is_global_admin) - capability holders such as
+  // subteam leads get a 42501, so hide the tab unless the global role allows.
+  const myRole = useMyRole();
+  const canSeePulse = myRole === "owner" || myRole === "admin";
+  const visibleTabs = TABS.filter(
+    (t) => (t.id !== "people" || canSeePeople) && (t.id !== "pulse" || canSeePulse),
+  );
   useEffect(() => {
     if (tab === "people" && !capsLoading && !canSeePeople) setTab("structure");
-  }, [tab, capsLoading, canSeePeople]);
+    if (tab === "pulse" && !canSeePulse) setTab("structure");
+  }, [tab, capsLoading, canSeePeople, canSeePulse]);
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
       <header className="flex flex-shrink-0 flex-col gap-3 border-b border-helios-line px-5 pt-4">
@@ -101,6 +115,7 @@ export function OrgModule() {
         {tab === "people" && <PeopleRolesPanel />}
         {tab === "structure" && <StructurePanel />}
         {tab === "roles" && <RoleEditorPanel />}
+        {tab === "pulse" && <PulsePanel />}
       </div>
     </div>
   );
@@ -129,14 +144,16 @@ function Avatar({ person }: { person: Person }) {
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
     return h;
   }, [person.user_id, person.email]);
+  const theme = useTheme();
+  const tint = avatarStyle(hue, theme);
   return (
     <span
       aria-hidden
       className="flex size-7 shrink-0 select-none items-center justify-center rounded-full text-[10px] font-semibold tracking-wide"
       style={{
-        backgroundColor: `hsl(${hue} 45% 22%)`,
-        color: `hsl(${hue} 70% 78%)`,
-        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
+        backgroundColor: tint.backgroundColor,
+        color: tint.color,
+        boxShadow: `inset 0 0 0 1px ${tint.borderColor}`,
       }}
     >
       {initialsOf(person)}
@@ -407,6 +424,7 @@ function PersonRow(props: {
   onUpdate: (target: string, name: string | null, subteam: string | null) => void;
   onDelete: (person: Person) => void;
 }) {
+  const theme = useTheme();
   const { person, roles, subteams, subteamName, busy, isMe, can, onGrant, onRevoke, onUpdate, onDelete } = props;
   const [adding, setAdding] = useState(false);
   const [roleKey, setRoleKey] = useState("");
@@ -594,7 +612,7 @@ function PersonRow(props: {
               disabled={busy}
               aria-label="Save"
               onClick={saveEdit}
-              className="rounded bg-asu-gold px-1.5 py-1 text-helios-base hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+              className="rounded bg-asu-gold px-1.5 py-1 text-helios-on-gold hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
             >
               <IconDeviceFloppy size={12} strokeWidth={1.75} />
             </button>
@@ -608,13 +626,13 @@ function PersonRow(props: {
             </button>
           </div>
         ) : (
-          person.signup_subteam ?? <span className="text-[#5A5F66]">—</span>
+          person.signup_subteam ?? <span className="text-helios-muted">—</span>
         )}
       </td>
       <td>
         <div className="flex flex-wrap items-center gap-1.5">
           {person.roles.length === 0 ? (
-            <span className="text-[11px] text-[#5A5F66]">no access</span>
+            <span className="text-[11px] text-helios-muted">no access</span>
           ) : (
             person.roles.map((r, i) => {
               const color = r.tag ?? "#9CA3AF";
@@ -622,7 +640,7 @@ function PersonRow(props: {
                 <span
                   key={`${r.role}-${r.subteam_id ?? "org"}-${i}`}
                   className="inline-flex items-center gap-1 rounded-full py-0.5 pl-2 pr-1 text-[10px] font-medium"
-                  style={{ backgroundColor: color + "22", color, boxShadow: `inset 0 0 0 1px ${color}33` }}
+                  style={chipStyle(color, theme)}
                   title={r.scope === "subteam" && r.subteam_id ? subteamName.get(r.subteam_id) ?? "" : "org-wide"}
                 >
                   <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
@@ -679,7 +697,7 @@ function PersonRow(props: {
                 type="button"
                 disabled={!canAdd || busy}
                 onClick={submit}
-                className="rounded-full bg-asu-gold px-2 py-0.5 text-[10px] font-semibold text-helios-base transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+                className="rounded-full bg-asu-gold px-2 py-0.5 text-[10px] font-semibold text-helios-on-gold transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
               >
                 Add
               </button>
@@ -744,7 +762,7 @@ function ProgramBadge({ program }: { program: "ic" | "ev" | null | undefined }) 
       </span>
     );
   }
-  return <span className="text-[9px] uppercase tracking-wider text-[#5A5F66]">—</span>;
+  return <span className="text-[9px] uppercase tracking-wider text-helios-muted">—</span>;
 }
 
 function StructurePanel() {
@@ -841,7 +859,7 @@ function StructurePanel() {
                 <tr key={s.id} className="border-b border-helios-line/60 transition-colors last:border-b-0 hover:bg-helios-panel/40">
                   <td className="px-3 py-2.5">
                     <span className="inline-flex items-center gap-2 text-helios-text">
-                      <span aria-hidden className="size-2.5 rounded-full ring-1 ring-inset ring-white/10" style={{ backgroundColor: s.color ?? "#6B7280" }} />
+                      <span aria-hidden className="size-2.5 rounded-full ring-1 ring-inset ring-white/10" style={{ backgroundColor: s.color ?? tc("dim") }} />
                       {s.name}
                     </span>
                   </td>
@@ -864,7 +882,7 @@ function StructurePanel() {
                     {count >= 2 ? (
                       <span className="rounded-full bg-asu-gold/15 px-2 py-0.5 text-[10px] font-medium text-asu-gold ring-1 ring-inset ring-asu-gold/30">shared</span>
                     ) : (
-                      <span className="text-[#5A5F66]">—</span>
+                      <span className="text-helios-muted">—</span>
                     )}
                   </td>
                   {editable && (
@@ -965,7 +983,7 @@ function StructurePanel() {
             <button
               type="submit"
               disabled={busy || !newName.trim()}
-              className="inline-flex items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-[11px] font-semibold text-helios-base transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded bg-asu-gold px-2.5 py-1.5 text-[11px] font-semibold text-helios-on-gold transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
             >
               <IconPlus size={14} strokeWidth={1.5} />
               Add subteam
@@ -985,7 +1003,7 @@ const BLANK_ROLE: RoleWithCaps = {
   label: "",
   // Lowercase to match <input type="color">, which always reports lowercase
   // hex — otherwise the dirty check below trips the moment the picker mounts.
-  tag: "#6b7280",
+  tag: tc("dim"),
   scope: "subteam",
   is_system: false,
   sort_order: 100,
@@ -1106,7 +1124,7 @@ function RoleCard(props: {
   const blockedByCaps = !isNew && ungrantableExisting.length > 0;
   const locked = role.is_system || !canManage || blockedByCaps;
   const [label, setLabel] = useState(role.label);
-  const [tag, setTag] = useState((role.tag ?? "#6b7280").toLowerCase());
+  const [tag, setTag] = useState((role.tag ?? tc("dim")).toLowerCase());
   const [scope, setScope] = useState<"org" | "subteam">(role.scope);
   const [selected, setSelected] = useState<Set<string>>(new Set(role.capabilities));
   const [busy, setBusy] = useState(false);
@@ -1117,7 +1135,7 @@ function RoleCard(props: {
     label !== role.label ||
     // <input type="color"> reports lowercase hex; compare case-insensitively so
     // an unchanged uppercase stored tag doesn't read as a pending edit.
-    tag !== (role.tag ?? "#6b7280").toLowerCase() ||
+    tag !== (role.tag ?? tc("dim")).toLowerCase() ||
     scope !== role.scope ||
     selected.size !== role.capabilities.length ||
     role.capabilities.some((c) => !selected.has(c));
@@ -1197,7 +1215,7 @@ function RoleCard(props: {
         {!grantable && canManage && !role.is_system ? (
           <span
             aria-hidden
-            className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-[#5A5F66]"
+            className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-helios-muted"
             title="You don't hold this capability"
           >
             locked
@@ -1278,7 +1296,7 @@ function RoleCard(props: {
           <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-helios-dim">Org-wide</div>
           <div className="flex flex-col">
             {orgCaps.length === 0 ? (
-              <span className="px-1.5 py-1 text-[11px] text-[#5A5F66]">None.</span>
+              <span className="px-1.5 py-1 text-[11px] text-helios-muted">None.</span>
             ) : (
               orgCaps.map(capCheckbox)
             )}
@@ -1288,7 +1306,7 @@ function RoleCard(props: {
           <div className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-helios-dim">Per-subteam</div>
           <div className="flex flex-col">
             {subteamCaps.length === 0 ? (
-              <span className="px-1.5 py-1 text-[11px] text-[#5A5F66]">None.</span>
+              <span className="px-1.5 py-1 text-[11px] text-helios-muted">None.</span>
             ) : (
               subteamCaps.map(capCheckbox)
             )}
@@ -1334,7 +1352,7 @@ function RoleCard(props: {
             type="button"
             onClick={save}
             disabled={busy || !dirty}
-            className="inline-flex items-center gap-1 rounded bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-base transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded bg-asu-gold px-2.5 py-1 text-[11px] font-semibold text-helios-on-gold transition hover:bg-asu-gold/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-40"
           >
             <IconDeviceFloppy size={13} strokeWidth={1.5} />
             {isNew ? "Create" : "Save"}

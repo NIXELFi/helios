@@ -99,16 +99,16 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
   });
 
   return (
-    <div className="w-full h-full bg-[#16171B] overflow-auto text-[11px]">
-      <div className="px-2 py-1 flex items-center justify-between bg-[#0E0E10] border-b border-[#2A2C32] sticky top-0">
-        <span className="text-[10px] uppercase tracking-wider text-[#9097A0]">
+    <div className="w-full h-full bg-helios-panel overflow-auto text-[11px]">
+      <div className="px-2 py-1 flex items-center justify-between bg-helios-base border-b border-helios-line sticky top-0">
+        <span className="text-[10px] uppercase tracking-wider text-helios-dim">
           {zone.kind === "datum-datum" ? "Δ datum" : "datum → cursor"}
         </span>
-        <span className="font-mono-num text-[10px] text-[#FFC627]">{fmtDur((zone.endUs - zone.startUs) / 1_000_000)}</span>
+        <span className="font-mono-num text-[10px] text-asu-gold">{fmtDur((zone.endUs - zone.startUs) / 1_000_000)}</span>
       </div>
       <table className="w-full font-mono-num">
-        <thead className="text-[#9097A0] text-[9px] uppercase tracking-wider">
-          <tr className="border-b border-[#2A2C32]">
+        <thead className="text-helios-dim text-[9px] uppercase tracking-wider">
+          <tr className="border-b border-helios-line">
             <th className="text-left px-2 py-0.5">Channel</th>
             <th className="text-right px-2 py-0.5">start</th>
             <th className="text-right px-2 py-0.5">end</th>
@@ -122,20 +122,20 @@ export function ZoneStatsRender(props: WidgetRenderProps<ZoneStatsConfig>) {
         </thead>
         <tbody>
           {rows.map(({ id, agg, mean, stddev, slope }) => (
-            <tr key={id} className="border-b border-[#23252B] text-[#D8DCE2]">
+            <tr key={id} className="border-b border-helios-grid text-helios-text">
               <td className="px-2 py-0.5">{id}</td>
               <td className="text-right px-2 py-0.5">{fmt(agg.start)}</td>
               <td className="text-right px-2 py-0.5">{fmt(agg.end)}</td>
               <td className="text-right px-2 py-0.5 text-[#FFB800]">{fmt(agg.end - agg.start)}</td>
               <td className="text-right px-2 py-0.5">{fmt(mean)}</td>
               <td className="text-right px-2 py-0.5">{fmt(stddev)}</td>
-              <td className="text-right px-2 py-0.5 text-[#9097A0]">{fmt(agg.min === Infinity ? NaN : agg.min)}</td>
-              <td className="text-right px-2 py-0.5 text-[#9097A0]">{fmt(agg.max === -Infinity ? NaN : agg.max)}</td>
+              <td className="text-right px-2 py-0.5 text-helios-dim">{fmt(agg.min === Infinity ? NaN : agg.min)}</td>
+              <td className="text-right px-2 py-0.5 text-helios-dim">{fmt(agg.max === -Infinity ? NaN : agg.max)}</td>
               <td className="text-right px-2 py-0.5">{fmt(slope, 3)}</td>
             </tr>
           ))}
           {rows.length === 0 && (
-            <tr><td colSpan={9} className="text-center text-[#9097A0] py-2">add channels in the config panel</td></tr>
+            <tr><td colSpan={9} className="text-center text-helios-dim py-2">add channels in the config panel</td></tr>
           )}
         </tbody>
       </table>

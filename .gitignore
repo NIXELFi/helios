@@ -87,3 +87,7 @@ worktrees/agent-*/pending_amend.rejected.json
 # .NET toolchain on the build machine. Rebuild + recommit it after add-in changes
 # via `pnpm --filter @helios/desktop build:addin`.
 worktrees/
+
+# Local perf-harness capture: a dump of REAL project data (member names and
+# emails). Regenerate locally; never commit it.
+apps/desktop/perf/real-pm.json

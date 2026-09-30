@@ -155,6 +155,11 @@ export const user = z.object({
   id: z.string().uuid(),
   name: z.string(),
   email: z.string().email().nullable(),
+  // Subteams this person belongs to, from pm.subteam_memberships via the
+  // list_directory RPC. Optional because it is genuinely incomplete — most of
+  // the directory carries no membership row — so it RANKS the owner pickers
+  // (this subteam's people first) and never filters them.
+  subteam_ids: z.array(z.string().uuid()).optional(),
 });
 export type User = z.infer<typeof user>;
 

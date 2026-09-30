@@ -6,11 +6,24 @@ mod bridge;
 mod cfd;
 mod commands;
 mod plugins;
+// The driver-in-loop simulator: launching it, and reading the runs it files.
+mod sim;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
+
+/// Settings → General → "When I close the window". `true` (default) hides the
+/// window to the tray so the SOLIDWORKS bridge stays live; `false` lets the
+/// close go through, which exits the app. The frontend pushes the stored
+/// preference at boot and on every change (`set_close_to_tray`).
+pub struct CloseBehavior(pub std::sync::atomic::AtomicBool);
+
+#[tauri::command]
+fn set_close_to_tray(state: tauri::State<'_, CloseBehavior>, enabled: bool) {
+    state.0.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Show + focus the main window (from the tray).
 fn show_main(app: &tauri::AppHandle) {
@@ -176,6 +189,7 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .manage(pending)
+        .manage(CloseBehavior(std::sync::atomic::AtomicBool::new(true)))
         .manage(cfd::CfdState::default())
         .manage(bridge_state.clone())
         // Active installed-plugin versions, read by the `plugin://` asset protocol
@@ -200,12 +214,25 @@ pub fn run() {
 
             // Provision / refresh the SOLIDWORKS add-in (per-user, no admin).
             // Best-effort; never block launch. Windows-only (SOLIDWORKS + registry).
+            //
+            // On its OWN thread. This setup hook runs on the main thread, and the
+            // webview's very first document request (tauri.localhost/index.html)
+            // is answered by that same thread — so every millisecond spent here
+            // is a millisecond the window sits on the boot spinner. Measured
+            // 2026-09-02: index.html took ~700 ms to be served, matching the
+            // injector's PE-version read + DLL staging + registry walk (with the
+            // endpoint AV scanning the staged DLL on top). Nothing in the app
+            // waits on the injector's result, so it runs alongside boot instead.
             #[cfg(windows)]
             {
                 let ah = app.handle().clone();
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    addin_injector::run(&ah);
-                }));
+                let _ = std::thread::Builder::new()
+                    .name("helios-addin-injector".into())
+                    .spawn(move || {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            addin_injector::run(&ah);
+                        }));
+                    });
             }
 
             // System tray — keeps Helios resident so the bridge stays live even
@@ -257,8 +284,15 @@ pub fn run() {
             // Close → hide to tray (real quit only from the tray menu), so the
             // localhost bridge keeps serving the SOLIDWORKS add-in.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                let to_tray = window
+                    .state::<CloseBehavior>()
+                    .0
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // else: let the close proceed — last window gone, app exits.
             }
         })
         .on_page_load(|window, _payload| {
@@ -272,6 +306,7 @@ pub fn run() {
             let _ = window.emit("helios://open-files", drained);
         })
         .invoke_handler(tauri::generate_handler![
+            set_close_to_tray,
             commands::load_csv::load_csv,
             commands::restart::helios_relaunch,
             commands::set_readonly::set_path_readonly,
@@ -280,6 +315,8 @@ pub fn run() {
             commands::parse_refs::parse_sw_properties,
             commands::reveal::reveal_in_explorer,
             commands::open_url::open_external_url,
+            commands::scan_folder::scan_vault_folder,
+            commands::download::download_object_to_temp,
             bridge::bridge_set_session,
             bridge::bridge_clear_session,
             bridge::bridge_set_snapshot,
@@ -306,6 +343,20 @@ pub fn run() {
             plugins::commands::inspect_plugin_bundle,
             plugins::commands::discard_staged_bundle,
             plugins::commands::remove_plugin_bundle,
+            sim::launch::sim_status,
+            sim::launch::sim_locate_exe,
+            sim::launch::sim_set_exe_path,
+            sim::launch::sim_launch,
+            sim::runs::sim_runs_dir,
+            sim::runs::sim_list_runs,
+            sim::runs::sim_read_run,
+            sim::runs::sim_run_telemetry_path,
+            sim::runs::sim_delete_run,
+            sim::runs::sim_read_telemetry,
+            sim::runs::sim_import_run,
+            sim::install::sim_available_build,
+            sim::install::sim_feed_platforms,
+            sim::install::sim_install,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Helios")

@@ -2,6 +2,7 @@ import type { TaskRow } from "./types";
 import { StatusBadge } from "./statusBadge";
 import { TypeBadge } from "./typeBadge";
 
+import { tc } from "@helios/ui";
 export interface TaskTableProps {
   tasks: ReadonlyArray<TaskRow>;
   emptyMessage?: string;
@@ -44,7 +45,7 @@ export function TaskTable({ tasks, emptyMessage = "No tasks yet." }: TaskTablePr
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: task.subteam.color ?? "#6B7280" }}
+                    style={{ backgroundColor: task.subteam.color ?? tc("dim") }}
                   />
                   {task.subteam.name}
                 </span>

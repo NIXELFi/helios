@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchLocal, vaultRelativePath } from "../local-match";
+import { matchLocal, shouldHoldBack, vaultRelativePath } from "../local-match";
 import type { VaultFile, Version } from "../types";
 import type { LocalFile } from "../useLocalFolderScan";
 
@@ -30,13 +30,14 @@ function version(sha: string): Version {
   };
 }
 
-function local(relativePath: string, sha: string): LocalFile {
+function local(relativePath: string, sha: string, readonly?: boolean): LocalFile {
   return {
     basename: relativePath.split("/").pop() ?? relativePath,
     relativePath,
     absolutePath: `C:/vault/${relativePath}`,
     sha256: sha,
     sizeBytes: 1,
+    readonly,
   };
 }
 
@@ -75,5 +76,28 @@ describe("matchLocal", () => {
     );
     expect(res.status).toBe("synced");
     expect(res.local?.relativePath).toBe("26-01_REV-A.SLDPRT");
+  });
+});
+
+describe("shouldHoldBack", () => {
+  it("refreshes a writable copy whose sha matches the ledger (clean older revision)", () => {
+    expect(shouldHoldBack(local("part.SLDPRT", "abc", false), "abc")).toBe(false);
+  });
+
+  it("is case-insensitive when comparing the local sha to the ledger sha", () => {
+    expect(shouldHoldBack(local("part.SLDPRT", "ABC", false), "abc")).toBe(false);
+  });
+
+  it("holds back a writable copy whose sha differs from the ledger (possible unsaved edit)", () => {
+    expect(shouldHoldBack(local("part.SLDPRT", "abc", false), "def")).toBe(true);
+  });
+
+  it("always refreshes a read-only copy, regardless of the ledger", () => {
+    expect(shouldHoldBack(local("part.SLDPRT", "abc", true), undefined)).toBe(false);
+    expect(shouldHoldBack(local("part.SLDPRT", "abc", true), "def")).toBe(false);
+  });
+
+  it("holds back a writable copy with no ledger entry for the path (old behaviour)", () => {
+    expect(shouldHoldBack(local("part.SLDPRT", "abc", false), undefined)).toBe(true);
   });
 });

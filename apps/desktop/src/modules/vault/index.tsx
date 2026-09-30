@@ -1,4 +1,6 @@
 import { useAuthLoading, useUser } from "@helios/auth";
+import { IconArchive } from "@tabler/icons-react";
+import { ModuleTransition } from "../../components/ModuleTransition";
 import { VaultHome } from "./VaultHome";
 import { useVaultAccess } from "./data/useVaultAccess";
 
@@ -12,7 +14,7 @@ import { useVaultAccess } from "./data/useVaultAccess";
 //      an explicit notice rather than a broken-looking empty vault.
 export function VaultModule() {
   const loading = useAuthLoading();
-  if (loading) return <Notice>Loading…</Notice>;
+  if (loading) return <ModuleTransition label="Vault" Icon={IconArchive} />;
   return <VaultAccessGate />;
 }
 
@@ -20,7 +22,9 @@ function VaultAccessGate() {
   const access = useVaultAccess();
   const user = useUser();
 
-  if (access.status === "loading") return <Notice>Checking access…</Notice>;
+  // Same placeholder the Shell showed while the chunk loaded, so the two
+  // hand-offs (chunk → access check → vault) read as one.
+  if (access.status === "loading") return <ModuleTransition label="Vault" Icon={IconArchive} />;
 
   if (access.status === "error") {
     return (
@@ -59,13 +63,6 @@ function VaultAccessGate() {
   return <VaultHome />;
 }
 
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center bg-helios-panel text-helios-dim">
-      {children}
-    </div>
-  );
-}
 
 function CenteredCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (

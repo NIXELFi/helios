@@ -145,7 +145,27 @@ function legacyLedgerFile(vaultId: string): string {
   return `sync-ledger-${vaultId}.json`;
 }
 
-export async function loadLedger(vaultId: string): Promise<SyncLedger> {
+/** Drop tombstones whose cool-off has expired. Mutates `ledger` in place and
+ *  returns how many were pruned. An expired tombstone behaves exactly like no
+ *  entry at all (classifyMissing → "never-downloaded", auto-add allowed, the
+ *  reaper skips it), so pruning is behavior-neutral — it just stops the ledger
+ *  growing forever. An UNPARSEABLE deletedAt is kept: useAutoAddDrafts treats it
+ *  as still-suppressing, and dropping it would re-allow an auto-add. */
+export function pruneExpiredTombstones(ledger: SyncLedger, now: number = Date.now()): number {
+  let pruned = 0;
+  for (const [k, e] of Object.entries(ledger.entries)) {
+    if (!e.deletedAt) continue;
+    const dt = new Date(e.deletedAt).getTime();
+    if (Number.isNaN(dt)) continue;
+    if (now - dt >= TOMBSTONE_COOLOFF_MS) {
+      delete ledger.entries[k];
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+async function readLedgerFromDisk(vaultId: string): Promise<SyncLedger> {
   for (const file of [ledgerFile(vaultId), legacyLedgerFile(vaultId)]) {
     try {
       const text = await readTextFile(file, { baseDir: BaseDirectory.AppLocalData });
@@ -173,38 +193,190 @@ export async function saveLedger(vaultId: string, ledger: SyncLedger): Promise<v
   }
 }
 
-// ── Convenience: chain-serialized load-modify-save (Task 6) ──────────────────
+// ── In-memory ledger + coalesced writes (Task 6) ─────────────────────────────
+//
+// Each vault's ledger is read from disk ONCE per session and then kept in
+// memory. Mutations (ledgerRecord / ledgerRemove / ledgerTombstone) apply to
+// that copy in place and mark it dirty; a debounced flush writes the whole file.
+// The old load-parse-spread-stringify-write per call made a bulk sync O(n^2)
+// (every one of ~13k downloads re-read and re-wrote the entire ledger).
+//
+// Ordering guarantees kept from the old chain-serialized load-modify-save:
+//  - mutations for a vault apply strictly in call order (per-vault `chains`),
+//    so concurrent download workers can't drop each other's records;
+//  - disk writes for a vault are serialized (per-vault `writes`) and each one
+//    serializes the CURRENT in-memory state, so a later write is always a
+//    superset of an earlier one — an older snapshot can never land last.
+// loadLedger serves the in-memory copy, so a pass never reads a disk file that
+// lags a not-yet-flushed record.
+//
+// Durability: writes are debounced (FLUSH_DEBOUNCE_MS after the last change)
+// but never deferred past FLUSH_MAX_WAIT_MS during a continuous stream, and are
+// forced on pass/bulk completion (flushLedger) and on page unload. A crash can
+// lose at most the last few seconds of records, which degrades exactly like a
+// failed write always did: deletion-detection lags until re-materialization.
 
-/** Per-vault promise chain so concurrent download workers can't interleave
- *  read-modify-write cycles and drop each other's records. */
+export const FLUSH_DEBOUNCE_MS = 500;
+export const FLUSH_MAX_WAIT_MS = 5_000;
+
+/** vaultId → the session's owned ledger (loaded once, mutated in place). */
+const owned = new Map<string, Promise<SyncLedger>>();
+/** Per-vault promise chain serializing mutations. */
 const chains = new Map<string, Promise<void>>();
+/** Per-vault promise chain serializing disk writes. */
+const writes = new Map<string, Promise<void>>();
 
-function enqueue(vaultId: string, work: (l: SyncLedger) => SyncLedger): Promise<void> {
+interface FlushState {
+  dirty: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** When the current dirty streak began (for the max-wait cap). */
+  since: number;
+  /** When the last change was marked; a gap longer than the debounce means a one-off. */
+  lastMark: number;
+}
+const flushStates = new Map<string, FlushState>();
+
+function ownedLedger(vaultId: string): Promise<SyncLedger> {
+  let p = owned.get(vaultId);
+  if (!p) {
+    p = readLedgerFromDisk(vaultId).then((l) => {
+      // Expired tombstones are dead weight; persist the pruned file lazily.
+      if (pruneExpiredTombstones(l) > 0) markDirty(vaultId);
+      return l;
+    });
+    owned.set(vaultId, p);
+  }
+  return p;
+}
+
+/** Load this vault's ledger. Returns a snapshot COPY of the in-memory ledger
+ *  (disk is read only on first use per session), so a caller can hold it for a
+ *  whole pass without later records mutating it underneath. Never throws: a
+ *  missing/corrupt file degrades to an empty ledger. */
+export async function loadLedger(vaultId: string): Promise<SyncLedger> {
+  const l = await ownedLedger(vaultId);
+  return { entries: { ...l.entries } };
+}
+
+function markDirty(vaultId: string): void {
+  let s = flushStates.get(vaultId);
+  if (!s) {
+    s = { dirty: false, timer: null, since: 0, lastMark: 0 };
+    flushStates.set(vaultId, s);
+  }
+  const state = s;
+  const now = Date.now();
+  // A record after a quiet spell is a one-off (Get Latest on a single file,
+  // check-in, a move): write it now, because Helios may be closed right after
+  // and WebView2 teardown doesn't reliably run the unload flush. Only a burst
+  // (sync pass, bulk download) is debounced.
+  const burst = now - state.lastMark < FLUSH_DEBOUNCE_MS;
+  state.lastMark = now;
+  if (!state.dirty) state.since = now;
+  state.dirty = true;
+  if (state.timer) clearTimeout(state.timer);
+  // Debounce, capped so a continuous stream still reaches disk every max-wait.
+  const delay = burst
+    ? Math.max(0, Math.min(FLUSH_DEBOUNCE_MS, state.since + FLUSH_MAX_WAIT_MS - now))
+    : 0;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    void flushLedger(vaultId);
+  }, delay);
+}
+
+function enqueue(vaultId: string, mutate: (l: SyncLedger) => void): Promise<void> {
   const prev = chains.get(vaultId) ?? Promise.resolve();
   const next = prev
     .catch(() => {}) // a prior failure must not stall the chain
     .then(async () => {
-      const ledger = await loadLedger(vaultId);
-      await saveLedger(vaultId, work(ledger));
+      const ledger = await ownedLedger(vaultId);
+      mutate(ledger);
+      markDirty(vaultId);
     });
   chains.set(vaultId, next);
   return next;
 }
 
-/** Load-modify-save recording one entry, serialized per vault. Best-effort. */
+/** Write this vault's pending ledger changes to disk now (after any mutations
+ *  already queued). Resolves once the write has landed (or failed — best-effort,
+ *  never throws). A no-op when nothing is dirty. Call at the end of a pass. */
+export async function flushLedger(vaultId: string): Promise<void> {
+  await (chains.get(vaultId) ?? Promise.resolve()).catch(() => {});
+  const s = flushStates.get(vaultId);
+  if (s?.timer) {
+    clearTimeout(s.timer);
+    s.timer = null;
+  }
+  if (s?.dirty) {
+    s.dirty = false;
+    const prev = writes.get(vaultId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => {})
+      .then(async () => {
+        const ledger = await ownedLedger(vaultId);
+        await saveLedger(vaultId, ledger);
+      });
+    writes.set(vaultId, next);
+  }
+  await (writes.get(vaultId) ?? Promise.resolve()).catch(() => {});
+}
+
+/** Flush every vault with pending changes (unload / shutdown). */
+export function flushAllLedgers(): Promise<void> {
+  const ids = Array.from(flushStates.entries())
+    .filter(([, s]) => s.dirty)
+    .map(([id]) => id);
+  return Promise.all(ids.map((id) => flushLedger(id))).then(() => {});
+}
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  // Best-effort: the async write may not finish if the webview is torn down,
+  // but the max-wait cap bounds what can be lost either way.
+  window.addEventListener("pagehide", () => void flushAllLedgers());
+  window.addEventListener("beforeunload", () => void flushAllLedgers());
+}
+
+/** Test-only: forget all in-memory ledgers, pending timers and chains. */
+export function __resetLedgerCacheForTests(): void {
+  for (const s of flushStates.values()) if (s.timer) clearTimeout(s.timer);
+  flushStates.clear();
+  owned.clear();
+  chains.clear();
+  writes.clear();
+}
+
+/** Record one materialized entry, serialized per vault (in memory now, on disk
+ *  at the next flush). Best-effort. Same entry shape as recordEntry. */
 export function ledgerRecord(vaultId: string, relPath: string, sha256: string): Promise<void> {
-  return enqueue(vaultId, (l) => recordEntry(l, relPath, sha256));
+  return enqueue(vaultId, (l) => {
+    l.entries[normalizePathForCompare(relPath)] = {
+      sha256,
+      recordedAt: new Date().toISOString(),
+    };
+  });
 }
 
-/** Load-modify-save removing one entry, serialized per vault. Best-effort. */
+/** Remove one entry, serialized per vault. Best-effort. */
 export function ledgerRemove(vaultId: string, relPath: string): Promise<void> {
-  return enqueue(vaultId, (l) => removeEntry(l, relPath));
+  return enqueue(vaultId, (l) => {
+    delete l.entries[normalizePathForCompare(relPath)];
+  });
 }
 
-/** Load-modify-save writing a tombstone for one entry, serialized per vault.
- *  Use after a successful pdm_delete_file propagation instead of ledgerRemove so
- *  a reappearing copy of the just-deleted file is not auto-re-vaulted during the
- *  TOMBSTONE_COOLOFF_MS window. Best-effort. */
+/** Write a tombstone for one entry, serialized per vault. Same entry shape as
+ *  tombstoneEntry. Use after a successful pdm_delete_file propagation instead of
+ *  ledgerRemove so a reappearing copy of the just-deleted file is not
+ *  auto-re-vaulted during the TOMBSTONE_COOLOFF_MS window. Best-effort. */
 export function ledgerTombstone(vaultId: string, relPath: string): Promise<void> {
-  return enqueue(vaultId, (l) => tombstoneEntry(l, relPath));
+  return enqueue(vaultId, (l) => {
+    const key = normalizePathForCompare(relPath);
+    const existing = l.entries[key];
+    const now = new Date().toISOString();
+    l.entries[key] = {
+      sha256: existing?.sha256 ?? "",
+      recordedAt: existing?.recordedAt ?? now,
+      deletedAt: now,
+    };
+  });
 }

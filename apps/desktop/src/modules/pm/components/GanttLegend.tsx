@@ -16,6 +16,7 @@ import {
   type User,
 } from "@helios/pm-ui";
 
+import { tc } from "@helios/ui";
 // Cap on how many subteam/owner swatches to enumerate before collapsing the
 // remainder into a "+k more" note (status/priority always show their full set).
 const SWATCH_CAP = 6;
@@ -64,7 +65,7 @@ function swatchesFor(
       return {
         swatches: subteams.slice(0, SWATCH_CAP).map((s) => ({
           key: s.id,
-          color: s.color ?? "#6B7280",
+          color: s.color ?? tc("dim"),
           label: s.code,
         })),
         more: Math.max(0, subteams.length - SWATCH_CAP),

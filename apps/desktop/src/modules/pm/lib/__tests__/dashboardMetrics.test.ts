@@ -3,6 +3,7 @@ import { addDays, format } from "date-fns";
 import {
   STATUS_FILL,
   TASK_STATUSES,
+  type CalendarEvent,
   type Subsystem,
   type Subteam,
   type TaskRow,
@@ -12,6 +13,7 @@ import {
   computeMetric,
   filterSet,
   groupTasks,
+  nextEventDate,
   subteamStats,
   taskDateHistogram,
   workloadByOwner,
@@ -239,5 +241,57 @@ describe("taskDateHistogram", () => {
     const h = taskDateHistogram([makeTask({ start_date: null })], "start", "auto");
     expect(h.bars).toHaveLength(0);
     expect(h.undated).toBe(1);
+  });
+
+  test("a typo'd year counts as undated instead of hollowing the chart", () => {
+    const tasks = [
+      makeTask({ start_date: iso(0) }),
+      makeTask({ start_date: iso(1) }),
+      makeTask({ start_date: "0202-08-18" }),
+    ];
+    const h = taskDateHistogram(tasks, "start", "auto");
+    expect(h.granularity).toBe("day");
+    expect(h.total).toBe(2);
+    expect(h.undated).toBe(1);
+    expect(h.bars).toHaveLength(2);
+  });
+});
+
+describe("nextEventDate", () => {
+  const today = new Date(2026, 8, 28);
+  function ev(over: Partial<CalendarEvent>): CalendarEvent {
+    return {
+      id: "e1",
+      project_id: "p1",
+      title: "Shop day",
+      date: "2026-09-01",
+      all_subteams: true,
+      subteam_ids: [],
+      type_tags: [],
+      description: null,
+      recurrence: "none",
+      recurrence_end: null,
+      ...over,
+    };
+  }
+
+  test("fast-forwards a monthly series that starts at a typo'd year", () => {
+    // Stepping month by month from year 202 ran out of guard in year ~285 and
+    // returned that as the "next" occurrence.
+    const next = nextEventDate(ev({ date: "0202-08-18", recurrence: "monthly" }), today);
+    expect(next && format(next, "yyyy-MM-dd")).toBe("2026-10-18");
+  });
+
+  test("fast-forwards daily and weekly series", () => {
+    expect(format(nextEventDate(ev({ date: "2020-01-01", recurrence: "daily" }), today)!, "yyyy-MM-dd")).toBe(
+      "2026-09-28",
+    );
+    // 2026-09-01 is a Tuesday; the next Tuesday on/after the 28th is the 29th.
+    expect(format(nextEventDate(ev({ recurrence: "weekly" }), today)!, "yyyy-MM-dd")).toBe("2026-09-29");
+  });
+
+  test("returns null for a past one-off or an ended series", () => {
+    expect(nextEventDate(ev({}), today)).toBeNull();
+    expect(nextEventDate(ev({ recurrence: "weekly", recurrence_end: "2026-09-20" }), today)).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import { useRef } from "react";
 
 import { useElementWidth } from "./useElementWidth";
 
+import { tc } from "@helios/ui";
 export interface TornadoBar {
   label: string;
   /** Signed correlation in [-1, 1]. */
@@ -58,11 +59,11 @@ export function TornadoChart({ title, bars, axisLabel, selectedLabel, onBarClick
 
   return (
     <div ref={hostRef} className="flex h-full w-full flex-col" style={{ minHeight: height }}>
-      <div className="flex items-center justify-between border-b border-[#2A2C32] px-2 py-1">
-        <div className="text-[10px] uppercase tracking-wider text-[#9097A0]">{title}</div>
+      <div className="flex items-center justify-between border-b border-helios-line px-2 py-1">
+        <div className="text-[10px] uppercase tracking-wider text-helios-dim">{title}</div>
       </div>
       {bars.length === 0 ? (
-        <div className="px-2 py-6 text-center text-[10px] text-[#5A5F66]">
+        <div className="px-2 py-6 text-center text-[10px] text-helios-muted">
           Not enough varied trials yet — sensitivity needs ≥3 trials where the knob moves.
         </div>
       ) : (
@@ -76,13 +77,13 @@ export function TornadoChart({ title, bars, axisLabel, selectedLabel, onBarClick
           {/* Center zero line + ±1 domain ticks. */}
           <line x1={center} y1={padTop} x2={center} y2={padTop + plotH} stroke="#3f3f46" />
           <line x1={plotLeft} y1={padTop + plotH} x2={plotRight} y2={padTop + plotH} stroke="#3f3f46" />
-          <text x={plotLeft} y={padTop + plotH + 12} fontSize="9" fill="#71717a" textAnchor="start">
+          <text x={plotLeft} y={padTop + plotH + 12} fontSize="9" fill={tc("dim")} textAnchor="start">
             −1
           </text>
-          <text x={center} y={padTop + plotH + 12} fontSize="9" fill="#71717a" textAnchor="middle">
+          <text x={center} y={padTop + plotH + 12} fontSize="9" fill={tc("dim")} textAnchor="middle">
             0
           </text>
-          <text x={plotRight} y={padTop + plotH + 12} fontSize="9" fill="#71717a" textAnchor="end">
+          <text x={plotRight} y={padTop + plotH + 12} fontSize="9" fill={tc("dim")} textAnchor="end">
             +1
           </text>
           {axisLabel && (
@@ -90,7 +91,7 @@ export function TornadoChart({ title, bars, axisLabel, selectedLabel, onBarClick
               x={center}
               y={padTop + plotH + 24}
               fontSize="10"
-              fill="#D8DCE2"
+              fill={tc("text")}
               textAnchor="middle"
             >
               {axisLabel}
@@ -116,14 +117,14 @@ export function TornadoChart({ title, bars, axisLabel, selectedLabel, onBarClick
                   y={yMid - rowH / 2}
                   width={width}
                   height={rowH}
-                  fill={selected ? "#16171B" : "transparent"}
+                  fill={selected ? tc("panel") : "transparent"}
                 />
                 {/* Param label in the left gutter, right-aligned to the plot edge. */}
                 <text
                   x={plotLeft - 6}
                   y={yMid + 3}
                   fontSize="10"
-                  fill={selected ? "#FFFFFF" : "#9097A0"}
+                  fill={selected ? "#FFFFFF" : tc("dim")}
                   textAnchor="end"
                 >
                   {b.label}
@@ -147,7 +148,7 @@ export function TornadoChart({ title, bars, axisLabel, selectedLabel, onBarClick
                   x={b.value >= 0 ? x + 4 : x - 4}
                   y={yMid + 3}
                   fontSize="9"
-                  fill="#D8DCE2"
+                  fill={tc("text")}
                   textAnchor={b.value >= 0 ? "start" : "end"}
                 >
                   {b.value >= 0 ? "+" : ""}

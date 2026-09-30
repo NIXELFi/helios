@@ -5,6 +5,7 @@ import { WidgetEmpty } from "../lib/widget-empty";
 import { findSpeed } from "../lib/speed";
 import { buildSectorTable, formatLapTime, type LapInput } from "./compute";
 
+import { tc } from "@helios/ui";
 export interface SectorTableConfig {
   /** Number of equal-distance sectors to split each lap into. Default 3. */
   sectorCount: number;
@@ -90,7 +91,7 @@ export function SectorTableRender(props: WidgetRenderProps<SectorTableConfig>) {
                   <td
                     key={k}
                     className="text-right px-2 py-0.5"
-                    style={{ color: isPurple ? PURPLE : "#D8DCE2" }}
+                    style={{ color: isPurple ? PURPLE : tc("text") }}
                   >
                     {formatLapTime(v)}
                   </td>
@@ -98,7 +99,7 @@ export function SectorTableRender(props: WidgetRenderProps<SectorTableConfig>) {
               })}
               <td
                 className="text-right px-2 py-0.5"
-                style={{ color: i === bestTotalRowIdx ? BEST_LAP : "#D8DCE2" }}
+                style={{ color: i === bestTotalRowIdx ? BEST_LAP : tc("text") }}
               >
                 {formatLapTime(row.totalS)}
               </td>

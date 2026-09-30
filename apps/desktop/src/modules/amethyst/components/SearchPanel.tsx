@@ -164,7 +164,7 @@ export function SearchPanel({
         >
           <span className={"flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border transition-colors " + (phraseOnly ? "border-asu-gold bg-asu-gold" : "border-helios-line")}>
             {phraseOnly && (
-              <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-helios-base" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-helios-on-gold" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}

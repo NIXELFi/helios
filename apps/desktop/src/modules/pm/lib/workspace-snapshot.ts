@@ -16,8 +16,11 @@ import type { Workspace } from "./data";
 // 4.4.3) — a v1 snapshot has no `links`, which crashed hydration before loadFlat
 // was made null-safe. v3: added `hiddenSubteams` (per-project sidebar display
 // hides, 4.5.x) — a v2 snapshot has no `hiddenSubteams` (loadFlat is null-safe,
-// but bumping forces a refetch so the field arrives authoritatively).
-const SNAPSHOT_VERSION = 3;
+// but bumping forces a refetch so the field arrives authoritatively). v4: User
+// gained `subteam_ids` (owner pickers rank by subteam, 5.6.x) — a v3 snapshot
+// paints every picker ungrouped until the network hydrate lands, and never if
+// it doesn't.
+const SNAPSHOT_VERSION = 4;
 // localStorage is ~5-10 MB; cap well under that. An oversize workspace simply
 // isn't cached (revalidate still works) rather than throwing a quota error.
 const MAX_BYTES = 3_000_000;

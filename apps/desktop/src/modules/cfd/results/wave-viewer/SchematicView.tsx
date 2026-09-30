@@ -14,6 +14,7 @@ import type {
   WaveSizeField,
 } from "../../state/types";
 
+import { tc, tca } from "@helios/ui";
 interface Props {
   packed: WaveCapturePacked;
   frameIdx: number;
@@ -108,7 +109,7 @@ function draw(
 ) {
   const { width, height, tiers, cylinderCenters, cylinderColumnX, cylinderBaseR } = layout;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#0E0E10";
+  ctx.fillStyle = tc("base");
   ctx.fillRect(0, 0, width, height);
 
   // Draw connection paths between tiers FIRST so pipes/cylinders sit on top.
@@ -132,7 +133,7 @@ function draw(
   // Inset a bit further so the text isn't clipped by the canvas edge, and
   // match the uppercase-tracking-wider treatment used everywhere else in
   // CFD so this reads as a section label rather than canvas noise.
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tc("dim");
   ctx.font = "600 11px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -163,7 +164,7 @@ function drawConnections(
   // Bumped from #3A3F47 → #5A5F66 so the connectivity actually reads against
   // the helios-base body. The previous 1.5px lines were nearly invisible at
   // normal viewing distance.
-  ctx.strokeStyle = "#5A5F66";
+  ctx.strokeStyle = tc("muted");
   ctx.lineWidth = 1.5;
 
   const wide = (role: "plenum" | "collector") =>
@@ -340,7 +341,7 @@ function drawWidePipe(
   // Hairline cell separators — drawn AFTER the cell fills so they sit on top.
   // Only render if cells are thick enough (>3px) to avoid moire on dense pipes.
   if (cellH > 3) {
-    ctx.strokeStyle = "rgba(14,14,16,0.55)";
+    ctx.strokeStyle = tca("base", 0.55);
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let c = 1; c < colorF.nCells; c++) {
@@ -353,7 +354,7 @@ function drawWidePipe(
   // Label centered above the pipe. Inter (the app body font) renders cleaner
   // at small sizes than the monospace stack; saved ui-monospace for the
   // status/numeric strips where alignment matters more than aesthetic.
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tc("dim");
   ctx.font = "600 10px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
@@ -396,7 +397,7 @@ function drawBranchPipe(
   }
   // Hairline cell separators — same treatment as drawWidePipe but along X.
   if (cellW > 3) {
-    ctx.strokeStyle = "rgba(14,14,16,0.55)";
+    ctx.strokeStyle = tca("base", 0.55);
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let c = 1; c < colorF.nCells; c++) {
@@ -407,7 +408,7 @@ function drawBranchPipe(
     ctx.stroke();
   }
   // Label above the strip (centered horizontally).
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tc("dim");
   ctx.font = "600 10px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
@@ -480,12 +481,12 @@ function drawCylinder(
   // ranges.
   const strokeColor =
     stroke === "INTAKE"      ? "#7FB3D5" :
-    stroke === "COMPRESSION" ? "#9097A0" :
+    stroke === "COMPRESSION" ? tc("dim") :
     stroke === "POWER"       ? "#E8A847" :
                                "#A77860";
 
   // Bore background (crankcase / below-piston region) — match canvas bg.
-  ctx.fillStyle = "#0E0E10";
+  ctx.fillStyle = tc("base");
   ctx.fillRect(boreX, boreY, boreSide, boreSide);
 
   // Chamber above piston, colored by cylField.
@@ -493,9 +494,9 @@ function drawCylinder(
   ctx.fillRect(boreX + pistonInset, boreY, pistonW, pistonY - boreY);
 
   // Piston body.
-  ctx.fillStyle = "#9097A0";
+  ctx.fillStyle = tc("dim");
   ctx.fillRect(pistonX, pistonY, pistonW, pistonH);
-  ctx.strokeStyle = "#2A2C32";
+  ctx.strokeStyle = tc("line");
   ctx.lineWidth = 1;
   ctx.strokeRect(pistonX, pistonY, pistonW, pistonH);
 
@@ -507,7 +508,7 @@ function drawCylinder(
   ctx.strokeRect(boreX, boreY, boreSide, boreSide);
 
   // Cylinder number above bore.
-  ctx.fillStyle = "#D8DCE2";
+  ctx.fillStyle = tc("text");
   ctx.font = "600 11px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
@@ -523,7 +524,7 @@ function drawCylinder(
   ctx.fillStyle = strokeColor;
   ctx.arc(cx - 32, dotY, dotR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#D8DCE2";
+  ctx.fillStyle = tc("text");
   ctx.font = "600 9px 'Inter', system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";

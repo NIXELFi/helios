@@ -46,6 +46,692 @@ follow [semver](https://semver.org/).
   every step of the submit wizard: what the sandbox blocks and why, what each
   permission actually grants, how review works, and what to do after a rejection.
 
+## [5.13.5] - 2026-09-29
+
+### Fixed
+- Logs: with a log open, Helios kept running two animation loops at the display's full refresh rate (about 190 frames a second here) even while you were in PM, Vault or anywhere else: the FPS counter and an FFT chart retrying its first draw forever because a hidden module's chart has no size. Both now stop when Logs isn't on screen.
+- PM task sheet dates: a date the sheet refuses (a start after the due date) now snaps back instead of staying on screen unsaved, and blanking just one part of a date (e.g. backspacing the day) no longer wipes the whole date. The Gantt also names tasks with a typo'd date when they are the only dated tasks in view.
+- PM: opening a task no longer clears its subsystem. A subsystem shared into another subteam is remembered per computer, so on any other computer just viewing the task wiped it. The subsystem is now only cleared when you change the task's primary subteam to one it doesn't belong to, and the picker always shows the task's current subsystem.
+- PM task sheet: the estimate saves when you leave the field or press Enter, not on every keystroke, and rejects negative or longer-than-10-year values.
+- PM Productivity: typing a custom From/To date no longer freezes the view while the year is half-typed (0202); the range waits for a real year, and the weekly chart is capped at 10 years.
+- PM: new tasks, events, milestones and the bulk Due field refuse a half-typed year (anything outside 2000-2100) and say why, instead of saving it. A new task's due date can't be before its start.
+- PM Dashboard: one task with a typo'd year no longer squashes the date histogram into a bar or two (it counts as undated), and "upcoming events" no longer lists a repeating event with a typo'd start with a date centuries in the past.
+- PM: the critical path ignores typo'd dates and caps any one task at 10 years, so one bad value can't take over the path.
+- Logs: a large `smooth()` window in a math channel could freeze Helios, and freeze it again on every launch because the channel is saved. Smoothing now takes the same time whatever the window, and a window wider than the data returns gaps immediately.
+- Logs: typing in the Math channels editor no longer recalculates every math channel on every loaded session after each keystroke. Changes are saved 0.4 s after you stop typing, when you leave the field, or when you close the editor, and only the edited channel and the ones after it are recalculated.
+- Logs: saved math channels and lap-detection settings are checked when Helios loads them. Malformed entries are dropped and decimals are limited to 0-6, so a corrupt saved value can't stop Helios from starting.
+- XY plot fit overlays: the polynomial degree is limited to 1-6 as you type and when a saved layout loads. The fit rejects degrees above 12, so a saved degree can no longer lock up the plot.
+- Engine bar segments are limited to 1-200, and the decimals setting on numeric readouts and gauges is limited to 0-6 when you type it. Saved values are limited again when the widget draws. A large decimals value previously crashed the widget, and a huge segment count stalled every cursor move.
+- CFD: typing an out-of-range run size (for example 1,000,000,000 "Max cycles") could make the solver try to reserve gigabytes of memory up front and crash Helios. The Single-RPM, Sweep and Optimization dialogs now disable Start and name the bad field (max cycles, RPM, convergence tol, min cycles, optimization step and seed), and the app refuses the same bad values (plus a zero, negative or non-numeric RPM, pipe cell count or pipe size in the engine config) with a clear error instead of running them.
+- CFD Optimization: "Max cycles per RPM" is now held to the 50 the field has always shown as its maximum; higher values used to be accepted silently.
+- CFD lap-sim VD sweep: a tiny step or an unbounded range no longer freezes the app; a sweep is capped at 500 points.
+- Less background work everywhere: a teammate opening Helios, leaving, or switching module no longer re-renders every module you have open (PM, Logs, Vault, CFD, Sim, Org...) on every signed-in client. Only the "On Helios" roster updates, and only when it actually changed.
+- Modules you are not looking at no longer re-render with the shell (the auto-update countdown, opening a dialog, switching modules), and the update download bar redraws at most four times a second instead of on every network chunk.
+- Org & Access Pulse stops refreshing its four admin queries every minute while it is hidden or the window is minimised, and catches up once when you come back.
+- Amethyst's graph stops animating once the layout settles or the module is hidden, and picks up again when you hover, drag, zoom or select a note. Plinko stops redrawing 60 times a second when no ball is falling.
+- Vault: matching vault files to the local folder is now a direct lookup instead of a scan of every local file for every vault file, so auto-sync passes, the file table and the bulk-action bar stay fast on large vaults (~13k files).
+- Vault: folder paths are worked out once per folder list instead of once per file, which removes another per-file cost from every sync pass.
+- Vault: a periodic local rescan that finds nothing changed no longer restarts an in-progress auto-sync or recomputes every file's status. A pass that ends with failed downloads now retries them after 30 seconds, since an unchanged rescan no longer does.
+- Vault: the sync ledger stays in memory and is saved in batches (within a few seconds, and when a sync or bulk download finishes). It used to rewrite the whole ledger file once per downloaded file, which slowed large syncs down more and more. Deletion markers older than the 7-day cool-off are cleaned out.
+- SOLIDWORKS add-in bridge: looking up a file by its path no longer scans the whole vault each time, so status checks for many files at once are faster.
+
+## [5.13.4] - 2026-09-29
+
+### Fixed
+- PM Gantt: one task with a typo'd year (start 0202-08-18) stretched the timeline across 1,800 years, about 2.2 million elements, and pushed Helios to 3-5 GB of memory with lag everywhere. The Gantt now skips dates outside 2000-2100, names the affected tasks in its header so they can be fixed, and caps the timeline at about 10 years.
+- PM: the task sheet's start/due dates and the table's due date no longer save the partial years a date field reports while you type a year (0002, 0020, 0202); only a real year is saved.
+
+## [5.13.3] - 2026-09-29
+
+### Fixed
+- Sign-up now states the 12-character password minimum plainly and counts characters live as you type (e.g. "5/12"), instead of a soft "most vaults require" hint and an error only after pressing Create account.
+- Sign-up subteam dropdown now uses your system's native colors, so the list can't render unreadable/blank on some Windows setups.
+- If the subteam list ever loads empty, sign-up now says "No subteams available" instead of showing a blank dropdown.
+
+## [5.13.2] - 2026-09-28
+
+### Fixed
+- Sign-up with a non-approved email (anything but @asu.edu) now says so right on the form, instead of failing with a generic server error.
+- PM Gantt: the task-name column stays frozen on the left however far you scroll right (it used to slide off-screen).
+- PM Gantt and Calendar now open on today instead of the project's earliest date.
+
+## [5.13.1] - 2026-09-28
+
+### Fixed
+- Windows: no more empty terminal windows flashing open and closed when Helios starts (or while the Sim tab is open).
+
+## [5.13.0] - 2026-09-24
+
+### Added
+- Sim: a sync pill in the header ("Synced 2 min ago", "Offline — showing this machine only", "Fetching Josh's lap…"), and errors now stay on screen as toasts until dismissed instead of vanishing on the next refresh.
+- Sim: "Recent records" strip on the leaderboard, with NEW badges for records and PBs set in the last 24 h, each judged on its own board.
+- Sim: Chase and Compare buttons on every leaderboard row, your own row highlighted, and the run panel opens beside the board instead of jumping to Runs.
+- Sim: the run panel says which board a run is on, its position and gap, and offers "Compare in Logs with my PB / leader".
+- Sim: "Drive against" has its own reference choice (this lap / my PB / leader); Sign in buttons on the Launch tab and board.
+
+### Changed
+- Sim: "Open in Logs" lands on the run's best lap in the lap-analysis workspace.
+- Sim: bests are per course everywhere ("AX 40.870 · Accel 4.352"), and "new PB" compares against the same board (course, car model, device, physics revision).
+- Sim: off-course laps are struck through and left out of gaps; unranked runs show a short reason chip; the ghost picker is "Ghost in replay" and lists ranked laps on the same car model, your PB first.
+- Sim: today's runs open automatically when they include yours; tables and tabs work from the keyboard; the Launch tab no longer waits for the run archive to load.
+
+## [5.12.3] - 2026-09-23
+
+### Fixed
+- Sim leaderboard: runs shared before 5.12.2 are re-shared once with their per-sector cones, so sector records and perfect laps fill in; until then a theoretical slower than a lap actually driven shows as a dash instead of a wrong number.
+- Sim leaderboard: tables no longer spill out of their card on a 1280-wide window (the date column shows from 1536 px up).
+
+## [5.12.2] - 2026-09-23
+
+### Added
+- Sim: launch the 4-wheel model from the Launch tab (new "Car model" choice) and straight from its leaderboard with a "Launch 4-wheel" button on each course. Needs simulator 0.7.5.
+- Sim: "N not ranked" on a board now says why when you hover it (e.g. "14 the car was modified").
+
+### Changed
+- Sim leaderboard: physics eras are picked per course, not per model, so looking back at one course's older board leaves the others alone. A course nobody has driven on the current physics says so.
+- Sim leaderboard: roomier tables. The setup sits on its own line under the driver, numbers have space between them, and the page uses more of a wide screen.
+- Sim: the "best lap anyone has scored" banner only counts lapped courses; a skidpad score or accel time no longer takes it.
+- Sim: "Time found" compares a driver's runs on the same car model and physics only.
+
+### Fixed
+- Sim: a run with a single off-course lap was taken off the board as if the car had been modified (simulators 0.7.2–0.7.4). Runs already on disk are corrected and re-shared.
+- Sim: a shared run from simulator 0.7.x whose car model was lost in sharing no longer ranks as a bicycle time by default.
+- Sim: skidpad no longer shows a ~24 s "Theoretical" or "Perfect lap" beside a ~4.9 s best.
+- Sim: a run with an untimed sector no longer disappears from the Runs list and the board, and per-sector cone counts now reach the shared board, so sector records and theoretical bests fill in for laps with cones.
+- Sim: keeping lap telemetry is judged per car model, so a driver's 4-wheel laps can no longer push out their bicycle bests.
+
+## [5.12.1] - 2026-09-23
+
+### Added
+- **Simulator leaderboards keep their history through physics updates.** Each board is now per physics era: when a simulator update changes a car's physics enough to move lap times, that model's board starts fresh, and the older era stays one click away (the "rev" chips above the board) instead of being wiped or mixed in. The simulator stamps the era on every run (0.7.4+) and refuses to ship a physics change without deciding whether it is a new era; older runs are placed by version (the 4-wheel beta's rev 1 ended at simulator 0.7.3).
+
+## [5.12.0] - 2026-09-23
+
+### Added
+- **Simulator leaderboards: the bicycle and the 4-wheel model side by side.** Every course now shows two boards next to each other, one per vehicle model, so a 4-wheel beta time never ranks against a bicycle time. Each row shows the setup its best lap was set on (roll stiffness split, brake bias, diff, launch rpm, final drive, and on the 4-wheel model its toe, camber and Ackermann). Needs simulator 0.7.2 to record the model and setup; older runs sit on the bicycle board.
+
+### Fixed
+- **4-wheel runs no longer show up as bicycle times.** The simulator marked them "not counted", but Helios never read that and ranked them anyway. Runs recorded before simulator 0.7.2 are classified from the car they were driven on, and a shared row is re-uploaded once it can say which model it was, so an existing 4-wheel time moves to its own board when its driver's Helios updates. Runs driven on a modified car no longer rank at all.
+
+## [5.11.0] - 2026-09-23
+
+### Added
+- **Simulator: Skidpad and Acceleration on the Launch tab.** The two new rulebook events in simulator 0.7.0+ can now be started from Helios. Skidpad is the FSAE figure of eight, scored (right + left) / 2 with 0.125 s a cone; Acceleration is 75 m timed from the line with the car staged 0.3 m behind it. Each gets its own leaderboard.
+
+## [5.10.0] - 2026-09-21
+
+### Changed
+- **Helios keeps looking for its own updates.** It used to check once, a few
+  seconds after it opened, so a copy left open for days never saw a release
+  and its auto-install never had anything to act on. It now also checks every
+  five minutes, whenever the network comes back, and within seconds of a
+  release being published (announced over realtime). Background checks are
+  quiet: the update pill only changes when one is found, and never in the
+  middle of an update.
+- Sim: **the simulator updates itself from anywhere in Helios.** A new build
+  used to be picked up only when somebody opened the Sim module. Now Helios
+  checks the build feed when it starts, every five minutes, and within seconds
+  of a build being published, whichever module is open. As before, only a
+  machine that already has the simulator is updated, and only with the build
+  the feed names, verified by its SHA-256 before it is installed; the
+  announcement itself is never trusted.
+
+## [5.9.3] - 2026-09-21
+
+### Added
+- Sim: **team sector records can be watched and compared.** Click a sector
+  record on the leaderboard and a card says whose it is, which lap, how many
+  cones are in it, and how far off it your own best in that sector is. "Watch
+  in sim" opens the record lap at that sector with your own lap as the ghost;
+  "Compare in Logs" opens both laps with the record as Main and yours as Ref,
+  in Lap Analysis, zoomed to the sector. Your own Theoretical time is clickable
+  too, and shows where your best sectors beat your best lap. When a lap is no
+  longer stored, the buttons are off and the card says why. Positioning at a
+  lap and sector needs a simulator that understands `--replay-lap`,
+  `--ghost-lap` and `--sector`; older ones open the replay from the start.
+- Sim: a lap that holds a team sector record or a course's best lap keeps its
+  telemetry, on top of the best-three / latest-three rule, so records stay
+  watchable. The storage budget still has the last word: a lap it removed is
+  not put back.
+
+### Changed
+- Sim: **sector records now include cone penalties.** A sector counts two
+  seconds for every cone struck in it, so a run that went through the slalom
+  can no longer hold that sector's record. Records and theoretical bests are
+  worked out from each lap rather than from a run's summary. Runs from
+  simulators that do not record which sector a cone was in only count laps
+  with no cones at all.
+
+### Fixed
+- Sim: replaying a run against a teammate's ghost no longer shows "GHOST NOT
+  LOADED". The ghost's lap is now downloaded along with the replay, and runs
+  whose lap was never shared are no longer offered as ghosts.
+
+## [5.9.2] - 2026-09-21
+
+### Fixed
+- Sim: laps driven before the 2026 courses gained their slaloms no longer rank.
+  Every run the simulator recorded before 19 September stamped itself `1.0.0` —
+  a version that never shipped — and because that sorts above every real
+  version, those runs were read as *newer* than the course change and survived
+  the clear-out meant to remove them. One of them, a lap through open road
+  where the current course has cones, had been sitting on top of the autocross
+  board. Twenty-five such times have been removed from the team's boards; the
+  runs themselves stay on the machines that recorded them.
+
+### Changed
+- Sim: a generated course now keeps your best 2 laps and your latest 1, rather
+  than the best 3 and latest 3 a fixed course keeps. Seeds are effectively
+  unlimited, so the old rule gave every new one its own six-lap allowance and
+  storage grew with how much the team practised. Times are unaffected — every
+  run's time is still shared and kept for good; this is only about which laps
+  are stored for replay.
+
+## [5.9.1] - 2026-09-21
+
+### Changed
+- Sim: the leaderboard keeps generated courses on their own tab. The
+  competition board shows the 2026 Michigan courses only; a "Generated
+  courses" tab appears once somebody has driven one, with a board per seed.
+
+## [5.9.0] - 2026-09-21
+
+### Added
+- Sim: the Launch tab can start a **generated course** — "Generated autocross" or
+  "Generated endurance" plus a seed. The simulator (0.6.0+) lays out a course
+  nobody has driven from the seed, to the FSAE course rules, and the same seed
+  gives the same course on every rig, so a seed is something to put in the
+  group chat. "New seed" picks one; the course id is `gen-ax-SEED` /
+  `gen-en-SEED` and shows up on the board and in the runs table under its own
+  name. Chasing a run on a generated course relaunches that course.
+
+### Changed
+- Sim: the 2026 autocross and endurance courses gained their slaloms (from the
+  published course maps) in simulator 0.6.0, and slalom gates that score a
+  cone passed on the wrong side as an off course. Times set before that were
+  driven on a different course, so **runs on those courses from before
+  2026-09-20 18:10 (or from a simulator older than 0.6.0; for endurance, which
+  gained a third slalom in 0.6.1, before 18:28 or older than 0.6.1) no longer
+  rank**, are not pushed to the team's board, and say why in the runs table.
+  The team's board was cleared of them. Every slalom cone now has a pointer
+  cone lying beside it showing which side to pass.
+- Sim: the runs table's course filter lists every course in the archive, not
+  only the fixed three.
+
+## [5.8.4] - 2026-09-20
+
+### Added
+
+- **Sim leaderboard: rank by average, not only by the one good lap.** An
+  "Average of last 15" switch beside "Fastest lap" ranks each driver by the
+  mean of their newest fifteen clean runs on the course, with the spread, the
+  best lap inside that window and how many runs the average covers. Three
+  clean runs to rank; drivers short of that are listed as pending. Off-course
+  and aided runs stay out of the average instead of dragging it down.
+
+### Fixed
+
+- **Sim on macOS: "not installed" was the wrong diagnosis.** The build feed
+  had only ever carried a Windows build, so a Mac found nothing for itself and
+  the panel implied the driver had missed a step, with no install button to
+  press. The panel now says what is true — no macOS build has been published
+  yet, and which platforms the feed does have — and a macOS build is published
+  alongside the Windows one from this release on.
+
+## [5.8.3] - 2026-09-19
+
+### Added
+- **The simulator keeps itself current.** Helios used to offer a newer
+  simulator build as a banner with a button, which at a test day nobody
+  pressed, so a fix published to the feed reached only the rigs whose driver
+  happened to notice. Now whenever the Sim module is open it reads the build
+  feed and, if the feed names a build other than the one installed, fetches
+  it, verifies it and installs it on its own — with a progress line on the
+  Launch tab and in the module header, and the launch button held until it
+  is done. Difference, not order: rolling the feed back rolls every rig
+  back with it. A machine that never had the simulator is still asked first.
+- **Every run says whether its lap went up.** The team's copy keeps a
+  driver's lap (the telemetry) for their best 3 and latest 3 runs on each
+  course; every run's time is shared regardless. That rule is now printed
+  where runs are started, at the foot of the runs table, and on each run of
+  your own — "time and lap" or "time only", with why.
+
+### Changed
+- **Best three, not best two.** The telemetry kept per course per driver is
+  now the best 3 plus the latest 3, as the team was told; it was 2 and 3.
+
+## [5.8.2] - 2026-09-19
+
+### Added
+- **A leaderboard per device, and Helios works out which one you were on.**
+  A wheel, a controller and a keyboard are not the same instrument — a wheel
+  has a real stop at a real angle and two hundred times the resolution of a
+  thumbstick, and a keyboard is a switch that software ramps into a steering
+  command — so one list of all three ranked hardware rather than drivers.
+  The leaderboard now has a tab per class, and only for classes somebody has
+  actually driven, so a team all on wheels never sees the question.
+
+  Which board a run lands on is measured, not asked. The simulator records
+  what actually steered the car, frame by frame, and decides from the device
+  itself: a base the rig opened for force feedback, or a wheel that says so
+  by name. The control profile in the settings screen is a dropdown, and
+  ranking by a dropdown ranks what people say — pick "Controller", steer the
+  wheel anyway, and the controller record was yours for free. Runs recorded
+  before this still fall back to the profile, which is all anybody had for
+  them.
+
+### Fixed
+- **A run already shared with the team could never be corrected.** Runs were
+  uploaded once and then only ever read back, so anything learned about a run
+  afterwards never reached the server. That showed the moment the leaderboard
+  started separating boards by device: every run the team had already driven
+  sat under "Unrecorded device" and the wheel board, the one everybody is
+  actually on, was empty — and nothing would have fixed it, because those
+  runs were already up there. Helios now compares what it has against what
+  the server holds and sends up anything that no longer matches. It settles
+  after one sign-in and writes nothing on the next. Sending a run up again
+  leaves the lap it shared exactly where it was; and anything in your storage
+  folder that no run points at any more is cleared out, so a shared lap can
+  neither be lost by a correction nor left behind by one.
+- **Signing in on a second machine no longer deletes the laps you shared from
+  the first.** Helios decided which of your laps to keep shared by looking
+  only at the runs on the machine it was running on. A laptop holding one of
+  your runs therefore judged the five the rig had shared, found none of them
+  on its own list, and removed all four of their laps — and the rig, on its
+  next sync, put them back and removed the laptop's, and the two went on
+  trading megabytes for as long as both stayed open. The rule is now judged
+  over every run you have, wherever it was driven, so every machine reaches
+  the same answer and nothing changes hands twice.
+- **A jittery log read as a faster one.** Helios measures a telemetry group's
+  real sample rate from the rows it finds, and re-labels the group when that
+  disagrees with the nominal rate by a fifth — which moves every filter cutoff
+  derived from it. A 100 Hz log recorded on a 144 Hz display has gaps that
+  alternate between one frame and two, and the old estimate landed on one of
+  the two rather than between them: a real 45-second run measured 141 Hz
+  against an actual 99.3. It now reads 99.3 — the rate the simulator itself
+  recorded — and a log with a ten-second dropout in the middle still reads
+  100 rather than collapsing.
+- Telemetry shared from a run that was not driven on a wheel now goes up at
+  10 Hz rather than 100. Nobody studies a thumbstick's steering trace sample
+  by sample, and an endurance run stops being eleven megabytes.
+- **The leaderboard's tooltip described a scoring rule nobody uses.** It said
+  an excursion costs ten seconds, "which is what an event scores". FSAE scores
+  an off course at twenty seconds, and this board — since 5.8.1 — gives such
+  a lap no time at all. The tooltip now says exactly that, and the footnote
+  under the runs table and the empty-board message list going off course
+  among the reasons a run is not ranked, which until now they did not.
+- **A run whose only lap went off course was described as having "no
+  completed lap".** The lap was completed and then thrown out, which is a
+  different thing from never finishing one, and the reason is what you hover
+  a time for. The runs table, the detail panel and the end-of-session card
+  now say the lap went off course.
+- **A teammate's shared run opened with a red error and the wrong numbers.**
+  The detail panel read a manifest it does not have and put "cannot find the
+  file specified" at the bottom, reported "0 samples at 99 Hz" and no
+  telemetry, offered "Watch replay" for a run whose lap was never shared and
+  refused "Open in Logs" for one whose lap was — the opposite of what the runs
+  table beside it said about the same run. It now knows the run is not on
+  this machine: it shows the size of the shared lap, the real sample count
+  where the row carries one, offers replay, Logs and "Drive against this lap"
+  exactly when the lap was shared (fetching it first, as the table does), and
+  drops "Show the files" for a run that has none here.
+- **Deleting a run did not delete it from the team.** "Delete for good"
+  removed the directory and left the row on the server, so the run came
+  straight back with a cloud icon, still ranked. Deleting one of your own
+  runs now takes it off the team's board as well, lap included, and the
+  confirmation says how far the delete reaches — this machine, the board, or
+  both — before you press it. A machine of yours that still holds the files
+  will share the run again the next time it syncs; delete it there too.
+- **The team's board stopped growing at a thousand runs, silently.** Helios
+  asked Supabase for two thousand shared runs in one request; the server sends
+  at most a thousand and says nothing about the rest, so past that point the
+  board kept the newest thousand and dropped the oldest without a word. Newest
+  first meant the ones it dropped were the season's earliest — where a
+  driver's first time on a course lives, and the whole of "time found". It now
+  reads the board a page at a time and gets all of it.
+- **Helios no longer talks to the server every six seconds while the Sim tab
+  is open.** It synced the whole archive with Supabase on every re-read of
+  the disk whether or not anything had changed, and one run the server would
+  not accept blocked every other run from being shared, ten times a minute.
+  It now pushes on sign-in and when a run is written or deleted, re-reads the
+  team's board once a minute, and the refresh button does both at once.
+- **Driving against a lap you were just watching no longer ends the session
+  before it starts.** "Watch that lap" and then "Drive against this lap" put
+  the session summary over an empty simulator window with the driver still on
+  the grid, and when that window really closed nothing happened. The
+  simulator is single-instance, so the drive had been handed to the replay's
+  window and its own process had exited at once; Helios now watches the
+  window whatever it was opened for, and speaks when that closes.
+- **A simulator update that could not replace the running simulator left a
+  `.part` file behind.** Rolling back to the build you are currently running,
+  which the update banner offers, fails on Windows because a running
+  executable cannot be replaced — and the half-installed download stayed
+  beside it. The download is now removed whichever step refuses, and the
+  error says to close the simulator and try again.
+
+## [5.8.1] - 2026-09-19
+
+### Added
+- **The simulator's runs are the team's, not your machine's.** Until now the
+  archive was local files and nothing else, so the Runs table and the
+  leaderboard only ever showed drives made at the rig you were sitting at —
+  and looked exactly like a team board while doing it. Every run's times,
+  penalties and stats now sync to Supabase and everybody sees everybody's.
+  A run that sets its driver's best on a course also shares its telemetry, so
+  you can watch that lap and race its ghost; clicking watch on a teammate's
+  run fetches it onto your machine first, after which it behaves like any
+  other run. Practice laps share their time only, which is what keeps a
+  season of them from being a season of megabytes.
+
+  Identity is stamped server-side from your session and the client's is
+  ignored, so a time can only ever be posted as yourself, and you can read
+  everyone's rows but write only your own. On a shared rig Helios pushes only
+  the runs recorded against the account that is signed in — the rest belong to
+  whoever else drove there, and they will share their own.
+
+  Local files stay the source of truth and a rig with no network is unchanged.
+- **An update button for the simulator.** Helios only ever asked the build
+  feed what it had when it could not find a simulator at all — so once you
+  had one it never looked again, and a fix published to the feed could not
+  reach anybody who had already installed. The Launch tab now offers a build
+  the feed has and this machine does not, with the version you have, the
+  download size and the release notes. It offers an OLDER build too: rolling
+  back to something known to work at an event is a real thing to want.
+
+### Changed
+- **A lap that left the course does not go on the leaderboard.** It is
+  recorded in full — telemetry, excursion count, raw time — and it is not a
+  time: not a best, not a reference, not a sector best. This is deliberately
+  stricter than FSAE, which scores an off course at +20 s and keeps the time.
+  At a competition an off course is seen, marshalled and re-run; a board
+  people practise against with nobody watching is a different problem, and a
+  penalty smaller than the time a driver can save by cutting rewards the thing
+  it is meant to punish. Runs already in the archive were scored under the old
+  rule, so Helios checks the lap itself and unranks the ones that went off.
+
+### Fixed
+- **A downloaded simulator is marked executable again** on macOS and Linux.
+  Broken after 5.8.0 by a refactor that inserted the `chmod` at a new call
+  site and then removed it by a pattern that matched the one just inserted.
+  Windows was unaffected.
+- **The simulator's build feed is no longer read from a stale cache.**
+  Supabase serves public storage through a CDN, and publishing a second build
+  left the edge handing out the previous feed — the upload fine, the origin
+  correct, and Helios blind to it.
+
+## [5.8.0] - 2026-09-19
+
+### Added
+- **Sim.** A new module, last of the everyday modules in the rail: the
+  launcher, the archive and the leaderboards for the driver-in-loop simulator.
+  It installs the simulator on demand from Supabase storage rather than
+  shipping inside Helios, so anyone who does not want a driving simulator does
+  not download one. Launching a drive needs you signed in — a lap time is a
+  claim about a person — and Helios then decides what the run *is*: who is
+  driving, which course, which driver aids, whether it is logged, and which
+  lap to chase. The simulator decides what the rig is. `docs/SIM_SETTINGS.md`
+  states the rule and where every setting lives.
+- **Every run is archived and replayable.** The simulator writes
+  Helios-canonical telemetry at 100 Hz — 78 channels, the names in
+  `docs/channels.yaml`, loadable by the Logs module with no conversion — plus
+  a manifest with the lap and sector times, the penalties, the vehicle setup
+  the run was driven on and the course it was driven at. Runs are files under
+  `%LOCALAPPDATA%\Helios\sim-runs`, so a rig with no network still works. The
+  Runs table groups them by day, filters to yours, and opens any of them
+  either in the simulator's replay or straight into Logs.
+- **Per-course leaderboards.** Scored the way the event is: raw time plus two
+  seconds a cone plus ten an off-course. A run is ranked only if it completed
+  a lap, was launched from Helios by a signed-in driver, and was driven with
+  **traction control, ABS and the automatic gearbox all off** — the real car
+  has none of them. Runs that miss any of that still list and still replay,
+  with the reason on the row.
+- **Session summary.** Closing the simulator brings Helios to the Runs tab
+  with what you just did: runs, laps, your best, cones, and whether anything
+  was a personal best.
+- **`system.beacon` in the channel registry**, alongside the 55 new `sim.*`
+  channels. It was simply missing.
+
+### Changed
+- **The Runs table opens with every day rolled up.** It is the whole team's
+  archive, so on a shared machine the newest day is somebody else's session as
+  often as it is yours; a screen of day headers says what is there — how many
+  runs, how many laps, the day's best — and you open the one you came for.
+  "Expand all" is one click, and a run opened from a leaderboard or from the
+  session summary opens its own day.
+- **A run with no completed lap is not saved at all.** A drive that never
+  crossed the finish line has no time to rank and nothing to compare, and
+  keeping them filled the archive and people's disks with runs nobody would
+  open. The simulator says why rather than letting the run vanish quietly.
+  Note that free roam at MIS has no finish line, so it never files a run; the
+  launcher now says so before you drive it.
+- **A log's rate groups are measured from the log, not looked up.** When a
+  group's real sample rate differs from the channel registry's nominal by more
+  than 20%, Helios now uses the measured rate and says so. This affects every
+  log, not only simulator runs: filter cutoffs on `lowpass`/`highpass` math
+  channels are computed from it, and a 100 Hz file read as 10 Hz filters at a
+  tenth of the frequency you asked for.
+
+### Fixed
+- **The whole window scrolled.** Anything that outgrew the viewport scrolled
+  the document rather than its own pane, which slid the title bar off the top
+  of a window with no way to get it back. The shell is one screen tall and
+  every scrolling region inside it is now its own — the module rail included,
+  which is where this actually came from.
+- **Presence put people in the wrong module.** The "who's on Helios" roster
+  kept its own hand-written list of module names, and anyone sitting in Org,
+  Sim or Amethyst was reported to everyone else as being in Logs — a wrong
+  answer that looks exactly like a right one. It is now derived from the
+  rail's own table, which the compiler will not let go stale.
+
+## [5.7.4] - 2026-09-16
+
+### Added
+- **Settings.** An app-wide Settings dialog (Ctrl/⌘+, · the gear in the rail
+  · the account menu) with General, Notifications, Data, Shortcuts and About
+  tabs: which module Helios opens on, launch at login, what the close button
+  does (keep in tray / quit), desktop-notification switches per source with
+  quiet hours and a test button, the CFD team data folder, a one-click clear
+  of the PM workspace cache, a link to the app-data folder, the full
+  shortcut list, updater status with a manual check, and "Copy diagnostics"
+  for bug reports. Launch-at-login moved here from Vault → Settings.
+- **Automatic updates.** On by default: when a new version is found Helios
+  downloads it and restarts after a 20-second countdown shown in the update
+  dialog (it waits while Logs playback is running). You can postpone once
+  for 30 minutes; after that it installs. Turn it off in Settings → General
+  to go back to being asked.
+- Desktop notification when an update is ready (Settings → Notifications).
+- **Light mode.** Settings → General → Appearance: System, Dark or Light.
+  Every module, dialog, chart and canvas widget follows the choice. In light
+  the accent is ASU maroon instead of gold (buttons, active states, the
+  wordmark), the page and cards are white with light-grey side strips, status
+  and role chips use darker text so they read on white, avatars go pastel,
+  the arcade lobby follows the theme while each game screen stays a dark
+  display like a real cabinet, and switching themes
+  crossfades the whole window instead of snapping. Dark stays the default.
+  Under the hood the whole
+  palette moved to design tokens (CSS variables + a runtime lookup for canvas
+  and SVG), replacing ~2,300 hardcoded colours.
+
+### Fixed
+- **macOS: the post-update restart now actually brings the new Helios up.**
+  The old build launched the new copy while it was still running, so the
+  single-instance guard swallowed the launch and the app just vanished.
+  The relaunch is now handed to a detached shell that waits for the old
+  process to exit first.
+
+### Changed
+- **Helios now opens on PM.** A signed-in member lands on the PM tab (the
+  project's last-used view) instead of Logs; PM moved to the top of the
+  module rail to match. Signed-out launches still land on Logs, which works
+  offline. Logs is no longer booted in the background on every launch, so a
+  PM-bound start does less work.
+- **One branded boot screen.** The HELIOS splash covers sign-in at launch;
+  opening a module for the first time shows a light placeholder (the module's
+  glyph, its name, a thin gold line along the top) that only appears if the
+  open takes longer than a blink, and the module then fades in. Replaces the
+  bare "Loading…" / "Checking access…" panes.
+- The rail's user pill shows a quiet placeholder while your session is
+  restored instead of flashing "Sign in" at a returning user.
+
+## [5.7.3] - 2026-09-15
+
+### Added
+- **Admin has a new Pulse tab: Supabase health and team growth in one place.**
+  Owners and global admins see who is online right now, how many members had
+  Helios open each day, sign-ups, vault files, versions and stored content over
+  30 days, 90 days or since launch, activity split by Vault / PM / Games, a
+  day-by-hour heatmap of when the team works, per-vault size and activity, a
+  people list sorted by last active with a 30-day activity bar per person, and
+  an infrastructure strip (database size, connections, cache hit rate,
+  notification queue, scheduled jobs, largest tables). A nightly job snapshots
+  the day's numbers so the history keeps growing even after auth sessions age
+  out; the backfill covers every day since the first sign-up.
+- **Vault rows show which revision your local copy is.** The version column
+  now reads "v14" when your file matches the latest, "v12 of v14" when it is an
+  older revision, or "edited" when it matches no vault version, so you can tell
+  at a glance whether you have the latest Master Assembly.
+- **2048 moves like the original.** Tiles slide into place, merges bump, and
+  new tiles pop in, instead of the board repainting.
+
+### Fixed
+- **Subteam leads can create, rename and delete subsystems for their subteam.**
+  The subsystem write policy keyed on a legacy project team-membership row that
+  most accounts never received (every EV-side lead included), so "Add
+  subsystem" was denied. It now follows the pm.manage_subsystems capability.
+- **Auto-sync refreshes files that fell behind.** A local copy that was a
+  clean older revision but had lost its read-only bit was held back forever as
+  a "possible unsaved edit", so new revisions never arrived. If the local bytes
+  match what Helios last downloaded to that path, the newer revision now
+  replaces them; genuinely edited files are still left alone.
+- **SDM27 vault now shows every file imported from glassyPDM.** Imported
+  files had landed as private drafts nobody could see; they have been
+  published on the server (no app change; the import tooling was fixed so it
+  cannot recur).
+
+## [5.7.2] - 2026-09-14
+
+### Added
+- **Cellular telemetry ingest (server side).** The HTP/1 wire protocol, `telemetry` schema, `telemetry-ingest` edge function and staging compactor from the June pipeline branch are now on main. No user-facing change yet.
+- **Project Manager has a new Productivity view — a lead's Monday page.** Four
+  tiles up top answer the questions a lead asks first: how many tasks got done
+  this window (against the previous one, with a twelve-week sparkline), what is
+  due this week (with a Monday-to-Sunday strip and the overdue count), what is
+  stuck in Blocked or Needs Review, and the share that landed on or before its
+  due date. Under them, a Weeks strip charts completions per ISO week stacked
+  by subteam (or by owner, for leads), with gridlines, a hover breakdown, the
+  current week banded and the project's milestones marked as diamonds. An
+  Attention column lists the tasks to chase — overdue, due by Sunday, waiting
+  on review for more than a week, blocked, and in progress but untouched for a
+  fortnight — each opening the task on click. A Subteams panel compares open
+  work by status, stuck-first, and a Workload panel shows who is carrying how
+  much, with Unowned as its own row, sorted by load rather than by finishes.
+  Every number links into the Table with the matching filters. Pick This week
+  (the default), 4 weeks, 12 weeks, Season or a custom range; scope to a
+  subteam from the picker or by opening the view inside a team. Person-level
+  rows are only shown to people who can manage that scope's dashboard —
+  everyone else sees their own row, the unowned pile, and the team picture.
+- **Task history exports to CSV.** The Export CSV button on the Productivity
+  view saves every task event in the window — when it happened, what changed,
+  the task and its subteam, due date, estimate and actual days — so you can take
+  the numbers into a spreadsheet. The person column is included only when you
+  are allowed to see it.
+
+## [5.7.1] - 2026-09-09
+
+### Changed
+- **Helios asks the server far less of the time.** The Vault and Project
+  Manager background change-checks are now a single server call each instead of
+  four or five row-counting requests, and the row-level read policies evaluate
+  your membership once per query instead of once per row. The database work
+  behind an idle Helios drops by roughly half, so the app — and everyone
+  else's — stays responsive when the whole team is online at once.
+- Logs opens as soon as your primary session is loaded; the other recent sessions come in behind it instead of holding up the first paint (at most 12 are reopened automatically).
+- The map widget and the built-in help pages are loaded the first time they are used instead of at launch.
+- Vault and Project Manager stop their background checks while you are in another module or the window is hidden, and catch up with one small request when you come back. Coming back to the window no longer re-downloads the whole workspace.
+- Modules other than Logs are loaded the first time you open them, which makes launch lighter.
+- **The Vault's local-folder scan and file downloads now run in the native
+  layer.** Launch no longer re-reads and re-hashes every local file through the
+  app window — the hashes are remembered between runs, so a folder that hasn't
+  changed is scanned almost instantly — and a 200-file sync no longer holds the
+  files in memory.
+- **The Vault reads its file catalog once per vault instead of twice**,
+  refreshes only the part that changed when a teammate edits, and keeps one live
+  connection per vault instead of two. Moving between folders is instant now
+  that a folder view is read from the catalog already in memory rather than
+  fetched again.
+- **Project Manager applies a teammate's edit directly from the live event
+  instead of re-downloading the whole workspace**, so the board no longer
+  flickers when someone else saves. A comment, link, milestone, calendar event
+  or dependency now costs your computer nothing at all to take in, and a task
+  edit costs one small read of just that task.
+
+### Fixed
+- **Rescans of large vault folders no longer stutter the interface on slower
+  laptops.**
+- A background Project Manager refresh no longer re-writes the local cache on
+  every change; edits arriving in a burst are saved once, a moment later.
+
+## [5.7.0] - 2026-09-02
+
+### Added
+- **The New task form can name co-owners.** Co-owners already existed on a task
+  you'd already made, but the create form had no field for them — so every new
+  shared task meant opening it again in the detail sheet just to add the second
+  person. They now go on at creation, and promoting a co-owner to primary owner
+  quietly drops them from the co-owner list instead of listing them twice
+  (changing the primary back restores them). If a co-owner can't be saved the
+  task itself still lands, and you're told what didn't.
+- **Owner pickers put your own subteam first.** Every place you pick an owner —
+  the New task form, a task's detail sheet, the co-owner chips, the Table view's
+  inline Owner cell, the bulk "Set owner" action, and the owner filter on
+  Board/Table/Calendar — now shows the current subteam's people under their own
+  heading at the top, with everyone else below. Nobody is hidden:
+  cross-subteam assignment still works, and the picker's search still reaches
+  the whole directory. Membership is drawn from Org & Access grants plus whoever
+  already owns work on that subteam, so it stays useful even where membership
+  rows were never filled in. Typing in a picker's search box is no longer wiped
+  by a background refresh.
+
+### Changed
+- **Description boxes grow as you type.** The description field on the new-task
+  form and the task detail sheet sizes itself to its content instead of holding
+  three lines and scrolling.
+- **The window comes up sooner on launch.** The SOLIDWORKS add-in provisioning
+  that runs on every start was holding up the very first page load; it now
+  runs alongside boot instead of ahead of it.
+
+### Fixed
+- **The Board no longer stutters on big projects.** Every background refresh,
+  realtime update or filter keystroke was re-rendering all of the cards on the
+  board rather than the ones that actually changed. On a full project this cut
+  idle frame time by about a fifth and stopped the hitching while typing in the
+  filter bar.
+- **Plinko no longer lags when you spam the DROP button.** Every drop was
+  triggering a refresh of all fourteen standings boards, and each of those
+  asked the auth server who you were while holding the sign-in lock that every
+  drop also needs. A burst of drops paid for that lock over and over. The
+  standings now read your identity locally, and a bet only re-pulls the open
+  cabinet's own boards right away — the others refresh when you next look at
+  them.
+
+## [5.6.2] - 2026-08-29
+
+### Changed
+- **Blackjack is now dealt by the house.** Every card comes from a server-side
+  shoe and every hand is settled by the server in the same transaction that
+  drew the cards. The table plays exactly as before — same rules, same coaching
+  line, same shared subteam chips — but the dealer's hole card genuinely does
+  not exist on your machine until the reveal. Older app versions can no longer
+  open a blackjack hand; update to keep playing.
+- **Games leaderboards got routine maintenance.** Score submission checks were
+  tightened server-side and standings were recalculated.
+
+### Fixed
+- **A signed-out Helios no longer polls the server forever.** When a machine's
+  login expired while the app sat open (a shop PC left running for weeks), the
+  SOLIDWORKS bridge kept requesting vault data it could never receive. It now
+  goes quiet the moment the session ends and resumes at the next sign-in.
+
 ## [5.6.1] - 2026-08-26
 
 ### Fixed

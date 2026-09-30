@@ -60,13 +60,13 @@ type SortDir = "asc" | "desc";
 type RankDim = "objective" | EventMetricKey;
 
 const PODIUM: Record<number, { border: string; chip: string }> = {
-  1: { border: "border-l-[#FFC627]", chip: "border-[#FFC627]/60 text-[#FFC627]" },
+  1: { border: "border-l-asu-gold", chip: "border-asu-gold/60 text-asu-gold" },
   2: { border: "border-l-[#C0C7D1]", chip: "border-[#C0C7D1]/60 text-[#C0C7D1]" },
   3: { border: "border-l-[#CD7F32]", chip: "border-[#CD7F32]/60 text-[#CD7F32]" },
 };
 
 const PODIUM_TEXT: Record<number, string> = {
-  1: "text-[#FFC627]",
+  1: "text-asu-gold",
   2: "text-[#C0C7D1]",
   3: "text-[#CD7F32]",
 };
@@ -445,15 +445,15 @@ export function OptimizationResults({ study }: Props) {
 
   return (
     <div className="flex h-full flex-col bg-helios-base text-helios-text">
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[#2A2C32] bg-[#0E0E10] px-3 py-2">
+      <header className="flex flex-shrink-0 items-center gap-2 border-b border-helios-line bg-helios-base px-3 py-2">
         <div className="group min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wider text-[#FFC627]">Optimization</div>
-          <p className="text-[10px] text-[#5A5F66]">
+          <div className="text-[11px] uppercase tracking-wider text-asu-gold">Optimization</div>
+          <p className="text-[10px] text-helios-muted">
             <StudyNameEditor
               display={studyName(study)}
               customName={study.name}
               onRename={(name) => renameStudy(study.id, name)}
-              className="text-[#D8DCE2]"
+              className="text-helios-text"
             />
             {study.name && <span className="ml-1">({basename(study.configPath)})</span>}
             {" · "}
@@ -462,11 +462,11 @@ export function OptimizationResults({ study }: Props) {
               <span className="ml-2 text-amber-300">
                 best #{live.ranked[0].trial.trialIdx} ={" "}
                 {dim.fmt(live.ranked[0].trial.objectiveValue as number)}
-                {dim.unit && <span className="ml-0.5 text-[#9097A0]">{dim.unit}</span>}
+                {dim.unit && <span className="ml-0.5 text-helios-dim">{dim.unit}</span>}
               </span>
             )}
             {showEta && (
-              <span className="ml-2 text-[#9097A0]">{formatEta(live.eta as number)}</span>
+              <span className="ml-2 text-helios-dim">{formatEta(live.eta as number)}</span>
             )}
             {knockCount > 0 && (
               <span
@@ -505,7 +505,7 @@ export function OptimizationResults({ study }: Props) {
                 return (
                   <div
                     key={slot}
-                    className="flex h-[64px] items-center justify-center rounded-sm border border-dashed border-[#2A2C32] text-[18px] text-[#3A3D44]"
+                    className="flex h-[64px] items-center justify-center rounded-sm border border-dashed border-helios-line text-[18px] text-[#3A3D44]"
                   >
                     —
                   </div>
@@ -520,9 +520,9 @@ export function OptimizationResults({ study }: Props) {
                   type="button"
                   onClick={() => setSelectedIdx(t.trialIdx)}
                   className={
-                    "flex flex-col rounded-sm border border-l-4 border-[#2A2C32] bg-[#0E0E10] px-2 py-1.5 text-left " +
+                    "flex flex-col rounded-sm border border-l-4 border-helios-line bg-helios-base px-2 py-1.5 text-left " +
                     podium.border +
-                    (selected ? " ring-1 ring-[#FFC627]/40" : " hover:bg-[#16171B]")
+                    (selected ? " ring-1 ring-asu-gold/40" : " hover:bg-helios-panel")
                   }
                 >
                   <div className="flex items-center justify-between">
@@ -534,7 +534,7 @@ export function OptimizationResults({ study }: Props) {
                     >
                       #{r.rank}
                     </span>
-                    <span className="text-[9px] text-[#5A5F66]">
+                    <span className="text-[9px] text-helios-muted">
                       {(kiByTrial.get(t.trialIdx) ?? 0) > 1 && (
                         <span
                           className="mr-1 text-[#FF5252]"
@@ -546,11 +546,11 @@ export function OptimizationResults({ study }: Props) {
                       trial #{t.trialIdx}
                     </span>
                   </div>
-                  <div className="mt-1 font-mono text-[14px] text-[#D8DCE2]">
+                  <div className="mt-1 font-mono text-[14px] text-helios-text">
                     {dim.fmt(t.objectiveValue as number)}
-                    {dim.unit && <span className="ml-1 text-[10px] text-[#9097A0]">{dim.unit}</span>}
+                    {dim.unit && <span className="ml-1 text-[10px] text-helios-dim">{dim.unit}</span>}
                   </div>
-                  <div className="font-mono text-[9px] text-[#5A5F66]">
+                  <div className="font-mono text-[9px] text-helios-muted">
                     {r.rank === 1
                       ? "best"
                       : `Δ ${r.deltaToBest > 0 ? "+" : ""}${r.deltaToBest.toPrecision(3)}` +
@@ -568,10 +568,10 @@ export function OptimizationResults({ study }: Props) {
               glance. "total pts" is the balanced pick; the per-event winners are
               the extremes. Click any to inspect that design + rank the view by it. */}
           {bestByMetric.some((b) => b.best) && (
-            <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-              <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+            <div className="rounded-sm border border-helios-line bg-helios-base">
+              <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
                 Best design per objective
-                <span className="ml-2 text-[9px] lowercase text-[#5A5F66]">
+                <span className="ml-2 text-[9px] lowercase text-helios-muted">
                   total pts = the efficiency↔speed balance · click to inspect + rank by it
                 </span>
               </div>
@@ -589,18 +589,18 @@ export function OptimizationResults({ study }: Props) {
                     className={
                       "flex items-baseline justify-between gap-2 rounded-sm border px-1.5 py-1 text-left " +
                       (rankDim === metric.key
-                        ? "border-[#FFC627]/60 bg-[#FFC627]/5"
-                        : "border-[#2A2C32] hover:border-[#FFC627]/40") +
+                        ? "border-asu-gold/60 bg-asu-gold/5"
+                        : "border-helios-line hover:border-asu-gold/40") +
                       (best ? "" : " opacity-40")
                     }
                   >
-                    <span className="uppercase tracking-wider text-[#5A5F66]">{metric.label}</span>
+                    <span className="uppercase tracking-wider text-helios-muted">{metric.label}</span>
                     {best ? (
-                      <span className="text-[#D8DCE2]">
-                        {metric.fmt(best.val)} <span className="text-[#5A5F66]">#{best.trialIdx}</span>
+                      <span className="text-helios-text">
+                        {metric.fmt(best.val)} <span className="text-helios-muted">#{best.trialIdx}</span>
                       </span>
                     ) : (
-                      <span className="text-[#5A5F66]">—</span>
+                      <span className="text-helios-muted">—</span>
                     )}
                   </button>
                 ))}
@@ -609,7 +609,7 @@ export function OptimizationResults({ study }: Props) {
           )}
 
           {live.nDone === 0 ? (
-            <div className="m-4 rounded-sm border border-dashed border-[#2A2C32] p-8 text-center text-[11px] text-[#5A5F66]">
+            <div className="m-4 rounded-sm border border-dashed border-helios-line p-8 text-center text-[11px] text-helios-muted">
               {dimDef && POINTS_METRIC_KEYS.includes(dimDef.key)
                 ? "No ranked trials — points need a reference baseline (set it on the Performance tab), or no trials are done yet."
                 : "Waiting for first trial…"}
@@ -617,7 +617,7 @@ export function OptimizationResults({ study }: Props) {
           ) : (
             <div className="flex flex-col gap-3">
               {/* Convergence — full width, in the active dimension. */}
-              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="rounded-sm border border-helios-line bg-helios-base">
                 <ScatterPlot
                   title={`${dim.label} vs trial`}
                   points={convergencePoints}
@@ -631,8 +631,8 @@ export function OptimizationResults({ study }: Props) {
               </div>
 
               {/* Value vs parameter — full width, with a param selector. */}
-              <div className="flex flex-col rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                <div className="flex flex-wrap items-center gap-1 border-b border-[#2A2C32] px-2 py-1">
+              <div className="flex flex-col rounded-sm border border-helios-line bg-helios-base">
+                <div className="flex flex-wrap items-center gap-1 border-b border-helios-line px-2 py-1">
                   {study.parameterPaths.map((p) => (
                     <button
                       key={p}
@@ -641,8 +641,8 @@ export function OptimizationResults({ study }: Props) {
                       className={
                         "rounded-sm border px-1.5 py-0.5 text-[9px] " +
                         (p === paramForScatter
-                          ? "border-[#FFC627] text-[#FFC627]"
-                          : "border-[#2A2C32] text-[#9097A0] hover:border-[#FFC627]/60")
+                          ? "border-asu-gold text-asu-gold"
+                          : "border-helios-line text-helios-dim hover:border-asu-gold/60")
                       }
                     >
                       {p}
@@ -661,7 +661,7 @@ export function OptimizationResults({ study }: Props) {
               </div>
 
               {/* Sensitivity tornado — which knobs move the active dimension. */}
-              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+              <div className="rounded-sm border border-helios-line bg-helios-base">
                 <TornadoChart
                   title={`sensitivity · ${dim.label}`}
                   bars={sensitivityBars}
@@ -674,8 +674,8 @@ export function OptimizationResults({ study }: Props) {
               </div>
 
               {/* Parallel coordinates — full width. */}
-              <div className="rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
-                <div className="border-b border-[#2A2C32] px-2 py-1 text-[10px] uppercase tracking-wider text-[#9097A0]">
+              <div className="rounded-sm border border-helios-line bg-helios-base">
+                <div className="border-b border-helios-line px-2 py-1 text-[10px] uppercase tracking-wider text-helios-dim">
                   parallel coordinates
                 </div>
                 <ParallelCoordsPlot
@@ -691,12 +691,12 @@ export function OptimizationResults({ study }: Props) {
 
           {/* Rank-by control — the active dimension drives the whole view. */}
           <div className="flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="uppercase tracking-wider text-[#9097A0]">Rank by</span>
+            <span className="uppercase tracking-wider text-helios-dim">Rank by</span>
             <select
               aria-label="Rank by"
               value={rankDim}
               onChange={(e) => setRankDim(e.target.value as RankDim)}
-              className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-2 py-1 font-mono text-[11px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+              className="rounded-sm border border-helios-line bg-helios-deep px-2 py-1 font-mono text-[11px] text-helios-text focus:border-asu-gold focus:outline-none"
             >
               <option value="objective">objective ({study.params.objective.metric})</option>
               {EVENT_RANK_METRICS.map((m) => (
@@ -706,7 +706,7 @@ export function OptimizationResults({ study }: Props) {
               ))}
             </select>
             {dimDef && (
-              <span className="text-[#5A5F66]">
+              <span className="text-helios-muted">
                 podium + charts + table all rank by {dimDef.label} · vehicle {carKey}
                 {POINTS_METRIC_KEYS.includes(dimDef.key) ? " · needs baselines (Performance tab)" : ""}
               </span>
@@ -729,21 +729,21 @@ export function OptimizationResults({ study }: Props) {
                   rankBy: rankDim === "objective" ? study.params.rankBy ?? null : rankDim,
                 }, { name: refineName(study.configPath, best.trialIdx) });
               }}
-              className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+              className="rounded-sm border border-asu-gold/50 px-2 py-1 text-[10px] uppercase tracking-wider text-asu-gold hover:bg-asu-gold/10 disabled:opacity-40"
             >
               ⟲ Refine around #1
             </button>
             {/* Auto-refine: run several rounds hands-off, stop on convergence. */}
             {arActive || autoRefine?.studyId === "<starting>" ? (
-              <span role="status" className="flex items-center gap-2 rounded-sm border border-[#FFC627]/40 bg-[#FFC627]/5 px-2 py-1 text-[10px] text-[#FFC627]">
+              <span role="status" className="flex items-center gap-2 rounded-sm border border-asu-gold/40 bg-asu-gold/5 px-2 py-1 text-[10px] text-asu-gold">
                 auto-refine round {autoRefine!.round}/{autoRefine!.totalRounds}
                 {study.status === "running" ? " — running…" : " — evaluating…"}
-                <span className="text-[#9097A0]">stops when gain &lt; 0.5%</span>
+                <span className="text-helios-dim">stops when gain &lt; 0.5%</span>
                 <button
                   type="button"
                   onClick={() => { setAutoRefine(null); setArTick((t) => t + 1); }}
                   title="Stop the loop after this round (the running job itself continues)"
-                  className="rounded-sm border border-[#2A2C32] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#9097A0] hover:border-[#FF5252] hover:text-[#FF5252]"
+                  className="rounded-sm border border-helios-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-helios-dim hover:border-[#FF5252] hover:text-[#FF5252]"
                 >
                   Stop loop
                 </button>
@@ -763,7 +763,7 @@ export function OptimizationResults({ study }: Props) {
                       setAutoRefine({ studyId: nextId, roundsLeft: arRounds - 1, round: 1, totalRounds: arRounds, lastBest: best });
                     }).catch(() => setAutoRefine(null));
                   }}
-                  className="rounded-sm border border-[#FFC627]/50 px-2 py-1 text-[10px] uppercase tracking-wider text-[#FFC627] hover:bg-[#FFC627]/10 disabled:opacity-40"
+                  className="rounded-sm border border-asu-gold/50 px-2 py-1 text-[10px] uppercase tracking-wider text-asu-gold hover:bg-asu-gold/10 disabled:opacity-40"
                 >
                   ▶ Auto-refine
                 </button>
@@ -771,7 +771,7 @@ export function OptimizationResults({ study }: Props) {
                   aria-label="Auto-refine rounds"
                   value={arRounds}
                   onChange={(e) => setArRounds(Number(e.target.value))}
-                  className="rounded-sm border border-[#2A2C32] bg-[#0B0B0D] px-1 py-1 font-mono text-[10px] text-[#D8DCE2] focus:border-[#FFC627] focus:outline-none"
+                  className="rounded-sm border border-helios-line bg-helios-deep px-1 py-1 font-mono text-[10px] text-helios-text focus:border-asu-gold focus:outline-none"
                 >
                   {[2, 3, 5].map((n) => <option key={n} value={n}>{n} rounds</option>)}
                 </select>
@@ -780,10 +780,10 @@ export function OptimizationResults({ study }: Props) {
           </div>
 
           {/* Sortable ranked trial table. */}
-          <div className="overflow-x-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10]">
+          <div className="overflow-x-auto rounded-sm border border-helios-line bg-helios-base">
             <table className="w-full text-left font-mono text-[10px]">
-              <thead className="bg-[#0B0B0D] text-[9px] uppercase tracking-wider text-[#5A5F66]">
-                <tr className="border-b border-[#2A2C32] [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
+              <thead className="bg-helios-deep text-[9px] uppercase tracking-wider text-helios-muted">
+                <tr className="border-b border-helios-line [&>th]:px-2 [&>th]:py-1 [&>th]:font-normal">
                   <SortTh label="rank" k="rank" onSort={onSort} arrow={arrow} />
                   <SortTh label="#" k="trial" onSort={onSort} arrow={arrow} />
                   <th>status</th>
@@ -805,8 +805,8 @@ export function OptimizationResults({ study }: Props) {
                   const baseCls = podiumText
                     ? podiumText
                     : t.status === "done"
-                    ? "text-[#D8DCE2]"
-                    : "text-[#5A5F66]";
+                    ? "text-helios-text"
+                    : "text-helios-muted";
                   return (
                     <tr
                       key={t.trialIdx}
@@ -821,8 +821,8 @@ export function OptimizationResults({ study }: Props) {
                         }
                       }}
                       className={
-                        "cursor-pointer border-t border-[#16171B] focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[#FFC627]/60 " +
-                        (isSelected ? "bg-[#16171B] " : "hover:bg-[#16171B]/50 ") +
+                        "cursor-pointer border-t border-helios-panel focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-asu-gold/60 " +
+                        (isSelected ? "bg-helios-panel " : "hover:bg-helios-panel/50 ") +
                         baseCls
                       }
                     >
@@ -831,7 +831,7 @@ export function OptimizationResults({ study }: Props) {
                       <td className="px-2 py-0.5">
                         {t.status === "running" ? (
                           <span className="inline-flex items-center gap-1">
-                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#FFC627]" />
+                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-asu-gold" />
                             running
                           </span>
                         ) : (
@@ -879,7 +879,7 @@ export function OptimizationResults({ study }: Props) {
           </div>
         </div>
 
-        <aside className="sticky top-0 self-start max-h-[calc(100vh-7rem)] overflow-auto rounded-sm border border-[#2A2C32] bg-[#0E0E10] p-3">
+        <aside className="sticky top-0 self-start max-h-[calc(100vh-7rem)] overflow-auto rounded-sm border border-helios-line bg-helios-base p-3">
           {selectedTrial ? (
             <TrialInspector
               trial={selectedTrial}
@@ -897,7 +897,7 @@ export function OptimizationResults({ study }: Props) {
               }
             />
           ) : (
-            <p className="text-[11px] text-[#5A5F66]">Click a trial to inspect.</p>
+            <p className="text-[11px] text-helios-muted">Click a trial to inspect.</p>
           )}
         </aside>
       </div>
@@ -944,7 +944,7 @@ function SortTh({
       <button
         type="button"
         onClick={() => onSort(k)}
-        className="cursor-pointer uppercase tracking-wider text-[#5A5F66] hover:text-[#FFC627]"
+        className="cursor-pointer uppercase tracking-wider text-helios-muted hover:text-asu-gold"
       >
         {label}
         {arrow(k)}

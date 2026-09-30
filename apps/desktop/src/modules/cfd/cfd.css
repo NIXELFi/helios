@@ -14,7 +14,7 @@
 .cfd-root,
 .cfd-root * {
   scrollbar-width: thin;
-  scrollbar-color: #ffc627 transparent;
+  scrollbar-color: rgb(var(--asu-gold)) transparent;
 }
 .cfd-root ::-webkit-scrollbar {
   width: 10px;
@@ -26,13 +26,13 @@
   background: transparent;
 }
 .cfd-root ::-webkit-scrollbar-thumb {
-  background: #ffc627;
+  background: rgb(var(--asu-gold));
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 8px;
 }
 .cfd-root ::-webkit-scrollbar-thumb:hover {
-  background: #ffd24d;
+  background: rgb(var(--asu-gold) / 0.85);
   background-clip: content-box;
   border: 2px solid transparent;
 }

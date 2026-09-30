@@ -82,7 +82,7 @@ export function PluginDetail({
               type="button"
               onClick={() => onRequestInstall(plugin)}
               disabled={busy}
-              className="rounded-sm bg-asu-gold px-4 py-2 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+              className="rounded-sm bg-asu-gold px-4 py-2 text-xs font-semibold text-helios-on-gold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
             >
               Install
             </button>
@@ -102,7 +102,7 @@ export function PluginDetail({
                   type="button"
                   onClick={() => onUpdate(plugin)}
                   disabled={busy}
-                  className="inline-flex items-center gap-1.5 rounded-sm bg-asu-gold px-4 py-2 text-xs font-semibold text-helios-base transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-sm bg-asu-gold px-4 py-2 text-xs font-semibold text-helios-on-gold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold disabled:opacity-50"
                 >
                   <IconArrowUp size={14} /> Update to v{plugin.version}
                 </button>

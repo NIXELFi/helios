@@ -25,10 +25,11 @@
 // long a budget lasts. If subteams blow up too fast, BET_FRACTION is the one
 // number to turn.
 //
-// ⚠ These rules are duplicated in SQL (games.max_bet / games.place_bet). The
-//   SQL copy is the one that counts — the client copy exists only so the
-//   cabinet can grey out chips it knows the server would refuse. They are
-//   pinned to each other by __tests__/money.sql-parity.test.ts.
+// ⚠ These rules are duplicated in SQL (games.max_bet, checked by bj_deal and
+//   plinko_drop under the budget row lock). The SQL copy is the one that
+//   counts — the client copy exists only so the cabinet can grey out chips it
+//   knows the server would refuse. They are pinned to each other by
+//   __tests__/money.sql-parity.test.ts.
 
 /** Share of the subteam budget one bet may stake. */
 export const BET_FRACTION = 0.05;
@@ -54,8 +55,9 @@ export function maxBet(balance: number): number {
 }
 
 /** Why this stake would be refused, or null if it's good. Mirrors the checks
- *  games.place_bet makes under the row lock, so the UI and the server give the
- *  same answer — but the server's answer is the one that moves money. */
+ *  games.bj_deal / games.plinko_drop make under the row lock, so the UI and
+ *  the server give the same answer — but the server's answer is the one that
+ *  moves money. */
 export function betRejection(stake: number, balance: number): string | null {
   if (!Number.isInteger(stake) || stake <= 0) return "Bets are whole chips.";
   const cap = maxBet(balance);

@@ -11,6 +11,7 @@ import { datumNearPx } from "./hit-test";
 import { sampleAt } from "../lib/sample-at";
 import { useResizeObserver } from "../lib/use-resize-observer";
 
+import { tc, tca } from "@helios/ui";
 export interface StripChartChannel {
   id: string;
   color: string;
@@ -241,7 +242,7 @@ function drawDatums(u: uPlot, datums: number[]): void {
       label.style.left = "3px";
       label.style.padding = "0 3px";
       label.style.background = "#FF6B4A";
-      label.style.color = "#0E0E10";
+      label.style.color = tc("base");
       label.style.font = MONO_9PX;
       label.style.borderRadius = "2px";
       label.style.whiteSpace = "nowrap";
@@ -342,8 +343,8 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
 
     const scales: Scales = { x: { time: false } };
     const axes: Axis[] = [{
-      stroke: "#5A5F66",
-      grid: { stroke: "#23252B" },
+      stroke: tc("muted"),
+      grid: { stroke: tc("grid") },
       font: AXIS_FONT,
       values: (_u, splits) => splits.map(xMode === "distance" ? formatDistance : formatElapsed),
       size: 30,
@@ -376,7 +377,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             scale: id,
             side,
             stroke: ch.color,
-            grid: side === 3 ? { stroke: "#23252B" } : { show: false, stroke: "" },
+            grid: side === 3 ? { stroke: tc("grid") } : { show: false, stroke: "" },
             font: AXIS_FONT,
             size: 60,
           });
@@ -498,7 +499,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
         zoomBox.style.position = "absolute";
         zoomBox.style.top = "0";
         zoomBox.style.bottom = "0";
-        zoomBox.style.background = "rgba(255, 198, 39, 0.18)";
+        zoomBox.style.background = tca("gold", 0.18);
         zoomBox.style.borderLeft = "1px solid #FFC627";
         zoomBox.style.borderRight = "1px solid #FFC627";
         zoomBox.style.pointerEvents = "none";
@@ -663,7 +664,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
     const reason = dataPack.emptyReason;
     if (!reason) return;
     const note = document.createElement("div");
-    note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-[#9097A0] text-center px-4 pointer-events-none";
+    note.className = "absolute inset-0 flex items-center justify-center text-[11px] text-helios-dim text-center px-4 pointer-events-none";
     note.textContent = reason;
     container.appendChild(note);
     return () => { note.remove(); };
@@ -817,7 +818,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
   }, [cursorEmitter, visibleIdsKey, JSON.stringify(config.channels.map((c) => c.id))]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-[#16171B]">
+    <div ref={containerRef} className="relative w-full h-full bg-helios-panel">
       {config.channels.length > 0 && (
         <div
           className="absolute top-1 right-1 z-10 pointer-events-none max-w-[85%] flex flex-col gap-px items-end"
@@ -830,7 +831,7 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
             >
               {isMulti && (
                 <span
-                  className="text-[9px] font-mono-num leading-none bg-[#0E0E10cc] px-1 py-px rounded-sm tabular-nums"
+                  className="text-[9px] font-mono-num leading-none bg-helios-base/80 px-1 py-px rounded-sm tabular-nums"
                   style={{ color: session.color }}
                 >
                   {session.label}
@@ -846,21 +847,21 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
                 return (
                   <div
                     key={i}
-                    className="flex items-center gap-1 text-[9px] text-[#D8DCE2] bg-[#0E0E10cc] px-1 py-px rounded-sm"
+                    className="flex items-center gap-1 text-[9px] text-helios-text bg-helios-base/80 px-1 py-px rounded-sm"
                   >
                     <span className="inline-block w-1.5 h-1.5" style={{ background: c.color }} />
                     <span className="font-mono-num leading-none" title={c.id || undefined}>
                       {meta?.label ?? (c.id || "—")}
                     </span>
                     <span
-                      className="font-mono-num leading-none text-[#FFC627] tabular-nums text-right"
+                      className="font-mono-num leading-none text-asu-gold tabular-nums text-right"
                       style={{ minWidth: "2.4em" }}
                       data-testid={`strip-chart-readout-value-${session.id}-${c.id}`}
                     >
                       {meta ? formatValue(v, meta.decimals) : formatReadout(v)}
                     </span>
                     {meta?.units ? (
-                      <span className="font-mono-num leading-none text-[#5A5F66]">{meta.units}</span>
+                      <span className="font-mono-num leading-none text-helios-muted">{meta.units}</span>
                     ) : null}
                   </div>
                 );
@@ -885,14 +886,14 @@ export function StripChartRender(props: WidgetRenderProps<StripChartConfig>) {
               ...config,
               xMode: config.xMode === "distance" ? "time" : "distance",
             })}
-            className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num border border-[#2A2C32] hover:border-[#FFC627] hover:text-[#FFC627] cursor-pointer transition-colors"
+            className="bg-helios-base/80 text-helios-dim px-1.5 py-px rounded-sm font-mono-num border border-helios-line hover:border-asu-gold hover:text-asu-gold cursor-pointer transition-colors"
           >
             x = {xMode === "distance" ? "distance" : "time"}
           </button>
         ) : (
           <span
             data-testid="strip-chart-xmode"
-            className="bg-[#0E0E10cc] text-[#9097A0] px-1.5 py-px rounded-sm font-mono-num"
+            className="bg-helios-base/80 text-helios-dim px-1.5 py-px rounded-sm font-mono-num"
           >
             x = {xMode === "distance" ? "distance" : "time"}
           </span>

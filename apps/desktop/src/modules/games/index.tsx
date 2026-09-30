@@ -3,10 +3,10 @@ import "./games.css";
 import { useHeliosAuth } from "../../auth/AuthShell";
 import { prefetchBoards } from "./components/standings";
 import {
-  dropBall, fetchBudget, fetchRating, forfeitOpenBet, isMoney, isRated, placeBet,
-  raiseBet, settleBet, submitRatedSession, submitScore,
-  type Budget, type DropRequest, type DropResult, type GameId, type PlacedBet,
-  type RaisedBet, type Rating, type SettledBet,
+  bjDeal, bjDouble, bjHit, bjStand, dropBall, fetchBudget, fetchRating,
+  forfeitOpenBet, isMoney, isRated, submitRatedSession, submitScore,
+  type BjTable, type Budget, type DropRequest, type DropResult, type GameId,
+  type Rating,
 } from "./api";
 import type { MoneyTable, RatedSession } from "./games/types";
 import { GAMES, categoryOf, gamesInCategory, type GameCategory, type GameDef } from "./registry";
@@ -81,8 +81,15 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // Warm every standings board on mount (and re-warm after each submit) so
   // the first click on any tab or game chip renders instantly from cache
   // instead of cold-loading.
+  // A money-driven bump (chips moved on the open cabinet) only re-pulls that
+  // game's boards; everything else re-warms the lot. The scope rides on a ref
+  // set by whoever bumps the token, so this effect stays keyed on the token.
+  const refreshScope = useRef<GameId | null>(null);
   useEffect(() => {
-    if (client) prefetchBoards(client, refreshToken);
+    if (!client) return;
+    const only = refreshScope.current;
+    refreshScope.current = null;
+    prefetchBoards(client, refreshToken, only ?? undefined);
   }, [client, refreshToken]);
 
   /** Lobby board game switch — persisted like play() so the choice sticks. */
@@ -190,8 +197,11 @@ export function GamesModule({ paused }: GamesModuleProps) {
   function refreshBoards() {
     if (boardBump.current.timer) return; // a trailing refresh is already due
     const wait = Math.max(0, BOARD_REFRESH_MS - (Date.now() - boardBump.current.last));
+    const game = active?.id ?? null;
     boardBump.current.timer = setTimeout(() => {
       boardBump.current = { last: Date.now(), timer: null };
+      // Chips only move on the cabinet that's open, so only its boards changed.
+      refreshScope.current = game;
       setRefreshToken((n) => n + 1);
     }, wait);
   }
@@ -218,11 +228,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // cabinet — a ref initialiser would freeze the first render's forever.
   const moneyOps = useRef<{
     drop: (req: DropRequest, nonce: string) => Promise<DropResult>;
-    placeBet: (stake: number, nonce: string) => Promise<PlacedBet>;
-    raiseBet: (betId: string, nonce: string) => Promise<RaisedBet>;
-    settleBet: (
-      betId: string, payout: number, outcome: string, nonce: string,
-    ) => Promise<SettledBet>;
+    deal: (stake: number, nonce: string) => Promise<BjTable>;
+    hit: (betId: string, nonce: string) => Promise<BjTable>;
+    stand: (betId: string, nonce: string) => Promise<BjTable>;
+    double: (betId: string, nonce: string) => Promise<BjTable>;
     forfeitOpen: () => Promise<{ stake: number } | null>;
   } | null>(null);
   moneyOps.current = {
@@ -230,17 +239,21 @@ export function GamesModule({ paused }: GamesModuleProps) {
       if (!client) throw new Error("no table open");
       return bank(await dropBall(client, req, nonce));
     },
-    placeBet: async (stake, nonce) => {
-      if (!client || !active) throw new Error("no table open");
-      return bank(await placeBet(client, active.id, stake, nonce));
-    },
-    raiseBet: async (betId, nonce) => {
+    deal: async (stake, nonce) => {
       if (!client) throw new Error("no table open");
-      return bank(await raiseBet(client, betId, nonce));
+      return bank(await bjDeal(client, stake, nonce));
     },
-    settleBet: async (betId, payout, outcome, nonce) => {
+    hit: async (betId, nonce) => {
       if (!client) throw new Error("no table open");
-      return bank(await settleBet(client, betId, payout, outcome, nonce));
+      return bank(await bjHit(client, betId, nonce));
+    },
+    stand: async (betId, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await bjStand(client, betId, nonce));
+    },
+    double: async (betId, nonce) => {
+      if (!client) throw new Error("no table open");
+      return bank(await bjDouble(client, betId, nonce));
     },
     forfeitOpen: async () => {
       if (!client || !active) return null;
@@ -256,10 +269,10 @@ export function GamesModule({ paused }: GamesModuleProps) {
   // must not churn the cabinet's effects mid-hand.
   const stableMoney = useRef({
     place: (req: DropRequest, nonce: string) => moneyOps.current!.drop(req, nonce),
-    placeBet: (stake: number, nonce: string) => moneyOps.current!.placeBet(stake, nonce),
-    raiseBet: (betId: string, nonce: string) => moneyOps.current!.raiseBet(betId, nonce),
-    settleBet: (betId: string, payout: number, outcome: string, nonce: string) =>
-      moneyOps.current!.settleBet(betId, payout, outcome, nonce),
+    deal: (stake: number, nonce: string) => moneyOps.current!.deal(stake, nonce),
+    hit: (betId: string, nonce: string) => moneyOps.current!.hit(betId, nonce),
+    stand: (betId: string, nonce: string) => moneyOps.current!.stand(betId, nonce),
+    double: (betId: string, nonce: string) => moneyOps.current!.double(betId, nonce),
     forfeitOpen: () => moneyOps.current!.forfeitOpen(),
   }).current;
 
@@ -314,7 +327,9 @@ export function GamesModule({ paused }: GamesModuleProps) {
               </button>
             </div>
             <GameStandings client={client} gameId={active.id} refreshToken={refreshToken}>
-              <div className="relative shrink-0 self-center">
+              {/* games-screen: the dark display of the cabinet — canvas, table AND
+                  overlays share the dark tokens in both themes (games.css). */}
+              <div className="games-screen relative shrink-0 self-center">
                 {(isRated(active.id) && !carried) || (isMoney(active.id) && !budget) ? (
                   /* A rated cabinet can't open until we know what rating the
                    * session is continuing from, and a money cabinet can't open
@@ -382,7 +397,7 @@ export function GamesModule({ paused }: GamesModuleProps) {
                       "games-display-heavy text-2xl tracking-[0.22em] transition-colors " +
                       (section === s.id
                         ? "text-asu-gold"
-                        : "text-helios-line hover:text-helios-dim")
+                        : "text-helios-muted hover:text-helios-dim")
                     }
                   >
                     {s.label}

@@ -96,12 +96,12 @@ export const binsOverlay: OverlayModule<BinsConfig, BinsArtifact> = {
       <Row label="bins">
         <input type="number" min={1} max={200} value={config.binCount}
           onChange={(e) => onChange({ ...config, binCount: Number(e.target.value) })}
-          className="w-16 bg-[#0E0E10] border border-[#2A2C32] px-1" />
+          className="w-16 bg-helios-base border border-helios-line px-1" />
       </Row>
       <Row label="statistic">
         <select value={config.statistic}
           onChange={(e) => onChange({ ...config, statistic: e.target.value as typeof config.statistic })}
-          className="bg-[#0E0E10] border border-[#2A2C32] px-1 text-[11px]">
+          className="bg-helios-base border border-helios-line px-1 text-[11px]">
           <option value="mean">mean</option>
           <option value="median">median</option>
           <option value="p25-p75">p25–p75 band</option>
@@ -121,8 +121,8 @@ export const binsOverlay: OverlayModule<BinsConfig, BinsArtifact> = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[11px] text-[#D8DCE2] py-0.5">
-      <span className="text-[#9097A0]">{label}</span>
+    <label className="flex items-center justify-between gap-2 text-[11px] text-helios-text py-0.5">
+      <span className="text-helios-dim">{label}</span>
       {children}
     </label>
   );

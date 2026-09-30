@@ -29,8 +29,13 @@ export interface VaultCursor {
 // The codebase treats the supabase client/query builder as `any` at helper
 // boundaries (cf. paginate.ts `buildQuery: () => any`) to avoid pulling the
 // @supabase/supabase-js types into app source — the client comes from
-// @helios/auth. We only need `.from(table)` here.
-type SupabaseLike = { from: (table: string) => any };
+// @helios/auth. We need `.rpc(fn, args)` (the fast path) and `.from(table)`
+// (the legacy fallback). `rpc` is optional so an older/stubbed client still
+// type-checks against the fallback.
+type SupabaseLike = {
+  from: (table: string) => any;
+  rpc?: (fn: string, args?: Record<string, unknown>) => any;
+};
 
 /** Deterministic string form of a cursor for cheap equality comparison. */
 export function cursorKey(c: VaultCursor): string {
@@ -48,11 +53,70 @@ export function cursorChanged(prev: VaultCursor | null, next: VaultCursor): bool
 }
 
 /**
- * Fetch the current cursor for a vault with four head-only count queries (no
- * row bodies). Throws if any sub-count errors so the caller can fall back to a
- * full reconcile rather than mistake an error for "nothing changed".
+ * Has this process seen the server answer "no such function" for the cursor
+ * RPC? A database that predates 20260909100000 answers that on EVERY probe, so
+ * we latch it once and go straight to the legacy counts for the rest of the
+ * session rather than pay for a doomed request every poll. Only a genuine
+ * missing-function signal sets it — a 500 or an outage must NOT downgrade the
+ * client permanently.
+ */
+let rpcMissing = false;
+
+/** PostgREST answers PGRST202 for an unknown RPC; Postgres itself answers
+ *  42883. Both wordings ("Could not find the function …", "… does not exist")
+ *  are matched too, because some paths lose the code (see useBridgeSync). */
+function isMissingFunction(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null;
+  if (e?.code === "PGRST202" || e?.code === "42883") return true;
+  return /could not find the function|does not exist/i.test(String(e?.message ?? ""));
+}
+
+/**
+ * Fetch the current cursor for a vault.
+ *
+ * Fast path: one `pdm.vault_cursor(vault_id)` call. It is `security definer`,
+ * so membership is checked once and the counts run without RLS — measured in
+ * prod at 11 ms against 1,434 ms for the RLS'd versions count alone, which was
+ * 32% of ALL database time. Falls back to the four-request legacy probe on a
+ * database that does not have the function yet; any other error throws so the
+ * caller runs a full reconcile instead of mistaking it for "nothing changed".
  */
 export async function fetchVaultCursor(
+  client: SupabaseLike,
+  vaultId: VaultId,
+): Promise<VaultCursor> {
+  if (!rpcMissing && typeof client.rpc === "function") {
+    // The vault client's default schema is `pdm` (packages/auth client.ts), so
+    // the bare function name resolves to pdm.vault_cursor.
+    const { data, error } = await client.rpc("vault_cursor", { p_vault_id: vaultId });
+    if (error) {
+      if (!isMissingFunction(error)) {
+        const msg = (error as { message?: string })?.message;
+        throw error instanceof Error ? error : new Error(msg ?? "vault_cursor failed");
+      }
+      rpcMissing = true;
+    } else {
+      // A `returns table` RPC comes back as an array of rows; tolerate a bare
+      // object in case PostgREST is asked for a single object.
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      if (!row) throw new Error("vault_cursor returned no row");
+      return {
+        liveFiles: Number(row.live_files ?? 0),
+        versions: Number(row.versions ?? 0),
+        liveFolders: Number(row.live_folders ?? 0),
+        activeLocks: Number(row.active_locks ?? 0),
+      };
+    }
+  }
+  return fetchVaultCursorLegacy(client, vaultId);
+}
+
+/**
+ * The pre-RPC probe: four head-only count queries (no row bodies). Kept as the
+ * fallback for a database without 20260909100000, and still exercised by its
+ * own tests — the FK-naming detail below is a shipped regression.
+ */
+export async function fetchVaultCursorLegacy(
   client: SupabaseLike,
   vaultId: VaultId,
 ): Promise<VaultCursor> {

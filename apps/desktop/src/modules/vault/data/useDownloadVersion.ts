@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useSupabaseClient } from "@helios/auth";
+import { invoke } from "@tauri-apps/api/core";
 import { writeFile, mkdir, rename, remove } from "@tauri-apps/plugin-fs";
 import { gunzipIfNeeded, isGzipped } from "./compression";
 import { setReadonly } from "./fs-readonly";
@@ -32,6 +33,11 @@ function parentDir(path: string): string {
 }
 
 /**
+ * Whole-transfer-in-the-webview download. This was `downloadVersionOnce`
+ * until v5.7.1 and is now the FALLBACK: it runs when the native
+ * `download_object_to_temp` command isn't reachable (no Tauri host — vitest,
+ * the Lite web build — or an older shell). Behaviour is unchanged.
+ *
  * Pure-async download primitive — call directly from a worker pool when you
  * need parallel downloads. Returns the error message on failure (instead of
  * setting hook state) so the caller can aggregate.
@@ -58,7 +64,7 @@ function parentDir(path: string): string {
  * so an interrupted write or a concurrent writer can never leave a corrupt
  * file at the real path.
  */
-export async function downloadVersionOnce(
+export async function downloadVersionOnceInWebview(
   client: SupabaseClient,
   sha: string,
   destPath: string,
@@ -172,6 +178,137 @@ export async function downloadVersionOnce(
         await rename(tmpPath, destPath);
       } catch (writeErr) {
         try { await remove(tmpPath); } catch { /* best-effort; temp may not exist */ }
+        throw writeErr;
+      }
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const transient = /504|502|503|timeout|gateway|network|fetch failed|abort/i.test(msg);
+      if (!transient || attempt === 2) {
+        return { ok: false, error: msg };
+      }
+      lastError = msg;
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+    }
+  }
+  return { ok: false, error: lastError };
+}
+
+/** Shape of `commands::download::DownloadResult` (serde camelCase). */
+interface NativeDownloadResult {
+  tempPath: string;
+  bytes: number;
+  wasGzip: boolean;
+}
+
+/** Messages Tauri's `invoke` produces when there is no host to talk to. */
+const NO_TAURI_HOST = /window\.__TAURI|__TAURI_INTERNALS__|not a tauri|invoke is not a function/i;
+
+function isMissingTauriHost(e: unknown): boolean {
+  return NO_TAURI_HOST.test(e instanceof Error ? e.message : String(e));
+}
+
+/**
+ * Ask the native layer to stream one object into a temp file next to
+ * `destPath`, verifying its sha256 on the way through. Nothing is buffered in
+ * the webview and no file bytes cross the IPC bridge — only the temp path
+ * comes back.
+ *
+ * Returns null when the command isn't reachable (no Tauri host, or the
+ * Supabase URL / anon key aren't configured), which sends the caller to the
+ * webview implementation. Real download failures THROW, so the retry loop
+ * below sees them and can back off on a 5xx.
+ */
+async function nativeDownload(
+  client: SupabaseClient,
+  sha: string,
+  destPath: string,
+): Promise<NativeDownloadResult | null> {
+  const supabaseUrl =
+    (client as unknown as { supabaseUrl?: string }).supabaseUrl ??
+    (import.meta.env.VITE_SUPABASE_URL as string | undefined);
+  const apikey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  if (!supabaseUrl || !apikey) return null;
+  // supabase-js sends the user's access token when a session exists and the
+  // anon key otherwise. Mirror that exactly so storage RLS sees the same role
+  // it saw before this moved out of the webview.
+  let bearer = apikey;
+  try {
+    const session = await client.auth.getSession();
+    bearer = session?.data?.session?.access_token ?? apikey;
+  } catch {
+    // No session (or a stub client) — the anon key is the right fallback.
+  }
+  const req = {
+    url: `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath(String(sha))}`,
+    bearer,
+    apikey,
+    destPath,
+    expectedSha256: String(sha).toLowerCase(),
+  };
+  const res = (await invoke("download_object_to_temp", { req })) as
+    | NativeDownloadResult
+    | null;
+  // jsdom's stub transport resolves every invoke to null instead of throwing,
+  // so a shape-less result means "no native layer" just as a throw does.
+  if (!res || typeof res !== "object" || typeof res.tempPath !== "string") return null;
+  return res;
+}
+
+/**
+ * Download the bytes for `sha` and put them at `destPath`.
+ *
+ * The transfer itself runs in Rust (`download_object_to_temp`), which leaves
+ * a verified `<dest>.<uuid>.part` behind; the rename onto the destination
+ * stays here so the abort guard, the read-only clear and the temp cleanup are
+ * exactly the ones the Vault has always used. Without a native layer the
+ * whole thing falls back to `downloadVersionOnceInWebview`.
+ *
+ * Retries up to 3 times with exponential backoff on transient errors; the
+ * command puts the HTTP status number in its message so the same regex keeps
+ * classifying 502/503/504 as retryable.
+ */
+export async function downloadVersionOnce(
+  client: SupabaseClient,
+  sha: string,
+  destPath: string,
+  opts?: { signal?: AbortSignal },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const signal = opts?.signal;
+  if (signal?.aborted) return { ok: false, error: "aborted" };
+  let lastError = "download failed";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (signal?.aborted) return { ok: false, error: "aborted" };
+    try {
+      let native: NativeDownloadResult | null;
+      try {
+        native = await nativeDownload(client, sha, destPath);
+      } catch (e) {
+        if (!isMissingTauriHost(e)) throw e;
+        native = null;
+      }
+      if (!native) {
+        return await downloadVersionOnceInWebview(client, sha, destPath, opts);
+      }
+      const dir = parentDir(destPath);
+      if (dir) {
+        try { await mkdir(dir, { recursive: true }); }
+        catch { /* mkdir errors when the dir exists in some Tauri versions */ }
+      }
+      try {
+        // The real-vault model leaves non-checked-out files read-only, and
+        // renaming onto a read-only destination fails on Windows.
+        await setReadonly(destPath, false);
+        // Last-chance abort check: a supersede can land while the transfer
+        // ran. Without this the rename commits a superseded pass's bytes over
+        // a path a newer pass now owns.
+        if (signal?.aborted) {
+          try { await remove(native.tempPath); } catch { /* best-effort */ }
+          return { ok: false, error: "aborted" };
+        }
+        await rename(native.tempPath, destPath);
+      } catch (writeErr) {
+        try { await remove(native.tempPath); } catch { /* best-effort */ }
         throw writeErr;
       }
       return { ok: true };

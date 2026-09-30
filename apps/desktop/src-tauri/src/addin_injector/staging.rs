@@ -17,9 +17,10 @@ pub fn addin_root() -> PathBuf {
 /// PowerShell's VersionInfo to avoid a native version-resource crate; the
 /// injector runs once at startup so the spawn cost is fine.
 pub fn dll_file_version(dll: &Path) -> Option<String> {
-    let out = std::process::Command::new("powershell")
+    let out = super::hidden_command("powershell")
         .args([
             "-NoProfile",
+            "-NonInteractive",
             "-Command",
             &format!(
                 "(Get-Item -LiteralPath '{}').VersionInfo.FileVersion",

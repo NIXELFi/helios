@@ -150,7 +150,7 @@ export function ReportModal({
                   aria-pressed={kind === k}
                   className={
                     "flex-1 rounded-sm border px-2 py-1 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-asu-gold " +
-                    (kind === k ? "border-asu-gold bg-asu-gold font-semibold text-helios-base" : "border-helios-line bg-helios-base text-helios-text hover:border-asu-gold")
+                    (kind === k ? "border-asu-gold bg-asu-gold font-semibold text-helios-on-gold" : "border-helios-line bg-helios-base text-helios-text hover:border-asu-gold")
                   }
                 >
                   {k}
@@ -269,7 +269,7 @@ export function ReportModal({
               <button
                 type="submit"
                 disabled={!title.trim() || submitting}
-                className="rounded-sm bg-asu-gold px-3 py-1 text-xs font-semibold text-helios-base hover:bg-asu-gold/90 disabled:opacity-50"
+                className="rounded-sm bg-asu-gold px-3 py-1 text-xs font-semibold text-helios-on-gold hover:bg-asu-gold/90 disabled:opacity-50"
               >
                 {submitting ? "Sending…" : "Send report"}
               </button>

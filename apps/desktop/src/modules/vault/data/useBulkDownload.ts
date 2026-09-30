@@ -5,7 +5,7 @@ import { useSupabaseClient } from "@helios/auth";
 import { downloadVersionOnce } from "./useDownloadVersion";
 import { setReadonly } from "./fs-readonly";
 import { localDestPathStrict, vaultRelPathFor } from "./folder-paths";
-import { ledgerRecord } from "./sync-ledger";
+import { flushLedger, ledgerRecord } from "./sync-ledger";
 import { sanitizeVaultName } from "./useVaultFolder";
 import type { FileId, Folder, VaultFile, Version } from "./types";
 
@@ -54,13 +54,13 @@ export interface BulkDownloadAPI extends BulkDownloadState {
 }
 
 /**
- * Worker count for parallel downloads. Each worker does fetch + arrayBuffer
- * + gunzip + Tauri writeFile. Pushing too many saturates the webview IPC
- * bridge and can stutter the UI; manual bulk downloads run with a progress
- * modal that consumes most paint frames anyway, so we push harder than the
- * auto-sync default. 8 saturates typical residential upstream + the Tauri
- * fs plugin without obvious jank on Apple-Silicon laptops; if a slower
- * machine struggles we'll dial back.
+ * Worker count for parallel downloads. Since v5.7.1 each worker's transfer,
+ * gunzip, hash and write happen in the native layer
+ * (`download_object_to_temp`): the file bytes never cross the webview IPC
+ * bridge and never sit in renderer memory, so the old "8 workers = 8 whole
+ * files buffered in JS" ceiling is gone and the limit is now network and disk.
+ * 8 saturates typical residential upstream without obvious jank; the
+ * remaining per-file webview work is one mkdir + one rename.
  */
 const WORKERS = 8;
 
@@ -286,6 +286,8 @@ export function useBulkDownload(opts: {
     }
     const workerCount = Math.min(WORKERS, downloadable.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    // Persist the coalesced ledger records now that the bulk run is done.
+    if (vaultId) void flushLedger(vaultId);
     // Only flip terminal state if we're still the current generation —
     // a superseded run finishing late must not clobber the active run's UI.
     if (isCurrent()) {

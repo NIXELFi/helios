@@ -369,10 +369,22 @@ pub fn run_single_rpm_job<E: JobEmitter, P: DivergenceProbe>(
             return RunOutcome::Errored;
         }
     }
+    // Reject bad cell counts / geometry before the solver sizes its grids.
+    if let Err(e) = crate::validate::validate_engine_config(&cfg) {
+        emitter.emit_error(JobErrorEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::SingleRpm,
+            reason: ErrorReason::ConfigLoad,
+            message: e,
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Errored;
+    }
 
     let mut eng = SDM26Engine::new(cfg, params.junction_kind.into());
     let mut loop_state = CycleLoopState::new(&mut eng);
-    let mut accumulated: Vec<CycleStats> = Vec::with_capacity(params.n_cycles_max as usize);
+    let mut accumulated: Vec<CycleStats> = Vec::with_capacity(crate::validate::capacity_hint(params.n_cycles_max as usize));
     let mut converged_cycle: i64 = -1;
 
     // Silence the default panic hook for the cycle loop + capture pass:
@@ -535,6 +547,18 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
         }
     }
     let cfg = cfg; // re-bind to immutable for the rest of the function
+    // Reject bad cell counts / geometry before the solver sizes its grids.
+    if let Err(e) = crate::validate::validate_engine_config(&cfg) {
+        emitter.emit_error(JobErrorEvent {
+            job_id: job_id.clone(),
+            kind: StudyKind::Sweep,
+            reason: ErrorReason::ConfigLoad,
+            message: e,
+            partial_cycles: vec![],
+            partial_points: vec![],
+        });
+        return RunOutcome::Errored;
+    }
 
     let flags = CaptureFlags {
         waves: params.capture_waves,
@@ -560,7 +584,7 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
     let stop = Arc::new(AtomicBool::new(false));
     let error_state: Arc<Mutex<Option<JobErrorEvent>>> = Arc::new(Mutex::new(None));
     let completed_points: Arc<Mutex<Vec<(u32, SweepPoint)>>> =
-        Arc::new(Mutex::new(Vec::with_capacity(params.rpm_list.len())));
+        Arc::new(Mutex::new(Vec::with_capacity(crate::validate::capacity_hint(params.rpm_list.len()))));
 
     let n_cpus = num_cpus::get().saturating_sub(1).max(1);
     let pool = match ThreadPoolBuilder::new().num_threads(n_cpus).build() {
@@ -604,7 +628,7 @@ pub fn run_sweep_job<E: JobEmitter, P: DivergenceProbe>(
 
             let mut eng = SDM26Engine::new(cfg.clone(), params.junction_kind.into());
             let mut loop_state = CycleLoopState::new(&mut eng);
-            let mut accumulated: Vec<CycleStats> = Vec::with_capacity(params.n_cycles_max as usize);
+            let mut accumulated: Vec<CycleStats> = Vec::with_capacity(crate::validate::capacity_hint(params.n_cycles_max as usize));
             let rpm_t0 = Instant::now();
             let mut converged_cycle: i64 = -1;
             let mut nonconservation_max = 0.0_f64;
@@ -820,7 +844,7 @@ fn run_single_rpm_inline<P: DivergenceProbe>(
     let InlineRpmSpec { junction, rpm, n_cycles_max, tol, min_cycles } = *spec;
     let mut eng = SDM26Engine::new(cfg.clone(), junction);
     let mut loop_state = CycleLoopState::new(&mut eng);
-    let mut accumulated: Vec<CycleStats> = Vec::with_capacity(n_cycles_max as usize);
+    let mut accumulated: Vec<CycleStats> = Vec::with_capacity(crate::validate::capacity_hint(n_cycles_max as usize));
     let rpm_t0 = Instant::now();
     let mut converged_cycle: i64 = -1;
     let mut nonconservation_max = 0.0_f64;
@@ -1085,7 +1109,7 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
     // (trial_idx, Ok(objective_value, sweep_points) | Err(msg))
     type TrialResult = (u32, Result<(f64, Vec<SweepPoint>), String>);
     let results: Arc<Mutex<Vec<TrialResult>>> =
-        Arc::new(Mutex::new(Vec::with_capacity(n_trials as usize)));
+        Arc::new(Mutex::new(Vec::with_capacity(crate::validate::capacity_hint(n_trials as usize))));
 
     // Solver panics are caught per-RPM inside `run_single_rpm_inline` and
     // returned as per-trial Errs; silence the default panic hook so the
@@ -1131,9 +1155,13 @@ pub fn run_optimization_job<E: JobEmitter, P: DivergenceProbe>(
                     return;
                 }
             }
+            if let Err(e) = crate::validate::validate_engine_config(&cfg) {
+                results.lock().unwrap().push((trial_idx, Err(e)));
+                return;
+            }
 
             // Run inline sweep over the objective's rpm_list.
-            let mut points: Vec<SweepPoint> = Vec::with_capacity(params.objective.rpm_list.len());
+            let mut points: Vec<SweepPoint> = Vec::with_capacity(crate::validate::capacity_hint(params.objective.rpm_list.len()));
             for &rpm in &params.objective.rpm_list {
                 let spec = InlineRpmSpec {
                     junction,

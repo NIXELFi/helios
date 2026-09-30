@@ -9,7 +9,7 @@
 // Anything time-series (burndown, cycle time, velocity) needs status-change
 // history the model doesn't record yet — noted as a backend follow-up.
 
-import type { TaskPriority, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
+import type { CalendarEvent, TaskPriority, TaskRow, TaskStatus, TaskType } from "@helios/pm-ui";
 import {
   PRIORITY_COLOR,
   STATUS_FILL,
@@ -26,6 +26,7 @@ import {
   addMonths,
   addWeeks,
   differenceInCalendarDays,
+  differenceInCalendarMonths,
   format,
   isValid,
   parseISO,
@@ -33,6 +34,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
+import { isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: "Low",
@@ -453,6 +455,37 @@ function bucketLabel(d: Date, g: HistogramGranularity): string {
   return format(d, g === "month" ? "MMM yyyy" : "MMM d");
 }
 
+// Next on-or-after-today occurrence of an event (handles recurrence). Returns
+// null if the event is in the past, its recurrence has ended, or its date is
+// unusable. Dense series are fast-forwarded like the Calendar's
+// expandEventsByDate: a step-by-step walk from a typo'd year (0202-...) ran out
+// of guard centuries short and handed back a date in year ~285.
+export function nextEventDate(ev: CalendarEvent, today: Date): Date | null {
+  const start = parseISO(ev.date);
+  if (!isValid(start)) return null;
+  const rec = ev.recurrence ?? "none";
+  if (rec === "none") return start >= today ? start : null;
+  const end = ev.recurrence_end ? parseISO(ev.recurrence_end) : null;
+  let cur = start;
+  if (cur < today) {
+    if (rec === "daily") {
+      cur = addDays(cur, differenceInCalendarDays(today, cur));
+    } else if (rec === "weekly") {
+      cur = addDays(cur, Math.floor(differenceInCalendarDays(today, cur) / 7) * 7);
+    } else {
+      cur = addMonths(cur, Math.max(0, differenceInCalendarMonths(today, cur) - 1));
+    }
+  }
+  let guard = 0;
+  while (cur < today && guard < 1000) {
+    cur = rec === "daily" ? addDays(cur, 1) : rec === "weekly" ? addDays(cur, 7) : addMonths(cur, 1);
+    guard++;
+  }
+  if (cur < today) return null;
+  if (end && isValid(end) && cur > end) return null;
+  return cur;
+}
+
 export function taskDateHistogram(
   tasks: readonly TaskRow[],
   field: HistogramDateField,
@@ -462,7 +495,9 @@ export function taskDateHistogram(
   let undated = 0;
   for (const t of tasks) {
     const raw = field === "start" ? t.start_date : t.due_date;
-    if (!raw) {
+    // A typo'd year (0202-...) would stretch the range so far that the bucket
+    // cap coarsens every real date into one or two bars — count it as undated.
+    if (!isPlausibleIsoDate(raw)) {
       undated += 1;
       continue;
     }

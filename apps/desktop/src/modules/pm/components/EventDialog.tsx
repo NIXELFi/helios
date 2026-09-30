@@ -5,7 +5,11 @@ import { EVENT_RECURRENCES } from "@helios/pm-ui";
 import { IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { FloatingWindow } from "@pm/components/ui/FloatingWindow";
+import { MAX_PLAUSIBLE_YEAR, MIN_PLAUSIBLE_YEAR, isPlausibleIsoDate } from "@pm/lib/plausibleDate";
 
+import { tc } from "@helios/ui";
+
+const YEAR_ERROR = `Enter a year between ${MIN_PLAUSIBLE_YEAR} and ${MAX_PLAUSIBLE_YEAR}`;
 const inputClass =
   "rounded border border-helios-line bg-helios-base px-2.5 py-1.5 text-sm text-helios-text " +
   "placeholder:text-helios-dim focus:border-asu-gold focus:outline-none";
@@ -78,8 +82,22 @@ export function EventDialog({
     setTags((prev) => prev.filter((x) => x !== t));
   }
 
+  // A date input can hold a partial year (0202-...) at save time; an event
+  // there would recur from year 202 and every calendar walk would pay for it.
+  const dateError = date !== "" && !isPlausibleIsoDate(date) ? YEAR_ERROR : null;
+  const endError =
+    recurrence === "none" || recurrenceEnd === ""
+      ? null
+      : !isPlausibleIsoDate(recurrenceEnd)
+        ? YEAR_ERROR
+        : recurrenceEnd < date
+          ? "Ends before the start date"
+          : null;
+
+  const canSave = title.trim().length > 0 && date !== "" && !dateError && !endError;
+
   function handleSave() {
-    if (!title.trim() || !date) return;
+    if (!canSave) return;
     onSave({
       id: event?.id ?? crypto.randomUUID(),
       project_id: projectId,
@@ -94,8 +112,6 @@ export function EventDialog({
     });
     onClose();
   }
-
-  const canSave = title.trim().length > 0 && date !== "";
 
   return (
     <FloatingWindow
@@ -164,6 +180,7 @@ export function EventDialog({
             onChange={(e) => setDate(e.target.value)}
             className={inputClass}
           />
+          {dateError ? <span className="text-xs text-red-400">{dateError}</span> : null}
         </Field>
 
         <div className="flex gap-3">
@@ -189,6 +206,7 @@ export function EventDialog({
                 onChange={(e) => setRecurrenceEnd(e.target.value)}
                 className={inputClass}
               />
+              {endError ? <span className="text-xs text-red-400">{endError}</span> : null}
             </Field>
           ) : null}
         </div>
@@ -225,7 +243,7 @@ export function EventDialog({
                   <span
                     aria-hidden
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: s.color ?? "#6B7280" }}
+                    style={{ backgroundColor: s.color ?? tc("dim") }}
                   />
                   {s.code}
                 </button>

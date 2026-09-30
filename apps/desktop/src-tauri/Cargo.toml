@@ -25,7 +25,14 @@ serde_json = { workspace = true }
 # runtime/thread) + a random per-launch token. See src/bridge/.
 axum = "0.7"
 tokio = { workspace = true, features = ["net", "time", "sync"] }
-reqwest = { workspace = true }
+# `blocking` powers commands::download: the whole transfer (request, gzip
+# decode, hash, write) runs inside one spawn_blocking closure with
+# reqwest::blocking, which keeps the streaming code straight-line and never
+# holds a whole file in memory.
+reqwest = { workspace = true, features = ["blocking"] }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+flate2 = "1"
 getrandom = "0.2"
 helios-core = { path = "../../../crates/helios-core" }
 helios-csv = { path = "../../../crates/helios-csv" }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useUser } from "@helios/auth";
 import { useActiveVault } from "../data/useActiveVault";
 import { useFolders } from "../data/useFolders";
-import { useFiles } from "../data/useFiles";
+import { useFolderFiles, useVaultFiles } from "../data/vault-files-context";
 import { useVersions } from "../data/useVersions";
 import { useLocks } from "../data/useLocks";
 import { useVaultUsers } from "../data/useVaultUsers";
@@ -19,7 +19,10 @@ export function HistoryScreen() {
   const { activeVaultId: vaultId, activeVault } = useActiveVault();
   const { data: folders, loading: foldersLoading, error: foldersError } = useFolders(vaultId ?? undefined);
   const [folderId, setFolderId] = useState<FolderId | null>(null);
-  const { data: files, loading: filesLoading, error: filesError } = useFiles(folderId ?? undefined);
+  // Folder listing derived from the shared vault catalog (VaultHome provides
+  // it once) instead of a second per-folder query.
+  const { loading: filesLoading, error: filesError } = useVaultFiles();
+  const files = useFolderFiles(folderId);
   const [fileId, setFileId] = useState<FileId | null>(null);
   const { data: versions, loading: versionsLoading, error: versionsError } = useVersions(fileId ?? undefined);
   // Per-vault local working folder → enables the "Get this version" action on
