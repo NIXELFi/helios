@@ -411,8 +411,7 @@ function ReviewCard({
             <IconShieldCheck size={15} className="mt-0.5 shrink-0 text-helios-dim" />
             <div className="text-[11px] leading-relaxed text-helios-text/90">
               You published this version, so you cannot approve it — approval is what lets code run on
-              everyone else's machine, and it takes a second person. Another lead or VP of this subteam
-              can review it.{" "}
+              everyone else's machine, and it takes a second person with review rights.{" "}
               <button
                 type="button"
                 onClick={() => onHelp("review")}

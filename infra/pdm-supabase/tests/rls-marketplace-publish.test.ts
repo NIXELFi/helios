@@ -10,6 +10,9 @@ import {
 /**
  * 20260826010000: the author-facing half of the marketplace.
  *
+ * Since 20260930000000 only the org-scoped `owner` role holds marketplace.review,
+ * so reviewers here are owners; leads keep publish only.
+ *
  * Covers the ACLs the UI relies on but must never be the authority for:
  * withdraw / yank / recommend require `marketplace.publish` on the plugin's
  * OWNING subteam, the two new states drop out of distribution, and reviewer
@@ -264,7 +267,7 @@ describe("marketplace — author-side management RPCs", () => {
     const lead = await createTestUser(uniqueEmail("lead"));
     const outsider = await createTestUser(uniqueEmail("outsider"));
     await grantPmRole(author.id, "engineer", subA);
-    await grantPmRole(lead.id, "lead", subA);
+    await grantPmRole(lead.id, "owner", null);
     await grantPmRole(outsider.id, "lead", subB);
     const pluginId = await seedPlugin({
       subteam: subA,
@@ -333,7 +336,7 @@ describe("marketplace — reviewer preview installs", () => {
     const sub = await makeSubteam("aero");
     const author = await createTestUser(uniqueEmail("author"));
     const reviewer = await createTestUser(uniqueEmail("reviewer"));
-    await grantPmRole(reviewer.id, "lead", sub);
+    await grantPmRole(reviewer.id, "owner", null);
     const pluginId = await seedPlugin({
       subteam: sub,
       createdBy: author.id,
@@ -381,7 +384,7 @@ describe("marketplace — reviewer preview installs", () => {
     const sub = await makeSubteam("aero");
     const author = await createTestUser(uniqueEmail("author"));
     const reviewer = await createTestUser(uniqueEmail("reviewer"));
-    await grantPmRole(reviewer.id, "lead", sub);
+    await grantPmRole(reviewer.id, "owner", null);
     const pluginId = await seedPlugin({
       subteam: sub,
       createdBy: author.id,
@@ -400,7 +403,7 @@ describe("marketplace — reviewer preview installs", () => {
     const sub = await makeSubteam("aero");
     const author = await createTestUser(uniqueEmail("author"));
     const reviewer = await createTestUser(uniqueEmail("reviewer"));
-    await grantPmRole(reviewer.id, "lead", sub);
+    await grantPmRole(reviewer.id, "owner", null);
     // An approved 1.0.0 makes the plugin visible in Browse; 1.1.0 is pending.
     const pluginId = await seedPlugin({
       subteam: sub,
@@ -464,7 +467,7 @@ describe("marketplace — 0930 triage fixes", () => {
     const author = await createTestUser(uniqueEmail("author"));
     const lead = await createTestUser(uniqueEmail("lead"));
     await grantPmRole(author.id, "engineer", sub);
-    await grantPmRole(lead.id, "lead", sub);
+    await grantPmRole(lead.id, "owner", null);
     const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "approved" });
 
     const client = await signInAs(lead.email!);
@@ -481,7 +484,7 @@ describe("marketplace — 0930 triage fixes", () => {
       const sub = await makeSubteam("aero");
       const author = await createTestUser(uniqueEmail("author"));
       const lead = await createTestUser(uniqueEmail("lead"));
-      await grantPmRole(lead.id, "lead", sub);
+      await grantPmRole(lead.id, "owner", null);
       const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "pending" });
       await serviceClient()
         .schema("marketplace")
@@ -505,7 +508,7 @@ describe("marketplace — 0930 triage fixes", () => {
     const sub = await makeSubteam("aero");
     const author = await createTestUser(uniqueEmail("author"));
     const lead = await createTestUser(uniqueEmail("lead"));
-    await grantPmRole(lead.id, "lead", sub);
+    await grantPmRole(lead.id, "owner", null);
     const pluginId = await seedPlugin({ subteam: sub, createdBy: author.id, version: "1.0.0", status: "approved" });
     await serviceClient()
       .schema("marketplace")

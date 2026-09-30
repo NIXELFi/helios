@@ -63,7 +63,7 @@ export const HELP_ARTICLES: Record<HelpTopic, HelpArticle> = {
           "Start a new plugin — Helios writes a starter project and the full authoring kit into a folder you choose.",
           "Hand the copy-paste prompt to your AI agent. It reads the kit from that folder.",
           "When the agent has produced a build in dist/, come back and click Add to Marketplace.",
-          "Your subteam lead or VP reviews it. Once approved, anyone on the team can install it.",
+          "A marketplace reviewer checks it. Once approved, anyone on the team can install it.",
         ],
       },
     ],
@@ -253,18 +253,18 @@ export const HELP_ARTICLES: Record<HelpTopic, HelpArticle> = {
   review: {
     id: "review",
     title: "How review works",
-    summary: "A lead or VP approves before anyone can install.",
+    summary: "A reviewer approves before anyone can install.",
     sections: [
       {
         body: [
-          "Publishing submits a version; it does not release it. A lead or VP of the owning subteam reviews it and approves or rejects. Only approved versions appear in Browse or can be installed.",
+          "Publishing submits a version; it does not release it. Someone with marketplace review rights for the owning subteam reviews it and approves or rejects. Only approved versions appear in Browse or can be installed.",
           "A reviewer sees your manifest, exactly which permissions the version asks for and how that differs from your last approved release, and a compliance scan Helios re-runs against the uploaded bundle itself. They can also install and run the pending build before deciding.",
         ],
       },
       {
         heading: "You cannot approve your own submission",
         body: [
-          "Even if you are a lead or VP with review rights, you cannot approve a version you published. Approval is what lets your code run on everyone else's machine, so it takes a second person. This is not a configuration — it is enforced by the database.",
+          "Even if you have review rights, you cannot approve a version you published. Approval is what lets your code run on everyone else's machine, so it takes a second person. This is not a configuration — it is enforced by the database.",
         ],
       },
       {

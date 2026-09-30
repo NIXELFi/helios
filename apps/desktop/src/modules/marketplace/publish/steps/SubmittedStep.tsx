@@ -26,7 +26,7 @@ export function SubmittedStep({
             <span className="font-mono text-helios-text">
               {submitted.pluginId} {submitted.version}
             </span>{" "}
-            is now waiting on a lead or VP of {subteamName}. They will see your manifest, exactly which
+            is now waiting on a marketplace reviewer for {subteamName}. They will see your manifest, exactly which
             permissions it asks for, and a fresh compliance check run against the bundle you just
             uploaded — and they can install and run it before deciding.
           </p>
