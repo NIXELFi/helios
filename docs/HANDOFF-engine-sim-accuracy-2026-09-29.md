@@ -3,6 +3,22 @@
 **Branch:** `fix/engine-sim-accuracy-0929` (from `main` @ `3d6073d0`)
 **Goal:** get the 1D engine model (`crates/engine-sim`) as close to the real SDM26 as possible before designing an **active / variable runner-length intake** this season.
 
+## Update (evening 2026-09-29): finding 0036, which supersedes parts of 0035
+
+See `physics_findings/0036-map-reference-level-calibration/finding.md`.
+
+- **Use MAP-VE as the car shape target.** It lives in `references/ecu/ve_map_reference.csv` and is the restrictor flow computed from baro − MAP.
+  - It agrees with the dyno (r 0.88, peaks 6.0k and 8.75k) and shows a 7.5-8k dip of only −0.09.
+  - PW·λ overstated the ripple about 2× and shifted it up in rpm. That also resolves 0035's "dyno rpm axis" item.
+- **Three model errors are fixed in the new experimental config `sdm26_asbuilt_cal`:**
+  - ambient (97.3 kPa / 305 K, not sea level);
+  - venturi diffuser recovery 0.62, which now matches the car's intake pressure drop within 0.5 kPa;
+  - exhaust walls at 900/750/650 K instead of 650/550/500. The cold walls were damping the waves.
+- **Calibration was level only** (combustion efficiency 0.98, FMEP ×0.775). Dyno RMSE is 2.18 kW over 6-12.5k and 1.76 over 7-11.5k. It carries 0.65 of the car's in-phase ripple (was 0.29).
+- **Ripple amplitude** is set by exhaust blowdown (EVO, exhaust lift, exhaust Cd) and exhaust heat loss, not by numerics or friction. The next data to get: exhaust valve flow-bench Cd/lift, the measured exhaust cam profile, and a baro reading or channel.
+- **Handoff step 7 (the active-runner study)** can now use `sdm26_asbuilt_cal` as its base.
+- The desktop crate compiles on this machine (`cargo check`), which closes the earlier compile-unverified note.
+
 ## Update (later 2026-09-29): finding 0035
 
 Next steps 1-4 are done. See `physics_findings/0035-collector-merge-lambda-lag/finding.md`.
