@@ -1,6 +1,6 @@
 out/*.ndjson
 out/smoke*
 out/*.log
-out/phase2/cache_*
+out/phase2/**/cache_*.ndjson
 studies/smoke*.toml
 __pycache__/

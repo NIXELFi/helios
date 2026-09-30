@@ -7,7 +7,7 @@
 #
 # Each sample's study is the 0037 A_neutral_disp study (neutral tune, 44 mm
 # trumpet OD, displacement ref 0, same design block and packaging cap) on a
-# coarser grid limited to extension <= 0 (runners only shorten), with the sample's applied parameter values as `overrides` on
+# coarser grid (extension -140..+120), with the sample's applied parameter values as `overrides` on
 # the same base config. The engine-sim knobs are all apply_override paths,
 # so no per-sample config file is needed.
 import os, sys, json, subprocess
@@ -20,11 +20,13 @@ P2 = os.path.join(F, "out", "phase2")
 EXE = os.environ.get("HELIOS_BENCH", os.path.join(REPO, "target", "release", "helios-bench.exe"))
 N_RESAMPLE = 16
 SEED = 380
-STROKES = [0, 50, 75, 100, 125, 150]
+STROKES = [0, 25, 50, 75, 100, 125, 150, 175]
+CAPS = [0, 20, 40, 60, 80, 100, 115]   # long-end limit: extension over as-built (mm)
 RATES = [("table", None), ("dyno_500", 500.0), ("gear2_3000", 3000.0), ("gear1_6000", 6000.0)]
-# Packaging (owner, 2026-09-29): runners can only get SHORTER than as-built, so the
-# as-built runner (extension 0) is the LONG end; designs are scored pinned at lmax = 0.
-REC = dict(stroke=100.0, lmin=-100.0)
+# Design envelope (coordinator, 2026-09-29): the long end may be a little longer than
+# as-built; score every (long-end cap x stroke) cell like the 0037 deterministic envelope
+# (best placement with lmax <= cap). ECU band + key cells use the 0037 recommendation.
+REC = dict(stroke=100.0, lmin=15.0)   # 100 mm at +15..+115 (runner 343-443 mm)
 BASE_RUNNER_MM = 328.1
 
 VRLI = """[vrli]
@@ -35,7 +37,7 @@ tune = "neutral"
 trumpet_od_mm = 44.0
 displacement_ref_mm = 0.0
 rpm = {{ min = 6000, max = 12500, step = 500 }}
-extension_mm = {{ min = -160, max = 0, step = 20 }}
+extension_mm = {{ min = -140, max = 120, step = 20 }}
 cache = "cache_{s}.ndjson"
 avg_cycles = 5
 conv_window = 6
@@ -141,70 +143,70 @@ def ecu_table(piv, lmin, stroke, step=1.0):
     return pd.Series(out)
 
 
-def pinned(ds):
-    """Per stroke, the design with its long end at extension 0 (lmin = -stroke)."""
-    m = np.isclose(ds.lmin_mm + ds.stroke_mm, 0.0)
-    return ds[m & ds.stroke_mm.isin(STROKES)].sort_values("stroke_mm")
+def envelope(ds, rate_is_table):
+    """0037 envelope rule: per (cap, stroke) the placement with lmax <= cap (and the
+    tool's plenum-fraction packaging limit) that maximises the quasi-steady P1 gain;
+    report that placement's metrics."""
+    ds = ds[ds.feasible_packaging.astype(str).str.lower() == "true"]
+    out = []
+    for cap in CAPS:
+        for st in STROKES:
+            x = ds[np.isclose(ds.stroke_mm, st) & (ds.lmax_mm <= cap + 1e-9)]
+            if not len(x):
+                continue
+            b = x.loc[x.p1_gain.idxmax()]
+            out.append(dict(cap=cap, stroke=st, lmin=b.lmin_mm, lmax=b.lmax_mm, table=b.p1_gain,
+                            follow=b.p1_gain_follow, p2=b.p2_ratio, driver=b.driver_gain))
+    return pd.DataFrame(out)
 
 
 def collect():
     R = pd.read_csv(os.path.join(P2, "resampled.csv"))
-    w = R.weight.values
-    per = []
-    rec = []
-    tables = {}
+    env, rec, tables = [], [], {}
     for _, r in R.iterrows():
         d = r["dir"]
         for tag, rate in RATES:
-            st = pd.read_csv(os.path.join(d, f"out_{tag}", "strokes.csv"))
             ds = pd.read_csv(os.path.join(d, f"out_{tag}", "designs.csv"))
-            for _, x in pinned(ds).iterrows():
-                b = st[np.isclose(st.stroke_mm, x.stroke_mm)]
-                bf = b.iloc[0] if len(b) else None
-                per.append(dict(sample=r["sample"], weight=r.weight, rate=tag, stroke=x.stroke_mm,
-                                best_runner_min=(BASE_RUNNER_MM + bf.lmin_mm) if bf is not None else np.nan,
-                                best_gain=(bf.p1_gain if rate is None else bf.p1_gain_follow) if bf is not None else np.nan,
-                                gain=(x.p1_gain if rate is None else x.p1_gain_follow), gain_table=x.p1_gain,
-                                p2=x.p2_ratio, lmin=x.lmin_mm, runner_min=BASE_RUNNER_MM + x.lmin_mm,
-                                failsafe_mm=x.failsafe_mm, failsafe_gain=x.failsafe_gain, driver=x.driver_gain))
-            m = ds[(np.isclose(ds.stroke_mm, REC["stroke"])) & (np.isclose(ds.lmin_mm, REC["lmin"]))]
+            e = envelope(ds, rate is None)
+            e["gain"] = e.table if rate is None else e.follow
+            e["sample"], e["weight"], e["rate"] = r["sample"], r.weight, tag
+            env.append(e)
+            m = ds[np.isclose(ds.stroke_mm, REC["stroke"]) & np.isclose(ds.lmin_mm, REC["lmin"])]
             if len(m):
                 x = m.iloc[0]
                 rec.append(dict(sample=r["sample"], weight=r.weight, rate=tag,
                                 gain=(x.p1_gain if rate is None else x.p1_gain_follow), p2=x.p2_ratio,
                                 failsafe_mm=x.failsafe_mm, failsafe_gain=x.failsafe_gain))
-        piv = surface(d)
-        tables[int(r["sample"])] = ecu_table(piv, REC["lmin"], REC["stroke"])
-    P = pd.DataFrame(per); P.to_csv(os.path.join(P2, "per_sample_stroke.csv"), index=False)
+        tables[int(r["sample"])] = ecu_table(surface(d), REC["lmin"], REC["stroke"])
+    E = pd.concat(env); E.to_csv(os.path.join(P2, "envelope_per_sample.csv"), index=False)
     Q = pd.DataFrame(rec); Q.to_csv(os.path.join(P2, "recommended_design_per_sample.csv"), index=False)
-    T = pd.DataFrame(tables); T.index.name = "rpm"
-    T.to_csv(os.path.join(P2, "ecu_table_per_sample.csv"))
-    # distributions
+    T = pd.DataFrame(tables); T.index.name = "rpm"; T.to_csv(os.path.join(P2, "ecu_table_per_sample.csv"))
     g = []
-    for (rate, st), x in P.groupby(["rate", "stroke"]):
+    for (rate, cap, st), x in E.groupby(["rate", "cap", "stroke"]):
         ww = x.weight.values
         q = wq(x.gain.values, ww, [0.1, 0.5, 0.9])
-        pl = wq(x.best_runner_min.values, ww, [0.1, 0.5, 0.9])
-        bg = wq(x.best_gain.values, ww, [0.1, 0.5, 0.9])
-        g.append(dict(rate=rate, stroke_mm=st, gain_q10=q[0], gain_q50=q[1], gain_q90=q[2],
+        pl = wq(x.lmin.values, ww, [0.1, 0.5, 0.9])
+        g.append(dict(rate=rate, cap=cap, stroke=st, n=len(x), wsum=ww.sum(),
+                      gain_q10=q[0], gain_q50=q[1], gain_q90=q[2],
                       P_p1_ge_5=float(np.sum(ww * (x.gain.values >= 0.05)) / ww.sum()),
                       P_p2_ge_097=float(np.sum(ww * (x.p2.values >= 0.97)) / ww.sum()),
-                      best_free_runner_min_q10=pl[0], best_free_runner_min_q50=pl[1], best_free_runner_min_q90=pl[2],
-                      best_free_gain_q50=bg[1]))
-    G = pd.DataFrame(g)
-    order = {t: i for i, (t, _) in enumerate(RATES)}
-    G = G.sort_values(["rate", "stroke_mm"], key=lambda c: c.map(order) if c.name == "rate" else c)
-    G.to_csv(os.path.join(P2, "stroke_distribution.csv"), index=False)
+                      lmin_q10=pl[0], lmin_q50=pl[1], lmin_q90=pl[2]))
+    G = pd.DataFrame(g); G.to_csv(os.path.join(P2, "envelope_distribution.csv"), index=False)
     h = []
     for rate, x in Q.groupby("rate"):
         ww = x.weight.values
         q = wq(x.gain.values, ww, [0.1, 0.5, 0.9])
         h.append(dict(rate=rate, gain_q10=q[0], gain_q50=q[1], gain_q90=q[2],
                       P_p1_ge_5=float(np.sum(ww * (x.gain.values >= 0.05)) / ww.sum()),
-                      P_p2_ge_097=(float(np.sum(ww * (x.p2.values >= 0.97)) / ww.sum()) if x.p2.notna().any() else np.nan)))
+                      P_p2_ge_097=float(np.sum(ww * (x.p2.values >= 0.97)) / ww.sum())))
     Hh = pd.DataFrame(h); Hh.to_csv(os.path.join(P2, "recommended_design_distribution.csv"), index=False)
     pd.set_option("display.width", 220)
-    print(G.round(3).to_string(index=False)); print(); print(Hh.round(3).to_string(index=False))
+    for tag, _ in RATES:
+        x = G[G.rate == tag]
+        print(f"== {tag}: median gain % (P(P1>=5%))")
+        print((100 * x.pivot(index="cap", columns="stroke", values="gain_q50")).round(1).to_string())
+        print(x.pivot(index="cap", columns="stroke", values="P_p1_ge_5").round(2).to_string())
+    print(); print(Hh.round(4).to_string(index=False))
 
 
 if __name__ == "__main__":
