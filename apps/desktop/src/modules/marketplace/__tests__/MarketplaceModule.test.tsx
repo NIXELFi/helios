@@ -162,6 +162,7 @@ describe("MarketplaceModule — opening an installed add-on", () => {
     fireEvent.click(screen.getByRole("button", { name: /installed/i }));
     fireEvent.click(screen.getByRole("button", { name: /^open$/i }));
     expect(await screen.findByText(/this computer has v1\.0\.0, not v1\.2\.0/i)).toBeTruthy();
+    expect(screen.getByRole("alert")).toBeTruthy();
   });
 
   it("covers the module with a running add-on instead of unmounting the tabs", async () => {

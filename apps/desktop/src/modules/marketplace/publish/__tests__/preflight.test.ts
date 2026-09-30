@@ -119,6 +119,14 @@ describe("manifestDrift", () => {
     expect(manifestDrift(manifest, { ...manifest, permissions: [] })).toEqual([]);
   });
 
+  it("blocks on a different sdk range or name inside the bundle", () => {
+    const d = manifestDrift(manifest, { ...manifest, sdk: "^2.0.0", name: "Other" });
+    expect(d.map((f) => f.title)).toEqual([
+      "The bundle's sdk does not match what was submitted",
+      "The bundle's name does not match what was submitted",
+    ]);
+  });
+
   it("ignores permission order", () => {
     const a = { ...manifest, permissions: ["storage", "file.read"] };
     const b = { ...manifest, permissions: ["file.read", "storage"] };

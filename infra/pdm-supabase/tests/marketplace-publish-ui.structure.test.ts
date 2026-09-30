@@ -114,7 +114,10 @@ describe("marketplace publish-UI migration", () => {
   });
 
   it("refuses to wrap someone else's unpublished upload in a version", () => {
-    expect(bodyOf("publish_plugin_version")).toMatch(/was uploaded by someone else/);
+    const body = bodyOf("publish_plugin_version");
+    expect(body).toMatch(/was uploaded by someone else/);
+    // Reuse is only exempt for bytes the caller could already read.
+    expect(body).toMatch(/pv\.review_status = 'approved'\s*\n\s*or pm\.has_capability\(v_uid, 'marketplace\.publish'/);
   });
 
   it("lets uploaders read their own objects by owner or owner_id", () => {

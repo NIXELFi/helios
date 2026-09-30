@@ -115,9 +115,9 @@ export function useMyPlugins(): {
       try {
         const res = await client.schema(SCHEMA).rpc("my_published_plugins");
         if (!active) return;
+        // A failed reload keeps the previous rows (and any half-typed reason).
         if (res.error) {
           setError(res.error.message);
-          setRows([]);
           return;
         }
         setError(null);
@@ -126,7 +126,6 @@ export function useMyPlugins(): {
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
-        setRows([]);
       } finally {
         if (active) setLoading(false);
       }

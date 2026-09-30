@@ -81,16 +81,17 @@ export function useReviewQueue(): {
       try {
         const res = await client.schema(SCHEMA).rpc("review_queue");
         if (!active) return;
+        // On failure the previous queue is KEPT: a reload that blips must not
+        // throw away the cards (and the scans and notes on them). The view
+        // shows `error` inline when it still has cards to show.
         if (res.error) {
           setError(res.error.message);
-          setQueue(EMPTY);
           return;
         }
         setQueue(((res.data ?? []) as ReviewQueueRow[]).map(toItem));
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
-        setQueue(EMPTY);
       } finally {
         if (active) setLoading(false);
       }

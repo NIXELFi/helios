@@ -69,7 +69,7 @@ export function ReviewView({
       </div>
     );
   }
-  if (error) {
+  if (error && queue.length === 0) {
     return (
       <div className="rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
         Couldn’t load the review queue: {error}
@@ -97,6 +97,11 @@ export function ReviewView({
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div role="status" className="rounded-sm border border-helios-warn/40 bg-helios-warn/10 p-2 text-[11px] text-helios-text/90">
+          Couldn’t refresh the review queue ({error}). Showing the last copy; your scans and notes are kept.
+        </div>
+      )}
       {queue.map((item) => (
         <ReviewCard
           key={`${item.pluginId}@${item.version}`}
@@ -148,6 +153,17 @@ function ReviewCard({
   // Set the moment this card's own test-drive finishes, so Open appears without
   // waiting for the Installed list to refetch.
   const [justPreviewed, setJustPreviewed] = useState(false);
+  // Once the Installed list has caught up and shows the preview, it is the only
+  // source of truth: if the preview is later removed or replaced (from
+  // Installed), Open preview must go away rather than point at nothing.
+  const sawReady = useRef(false);
+  useEffect(() => {
+    if (previewReady) sawReady.current = true;
+    else if (sawReady.current) {
+      sawReady.current = false;
+      setJustPreviewed(false);
+    }
+  }, [previewReady]);
   const canOpenPreview = previewReady || justPreviewed;
 
   function startPreview(replaceInstall: boolean) {

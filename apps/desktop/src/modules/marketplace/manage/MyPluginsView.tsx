@@ -68,7 +68,7 @@ export function MyPluginsView({
       </div>
     );
   }
-  if (my.error) {
+  if (my.error && my.plugins.length === 0) {
     return (
       <div className="rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
         Couldn’t load your plugins: {my.error}

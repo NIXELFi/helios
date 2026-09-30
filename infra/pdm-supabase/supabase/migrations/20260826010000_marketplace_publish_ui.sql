@@ -602,8 +602,19 @@ begin
   -- version already uses. Otherwise a publisher who learned another subteam's
   -- unapproved sha could wrap it in their own pending version and read it.
   -- (Objects with no recorded owner predate uploads from the app; allowed.)
+  -- "Already in use" only counts where the caller could read those bytes
+  -- anyway: an approved version (public to members), or a version on a subteam
+  -- they publish to or review. Another subteam's PENDING version does not count.
   if v_owner is not null and v_owner <> v_uid::text
-     and not exists (select 1 from marketplace.plugin_versions pv where pv.bundle_sha256 = lower(p_sha256)) then
+     and not exists (
+       select 1 from marketplace.plugin_versions pv
+       where pv.bundle_sha256 = lower(p_sha256)
+         and (
+           pv.review_status = 'approved'
+           or pm.has_capability(v_uid, 'marketplace.publish', marketplace.plugin_subteam(pv.plugin_id))
+           or pm.has_capability(v_uid, 'marketplace.review',  marketplace.plugin_subteam(pv.plugin_id))
+         )
+     ) then
     raise exception 'bundle % was uploaded by someone else; upload your own build', lower(p_sha256);
   end if;
   if v_stored <> -1 and v_stored <> p_bytes then

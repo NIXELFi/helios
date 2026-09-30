@@ -264,13 +264,12 @@ export function MarketplaceModule() {
     }
   }, []);
 
-  if (builtIn) {
-    return <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />;
-  }
   // A running add-on covers the module instead of replacing it: the tabs stay
   // mounted underneath, so a reviewer who opens a preview comes back to the same
   // card with their scan and notes intact.
-  const stage = launch ? (
+  const stage = builtIn ? (
+    <FirstPartyStage app={builtIn} onBack={() => setBuiltIn(null)} />
+  ) : launch ? (
     <PluginStage
       plugin={launch}
       preview={launchIsPreview}
@@ -284,7 +283,7 @@ export function MarketplaceModule() {
   return (
     <>
     {stage}
-    <div className={launch ? "hidden" : "h-full overflow-y-auto bg-helios-base"}>
+    <div className={stage ? "hidden" : "h-full overflow-y-auto bg-helios-base"}>
       <div className="mx-auto max-w-4xl px-6 py-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -332,6 +331,16 @@ export function MarketplaceModule() {
           </div>
         </header>
 
+        {launchError && (
+          <div
+            ref={(el) => el?.scrollIntoView?.({ block: "nearest" })}
+            role="alert"
+            className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger"
+          >
+            Couldn’t launch {launchError.baseUrl}: {launchError.message}
+          </div>
+        )}
+
         {detail ? (
           <PluginDetail
             plugin={detail}
@@ -362,12 +371,6 @@ export function MarketplaceModule() {
                 </TabButton>
               )}
             </div>
-
-            {launchError && (
-              <div className="mb-4 rounded-sm border border-helios-danger/40 bg-helios-danger/10 p-3 text-xs text-helios-danger">
-                Couldn’t launch {launchError.baseUrl}: {launchError.message}
-              </div>
-            )}
 
             {tab === "browse" ? (
               <>

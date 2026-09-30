@@ -282,4 +282,25 @@ describe("ReviewView", () => {
     render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
     expect(screen.getByText(/renames “old name”/i)).toBeInTheDocument();
   });
+
+  it("drops Open preview once Installed no longer has the preview", async () => {
+    const withPreview = [
+      { id: "aero.test", isPreview: true, installedVersion: "1.2.0" },
+    ] as unknown as Parameters<typeof ReviewView>[0]["installed"];
+    const { rerender } = render(
+      <ReviewView available={AVAILABLE} installed={[]} onHelp={() => {}} onOpenPreview={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /test-drive/i }));
+    await screen.findByRole("button", { name: /open preview/i });
+    rerender(<ReviewView available={AVAILABLE} installed={withPreview} onHelp={() => {}} onOpenPreview={() => {}} />);
+    rerender(<ReviewView available={AVAILABLE} installed={[]} onHelp={() => {}} onOpenPreview={() => {}} />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /open preview/i })).not.toBeInTheDocument());
+  });
+
+  it("keeps the cards and says so when a reload fails", () => {
+    state.error = "Failed to fetch";
+    render(<ReviewView available={AVAILABLE} onHelp={() => {}} />);
+    expect(screen.getByText("Downforce Calculator")).toBeInTheDocument();
+    expect(screen.getByText(/couldn’t refresh the review queue/i)).toBeInTheDocument();
+  });
 });

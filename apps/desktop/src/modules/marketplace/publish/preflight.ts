@@ -302,6 +302,8 @@ export function manifestDrift(recorded: unknown, bundle: unknown): PreflightFind
     ["id", String(r.id ?? ""), String(b.id ?? "")],
     ["version", String(r.version ?? ""), String(b.version ?? "")],
     ["entry", String(r.entry ?? ""), String(b.entry ?? "")],
+    ["sdk", String(r.sdk ?? ""), String(b.sdk ?? "")],
+    ["name", String(r.name ?? ""), String(b.name ?? "")],
     ["permissions", perms(r), perms(b)],
   ] as const) {
     if (a !== c) {
